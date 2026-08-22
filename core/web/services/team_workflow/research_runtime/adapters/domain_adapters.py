@@ -17,7 +17,7 @@ from ..action_registry import (
     AdapterResult,
     VerifiedDomainResult,
 )
-from ..domain_ports import DomainPorts
+from ..domain_ports import AgentTurnResult, DomainPorts
 
 DEFAULT_AGENT_ESTIMATE_TOKENS = 25_000
 
@@ -47,13 +47,47 @@ class AgentActionAdapter:
             action=action, estimate_tokens=self._estimate_tokens
         )
         handle = self._ports.create_agent_task(action=action)
-        refs = self._ports.execute_agent_turn(action=action, handle=handle)
+        executed = self._ports.execute_agent_turn(action=action, handle=handle)
+        if isinstance(executed, AgentTurnResult):
+            refs = list(executed.materialized_refs)
+            handle = executed.handle
+        else:
+            refs = executed
         anchor = {
             **binding.to_dict(),
             **handle.to_dict(),
             "actionId": action.action_id,
             "reservationId": str(reservation.get("reservationId") or ""),
         }
+        # Keep the node root and candidate child anchors in one formal Ledger
+        # anchor. The scalar columns project the root only; child identities are
+        # never flattened into the root compatibility fields.
+        if handle.scoped_handles:
+            root_session_id = str(handle.root_session_id or "").strip()
+            if not root_session_id or handle.session_id != root_session_id:
+                raise RuntimeError("candidate fan-out requires a canonical root session")
+            selection_ids = {item.selection_id for item in handle.scoped_handles}
+            if len(selection_ids) != 1:
+                raise RuntimeError("candidate fan-out spans multiple selections")
+            for item in handle.scoped_handles:
+                if (
+                    item.parent_session_id != root_session_id
+                    or item.root_session_id != root_session_id
+                ):
+                    raise RuntimeError(
+                        "candidate session lineage does not match the node root"
+                    )
+            anchor["schemaVersion"] = 3
+            anchor["sessionId"] = root_session_id
+            anchor["sessionAttempt"] = (
+                handle.root_session_attempt or handle.session_attempt
+            )
+            anchor["taskId"] = None
+            anchor["turnId"] = None
+            anchor["rootSession"] = handle.to_dict()["rootSession"]
+            anchor["scopedSessions"] = [
+                item.to_dict() for item in handle.scoped_handles
+            ]
         return AdapterResult(
             action_id=action.action_id,
             outcome="succeeded",
@@ -64,6 +98,14 @@ class AgentActionAdapter:
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
+        if result.observation_only:
+            return VerifiedDomainResult(
+                action_id=action.action_id,
+                outcome="succeeded",
+                artifact_receipts=(),
+                anchor=None,
+                budget_receipt=None,
+            )
         from ..artifact_readback_registry import required_artifact_kinds
 
         required = required_artifact_kinds(action.node_id)

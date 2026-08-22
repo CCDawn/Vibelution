@@ -1041,6 +1041,7 @@ def create_child_session(
     auto_start: bool = True,
     switch_to_child: bool = False,
     source: str = "agent_auto_split",
+    experiment_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     lang = s.get_web_language()
@@ -1077,6 +1078,81 @@ def create_child_session(
         child_id = s._new_conversation_id(existing_ids)
         title = s.trim_lines(task_title or request_text, max_lines=1).strip() or s.text_for(lang, zh="子对话", en="Child session")
         agent_id = str(parent.get("agent_id") or parent.get("agentId") or "").strip()
+        raw_experiment_binding = (
+            experiment_binding if isinstance(experiment_binding, dict) else {}
+        )
+        normalized_experiment_binding: dict[str, Any] = {}
+        if raw_experiment_binding:
+            try:
+                binding_attempt = max(1, int(raw_experiment_binding.get("attempt") or 1))
+            except (TypeError, ValueError):
+                binding_attempt = 1
+            normalized_experiment_binding = {
+                "teamId": str(raw_experiment_binding.get("teamId") or "").strip()[:160],
+                "researchProjectId": str(
+                    raw_experiment_binding.get("researchProjectId") or ""
+                ).strip()[:160],
+                "experimentName": str(
+                    raw_experiment_binding.get("experimentName") or ""
+                ).strip()[:160],
+                "agentId": str(raw_experiment_binding.get("agentId") or "").strip()[:160],
+                "roleKey": str(raw_experiment_binding.get("roleKey") or "").strip()[:80],
+                "roleLabel": str(raw_experiment_binding.get("roleLabel") or "").strip()[:80],
+                "attempt": binding_attempt,
+                "retryOfSessionId": str(
+                    raw_experiment_binding.get("retryOfSessionId") or ""
+                ).strip()[:160],
+                "createdFromTaskId": str(
+                    raw_experiment_binding.get("createdFromTaskId") or ""
+                ).strip()[:160],
+                "createdAt": str(raw_experiment_binding.get("createdAt") or "").strip()[:120],
+            }
+            workflow_run_id = str(
+                raw_experiment_binding.get("workflowRunId") or ""
+            ).strip()[:160]
+            workflow_node_id = str(
+                raw_experiment_binding.get("workflowNodeId") or ""
+            ).strip()[:80]
+            if bool(workflow_run_id) != bool(workflow_node_id):
+                raise s.SessionValidationError(
+                    "Child experiment binding workflow scope requires both workflowRunId and workflowNodeId."
+                )
+            if workflow_run_id and workflow_node_id:
+                normalized_experiment_binding["workflowRunId"] = workflow_run_id
+                normalized_experiment_binding["workflowNodeId"] = workflow_node_id
+            selection_id = str(raw_experiment_binding.get("selectionId") or "").strip()[:160]
+            candidate_id = str(raw_experiment_binding.get("candidateId") or "").strip()[:160]
+            if bool(selection_id) != bool(candidate_id):
+                raise s.SessionValidationError(
+                    "Child experiment binding candidate scope requires both selectionId and candidateId."
+                )
+            if selection_id and candidate_id:
+                normalized_experiment_binding["selectionId"] = selection_id
+                normalized_experiment_binding["candidateId"] = candidate_id
+            raw_scope = raw_experiment_binding.get("scope")
+            if isinstance(raw_scope, dict):
+                scope = {
+                    key: raw_scope[key]
+                    for key in (
+                        "version",
+                        "kind",
+                        "teamId",
+                        "researchProjectId",
+                        "agentId",
+                        "workflowRunId",
+                        "workflowNodeId",
+                        "selectionId",
+                        "candidateId",
+                    )
+                    if key in raw_scope and key not in {"attempt"}
+                }
+                if scope:
+                    normalized_experiment_binding["scope"] = scope
+            binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
+            if binding_agent_id and binding_agent_id != agent_id:
+                raise s.SessionValidationError(
+                    "Child experiment binding Agent id does not match the parent Agent."
+                )
         handoff_context = {
             "source": str(source or "agent_auto_split").strip() or "agent_auto_split",
             "parentSessionId": root_id,
@@ -1108,6 +1184,9 @@ def create_child_session(
                 "handoff_context": s._normalize_child_handoff_context(handoff_context),
             }
         )
+        if normalized_experiment_binding:
+            child["experiment_binding"] = normalized_experiment_binding
+            child["experimentBinding"] = normalized_experiment_binding
         s._ensure_conversation_workspace_metadata(child)
         child_ids = s._normalize_string_list(parent.get("child_session_ids") or parent.get("childSessionIds"))
         if child_id not in child_ids:

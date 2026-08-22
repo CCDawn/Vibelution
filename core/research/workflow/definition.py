@@ -9,6 +9,7 @@ from typing import Any
 from .models import (
     ActorKind,
     GateKind,
+    NodeSessionScopePolicy,
     WorkflowDefinition,
     WorkflowEdgeSpec,
     WorkflowNodeSpec,
@@ -73,6 +74,7 @@ _EXPERIMENT_NODES: tuple[WorkflowNodeSpec, ...] = (
         primaryRoleKey="experiment_planner",
         acceptsGateKinds=(GateKind.KNOWLEDGE_PACKAGE,),
         producesArtifactKinds=("hypothesis_set",),
+        sessionScopePolicy=NodeSessionScopePolicy.CANDIDATE_FAN_OUT,
     ),
     WorkflowNodeSpec(
         nodeId="protocol_design",

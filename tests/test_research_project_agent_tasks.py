@@ -15,6 +15,7 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from core.web.services.team_workflow import research_project_agent_tasks
 from core.web.services.team_workflow.experiment_kernel import (
     _select_experiment_stage_round,
 )
@@ -222,6 +223,122 @@ def test_hypothesis_task_preserves_formal_workflow_scope(
     assert task["roleLabel"] == "假设设计"
     assert "record_hypothesis_set" in calls[0]["content"]
     assert "本节点到 hypothesis_set 写回即结束" in calls[0]["content"]
+
+
+def test_candidate_hypothesis_tasks_run_in_parallel_hidden_child_sessions(
+    tmp_path, monkeypatch
+) -> None:
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    calls = _accepted_submitter(monkeypatch)
+    common = {
+        "taskKind": "hypothesis_design",
+        "agentId": agents["experiment_planner"]["agentId"],
+        "workflowRunId": "run-sci-096",
+        "workflowNodeId": "hypothesis_design",
+        "nodeRunId": "node-run-hypothesis",
+        "sourceCollectionRunId": "dprun-sci-096",
+        "selectionId": "selection-1",
+        "selectedCandidateIds": ["H1", "H2"],
+    }
+    h1 = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            **common,
+            "candidateId": "H1",
+            "subtaskId": "node-run-hypothesis:selection-1:H1",
+            "targetRef": "hypothesis:selection-1:H1",
+            "candidateContext": {"candidateId": "H1", "statement": "claim H1"},
+            "idempotencyKey": "candidate-H1",
+        },
+    )
+    h2 = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            **common,
+            "candidateId": "H2",
+            "subtaskId": "node-run-hypothesis:selection-1:H2",
+            "targetRef": "hypothesis:selection-1:H2",
+            "candidateContext": {"candidateId": "H2", "statement": "claim H2"},
+            "idempotencyKey": "candidate-H2",
+        },
+    )
+
+    assert h1["task"]["sessionId"] != h2["task"]["sessionId"]
+    assert h1["task"]["candidateId"] == "H1"
+    assert h2["task"]["candidateId"] == "H2"
+    assert session_service.get_session_detail(h1["task"]["sessionId"])[
+        "hiddenFromIndex"
+    ] is True
+    assert "record_hypothesis_fragment" in calls[0]["content"]
+    assert '"candidateId":"H1"' in calls[0]["content"]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (
+            "statement",
+            "s"
+            * research_project_agent_tasks.CANDIDATE_CONTEXT_STATEMENT_MAX_CHARS
+            + "overflow",
+        ),
+        (
+            "mechanism",
+            "m"
+            * research_project_agent_tasks.CANDIDATE_CONTEXT_MECHANISM_MAX_CHARS
+            + "overflow",
+        ),
+        (
+            "predictions",
+            ["prediction"]
+            * (research_project_agent_tasks.CANDIDATE_CONTEXT_MAX_PREDICTIONS + 1),
+        ),
+        (
+            "predictions",
+            [
+                "p"
+                * research_project_agent_tasks.CANDIDATE_CONTEXT_PREDICTION_MAX_CHARS
+                + "overflow"
+            ],
+        ),
+    ],
+)
+def test_candidate_context_rejects_unbounded_prompt_fields(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+) -> None:
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    calls = _accepted_submitter(monkeypatch)
+    context = {"candidateId": "H1", "statement": "claim H1"}
+    context[field] = value
+
+    with pytest.raises(ResearchProjectAgentTaskError) as exc:
+        start_research_project_agent_task(
+            team["teamId"],
+            project["projectId"],
+            {
+                "taskKind": "hypothesis_design",
+                "agentId": agents["experiment_planner"]["agentId"],
+                "workflowRunId": "run-sci-096",
+                "workflowNodeId": "hypothesis_design",
+                "nodeRunId": "node-run-hypothesis",
+                "sourceCollectionRunId": "dprun-sci-096",
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1"],
+                "candidateId": "H1",
+                "subtaskId": "node-run-hypothesis:selection-1:H1",
+                "candidateContext": context,
+                "idempotencyKey": f"candidate-boundary-{field}",
+            },
+        )
+
+    assert exc.value.code == "invalid_candidate_context"
+    assert calls == []
 
 
 def test_hypothesis_workflow_task_does_not_reuse_the_planners_flat_experiment_session(

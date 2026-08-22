@@ -184,6 +184,34 @@ def test_concurrent_create_run_same_key_replays_idempotently(
         assert "idempotency_conflict" in str(exc_info.value.code)
 
 
+def test_ledger_create_run_idempotency_ignores_client_authored_scope_mode(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
+
+    with ledger_http_client(tmp_path, monkeypatch):
+        first_input = _baseline_run_input()
+        first_input["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
+        replay_input = _baseline_run_input()
+        replay_input["workflowSessionScopeV3"] = {"hypothesis_design": "on"}
+
+        first = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=first_input,
+            idempotency_key="idem-scope-mode-1",
+        )
+        replay = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=replay_input,
+            idempotency_key="idem-scope-mode-1",
+        )
+
+        assert replay["runId"] == first["runId"]
+        assert replay["inputSnapshotHash"] == first["inputSnapshotHash"]
+
+
 def _baseline_run_input() -> dict:
     import json as _json
 

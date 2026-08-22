@@ -6,6 +6,7 @@ import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
 import { NodeCommandSection } from "./NodeCommandSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
+import { NodeSessionSection } from "./NodeSessionSection";
 import {
   isHypothesisFirstMeetingBlocker,
   pickPrimaryCommandOffer,
@@ -95,6 +96,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
       {props.statusBanner ? (
         <div role="status" className={styles.status}>{props.statusBanner}</div>
       ) : null}
+      {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
       {showHypothesisNav ? (
         <div className={styles.nav}>
           <VButton

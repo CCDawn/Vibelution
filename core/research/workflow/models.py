@@ -73,6 +73,12 @@ class GateKind(str, Enum):
     PROMOTION = "promotion"
 
 
+class NodeSessionScopePolicy(str, Enum):
+    NODE_SHARED = "node_shared"
+    CANDIDATE_FAN_OUT = "candidate_fan_out"
+    ROUND_SHARED = "round_shared"
+
+
 # Allowed NodeRun transitions (from -> to). Used by runtime; pure data for Task 1.
 NODE_RUN_TRANSITIONS: dict[NodeRunStatus, frozenset[NodeRunStatus]] = {
     NodeRunStatus.PENDING: frozenset({NodeRunStatus.READY, NodeRunStatus.SKIPPED, NodeRunStatus.CANCELLED}),
@@ -141,6 +147,7 @@ class WorkflowNodeSpec:
     collaboratorRoleKeys: tuple[str, ...] = ()
     acceptsGateKinds: tuple[GateKind, ...] = ()
     producesArtifactKinds: tuple[str, ...] = ()
+    sessionScopePolicy: NodeSessionScopePolicy = NodeSessionScopePolicy.NODE_SHARED
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -153,6 +160,7 @@ class WorkflowNodeSpec:
             "collaboratorRoleKeys": list(self.collaboratorRoleKeys),
             "acceptsGateKinds": [g.value for g in self.acceptsGateKinds],
             "producesArtifactKinds": list(self.producesArtifactKinds),
+            "sessionScopePolicy": self.sessionScopePolicy.value,
         }
 
 

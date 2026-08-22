@@ -167,7 +167,10 @@ def challenge_cup_experiment_writeback_tool(
         normalized_operation = _text(operation)
         if normalized_operation in {"run_smoke", "execute_smoke", "run_training", "execute_training", "full_run"}:
             return _unsupported_operation(normalized_operation, boundary="experiment_planning_ledger_only_not_training_execution")
-        if normalized_operation == "record_hypothesis_set":
+        if normalized_operation in {
+            "record_hypothesis_fragment",
+            "record_hypothesis_set",
+        }:
             allowed_task_kinds = ("hypothesis_design",)
         elif normalized_operation == "create_plan":
             allowed_task_kinds = ("experiment_design",)
@@ -183,7 +186,11 @@ def challenge_cup_experiment_writeback_tool(
             allowed_task_kinds=allowed_task_kinds,
             recorded_by_agent=recorded_by_agent,
             load_context=normalized_operation
-            in {"record_hypothesis_set", "record_protocol_review"},
+            in {
+                "record_hypothesis_fragment",
+                "record_hypothesis_set",
+                "record_protocol_review",
+            },
         )
         bound_project_id, bound_task_id = _project_task_identity(task_binding)
         task = (
@@ -215,7 +222,21 @@ def challenge_cup_experiment_writeback_tool(
             payload["createdFromTurnId"] = _text(
                 (task.get("turn") or {}).get("turnId")
             )
-        if normalized_operation == "record_hypothesis_set":
+        if normalized_operation == "record_hypothesis_fragment":
+            if not isinstance(task_binding, dict) or not isinstance(task, dict):
+                raise ValueError(
+                    "record_hypothesis_fragment requires a bound candidate task."
+                )
+            from core.web.services.team_workflow.research_runtime.hypothesis_scoped_execution import (
+                record_candidate_fragment_and_maybe_aggregate,
+            )
+
+            response = record_candidate_fragment_and_maybe_aggregate(
+                team_id=team_id,
+                task_context=task_binding,
+                payload=payload,
+            )
+        elif normalized_operation == "record_hypothesis_set":
             if not isinstance(task_binding, dict) or not isinstance(task, dict):
                 raise ValueError(
                     "record_hypothesis_set requires a bound hypothesis task."
@@ -322,7 +343,17 @@ def challenge_cup_experiment_writeback_tool(
             )
         task_status = None
         if task:
-            result_refs = (
+            if normalized_operation == "record_hypothesis_fragment":
+                result_refs = [
+                    _text(
+                        ((response.get("fragment") or {}).get("artifact") or {}).get(
+                            "recordId"
+                        )
+                    ),
+                    _text(response.get("hypothesisSetRef")),
+                ]
+            else:
+                result_refs = (
                 [_text((response.get("artifact") or {}).get("recordId"))]
                 if normalized_operation
                 in {"record_hypothesis_set", "record_protocol_review"}
@@ -331,7 +362,7 @@ def challenge_cup_experiment_writeback_tool(
                     requested_plan_id=_text(plan_id),
                     response=response,
                 )
-            )
+                )
             result_refs = [item for item in result_refs if item]
             task_status = (
                 workflow_service.update_research_project_agent_task_status(

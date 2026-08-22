@@ -24,6 +24,40 @@ class PendingAction:
     input_artifact_refs: tuple[ArtifactRef, ...]
     binding_snapshot_id: str | None
     budget_policy_hash: str
+    scope: dict[str, Any] | None = None
+    selection_id: str | None = None
+    candidate_id: str | None = None
+
+    def __post_init__(self) -> None:
+        selection_id = str(self.selection_id or "").strip() or None
+        candidate_id = str(self.candidate_id or "").strip() or None
+        if bool(selection_id) != bool(candidate_id):
+            raise ValueError(
+                "candidate-scoped PendingAction requires selectionId and candidateId"
+            )
+        scope_kind = str((self.scope or {}).get("kind") or "").strip()
+        if scope_kind == "workflow_node_root" and (selection_id or candidate_id):
+            raise ValueError(
+                "workflow_node_root PendingAction must not carry candidate identity"
+            )
+        if scope_kind == "workflow_candidate":
+            if not selection_id or not candidate_id:
+                raise ValueError(
+                    "workflow_candidate PendingAction requires candidate identity"
+                )
+            scoped_selection_id = (
+                str((self.scope or {}).get("selectionId") or "").strip() or None
+            )
+            scoped_candidate_id = (
+                str((self.scope or {}).get("candidateId") or "").strip() or None
+            )
+            if (scoped_selection_id, scoped_candidate_id) != (
+                selection_id,
+                candidate_id,
+            ):
+                raise ValueError(
+                    "PendingAction candidate identity does not match its scope"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -40,6 +74,12 @@ class PendingAction:
         }
         if self.binding_snapshot_id:
             payload["bindingSnapshotId"] = self.binding_snapshot_id
+        if self.scope:
+            payload["scope"] = dict(self.scope)
+        if self.selection_id:
+            payload["selectionId"] = self.selection_id
+        if self.candidate_id:
+            payload["candidateId"] = self.candidate_id
         return payload
 
     @classmethod
@@ -66,6 +106,13 @@ class PendingAction:
             ),
             binding_snapshot_id=payload.get("bindingSnapshotId"),
             budget_policy_hash=str(payload.get("budgetPolicyHash") or ""),
+            scope=(
+                dict(payload.get("scope") or {})
+                if isinstance(payload.get("scope"), Mapping)
+                else None
+            ),
+            selection_id=str(payload.get("selectionId") or "").strip() or None,
+            candidate_id=str(payload.get("candidateId") or "").strip() or None,
         )
 
 

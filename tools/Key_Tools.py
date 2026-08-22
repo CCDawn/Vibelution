@@ -821,8 +821,12 @@ def _build_key_tools() -> List[BaseTool]:
         【挑战杯实验账本回写】登记假设集、实验计划、baseline、smoke/full-run 结果或入库申请。
 
         该工具只写实验账本，不执行训练、smoke runner、Shell、Git、RAG 或 official graph。
-        operation 支持 record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
+        operation 支持 record_hypothesis_fragment / record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
         register_full_run_result / request_knowledge_ingestion。
+
+        当 operation=record_hypothesis_fragment 时，只提交当前 Child Session 绑定 candidate 的
+        statement、mechanism、predictions、falsificationCriteria、evidenceRefs、counterEvidenceRefs 和五维 scores；
+        selection/candidate/session/task scope 均由当前正式任务绑定。
 
         当 operation=record_hypothesis_set 时，payload_json 须包含 portfolioId、maxCandidates、
         maxEvolutionRounds、currentEvolutionRound 和 candidates；runId 由当前正式任务绑定，Agent 不得猜测或填写。

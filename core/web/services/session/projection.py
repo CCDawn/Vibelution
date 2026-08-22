@@ -732,6 +732,35 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
     if workflow_run_id and workflow_node_id:
         binding["workflowRunId"] = workflow_run_id
         binding["workflowNodeId"] = workflow_node_id
+    selection_id = str(value.get("selectionId") or "").strip()[:160]
+    candidate_id = str(value.get("candidateId") or "").strip()[:160]
+    if bool(selection_id) != bool(candidate_id):
+        return None
+    if selection_id and candidate_id:
+        if not workflow_run_id or not workflow_node_id:
+            return None
+        binding["selectionId"] = selection_id
+        binding["candidateId"] = candidate_id
+
+    raw_scope = value.get("scope")
+    if raw_scope is not None:
+        if not isinstance(raw_scope, dict):
+            return None
+        expected_scope = {
+            "version": 3,
+            "kind": "workflow_candidate" if candidate_id else "workflow_node_root",
+            "teamId": binding["teamId"],
+            "researchProjectId": research_project_id,
+            "agentId": agent_id,
+            "workflowRunId": workflow_run_id,
+            "workflowNodeId": workflow_node_id,
+        }
+        if candidate_id:
+            expected_scope["selectionId"] = selection_id
+            expected_scope["candidateId"] = candidate_id
+        if any(raw_scope.get(key) != expected for key, expected in expected_scope.items()):
+            return None
+        binding["scope"] = expected_scope
     return binding
 
 

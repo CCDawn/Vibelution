@@ -11,22 +11,109 @@ reserve -> create task -> turn -> verify -> one ledger commit -> settle.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import time
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
-from core.research.workflow.contracts import PendingAction
+from core.research.workflow.contracts import PendingAction, WorkflowSessionScopeV3
 from core.research.workflow.ledger import WorkflowLedgerStore
 
 from .domain_ports import (
     AgentTaskHandle,
+    AgentTurnResult,
     ArtifactReadBack,
     BindingResolution,
     HumanTaskHandle,
     ReadBackVerdict,
+    ScopedAgentTaskHandle,
+)
+from .formal_hypothesis_fanout import (
+    HypothesisAuthorityUnavailable as _HypothesisAuthorityUnavailable,
+)
+from .formal_hypothesis_fanout import (
+    candidate_hypothesis_task_context as _candidate_hypothesis_task_context,
+)
+from .formal_hypothesis_fanout import (
+    formal_hypothesis_fan_out_input as _formal_hypothesis_fan_out_input,
+)
+from .formal_hypothesis_fanout import (
+    hypothesis_max_parallel as _hypothesis_max_parallel,
+)
+from .formal_hypothesis_fanout import (
+    load_formal_hypothesis_fragment as _load_formal_hypothesis_fragment,
+)
+from .formal_hypothesis_fanout import (
+    load_reusable_formal_hypothesis_fragment as _load_reusable_formal_hypothesis_fragment,
+)
+from .formal_hypothesis_fanout import (
+    mark_candidate_task_completed as _mark_candidate_task_completed,
+)
+from .formal_hypothesis_fanout import (
+    previous_hypothesis_anchor as _previous_hypothesis_anchor,
+)
+from .formal_hypothesis_fanout import (
+    resolve_formal_candidate_task as _resolve_or_start_formal_candidate_task,
+)
+from .formal_hypothesis_fanout import (
+    resolve_formal_node_root_session as _resolve_formal_node_root_session,
+)
+from .formal_hypothesis_fanout import (
+    root_hypothesis_task_context as _root_hypothesis_task_context,
+)
+from .formal_hypothesis_fanout import (
+    scoped_handle_from_started as _scoped_handle_from_started,
+)
+from .hypothesis_scope_events import (
+    record_hypothesis_scope_event as _record_hypothesis_scope_event,
+)
+from .hypothesis_session_scope_mode import (
+    evaluate_hypothesis_scope_shadow as _evaluate_hypothesis_scope_shadow,
+)
+from .hypothesis_session_scope_mode import (
+    resolve_hypothesis_scope_activation as _resolve_hypothesis_scope_activation,
+)
+from .hypothesis_session_scope_mode import (
+    resolve_hypothesis_session_scope_mode as _resolve_hypothesis_session_scope_mode,
 )
 
 DEFAULT_AGENT_ESTIMATE_TOKENS = 25_000
+_HYPOTHESIS_SELECTION_MISSING = (
+    "hypothesis_design requires a current hypothesis selection"
+)
+
+
+def _binding_session_scope(
+    snapshot: Mapping[str, Any], action: PendingAction, agent_id: str
+) -> dict[str, Any] | None:
+    """Build the full v3 session identity once the frozen Agent is known.
+
+    A PendingAction may represent either the node root or one candidate.  Keep
+    that distinction in the binding metadata so the downstream session/task
+    authority receives the same identity that was frozen at the graph
+    interrupt; never silently project a candidate action back to the root.
+    """
+
+    team_id = str(snapshot.get("teamId") or "").strip()
+    project_id = str(snapshot.get("projectId") or "").strip()
+    if not team_id or not project_id or not agent_id:
+        return None
+    common = {
+        "teamId": team_id,
+        "researchProjectId": project_id,
+        "agentId": agent_id,
+        "workflowRunId": action.run_id,
+        "workflowNodeId": action.node_id,
+    }
+    if action.selection_id and action.candidate_id:
+        return WorkflowSessionScopeV3.candidate(
+            **common,
+            selectionId=action.selection_id,
+            candidateId=action.candidate_id,
+        ).to_dict()
+    return WorkflowSessionScopeV3.root(**common).to_dict()
 
 
 class RealDomainPorts:
@@ -79,15 +166,26 @@ class RealDomainPorts:
             if not agent_id:
                 healed = _heal_binding_resolution(snapshot, action.node_id)
                 if healed.agent_id:
-                    return healed
+                    return replace(
+                        healed,
+                        session_scope=_binding_session_scope(
+                            snapshot, action, healed.agent_id
+                        ),
+                    )
             return BindingResolution(
                 agent_id=agent_id,
                 role_key=str(binding.get("roleKey") or ""),
                 binding_snapshot_id=str(binding.get("snapshotId") or "") or None,
+                session_scope=_binding_session_scope(snapshot, action, agent_id),
             )
         healed = _heal_binding_resolution(snapshot, action.node_id)
         if healed.agent_id:
-            return healed
+            return replace(
+                healed,
+                session_scope=_binding_session_scope(
+                    snapshot, action, healed.agent_id
+                ),
+            )
         return BindingResolution(agent_id="", role_key="")
 
     # ------------------------------------------------------------- budget
@@ -155,6 +253,386 @@ class RealDomainPorts:
 
     # ------------------------------------------------------------ agent
 
+    def _bound_hypothesis_selection(self, action: PendingAction) -> dict[str, Any]:
+        try:
+            row = self._store.read(
+                lambda repo: repo.get_anchor_by_node_run(action.node_run_id)
+            )
+            payload = (
+                json.loads(row[13] or "{}")
+                if row is not None and len(row) > 13
+                else {}
+            )
+        except Exception as exc:
+            raise _HypothesisAuthorityUnavailable(
+                f"hypothesis selection anchor authority is unavailable: {exc}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise _HypothesisAuthorityUnavailable(
+                "hypothesis selection anchor authority returned an invalid payload"
+            )
+        selection_id = str(payload.get("selectionId") or "").strip()
+        selected_candidate_ids = [
+            str(item).strip()
+            for item in list(payload.get("selectedCandidateIds") or [])
+            if str(item).strip()
+        ]
+        if len(set(selected_candidate_ids)) != len(selected_candidate_ids):
+            raise RuntimeError("candidate scope contains duplicate candidates")
+        # A candidate-scoped action is already frozen by the graph interrupt.
+        # It is the authoritative minimum when a draft anchor has not yet
+        # been published (for example after a crash between dispatch steps).
+        if action.selection_id:
+            if selection_id and selection_id != action.selection_id:
+                raise RuntimeError("candidate action selection does not match anchor")
+            selection_id = selection_id or action.selection_id
+        if action.candidate_id:
+            if (
+                selected_candidate_ids
+                and action.candidate_id not in selected_candidate_ids
+            ):
+                raise RuntimeError("candidate action is outside the selected candidates")
+            if not selected_candidate_ids:
+                selected_candidate_ids.append(action.candidate_id)
+        return {
+            "selectionId": selection_id,
+            "selectedCandidateIds": selected_candidate_ids,
+        }
+
+    def _bound_hypothesis_selection_id(self, action: PendingAction) -> str:
+        return str(
+            self._bound_hypothesis_selection(action).get("selectionId") or ""
+        ).strip()
+
+    def _hypothesis_chain_state(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        """Read live selection authority without treating read errors as empty."""
+
+        team_id = str(snapshot.get("teamId") or "").strip()
+        question_id = str(snapshot.get("questionId") or "").strip()
+        if not team_id or not question_id:
+            return {}
+        try:
+            from core.web.services.team_workflow.research_runtime import (
+                hypothesis_first_chain,
+            )
+
+            state = hypothesis_first_chain.chain_state(team_id, question_id)
+        except Exception as exc:
+            raise _HypothesisAuthorityUnavailable(
+                f"hypothesis selection authority is unavailable: {exc}"
+            ) from exc
+        if not isinstance(state, Mapping):
+            raise _HypothesisAuthorityUnavailable(
+                "hypothesis selection authority returned an invalid chain state"
+            )
+        return dict(state)
+
+    def _resolve_hypothesis_scope(
+        self,
+        action: PendingAction,
+        *,
+        snapshot: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Resolve live scope, then classify an explicit compatibility fallback."""
+
+        chain_state = self._hypothesis_chain_state(snapshot)
+        decision = _resolve_hypothesis_scope_activation(
+            snapshot,
+            chain_state=chain_state,
+        )
+        fan_out: dict[str, Any] | None = None
+        try:
+            fan_out = _formal_hypothesis_fan_out_input(
+                action=action,
+                snapshot=snapshot,
+                bound_selection_id=self._bound_hypothesis_selection_id(action),
+            )
+        except RuntimeError as exc:
+            # Only the explicit no-selection result can enter the bounded
+            # compatibility path.  Invalid selections and all authority
+            # failures remain fail-closed.
+            if str(exc) != _HYPOTHESIS_SELECTION_MISSING:
+                raise
+            if not decision.get("fallbackReason"):
+                raise
+        if fan_out is not None:
+            self._require_bound_hypothesis_selection(action, fan_out)
+        elif decision.get("selectionRequired") or decision.get("fanOutEnabled"):
+            raise RuntimeError(_HYPOTHESIS_SELECTION_MISSING)
+        return decision, fan_out
+
+    def _require_bound_hypothesis_selection(
+        self,
+        action: PendingAction,
+        fan_out: Mapping[str, Any],
+    ) -> None:
+        bound = self._bound_hypothesis_selection(action)
+        bound_selection_id = str(bound.get("selectionId") or "").strip()
+        if not bound_selection_id:
+            return
+        observed_selection_id = str(fan_out.get("selectionId") or "").strip()
+        bound_candidates = list(bound.get("selectedCandidateIds") or [])
+        observed_candidates = [
+            str(item).strip()
+            for item in list(fan_out.get("selectedCandidateIds") or [])
+            if str(item).strip()
+        ]
+        if (
+            observed_selection_id != bound_selection_id
+            or not bound_candidates
+            or observed_candidates != bound_candidates
+        ):
+            raise RuntimeError(
+                "hypothesis selection changed after the NodeRun scope was frozen"
+            )
+
+    def evaluate_hypothesis_scope_shadow(
+        self,
+        action: PendingAction,
+        *,
+        snapshot: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Validate and record shadow scope without creating runtime objects."""
+
+        if action.node_id != "hypothesis_design":
+            return None
+        current_snapshot = dict(snapshot or self._run_input_snapshot(action.run_id))
+        if _resolve_hypothesis_session_scope_mode(current_snapshot) != "shadow":
+            return None
+        decision, fan_out = self._resolve_hypothesis_scope(
+            action,
+            snapshot=current_snapshot,
+        )
+        if fan_out is None:
+            # Non-hypothesis-first runs without a live selection retain the
+            # legacy single-session path; create_agent_task records the
+            # bounded compatibility reason when it continues there.
+            if decision.get("fallbackReason"):
+                return None
+            raise RuntimeError("hypothesis_design shadow selection is unavailable")
+        evaluation = _evaluate_hypothesis_scope_shadow(
+            fan_out,
+            max_parallel=_hypothesis_max_parallel(
+                current_snapshot,
+                len(fan_out["selectedCandidateIds"]),
+            ),
+        )
+        _record_hypothesis_scope_event(
+            self._store,
+            action=action,
+            event_type="workflow.session_scope.resolved",
+            fields={
+                "mode": "shadow",
+                "selectionId": str(fan_out.get("selectionId") or ""),
+                "candidateCount": len(
+                    list(fan_out.get("selectedCandidateIds") or [])
+                ),
+                "scopeHash": str(evaluation.get("scopeHash") or ""),
+            },
+            discriminator="shadow",
+        )
+        return evaluation
+
+    def _persist_hypothesis_anchor_draft(
+        self,
+        *,
+        action: PendingAction,
+        binding: BindingResolution,
+        root_session_id: str,
+        root_session_attempt: int,
+        selection_id: str,
+        selected_candidate_ids: list[str],
+        handles: list[ScopedAgentTaskHandle],
+        candidate_statuses: Mapping[str, str] | None = None,
+        root_status: str = "running",
+    ) -> None:
+        """Publish live candidate anchors without reading a legacy workflow store."""
+        now_ms = int(time.time() * 1000)
+        anchor_id = "anchor-" + hashlib.sha256(
+            action.node_run_id.encode()
+        ).hexdigest()[:16]
+        terminal = {"succeeded", "failed", "blocked", "cancelled"}
+        selected_ids = [str(item).strip() for item in selected_candidate_ids]
+        if not selection_id or not selected_ids or any(not item for item in selected_ids):
+            raise RuntimeError("candidate scope requires a non-empty selection")
+        if len(set(selected_ids)) != len(selected_ids):
+            raise RuntimeError("candidate scope contains duplicate candidates")
+        for handle in handles:
+            if handle.selection_id != selection_id:
+                raise RuntimeError("candidate handle selection does not match anchor")
+            if handle.candidate_id not in selected_ids:
+                raise RuntimeError("candidate handle is outside the selected candidates")
+            if handle.session_id and (
+                handle.parent_session_id != root_session_id
+                or handle.root_session_id != root_session_id
+            ):
+                raise RuntimeError("candidate handle lineage does not match anchor root")
+        for candidate_id in (candidate_statuses or {}):
+            if str(candidate_id).strip() not in selected_ids:
+                raise RuntimeError("candidate status is outside the selected candidates")
+
+        def merge_status(current: Any, desired: Any) -> str:
+            current_text = str(current or "").strip().lower()
+            desired_text = str(desired or "").strip().lower()
+            if current_text in terminal and desired_text != current_text:
+                return current_text
+            return desired_text or current_text or "pending"
+
+        def read_snapshot() -> tuple[dict[str, Any], int | None]:
+            row = self._store.read(
+                lambda repo: repo.get_anchor_by_node_run(action.node_run_id)
+            )
+            if row is None:
+                return {}, None
+            try:
+                payload = json.loads(row[13] or "{}")
+            except (TypeError, ValueError, IndexError) as exc:
+                raise RuntimeError("execution anchor payload is invalid") from exc
+            if not isinstance(payload, dict):
+                raise RuntimeError("execution anchor payload is not an object")
+            revision = int(row[15]) if len(row) > 15 else 0
+            return payload, revision
+
+        def build_payload(existing: Mapping[str, Any]) -> dict[str, Any]:
+            payload = dict(existing)
+            payload.update(
+                {
+                    "schemaVersion": 3,
+                    "agentId": binding.agent_id,
+                    "roleKey": binding.role_key,
+                    "actionId": action.action_id,
+                    "sessionId": root_session_id,
+                    "sessionAttempt": root_session_attempt,
+                    # The root is a session-only container for candidate
+                    # fan-out.  Legacy scalar task/turn values may point at a
+                    # child; retaining them would mislabel the root and make
+                    # the compatibility projection unsafe.
+                    "taskId": None,
+                    "turnId": None,
+                    "selectionId": selection_id,
+                    "selectedCandidateIds": list(selected_ids),
+                }
+            )
+            previous_root = (
+                payload.get("rootSession")
+                if isinstance(payload.get("rootSession"), Mapping)
+                else {}
+            )
+            payload["rootSession"] = {
+                **dict(previous_root),
+                "scopeKind": "workflow_node_root",
+                "sessionId": root_session_id,
+                "sessionAttempt": root_session_attempt,
+                "taskId": None,
+                "turnId": None,
+                "status": merge_status(previous_root.get("status"), root_status),
+            }
+
+            existing_items = [
+                dict(item)
+                for item in list(payload.get("scopedSessions") or [])
+                if isinstance(item, Mapping)
+                and str(item.get("selectionId") or "").strip() == selection_id
+                and str(item.get("candidateId") or "").strip()
+            ]
+            by_key = {
+                (
+                    str(item.get("selectionId") or "").strip(),
+                    str(item.get("candidateId") or "").strip(),
+                ): item
+                for item in existing_items
+            }
+            handle_by_candidate = {item.candidate_id: item for item in handles}
+            statuses = dict(candidate_statuses or {})
+            for candidate_id in selected_ids:
+                key = (selection_id, candidate_id)
+                item = by_key.get(key) or {
+                    "scopeKind": "workflow_candidate",
+                    "selectionId": selection_id,
+                    "candidateId": candidate_id,
+                    "sessionId": None,
+                    "sessionAttempt": None,
+                    "taskId": None,
+                    "turnId": None,
+                    "parentSessionId": None,
+                    "rootSessionId": None,
+                    "fragmentRefs": [],
+                    "status": "pending",
+                }
+                handle = handle_by_candidate.get(candidate_id)
+                if (
+                    handle is not None
+                    and str(item.get("status") or "").lower() not in terminal
+                ):
+                    incoming = handle.to_dict()
+                    previous_refs = list(item.get("fragmentRefs") or [])
+                    incoming_refs = list(incoming.get("fragmentRefs") or [])
+                    item.update(incoming)
+                    if previous_refs and not incoming_refs:
+                        item["fragmentRefs"] = previous_refs
+                    elif previous_refs:
+                        item["fragmentRefs"] = list(
+                            dict.fromkeys(previous_refs + incoming_refs)
+                        )
+                if candidate_id in statuses:
+                    item["status"] = merge_status(
+                        item.get("status"), statuses[candidate_id]
+                    )
+                else:
+                    item["status"] = merge_status(
+                        item.get("status"), item.get("status")
+                    )
+                by_key[key] = item
+            payload["scopedSessions"] = list(by_key.values())
+            return payload
+
+        for _ in range(4):
+            existing, expected_revision = read_snapshot()
+            payload = build_payload(existing)
+            anchor_json = json.dumps(payload, ensure_ascii=False)
+
+            def mutate(
+                uow: Any,
+                *,
+                expected_revision: int | None = expected_revision,
+                anchor_json: str = anchor_json,
+                payload: dict[str, Any] = payload,
+            ) -> bool:
+                current = uow.repository.get_anchor_by_node_run(action.node_run_id)
+                if expected_revision is None:
+                    if current is not None:
+                        return False
+                    uow.repository.insert_anchor(
+                        anchor_id=anchor_id,
+                        node_run_id=action.node_run_id,
+                        actor_kind=action.actor_kind.value,
+                        anchor_json=anchor_json,
+                        created_at_ms=now_ms,
+                        agent_id=binding.agent_id,
+                        role_key=binding.role_key,
+                        session_id=root_session_id,
+                        session_attempt=root_session_attempt,
+                        status=str(payload.get("rootSession", {}).get("status") or root_status),
+                    )
+                    return True
+                if current is None or len(current) <= 15:
+                    return False
+                return uow.repository.update_anchor_by_node_run_cas(
+                    node_run_id=action.node_run_id,
+                    expected_revision=int(expected_revision),
+                    anchor_json=anchor_json,
+                    status=str(payload.get("rootSession", {}).get("status") or root_status),
+                    agent_id=binding.agent_id,
+                    role_key=binding.role_key,
+                    session_id=root_session_id,
+                    session_attempt=root_session_attempt,
+                )
+
+            committed = self._store.submit(mutate, force_flush=True).result(timeout=30)
+            if committed:
+                return
+        raise RuntimeError("execution anchor changed while publishing candidate scope")
+
     def create_agent_task(self, *, action: PendingAction) -> AgentTaskHandle:
         from .task_adapter_registry import resolve_agent_task_adapter
 
@@ -172,6 +650,53 @@ class RealDomainPorts:
         binding = self.resolve_binding(action)
         if not binding.agent_id:
             raise RuntimeError("agent node is unbound")
+        if action.node_id == "hypothesis_design":
+            scope_mode = _resolve_hypothesis_session_scope_mode(snapshot)
+            fan_out = None
+            shadow_evaluation: dict[str, Any] | None = None
+            scope_decision: dict[str, Any] = {
+                "fallbackReason": "",
+                "selectionId": "",
+            }
+            if scope_mode != "off":
+                scope_decision, fan_out = self._resolve_hypothesis_scope(
+                    action,
+                    snapshot=snapshot,
+                )
+                if fan_out is not None and scope_mode == "shadow":
+                    shadow_evaluation = _evaluate_hypothesis_scope_shadow(
+                        fan_out,
+                        max_parallel=_hypothesis_max_parallel(
+                            snapshot,
+                            len(fan_out["selectedCandidateIds"]),
+                        ),
+                    )
+            _record_hypothesis_scope_event(
+                self._store,
+                action=action,
+                event_type="workflow.session_scope.resolved",
+                fields={
+                    "mode": scope_mode,
+                    "selectionId": str((fan_out or {}).get("selectionId") or ""),
+                    "candidateCount": len(
+                        list((fan_out or {}).get("selectedCandidateIds") or [])
+                    ),
+                    "fallbackReason": str(
+                        scope_decision.get("fallbackReason") or ""
+                    ),
+                    "scopeHash": str(
+                        (shadow_evaluation or {}).get("scopeHash") or ""
+                    ),
+                },
+                discriminator=scope_mode,
+            )
+            if scope_mode == "on" and fan_out is not None:
+                return self._create_hypothesis_fan_out(
+                    action=action,
+                    binding=binding,
+                    snapshot=snapshot,
+                    fan_out=fan_out,
+                )
         if self._agent_task_factory is not None:
             return self._agent_task_factory(action=action, binding=binding)
         # 默认 factory：真实 research-project / source-collection task。
@@ -190,8 +715,11 @@ class RealDomainPorts:
 
     def execute_agent_turn(
         self, *, action: PendingAction, handle: AgentTaskHandle
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, str]] | AgentTurnResult:
         from .agent_turn_completion import complete_agent_turn_outputs
+
+        if handle.observation_only:
+            return AgentTurnResult(materialized_refs=(), handle=handle)
 
         snapshot = self._run_input_snapshot(action.run_id)
         bounded = _bounded_agent_node_can_complete(
@@ -218,10 +746,700 @@ class RealDomainPorts:
                 return refs
             if bounded:
                 raise RuntimeError("bounded version_governance produced no artifact refs")
+        if handle.scoped_handles:
+            return self._execute_hypothesis_fan_out(
+                action=action,
+                handle=handle,
+                snapshot=snapshot,
+            )
         return complete_agent_turn_outputs(
             action=action,
             handle=handle,
             input_snapshot=snapshot,
+        )
+
+    def _create_hypothesis_fan_out(
+        self,
+        *,
+        action: PendingAction,
+        binding: BindingResolution,
+        snapshot: dict[str, Any],
+        fan_out: dict[str, Any],
+    ) -> AgentTaskHandle:
+        """Create/replay one root and one canonical child task per candidate.
+
+        The root is a session-only container.  Candidate work is the only work
+        that owns a Task/Turn, and all candidate creation is bounded before the
+        first child side effect.  Retry lookup is deliberately based on the
+        project Agent task authority, so a failed node attempt can reuse
+        successful siblings without opening duplicate conversations.
+        """
+
+        selected_ids = [str(item).strip() for item in fan_out["selectedCandidateIds"]]
+        max_parallel = _hypothesis_max_parallel(snapshot, len(selected_ids))
+        if len(selected_ids) > max_parallel:
+            raise RuntimeError(
+                "hypothesis candidate fan-out exceeds maxConcurrency: "
+                f"selected={len(selected_ids)}, max={max_parallel}"
+            )
+        team_id = str(snapshot.get("teamId") or "").strip()
+        project_id = str(snapshot.get("projectId") or "").strip()
+        source_collection_run_id = str(
+            snapshot.get("sourceCollectionRunId") or action.run_id
+        ).strip()
+        if not team_id or not project_id:
+            raise RuntimeError("hypothesis_design fan-out requires teamId and projectId")
+
+        root = _resolve_formal_node_root_session(
+            team_id=team_id,
+            project_id=project_id,
+            agent_id=binding.agent_id,
+            role_key=binding.role_key,
+            workflow_run_id=action.run_id,
+            workflow_node_id=action.node_id,
+            created_from_task_id=f"workflow-root:{action.node_run_id}",
+        )
+        root_session_id = str(root.get("sessionId") or "").strip()
+        if not root_session_id:
+            raise RuntimeError("hypothesis_design root session anchor is incomplete")
+        _verify_node_root_session(
+            root_session_id,
+            agent_id=binding.agent_id,
+        )
+        root_attempt = int(root.get("sessionAttempt") or 1)
+        selection_id = str(fan_out["selectionId"])
+        self._persist_hypothesis_anchor_draft(
+            action=action,
+            binding=binding,
+            root_session_id=root_session_id,
+            root_session_attempt=root_attempt,
+            selection_id=selection_id,
+            selected_candidate_ids=selected_ids,
+            handles=[],
+        )
+
+        previous_anchor = _previous_hypothesis_anchor(self._store, action)
+        previous_children = {
+            str(item.get("candidateId") or "").strip(): item
+            for item in list(previous_anchor.get("scopedSessions") or [])
+            if isinstance(item, dict)
+            and str(item.get("selectionId") or "").strip()
+            == str(fan_out["selectionId"])
+            and str(item.get("candidateId") or "").strip()
+        }
+        candidate_snapshots = {
+            str(item.get("candidateId") or "").strip(): dict(item)
+            for item in list(fan_out.get("candidateSnapshots") or [])
+            if isinstance(item, dict) and str(item.get("candidateId") or "").strip()
+        }
+
+        handles: list[ScopedAgentTaskHandle] = []
+        failed_candidates: dict[str, str] = {}
+        for candidate_id in selected_ids:
+            candidate_context = dict(candidate_snapshots.get(candidate_id) or {})
+            candidate_context.setdefault("candidateId", candidate_id)
+            subtask_id = (
+                f"{action.node_run_id}:{fan_out['selectionId']}:{candidate_id}"
+            )
+            prior = previous_children.get(candidate_id) or {}
+            try:
+                started = _resolve_or_start_formal_candidate_task(
+                    team_id=team_id,
+                    project_id=project_id,
+                    action=action,
+                    agent_id=binding.agent_id,
+                    source_collection_run_id=source_collection_run_id,
+                    selection_id=selection_id,
+                    candidate_id=candidate_id,
+                    selected_candidate_ids=selected_ids,
+                    candidate_context=candidate_context,
+                    subtask_id=subtask_id,
+                    previous=prior,
+                )
+                child = _scoped_handle_from_started(
+                    started,
+                    selection_id=selection_id,
+                    candidate_id=candidate_id,
+                    subtask_id=subtask_id,
+                    expected_root_session_id=root_session_id,
+                    expected_agent_id=binding.agent_id,
+                )
+            except _HypothesisAuthorityUnavailable:
+                raise
+            except (RuntimeError, ValueError):
+                failed_candidates[candidate_id] = "failed"
+                self._persist_hypothesis_anchor_draft(
+                    action=action,
+                    binding=binding,
+                    root_session_id=root_session_id,
+                    root_session_attempt=root_attempt,
+                    selection_id=selection_id,
+                    selected_candidate_ids=selected_ids,
+                    handles=handles,
+                    candidate_statuses=failed_candidates,
+                )
+                continue
+            started_task = (
+                dict(started.get("task"))
+                if isinstance(started.get("task"), Mapping)
+                else {}
+            )
+            formal_retry = bool(
+                started.get("formalRetry") or started_task.get("formalRetry")
+            )
+            session_created = bool(
+                started.get("sessionCreated")
+                or started_task.get("sessionCreated")
+            )
+            if formal_retry:
+                child_event_type = "workflow.scope_attempt.retried"
+            elif session_created:
+                child_event_type = "workflow.child_session.created"
+            else:
+                child_event_type = "workflow.child_session.resumed"
+            _record_hypothesis_scope_event(
+                self._store,
+                action=action,
+                event_type=child_event_type,
+                fields={
+                    "mode": "on",
+                    "selectionId": selection_id,
+                    "candidateId": candidate_id,
+                    "sessionId": child.session_id,
+                    "sessionAttempt": child.session_attempt,
+                    "taskId": child.task_id,
+                    "status": child.status,
+                    "created": session_created,
+                },
+                discriminator=(
+                    f"{candidate_id}:{child.session_attempt}:{child_event_type}"
+                ),
+            )
+            handles.append(child)
+            self._persist_hypothesis_anchor_draft(
+                action=action,
+                binding=binding,
+                root_session_id=root_session_id,
+                root_session_attempt=root_attempt,
+                selection_id=selection_id,
+                selected_candidate_ids=selected_ids,
+                handles=handles,
+                candidate_statuses=failed_candidates,
+            )
+
+        if not handles:
+            raise RuntimeError("hypothesis_design fan-out produced no candidate tasks")
+        return AgentTaskHandle(
+            session_id=root_session_id,
+            session_attempt=root_attempt,
+            task_id="",
+            turn_id="",
+            root_session_id=root_session_id,
+            root_session_attempt=root_attempt,
+            scoped_handles=tuple(handles),
+        )
+
+    def _execute_hypothesis_fan_out(
+        self,
+        *,
+        action: PendingAction,
+        handle: AgentTaskHandle,
+        snapshot: dict[str, Any],
+    ) -> AgentTurnResult:
+        """Wait for children, read fragments, deterministically fan in a set."""
+
+        from .agent_turn_completion import (
+            TurnNotReadyError,
+            collect_required_artifact_refs,
+            wait_for_agent_turn_terminal,
+        )
+        from .hypothesis_artifact_writer import record_hypothesis_set_from_fragments
+        from .hypothesis_fragment_writer import (
+            build_hypothesis_fragment,
+            record_hypothesis_fragment,
+        )
+        from .workflow_artifact_store import (
+            list_workflow_artifacts,
+            put_workflow_artifact,
+        )
+
+        fan_out = _formal_hypothesis_fan_out_input(
+            action=action,
+            snapshot=snapshot,
+            bound_selection_id=self._bound_hypothesis_selection_id(action),
+        )
+        if fan_out is None:
+            raise RuntimeError("hypothesis_design fan-out selection is unavailable")
+        try:
+            self._require_bound_hypothesis_selection(action, fan_out)
+        except RuntimeError:
+            bound_selection = self._bound_hypothesis_selection(action)
+            self._persist_hypothesis_anchor_draft(
+                action=action,
+                binding=self.resolve_binding(action),
+                root_session_id=str(handle.root_session_id or ""),
+                root_session_attempt=int(
+                    handle.root_session_attempt or handle.session_attempt or 1
+                ),
+                selection_id=str(bound_selection.get("selectionId") or ""),
+                selected_candidate_ids=list(
+                    bound_selection.get("selectedCandidateIds") or []
+                ),
+                handles=list(handle.scoped_handles),
+                root_status="failed",
+            )
+            _record_hypothesis_scope_event(
+                self._store,
+                action=action,
+                event_type="workflow.hypothesis_aggregation.blocked",
+                fields={
+                    "mode": "on",
+                    "selectionId": str(
+                        bound_selection.get("selectionId") or ""
+                    ),
+                    "candidateCount": len(
+                        list(bound_selection.get("selectedCandidateIds") or [])
+                    ),
+                    "status": "blocked",
+                    "errorCode": "selection_scope_drift",
+                },
+                discriminator="selection-scope-drift",
+            )
+            raise
+        team_id = str(snapshot.get("teamId") or "").strip()
+        project_id = str(snapshot.get("projectId") or "").strip()
+        source_collection_run_id = str(
+            snapshot.get("sourceCollectionRunId") or action.run_id
+        ).strip()
+        fragments: list[dict[str, Any]] = []
+        completed_handles: list[ScopedAgentTaskHandle] = []
+        previous_anchor = _previous_hypothesis_anchor(self._store, action)
+        previous_children = {
+            str(item.get("candidateId") or "").strip(): item
+            for item in list(previous_anchor.get("scopedSessions") or [])
+            if isinstance(item, dict)
+            and str(item.get("selectionId") or "").strip()
+            == str(fan_out["selectionId"])
+            and str(item.get("candidateId") or "").strip()
+        }
+        for child in handle.scoped_handles:
+            if not child.session_id or not child.task_id or not child.turn_id:
+                raise RuntimeError(
+                    "hypothesis candidate anchor is incomplete: " + child.candidate_id
+                )
+            try:
+                completion = wait_for_agent_turn_terminal(
+                    child.session_id,
+                    child.turn_id,
+                )
+            except TurnNotReadyError:
+                raise
+            except RuntimeError:
+                self._persist_hypothesis_anchor_draft(
+                    action=action,
+                    binding=self.resolve_binding(action),
+                    root_session_id=str(handle.root_session_id or ""),
+                    root_session_attempt=int(
+                        handle.root_session_attempt or handle.session_attempt or 1
+                    ),
+                    selection_id=str(fan_out["selectionId"]),
+                    selected_candidate_ids=[
+                        str(item) for item in fan_out["selectedCandidateIds"]
+                    ],
+                    handles=list(handle.scoped_handles),
+                    candidate_statuses={child.candidate_id: "failed"},
+                    root_status="failed",
+                )
+                _record_hypothesis_scope_event(
+                    self._store,
+                    action=action,
+                    event_type="workflow.hypothesis_aggregation.blocked",
+                    fields={
+                        "mode": "on",
+                        "selectionId": str(fan_out["selectionId"]),
+                        "candidateId": child.candidate_id,
+                        "sessionAttempt": child.session_attempt,
+                        "status": "blocked",
+                        "errorCode": "candidate_turn_failed",
+                    },
+                    discriminator=(
+                        f"turn-failed:{child.candidate_id}:"
+                        f"{child.session_attempt}"
+                    ),
+                )
+                raise
+            fragment_rows = list_workflow_artifacts(
+                team_id,
+                kind="hypothesis_fragment",
+                workflow_run_id=action.run_id,
+            )
+            task_context = _candidate_hypothesis_task_context(
+                team_id=team_id,
+                project_id=project_id,
+                action=action,
+                child=child,
+                snapshot=snapshot,
+            )
+            fragment = _load_formal_hypothesis_fragment(
+                fragment_rows,
+                node_run_id=action.node_run_id,
+                selection_id=str(fan_out["selectionId"]),
+                candidate_id=child.candidate_id,
+                session_id=child.session_id,
+                task_id=child.task_id,
+                session_attempt=child.session_attempt,
+            )
+            if fragment is None:
+                reusable = _load_reusable_formal_hypothesis_fragment(
+                    fragment_rows,
+                    workflow_run_id=action.run_id,
+                    selection_id=str(fan_out["selectionId"]),
+                    candidate_id=child.candidate_id,
+                    session_id=child.session_id,
+                    task_id=child.task_id,
+                    session_attempt=child.session_attempt,
+                    preferred_fragment_refs=tuple(
+                        str(item).strip()
+                        for item in list(
+                            (previous_children.get(child.candidate_id) or {}).get(
+                                "fragmentRefs"
+                            )
+                            or []
+                        )
+                        if str(item).strip()
+                    ),
+                )
+                if reusable is None:
+                    self._persist_hypothesis_anchor_draft(
+                        action=action,
+                        binding=self.resolve_binding(action),
+                        root_session_id=str(handle.root_session_id or ""),
+                        root_session_attempt=int(
+                            handle.root_session_attempt
+                            or handle.session_attempt
+                            or 1
+                        ),
+                        selection_id=str(fan_out["selectionId"]),
+                        selected_candidate_ids=[
+                            str(item) for item in fan_out["selectedCandidateIds"]
+                        ],
+                        handles=list(handle.scoped_handles),
+                        candidate_statuses={child.candidate_id: "failed"},
+                        root_status="failed",
+                    )
+                    _record_hypothesis_scope_event(
+                        self._store,
+                        action=action,
+                        event_type="workflow.hypothesis_aggregation.blocked",
+                        fields={
+                            "mode": "on",
+                            "selectionId": str(fan_out["selectionId"]),
+                            "candidateId": child.candidate_id,
+                            "status": "blocked",
+                            "errorCode": "hypothesis_fragment_missing",
+                        },
+                        discriminator=(
+                            f"fragment-missing:{child.candidate_id}:"
+                            f"{child.session_attempt}"
+                        ),
+                    )
+                    raise RuntimeError(
+                        "hypothesis candidate did not write a canonical fragment: "
+                        + child.candidate_id
+                    )
+                replay_payload = {
+                    key: value
+                    for key, value in reusable.items()
+                    if key
+                    not in {
+                        "contentHash",
+                        "nodeRunId",
+                        "provenance",
+                        "schemaVersion",
+                    }
+                }
+                source_fragment_ref = (
+                    f"hypothesis_fragment:{reusable.get('selectionId')}:"
+                    f"{reusable.get('candidateId')}:{reusable.get('nodeRunId')}"
+                )
+                for row in fragment_rows:
+                    row_payload = row.get("payload") if isinstance(row, dict) else None
+                    if not isinstance(row_payload, dict):
+                        continue
+                    if (
+                        str(row_payload.get("workflowRunId") or "").strip()
+                        == str(reusable.get("workflowRunId") or "").strip()
+                        and str(row_payload.get("selectionId") or "").strip()
+                        == str(reusable.get("selectionId") or "").strip()
+                        and str(row_payload.get("candidateId") or "").strip()
+                        == str(reusable.get("candidateId") or "").strip()
+                        and str(row_payload.get("nodeRunId") or "").strip()
+                        == str(reusable.get("nodeRunId") or "").strip()
+                        and str(row_payload.get("taskId") or "").strip()
+                        == str(reusable.get("taskId") or "").strip()
+                    ):
+                        source_fragment_ref = str(
+                            row.get("recordId") or source_fragment_ref
+                        ).strip()
+                        break
+                replay_payload["provenance"] = {
+                    "source": "replayed_child_session_fragment",
+                    "workflowRunId": action.run_id,
+                    "workflowNodeId": action.node_id,
+                    "nodeRunId": action.node_run_id,
+                    "selectionId": child.selection_id,
+                    "candidateId": child.candidate_id,
+                    "sessionId": child.session_id,
+                    "sessionAttempt": child.session_attempt,
+                    "taskId": child.task_id,
+                    "replayedFromFragmentRef": source_fragment_ref,
+                    "replayedFromNodeRunId": str(
+                        reusable.get("nodeRunId") or ""
+                    ).strip(),
+                    "replayedFromTaskId": str(
+                        reusable.get("taskId") or ""
+                    ).strip(),
+                    "replayedFromSessionId": str(
+                        reusable.get("sessionId") or ""
+                    ).strip(),
+                    "replayedFromSessionAttempt": reusable.get("sessionAttempt"),
+                }
+                replayed = record_hypothesis_fragment(
+                    team_id=team_id,
+                    task_context=task_context,
+                    payload=replay_payload,
+                    persist=True,
+                    artifact_sink=put_workflow_artifact,
+                    artifact_identity=(
+                        f"hypothesis_fragment:{child.selection_id}:"
+                        f"{child.candidate_id}:{action.node_run_id}"
+                    ),
+                )
+                fragment = dict(replayed["fragment"])
+            # Re-parse through the canonical writer contract.  This ensures
+            # aggregation never consumes an unbound or stale child payload.
+            fragment = build_hypothesis_fragment(
+                task_context=task_context,
+                payload=fragment,
+            ).to_dict()
+            fragment_ref = str(
+                next(
+                    (
+                        item.get("recordId")
+                        for item in list_workflow_artifacts(
+                            team_id,
+                            kind="hypothesis_fragment",
+                            workflow_run_id=action.run_id,
+                        )
+                        if isinstance(item, dict)
+                        and isinstance(item.get("payload"), dict)
+                        and str(
+                            (item.get("payload") or {}).get("candidateId") or ""
+                        ).strip()
+                        == child.candidate_id
+                        and str(
+                            (item.get("payload") or {}).get("nodeRunId") or ""
+                        ).strip()
+                        == action.node_run_id
+                        and str(
+                            (item.get("payload") or {}).get("taskId") or ""
+                        ).strip()
+                        == child.task_id
+                        and str(item.get("recordId") or "").strip()
+                    ),
+                    "",
+                )
+                or (
+                    f"hypothesis_fragment:{child.selection_id}:"
+                    f"{child.candidate_id}:{action.node_run_id}"
+                )
+            )
+            _mark_candidate_task_completed(
+                team_id=team_id,
+                project_id=project_id,
+                task_id=child.task_id,
+                completion=completion,
+                result_ref=fragment_ref,
+            )
+            completed_handles.append(
+                replace(
+                    child,
+                    status="succeeded",
+                    fragment_refs=(fragment_ref,),
+                )
+            )
+            current_by_candidate = {
+                item.candidate_id: item for item in handle.scoped_handles
+            }
+            current_by_candidate.update(
+                {item.candidate_id: item for item in completed_handles}
+            )
+            self._persist_hypothesis_anchor_draft(
+                action=action,
+                binding=self.resolve_binding(action),
+                root_session_id=str(handle.root_session_id or ""),
+                root_session_attempt=int(
+                    handle.root_session_attempt or handle.session_attempt or 1
+                ),
+                selection_id=str(fan_out["selectionId"]),
+                selected_candidate_ids=[
+                    str(item) for item in fan_out["selectedCandidateIds"]
+                ],
+                handles=list(current_by_candidate.values()),
+            )
+            fragments.append(fragment)
+            _record_hypothesis_scope_event(
+                self._store,
+                action=action,
+                event_type="workflow.hypothesis_fragment.recorded",
+                fields={
+                    "mode": "on",
+                    "selectionId": child.selection_id,
+                    "candidateId": child.candidate_id,
+                    "sessionId": child.session_id,
+                    "sessionAttempt": child.session_attempt,
+                    "taskId": child.task_id,
+                    "status": "succeeded",
+                    "fragmentRef": fragment_ref,
+                },
+                discriminator=(
+                    f"{child.candidate_id}:{child.session_attempt}:{fragment_ref}"
+                ),
+            )
+
+        candidate_scopes = {
+            child.candidate_id: {
+                "candidateId": child.candidate_id,
+                "selectionId": child.selection_id,
+                "sessionId": child.session_id,
+                "sessionAttempt": child.session_attempt,
+                "taskId": child.task_id,
+            }
+            for child in handle.scoped_handles
+        }
+        root_task_context = _root_hypothesis_task_context(
+            team_id=team_id,
+            action=action,
+            root_session_id=str(handle.root_session_id or ""),
+            source_collection_run_id=source_collection_run_id,
+            child_task_context=task_context,
+        )
+        try:
+            aggregation = record_hypothesis_set_from_fragments(
+                team_id=team_id,
+                task_context=root_task_context,
+                selection=dict(fan_out["selection"]),
+                fragments=fragments,
+                scope={
+                    "workflowRunId": action.run_id,
+                    "workflowNodeId": action.node_id,
+                    "nodeRunId": action.node_run_id,
+                    "selectionId": fan_out["selectionId"],
+                    "candidateScopes": candidate_scopes,
+                },
+                artifact_identity=(
+                    f"hypothesis_set:{fan_out['selectionId']}:{action.node_run_id}:v1"
+                ),
+            )
+        except Exception:
+            self._persist_hypothesis_anchor_draft(
+                action=action,
+                binding=self.resolve_binding(action),
+                root_session_id=str(handle.root_session_id or ""),
+                root_session_attempt=int(
+                    handle.root_session_attempt or handle.session_attempt or 1
+                ),
+                selection_id=str(fan_out["selectionId"]),
+                selected_candidate_ids=[
+                    str(item) for item in fan_out["selectedCandidateIds"]
+                ],
+                handles=list(completed_handles or handle.scoped_handles),
+                root_status="failed",
+            )
+            _record_hypothesis_scope_event(
+                self._store,
+                action=action,
+                event_type="workflow.hypothesis_aggregation.blocked",
+                fields={
+                    "mode": "on",
+                    "selectionId": str(fan_out["selectionId"]),
+                    "candidateCount": len(fragments),
+                    "status": "blocked",
+                    "errorCode": "hypothesis_aggregation_invalid",
+                },
+                discriminator="aggregation-invalid",
+            )
+            raise
+        aggregation_artifact = (
+            dict(aggregation.get("artifact"))
+            if isinstance(aggregation.get("artifact"), Mapping)
+            else {}
+        )
+        _record_hypothesis_scope_event(
+            self._store,
+            action=action,
+            event_type="workflow.hypothesis_aggregation.completed",
+            fields={
+                "mode": "on",
+                "selectionId": str(fan_out["selectionId"]),
+                "candidateCount": len(fragments),
+                "fragmentCount": len(fragments),
+                "status": "completed",
+                "aggregationHash": str(
+                    aggregation_artifact.get("contentHash") or ""
+                ),
+                "fragmentRef": str(
+                    aggregation_artifact.get("recordId") or ""
+                ),
+            },
+            discriminator="aggregation-completed",
+        )
+        refs = collect_required_artifact_refs(
+            action.node_id,
+            team_id=team_id,
+            workflow_run_id=action.run_id,
+            source_collection_run_id=source_collection_run_id,
+        )
+        if not refs:
+            self._persist_hypothesis_anchor_draft(
+                action=action,
+                binding=self.resolve_binding(action),
+                root_session_id=str(handle.root_session_id or ""),
+                root_session_attempt=int(
+                    handle.root_session_attempt or handle.session_attempt or 1
+                ),
+                selection_id=str(fan_out["selectionId"]),
+                selected_candidate_ids=[
+                    str(item) for item in fan_out["selectedCandidateIds"]
+                ],
+                handles=list(completed_handles),
+                root_status="failed",
+            )
+            raise RuntimeError(
+                "hypothesis_design aggregation did not produce a readable hypothesis_set"
+            )
+        self._persist_hypothesis_anchor_draft(
+            action=action,
+            binding=self.resolve_binding(action),
+            root_session_id=str(handle.root_session_id or ""),
+            root_session_attempt=int(
+                handle.root_session_attempt or handle.session_attempt or 1
+            ),
+            selection_id=str(fan_out["selectionId"]),
+            selected_candidate_ids=[
+                str(item) for item in fan_out["selectedCandidateIds"]
+            ],
+            handles=list(completed_handles),
+            root_status="succeeded",
+        )
+        _ = aggregation
+        return AgentTurnResult(
+            materialized_refs=tuple(refs),
+            handle=replace(
+                handle,
+                root_status="succeeded",
+                scoped_handles=tuple(completed_handles),
+            ),
         )
 
     def read_back_artifact(self, canonical_ref: str) -> ArtifactReadBack | None:
@@ -345,6 +1563,7 @@ def _create_real_agent_task(
         from core.web.services.team_workflow.research_project_agent_tasks import (
             start_research_project_agent_task,
         )
+
         from . import experiment_stage_bootstrap
 
         if not project_id:
@@ -358,6 +1577,22 @@ def _create_real_agent_task(
             store=store,
             run_id=action.run_id,
         )
+        scoped_payload: dict[str, Any] = {}
+        if action.selection_id and action.candidate_id:
+            raw_selected = (action.scope or {}).get("selectedCandidateIds")
+            selected = (
+                [str(item).strip() for item in raw_selected if str(item).strip()]
+                if isinstance(raw_selected, (list, tuple))
+                else []
+            )
+            if action.candidate_id not in selected:
+                selected.append(action.candidate_id)
+            scoped_payload = {
+                "selectionId": action.selection_id,
+                "candidateId": action.candidate_id,
+                "selectedCandidateIds": selected,
+                "scope": dict(action.scope or {}),
+            }
         started = start_research_project_agent_task(
             team_id,
             project_id,
@@ -371,6 +1606,7 @@ def _create_real_agent_task(
                 "sourceCollectionRunId": str(
                     input_snapshot.get("sourceCollectionRunId") or ""
                 ),
+                **scoped_payload,
             },
         )
     return _agent_handle_from_started(started)
@@ -525,6 +1761,21 @@ def _agent_handle_from_started(started: dict[str, Any]) -> AgentTaskHandle:
         task_id=task_id,
         turn_id=turn_id,
     )
+
+
+def _verify_node_root_session(session_id: str, *, agent_id: str) -> None:
+    from core.web.services import session_service
+
+    _require_canonical_session(session_id=session_id, agent_id=agent_id)
+    detail = session_service.get_session_detail(
+        session_id,
+        message_limit=0,
+        transcript_scope="none",
+    )
+    if not isinstance(detail, dict):
+        raise TypeError("workflow node root session detail is invalid")
+    if str(detail.get("parentSessionId") or "").strip():
+        raise RuntimeError("workflow node root resolved to a child session")
 
 
 def _require_canonical_session(*, session_id: str, agent_id: str) -> None:
@@ -1385,6 +2636,7 @@ def _ledger_iteration_decision(
 ) -> list[dict[str, str]]:
     """Write a STOP iteration_decision from bounded evaluation, without an LLM turn."""
     from core.research.workflow.iteration_decisions import validate_decision_payload
+
     from .node_execution_support import iso, utc_now
 
     team_id = str(snapshot.get("teamId") or "").strip()

@@ -121,6 +121,56 @@ def _evidence_relations_payload(task: dict[str, Any]) -> dict[str, Any]:
     return build_evidence_relation_artifact(result)
 
 
+def _hypothesis_set_payload(
+    record: dict[str, Any],
+    node_run: dict[str, Any],
+) -> dict[str, Any]:
+    """Read the exact deterministic fan-in artifact bound to this NodeRun."""
+
+    bundle = next(
+        (
+            dict(item)
+            for item in record.get("taskBundles") or []
+            if str(item.get("parentNodeRunId") or "")
+            == str(node_run.get("nodeRunId") or "")
+        ),
+        None,
+    )
+    refs = list((bundle or {}).get("aggregationArtifactRefs") or [])
+    if (bundle or {}).get("status") != "succeeded" or len(refs) != 1:
+        raise ValueError(
+            "hypothesis_design requires one completed TaskBundle aggregation artifact"
+        )
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    artifact = next(
+        (
+            dict(item)
+            for item in list_workflow_artifacts(
+                str(record.get("teamId") or ""),
+                kind="hypothesis_set",
+                workflow_run_id=str(record.get("runId") or ""),
+            )
+            if str(item.get("recordId") or "") == str(refs[0] or "")
+        ),
+        None,
+    )
+    payload = (artifact or {}).get("payload")
+    provenance = (
+        payload.get("provenance") if isinstance(payload, dict) else None
+    )
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(provenance, dict)
+        or str(provenance.get("nodeRunId") or "")
+        != str(node_run.get("nodeRunId") or "")
+    ):
+        raise ValueError(
+            "hypothesis_design aggregation artifact is missing or belongs to another NodeRun"
+        )
+    return dict(payload)
+
+
 def _payload_for_kind(
     record: dict[str, Any],
     node_spec: WorkflowNodeSpec,
@@ -140,6 +190,8 @@ def _payload_for_kind(
         return _source_extraction_payload(task)
     if node_spec.nodeId == "evidence_relations":
         return _evidence_relations_payload(task)
+    if node_spec.nodeId == "hypothesis_design" and artifact_kind == "hypothesis_set":
+        return _hypothesis_set_payload(record, node_run)
     return {
         **result,
         "runId": result.get("runId") or record["runId"],

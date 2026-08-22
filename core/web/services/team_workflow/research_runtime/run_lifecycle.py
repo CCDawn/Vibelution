@@ -51,8 +51,18 @@ def freeze_run_input(
     binding_snapshots: list[dict[str, Any]],
     created_at: str,
 ) -> WorkflowRunInputSnapshot:
+    from config.settings import get_config
+
+    configured_mode = str(
+        get_config().workflow_session_scope_v3.hypothesis_design
+    ).strip().lower()
     payload = {
         **dict(request),
+        # Effective server-owned mode; request input cannot override it and
+        # replay always reads the frozen run snapshot.
+        "workflowSessionScopeV3": {
+            "hypothesis_design": configured_mode,
+        },
         "workflowVersionId": workflow_version_id,
         "agentBindingSnapshot": binding_snapshots,
         "createdAt": created_at,

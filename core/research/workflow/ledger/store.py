@@ -88,6 +88,9 @@ class WorkflowLedgerStore:
             lambda repo: repo.list_events(run_id, after_sequence, limit)
         )
 
+    def get_event_by_id(self, event_id: str) -> EventRecord | None:
+        return self.read(lambda repo: repo.get_event_by_id(event_id))
+
     def latest_event_sequence(self, run_id: str) -> int:
         return self.read(lambda repo: repo.latest_event_sequence(run_id))
 

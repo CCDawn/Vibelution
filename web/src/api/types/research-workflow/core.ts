@@ -53,6 +53,42 @@ export type HumanTaskSummary = {
   resolvedAtMs?: number | null;
 };
 
+/**
+ * A candidate-scoped child-session summary returned with node detail.
+ *
+ * The node root remains represented by the legacy session fields on
+ * `ResearchWorkflowNodeDetail`; these anchors are ordered by the server's
+ * current selection and must not be re-sorted by the Inspector.
+ */
+export type NodeSessionAnchor = {
+  scopeKind?: "workflow_node_root" | "workflow_candidate";
+  nodeId?: string | null;
+  nodeRunId?: string | null;
+  selectionId?: string | null;
+  candidateId?: string | null;
+  subtaskId?: string | null;
+  sessionId?: string | null;
+  attempt?: number | null;
+  sessionAttempt?: number | null;
+  taskId?: string | null;
+  turnId?: string | null;
+  status?: string | null;
+  chatDeepLink?: string | null;
+  /** Older fan-out responses call this field `chatRoute`. */
+  chatRoute?: string | null;
+  fragmentRef?: string | null;
+  fragmentRefs?: string[];
+  parentSessionId?: string | null;
+  rootSessionId?: string | null;
+  sessionAnchorDegraded?: boolean;
+  sessionAnchorDegradedReason?: string | null;
+};
+
+export type ScopedSessionAnchor = NodeSessionAnchor & {
+  scopeKind: "workflow_candidate";
+  candidateId: string;
+};
+
 export type HandoffSummary = {
   countsByStatus: Record<string, number>;
   refs: Array<{
@@ -120,6 +156,8 @@ export type ResearchWorkflowNodeDetail = {
   sessionAttempt?: number | null;
   chatDeepLink?: string | null;
   sessionAnchorDegraded?: boolean;
+  rootSession?: NodeSessionAnchor | null;
+  scopedSessions?: ScopedSessionAnchor[];
   blockedReason?: string;
   nodeAttempt?: number;
 };

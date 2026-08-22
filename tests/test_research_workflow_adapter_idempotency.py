@@ -14,7 +14,9 @@ from pathlib import Path
 
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.models import ActorKind
-from core.web.services.team_workflow.research_runtime.action_registry import ActionRegistry
+from core.web.services.team_workflow.research_runtime.action_registry import (
+    ActionRegistry,
+)
 from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
     AdapterDispatchWorker,
 )
@@ -30,7 +32,7 @@ def _action(action_id: str = "act-1") -> PendingAction:
     return PendingAction(
         action_id=action_id,
         run_id="run-test",
-        node_run_id=f"nr-run-test-source_finding-a1",
+        node_run_id="nr-run-test-source_finding-a1",
         node_id="source_finding",
         attempt=1,
         actor_kind=ActorKind.AGENT,
@@ -114,6 +116,33 @@ def test_budget_reserved_before_task_creation(tmp_path: Path) -> None:
         worker.run_once()
         assert ports.order("read_back_input", "reserve_budget", "create_agent_task")
         assert ports.reservations == ["act-1"]
+    finally:
+        harness.close()
+
+
+def test_expired_lease_does_not_settle_budget_after_commit_is_rejected(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        ports = FakeDomainPorts()
+        action = _action()
+        _seed(harness, action)
+        worker = _worker(harness, ports)
+        worker._lease_ms = 100
+        now_values = iter((FIXED_NOW_MS, FIXED_NOW_MS + 200))
+        worker._now = lambda: next(now_values, FIXED_NOW_MS + 200)
+
+        worker.run_once()
+
+        assert ports.settled == []
+        assert harness.store.latest_event_sequence("run-test") == 1
+        outbox = harness.store.read(
+            lambda repo: repo.get_outbox(f"adapter-outbox-{action.action_id}")
+        )
+        assert outbox is not None
+        assert outbox.status == "leased"
     finally:
         harness.close()
 
@@ -207,5 +236,115 @@ def test_verified_flow_writes_receipts_handoff_and_resume_dispatch(tmp_path: Pat
             force_flush=True,
         ).result(timeout=10)
         assert len(resume_rows) == 1
+    finally:
+        harness.close()
+
+
+def test_verified_flow_updates_existing_live_anchor_without_duplicate(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        ports = FakeDomainPorts()
+        worker = _worker(harness, ports)
+        action = _action()
+        _seed(harness, action)
+
+        def seed_live_anchor(uow) -> None:
+            uow.repository.insert_anchor(
+                anchor_id="anchor-live-draft",
+                node_run_id=action.node_run_id,
+                actor_kind="agent",
+                agent_id="agent-1",
+                role_key="source_finder",
+                session_id="session-live",
+                session_attempt=1,
+                anchor_json=json.dumps(
+                    {"sessionId": "session-live", "status": "running"}
+                ),
+                status="running",
+                created_at_ms=FIXED_NOW_MS,
+            )
+
+        harness.store.submit(seed_live_anchor, force_flush=True).result(timeout=10)
+        worker.run_once()
+
+        anchor = harness.store.submit(
+            lambda uow: uow.repository.get_anchor_by_node_run(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        assert anchor is not None
+        assert anchor[0] == "anchor-live-draft"
+        assert anchor[12] == "bound"
+        payload = json.loads(anchor[13])
+        assert payload["taskId"] == "task-act-1"
+        assert payload["turnId"] == "turn-act-1"
+    finally:
+        harness.close()
+
+
+def test_verify_failure_closes_a_live_scoped_anchor(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        ports = FakeDomainPorts()
+        ports.fail_artifact_hash = True
+        worker = _worker(harness, ports)
+        action = _action()
+        _seed(harness, action)
+
+        def seed_live_anchor(uow) -> None:
+            uow.repository.insert_anchor(
+                anchor_id="anchor-live-scoped",
+                node_run_id=action.node_run_id,
+                actor_kind="agent",
+                agent_id="agent-1",
+                role_key="hypothesis_designer",
+                session_id="root-session",
+                session_attempt=1,
+                anchor_json=json.dumps(
+                    {
+                        "schemaVersion": 3,
+                        "rootSession": {
+                            "sessionId": "root-session",
+                            "status": "succeeded",
+                        },
+                        "scopedSessions": [
+                            {
+                                "candidateId": "H1",
+                                "selectionId": "selection-1",
+                                "sessionId": "child-H1",
+                                "sessionAttempt": 1,
+                                "taskId": "task-H1",
+                                "turnId": "turn-H1",
+                                "parentSessionId": "root-session",
+                                "rootSessionId": "root-session",
+                                "fragmentRefs": ["fragment-H1"],
+                                "status": "succeeded",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                status="bound",
+                created_at_ms=FIXED_NOW_MS,
+                revision=1,
+            )
+
+        harness.store.submit(seed_live_anchor, force_flush=True).result(timeout=10)
+        worker.run_once()
+
+        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        assert attempt is not None and attempt.status == "blocked"
+        row = harness.store.submit(
+            lambda uow: uow.repository.get_anchor_by_node_run(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        assert row is not None
+        payload = json.loads(row[13])
+        assert payload["rootSession"]["status"] == "blocked"
+        assert payload["scopedSessions"][0]["status"] == "blocked"
+        assert row[12] == "blocked"
     finally:
         harness.close()

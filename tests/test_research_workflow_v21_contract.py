@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from config.models import AppConfig
+from config.operator_bootstrap import build_default_operator_config
 from core.research.workflow.contracts import (
     ArtifactManifest,
     CompetitionEvaluationSnapshot,
@@ -20,7 +23,17 @@ from core.research.workflow.contracts import (
     TaskLease,
     WorkflowRunInputSnapshot,
 )
+from core.research.workflow.contracts._validation import canonical_sha256
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.web.services.team_workflow.research_runtime.hypothesis_session_scope_mode import (
+    HYPOTHESIS_SCOPE_LEGACY_FALLBACK_REASON,
+    evaluate_hypothesis_scope_shadow,
+    resolve_hypothesis_scope_activation,
+    resolve_hypothesis_session_scope_mode,
+)
+from core.web.services.team_workflow.research_runtime.run_lifecycle import (
+    freeze_run_input,
+)
 
 FIXTURE = (
     Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
@@ -55,6 +68,143 @@ def test_run_input_snapshot_is_complete_and_hash_stable() -> None:
     assert len(snapshot.snapshotHash) == 64
     assert snapshot.to_dict()["teamId"] == "acceptance-research-team"
     assert snapshot.to_dict()["trackAndRubricSnapshot"]["track"] == "科技发明制作类"
+    assert snapshot.workflowSessionScopeV3 == {"hypothesis_design": "off"}
+
+
+def test_legacy_snapshot_without_scope_mode_defaults_off_and_rehashes() -> None:
+    payload = _baseline_payload()
+    payload.pop("workflowSessionScopeV3", None)
+    legacy_raw_hash = canonical_sha256(payload)
+    payload["snapshotHash"] = legacy_raw_hash
+
+    parsed = WorkflowRunInputSnapshot.from_dict(payload)
+
+    assert parsed.workflowSessionScopeV3 == {"hypothesis_design": "off"}
+    assert parsed.snapshotHash != legacy_raw_hash
+    assert WorkflowRunInputSnapshot.from_dict(parsed.to_dict()).snapshotHash == parsed.snapshotHash
+
+
+def test_hypothesis_scope_rollout_defaults_to_shadow() -> None:
+    assert AppConfig().workflow_session_scope_v3.hypothesis_design == "shadow"
+    bootstrap = build_default_operator_config(
+        include_unconfigured_providers=False
+    )
+    assert bootstrap["workflow_session_scope_v3"] == {
+        "hypothesis_design": "shadow"
+    }
+
+
+def test_hypothesis_scope_mode_is_server_frozen_and_shadow_is_side_effect_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            workflow_session_scope_v3=SimpleNamespace(hypothesis_design="shadow")
+        ),
+    )
+    payload = _baseline_payload()
+    payload["workflowSessionScopeV3"] = {"hypothesis_design": "on"}
+    snapshot = freeze_run_input(
+        payload,
+        workflow_version_id="2.1.0",
+        binding_snapshots=list(payload["agentBindingSnapshot"]),
+        created_at="2026-08-22T00:00:00Z",
+    )
+
+    assert snapshot.workflowSessionScopeV3 == {"hypothesis_design": "shadow"}
+    assert resolve_hypothesis_session_scope_mode(snapshot.to_dict()) == "shadow"
+    evaluation = evaluate_hypothesis_scope_shadow(
+        {
+            "selectionId": "selection-1",
+            "selectedCandidateIds": ["H1", "H2"],
+        },
+        max_parallel=2,
+    )
+    assert evaluation["candidateCount"] == 2
+    assert len(evaluation["scopeHash"]) == 64
+
+
+def test_hypothesis_scope_activation_preserves_legacy_runs_without_selection() -> None:
+    base = {
+        "workflowSessionScopeV3": {"hypothesis_design": "on"},
+        "researchObjectiveContract": {"question": "legacy run"},
+        "teamId": "team-1",
+        "questionId": "question-1",
+    }
+
+    legacy = resolve_hypothesis_scope_activation(base, chain_state={})
+    assert legacy["fanOutEnabled"] is False
+    assert legacy["selectionRequired"] is False
+    assert legacy["hasAuthoritativeSelection"] is False
+    assert legacy["fallbackReason"] == HYPOTHESIS_SCOPE_LEGACY_FALLBACK_REASON
+
+    hypothesis_first = resolve_hypothesis_scope_activation(
+        {
+            **base,
+            "researchObjectiveContract": {
+                "question": "hypothesis-first run",
+                "hypothesisFirst": True,
+            },
+        },
+        chain_state={},
+    )
+    assert hypothesis_first["fanOutEnabled"] is False
+    assert hypothesis_first["selectionRequired"] is True
+    assert hypothesis_first["fallbackReason"] == ""
+
+    shadow = resolve_hypothesis_scope_activation(
+        {
+            **base,
+            "workflowSessionScopeV3": {"hypothesis_design": "shadow"},
+        },
+        chain_state={},
+    )
+    assert shadow["fanOutEnabled"] is False
+    assert shadow["selectionRequired"] is False
+    assert shadow["fallbackReason"] == HYPOTHESIS_SCOPE_LEGACY_FALLBACK_REASON
+
+    selected = resolve_hypothesis_scope_activation(
+        base,
+        chain_state={"selectionId": "selection-1"},
+    )
+    assert selected["fanOutEnabled"] is True
+    assert selected["hasAuthoritativeSelection"] is True
+    assert selected["selectionId"] == "selection-1"
+
+
+@pytest.mark.parametrize("configured_mode", ["off", "shadow", "on"])
+def test_all_scope_modes_round_trip_from_the_frozen_run_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_mode: str,
+) -> None:
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            workflow_session_scope_v3=SimpleNamespace(
+                hypothesis_design=configured_mode
+            )
+        ),
+    )
+    payload = _baseline_payload()
+    payload["workflowSessionScopeV3"] = {
+        "hypothesis_design": "on" if configured_mode == "off" else "off"
+    }
+
+    snapshot = freeze_run_input(
+        payload,
+        workflow_version_id="2.1.0",
+        binding_snapshots=list(payload["agentBindingSnapshot"]),
+        created_at="2026-08-22T00:00:00Z",
+    )
+    replayed = WorkflowRunInputSnapshot.from_dict(snapshot.to_dict())
+
+    assert snapshot.workflowSessionScopeV3 == {
+        "hypothesis_design": configured_mode
+    }
+    assert resolve_hypothesis_session_scope_mode(snapshot.to_dict()) == configured_mode
+    assert replayed.workflowSessionScopeV3 == snapshot.workflowSessionScopeV3
+    assert replayed.snapshotHash == snapshot.snapshotHash
 
 
 def test_run_input_snapshot_rejects_missing_frozen_contract() -> None:

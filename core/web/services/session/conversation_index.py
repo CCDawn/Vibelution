@@ -1299,6 +1299,34 @@ def create_chat_session(
         if workflow_run_id and workflow_node_id:
             normalized_experiment_binding["workflowRunId"] = workflow_run_id
             normalized_experiment_binding["workflowNodeId"] = workflow_node_id
+        selection_id = str(raw_experiment_binding.get("selectionId") or "").strip()[:160]
+        candidate_id = str(raw_experiment_binding.get("candidateId") or "").strip()[:160]
+        if bool(selection_id) != bool(candidate_id):
+            raise s.SessionValidationError(
+                "Experiment binding candidate scope requires both selectionId and candidateId."
+            )
+        if selection_id and candidate_id:
+            normalized_experiment_binding["selectionId"] = selection_id
+            normalized_experiment_binding["candidateId"] = candidate_id
+        raw_scope = raw_experiment_binding.get("scope")
+        if isinstance(raw_scope, dict):
+            scope = {
+                key: raw_scope[key]
+                for key in (
+                    "version",
+                    "kind",
+                    "teamId",
+                    "researchProjectId",
+                    "agentId",
+                    "workflowRunId",
+                    "workflowNodeId",
+                    "selectionId",
+                    "candidateId",
+                )
+                if key in raw_scope and key != "attempt"
+            }
+            if scope:
+                normalized_experiment_binding["scope"] = scope
     binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
     if binding_agent_id and binding_agent_id != normalized_agent_id:
         raise s.SessionValidationError("Experiment binding Agent id does not match the bound Agent.")

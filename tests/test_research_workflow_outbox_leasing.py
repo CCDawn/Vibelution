@@ -111,6 +111,29 @@ def test_ack_requires_lease_owner(tmp_path: Path) -> None:
         store.close()
 
 
+def test_lease_can_be_renewed_only_by_current_owner(tmp_path: Path) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_outbox(store, count=1)
+        outbox_api.lease_ready_actions(store, owner="w1", now_ms=1000, lease_ms=100)
+        assert outbox_api.renew_lease(
+            store, "act-0", "w1", now_ms=1050, lease_ms=200
+        ) is True
+        assert outbox_api.renew_lease(
+            store, "act-0", "wrong-owner", now_ms=1100, lease_ms=200
+        ) is False
+        blocked = outbox_api.lease_ready_actions(
+            store, owner="w2", now_ms=1150, lease_ms=100
+        )
+        assert blocked == []
+        released = outbox_api.lease_ready_actions(
+            store, owner="w2", now_ms=1250, lease_ms=100
+        )
+        assert len(released) == 1
+    finally:
+        store.close()
+
+
 def test_requeue_with_retry_delay(tmp_path: Path) -> None:
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
     try:

@@ -28,6 +28,7 @@ _SUPPORTED_KINDS = frozenset(
         "smoke_release",
         "frozen_protocol",
         "evaluation_report",
+        "hypothesis_fragment",
         "hypothesis_set",
         "protocol_draft",
         "protocol_review_report",

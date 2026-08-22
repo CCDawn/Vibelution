@@ -153,6 +153,48 @@ def build_hypothesis_input_context(
         - {""}
     )
     ready = bool(evidence_claims and allowed_refs)
+    candidate_id = _text(task.get("candidateId"))
+    candidate_context = (
+        dict(task.get("candidateContext") or {})
+        if isinstance(task.get("candidateContext"), dict)
+        else {}
+    )
+    writeback_contract = {
+        "tool": "challenge_cup_experiment_writeback_tool",
+        "operation": "record_hypothesis_fragment"
+        if candidate_id
+        else "record_hypothesis_set",
+        "artifactKind": "hypothesis_fragment"
+        if candidate_id
+        else "hypothesis_set",
+        "runId": workflow_run_id,
+    }
+    if candidate_id:
+        writeback_contract.update(
+            {
+                "selectionId": _text(task.get("selectionId")),
+                "candidateId": candidate_id,
+                "requiredFields": [
+                    "statement",
+                    "mechanism",
+                    "predictions",
+                    "falsificationCriteria",
+                    "evidenceRefs",
+                    "counterEvidenceRefs",
+                    "scores",
+                ],
+            }
+        )
+    else:
+        writeback_contract["requiredCandidateFields"] = [
+            "candidateId",
+            "claim",
+            "scores",
+            "counterEvidenceRefs",
+            "derivedFromCandidateIds",
+            "status",
+            "reviewRef",
+        ]
     return {
         "status": "ready" if ready else "blocked",
         "code": "ready" if ready else "knowledge_package_has_no_evidence_claims",
@@ -167,19 +209,6 @@ def build_hypothesis_input_context(
         },
         "evidenceClaims": evidence_claims[:24],
         "allowedEvidenceRefs": allowed_refs[:64],
-        "writebackContract": {
-            "tool": "challenge_cup_experiment_writeback_tool",
-            "operation": "record_hypothesis_set",
-            "artifactKind": "hypothesis_set",
-            "runId": workflow_run_id,
-            "requiredCandidateFields": [
-                "candidateId",
-                "claim",
-                "scores",
-                "counterEvidenceRefs",
-                "derivedFromCandidateIds",
-                "status",
-                "reviewRef",
-            ],
-        },
+        "candidateContext": candidate_context,
+        "writebackContract": writeback_contract,
     }

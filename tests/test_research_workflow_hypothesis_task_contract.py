@@ -231,6 +231,76 @@ def test_hypothesis_writeback_uses_scoped_formal_artifact_store(
     assert read_back["payload"]["hypothesis_count"] == 1
 
 
+def test_candidate_writeback_routes_to_fragment_and_fan_in_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _task_context(run_id="run-sci-096", counter_ref="counter-1")
+    context["task"].update(
+        {
+            "nodeRunId": "node-run-1",
+            "selectionId": "selection-1",
+            "candidateId": "H1",
+            "subtaskId": "node-run-1:selection-1:H1",
+        }
+    )
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_context",
+        lambda *_args, **_kwargs: context,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_scoped_execution.record_candidate_fragment_and_maybe_aggregate",
+        lambda **kwargs: calls.append(kwargs)
+        or {
+            "status": "fragment_recorded",
+            "fragment": {"artifact": {"recordId": "fragment-H1"}},
+            "hypothesisSetRef": "",
+        },
+    )
+    updates: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda *_args, **kwargs: updates.append(kwargs)
+        or {"status": kwargs["status"]},
+        raising=False,
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="challenge-sci-096",
+            task_id="task-hypothesis-a5",
+            operation="record_hypothesis_fragment",
+            payload_json=json.dumps(
+                {
+                    "statement": "claim H1",
+                    "mechanism": "mechanism H1",
+                    "predictions": ["prediction H1"],
+                    "falsificationCriteria": ["falsify H1"],
+                    "evidenceRefs": ["counter-1"],
+                    "counterEvidenceRefs": ["counter-1"],
+                    "scores": {
+                        "novelty": 0.8,
+                        "competitionFit": 0.8,
+                        "falsifiability": 0.8,
+                        "evidenceSupport": 0.8,
+                        "feasibility": 0.8,
+                    },
+                }
+            ),
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["operation"] == "record_hypothesis_fragment"
+    assert calls[0]["task_context"] == context
+    assert updates == [{"status": "running", "result_refs": ["fragment-H1"]}]
+
+
 @pytest.mark.parametrize("untrusted_run_id", ["", "node-run:nr-run-sci-096-hypothesis-a5"])
 def test_hypothesis_writeback_binds_run_id_from_the_formal_task(
     monkeypatch: pytest.MonkeyPatch,

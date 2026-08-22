@@ -65,6 +65,7 @@ class WorkflowRunInputSnapshot:
     createdBy: str
     createdAt: str
     evidenceRemediationContract: dict[str, Any]
+    workflowSessionScopeV3: dict[str, str]
     snapshotHash: str
 
     @classmethod
@@ -110,6 +111,21 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "evidenceRemediationContract",
             )
+        raw_scope_mode = payload.get("workflowSessionScopeV3")
+        if raw_scope_mode is None:
+            canonical["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
+        else:
+            scope_mode = require_mapping(payload, "workflowSessionScopeV3")
+            hypothesis_design_mode = str(
+                scope_mode.get("hypothesis_design") or ""
+            ).strip().lower()
+            if hypothesis_design_mode not in {"off", "shadow", "on"}:
+                raise ContractValidationError(
+                    "workflowSessionScopeV3.hypothesis_design must be off, shadow or on"
+                )
+            canonical["workflowSessionScopeV3"] = {
+                "hypothesis_design": hypothesis_design_mode
+            }
         if any(
             not isinstance(item, Mapping) for item in canonical["agentBindingSnapshot"]
         ):
@@ -144,6 +160,9 @@ class WorkflowRunInputSnapshot:
             evidenceRemediationContract=copy.deepcopy(
                 canonical.get("evidenceRemediationContract") or {}
             ),
+            workflowSessionScopeV3=copy.deepcopy(
+                canonical["workflowSessionScopeV3"]
+            ),
             snapshotHash=snapshot_hash,
         )
 
@@ -170,6 +189,7 @@ class WorkflowRunInputSnapshot:
             "agentBindingSnapshot": copy.deepcopy(list(self.agentBindingSnapshot)),
             "createdBy": self.createdBy,
             "createdAt": self.createdAt,
+            "workflowSessionScopeV3": copy.deepcopy(self.workflowSessionScopeV3),
             "snapshotHash": self.snapshotHash,
         }
         if self.evidenceRemediationContract:

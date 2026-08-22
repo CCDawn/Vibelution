@@ -14,6 +14,7 @@ Any crash point re-runs idempotently through stable actionIds.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -23,22 +24,126 @@ from core.research.workflow.contracts import (
     ExecutionReceipt,
     PendingAction,
 )
-from core.research.workflow.ledger import WorkflowLedgerStore, outbox as outbox_api
+from core.research.workflow.ledger import WorkflowLedgerStore
+from core.research.workflow.ledger import outbox as outbox_api
 from core.research.workflow.models import ActorKind
 from core.research.workflow.transitions import NodeAttemptStatus
 
 from .action_registry import ActionRegistry, VerifiedDomainResult
-from .block_projection import sync_run_blocked, sync_run_succeeded, terminal_facts_for_run
+from .block_projection import (
+    sync_run_blocked,
+    sync_run_succeeded,
+    terminal_facts_for_run,
+)
 from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
 
-
 # Adapter execution may synchronously wait for a canonical Agent turn.  The
 # lease must outlive that bounded wait so another Workbench process cannot
 # concurrently reclaim the same action while the first execution is live.
 DEFAULT_ADAPTER_DISPATCH_LEASE_MS = 150_000
+
+
+class _OutboxLeaseLost(RuntimeError):
+    """The worker must stop projecting after its outbox lease is lost."""
+
+
+def _canonical_anchor_payload(
+    action: PendingAction, anchor: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    if not anchor:
+        return None
+    payload = dict(anchor)
+    raw_scoped = payload.get("scopedSessions")
+    if not isinstance(raw_scoped, list):
+        return payload
+    root = payload.get("rootSession")
+    if not isinstance(root, dict):
+        raise TypeError("v3 scoped execution anchor requires rootSession")
+    root_session_id = str(root.get("sessionId") or "").strip()
+    if not root_session_id:
+        raise RuntimeError("v3 scoped execution anchor has no root session")
+    scoped: list[dict[str, Any]] = []
+    for raw in raw_scoped:
+        if not isinstance(raw, dict):
+            raise TypeError("v3 scoped execution anchor contains a non-object child")
+        item = dict(raw)
+        required = {
+            "selectionId": str(item.get("selectionId") or "").strip(),
+            "candidateId": str(item.get("candidateId") or "").strip(),
+            "sessionId": str(item.get("sessionId") or "").strip(),
+            "taskId": str(item.get("taskId") or "").strip(),
+            "turnId": str(item.get("turnId") or "").strip(),
+        }
+        if not all(required.values()):
+            raise RuntimeError("v3 candidate execution anchor is incomplete")
+        if (
+            str(item.get("parentSessionId") or "").strip() != root_session_id
+            or str(item.get("rootSessionId") or "").strip() != root_session_id
+        ):
+            raise RuntimeError("v3 candidate execution anchor has invalid lineage")
+        fragment_refs = item.get("fragmentRefs")
+        if not isinstance(fragment_refs, list):
+            raise TypeError("v3 candidate execution anchor requires fragmentRefs")
+        if not fragment_refs or any(
+            not str(fragment_ref or "").strip() for fragment_ref in fragment_refs
+        ):
+            raise RuntimeError(
+                "v3 candidate execution anchor has no canonical fragment ref"
+            )
+        item["scopeKind"] = "workflow_candidate"
+        scoped.append(item)
+    selection_ids = {
+        str(item.get("selectionId") or "").strip() for item in scoped
+    }
+    candidate_ids = [
+        str(item.get("candidateId") or "").strip() for item in scoped
+    ]
+    if len(selection_ids) != 1 or len(set(candidate_ids)) != len(candidate_ids):
+        raise RuntimeError("v3 candidate execution anchors have conflicting scopes")
+    if action.selection_id and any(
+        str(item.get("selectionId") or "") != action.selection_id for item in scoped
+    ):
+        raise RuntimeError("candidate anchor selection does not match PendingAction")
+    if action.candidate_id:
+        matching_candidates = [
+            str(item.get("candidateId") or "").strip()
+            for item in scoped
+            if str(item.get("candidateId") or "").strip() == action.candidate_id
+        ]
+        if len(scoped) != 1 or not matching_candidates:
+            raise RuntimeError("candidate anchor does not match PendingAction")
+    raw_selected = (action.scope or {}).get("selectedCandidateIds")
+    if isinstance(raw_selected, (list, tuple)):
+        selected = {
+            str(item).strip() for item in raw_selected if str(item).strip()
+        }
+        if selected and any(
+            str(item.get("candidateId") or "").strip() not in selected
+            for item in scoped
+        ):
+            raise RuntimeError("candidate anchor is outside PendingAction selection")
+    root = {
+        **root,
+        "scopeKind": "workflow_node_root",
+        "sessionId": root_session_id,
+        "taskId": root.get("taskId") or None,
+        "turnId": root.get("turnId") or None,
+    }
+    payload.update(
+        {
+            "schemaVersion": 3,
+            "sessionId": root_session_id,
+            "sessionAttempt": root.get("sessionAttempt"),
+            "taskId": root.get("taskId"),
+            "turnId": root.get("turnId"),
+            "rootSession": root,
+            "scopedSessions": scoped,
+        }
+    )
+    return payload
 
 
 class AdapterDispatchWorker:
@@ -119,13 +224,21 @@ class AdapterDispatchWorker:
             return
 
         try:
-            result = adapter.execute(action)
+            result = self._execute_with_lease_heartbeat(adapter, action, outbox)
         except Exception as exc:
             from .agent_turn_completion import TurnNotReadyError
+            from .formal_hypothesis_fanout import HypothesisAuthorityUnavailable
 
-            if isinstance(exc, TurnNotReadyError):
-                # Turn still running — requeue without failing the attempt.
-                self._requeue_or_fail(outbox, action, f"turn_not_ready:{exc}")
+            if isinstance(exc, _OutboxLeaseLost):
+                return
+            if isinstance(exc, (TurnNotReadyError, HypothesisAuthorityUnavailable)):
+                # Transient turn/authority state — requeue without failing the attempt.
+                prefix = (
+                    "turn_not_ready"
+                    if isinstance(exc, TurnNotReadyError)
+                    else "hypothesis_authority_unavailable"
+                )
+                self._requeue_or_fail(outbox, action, f"{prefix}:{exc}")
                 return
             # Compensation-void unused reservation if execute reserved then crashed.
             self._void_unused_reservation(
@@ -179,11 +292,14 @@ class AdapterDispatchWorker:
             return
 
         try:
+            committed = False
             if action.actor_kind == ActorKind.HUMAN:
-                self._commit_human(outbox, action, verified)
+                committed = self._commit_human(outbox, action, verified)
             else:
-                self._commit_verified(outbox, action, verified, usage=result.usage)
-            if verified.budget_receipt:
+                committed = self._commit_verified(
+                    outbox, action, verified, usage=result.usage
+                )
+            if committed and verified.budget_receipt:
                 # ledger 提交后结算领域预算权威；settle 失败不回滚已提交 receipt，
                 # 进入 reconciliation_required 供对账（禁止静默吞掉）。
                 self._settle_domain_budget(
@@ -193,13 +309,58 @@ class AdapterDispatchWorker:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
             self._requeue_or_fail(outbox, action, str(exc))
 
+    def _execute_with_lease_heartbeat(
+        self, adapter: Any, action: PendingAction, outbox: Any
+    ) -> Any:
+        """Run a potentially long adapter turn while renewing its outbox lease."""
+
+        stop = threading.Event()
+        lost = threading.Event()
+        interval_seconds = max(0.001, float(self._lease_ms) / 3000.0)
+
+        def heartbeat() -> None:
+            while not stop.wait(interval_seconds):
+                try:
+                    renewed = outbox_api.renew_lease(
+                        self._store,
+                        outbox.action_id,
+                        self._owner,
+                        now_ms=self._now(),
+                        lease_ms=self._lease_ms,
+                    )
+                except Exception:
+                    renewed = False
+                if not renewed:
+                    lost.set()
+                    return
+
+        thread = threading.Thread(
+            target=heartbeat,
+            name=f"outbox-lease-heartbeat:{outbox.action_id}",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            result = adapter.execute(action)
+        except Exception as exc:
+            if lost.is_set():
+                raise _OutboxLeaseLost("adapter outbox lease was lost") from exc
+            raise
+        finally:
+            stop.set()
+            thread.join(timeout=max(1.0, interval_seconds * 2.0))
+        if lost.is_set():
+            raise _OutboxLeaseLost("adapter outbox lease was lost")
+        return result
+
     # ------------------------------------------------------------ commits
 
     def _commit_verified(
         self, outbox: Any, action: PendingAction, verified: VerifiedDomainResult, *, usage: dict[str, Any]
-    ) -> None:
+    ) -> bool:
         now_ms = self._now()
-        anchor_id = new_id("anchor") if verified.anchor else None
+        anchor_payload = _canonical_anchor_payload(action, verified.anchor)
+        anchor_id = new_id("anchor") if anchor_payload else None
         budget_receipt_id = new_id("br") if verified.budget_receipt else None
         handoff_id = new_id("ho")
         event_count = 3
@@ -215,36 +376,56 @@ class AdapterDispatchWorker:
                 uow.after_commit(self._after_commit_hook)
             acked = uow.repository.ack_outbox(outbox.action_id, self._owner, now_ms)
             if not acked:
-                return
+                return False
             run = uow.repository.get_run(action.run_id)
             if run is None:
-                return
+                return False
             last_sequence = uow.repository.advance_last_sequence(
                 action.run_id, event_count, now_ms
             )
             if last_sequence is None:
-                return
+                return False
             base_sequence = last_sequence - event_count
+            bound_anchor_id = anchor_id
 
-            if anchor_id and verified.anchor:
-                uow.repository.insert_anchor(
-                    anchor_id=anchor_id,
-                    node_run_id=action.node_run_id,
-                    actor_kind=action.actor_kind.value,
-                    anchor_json=json.dumps(verified.anchor, ensure_ascii=False),
-                    created_at_ms=now_ms,
-                    agent_id=verified.anchor.get("agentId"),
-                    session_id=verified.anchor.get("sessionId"),
-                    session_attempt=verified.anchor.get("sessionAttempt"),
-                    task_id=verified.anchor.get("taskId"),
-                    turn_id=verified.anchor.get("turnId"),
-                    system_action_id=verified.anchor.get("systemActionId"),
+            if anchor_id and anchor_payload:
+                existing_anchor = uow.repository.get_anchor_by_node_run(
+                    action.node_run_id
                 )
+                if existing_anchor is None:
+                    uow.repository.insert_anchor(
+                        anchor_id=anchor_id,
+                        node_run_id=action.node_run_id,
+                        actor_kind=action.actor_kind.value,
+                        anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
+                        created_at_ms=now_ms,
+                        agent_id=anchor_payload.get("agentId"),
+                        role_key=anchor_payload.get("roleKey"),
+                        session_id=anchor_payload.get("sessionId"),
+                        session_attempt=anchor_payload.get("sessionAttempt"),
+                        task_id=anchor_payload.get("taskId"),
+                        turn_id=anchor_payload.get("turnId"),
+                        system_action_id=anchor_payload.get("systemActionId"),
+                    )
+                else:
+                    bound_anchor_id = str(existing_anchor[0])
+                    uow.repository.update_anchor_by_node_run(
+                        node_run_id=action.node_run_id,
+                        anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
+                        status="bound",
+                        agent_id=anchor_payload.get("agentId"),
+                        role_key=anchor_payload.get("roleKey"),
+                        session_id=anchor_payload.get("sessionId"),
+                        session_attempt=anchor_payload.get("sessionAttempt"),
+                        task_id=anchor_payload.get("taskId"),
+                        turn_id=anchor_payload.get("turnId"),
+                        system_action_id=anchor_payload.get("systemActionId"),
+                    )
                 uow.repository.update_attempt_status(
                     action.node_run_id,
                     NodeAttemptStatus.RUNNING.value,
                     now_ms,
-                    execution_anchor_id=anchor_id,
+                    execution_anchor_id=bound_anchor_id,
                 )
 
             for index, receipt in enumerate(verified.artifact_receipts):
@@ -348,14 +529,14 @@ class AdapterDispatchWorker:
                 node_run_id=action.node_run_id,
                 outcome="succeeded",
                 artifact_receipt_ids=tuple(receipt_id_by_index),
-                execution_anchor_id=anchor_id,
+                execution_anchor_id=bound_anchor_id,
                 budget_receipt_id=budget_receipt_id,
                 problem=None,
                 completed_at_ms=now_ms,
             )
             attempt = uow.repository.get_attempt(action.node_run_id)
             if attempt is None:
-                return
+                return False
             if successors or action.node_id == "result_package":
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
@@ -386,9 +567,14 @@ class AdapterDispatchWorker:
                     sequence=base_sequence + 1,
                     run_version=run.run_version,
                     event_id=new_id("evt"),
-                    event_type="execution_anchor_bound" if anchor_id else "node_running",
+                    event_type=(
+                        "execution_anchor_bound" if bound_anchor_id else "node_running"
+                    ),
                     correlation_id=action.action_id,
-                    payload={"nodeRunId": action.node_run_id, "anchorId": anchor_id},
+                    payload={
+                        "nodeRunId": action.node_run_id,
+                        "anchorId": bound_anchor_id,
+                    },
                     now_ms=now_ms,
                 )
             )
@@ -416,12 +602,13 @@ class AdapterDispatchWorker:
                     now_ms=now_ms,
                 )
             )
+            return True
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
 
     def _commit_human(
         self, outbox: Any, action: PendingAction, verified: VerifiedDomainResult
-    ) -> None:
+    ) -> bool:
         now_ms = self._now()
         anchor_id = new_id("anchor")
         task_id = str((verified.anchor or {}).get("humanTaskId") or new_id("ht"))
@@ -432,15 +619,15 @@ class AdapterDispatchWorker:
                 uow.after_commit(self._after_commit_hook)
             acked = uow.repository.ack_outbox(outbox.action_id, self._owner, now_ms)
             if not acked:
-                return
+                return False
             run = uow.repository.get_run(action.run_id)
             if run is None:
-                return
+                return False
             last_sequence = uow.repository.advance_last_sequence(
                 action.run_id, 1, now_ms
             )
             if last_sequence is None:
-                return
+                return False
             uow.repository.insert_anchor(
                 anchor_id=anchor_id,
                 node_run_id=action.node_run_id,
@@ -490,10 +677,52 @@ class AdapterDispatchWorker:
                     now_ms=now_ms,
                 )
             )
+            return True
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
 
     # ------------------------------------------------------------ failures
+
+    @staticmethod
+    def _close_execution_anchor(
+        uow: Any,
+        *,
+        action: PendingAction,
+        status: str,
+        problem: dict[str, Any],
+    ) -> None:
+        """Close a live root/candidate anchor in the same failure transaction."""
+
+        row = uow.repository.get_anchor_by_node_run(action.node_run_id)
+        if row is None:
+            return
+        try:
+            payload = json.loads(row[13] or "{}")
+        except (TypeError, ValueError, IndexError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        root = payload.get("rootSession")
+        if not isinstance(root, dict):
+            root = {}
+        root["status"] = status
+        payload["rootSession"] = root
+        payload["status"] = status
+        scoped = payload.get("scopedSessions")
+        if isinstance(scoped, list):
+            for item in scoped:
+                if isinstance(item, dict):
+                    item["status"] = status
+        payload["closure"] = {
+            "code": str(problem.get("code") or "execution_failed")[:120],
+            "detail": str(problem.get("detail") or "")[:400],
+            "status": status,
+        }
+        uow.repository.update_anchor_by_node_run(
+            node_run_id=action.node_run_id,
+            anchor_json=json.dumps(payload, ensure_ascii=False),
+            status=status,
+        )
 
     def _void_unused_reservation(self, action: PendingAction, *, reason: str) -> None:
         """Void any still-reserved budget receipt for this attempt (compensation).
@@ -634,8 +863,16 @@ class AdapterDispatchWorker:
             problem["code"] = str(parsed.get("code") or code)
 
         def mutate(uow):
-            uow.repository.fail_outbox(
+            failed = uow.repository.fail_outbox(
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
+            )
+            if not failed:
+                return
+            self._close_execution_anchor(
+                uow,
+                action=action,
+                status="blocked",
+                problem=problem,
             )
             apply_node_run_block(
                 uow,
@@ -654,8 +891,16 @@ class AdapterDispatchWorker:
         now_ms = self._now()
 
         def mutate(uow):
-            uow.repository.fail_outbox(
+            failed = uow.repository.fail_outbox(
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
+            )
+            if not failed:
+                return
+            self._close_execution_anchor(
+                uow,
+                action=action,
+                status="failed",
+                problem=problem,
             )
             apply_node_run_failure(
                 uow,
@@ -675,8 +920,16 @@ class AdapterDispatchWorker:
         problem = {"code": "adapter_not_registered", "detail": action.action_kind}
 
         def mutate(uow):
-            uow.repository.fail_outbox(
+            failed = uow.repository.fail_outbox(
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
+            )
+            if not failed:
+                return
+            self._close_execution_anchor(
+                uow,
+                action=action,
+                status="failed",
+                problem=problem,
             )
             apply_node_run_failure(
                 uow,

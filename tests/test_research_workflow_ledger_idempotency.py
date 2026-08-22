@@ -13,6 +13,7 @@ from core.research.workflow.ledger import (
 )
 from tests._support.workflow_ledger_helpers import (
     build_command_record,
+    build_attempt_record,
     build_run_record,
     open_ledger_store,
 )
@@ -98,5 +99,60 @@ def test_unique_key_constraint_violation_rejected(tmp_path: Path) -> None:
         _insert_command(store, idempotency_key="key-1", request_hash="h1", command_id="cmd-1")
         with pytest.raises(apsw.ConstraintError):
             _insert_command(store, idempotency_key="key-1", request_hash="h2", command_id="cmd-2")
+    finally:
+        store.close()
+
+
+def test_execution_anchor_cas_rejects_stale_revision(tmp_path: Path) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        def seed(uow):
+            uow.repository.insert_run(build_run_record())
+            uow.repository.insert_command(build_command_record())
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="node-run-1",
+                    run_id="run-test",
+                    node_id="hypothesis_design",
+                )
+            )
+            uow.repository.insert_anchor(
+                anchor_id="anchor-1",
+                node_run_id="node-run-1",
+                actor_kind="agent",
+                anchor_json='{"rootSession":{"status":"running"}}',
+                created_at_ms=1,
+                status="running",
+                revision=1,
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        stale = store.submit(
+            lambda uow: uow.repository.update_anchor_by_node_run_cas(
+                node_run_id="node-run-1",
+                expected_revision=0,
+                anchor_json='{"rootSession":{"status":"failed"}}',
+                status="failed",
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        assert stale is False
+        fresh = store.submit(
+            lambda uow: uow.repository.update_anchor_by_node_run_cas(
+                node_run_id="node-run-1",
+                expected_revision=1,
+                anchor_json='{"rootSession":{"status":"succeeded"}}',
+                status="bound",
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        assert fresh is True
+        row = store.submit(
+            lambda uow: uow.repository.get_anchor_by_node_run("node-run-1"),
+            force_flush=True,
+        ).result(timeout=10)
+        assert row is not None
+        assert row[15] == 2
+        assert row[12] == "bound"
     finally:
         store.close()

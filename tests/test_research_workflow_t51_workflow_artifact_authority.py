@@ -129,6 +129,27 @@ def test_artifact_identity_replay_is_idempotent_and_conflict_fails_loudly(
         put_workflow_artifact("research-team", payload={"status": "failed"}, **kwargs)
 
 
+def test_hypothesis_fragments_use_the_internal_workflow_artifact_store(
+    monkeypatch, tmp_path
+) -> None:
+    _use_artifact_root(monkeypatch, tmp_path)
+    stored = put_workflow_artifact(
+        "research-team",
+        kind="hypothesis_fragment",
+        workflow_run_id="run-hypothesis",
+        source_collection_run_id="source-hypothesis",
+        artifact_identity="hypothesis_fragment:selection-1:H1",
+        payload={"candidateId": "H1", "selectionId": "selection-1"},
+    )
+
+    assert stored["kind"] == "hypothesis_fragment"
+    assert list_workflow_artifacts(
+        "research-team",
+        kind="hypothesis_fragment",
+        workflow_run_id="run-hypothesis",
+    )[0]["payload"]["candidateId"] == "H1"
+
+
 def test_corrupt_artifact_store_fails_loudly(monkeypatch, tmp_path) -> None:
     _use_artifact_root(monkeypatch, tmp_path)
     path = (

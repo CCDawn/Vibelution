@@ -67,6 +67,7 @@ from .node_execution import heartbeat_node_execution, start_node_execution
 from .node_execution_support import NodeExecutionError, latest_node_run
 from .node_operational_projection import project_node_operations
 from .node_recovery import reconcile_expired_execution, retry_node_execution
+from .node_scoped_session_projection import project_node_scoped_sessions
 from .question_launch import (
     QuestionLaunchError,
     activate_experiment_campaign,
@@ -123,6 +124,20 @@ def _require_non_terminal_run(record: dict[str, Any], *, command: str) -> None:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _create_request_fingerprints(run_input: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return current and legacy fingerprints for a create request.
+
+    The session-scope mode is a server-owned field added by
+    ``freeze_run_input``.  Ignore it for the current idempotency identity, but
+    accept the raw fingerprint when replaying a pre-normalization run.
+    """
+    canonical_request = dict(run_input)
+    canonical_request.pop("workflowSessionScopeV3", None)
+    canonical = create_request_fingerprint(canonical_request)
+    legacy = create_request_fingerprint(run_input)
+    return tuple(dict.fromkeys((canonical, legacy)))
 
 
 def _node_attempt(record: dict[str, Any], node_id: str) -> int:
@@ -435,7 +450,8 @@ class ResearchWorkflowRuntimeService:
     ) -> dict[str, Any]:
         with self._lock:
             meta = self.get_definition(workflow_id)
-            create_input_fingerprint = create_request_fingerprint(run_input)
+            create_input_fingerprints = _create_request_fingerprints(run_input)
+            create_input_fingerprint = create_input_fingerprints[0]
             run_id = run_id_for_create(workflow_id, idempotency_key)
             create_index_key = f"create:{idempotency_key}" if idempotency_key else ""
             indexed_run_id = self._index.get_run_id(create_index_key) if create_index_key else None
@@ -451,7 +467,8 @@ class ResearchWorkflowRuntimeService:
                     code="idempotency_index_missing_run",
                 )
             if existing:
-                if existing.get("createInputFingerprint") != create_input_fingerprint:
+                prior_fingerprint = str(existing.get("createInputFingerprint") or "")
+                if prior_fingerprint and prior_fingerprint not in create_input_fingerprints:
                     raise ResearchWorkflowError(
                         "idempotencyKey was already used with different run input",
                         code="idempotency_conflict",
@@ -559,10 +576,16 @@ class ResearchWorkflowRuntimeService:
         snapshots = {s["nodeId"]: s for s in record.get("bindingSnapshots") or []}
         snap = snapshots.get(node_id) or {}
         bridge = SessionBindingBridge(self._store)
+        session_binding = self._store.get_session_binding(run_id, node_id)
         chat_href, degraded = bridge.deep_link_for(record, node_id)
         if node.actorKind is not ActorKind.AGENT:
             degraded = False
             chat_href = None
+        session_projection = project_node_scoped_sessions(
+            record,
+            node_id=node_id,
+            session_binding=session_binding,
+        )
         display_name = ""
         if snap.get("agentId"):
             display_name = _agent_display_name(str(snap["agentId"]))
@@ -591,9 +614,11 @@ class ResearchWorkflowRuntimeService:
             "primaryRoleKey": node.primaryRoleKey,
             "label": node.label,
             "bindingSnapshot": {**snap, "displayName": display_name},
-            "sessionBinding": self._store.get_session_binding(run_id, node_id),
+            "sessionBinding": session_binding,
             "chatDeepLink": chat_href,
             "sessionAnchorDegraded": degraded,
+            "rootSession": session_projection["rootSession"],
+            "scopedSessions": session_projection["scopedSessions"],
             "runtimeCurrent": node_id in (record.get("runtimeCurrentNodeIds") or []),
             "status": record.get("status"),
             "nodeAttempt": _node_attempt(record, node_id),

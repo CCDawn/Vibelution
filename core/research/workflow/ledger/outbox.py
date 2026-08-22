@@ -44,6 +44,26 @@ def ack_action(store: Any, action_id: str, owner: str, now_ms: int) -> bool:
     return bool(future.result(timeout=30))
 
 
+def renew_lease(
+    store: Any,
+    action_id: str,
+    owner: str,
+    *,
+    now_ms: int,
+    lease_ms: int,
+) -> bool:
+    future = store.submit(
+        lambda uow: uow.repository.renew_outbox_lease(
+            action_id,
+            owner,
+            now_ms,
+            lease_ms,
+        ),
+        force_flush=True,
+    )
+    return bool(future.result(timeout=30))
+
+
 def fail_action(
     store: Any, action_id: str, owner: str, now_ms: int, problem_json: str
 ) -> bool:

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from core.chat.turn_journal import (
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_turn_event,
+)
+from core.research.workflow.contracts.session_scope import (
+    ContractValidationError,
+    WorkflowSessionScopeV3,
 )
 from core.web.services import (
     agent_directory_service,
@@ -210,6 +216,390 @@ def test_formal_workflow_nodes_use_exact_scoped_sessions_without_reusing_flat_hi
     ]
     assert scoped_binding["workflowRunId"] == "run-sci-096"
     assert scoped_binding["workflowNodeId"] == "hypothesis_design"
+    assert scoped_binding["scope"]["kind"] == "workflow_node_root"
+
+
+def test_v2_root_registry_fixture_recovers_the_existing_canonical_session(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    workflow_run_id = "run-sci-096"
+    workflow_node_id = "hypothesis_design"
+    created_at = "2026-08-22T00:00:00Z"
+    legacy_binding = {
+        "teamId": team["teamId"],
+        "researchProjectId": project["projectId"],
+        "experimentName": project["name"],
+        "agentId": agent["agentId"],
+        "roleKey": "source_finder",
+        "roleLabel": "假设设计",
+        "attempt": 1,
+        "retryOfSessionId": "",
+        "createdFromTaskId": "v2-root-task",
+        "createdAt": created_at,
+        "workflowRunId": workflow_run_id,
+        "workflowNodeId": workflow_node_id,
+    }
+    legacy_session = session_service.create_chat_session(
+        title="层级反馈实验｜假设设计",
+        agent_id=agent["agentId"],
+        created_by="test.v2_root_fixture",
+        conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        experiment_binding=legacy_binding,
+    )
+    legacy_session_id = legacy_session["id"]
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"], project["projectId"]
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "teamId": team["teamId"],
+                "researchProjectId": project["projectId"],
+                "agents": {},
+                "workflowNodes": {
+                    f"{agent['agentId']}::{workflow_run_id}::{workflow_node_id}": {
+                        "agentId": agent["agentId"],
+                        "roleKey": "source_finder",
+                        "workflowRunId": workflow_run_id,
+                        "workflowNodeId": workflow_node_id,
+                        "currentAttempt": 1,
+                        "attempts": [
+                            {
+                                "sessionId": legacy_session_id,
+                                "agentId": agent["agentId"],
+                                "roleKey": "source_finder",
+                                "attempt": 1,
+                                "retryOfSessionId": "",
+                                "createdFromTaskId": "v2-root-task",
+                                "createdAt": created_at,
+                                "workflowRunId": workflow_run_id,
+                                "workflowNodeId": workflow_node_id,
+                            }
+                        ],
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    recovered = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        created_from_task_id="v2-root-replay",
+        workflow_run_id=workflow_run_id,
+        workflow_node_id=workflow_node_id,
+    )
+
+    assert recovered["sessionCreated"] is False
+    assert recovered["sessionId"] == legacy_session_id
+    assert recovered["scope"]["kind"] == "workflow_node_root"
+    assert recovered["scopeKey"] == (
+        "v3|node|"
+        f"{agent['agentId']}|{workflow_run_id}|{workflow_node_id}"
+    )
+    assert session_service.get_session_detail(legacy_session_id)["id"] == legacy_session_id
+
+
+def test_workflow_session_scope_v3_is_stable_and_attempt_is_not_identity():
+    root = WorkflowSessionScopeV3.root(
+        teamId="team-1",
+        researchProjectId="project-1",
+        agentId="agent-1",
+        workflowRunId="run-sci-096",
+        workflowNodeId="hypothesis_design",
+    )
+    candidate = WorkflowSessionScopeV3.candidate(
+        teamId="team-1",
+        researchProjectId="project-1",
+        agentId="agent-1",
+        workflowRunId="run-sci-096",
+        workflowNodeId="hypothesis_design",
+        selectionId="selection-1",
+        candidateId="H2",
+    )
+
+    assert root.kind == "workflow_node_root"
+    assert root.key == "v3|node|agent-1|run-sci-096|hypothesis_design"
+    assert candidate.kind == "workflow_candidate"
+    assert candidate.key == (
+        "v3|candidate|agent-1|run-sci-096|hypothesis_design|selection-1|H2"
+    )
+    assert candidate.to_dict()["version"] == 3
+    assert "attempt" not in candidate.to_dict()
+    assert WorkflowSessionScopeV3.from_mapping(
+        {**candidate.to_dict(), "attempt": 2}
+    ).key == candidate.key
+
+    with pytest.raises(ContractValidationError, match="both selectionId and candidateId"):
+        WorkflowSessionScopeV3.from_mapping(
+            {**root.to_dict(), "kind": "workflow_candidate", "selectionId": "selection-1"}
+        )
+    with pytest.raises(ContractValidationError, match="must not carry candidate"):
+        WorkflowSessionScopeV3.from_mapping(
+            {**root.to_dict(), "selectionId": "selection-1", "candidateId": "H1"}
+        )
+
+
+def test_candidate_scope_creates_hidden_child_and_resumes_exact_candidate_scope(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+        "selection_id": "selection-1",
+    }
+    h1 = resolve_research_project_agent_session(
+        **common, candidate_id="H1", created_from_task_id="h1-task"
+    )
+    h2 = resolve_research_project_agent_session(
+        **common, candidate_id="H2", created_from_task_id="h2-task"
+    )
+    h1_replay = resolve_research_project_agent_session(
+        **common, candidate_id="H1", created_from_task_id="h1-replay"
+    )
+
+    assert h1["sessionCreated"] is True
+    assert h1["sessionKind"] == "child"
+    assert h1["hiddenFromIndex"] is True
+    assert h1["sessionId"] != h2["sessionId"]
+    assert h1_replay["sessionCreated"] is False
+    assert h1_replay["sessionId"] == h1["sessionId"]
+    assert h1["parentSessionId"] == h2["parentSessionId"]
+    assert h1["rootSessionId"] == h1["parentSessionId"]
+
+    h1_detail = session_service.get_session_detail(h1["sessionId"])
+    h2_detail = session_service.get_session_detail(h2["sessionId"])
+    assert h1_detail["sessionKind"] == "child"
+    assert h1_detail["hiddenFromIndex"] is True
+    assert h1_detail["parentSessionId"] == h1["parentSessionId"]
+    assert h1_detail["rootSessionId"] == h1["parentSessionId"]
+    assert h1_detail["experimentBinding"]["scope"] == {
+        "version": 3,
+        "kind": "workflow_candidate",
+        "teamId": team["teamId"],
+        "researchProjectId": project["projectId"],
+        "agentId": agent["agentId"],
+        "workflowRunId": "run-sci-096",
+        "workflowNodeId": "hypothesis_design",
+        "selectionId": "selection-1",
+        "candidateId": "H1",
+    }
+    assert h2_detail["experimentBinding"]["scope"]["candidateId"] == "H2"
+    assert h1["sessionId"] not in {
+        item["id"] for item in session_service.list_sessions()
+    }
+
+
+def test_candidate_formal_retry_only_advances_that_candidate_scope(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+        "selection_id": "selection-1",
+    }
+    h1 = resolve_research_project_agent_session(
+        **common, candidate_id="H1", created_from_task_id="h1-task"
+    )
+    h2 = resolve_research_project_agent_session(
+        **common, candidate_id="H2", created_from_task_id="h2-task"
+    )
+    h2_retry = resolve_research_project_agent_session(
+        **common,
+        candidate_id="H2",
+        created_from_task_id="h2-retry",
+        formal_retry=True,
+        previous_task={
+            "taskId": "h2-task",
+            "sessionId": h2["sessionId"],
+            "status": "failed",
+        },
+    )
+    h1_replay = resolve_research_project_agent_session(
+        **common, candidate_id="H1", created_from_task_id="h1-replay"
+    )
+
+    assert h2_retry["sessionCreated"] is True
+    assert h2_retry["sessionAttempt"] == 2
+    assert h2_retry["retryOfSessionId"] == h2["sessionId"]
+    assert h2_retry["sessionId"] != h2["sessionId"]
+    assert h1_replay["sessionId"] == h1["sessionId"]
+    assert h1_replay["sessionAttempt"] == 1
+    assert h2_retry["parentSessionId"] == h2["parentSessionId"]
+    assert session_service.get_session_detail(h2_retry["sessionId"])[
+        "experimentBinding"
+    ]["scope"]["candidateId"] == "H2"
+
+
+def test_candidate_scope_recovers_registry_and_never_falls_back_to_node_root(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+        "selection_id": "selection-1",
+    }
+    first = resolve_research_project_agent_session(
+        **common, candidate_id="H1", created_from_task_id="h1-task"
+    )
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"], project["projectId"]
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry_path.unlink()
+
+    recovered = resolve_research_project_agent_session(
+        **common, candidate_id="H1", created_from_task_id="h1-replay"
+    )
+    assert recovered["sessionId"] == first["sessionId"]
+    assert recovered["sessionCreated"] is False
+    assert recovered["sessionKind"] == "child"
+
+    session_service.delete_chat_session(first["sessionId"])
+    with pytest.raises(ResearchProjectAgentSessionError, match="candidate session"):
+        resolve_research_project_agent_session(
+            **common, candidate_id="H1", created_from_task_id="h1-missing"
+        )
+
+
+def test_candidate_registry_pointing_to_root_fails_closed_without_creating_child(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+        "selection_id": "selection-1",
+    }
+    root = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        created_from_task_id="root-task",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="hypothesis_design",
+    )
+    candidate_scope = WorkflowSessionScopeV3.candidate(
+        teamId=team["teamId"],
+        researchProjectId=project["projectId"],
+        agentId=agent["agentId"],
+        workflowRunId="run-sci-096",
+        workflowNodeId="hypothesis_design",
+        selectionId="selection-1",
+        candidateId="H1",
+    )
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"], project["projectId"]
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry.setdefault("workflowCandidates", {})[candidate_scope.key] = {
+        "agentId": agent["agentId"],
+        "roleKey": "source_finder",
+        "workflowRunId": "run-sci-096",
+        "workflowNodeId": "hypothesis_design",
+        "selectionId": "selection-1",
+        "candidateId": "H1",
+        "currentAttempt": 1,
+        "attempts": [
+            {
+                "sessionId": root["sessionId"],
+                "agentId": agent["agentId"],
+                "roleKey": "source_finder",
+                "attempt": 1,
+                "retryOfSessionId": "",
+                "createdFromTaskId": "candidate-task",
+                "createdAt": "2026-08-22T00:00:00Z",
+                "workflowRunId": "run-sci-096",
+                "workflowNodeId": "hypothesis_design",
+                "selectionId": "selection-1",
+                "candidateId": "H1",
+                "scope": candidate_scope.to_dict(),
+            }
+        ],
+    }
+    registry_path.write_text(
+        json.dumps(registry, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    session_ids_before = {item["id"] for item in session_service.list_sessions()}
+    child_calls: list[dict] = []
+
+    def forbidden_child_creation(*_args, **kwargs):
+        child_calls.append(dict(kwargs))
+        raise AssertionError("candidate scope must not create a child for a root registry entry")
+
+    monkeypatch.setattr(session_service, "create_child_session", forbidden_child_creation)
+
+    with pytest.raises(
+        ResearchProjectAgentSessionError,
+        match="missing or mismatched canonical session",
+    ):
+        resolve_research_project_agent_session(
+            **common,
+            candidate_id="H1",
+            created_from_task_id="candidate-replay",
+        )
+
+    assert child_calls == []
+    assert {item["id"] for item in session_service.list_sessions()} == session_ids_before
+    persisted_registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert (
+        persisted_registry["workflowCandidates"][candidate_scope.key]["attempts"][0][
+            "sessionId"
+        ]
+        == root["sessionId"]
+    )
 
 
 def test_project_agent_session_recovers_exact_identity_from_real_stage_turn_journal(
@@ -1184,3 +1574,141 @@ def test_formal_retry_selects_the_same_agent_previous_task_when_roles_match(
     assert retry["sessionAttempt"] == 2
     assert retry["retryOfSessionId"] == first["sessionId"]
     assert retry["sessionId"] != second["sessionId"]
+
+
+def test_root_resolver_rejects_registry_entry_pointing_to_child(tmp_path, monkeypatch):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+    }
+    root = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="root-task",
+    )
+    child = resolve_research_project_agent_session(
+        **common,
+        selection_id="selection-1",
+        candidate_id="H1",
+        created_from_task_id="candidate-task",
+    )
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"], project["projectId"]
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    record_key = (
+        f"{agent['agentId']}::run-sci-096::hypothesis_design"
+    )
+    registry["workflowNodes"][record_key]["attempts"][-1]["sessionId"] = child[
+        "sessionId"
+    ]
+    registry_path.write_text(json.dumps(registry, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ResearchProjectAgentSessionError, match="non-canonical root"):
+        resolve_research_project_agent_session(
+            **common,
+            created_from_task_id="root-replay",
+        )
+    assert root["sessionId"] != child["sessionId"]
+
+
+def test_root_recovery_skips_durable_child_even_with_root_binding(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+    }
+    root = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="root-task",
+    )
+    session_service.create_child_session(
+        root["sessionId"],
+        user_request="durable child should not become root",
+        auto_start=False,
+        switch_to_child=False,
+        experiment_binding={
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+            "experimentName": project["name"],
+            "agentId": agent["agentId"],
+            "roleKey": "source_finder",
+            "roleLabel": "假设设计",
+            "attempt": 1,
+            "retryOfSessionId": "",
+            "createdFromTaskId": "child-task",
+            "createdAt": "2026-08-22T00:00:00Z",
+            "workflowRunId": common["workflow_run_id"],
+            "workflowNodeId": common["workflow_node_id"],
+        },
+    )
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"], project["projectId"]
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry_path.unlink()
+
+    recovered = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="root-replay",
+    )
+
+    assert recovered["sessionId"] == root["sessionId"]
+    assert recovered["sessionCreated"] is False
+
+
+def test_candidate_resolver_rejects_child_not_hidden_from_index(tmp_path, monkeypatch):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+        "selection_id": "selection-1",
+        "candidate_id": "H1",
+    }
+    first = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="candidate-task",
+    )
+    original_get_detail = session_service.get_session_detail
+
+    def get_detail(session_id, **kwargs):
+        detail = original_get_detail(session_id, **kwargs)
+        if session_id == first["sessionId"] and isinstance(detail, dict):
+            detail = dict(detail)
+            detail["hiddenFromIndex"] = False
+        return detail
+
+    monkeypatch.setattr(session_service, "get_session_detail", get_detail)
+    with pytest.raises(ResearchProjectAgentSessionError, match="candidate session"):
+        resolve_research_project_agent_session(
+            **common,
+            created_from_task_id="candidate-replay",
+        )

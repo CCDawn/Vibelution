@@ -18,6 +18,7 @@ const mutationOwners = [
   "repairChallengeCupTeamAgentsMutation",
   "repairKnowledgeExpansionTeamAgentsMutation",
   "startTeamRoundMutation",
+  "stopTeamRoundMutation",
 ] as const;
 
 describe("team shell mutations contract", () => {
@@ -56,6 +57,7 @@ describe("team shell mutations contract", () => {
     expect(mutationsSource).toContain("repairChallengeCupTeamAgents(");
     expect(mutationsSource).toContain("repairKnowledgeExpansionTeamAgents(");
     expect(mutationsSource).toContain("startChatRoomRound(");
+    expect(mutationsSource).toContain("stopChatRoomRound(");
     expect(mutationsSource).toContain('source: "team_workspace"');
   });
 });

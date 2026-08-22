@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import json
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -28,6 +30,14 @@ from core.web.routes.team_workflows.research_runtime_models import (
     ResearchWorkflowRunListResponse,
     ResearchWorkflowRunSnapshotResponse,
 )
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_attempt_record,
+    build_command_record,
+    build_event_record,
+    build_run_record,
+)
+from tests._support.workflow_ledger_http import ledger_http_client
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROUTE_FILE = REPO_ROOT / "core" / "web" / "routes" / "team_workflows" / "research_runtime.py"
@@ -193,6 +203,8 @@ def test_research_runtime_models_publish_known_schema_fields() -> None:
             "sessionAttempt",
             "chatDeepLink",
             "sessionAnchorDegraded",
+            "rootSession",
+            "scopedSessions",
             "blockedReason",
             "nodeAttempt",
         },
@@ -357,6 +369,207 @@ def test_research_runtime_json_routes_keep_unknown_fields(monkeypatch) -> None:
     )
     assert created.status_code == 201
     assert created.json() == expected_create
+
+
+def test_research_runtime_node_detail_route_reads_scoped_sessions_from_formal_ledger(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Exercise the actual route -> WorkflowQueryService -> Ledger path."""
+
+    from core.web.services import session_service
+
+    run_id = "run-http-scoped"
+    node_run_id = "nr-http-scoped-hypothesis-design-1"
+    root_session_id = "root-http"
+    child_details = {
+        "child-http-h2": {
+            "id": "child-http-h2",
+            "sessionKind": "child",
+            "hiddenFromIndex": True,
+            "agentId": "agent-hypothesis",
+            "parentSessionId": root_session_id,
+            "rootSessionId": root_session_id,
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "challenge-sci-096",
+                "agentId": "agent-hypothesis",
+                "workflowRunId": run_id,
+                "workflowNodeId": "hypothesis_design",
+                "selectionId": "selection-http",
+                "candidateId": "H2",
+                "scope": {
+                    "version": 3,
+                    "kind": "workflow_candidate",
+                    "teamId": "research-team",
+                    "researchProjectId": "challenge-sci-096",
+                    "agentId": "agent-hypothesis",
+                    "workflowRunId": run_id,
+                    "workflowNodeId": "hypothesis_design",
+                    "selectionId": "selection-http",
+                    "candidateId": "H2",
+                },
+            },
+        },
+        "child-http-h1": {
+            "id": "child-http-h1",
+            "sessionKind": "child",
+            "hiddenFromIndex": True,
+            "agentId": "agent-hypothesis",
+            "parentSessionId": root_session_id,
+            "rootSessionId": root_session_id,
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "challenge-sci-096",
+                "agentId": "agent-hypothesis",
+                "workflowRunId": run_id,
+                "workflowNodeId": "hypothesis_design",
+                "selectionId": "selection-http",
+                "candidateId": "H1",
+                "scope": {
+                    "version": 3,
+                    "kind": "workflow_candidate",
+                    "teamId": "research-team",
+                    "researchProjectId": "challenge-sci-096",
+                    "agentId": "agent-hypothesis",
+                    "workflowRunId": run_id,
+                    "workflowNodeId": "hypothesis_design",
+                    "selectionId": "selection-http",
+                    "candidateId": "H1",
+                },
+            },
+        },
+    }
+
+    def read_session(session_id: str, **_kwargs):
+        if session_id == root_session_id:
+            return {
+                "id": root_session_id,
+                "sessionKind": "main",
+                "parentSessionId": None,
+                "rootSessionId": root_session_id,
+            }
+        return child_details.get(session_id)
+
+    monkeypatch.setattr(session_service, "get_session_detail", read_session)
+
+    with ledger_http_client(tmp_path, monkeypatch) as (client, runtime):
+        run = replace(
+            build_run_record(
+                run_id=run_id,
+                status="running",
+                last_event_sequence=1,
+            ),
+            active_node_id="hypothesis_design",
+        )
+        attempt = build_attempt_record(
+            node_run_id=node_run_id,
+            run_id=run_id,
+            node_id="hypothesis_design",
+            status="running",
+            command_id="cmd-http-scoped",
+        )
+        anchor_payload = {
+            "schemaVersion": 3,
+            "rootSession": {
+                "scopeKind": "workflow_node_root",
+                "sessionId": root_session_id,
+                "sessionAttempt": 1,
+                "taskId": "root-task-http",
+                "turnId": "root-turn-http",
+                "status": "running",
+            },
+            # Keep the persisted order intentionally H2 -> H1.
+            "scopedSessions": [
+                {
+                    "scopeKind": "workflow_candidate",
+                    "selectionId": "selection-http",
+                    "candidateId": "H2",
+                    "sessionId": "child-http-h2",
+                    "sessionAttempt": 2,
+                    "taskId": "task-http-h2",
+                    "turnId": "turn-http-h2",
+                    "parentSessionId": root_session_id,
+                    "rootSessionId": root_session_id,
+                    "fragmentRefs": ["hypothesis_fragment:h2"],
+                },
+                {
+                    "scopeKind": "workflow_candidate",
+                    "selectionId": "selection-http",
+                    "candidateId": "H1",
+                    "sessionId": "child-http-h1",
+                    "sessionAttempt": 1,
+                    "taskId": "task-http-h1",
+                    "turnId": "turn-http-h1",
+                    "parentSessionId": root_session_id,
+                    "rootSessionId": root_session_id,
+                    "fragmentRefs": ["hypothesis_fragment:h1"],
+                },
+            ],
+        }
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(run)
+            uow.repository.insert_event(
+                build_event_record(
+                    sequence=1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-http-scoped",
+                    run_id=run_id,
+                    node_id="hypothesis_design",
+                    idempotency_key="http-scoped-start",
+                )
+            )
+            uow.repository.insert_attempt(attempt)
+            uow.repository.insert_anchor(
+                anchor_id="anchor-http-scoped",
+                node_run_id=node_run_id,
+                actor_kind="agent",
+                agent_id="agent-hypothesis",
+                role_key="hypothesis_designer",
+                # Legacy scalar columns point at a child on purpose. The
+                # formal JSON root must remain authoritative for top-level
+                # compatibility fields.
+                session_id="child-http-h2",
+                session_attempt=2,
+                task_id="task-http-h2",
+                turn_id="turn-http-h2",
+                anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
+                created_at_ms=FIXED_NOW_MS,
+            )
+
+        runtime.store.submit(seed, force_flush=True).result(timeout=10)
+
+        response = client.get(
+            f"/api/research/workflow-runs/{run_id}/nodes/hypothesis_design",
+            params={"teamId": "research-team"},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["rootSession"]["sessionId"] == root_session_id
+    assert payload["sessionId"] == root_session_id
+    assert payload["taskId"] == "root-task-http"
+    assert payload["turnId"] == "root-turn-http"
+    assert payload["sessionAnchorDegraded"] is False
+    assert [item["candidateId"] for item in payload["scopedSessions"]] == [
+        "H2",
+        "H1",
+    ]
+    assert payload["scopedSessions"][0]["selectionId"] == "selection-http"
+    assert payload["scopedSessions"][0]["parentSessionId"] == root_session_id
+    assert payload["scopedSessions"][0]["rootSessionId"] == root_session_id
+    assert payload["scopedSessions"][0]["fragmentRefs"] == [
+        "hypothesis_fragment:h2"
+    ]
+    assert payload["scopedSessions"][1]["fragmentRefs"] == [
+        "hypothesis_fragment:h1"
+    ]
 
 
 def test_research_runtime_stream_keeps_event_stream_media_type_and_frames(monkeypatch) -> None:

@@ -413,6 +413,9 @@ def build_default_operator_config(
             "max_task_seconds": 1800,
             "lease_seconds": 30,
         },
+        "workflow_session_scope_v3": {
+            "hypothesis_design": "shadow",
+        },
     }
 
 

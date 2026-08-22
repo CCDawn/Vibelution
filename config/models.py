@@ -1716,6 +1716,16 @@ class RuntimeStatusConfig(BaseModel):
     show_in_status_rail: bool = Field(default=True, description="是否在前端状态栏展示")
 
 
+class WorkflowSessionScopeV3Config(BaseModel):
+    """Workflow candidate-session rollout controlled by trusted operator config."""
+
+    model_config = ConfigDict(extra="ignore")
+    hypothesis_design: Literal["off", "shadow", "on"] = Field(
+        default="shadow",
+        description="假说设计会话作用域模式：off / shadow / on",
+    )
+
+
 class SupervisedEvolutionFeatureConfig(BaseModel):
     """可信操作员配置控制的监督进化功能族。"""
 
@@ -2190,6 +2200,9 @@ class AppConfig(BaseModel):
     )
     mental_model: MentalModelConfig = Field(default_factory=MentalModelConfig)
     runtime_status: RuntimeStatusConfig = Field(default_factory=RuntimeStatusConfig)
+    workflow_session_scope_v3: WorkflowSessionScopeV3Config = Field(
+        default_factory=WorkflowSessionScopeV3Config
+    )
     supervised_evolution: SupervisedEvolutionFeatureConfig = Field(
         default_factory=SupervisedEvolutionFeatureConfig
     )

@@ -66,6 +66,27 @@ def test_hypothesis_design_ready_with_accepted_handoff_and_materialized_package(
     assert "knowledge_package" in context.calls
 
 
+def test_hypothesis_design_legacy_run_does_not_require_selection() -> None:
+    context = FakeDomainContext()
+    context._knowledge_package = {
+        "accepted": True,
+        "knowledgeItems": [{"knowledgeItemId": "ki-legacy", "contentHash": "a" * 64}],
+    }
+    context.handoffs["hypothesis_design"] = [
+        HandoffSnapshot(
+            handoff_id="ho-legacy-hypothesis",
+            from_node_run_id="nr-legacy-a1",
+            status="accepted",
+        )
+    ]
+    context.hypothesis_first_flow = lambda *_args, **_kwargs: False
+
+    result = _evaluate(context, "hypothesis_design")
+
+    assert result.ready is True
+    assert all(blocker.code != "hypothesis_round_unconverged" for blocker in result.blockers)
+
+
 def test_protocol_design_blocks_without_hypotheses() -> None:
     context = FakeDomainContext()
     context._hypothesis_set = None
