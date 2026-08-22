@@ -291,6 +291,205 @@ def test_adapter_rejects_reused_stage_invocation_identity(
         )
 
 
+@pytest.mark.parametrize(
+    "identity_kind",
+    ["receiptId", "evidenceId", "outputRef", "canonicalTurn"],
+)
+def test_adapter_rejects_shadowing_identity_alias(
+    identity_kind: str,
+) -> None:
+    output, payload, binding, evidence = _package_inputs()
+    receipts = deepcopy(payload["model_invocation_receipts"])
+    evidence = deepcopy(evidence)
+    generation_receipt = receipts["generation"]
+    review_receipt = receipts["review"]
+    generation_evidence = next(
+        item for item in evidence if item["stageId"] == "generation"
+    )
+    review_evidence = next(item for item in evidence if item["stageId"] == "review")
+
+    if identity_kind == "receiptId":
+        review_evidence["receipt_id"] = generation_evidence["receiptId"]
+    elif identity_kind == "evidenceId":
+        review_receipt["evidenceLocator"]["evidence_id"] = generation_receipt[
+            "evidenceLocator"
+        ]["evidenceId"]
+    elif identity_kind == "outputRef":
+        review_receipt["evidenceLocator"]["output_ref"] = generation_receipt[
+            "evidenceLocator"
+        ]["outputRef"]
+    else:
+        review_receipt["scope"]["task_id"] = generation_receipt["scope"][
+            "taskId"
+        ]
+        review_receipt["scope"]["turn_id"] = generation_receipt["scope"][
+            "turnId"
+        ]
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="aliases conflict"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=receipts,
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+@pytest.mark.parametrize(
+    ("alias", "conflicting_value"),
+    [
+        ("question_id", "SCI-999"),
+        ("run_id", "run-other"),
+        ("stage_id", "generation"),
+        ("outputHash", "b" * 64),
+    ],
+)
+def test_adapter_rejects_conflicting_related_evidence_aliases(
+    alias: str,
+    conflicting_value: str,
+) -> None:
+    output, payload, binding, evidence = _package_inputs()
+    review_evidence = next(item for item in evidence if item["stageId"] == "review")
+    review_evidence[alias] = conflicting_value
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="aliases conflict"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+def test_adapter_rejects_empty_identity_alias() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    evidence[0]["receipt_id"] = ""
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="must not be empty"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+def test_adapter_normalizes_snake_case_evidence_identity() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    row = evidence[0]
+    aliases = {
+        "receiptId": "receipt_id",
+        "evidenceId": "evidence_id",
+        "questionId": "question_id",
+        "sourceRunId": "run_id",
+        "sourceSessionId": "source_session_id",
+        "taskId": "task_id",
+        "turnId": "turn_id",
+        "stageId": "stage_id",
+        "outputRef": "output_ref",
+        "outputSha256": "output_sha256",
+    }
+    for canonical, alias in aliases.items():
+        row[alias] = row.pop(canonical)
+
+    package = adapt_question_result_package(
+        output,
+        catalog_scope=CatalogScope.from_tracked_resources(),
+        run_binding=binding,
+        authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+        result_package=payload,
+        model_policy=payload["model_policy"],
+        model_invocation_receipts=payload["model_invocation_receipts"],
+        official_model_evidence=_evidence_store(evidence),
+        canonical_turn_resolver=_canonical_resolver(output),
+    )
+
+    assert package.question_id == payload["question_id"]
+
+
+@pytest.mark.parametrize(
+    "identity_kind",
+    ["receiptId", "evidenceId", "outputRef", "canonicalTurn"],
+)
+def test_adapter_rejects_unreferenced_v2_evidence_identity_collision(
+    identity_kind: str,
+) -> None:
+    output, payload, binding, evidence = _package_inputs()
+    generation_evidence = next(
+        item for item in evidence if item["stageId"] == "generation"
+    )
+    unreferenced = deepcopy(generation_evidence)
+    unreferenced.update(
+        {
+            "receiptId": "receipt-unreferenced",
+            "evidenceId": "official-unreferenced",
+            "taskId": "task-unreferenced",
+            "turnId": "turn-unreferenced",
+            "stageId": "unreferenced",
+            "outputRef": "turn-journal://session-unreferenced/run/task/turn",
+        }
+    )
+    if identity_kind == "receiptId":
+        unreferenced["receiptId"] = generation_evidence["receiptId"]
+    elif identity_kind == "evidenceId":
+        unreferenced["evidenceId"] = generation_evidence["evidenceId"]
+    elif identity_kind == "outputRef":
+        unreferenced["outputRef"] = generation_evidence["outputRef"]
+    else:
+        unreferenced["taskId"] = generation_evidence["taskId"]
+        unreferenced["turnId"] = generation_evidence["turnId"]
+    evidence.append(unreferenced)
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="reuse.*identity"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+def test_adapter_ignores_unreferenced_v1_evidence_identity_collision() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    historical = deepcopy(evidence[0])
+    historical["schemaVersion"] = 1
+    evidence.append(historical)
+
+    package = adapt_question_result_package(
+        output,
+        catalog_scope=CatalogScope.from_tracked_resources(),
+        run_binding=binding,
+        authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+        result_package=payload,
+        model_policy=payload["model_policy"],
+        model_invocation_receipts=payload["model_invocation_receipts"],
+        official_model_evidence=_evidence_store(evidence),
+        canonical_turn_resolver=_canonical_resolver(output),
+    )
+
+    assert package.question_id == payload["question_id"]
+
+
 def test_adapter_rejects_supplied_package_identity_conflicts() -> None:
     output, payload, binding, evidence = _package_inputs()
     valid = adapt_question_result_package(
@@ -478,7 +677,7 @@ def test_adapter_rejects_v1_official_evidence_row_with_v2_fields() -> None:
 
     with pytest.raises(
         QuestionResultPackageAdapterError,
-        match=r"receipt\.generation\.schemaVersion must be 2",
+        match=r"receipt\.generation is not linked",
     ):
         adapt_question_result_package(
             output,
@@ -568,27 +767,35 @@ def test_task_model_evidence_persists_three_validated_receipts_and_is_idempotent
     }
     policy = _model_policy()
     for stage in ("generation", "review", "revision"):
+        stage_task = deepcopy(task)
+        stage_task["sessionId"] = f"{task['sessionId']}-{stage}"
+        stage_task["taskId"] = f"{task['taskId']}-{stage}"
+        stage_task["turn"] = {
+            **task["turn"],
+            "turnId": f"{task['turn']['turnId']}-{stage}",
+        }
+        _append_canonical_turn_output(tmp_path, stage_task, output)
         receipt = _receipt(_scope(), stage=stage, policy_sha256=policy["policySha256"], run_id=task["runId"])
         receipt["scope"].update(
             {
-                "questionId": task["challengeTaskContract"]["questionId"],
-                "taskId": task["taskId"],
-                "turnId": task["turn"]["turnId"],
+                "questionId": stage_task["challengeTaskContract"]["questionId"],
+                "taskId": stage_task["taskId"],
+                "turnId": stage_task["turn"]["turnId"],
             }
         )
         receipt["evidenceLocator"] = {
             "kind": "official_model_evidence",
             "outputSha256": challenge_question_runs._output_sha256(output),
             "outputRef": challenge_question_runs._canonical_output_ref(
-                task["sessionId"],
-                task["runId"],
-                task["taskId"],
-                task["turn"]["turnId"],
+                stage_task["sessionId"],
+                stage_task["runId"],
+                stage_task["taskId"],
+                stage_task["turn"]["turnId"],
             ),
         }
         first = challenge_question_runs.register_challenge_task_model_evidence(
             "research-team",
-            task,
+            stage_task,
             final_status="completed",
             llm_usage=usage,
             model_invocation_receipt=receipt,
@@ -597,7 +804,7 @@ def test_task_model_evidence_persists_three_validated_receipts_and_is_idempotent
         )
         repeated = challenge_question_runs.register_challenge_task_model_evidence(
             "research-team",
-            task,
+            stage_task,
             final_status="completed",
             llm_usage=usage,
             model_invocation_receipt=receipt,

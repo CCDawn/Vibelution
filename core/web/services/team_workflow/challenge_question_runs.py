@@ -1079,6 +1079,7 @@ def register_challenge_task_model_evidence(
                     "receiptId": validated_receipt.receipt_id,
                     "stageId": normalized_stage_id,
                     "modelPolicySha256": normalized_policy_sha256,
+                    "logRef": source_binding["outputRef"],
                 }
             )
         record["outputSha256"] = source_binding["outputSha256"]

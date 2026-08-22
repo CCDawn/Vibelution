@@ -80,12 +80,39 @@ def _sha256(value: Any, field: str) -> str:
     return result
 
 
+def _alias_value(
+    layers: Sequence[tuple[str, Mapping[str, Any]]],
+    keys: tuple[str, ...],
+    field: str,
+) -> str:
+    supplied: list[tuple[str, str]] = []
+    for layer_name, layer in layers:
+        for key in keys:
+            if key not in layer:
+                continue
+            value = str(layer[key] or "").strip()
+            if not value:
+                raise QuestionResultPackageAdapterError(
+                    f"{field} alias {layer_name}.{key} must not be empty"
+                )
+            supplied.append((f"{layer_name}.{key}", value))
+    if not supplied:
+        return ""
+    first = supplied[0][1]
+    if any(value != first for _, value in supplied[1:]):
+        raise QuestionResultPackageAdapterError(
+            f"{field} aliases conflict: "
+            + ", ".join(name for name, _ in supplied)
+        )
+    return first
+
+
 def _scope_value(payload: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = str(payload.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    return _alias_value(
+        (("value", payload),),
+        tuple(keys),
+        keys[0] if keys else "identity",
+    )
 
 
 def _present_values(
@@ -220,17 +247,97 @@ def _evidence_rows(value: Any) -> list[dict[str, Any]]:
 
 
 def _row_value(row: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = str(row.get(key) or "").strip()
-        if value:
-            return value
+    layers: list[tuple[str, Mapping[str, Any]]] = [("row", row)]
     metadata = row.get("metadata")
     if isinstance(metadata, Mapping):
-        for key in keys:
-            value = str(metadata.get(key) or "").strip()
-            if value:
-                return value
-    return ""
+        layers.append(("metadata", metadata))
+    return _alias_value(
+        layers,
+        tuple(keys),
+        keys[0] if keys else "evidence identity",
+    )
+
+
+def _validated_v2_evidence_rows(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    v2_rows: list[dict[str, Any]] = []
+    identity_owners: dict[str, dict[object, int]] = {
+        "receiptId": {},
+        "evidenceId": {},
+        "outputRef": {},
+        "canonicalTurn": {},
+    }
+    for index, row in enumerate(rows):
+        row_schema_version = row.get("schemaVersion")
+        if type(row_schema_version) is not int or row_schema_version not in {1, 2}:
+            raise QuestionResultPackageAdapterError(
+                f"official_model_evidence row {index}.schemaVersion must be 1 or 2"
+            )
+        if row_schema_version == 1:
+            continue
+        identity = {
+            "receiptId": _row_value(row, "receiptId", "receipt_id"),
+            "evidenceId": _row_value(row, "evidenceId", "evidence_id", "id"),
+            "questionId": _row_value(
+                row, "questionId", "question_id", "question"
+            ),
+            "runId": _row_value(
+                row, "sourceRunId", "source_run_id", "runId", "run_id"
+            ),
+            "sourceSessionId": _row_value(
+                row,
+                "sourceSessionId",
+                "source_session_id",
+                "sessionId",
+                "session_id",
+            ),
+            "taskId": _row_value(row, "taskId", "task_id", "task"),
+            "turnId": _row_value(row, "turnId", "turn_id", "turn"),
+            "stageId": _row_value(
+                row,
+                "stageId",
+                "stage_id",
+                "stage",
+                "workflowNode",
+                "workflow_node",
+                "nodeId",
+                "node_id",
+            ),
+            "outputRef": _row_value(
+                row, "outputRef", "output_ref", "ref", "logRef"
+            ),
+            "outputSha256": _row_value(
+                row,
+                "outputSha256",
+                "output_sha256",
+                "outputHash",
+                "output_hash",
+            ),
+        }
+        missing = [field for field, value in identity.items() if not value]
+        if missing:
+            raise QuestionResultPackageAdapterError(
+                f"official_model_evidence v2 row {index} is incomplete; missing fields: "
+                + ", ".join(missing)
+            )
+        _sha256(identity["outputSha256"], f"evidence[{index}].outputSha256")
+        unique_identities = {
+            "receiptId": identity["receiptId"],
+            "evidenceId": identity["evidenceId"],
+            "outputRef": identity["outputRef"],
+            "canonicalTurn": (identity["taskId"], identity["turnId"]),
+        }
+        for kind, value in unique_identities.items():
+            previous_index = identity_owners[kind].get(value)
+            if previous_index is not None:
+                raise QuestionResultPackageAdapterError(
+                    f"official_model_evidence v2 rows {previous_index} and {index} "
+                    f"reuse {kind} invocation identity"
+                )
+            identity_owners[kind][value] = index
+        v2_rows.append(deepcopy(dict(row)))
+    return v2_rows
 
 
 def _validate_receipt_evidence(
@@ -241,27 +348,11 @@ def _validate_receipt_evidence(
     ],
 ) -> dict[str, dict[str, Any]]:
     rows = _evidence_rows(official_model_evidence)
+    v2_rows = _validated_v2_evidence_rows(rows)
     canonical_bindings: dict[str, dict[str, Any]] = {}
-    stage_identity_owners: dict[str, dict[object, str]] = {
-        "receiptId": {},
-        "evidenceId": {},
-        "outputRef": {},
-        "canonicalTurn": {},
-    }
-
-    def require_independent_identity(kind: str, value: object, stage: str) -> None:
-        previous_stage = stage_identity_owners[kind].get(value)
-        if previous_stage is not None:
-            raise QuestionResultPackageAdapterError(
-                f"receipt stages {previous_stage} and {stage} must use independent "
-                f"{kind} invocation identities"
-            )
-        stage_identity_owners[kind][value] = stage
-
     for stage, receipt in package.model_invocation_receipts.items():
         receipt_dict = receipt.to_dict()
         receipt_id = receipt.receipt_id
-        require_independent_identity("receiptId", receipt_id, stage)
         receipt_scope = dict(receipt.scope or {})
         receipt_scope_fields = {
             "questionId": _scope_value(
@@ -288,7 +379,9 @@ def _validate_receipt_evidence(
             )
         locator = dict(receipt.evidence_locator or {})
         locator_evidence_id = _scope_value(locator, "evidenceId", "evidence_id", "id")
-        locator_output_ref = _scope_value(locator, "outputRef", "output_ref", "ref")
+        locator_output_ref = _scope_value(
+            locator, "outputRef", "output_ref", "ref", "logRef"
+        )
         if not locator_output_ref:
             raise QuestionResultPackageAdapterError(
                 f"receipt.{stage}.evidenceLocator.outputRef is required"
@@ -299,12 +392,13 @@ def _validate_receipt_evidence(
                 "outputSha256",
                 "output_sha256",
                 "outputHash",
+                "output_hash",
             ),
             f"receipt.{stage}.evidenceLocator.outputSha256",
         )
         matches = [
             row
-            for row in rows
+            for row in v2_rows
             if _row_value(row, "receiptId", "receipt_id") == receipt_id
         ]
         if not matches:
@@ -316,22 +410,32 @@ def _validate_receipt_evidence(
                 f"receipt.{stage} has ambiguous official_model_evidence binding"
             )
         row = matches[0]
-        row_schema_version = row.get("schemaVersion")
-        if (
-            type(row_schema_version) is not int
-            or row_schema_version != _OFFICIAL_EVIDENCE_SCHEMA_VERSION
-        ):
-            raise QuestionResultPackageAdapterError(
-                f"official_model_evidence for receipt.{stage}.schemaVersion must be 2"
-            )
         required = {
             "receiptId": _row_value(row, "receiptId", "receipt_id"),
             "evidenceId": _row_value(row, "evidenceId", "evidence_id", "id"),
             "questionId": _row_value(row, "questionId", "question_id", "question"),
-            "runId": _row_value(row, "sourceRunId", "runId", "run_id"),
+            "runId": _row_value(
+                row, "sourceRunId", "source_run_id", "runId", "run_id"
+            ),
+            "sourceSessionId": _row_value(
+                row,
+                "sourceSessionId",
+                "source_session_id",
+                "sessionId",
+                "session_id",
+            ),
             "taskId": _row_value(row, "taskId", "task_id", "task"),
             "turnId": _row_value(row, "turnId", "turn_id", "turn"),
-            "stageId": _row_value(row, "stageId", "stage_id", "stage", "workflowNode"),
+            "stageId": _row_value(
+                row,
+                "stageId",
+                "stage_id",
+                "stage",
+                "workflowNode",
+                "workflow_node",
+                "nodeId",
+                "node_id",
+            ),
             "modelPolicySha256": _row_value(
                 row,
                 "modelPolicySha256",
@@ -341,7 +445,13 @@ def _validate_receipt_evidence(
             "modelProvider": _row_value(row, "modelProvider", "provider"),
             "modelId": _row_value(row, "modelId", "model"),
             "status": _row_value(row, "status"),
-            "outputSha256": _row_value(row, "outputSha256", "output_sha256", "outputHash"),
+            "outputSha256": _row_value(
+                row,
+                "outputSha256",
+                "output_sha256",
+                "outputHash",
+                "output_hash",
+            ),
             "outputRef": _row_value(row, "outputRef", "output_ref", "ref", "logRef"),
         }
         missing = [key for key, value in required.items() if not value]
@@ -381,13 +491,6 @@ def _validate_receipt_evidence(
                     f"official_model_evidence for receipt.{stage} {field} "
                     "does not match receipt scope"
                 )
-        require_independent_identity("evidenceId", required["evidenceId"], stage)
-        require_independent_identity("outputRef", required["outputRef"], stage)
-        require_independent_identity(
-            "canonicalTurn",
-            (required["taskId"], required["turnId"]),
-            stage,
-        )
         if required["modelProvider"].lower() != receipt.provider.lower():
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} provider binding mismatch"
@@ -419,7 +522,22 @@ def _validate_receipt_evidence(
             raise QuestionResultPackageAdapterError(
                 f"receipt.{stage} receipt identity changed during validation"
             )
-        resolved = canonical_turn_resolver(row)
+        normalized_row = deepcopy(dict(row))
+        normalized_row.update(
+            {
+                "receiptId": required["receiptId"],
+                "evidenceId": required["evidenceId"],
+                "questionId": required["questionId"],
+                "sourceRunId": required["runId"],
+                "sourceSessionId": required["sourceSessionId"],
+                "taskId": required["taskId"],
+                "turnId": required["turnId"],
+                "stageId": required["stageId"],
+                "outputRef": required["outputRef"],
+                "outputSha256": required["outputSha256"],
+            }
+        )
+        resolved = canonical_turn_resolver(normalized_row)
         if not isinstance(resolved, Mapping):
             raise QuestionResultPackageAdapterError(
                 f"canonical turn output for receipt.{stage} was not found"
@@ -435,15 +553,19 @@ def _validate_receipt_evidence(
                 binding, "questionId", "question_id", "question"
             ),
             "runId": _scope_value(
-                binding, "sourceRunId", "runId", "run_id"
+                binding, "sourceRunId", "source_run_id", "runId", "run_id"
             ),
             "taskId": _scope_value(binding, "taskId", "task_id", "task"),
             "turnId": _scope_value(binding, "turnId", "turn_id", "turn"),
             "outputRef": _scope_value(
-                binding, "outputRef", "output_ref", "ref"
+                binding, "outputRef", "output_ref", "ref", "logRef"
             ),
             "outputSha256": _scope_value(
-                binding, "outputSha256", "output_sha256", "outputHash"
+                binding,
+                "outputSha256",
+                "output_sha256",
+                "outputHash",
+                "output_hash",
             ),
         }
         missing_binding = [
