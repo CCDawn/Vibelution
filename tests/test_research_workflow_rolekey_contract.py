@@ -8,9 +8,13 @@ so a one-sided rename cannot silently leave a workflow node unbound.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from core.research.workflow.bindings import build_run_binding_snapshots
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
-from core.research.workflow.models import ActorKind, AgentBindingLayers
+from core.research.workflow.models import ActorKind, AgentBindingLayers, WorkflowDefinition
 from core.web.services.team.team_constants import (
     CHALLENGE_CUP_RESEARCH_TEAM_ROLES,
     RESEARCH_TEAM_MEMBER_ROLE_KEYS,
@@ -18,6 +22,32 @@ from core.web.services.team.team_constants import (
 from core.web.services.team_workflow.research_runtime.team_role_source import (
     resolve_team_role_bindings,
 )
+
+
+EXPECTED_AGENT_NODE_ROLE_KEYS = {
+    "source_finding": "source_finder",
+    "source_extraction": "source_extractor",
+    "evidence_relations": "source_relation_mapper",
+    "knowledge_ingestion": "source_ingestor",
+    "hypothesis_design": "experiment_planner",
+    "protocol_design": "experiment_planner",
+    "protocol_review": "experiment_ledger",
+    "result_evaluation": "experiment_ledger",
+    "iteration_decision": "iteration_planner",
+    "version_governance": "iteration_versioning",
+}
+
+
+def _definition_agent_role_keys(definition: WorkflowDefinition) -> dict[str, str]:
+    return {
+        node.nodeId: node.primaryRoleKey
+        for node in definition.nodes
+        if node.actorKind is ActorKind.AGENT
+    }
+
+
+def _assert_definition_agent_role_keys(definition: WorkflowDefinition) -> None:
+    assert _definition_agent_role_keys(definition) == EXPECTED_AGENT_NODE_ROLE_KEYS
 
 
 def test_team_role_key_mapping_matches_challenge_cup_catalog() -> None:
@@ -50,9 +80,8 @@ def test_every_definition_agent_role_resolves_through_team_binding_path(monkeypa
     """Every agent node can resolve through the production team-role adapter."""
 
     definition = build_challenge_cup_workflow_definition()
-    definition_agent_roles = {
-        node.primaryRoleKey for node in definition.nodes if node.actorKind is ActorKind.AGENT
-    }
+    _assert_definition_agent_role_keys(definition)
+    definition_agent_roles = set(_definition_agent_role_keys(definition).values())
     mapping_roles = set(RESEARCH_TEAM_MEMBER_ROLE_KEYS)
     assert definition_agent_roles <= mapping_roles
 
@@ -85,3 +114,21 @@ def test_every_definition_agent_role_resolves_through_team_binding_path(monkeypa
         snapshot = by_node_id[node.nodeId]
         assert snapshot.roleKey == node.primaryRoleKey
         assert snapshot.agentId == f"agent-{node.primaryRoleKey}"
+
+
+def test_role_key_contract_rejects_a_legal_cross_node_rename() -> None:
+    """A rename to another valid roleKey must still fail the node contract."""
+
+    definition = build_challenge_cup_workflow_definition()
+    mutated = replace(
+        definition,
+        nodes=tuple(
+            replace(node, primaryRoleKey="source_extractor")
+            if node.nodeId == "source_finding"
+            else node
+            for node in definition.nodes
+        ),
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_definition_agent_role_keys(mutated)
