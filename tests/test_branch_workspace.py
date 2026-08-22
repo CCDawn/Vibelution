@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import inspect
 import subprocess
 from pathlib import Path
@@ -14,6 +15,7 @@ from core.infrastructure.branch_workspace import (
     migrate_legacy_branch_workspaces,
     resolve_branch_workspace,
 )
+from core.launcher import branch_instance_cleanup as cleanup
 
 
 def _git(root: Path, *args: str) -> str:
@@ -181,6 +183,30 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     assert by_id["branch:codex/not-open"]["checkedOut"] is False
     assert by_id["retired:shell-only"]["promotable"] is False
     assert len(payload["items"]) == len({item["id"] for item in payload["items"]})
+
+
+def test_pool_reparse_entry_is_removed_without_touching_external_target(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    pool_entry = project / ".worktrees" / "external-link"
+    external = tmp_path / "external-data"
+    sentinel = external / "must-survive.txt"
+    pool_entry.parent.mkdir(parents=True)
+    sentinel.parent.mkdir(parents=True)
+    sentinel.write_text("keep", encoding="utf-8")
+    try:
+        pool_entry.symlink_to(external, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory reparse link unavailable: {exc}")
+
+    layout = resolve_branch_workspace(project)
+    leftovers = workspace._unregistered_pool_dirs(layout)
+    assert pool_entry in leftovers
+    assert external not in leftovers
+
+    cleanup._remove_worktree(project, pool_entry)
+
+    assert not os.path.lexists(str(pool_entry))
+    assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
 def test_allocate_worktree_path_uses_in_repo_pool(tmp_path):

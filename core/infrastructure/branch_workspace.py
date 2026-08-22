@@ -548,17 +548,37 @@ def _unregistered_pool_dirs(layout: BranchWorkspaceLayout) -> list[Path]:
         if not root.is_dir():
             continue
         for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+            if _is_reparse_point(child):
+                leftovers.append(child)
+                continue
             if not child.is_dir():
                 continue
             if child.name == RETIRED_DIR_NAME:
                 for retired in sorted(child.iterdir(), key=lambda item: item.name.lower()):
-                    if retired.is_dir() and not (retired / ".git").exists():
+                    if _is_reparse_point(retired):
+                        leftovers.append(retired)
+                    elif retired.is_dir() and not (retired / ".git").exists():
                         leftovers.append(retired.resolve())
                 continue
             if (child / ".git").exists():
                 continue
             leftovers.append(child.resolve())
     return leftovers
+
+
+def _is_reparse_point(path: Path) -> bool:
+    """Inspect a pool entry without following a symlink or Windows junction."""
+
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and bool(is_junction()):
+            return True
+        attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+        return bool(attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+    except OSError:
+        return False
 
 
 def _worktree_is_dirty(path: Path) -> bool:
