@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const FNV32_OFFSET = 2166136261;
 const FNV32_PRIME = 16777619;
+const STORAGE_MIGRATION_SCHEMA_VERSION = 1;
+const STORAGE_MIGRATION_STATE_NAME = "storage-migration.json";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -48,21 +50,8 @@ export function resolveProjectsHome(): string {
 
 export function resolveRuntimeManagerDir(workspaceRoot: string): string {
   const checkoutDir = join(resolve(workspaceRoot), ".runtime", "runtime-manager");
-  const projectId = readProjectId(workspaceRoot);
-  if (!projectId) {
-    return checkoutDir;
-  }
-  const instanceId = instanceIdForProject(workspaceRoot);
-  const migratedDir = join(resolveProjectsHome(), projectId, "instances", instanceId, "runtime", "runtime-manager");
-  const migratedState = join(migratedDir, "state.json");
-  const checkoutState = join(checkoutDir, "state.json");
-  if (existsSync(migratedState)) {
-    return migratedDir;
-  }
-  if (existsSync(checkoutState)) {
-    return checkoutDir;
-  }
-  return existsSync(migratedDir) ? migratedDir : checkoutDir;
+  const activeRuntimeHome = resolveActiveCanonicalRuntimeHome(workspaceRoot);
+  return activeRuntimeHome ? join(activeRuntimeHome, "runtime-manager") : checkoutDir;
 }
 
 export const DESKTOP_SHELL_OWNER_FILE = "desktop_shell_owner.json";
@@ -105,20 +94,43 @@ export function resolveCheckoutRuntimeHome(workspaceRoot: string): string {
 
 export function resolveLauncherRuntimeDir(workspaceRoot: string): string {
   const checkoutDir = join(resolveCheckoutRuntimeHome(workspaceRoot), "launcher");
+  const activeRuntimeHome = resolveActiveCanonicalRuntimeHome(workspaceRoot);
+  return activeRuntimeHome ? join(activeRuntimeHome, "launcher") : checkoutDir;
+}
+
+/**
+ * Keep Electron's runtime-path cutover identical to Python's
+ * resolve_active_project_storage_paths(): a valid migration marker makes the
+ * canonical instance runtime authoritative, even before its first state file
+ * is written. Falling back based on whichever state.json happens to exist
+ * creates competing port records and can route a live window to a stale port.
+ */
+function resolveActiveCanonicalRuntimeHome(workspaceRoot: string): string | null {
+  const projectId = readProjectId(workspaceRoot);
   const canonicalHome = resolveCanonicalRuntimeHome(workspaceRoot);
-  if (!canonicalHome) {
-    return checkoutDir;
+  if (!projectId || !canonicalHome) {
+    return null;
   }
-  const migratedDir = join(canonicalHome, "launcher");
-  const migratedState = join(migratedDir, "state.json");
-  const checkoutState = join(checkoutDir, "state.json");
-  if (existsSync(migratedState)) {
-    return migratedDir;
+  const instanceId = instanceIdForProject(workspaceRoot);
+  const markerPath = join(dirname(canonicalHome), STORAGE_MIGRATION_STATE_NAME);
+  if (!existsSync(markerPath)) {
+    return null;
   }
-  if (existsSync(checkoutState)) {
-    return checkoutDir;
+  try {
+    const payload = JSON.parse(readFileSync(markerPath, "utf8")) as unknown;
+    if (
+      isRecord(payload)
+      && payload.schemaVersion === STORAGE_MIGRATION_SCHEMA_VERSION
+      && payload.status === "completed"
+      && String(payload.projectId || "") === projectId
+      && String(payload.instanceId || "") === instanceId
+    ) {
+      return canonicalHome;
+    }
+  } catch {
+    // A present migration marker is a fail-closed boundary, matching Python.
   }
-  return existsSync(migratedDir) ? migratedDir : checkoutDir;
+  throw new Error(`storage_migration_marker_invalid: ${markerPath}`);
 }
 
 export function resolveDesktopShellOwnerPaths(workspaceRoot: string): {
