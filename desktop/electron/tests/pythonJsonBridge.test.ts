@@ -94,6 +94,97 @@ describe("runPythonJsonBridge", () => {
     })).resolves.toBe(false);
   });
 
+  it("does not treat an unverified tree result as successful retirement", async () => {
+    const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({
+      status: "unverified",
+      pid: 42,
+      reason: "child_enumeration_unstable",
+    }));
+    const terminateOwnedTree = createPythonOwnedProcessTreeTerminator({
+      pythonPath: "python",
+      workspaceRoot: "C:/repo",
+      allowedKinds: ["managed_workbench_backend"],
+      spawnImpl,
+    });
+
+    await expect(terminateOwnedTree(42, {
+      pid: 42,
+      createTime: 123.456,
+      executable: "C:/Python/python.exe"
+    })).resolves.toBe(false);
+  });
+
+  it("rejects null, array, and unknown-status tree payloads without throwing", async () => {
+    const payloads: unknown[] = [
+      null,
+      [],
+      { status: "future_status", pid: 42 },
+      { status: {}, pid: 42 },
+    ];
+    for (const payload of payloads) {
+      const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify(payload));
+      const terminateOwnedTree = createPythonOwnedProcessTreeTerminator({
+        pythonPath: "python",
+        workspaceRoot: "C:/repo",
+        allowedKinds: ["managed_workbench_backend"],
+        spawnImpl,
+      });
+
+      await expect(terminateOwnedTree(42, {
+        pid: 42,
+        createTime: 123.456,
+        executable: "C:/Python/python.exe"
+      })).resolves.toBe(false);
+    }
+  });
+
+  it("requires two stable descendant snapshots before killing the owned tree", async () => {
+    const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({ status: "unverified", pid: 42 }));
+    const terminateOwnedTree = createPythonOwnedProcessTreeTerminator({
+      pythonPath: "python",
+      workspaceRoot: "C:/repo",
+      allowedKinds: ["managed_workbench_backend"],
+      spawnImpl,
+    });
+
+    await expect(terminateOwnedTree(42, {
+      pid: 42,
+      createTime: 123.456,
+      executable: "C:/Python/python.exe"
+    })).resolves.toBe(false);
+
+    const script = String(spawnImpl.mock.calls[0]?.[1]?.[1] ?? "");
+    expect(script).toContain("def descendants_snapshot(root_process):");
+    expect(script).toContain("processes, process_fingerprints = descendants_snapshot(root)");
+    expect(script).toContain("verification_processes, verification_fingerprints = descendants_snapshot(root)");
+    expect(script).toContain("processes = verification_processes");
+    expect(script).toContain("float(process.create_time())");
+    expect(script).toContain("process_fingerprints");
+    expect(script).toContain("verification_fingerprints");
+    expect(script).toContain("if process_fingerprints != verification_fingerprints:");
+    expect(script).toContain('emit("unverified", kind=kind, reason="child_enumeration_unstable")');
+    expect(script).toContain("fresh_root = psutil.Process(pid)");
+    expect(script).toContain("if not identity_matches(fresh_root):");
+    expect(script).toContain("root = fresh_root");
+    expect(script).toContain("if not process.is_running():");
+    expect(script).toContain('emit("unverified", kind=kind, reason="root_identity_changed_before_termination")');
+    const unstableIndex = script.indexOf('emit("unverified", kind=kind, reason="child_enumeration_unstable")');
+    const freshProcessesIndex = script.indexOf("processes = verification_processes");
+    const freshRootIndex = script.indexOf("fresh_root = psutil.Process(pid)");
+    const rootRecheckIndex = script.indexOf('emit("unverified", kind=kind, reason="root_identity_changed_before_termination")');
+    const rootReplaceIndex = script.indexOf("root = fresh_root");
+    const runningCheckIndex = script.indexOf("if not process.is_running():");
+    const terminateIndex = script.indexOf("process.terminate()");
+    expect(unstableIndex).toBeGreaterThanOrEqual(0);
+    expect(freshProcessesIndex).toBeGreaterThan(unstableIndex);
+    expect(freshRootIndex).toBeGreaterThan(freshProcessesIndex);
+    expect(rootRecheckIndex).toBeGreaterThan(unstableIndex);
+    expect(rootReplaceIndex).toBeGreaterThan(rootRecheckIndex);
+    expect(runningCheckIndex).toBeGreaterThan(rootReplaceIndex);
+    expect(terminateIndex).toBeGreaterThan(rootRecheckIndex);
+    expect(terminateIndex).toBeGreaterThan(runningCheckIndex);
+  });
+
   it("does not treat a still-alive tree result as successful retirement", async () => {
     const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({
       status: "still_alive",

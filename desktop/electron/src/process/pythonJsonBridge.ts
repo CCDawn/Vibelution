@@ -81,12 +81,33 @@ export type PythonOwnedProcessTreeKind =
   | "frontend_build_process";
 
 export type PythonOwnedProcessTreeResult = {
-  status: "terminated" | "already_dead" | "not_owned" | "still_alive";
+  status: "terminated" | "already_dead" | "not_owned" | "still_alive" | "unverified";
   pid: number;
   kind?: string;
   reason?: string;
   remainingPids?: number[];
 };
+
+const PYTHON_OWNED_PROCESS_TREE_STATUSES: ReadonlySet<string> = new Set([
+  "terminated",
+  "already_dead",
+  "not_owned",
+  "still_alive",
+  "unverified",
+]);
+
+function isPythonOwnedProcessTreeResult(value: unknown): value is PythonOwnedProcessTreeResult {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as { pid?: unknown; status?: unknown };
+  return (
+    typeof candidate.pid === "number" &&
+    Number.isInteger(candidate.pid) &&
+    typeof candidate.status === "string" &&
+    PYTHON_OWNED_PROCESS_TREE_STATUSES.has(candidate.status)
+  );
+}
 
 export type PythonOwnedProcessTreeTerminator = (
   pid: number,
@@ -108,6 +129,7 @@ print(json.dumps(identity or {}, separators=(",", ":")))
 
 const PYTHON_OWNED_PROCESS_TREE_SCRIPT = String.raw`
 import json
+import math
 import os
 import sys
 
@@ -181,6 +203,32 @@ def identity_matches(process):
         and actual_executable == expected_executable
     )
 
+def descendants_snapshot(root_process):
+    try:
+        processes = list(root_process.children(recursive=True))
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        emit("unverified", reason="root_disappeared_during_child_enumeration")
+        raise SystemExit(0)
+    except (psutil.AccessDenied, OSError) as error:
+        emit("unverified", reason="child_enumeration_failed:" + type(error).__name__)
+        raise SystemExit(0)
+    fingerprints = []
+    for process in processes:
+        try:
+            process_pid = int(process.pid)
+            create_time = float(process.create_time())
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            emit("unverified", reason="descendant_disappeared_during_snapshot")
+            raise SystemExit(0)
+        except (psutil.AccessDenied, OSError, TypeError, ValueError) as error:
+            emit("unverified", reason="descendant_identity_unavailable:" + type(error).__name__)
+            raise SystemExit(0)
+        if not math.isfinite(create_time) or create_time <= 0:
+            emit("unverified", reason="descendant_identity_invalid")
+            raise SystemExit(0)
+        fingerprints.append((process_pid, create_time))
+    return processes, sorted(fingerprints)
+
 try:
     root = psutil.Process(pid)
     kind = ""
@@ -202,12 +250,44 @@ try:
         emit("not_owned", kind=kind, reason="process_identity_mismatch")
         raise SystemExit(0)
 
-    processes = list(root.children(recursive=True))
+    processes, process_fingerprints = descendants_snapshot(root)
+    # A second stable snapshot is the narrowest proof available before the
+    # helper starts mutating the tree.  If descendants appear/disappear while
+    # enumerating, the helper cannot prove it has a complete tree and must
+    # leave the lifecycle handle for a later reconciliation pass.  The
+    # create-time component protects against a PID being reused between the
+    # two snapshots; psutil's Process handles provide the PID-reuse guard for
+    # the subsequent kill, while this fingerprint prevents a reused child
+    # from being omitted and still reported as a complete termination.
+    verification_processes, verification_fingerprints = descendants_snapshot(root)
+    if process_fingerprints != verification_fingerprints:
+        emit("unverified", kind=kind, reason="child_enumeration_unstable")
+        raise SystemExit(0)
+    # Use the second snapshot's fresh Process handles after its fingerprint
+    # matches.  This keeps the kill list tied to the most recent enumeration.
+    processes = verification_processes
+    # The root identity may change after the snapshots but before mutation.
+    # Keep the lifecycle handle open for reconciliation if that final guard
+    # cannot prove that the original owned root is still the target.
+    try:
+        fresh_root = psutil.Process(pid)
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        emit("unverified", kind=kind, reason="root_reacquire_failed")
+        raise SystemExit(0)
+    except (psutil.AccessDenied, OSError) as error:
+        emit("unverified", kind=kind, reason="root_reacquire_failed:" + type(error).__name__)
+        raise SystemExit(0)
+    if not identity_matches(fresh_root):
+        emit("unverified", kind=kind, reason="root_identity_changed_before_termination")
+        raise SystemExit(0)
+    root = fresh_root
     # Descendants first prevents a child from surviving a root termination.
     for process in reversed(processes):
         try:
+            if not process.is_running():
+                continue
             process.terminate()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied, OSError):
             pass
     try:
         root.terminate()
@@ -233,9 +313,9 @@ try:
 except (psutil.NoSuchProcess, psutil.ZombieProcess):
     # A missing root does not prove that descendants are gone. The caller
     # must retain the handle and reconcile it through a later verified pass.
-    emit("not_owned", reason="root_not_found")
+    emit("unverified", reason="root_not_found")
 except (psutil.AccessDenied, OSError) as error:
-    emit("not_owned", reason=type(error).__name__)
+    emit("unverified", reason=type(error).__name__)
 `;
 
 /**
@@ -306,18 +386,23 @@ export function createPythonOwnedProcessTreeTerminator(input: {
 
     let result: PythonOwnedProcessTreeResult;
     try {
-      result = parsePythonJsonBridgePayload<PythonOwnedProcessTreeResult>(
+      const parsed = parsePythonJsonBridgePayload<unknown>(
         raw,
         `owned process-tree terminator for pid ${normalizedPid}`
       );
+      if (!isPythonOwnedProcessTreeResult(parsed)) {
+        return false;
+      }
+      result = parsed;
     } catch {
       return false;
     }
     if (result.pid !== normalizedPid) {
       return false;
     }
-    // "already_dead" is not proof that descendants are gone.  Only the
-    // helper's explicit post-termination verification can close the handle.
+    // "already_dead" and "unverified" are not proof that descendants are
+    // gone. Only the helper's explicit post-termination verification can
+    // close the handle.
     return result.status === "terminated";
   };
 }
