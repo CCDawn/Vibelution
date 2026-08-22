@@ -16,7 +16,7 @@ import time
 
 from config import get_config
 from config.public_config import load_public_config
-from core.launcher import desktop_session_store
+from core.launcher import desktop_session_store, lifecycle_intent_store
 from core.infrastructure import developer_sandbox
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
@@ -1173,6 +1173,28 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     observed_state = str(workbench.get("observedState") or "closed").strip() or "closed"
     session_role = str(workbench.get("sessionRole") or "workbench").strip() or "workbench"
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
+    project_window_alive = bool(workbench.get("browserWindowAlive"))
+    window_managed = bool(workbench.get("windowManaged"))
+    window_provider = str(workbench.get("windowProvider") or "").strip()
+    desktop_session_id = str(workbench.get("desktopSessionId") or "").strip()
+    electron_window_expected = bool(window_provider == "electron" or desktop_session_id)
+    active_close_transaction = (
+        lifecycle_intent_store.latest_active_workbench_close_transaction_for_session(desktop_session_id)
+        if desktop_session_id
+        else {}
+    )
+    if (
+        project_window_alive
+        and window_managed
+        and electron_window_expected
+        and desired_state == "closed"
+        and not active_close_transaction
+    ):
+        # The current Electron window is newer lifecycle evidence than a
+        # stopped Runtime Manager's persisted desiredState=closed snapshot.
+        desired_state = "open"
+        if observed_state == "open" and phase != "failed":
+            phase = "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
     if not failure_message:
         # Preserve lifecycle failures stored only on lastError (older reconcile paths).

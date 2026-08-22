@@ -1129,6 +1129,57 @@ def test_runtime_workbench_payload_projects_launcher_only_electron_session(tmp_p
     assert payload["browserManaged"] is False
 
 
+@pytest.mark.parametrize("has_active_close_transaction", [False, True])
+def test_runtime_workbench_payload_reconciles_stale_closed_state_against_active_electron_window(
+    has_active_close_transaction, monkeypatch
+):
+    from core.launcher import lifecycle_intent_store
+
+    desktop_session_id = "electron-runtime-reconcile-1"
+    monkeypatch.setattr(
+        desktop_session_store,
+        "latest_active_workbench_projection",
+        lambda: {
+            "observedState": "open",
+            "browserWindowAlive": True,
+            "browserManaged": False,
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "desktopSessionId": desktop_session_id,
+        },
+    )
+    monkeypatch.setattr(desktop_session_store, "latest_active_window_provider_projection", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "latest_active_workbench_close_transaction_for_session",
+        lambda session_id: {"closeId": "workbench-close-active"}
+        if has_active_close_transaction and session_id == desktop_session_id
+        else {},
+    )
+
+    payload = runtime_service._workbench_payload(
+        "zh",
+        {
+            "daemonRunning": False,
+            "command": {"activeCommandId": "", "activeType": ""},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+            },
+        },
+    )
+
+    assert payload["observedState"] == "open"
+    if has_active_close_transaction:
+        assert payload["desiredState"] == "closed"
+        assert payload["statusLine"] == "正在关闭工作台。"
+    else:
+        assert payload["desiredState"] == "open"
+        assert payload["phase"] == "steady"
+        assert payload["statusLine"] == "工作台正在运行。"
+
+
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
