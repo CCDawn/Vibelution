@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from core.research.workflow.bindings import build_run_binding_snapshots
+from core.research.workflow.models import AgentBindingLayers
 from core.web.services.team_workflow.research_runtime.team_role_source import (
+    effective_binding_layers,
     resolve_team_role_bindings,
 )
 
@@ -64,3 +67,60 @@ def test_resolve_team_role_bindings_empty_on_lookup_failure(monkeypatch) -> None
     )
     assert resolve_team_role_bindings("research-team") == {}
     assert resolve_team_role_bindings("") == {}
+
+
+def test_canonical_six_role_team_projects_legacy_workflow_bindings(monkeypatch) -> None:
+    canonical = {
+        "challenge_cup_search": "agent-search",
+        "challenge_cup_extractor": "agent-extractor",
+        "challenge_cup_knowledge_manager": "agent-knowledge",
+        "challenge_cup_execution_steward": "agent-execution",
+        "challenge_cup_experiment_revision": "agent-revision",
+        "challenge_cup_evaluator": "agent-evaluator",
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_service.list_team_role_binding_sources",
+        lambda _team_id: {
+            "canvas_nodes": [
+                {"role": "source_finder", "agentId": "agent-old-search"},
+                {"role": "iteration_versioning", "agentId": "agent-old-versioning"},
+            ],
+            "members": [
+                {"role": role_key, "agentId": agent_id}
+                for role_key, agent_id in canonical.items()
+            ],
+        },
+    )
+
+    role_bindings = resolve_team_role_bindings("research-team")
+
+    assert role_bindings["source_finder"] == "agent-search"
+    assert role_bindings["source_extractor"] == "agent-extractor"
+    assert role_bindings["source_relation_mapper"] == "agent-knowledge"
+    assert role_bindings["source_ingestor"] == "agent-knowledge"
+    assert role_bindings["experiment_planner"] == "agent-revision"
+    assert role_bindings["iteration_planner"] == "agent-revision"
+    assert role_bindings["experiment_ledger"] == "agent-evaluator"
+    assert role_bindings["execution_steward"] == "agent-execution"
+    assert "iteration_versioning" not in role_bindings
+
+    layers = effective_binding_layers("research-team", AgentBindingLayers())
+    snapshots = build_run_binding_snapshots(
+        run_id="run-canonical-six",
+        workflow_version_id="workflow-v2",
+        layers=layers,
+        captured_at="2026-08-23T00:00:00Z",
+    )
+    agent_by_node = {item.nodeId: item.agentId for item in snapshots}
+    assert agent_by_node == {
+        "source_finding": "agent-search",
+        "source_extraction": "agent-extractor",
+        "evidence_relations": "agent-knowledge",
+        "knowledge_ingestion": "agent-knowledge",
+        "hypothesis_design": "agent-revision",
+        "protocol_design": "agent-revision",
+        "protocol_review": "agent-evaluator",
+        "result_evaluation": "agent-evaluator",
+        "iteration_decision": "agent-revision",
+        "version_governance": "",
+    }

@@ -7,8 +7,9 @@ RunAgentBindingSnapshot, so history never re-reads live team config.
 
 Rules enforced here:
 - no random fallback to arbitrary agents (a missing role is simply unbound);
-- canvas nodes win over team members for the same role (mirrors the frontend
-  researchStageAgentBindings projection);
+- canvas nodes win over team members for the same observed role;
+- a canonical product role projects onto its legacy lookup aliases and wins
+  over legacy Agent identities, while system-capability aliases never project;
 - team lookup failure yields an empty map (all roles unbound), never an error.
 """
 
@@ -17,6 +18,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
 from core.research.workflow.models import AgentBindingLayers
 
 
@@ -47,21 +51,43 @@ def resolve_team_role_bindings(team_id: str) -> dict[str, str]:
     except Exception:
         return {}
 
+    contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
     bindings: dict[str, str] = {}
-    for node in list(sources.get("canvas_nodes") or []):
-        if not isinstance(node, dict):
+    canonical_product_bindings: dict[str, str] = {}
+    for items in (
+        list(sources.get("canvas_nodes") or []),
+        list(sources.get("members") or []),
+    ):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            role = _role_of(item)
+            agent_id = _agent_id_of(item)
+            if not role or not agent_id:
+                continue
+            owner = contract.resolve_role_owner(role)
+            if owner is not None and owner[0] == "system_capability":
+                # System capabilities are never backfilled with a product Agent.
+                continue
+            if role not in bindings:
+                bindings[role] = agent_id
+            if (
+                owner is not None
+                and owner[0] == "product_agent"
+                and role == owner[1]
+                and owner[1] not in canonical_product_bindings
+            ):
+                canonical_product_bindings[owner[1]] = agent_id
+
+    # The v2 canonical identity is the active binding.  Project it onto every
+    # legacy lookup key so the frozen workflow definition can remain readable
+    # without reviving legacy Agent identities.
+    for role in contract.product_agents:
+        agent_id = canonical_product_bindings.get(role.product_role_id, "")
+        if not agent_id:
             continue
-        role = _role_of(node)
-        agent_id = _agent_id_of(node)
-        if role and agent_id and role not in bindings:
-            bindings[role] = agent_id
-    for member in list(sources.get("members") or []):
-        if not isinstance(member, dict):
-            continue
-        role = _role_of(member)
-        agent_id = _agent_id_of(member)
-        if role and agent_id and role not in bindings:
-            bindings[role] = agent_id
+        for lookup_key in (role.product_role_id, *role.legacy_role_aliases):
+            bindings[normalize_role_key(lookup_key)] = agent_id
     return bindings
 
 

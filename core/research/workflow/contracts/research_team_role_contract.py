@@ -8,7 +8,7 @@ prompt/tool policy and meeting persistence consume this snapshot in later layers
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from ._canonical import sha256_hex
 from ._validation import ContractValidationError
@@ -216,6 +216,38 @@ class ResearchTeamRoleContract:
         return tuple(
             capability.capability_id for capability in self.system_capabilities
         )
+
+    def resolve_role_owner(
+        self,
+        role_key: Any,
+    ) -> tuple[Literal["product_agent", "system_capability"], str] | None:
+        """Resolve a canonical/legacy role key to its contract-owned identity.
+
+        The contract is the only alias authority.  Callers must inspect the
+        owner type instead of assuming every historical role represents a
+        product Agent.
+        """
+
+        normalized = str(role_key or "").strip().lower()
+        if not normalized:
+            return None
+        for role in self.product_agents:
+            values = (role.product_role_id, *role.legacy_role_aliases)
+            if normalized in {value.strip().lower() for value in values}:
+                return ("product_agent", role.product_role_id)
+        for capability in self.system_capabilities:
+            values = (capability.capability_id, *capability.legacy_role_aliases)
+            if normalized in {value.strip().lower() for value in values}:
+                return ("system_capability", capability.capability_id)
+        return None
+
+    def resolve_product_role_id(self, role_key: Any) -> str | None:
+        """Return the canonical product role, excluding system capabilities."""
+
+        owner = self.resolve_role_owner(role_key)
+        if owner is None or owner[0] != "product_agent":
+            return None
+        return owner[1]
 
     def participant_policy(self, meeting_type: str) -> ResearchParticipantPolicy:
         normalized = _require_text(meeting_type, field_name="meetingType")

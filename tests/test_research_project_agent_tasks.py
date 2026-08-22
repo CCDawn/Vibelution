@@ -73,6 +73,38 @@ def _team_project_and_agents(tmp_path, monkeypatch):
     return team, project, agents
 
 
+def _canonical_team_project_and_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    role_specs = (
+        ("challenge_cup_experiment_revision", "实验修订"),
+        ("challenge_cup_evaluator", "独立评估"),
+        ("challenge_cup_execution_steward", "执行管理"),
+        ("challenge_cup_versioning", "旧版本治理"),
+        ("challenge_cup_experiment_planner", "旧实验规划"),
+    )
+    members = []
+    agents = {}
+    for role_key, label in role_specs:
+        agent = agent_directory_service.create_agent_instance(
+            display_name=label,
+            role_key=role_key,
+        )
+        agents[role_key] = agent
+        members.append(
+            {
+                "agentId": agent["agentId"],
+                "agentName": label,
+                "role": role_key,
+            }
+        )
+    team = team_service.create_team(name="六角色科研团队", members=members)
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "125 题假说实验"},
+    )["project"]
+    return team, project, agents
+
+
 def _accepted_submitter(monkeypatch):
     calls: list[dict] = []
 
@@ -160,6 +192,67 @@ def test_task_start_resolves_fixed_role_and_replays_idempotently(tmp_path, monke
     assert replay["task"]["taskId"] == first["task"]["taskId"]
     assert replay["task"]["sessionId"] == first["task"]["sessionId"]
     assert len(calls) == 1
+
+
+def test_canonical_revision_agent_starts_legacy_task_contract(
+    tmp_path,
+    monkeypatch,
+):
+    team, project, agents = _canonical_team_project_and_agents(
+        tmp_path,
+        monkeypatch,
+    )
+    calls = _accepted_submitter(monkeypatch)
+
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "canonical-revision-design-1",
+        },
+    )
+
+    assert started["task"]["agentId"] == agents[
+        "challenge_cup_experiment_revision"
+    ]["agentId"]
+    assert started["task"]["roleKey"] == "challenge_cup_experiment_planner"
+    assert len(calls) == 1
+
+
+def test_role_resolver_accepts_canonical_evaluator_and_execution_but_not_versioning(
+    tmp_path,
+    monkeypatch,
+):
+    team, _project, agents = _canonical_team_project_and_agents(
+        tmp_path,
+        monkeypatch,
+    )
+
+    evaluator_member, evaluator = research_project_agent_tasks._resolve_role_agent(
+        team["teamId"],
+        research_project_agent_tasks.TASK_KIND_CONTRACTS["protocol_review"],
+    )
+    execution_member, execution = research_project_agent_tasks._resolve_role_agent(
+        team["teamId"],
+        {
+            "teamRole": "execution_steward",
+            "roleKey": "execution_steward",
+        },
+    )
+
+    assert evaluator_member["agentId"] == agents["challenge_cup_evaluator"]["agentId"]
+    assert evaluator["roleKey"] == "challenge_cup_evaluator"
+    assert execution_member["agentId"] == agents[
+        "challenge_cup_execution_steward"
+    ]["agentId"]
+    assert execution["roleKey"] == "challenge_cup_execution_steward"
+    with pytest.raises(ResearchProjectAgentTaskError) as exc:
+        research_project_agent_tasks._resolve_role_agent(
+            team["teamId"],
+            research_project_agent_tasks.TASK_KIND_CONTRACTS["version_governance"],
+        )
+    assert exc.value.code == "system_capability_not_agent"
 
 
 def test_task_start_requires_explicit_agent_to_match_team_role_snapshot(
@@ -571,9 +664,9 @@ def test_public_task_status_is_project_scoped_and_path_prompt_secret_free(
         team["teamId"],
         project["projectId"],
         {
-            "taskKind": "version_governance",
+            "taskKind": "experiment_design",
             "targetRef": "candidate-1",
-            "idempotencyKey": "version-1",
+            "idempotencyKey": "public-status-design-1",
         },
     )
 
@@ -584,7 +677,7 @@ def test_public_task_status_is_project_scoped_and_path_prompt_secret_free(
     encoded = json.dumps(status, ensure_ascii=False).lower()
 
     assert status["researchProjectId"] == project["projectId"]
-    assert status["tasks"][0]["roleKey"] == "challenge_cup_versioning"
+    assert status["tasks"][0]["roleKey"] == "challenge_cup_experiment_planner"
     assert "storagepath" not in encoded
     assert "prompt" not in encoded
     assert "secret" not in encoded

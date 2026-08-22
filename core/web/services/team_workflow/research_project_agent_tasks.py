@@ -9,6 +9,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
+
 SCHEMA_VERSION = 2
 TASK_STORE_FILE_NAME = "research_project_agent_tasks.json"
 MAX_TASKS = 500
@@ -376,16 +380,38 @@ def _resolve_role_agent(
     team = s.team_service.get_team(team_id)
     expected_team_role = _text(contract.get("teamRole"), limit=80)
     expected_role_key = _text(contract.get("roleKey"), limit=80)
-    member = next(
-        (
-            item
-            for item in list(team.get("members") or [])
-            if isinstance(item, dict)
-            and _text(item.get("role"), limit=80) == expected_team_role
-            and _text(item.get("agentId"))
-        ),
-        None,
+    role_contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
+    expected_owner = role_contract.resolve_role_owner(
+        expected_role_key or expected_team_role
     )
+    if expected_owner is None:
+        raise ResearchProjectAgentTaskError(
+            f"Research task role is not present in the canonical role contract: {expected_role_key or expected_team_role}.",
+            code="unknown_agent_role",
+        )
+    if expected_owner[0] != "product_agent":
+        raise ResearchProjectAgentTaskError(
+            f"Research task role {expected_role_key or expected_team_role} is a system capability and cannot bind a product Agent.",
+            code="system_capability_not_agent",
+        )
+
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for index, item in enumerate(list(team.get("members") or [])):
+        if not isinstance(item, dict) or not _text(item.get("agentId")):
+            continue
+        observed_role = _text(item.get("role") or item.get("roleKey"), limit=80)
+        owner = role_contract.resolve_role_owner(observed_role)
+        if owner != expected_owner:
+            continue
+        candidates.append(
+            (
+                0 if observed_role.lower() == expected_owner[1] else 1,
+                index,
+                item,
+            )
+        )
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    member = candidates[0][2] if candidates else None
     if member is None:
         raise ResearchProjectAgentTaskError(
             f"Research team role {expected_team_role} is not bound to an Agent.",
@@ -405,7 +431,8 @@ def _resolve_role_agent(
             code="agent_role_unbound",
         )
     actual_role_key = _text(agent.get("roleKey"), limit=80)
-    if actual_role_key and actual_role_key != expected_role_key:
+    actual_owner = role_contract.resolve_role_owner(actual_role_key)
+    if actual_role_key and actual_owner != expected_owner:
         raise ResearchProjectAgentTaskError(
             f"Agent role mismatch for {expected_team_role}: expected {expected_role_key}.",
             code="agent_role_mismatch",

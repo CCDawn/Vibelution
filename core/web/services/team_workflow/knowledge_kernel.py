@@ -19,6 +19,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -3510,21 +3514,187 @@ def _normalize_local_research_task_type(value: Any) -> str:
 
 
 def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], payload: dict[str, Any]) -> dict[str, str]:
+    """Project current canonical Team bindings onto legacy source-stage keys.
+
+    Challenge Cup v2 ``activeBinding`` is authoritative.  Generic/legacy teams
+    retain the old canvas/member lookup as a compatibility read, but a
+    canonical role wins when both identities are present.  Explicit IDs are
+    validation input, never authority for binding an arbitrary Agent.
+    """
+
     s = _service()
-    explicit_agent_ids = payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else {}
-    mapped: dict[str, str] = {}
-    for role in roles:
-        explicit = s._trim_text(explicit_agent_ids.get(role), max_length=160)
-        if explicit:
-            mapped[role] = explicit
+    contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
+
+    requested: list[tuple[str, str]] = []
+    for raw_role in roles:
+        role = s._normalize_source_collection_agent_role(raw_role).lower()
+        owner = contract.resolve_role_owner(role)
+        if owner is None:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection requested an unknown role: {role or '<empty>'}."
+            )
+        if owner[0] != "product_agent":
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection role is a system capability, not a product Agent: {role}."
+            )
+        if role not in {item[0] for item in requested}:
+            requested.append((role, owner[1]))
+
+    raw_explicit = (
+        payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else {}
+    )
+    explicit: dict[str, tuple[str, str]] = {}
+    for raw_role, raw_agent_id in raw_explicit.items():
+        role = s._normalize_source_collection_agent_role(raw_role).lower()
+        agent_id = s._trim_text(raw_agent_id, max_length=160)
+        owner = contract.resolve_role_owner(role)
+        if owner is None:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection agentIds contains an unknown role: {role or '<empty>'}."
+            )
+        if owner[0] != "product_agent":
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection agentIds cannot bind a system capability: {role}."
+            )
+        if not agent_id:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection agentIds contains an empty Agent id for role: {role}."
+            )
+        if role in explicit and explicit[role][0] != agent_id:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection agentIds contains duplicate role bindings: {role}."
+            )
+        explicit[role] = (agent_id, owner[1])
+
+    active_binding = (
+        team.get("activeBinding") if isinstance(team.get("activeBinding"), dict) else {}
+    )
+    raw_active_ids = (
+        active_binding.get("productRoleAgentIds")
+        if isinstance(active_binding.get("productRoleAgentIds"), dict)
+        else {}
+    )
+    if str(active_binding.get("status") or "").strip() == "active":
+        if not raw_active_ids:
+            raise s.TeamWorkflowOrchestrationError(
+                "Challenge Cup activeBinding has no canonical product role bindings."
+            )
+        active_ids: dict[str, str] = {}
+        agent_owner: dict[str, str] = {}
+        for raw_role, raw_agent_id in raw_active_ids.items():
+            role = str(raw_role or "").strip().lower()
+            agent_id = s._trim_text(raw_agent_id, max_length=160)
+            owner = contract.resolve_role_owner(role)
+            if (
+                owner is None
+                or owner[0] != "product_agent"
+                or role != owner[1]
+                or not agent_id
+            ):
+                raise s.TeamWorkflowOrchestrationError(
+                    "Challenge Cup activeBinding contains an invalid canonical product role."
+                )
+            previous_agent_id = active_ids.get(owner[1])
+            if previous_agent_id is not None and previous_agent_id != agent_id:
+                raise s.TeamWorkflowOrchestrationError(
+                    "Challenge Cup activeBinding contains duplicate product role bindings."
+                )
+            previous_owner = agent_owner.get(agent_id)
+            if previous_owner is not None and previous_owner != owner[1]:
+                raise s.TeamWorkflowOrchestrationError(
+                    "Challenge Cup activeBinding assigns one Agent to more than one product role."
+                )
+            active_ids[owner[1]] = agent_id
+            agent_owner[agent_id] = owner[1]
+
+        missing_owner_ids = sorted(
+            owner_id
+            for _, owner_id in requested
+            if not active_ids.get(owner_id)
+        )
+        if missing_owner_ids:
+            raise s.TeamWorkflowOrchestrationError(
+                "Challenge Cup activeBinding is missing required canonical product roles: "
+                + ", ".join(missing_owner_ids)
+                + "."
+            )
+
+        for role, (agent_id, owner_id) in explicit.items():
+            expected_agent_id = active_ids.get(owner_id, "")
+            if not expected_agent_id or agent_id != expected_agent_id:
+                raise s.TeamWorkflowOrchestrationError(
+                    f"Explicit Agent id for {role} conflicts with the active canonical binding."
+                )
+
+        return {
+            role: active_ids[owner_id]
+            for role, owner_id in requested
+            if active_ids.get(owner_id)
+        }
+
     canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
     nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        role = s._normalize_source_collection_agent_role(node.get("role"))
-        agent_id = s._trim_text(node.get("agentId"), max_length=160)
-        if role in roles and agent_id and role not in mapped:
+    members = team.get("members") if isinstance(team.get("members"), list) else []
+    candidates: list[tuple[int, str, str, str]] = []
+    for source_priority, items in enumerate((nodes, members)):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            observed_role = s._normalize_source_collection_agent_role(
+                item.get("role") or item.get("roleKey")
+            ).lower()
+            agent_id = s._trim_text(item.get("agentId"), max_length=160)
+            owner = contract.resolve_role_owner(observed_role)
+            if owner is None or owner[0] != "product_agent" or not agent_id:
+                continue
+            candidates.append((source_priority, observed_role, owner[1], agent_id))
+
+    canonical_by_owner: dict[str, str] = {}
+    exact_by_role: dict[str, str] = {}
+    candidate_owners_by_agent: dict[str, set[str]] = {}
+    for _, observed_role, owner_id, agent_id in candidates:
+        candidate_owners_by_agent.setdefault(agent_id, set()).add(owner_id)
+        if observed_role == owner_id and owner_id not in canonical_by_owner:
+            canonical_by_owner[owner_id] = agent_id
+        if observed_role not in exact_by_role:
+            exact_by_role[observed_role] = agent_id
+
+    canonical_explicit_by_owner: dict[str, str] = {}
+    explicit_owner_by_agent: dict[str, str] = {}
+    for role, (agent_id, owner_id) in explicit.items():
+        previous_owner = explicit_owner_by_agent.get(agent_id)
+        if previous_owner is not None and previous_owner != owner_id:
+            raise s.TeamWorkflowOrchestrationError(
+                "Source collection agentIds assigns one Agent to more than one product role."
+            )
+        explicit_owner_by_agent[agent_id] = owner_id
+        if role == owner_id:
+            previous = canonical_explicit_by_owner.get(owner_id)
+            if previous is not None and previous != agent_id:
+                raise s.TeamWorkflowOrchestrationError(
+                    f"Source collection agentIds contains conflicting canonical bindings for {owner_id}."
+                )
+            canonical_explicit_by_owner[owner_id] = agent_id
+        if owner_id not in candidate_owners_by_agent.get(agent_id, set()):
+            raise s.TeamWorkflowOrchestrationError(
+                f"Explicit Agent id for {role} is not a matching Team role binding."
+            )
+
+    mapped: dict[str, str] = {}
+    for role, owner_id in requested:
+        explicit_binding = explicit.get(role)
+        canonical_explicit = canonical_explicit_by_owner.get(owner_id, "")
+        if explicit_binding and canonical_explicit and explicit_binding[0] != canonical_explicit:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection agentIds contains conflicting alias bindings for {owner_id}."
+            )
+        agent_id = (
+            canonical_explicit
+            or (explicit_binding[0] if explicit_binding else "")
+            or canonical_by_owner.get(owner_id, "")
+            or exact_by_role.get(role, "")
+        )
+        if agent_id:
             mapped[role] = agent_id
     return mapped
 

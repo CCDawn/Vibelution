@@ -9,6 +9,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
 from core.research.workflow.contracts.session_scope import (
     ContractValidationError,
     WorkflowSessionScopeV3,
@@ -39,6 +42,10 @@ ROLE_LABELS = {
     "challenge_cup_experiment_ledger": "实验证据",
     "challenge_cup_iteration_planner": "迭代决策",
     "challenge_cup_versioning": "版本治理",
+    **{
+        role.product_role_id: role.label
+        for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents
+    },
 }
 _REGISTRY_LOCK = threading.RLock()
 
