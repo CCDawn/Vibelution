@@ -641,7 +641,7 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
         common = [
             "- 默认中文；代码、命令、路径、协议字段、必要报错可保留原文。",
             "- 同轮同类失败不重复：shell/被拦截失败 **1 次**后立即换 `code_symbol_tool`/`grep_search_tool`，禁止换壳连撞。",
-            "- 工具顺序：定位优先结构化工具 → 必要时有界 `rg`/小范围读 → 修改后 lint/compile/test。",
+            "- 工具顺序：定位优先结构化工具 → 必要时有界 `rg`/小范围读 → 一个逻辑修改批次结束后，按影响面做最小 lint/compile/test；Python 只跑受影响的 pytest。",
             budget_rule,
             "- cli_tool/exec_command 共用 shell 方言路由；命令要短、可复现、输出有界（默认约 6KB），大结果只消费结论。",
             "- 记忆读取可用于查历史决策；record_learning 只在形成可复用经验或踩坑规律时写入。",
@@ -662,7 +662,7 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
             ],
             "execute": [
                 "- 只在当前冻结范围内做最小修改，不顺手扩改无关路径。",
-                "- Python 修改后先 lint，再 py_compile / pytest，验证不过不提交。",
+                "- 一个逻辑修改批次结束后，按影响面执行最小验证；Python 只对受影响文件先 lint，再运行对应 pytest，验证不过不提交。",
                 "- 高风险业务逻辑尽量留在 core/，不要把实现重新堆回 agent.py。",
             ],
             "verify": [

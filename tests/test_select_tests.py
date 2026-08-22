@@ -17,7 +17,6 @@ def test_matrix_loads_with_builtin_subset_parser():
     assert matrix["version"] == 1
     assert matrix["always"]["commands"] == [
         "git diff --check",
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q",
     ]
     assert any(rule["id"] == "web-session-chat" for rule in matrix["rules"])
 
@@ -178,7 +177,7 @@ def test_selector_matches_session_service_to_chat_validation_commands():
     assert "core/web/services/session_service.py" in result["matchedRules"][0]["matchedFiles"]
     assert "git diff --check" in result["commands"]
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
-    assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+    assert not any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
 def test_selector_matches_local_quality_gate_surfaces():
@@ -214,10 +213,15 @@ def test_selector_matches_chat_style_map_to_chat_validation_commands():
         select_tests.load_matrix(),
     )
 
-    assert result["matchedRules"][0]["id"] == "web-session-chat"
+    assert result["matchedRules"][0]["id"] == "web-session-chat-ui"
     assert "web/src/routes/ChatCodingRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
-    assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
+    assert not any("tests/test_web_session_routes.py" in command for command in result["commands"])
     assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+    assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
+    assert any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
+    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
+    assert not any(command == "npm --prefix web run build" for command in result["commands"])
 
 
 def test_selector_matches_teams_style_map_to_teams_validation_commands():
@@ -226,17 +230,19 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
         select_tests.load_matrix(),
     )
 
-    assert result["matchedRules"][0]["id"] == "teams-knowledge"
+    assert result["matchedRules"][0]["id"] == "teams-knowledge-ui"
     assert "web/src/routes/TeamsRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
-    assert any("tests/test_team_workflow_facade_contract.py" in command for command in result["commands"])
-    assert any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
-    assert any("--dist loadfile" in command for command in result["commands"])
+    assert not any("tests/test_team_workflow_facade_contract.py" in command for command in result["commands"])
+    assert not any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
     assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
     assert any("src/routes/teams" in command for command in result["commands"])
-    assert any("npm --prefix web run build" in command for command in result["commands"])
+    assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
+    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert not any("npm --prefix web run build" in command for command in result["commands"])
     assert not any("挑战杯/" in command for command in result["commands"])
-    assert "local-parallel" in result["validationLayers"]
-    assert "remote-distributed" in result["validationLayers"]
+    assert "frontend" in result["validationLayers"]
+    assert "local-parallel" not in result["validationLayers"]
+    assert "remote-distributed" not in result["validationLayers"]
 
 
 def test_selector_matches_team_workflows_package_routes():
@@ -265,14 +271,26 @@ def test_selector_matches_large_file_split_extracted_paths():
     )
 
     rule_ids = {rule["id"] for rule in result["matchedRules"]}
-    assert {"web-session-chat", "teams-knowledge", "frontend-workbench"}.issubset(rule_ids)
+    assert {"web-session-chat", "teams-knowledge", "teams-knowledge-ui", "frontend-non-ui"}.issubset(rule_ids)
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
     assert any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
-    assert any(
-        command == "node web/node_modules/vitest/vitest.mjs run"
-        for command in result["commands"]
+    assert any("ChatCodingRoute" not in command and "--changed main" in command for command in result["commands"])
+    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
+    assert not any(command == "npm --prefix web run build" for command in result["commands"])
+
+
+def test_selector_uses_non_ui_frontend_fallback_without_vui_contracts():
+    result = select_tests.select_tests(
+        ["web/src/api/types/chat.ts"],
+        select_tests.load_matrix(),
     )
-    assert any(command == "npm --prefix web run build" for command in result["commands"])
+
+    assert {rule["id"] for rule in result["matchedRules"]} == {"frontend-non-ui"}
+    assert any("--changed main --passWithNoTests" in command for command in result["commands"])
+    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert not any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
+    assert not any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
 
 
 def test_selector_matches_real_session_route_files_to_chat_validation_commands():
@@ -290,7 +308,7 @@ def test_selector_matches_real_session_route_files_to_chat_validation_commands()
         "core/web/routes/chat_rooms.py",
     ]
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
-    assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+    assert not any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
 def test_selector_matches_web_config_routes_to_config_validation_commands():
@@ -427,6 +445,57 @@ def test_selector_keeps_frontend_validation_separate_from_remote_distributed():
     assert "frontend" in result["validationLayers"]
     assert result["executionPlan"]["frontend"]["required"] is True
     assert result["executionPlan"]["remoteDistributed"]["recommended"] is False
+    assert any("--changed main --passWithNoTests" in command for command in result["commands"])
+    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
+    assert not any(command == "npm --prefix web run build" for command in result["commands"])
+
+
+def test_selector_suppresses_frontend_fallback_when_chat_rule_covers_file():
+    result = select_tests.select_tests(
+        ["web/src/routes/ChatCodingRoute.styles.ts"],
+        select_tests.load_matrix(),
+    )
+
+    assert {rule["id"] for rule in result["matchedRules"]} == {"web-session-chat-ui"}
+    assert not any("--changed main" in command for command in result["commands"])
+    assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
+
+
+def test_selector_keeps_frontend_fallback_for_uncovered_mixed_file():
+    result = select_tests.select_tests(
+        [
+            "web/src/routes/ChatCodingRoute.styles.ts",
+            "web/src/app/router.tsx",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    fallback = next(rule for rule in result["matchedRules"] if rule["id"] == "frontend-workbench")
+    assert fallback["matchedFiles"] == ["web/src/app/router.tsx"]
+    assert any("--changed main --passWithNoTests" in command for command in result["commands"])
+
+
+def test_selector_scopes_authorization_contract_to_authorization_changes():
+    docs = select_tests.select_tests(["docs/ops/config/README.md"], select_tests.load_matrix())
+    assert not any("test_tool_authorization_test_contract.py" in command for command in docs["commands"])
+
+    ordinary_test = select_tests.select_tests(["tests/test_runner.py"], select_tests.load_matrix())
+    assert any("test-tool-authorization" == rule["id"] for rule in ordinary_test["matchedRules"])
+    assert any("test_tool_authorization_test_contract.py" in command for command in ordinary_test["commands"])
+
+    auth = select_tests.select_tests(
+        ["tests/test_tool_authorization_contract.py"], select_tests.load_matrix()
+    )
+    assert any(rule["id"] == "test-tool-authorization" for rule in auth["matchedRules"])
+    assert any("test_tool_authorization_test_contract.py" in command for command in auth["commands"])
+
+
+def test_selector_routes_pure_docs_to_docs_only_without_test_tooling():
+    result = select_tests.select_tests(["tests/README.md"], select_tests.load_matrix())
+
+    assert {rule["id"] for rule in result["matchedRules"]} == {"docs-only"}
+    assert result["commands"] == ["git diff --check"]
 
 
 def test_selector_uses_default_when_no_rule_matches():
@@ -435,9 +504,7 @@ def test_selector_uses_default_when_no_rule_matches():
     assert result["matchedRules"] == []
     assert result["commands"] == [
         "git diff --check",
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q",
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q",
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q",
     ]
     assert result["validationLayers"] == ["hygiene", "focused"]
 

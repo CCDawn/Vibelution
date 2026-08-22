@@ -22,7 +22,7 @@
 3 RESEARCH  §2.2：评估本地 + 对照仓外成熟方案 → 评估排序，只借最符合项目的切片；未闭合不写
 4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
-6 VERIFY    select_tests → focused → UI contract if FE；所有验证在 merge 前完成
+6 VERIFY    每个逻辑修改批次按影响面跑最小 lint/compile/test；FE 走 focused/changed Vitest + VUI contract + 增量 typecheck；所有验证在 merge 前完成
 7 EVIDENCE  logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
 8 INTEGRATE 合入门全绿后必须主动 `git merge --ff-only`；不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
@@ -40,9 +40,12 @@
 # pytest 聚焦
 .\.venv\Scripts\python.exe -m pytest tests\test_TARGET.py -q
 
-# FE（cwd=web）
-npm test -- --run PATTERN
+# FE focused Vitest（cwd=web）
+node node_modules/vitest/vitest.mjs run --changed main --passWithNoTests
 npx tsc -b --pretty false
+
+# Web 增量 typecheck（仓库根执行，selector 的 allowlist 命令）
+npm --prefix web exec -- tsc -b --pretty false
 
 # 连不上 / 无响应：先解析本机工作台实开 URL，再进下面三件套。不要默认打 :8000。
 # 必须在 Launcher 打开的那个 checkout 根目录跑（通常是本地 main），不要在任务 worktree 里跑。

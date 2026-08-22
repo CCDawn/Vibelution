@@ -18,6 +18,8 @@ def test_pre_commit_is_thin_adapter() -> None:
     )
     assert '"$repo_root/scripts/local_quality_gate.py" commit' in hook
     assert "direct commits on main are blocked" in hook
+    assert "git diff --cached --quiet -- web/package.json web/package-lock.json" in hook
+    assert "npm --silent --prefix \"$repo_root/web\" ci --ignore-scripts --dry-run --no-audit --no-fund" in hook
     assert "pytest" not in hook
     assert "ruff" not in hook
 
@@ -355,6 +357,11 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
             "npm --prefix web run build",
             "web-build",
             ["npm", "--prefix", "web", "run", "build"],
+        ),
+        (
+            "npm --prefix web exec -- tsc -b --pretty false",
+            "web-typecheck",
+            ["npm", "--prefix", "web", "exec", "--", "tsc", "-b", "--pretty", "false"],
         ),
         (
             "npm --prefix web run check:bundle",

@@ -258,6 +258,31 @@ def _execution_layers(source: dict[str, Any], fallback: list[str]) -> list[str]:
     return list(fallback)
 
 
+def _rule_matches(rule: dict[str, Any], changed_files: list[str]) -> list[str]:
+    patterns = [str(pattern) for pattern in rule.get("paths", [])]
+    excluded_patterns = [str(pattern) for pattern in rule.get("excludePaths", [])]
+    return [
+        changed_file
+        for changed_file in changed_files
+        if any(path_matches(pattern, changed_file) for pattern in patterns)
+        and not any(path_matches(pattern, changed_file) for pattern in excluded_patterns)
+    ]
+
+
+def _is_frontend_specialized_rule(rule: dict[str, Any]) -> bool:
+    """Return whether a rule owns a frontend surface instead of being a fallback.
+
+    Frontend fallback suppression is deliberately file-based.  A mixed change
+    can contain both a route with a focused owner and a shared frontend file
+    without one rule being allowed to hide validation for the other file.
+    """
+
+    return (
+        "frontend" in _execution_layers(rule, [])
+        and not bool(rule.get("fallback", False))
+    )
+
+
 def build_execution_plan(layers: list[str]) -> dict[str, Any]:
     return {
         "layers": layers,
@@ -308,17 +333,33 @@ def select_tests(
             notes.extend(str(note) for note in always.get("notes", []))
             validation_layers.extend(_execution_layers(always, ["hygiene"]))
 
+    rule_matches: list[tuple[dict[str, Any], list[str]]] = []
     for rule in matrix.get("rules", []):
         if not isinstance(rule, dict):
             continue
-        patterns = [str(pattern) for pattern in rule.get("paths", [])]
-        matched_files = [
-            changed_file
-            for changed_file in normalized_files
-            if any(path_matches(pattern, changed_file) for pattern in patterns)
-        ]
+        matched_files = _rule_matches(rule, normalized_files)
         if not matched_files:
             continue
+        rule_matches.append((rule, matched_files))
+
+    specialized_frontend_files = {
+        changed_file
+        for rule, matched_files in rule_matches
+        if _is_frontend_specialized_rule(rule)
+        for changed_file in matched_files
+    }
+    for rule, matched_files in rule_matches:
+        if rule.get("fallback", False):
+            # Keep only files not owned by a focused frontend rule.  This is
+            # what makes a Chat/Teams-only edit cheap while preserving the
+            # generic frontend checks for a mixed route + shared-file change.
+            matched_files = [
+                changed_file
+                for changed_file in matched_files
+                if changed_file not in specialized_frontend_files
+            ]
+            if not matched_files:
+                continue
         matched_rule = {
             "id": rule.get("id"),
             "description": rule.get("description", ""),

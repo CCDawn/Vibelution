@@ -83,7 +83,7 @@ HTTP routes 现位于 `core/web/routes/team_workflows/` 包（不再是单文件
 
 ### 3.1 推荐验证顺序
 
-日常开发优先从影响面选择器开始，不要默认直接跑整仓串行测试：
+日常开发优先从影响面选择器开始，不要默认直接跑整仓串行测试。每个逻辑修改批次只跑与影响面对应的最小 lint/compile/test；只有需要交付收口时才扩大证据范围：
 
 ```bash
 # 根据当前分支相对 main 的变更给出分层验证建议
@@ -95,11 +95,11 @@ python tests/select_tests.py --from-git main --commands-only
 
 推荐顺序：
 
-1. 先跑 selector 输出的 focused 命令。
+1. 先跑 selector 输出的 focused 命令；小改动不要因为迭代次数多而重复跑无关重量测试。
 2. 如果输出 `local-parallel`，再跑本地 `pytest-xdist` 的 `not serial` 并发层。
 3. 如果输出 `local-serial`，必须在本机串行补跑对应 Launcher、端口、真实进程、Git、config 或共享 workspace 测试。
 4. 如果输出 `remote-distributed`，可以用服务器/Docker 分片加速 Python `not serial` 回归，但它不是完整 gate。
-5. 如果输出 `frontend`，必须单独跑对应 Vitest/build；Python 本地或远端测试都不能替代前端验证。
+5. 如果输出 `frontend`，必须单独跑对应 Vitest/typecheck/build；Python 本地或远端测试都不能替代前端验证。普通 Web TS/TSX 使用增量 typecheck 和 changed-file Vitest；只有依赖、编译器、bundler、入口或静态资源等构建输入变化时才跑全量 Vitest + build。
 
 #### Provider-scoped LLM 配置收敛
 
@@ -191,6 +191,8 @@ python tests/test_runner.py --hybrid --workers 4
 
 `tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它只做选择和解释，不自动执行命令，也不改变默认 pytest 串行策略。
 
+选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。
+
 ```bash
 # 手动输入变更文件并查看结构化结果
 python tests/select_tests.py --changed-file core/web/services/session_service.py --json
@@ -205,9 +207,9 @@ python tests/select_tests.py --from-git main --commands-only
 使用原则：
 
 - 先运行 selector 给出的聚焦命令，再按风险扩大到相关文件或全量回归。
-- `validationLayers` 是验证边界提示：`local-parallel` 可并发，`local-serial` 必须本地串行，`remote-distributed` 只是服务器加速，`frontend` 必须单独跑前端测试或构建。
+- `validationLayers` 是验证边界提示：`local-parallel` 可并发，`local-serial` 必须本地串行，`remote-distributed` 只是服务器加速，`frontend` 必须单独跑前端测试、typecheck 或构建。
 - selector 输出的是建议，不替代工程判断；涉及 Launcher、真实进程、外部 config、Git 副作用或共享 workspace 的测试仍按 `serial` 边界处理。
-- 没有规则命中时，默认输出轻量 runner smoke、collect-only 和 `git diff --check`，帮助 Agent 先判断测试集合是否可收集。
+- 没有规则命中时，默认只输出轻量 runner smoke 和 `git diff --check`；需要了解收集问题时再对明确的测试目标执行 `collect-only`，不把全树收集作为日常门。
 - 新增高频模块或拆分测试文件后，同步补充 `tests/test_matrix.yaml` 和 `tests/test_select_tests.py`。
 
 ### 3.6 本地质量门
@@ -215,10 +217,10 @@ python tests/select_tests.py --from-git main --commands-only
 `scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
 
 - `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
-- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，绑定 claim、本地 `main` SHA、HEAD SHA、selector 命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。
+- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，在精确 HEAD 上独立执行一次完整 selector 计划，绑定 claim、本地 `main` SHA、HEAD SHA、命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。closeout 当前不复用或缓存早期迭代结果。
 - `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、allowlisted command 结果与 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
 
-首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。远端 CI 的 `workflow_dispatch` 可按需补充验证，但 remote push 不是默认本地闭环的一部分。
+首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。CI/`workflow_dispatch` 按需使用，不是默认日常本地闭环；remote push 也不是默认本地闭环的一部分。
 
 Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 

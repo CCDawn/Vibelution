@@ -5,16 +5,14 @@ always:
     - "hygiene"
   commands:
     - "git diff --check"
-    - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q"
 
 default:
   executionLayers:
     - "focused"
   commands:
     - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q"
-    - ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q"
   notes:
-    - "No focused rule matched; use a cheap runner smoke plus collect-only before choosing broader validation."
+    - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
   - id: test-tooling
@@ -30,13 +28,10 @@ rules:
       - "tests/test_runner.py"
       - "tests/test_remote_test_runner.py"
       - "tests/conftest.py"
-      - "tests/README.md"
       - "scripts/remote_test_runner.py"
-      - "docs/testing/remote-test-runner.md"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_select_tests.py tests/test_runner.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_remote_test_runner.py -q"
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q"
     notes:
       - "Pure test-tooling changes do not require Launcher refresh."
       - "Remote distributed testing is a speed path for Python not-serial coverage; it is not a complete gate."
@@ -57,9 +52,6 @@ rules:
       - "tests/test_ci_workflow_contract.py"
       - "tests/test_environment_doctor.py"
       - "tests/test_select_tests.py"
-      - "README.md"
-      - "tests/README.md"
-      - "docs/standards/development-standard.md"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_ci_workflow_contract.py tests/test_environment_doctor.py tests/test_select_tests.py -q"
     notes:
@@ -102,11 +94,10 @@ rules:
       - "New *_service.py facades must appear in core/web/services/README.md (regen via scripts/_gen_services_readme.py)."
 
   - id: web-session-chat
-    description: "Direct chat, session routes, room routes, and conversation UI."
+    description: "Direct chat, session routes, and room service/route behavior."
     executionLayers:
       - "focused"
       - "local-serial"
-      - "frontend"
     paths:
       - "core/web/services/session_service.py"
       - "core/web/services/session/**"
@@ -118,17 +109,29 @@ rules:
       - "tests/test_chat_room_service.py"
       - "tests/test_chat_room_routes.py"
       - "tests/helpers/web_chat_state.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
+    notes:
+      - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
+
+  - id: web-session-chat-ui
+    description: "Chat route and conversation UI focused validation."
+    executionLayers:
+      - "focused"
+      - "frontend"
+    paths:
       - "web/src/routes/ChatCodingRoute.tsx"
       - "web/src/routes/ChatCodingRoute.styles.ts"
       - "web/src/routes/ChatCodingRoute.layout.test.ts"
+      - "web/src/routes/ChatCodingRoute.*"
       - "web/src/routes/chat/**"
       - "web/src/components/conversation/**"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
-      - "node web/node_modules/vitest/vitest.mjs run ChatCodingRoute.layout.test.ts"
-      - "npm --prefix web run build"
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/ChatCodingRoute.layout.test.ts"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
+      - "npm --prefix web exec -- tsc -b --pretty false"
     notes:
-      - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
+      - "Small Chat UI changes keep a focused route test, both VUI contracts, and incremental typecheck; they do not imply backend pytest or a full build."
 
   - id: web-runtime-launcher
     description: "Launcher, runtime manager, runtime scene, and runtime route behavior."
@@ -197,7 +200,6 @@ rules:
       - "core/llm/payload_builder.py"
       - "core/llm/PROTOCOL.md"
       - "core/web/services/config_service.py"
-      - "docs/ops/config/**"
       - "tests/test_web_config_routes.py"
       - "tests/test_config_panel.py"
       - "tests/test_config_sync.py"
@@ -296,7 +298,6 @@ rules:
       - "focused"
       - "local-parallel"
       - "remote-distributed"
-      - "frontend"
     paths:
       - "core/web/services/team_service.py"
       - "core/web/services/team_knowledge_service.py"
@@ -315,44 +316,107 @@ rules:
       - "tests/test_team_workflow_structure_packs.py"
       - "tests/test_team_workflow_routes.py"
       - "tests/_support/team_workflow/**"
-      - "web/src/routes/TeamsRoute.tsx"
-      - "web/src/routes/TeamsRoute.styles.ts"
-      - "web/src/routes/TeamsRoute.layout.test.ts"
-      - "web/src/routes/teams/**"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_facade_contract.py tests/test_team_workflow_structure_packs.py tests/test_team_service.py tests/test_team_knowledge_service.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_routes.py tests/test_team_workflow_structure_cases.py tests/test_team_workflow_source_collection_cases.py tests/test_team_workflow_experiment_cases.py tests/test_team_workflow_research_knowledge_cases.py tests/test_team_workflow_remainder_cases.py -n 4 --dist loadfile -q"
-      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts"
-      - "npm --prefix web run build"
     notes:
-      - "Challenge Cup flow changes are verified through the versioned Teams tests and frontend build."
+      - "Challenge Cup workflow changes are verified through the versioned Teams tests; route UI changes use the focused frontend rule below."
       - "Behavioral cases are split into five domain packs for xdist loadfile; the aggregate test_team_workflow_orchestration_service.py is skipped when those packs are collected."
       - "Single-domain debug: pytest tests/test_team_workflow_source_collection_cases.py -q (or cases_*.py under _support/)."
       - "Team workflow Python tests are not serial-marked; use local-parallel / remote-distributed for speed."
 
-  - id: frontend-workbench
-    description: "Workbench routes, shared frontend API types, and route-level layout tests."
+  - id: teams-knowledge-ui
+    description: "Teams and Challenge Cup route UI focused validation."
     executionLayers:
       - "focused"
       - "frontend"
     paths:
-      - "web/src/routes/**"
-      - "web/src/components/**"
-      - "web/src/api/types/**"
-      - "web/src/api/**"
-      - "web/src/app/**"
-      - "web/src/i18n/**"
-      - "web/vite.config.ts"
-      - "web/package.json"
-      - "web/bundleBudget.test.ts"
+      - "web/src/routes/TeamsRoute.tsx"
+      - "web/src/routes/TeamsRoute.styles.ts"
+      - "web/src/routes/TeamsRoute.layout.test.ts"
+      - "web/src/routes/TeamsRoute.*"
+      - "web/src/routes/teams/**"
     commands:
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts"
       - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
+      - "npm --prefix web exec -- tsc -b --pretty false"
+    notes:
+      - "Small Teams UI changes keep a focused route test, both VUI contracts, and incremental typecheck; they do not imply workflow pytest or a full build."
+
+  - id: frontend-build-inputs
+    description: "Frontend dependency, compiler, bundler, entrypoint, and static build inputs."
+    executionLayers:
+      - "focused"
+      - "frontend"
+    paths:
+      - "web/package.json"
+      - "web/package-lock.json"
+      - "web/vite.config.*"
+      - "web/tsconfig*.json"
+      - "web/index.html"
+      - "web/src/main.tsx"
+      - "web/public/**"
+      - "web/scripts/**"
+    commands:
       - "node web/node_modules/vitest/vitest.mjs run"
       - "npm --prefix web run build"
     notes:
+      - "Full Vitest and Vite build are reserved for inputs that can change the build graph or generated output."
+
+  - id: frontend-workbench
+    description: "Workbench routes, components, app shell, and route-level layout tests."
+    executionLayers:
+      - "focused"
+      - "frontend"
+    fallback: true
+    paths:
+      - "web/src/routes/**"
+      - "web/src/components/**"
+      - "web/src/app/**"
+    commands:
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
+      - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests"
+      - "npm --prefix web exec -- tsc -b --pretty false"
+    notes:
       - "VUI/shadcn route contract + component design catalog are mandatory for any web UI path (root AGENTS.md §2)."
-      - "Vitest uses fileParallelism + forks (see web/vite.config.ts); prefer npm --prefix web run test for the full suite."
-      - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout/contract test, but keep both VUI design gates."
+      - "The UI fallback keeps changed-file Vitest, both VUI contracts, and incremental typecheck; it is suppressed file-by-file when a focused frontend rule owns every changed file."
+
+  - id: frontend-non-ui
+    description: "Shared frontend API types, API helpers, i18n, and non-visual TypeScript surfaces."
+    executionLayers:
+      - "focused"
+      - "frontend"
+    fallback: true
+    paths:
+      - "web/src/api/types/**"
+      - "web/src/api/**"
+      - "web/src/i18n/**"
+      - "web/bundleBudget.test.ts"
+    commands:
+      - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests"
+      - "npm --prefix web exec -- tsc -b --pretty false"
+    notes:
+      - "Non-UI frontend changes use changed-file Vitest and incremental typecheck; VUI contracts are reserved for visible UI surfaces."
+
+  - id: test-tool-authorization
+    description: "Tool authorization implementation, fixtures, helpers, and authorization contract tests."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/authorization/**"
+      - "core/logging/tool_authorization_events.py"
+      - "core/orchestration/tool_authorization_binding.py"
+      - "tests/helpers/tool_authorization.py"
+      - "tests/fixtures/tool_authorization/**"
+      - "tests/test_*authorization*.py"
+      - "tests/**"
+    excludePaths:
+      - "tests/*.md"
+      - "tests/**/*.md"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q"
+    notes:
+      - "Authorization contract coverage is scoped to tests and authorization/tool paths; ordinary product and documentation edits do not run it."
 
   - id: docs-only
     description: "Documentation-only changes."
@@ -362,6 +426,8 @@ rules:
       - "*.md"
       - "docs/**"
       - ".docs/**"
+      - "tests/*.md"
+      - "tests/**/*.md"
       - "PROJECT_MEMORY.html"
     commands:
       - "git diff --check"

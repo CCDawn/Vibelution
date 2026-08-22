@@ -22,13 +22,16 @@ if [ -z "$project_python" ]; then
   exit 1
 fi
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[pre-commit] missing npm; cannot verify web/package-lock.json" >&2
-  exit 1
-fi
+if ! git diff --cached --quiet -- web/package.json web/package-lock.json; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "[pre-commit] missing npm; cannot verify staged web dependency metadata" >&2
+    exit 1
+  fi
 
-# npm ci validates that the root package manifest and package lock describe the
-# same dependency tree without changing either file.
-npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund
+  # When dependency metadata is staged, validate the current worktree package
+  # manifest/lock pair without changing either file. Unrelated commits do not
+  # pay this dependency-resolution cost.
+  npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund
+fi
 
 exec "$project_python" "$repo_root/scripts/local_quality_gate.py" commit

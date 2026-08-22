@@ -111,6 +111,7 @@ SUPPORTED_RECORDED_COMMAND_KINDS = frozenset(
         "prompt-debugger",
         "pytest",
         "selector",
+        "web-typecheck",
         "web-build",
         "web-test",
     }
@@ -174,6 +175,18 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
     }
     if normalized == ["git", "diff", "--check"]:
         return CommandSpec("diff-check", argv, root)
+    if normalized == [
+        "npm",
+        "--prefix",
+        "web",
+        "exec",
+        "--",
+        "tsc",
+        "-b",
+        "--pretty",
+        "false",
+    ]:
+        return CommandSpec("web-typecheck", argv, root)
     if normalized and normalized[0] in python_tokens:
         canonical = [str(PROJECT_PYTHON_NAME), *argv[1:]]
         if argv[1:3] == ["-m", "pytest"]:
