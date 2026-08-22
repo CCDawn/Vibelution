@@ -385,7 +385,7 @@ describe("instanceRegistryStore shared fixture", () => {
     expect(result.entry.status).toBe("stopping");
   });
 
-  it("reclaims a stale stopping row with the same closed-stop cleanup as completion", () => {
+  it("does not let the pure start reclaimer wash a stale stopping row", () => {
     const payload = cloneRegistry({
       schemaVersion: 3,
       instances: {
@@ -410,14 +410,45 @@ describe("instanceRegistryStore shared fixture", () => {
       nowMs: Date.parse("2026-08-20T12:00:00Z")
     });
 
-    expect(result.applied).toBe(true);
+    expect(result.applied).toBe(false);
     expect(result.entry).toMatchObject({
-      status: "closed",
-      phase: "steady",
+      status: "stopping",
+      phase: "stopping",
       desiredState: "closed",
-      spawnPid: 0,
-      windowPid: 0,
-      portLeaseStatus: "reclaimable"
+      spawnPid: 4242,
+      windowPid: 4343,
+      portLeaseStatus: "held"
+    });
+  });
+
+  it("does not mark a stale start failed while a registered backend handle remains", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "starting",
+          phase: "starting",
+          desiredState: "open",
+          generation: 9,
+          spawnPid: 4242,
+          port: 8010,
+          portLeaseStatus: "held",
+          deadlineAt: "2026-08-20T11:59:00Z"
+        }
+      }
+    });
+
+    const result = applyReclaimStaleInFlightStart(payload, {
+      instanceId: "worktree:task",
+      expectedGeneration: 9,
+      nowMs: Date.parse("2026-08-20T12:00:00Z")
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.entry).toMatchObject({
+      status: "starting",
+      spawnPid: 4242,
+      portLeaseStatus: "held"
     });
   });
 
@@ -531,7 +562,8 @@ describe("instanceRegistryStore shared fixture", () => {
     }), null, 2)}\n`, "utf8");
 
     const result = await reclaimStaleInFlightStops(registryPath, {
-      nowMs: Date.parse("2026-08-20T12:00:00Z")
+      nowMs: Date.parse("2026-08-20T12:00:00Z"),
+      completionProof: (instanceId) => instanceId === "worktree:stale"
     });
 
     expect(result).toEqual({ applied: true, instanceIds: ["worktree:stale"] });

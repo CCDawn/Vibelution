@@ -620,12 +620,11 @@
         "nowMs": 1787227200000
       },
       "expected": {
-        "applied": true,
+        "applied": false,
         "generation": 3,
-        "status": "failed",
-        "phase": "failed",
-        "failureMessage": "启动监督进程已退出且超过启动期限，启动未完成。",
-        "ownerId": ""
+        "status": "starting",
+        "spawnPid": 424242,
+        "ownerId": "pid:111"
       }
     },
     {
@@ -683,13 +682,13 @@
         "nowMs": 1787227200000
       },
       "expected": {
-        "applied": true,
+        "applied": false,
         "generation": 9,
-        "status": "closed",
-        "phase": "steady",
+        "status": "stopping",
+        "phase": "stopping",
         "desiredState": "closed",
-        "spawnPid": 0,
-        "ownerId": ""
+        "spawnPid": 4242,
+        "portLeaseStatus": "held"
       }
     },
     {

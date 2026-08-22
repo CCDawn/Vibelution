@@ -105,11 +105,11 @@ import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projec
 import {
   claimStopIfGeneration,
   instancesRegistryPath,
-  reclaimStaleInFlightStops,
   readRegistry,
   recordSpawnPid,
   upsert
 } from "./lifecycle/instanceRegistryStore.js";
+import { reconcileOrphanedInstanceRegistry } from "./lifecycle/instanceRegistryRecovery.js";
 import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
@@ -3770,7 +3770,14 @@ async function orchestrateLauncherApi(
 }
 
 async function reclaimExpiredIsolatedStops(): Promise<void> {
-  await reclaimStaleInFlightStops(instancesRegistryPath());
+  const result = await reconcileOrphanedInstanceRegistry({
+    registryPath: instancesRegistryPath()
+  });
+  if (result.retained.length > 0) {
+    console.warn(
+      `Isolated runtime reconciliation retained ${result.retained.length} in-flight registry row(s) because retirement was not verified.`
+    );
+  }
 }
 
 function scheduleLauncherStatusCliRefresh(): void {
@@ -4067,6 +4074,7 @@ app.whenReady()
         await recordElectronSupervisorEvent(launcherBootstrap, event);
       }
     });
+    await reclaimExpiredIsolatedStops();
     if (desktopCliArgs.smoke) {
       await runSmokeAndQuit(paths);
       return;

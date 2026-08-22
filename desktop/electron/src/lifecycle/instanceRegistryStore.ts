@@ -689,11 +689,11 @@ export function applyReclaimStaleInFlightStart(
   if (expected > 0 && positiveInt(entry.generation) !== expected) {
     return { applied: false, entry: { ...entry } };
   }
+  // Stopping rows require an actual retirement proof from the Electron host.
+  // This pure CAS helper has no process identity or port-health context, so it
+  // must never clear their handles merely because the deadline elapsed.
   if (isStaleInFlightStop(entry, { nowMs: input.nowMs })) {
-    return applyCompleteStop(payload, {
-      instanceId,
-      expectedGeneration: expected || undefined
-    });
+    return { applied: false, entry: { ...entry } };
   }
   if (
     !isStaleInFlightStart(entry, {
@@ -703,6 +703,12 @@ export function applyReclaimStaleInFlightStart(
       windowOpen: input.windowOpen
     })
   ) {
+    return { applied: false, entry: { ...entry } };
+  }
+  // A stale start with a registered process/window handle must go through the
+  // health-identity retirement path before the handle or port can be reused.
+  // The store can safely mark only handle-free rows as failed.
+  if (positiveInt(entry.spawnPid) > 0 || positiveInt(entry.windowPid) > 0) {
     return { applied: false, entry: { ...entry } };
   }
   entry.status = "failed";
@@ -893,14 +899,20 @@ export type ReclaimStaleInFlightStopsResult = {
   instanceIds: string[];
 };
 
+export type StaleStopCompletionProof = (
+  instanceId: string,
+  entry: RegistryEntry
+) => boolean;
+
 /**
- * Reconcile every expired stop claim in one registry-lock transaction.
- * Callers can use this before projecting the registry so a dead Electron
- * supervisor cannot leave a stopping row busy until the next start attempt.
+ * Complete expired stop claims only when the caller supplies an independent
+ * retirement proof for each row. A deadline alone is not process-exit
+ * evidence, so the default path deliberately leaves stale rows visible and
+ * keeps their handles/port lease held.
  */
 export async function reclaimStaleInFlightStops(
   registryPath: string,
-  input: { nowMs?: number } | number = {},
+  input: { nowMs?: number; completionProof?: StaleStopCompletionProof } | number = {},
   options: RegistryStoreOptions = {}
 ): Promise<ReclaimStaleInFlightStopsResult> {
   return mutateRegistry(
@@ -908,9 +920,18 @@ export async function reclaimStaleInFlightStops(
     (payload) => {
       const instanceIds: string[] = [];
       const nowMs = typeof input === "number" ? input : input.nowMs;
+      const completionProof = typeof input === "number" ? undefined : input.completionProof;
       for (const instanceId of Object.keys(payload.instances)) {
         const entry = payload.instances[instanceId];
         if (!isStaleInFlightStop(entry, { nowMs })) {
+          continue;
+        }
+        // A stale deadline is only a liveness signal for the supervisor. It is
+        // not evidence that the registered backend/window has exited. Keep the
+        // row and its port lease until the caller supplies an independently
+        // verified retirement proof (the Electron host performs health-identity
+        // reclaim before calling completeStop).
+        if (!completionProof || !completionProof(instanceId, { ...entry })) {
           continue;
         }
         const result = applyCompleteStop(payload, { instanceId });

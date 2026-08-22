@@ -99,7 +99,7 @@ describe("isolated lifecycle recovery", () => {
     expect(stopGateSource).toContain("await closeOrchestratedWorkbenchWindow(instanceId)");
   });
 
-  it("reclaims expired stopping rows through the TS registry writer before refresh", () => {
+  it("reconciles orphaned in-flight rows through health-identity retirement before refresh", () => {
     const schedulerStart = mainSource.indexOf("const reconcileDeadlineScheduler =");
     const schedulerEnd = mainSource.indexOf("launcherStateStore.subscribe", schedulerStart);
     const schedulerBody = mainSource.slice(schedulerStart, schedulerEnd);
@@ -111,9 +111,14 @@ describe("isolated lifecycle recovery", () => {
     const reclaimStart = mainSource.indexOf("async function reclaimExpiredIsolatedStops");
     const reclaimEnd = mainSource.indexOf("\nfunction scheduleLauncherStatusCliRefresh", reclaimStart);
     const reclaimBody = mainSource.slice(reclaimStart, reclaimEnd);
-    expect(reclaimBody).toContain("reclaimStaleInFlightStops");
+    expect(reclaimBody).toContain("reconcileOrphanedInstanceRegistry");
     expect(reclaimBody).toContain("instancesRegistryPath()");
     expect(reclaimBody).not.toContain("launcherStateStore.snapshot()");
+
+    const startupReap = mainSource.indexOf("await reapManagedRuntimeOnDesktopStart");
+    const startupRecovery = mainSource.indexOf("await reclaimExpiredIsolatedStops();", startupReap);
+    expect(startupReap).toBeGreaterThan(0);
+    expect(startupRecovery).toBeGreaterThan(startupReap);
 
     const userRecheck = mainSource.slice(mainSource.indexOf("ipcMain.handle(IPC_CHANNELS.refreshLauncherState"));
     expect(userRecheck).toContain("await reclaimExpiredIsolatedStops();");
