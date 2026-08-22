@@ -50,6 +50,12 @@ import { isTokenUsageOverview } from "../challenge-cup/challengeTokenUsageModel"
 import { ChallengeSubmissionReadinessPanel } from "./ChallengeSubmissionReadinessPanel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ChallengeMvpProgressPanel.styles";
+import challengeMvpProgressPanelContract from "./ChallengeMvpProgressPanel.contract.json";
+
+const panelContract = challengeMvpProgressPanelContract;
+const devActions = panelContract.devControls.actions;
+const devPlanIds = panelContract.devControls.plans;
+const devMarkers = panelContract.devControls.markers;
 
 export type ChallengeMvpProgressPanelProps = {
   teamId: string;
@@ -99,14 +105,14 @@ function batchTone(
 
 function actionLabel(zh: boolean, action: string): string {
   const labels: Record<string, string> = {
-    run_dev_readiness: zh ? "运行 DEV readiness" : "Run DEV readiness",
-    run_dev_1_fixture_batch: zh ? "运行 dev-1 fixture" : "Run dev-1 fixture",
-    run_dev_5_fixture_batch: zh ? "开始处理首批题目" : "Process the first question batch",
-    resume_dev_5_fixture_batch: zh ? "继续处理剩余题目" : "Continue with remaining questions",
-    repair_failed_platform_gates: zh ? "修复失败的平台门禁" : "Repair failed platform gates",
-    repair_dev_1_fixture_batch: zh ? "修复 dev-1 fixture" : "Repair dev-1 fixture",
-    repair_dev_5_fixture_batch: zh ? "修复 dev-5 fixture" : "Repair dev-5 fixture",
-    RESEARCH_AUTHORIZATION_REQUIRED: "RESEARCH_AUTHORIZATION_REQUIRED",
+    [devActions.runReadiness]: zh ? "运行 DEV readiness" : "Run DEV readiness",
+    [devActions.runDev1]: zh ? "运行 dev-1 fixture" : "Run dev-1 fixture",
+    [devActions.runDev5]: zh ? "开始处理首批题目" : "Process the first question batch",
+    [devActions.resumeDev5]: zh ? "继续处理剩余题目" : "Continue with remaining questions",
+    [devActions.repairReadiness]: zh ? "修复失败的平台门禁" : "Repair failed platform gates",
+    [devActions.repairDev1]: zh ? "修复 dev-1 fixture" : "Repair dev-1 fixture",
+    [devActions.repairDev5]: zh ? "修复 dev-5 fixture" : "Repair dev-5 fixture",
+    [devActions.researchAuthorizationRequired]: devActions.researchAuthorizationRequired,
   };
   return labels[action] ?? action;
 }
@@ -137,7 +143,9 @@ export function ChallengeMvpProgressPanel({
     enabled: Boolean(teamId.trim()),
     staleTime: 30_000,
   });
-  const devControlsKey = queryKeys.challengeCupDevControlsSnapshot(teamId);
+  const devControlsKey = queryKeys[
+    panelContract.devControls.snapshotQueryKey as "challengeCupDevControlsSnapshot"
+  ](teamId);
   const devControlsQuery = useQuery({
     queryKey: devControlsKey,
     queryFn: () => fetchChallengeCupDevControlSnapshot(teamId),
@@ -170,19 +178,19 @@ export function ChallengeMvpProgressPanel({
   }
 
   async function runDev1(vars: { teamId: string }) {
-    return runChallengeCupDevBatch(vars.teamId, "dev-1", { maxItems: null, retryFailed: false });
+    return runChallengeCupDevBatch(vars.teamId, devPlanIds.dev1, { maxItems: null, retryFailed: false });
   }
 
   async function runDev5(vars: { teamId: string; maxItems: number | null }) {
-    return runChallengeCupDevBatch(vars.teamId, "dev-5", { maxItems: vars.maxItems, retryFailed: false });
+    return runChallengeCupDevBatch(vars.teamId, devPlanIds.dev5, { maxItems: vars.maxItems, retryFailed: false });
   }
 
   async function repairDev1(vars: { teamId: string }) {
-    return runChallengeCupDevBatch(vars.teamId, "dev-1", { maxItems: null, retryFailed: true });
+    return runChallengeCupDevBatch(vars.teamId, devPlanIds.dev1, { maxItems: null, retryFailed: true });
   }
 
   async function repairDev5(vars: { teamId: string }) {
-    return runChallengeCupDevBatch(vars.teamId, "dev-5", { maxItems: null, retryFailed: true });
+    return runChallengeCupDevBatch(vars.teamId, devPlanIds.dev5, { maxItems: null, retryFailed: true });
   }
 
   const readinessMutation = useMutation({
@@ -205,16 +213,21 @@ export function ChallengeMvpProgressPanel({
     mutationFn: repairDev5,
     onSuccess: () => refreshDevControls(),
   });
-  const program = experimentStatusQuery.data?.competitionProgramProjection;
+  const program = experimentStatusQuery.data?.[
+    panelContract.programProjection.property as "competitionProgramProjection"
+  ];
+  const requiredDeepExperiments = program?.[
+    panelContract.programProjection.requiredDeepExperimentsProperty as "requiredDeepExperiments"
+  ] ?? [];
   const summary = questionStatusQuery.data?.summary;
   const results = summary?.validatedQuestionResults ?? [];
-  const approvedDeepExperimentCount = program?.requiredDeepExperiments.filter((item) => item.approved).length ?? 0;
+  const approvedDeepExperimentCount = requiredDeepExperiments.filter((item) => item.approved).length;
 
   const snapshot = devControlsQuery.data ?? null;
   const nextLegalAction = snapshot?.nextLegalAction ?? "";
   const report = snapshot?.report ?? null;
-  const dev1 = snapshot?.batches?.["dev-1"];
-  const dev5 = snapshot?.batches?.["dev-5"];
+  const dev1 = snapshot?.batches?.[devPlanIds.dev1];
+  const dev5 = snapshot?.batches?.[devPlanIds.dev5];
   const boundary = snapshot?.boundary ?? null;
   const anyMutationPending =
     readinessMutation.isPending
@@ -230,8 +243,8 @@ export function ChallengeMvpProgressPanel({
     ?? repairDev1Mutation.error
     ?? repairDev5Mutation.error;
   const devNeedsAttention = Boolean(
-    nextLegalAction.startsWith("repair_")
-    || nextLegalAction === "RESEARCH_AUTHORIZATION_REQUIRED"
+    nextLegalAction.startsWith(panelContract.devControls.repairActionPrefix)
+    || nextLegalAction === devActions.researchAuthorizationRequired
     || (report && report.status !== "READY"),
   );
 
@@ -295,14 +308,14 @@ export function ChallengeMvpProgressPanel({
             </div>
             <div className={styles.metric}>
               <div className={styles.metricLabel}>{zh ? "独立实验" : "Deep experiments"}</div>
-              <div className={styles.metricValue}>{approvedDeepExperimentCount}/{program.requiredDeepExperiments.length}</div>
+              <div className={styles.metricValue}>{approvedDeepExperimentCount}/{requiredDeepExperiments.length}</div>
             </div>
           </div>
           <div className={styles.catalog} title={program.questionCatalog.catalogSha256}>
             {program.questionCatalog.catalogId} · {program.questionCatalog.questionCount} · SHA-256 {program.questionCatalog.catalogSha256.slice(0, 12)}…
           </div>
           <div className={styles.experimentGrid}>
-            {program.requiredDeepExperiments.map((experiment) => (
+            {requiredDeepExperiments.map((experiment) => (
               <article className={styles.experimentCard} key={experiment.experimentId}>
                 <div className={styles.experimentHeader}>
                   <strong>{experiment.questionId} · {experiment.name}</strong>
@@ -381,17 +394,17 @@ export function ChallengeMvpProgressPanel({
         {devControlsQuery.isPending ? (
           <VStateSurface tone="loading" title={zh ? "读取 DEV 控制快照" : "Loading DEV control snapshot"} fill className={styles.fill} />
         ) : devControlsQuery.isError || !snapshot ? (
-          <div className={styles.error} role="alert" data-dev-controls="snapshot-error">
+          <div className={styles.error} role="alert" data-dev-controls={devMarkers.snapshotError}>
             <div className={styles.devMeta}>
               {devControlsQuery.error instanceof Error ? devControlsQuery.error.message : String(devControlsQuery.error ?? (zh ? "DEV 控制快照不可用" : "DEV control snapshot unavailable"))}
             </div>
-            <VButton type="button" variant="secondary" data-dev-controls="snapshot-retry" onClick={() => void devControlsQuery.refetch()}>
+            <VButton type="button" variant="secondary" data-dev-controls={devMarkers.snapshotRetry} onClick={() => void devControlsQuery.refetch()}>
               {zh ? "重试" : "Retry"}
             </VButton>
             <VButton
               type="button"
               variant="danger"
-              data-dev-controls="snapshot-readiness-repair"
+              data-dev-controls={devMarkers.snapshotReadinessRepair}
               isDisabled={readinessMutation.isPending}
               isPending={readinessMutation.isPending}
               onClick={() => readinessMutation.mutate({ teamId })}
@@ -401,7 +414,7 @@ export function ChallengeMvpProgressPanel({
           </div>
         ) : (
           <>
-            <div className={styles.devRow} data-dev-controls="readiness">
+            <div className={styles.devRow} data-dev-controls={devMarkers.readiness}>
               <div className={styles.devRowHeader}>
                 <strong>Readiness</strong>
                 <VStatusChip tone={readinessMutation.isPending ? "accent" : report?.status === "READY" ? "success" : report ? "danger" : "neutral"}>
@@ -434,9 +447,9 @@ export function ChallengeMvpProgressPanel({
               )}
             </div>
 
-            {(["dev-1", "dev-5"] as const).map((planId) => {
-              const batch = planId === "dev-1" ? dev1 : dev5;
-              const running = planId === "dev-1" ? dev1Mutation.isPending : dev5Mutation.isPending;
+            {([devPlanIds.dev1, devPlanIds.dev5] as const).map((planId) => {
+              const batch = planId === devPlanIds.dev1 ? dev1 : dev5;
+              const running = planId === devPlanIds.dev1 ? dev1Mutation.isPending : dev5Mutation.isPending;
               return (
                 <div className={styles.devRow} key={planId} data-dev-controls={planId}>
                   <div className={styles.devRowHeader}>
@@ -468,7 +481,7 @@ export function ChallengeMvpProgressPanel({
                     </>
                   ) : (
                     <VEmptyState title={`${planId} ${zh ? "未运行" : "unrun"}`} className={styles.empty}>
-                      {planId === "dev-1"
+                      {planId === devPlanIds.dev1
                         ? (zh ? "readiness 通过后运行。" : "Run after readiness passes.")
                         : (zh ? "dev-1 通过后先处理首批题目，完成后可继续剩余题目。" : "After dev-1 passes, process the first batch and continue with the remaining questions.")}
                     </VEmptyState>
@@ -477,8 +490,8 @@ export function ChallengeMvpProgressPanel({
               );
             })}
 
-            <div className={styles.actions} data-dev-controls="actions" aria-live="polite">
-              {nextLegalAction === "run_dev_readiness" ? (
+            <div className={styles.actions} data-dev-controls={devMarkers.actions} aria-live="polite">
+              {nextLegalAction === devActions.runReadiness ? (
                 <VButton
                   type="button"
                   variant="primary"
@@ -489,7 +502,7 @@ export function ChallengeMvpProgressPanel({
                   {zh ? "运行 DEV readiness" : "Run DEV readiness"}
                 </VButton>
               ) : null}
-              {nextLegalAction === "run_dev_1_fixture_batch" ? (
+              {nextLegalAction === devActions.runDev1 ? (
                 <VButton
                   type="button"
                   variant="primary"
@@ -500,7 +513,7 @@ export function ChallengeMvpProgressPanel({
                   {zh ? "运行 dev-1 fixture" : "Run dev-1 fixture"}
                 </VButton>
               ) : null}
-              {nextLegalAction === "run_dev_5_fixture_batch" ? (
+              {nextLegalAction === devActions.runDev5 ? (
                 <VButton
                   type="button"
                   variant="primary"
@@ -511,7 +524,7 @@ export function ChallengeMvpProgressPanel({
                   {zh ? "开始处理首批题目" : "Process the first question batch"}
                 </VButton>
               ) : null}
-              {nextLegalAction === "resume_dev_5_fixture_batch" ? (
+              {nextLegalAction === devActions.resumeDev5 ? (
                 <VButton
                   type="button"
                   variant="primary"
@@ -522,7 +535,7 @@ export function ChallengeMvpProgressPanel({
                   {zh ? "继续处理剩余题目" : "Continue with remaining questions"}
                 </VButton>
               ) : null}
-              {nextLegalAction === "repair_failed_platform_gates" ? (
+              {nextLegalAction === devActions.repairReadiness ? (
                 <>
                   <VButton
                     type="button"
@@ -540,7 +553,7 @@ export function ChallengeMvpProgressPanel({
                   </div>
                 </>
               ) : null}
-              {nextLegalAction === "repair_dev_1_fixture_batch" ? (
+              {nextLegalAction === devActions.repairDev1 ? (
                 <>
                   <VButton
                     type="button"
@@ -558,7 +571,7 @@ export function ChallengeMvpProgressPanel({
                   </div>
                 </>
               ) : null}
-              {nextLegalAction === "repair_dev_5_fixture_batch" ? (
+              {nextLegalAction === devActions.repairDev5 ? (
                 <>
                   <VButton
                     type="button"
@@ -576,7 +589,7 @@ export function ChallengeMvpProgressPanel({
                   </div>
                 </>
               ) : null}
-              {nextLegalAction === "RESEARCH_AUTHORIZATION_REQUIRED" ? (
+              {nextLegalAction === devActions.researchAuthorizationRequired ? (
                 <div className={styles.notice} role="status">
                   {zh
                     ? "DEV fixture 已全部通过，停在 RESEARCH_AUTHORIZATION_REQUIRED；真实 Qwen / CUDA / DANDI / 125 题 / 提交需单独科研授权。"
@@ -602,7 +615,7 @@ export function ChallengeMvpProgressPanel({
               </div>
             ) : null}
 
-            <div className={styles.locator} data-dev-controls="cli-locator">
+            <div className={styles.locator} data-dev-controls={devMarkers.cliLocator}>
               {zh
                 ? "CLI 诊断（非授权入口）：python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"
                 : "CLI diagnostic (not an authorization entry): python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"}
@@ -611,7 +624,7 @@ export function ChallengeMvpProgressPanel({
         )}
 
         {activeMutationError ? (
-          <div className={styles.error} role="alert" data-dev-controls="mutation-error">
+          <div className={styles.error} role="alert" data-dev-controls={devMarkers.mutationError}>
             {zh
               ? `DEV 操作失败：${errorMessage(activeMutationError)}（可安全重试）`
               : `DEV action failed: ${errorMessage(activeMutationError)} (retry is safe)`}
@@ -619,7 +632,7 @@ export function ChallengeMvpProgressPanel({
         ) : null}
           </>
         ) : (
-          <p className={styles.devCollapsedHint} data-dev-controls="collapsed-summary" role={devNeedsAttention ? "status" : undefined}>
+          <p className={styles.devCollapsedHint} data-dev-controls={devMarkers.collapsedSummary} role={devNeedsAttention ? "status" : undefined}>
             {devNeedsAttention ? (
               <>
                 <strong>{zh ? "开发态需要处理" : "DEV action needs attention"}</strong>

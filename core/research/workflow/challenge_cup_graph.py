@@ -13,7 +13,11 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from .definition import build_challenge_cup_workflow_definition
+from .definition import (
+    build_challenge_cup_workflow_definition,
+    graph_conditional_targets,
+    graph_static_edge_pairs,
+)
 from .iteration_decisions import (
     ITERATION_ROUTE_TARGETS,
     IterationDecisionError,
@@ -95,49 +99,26 @@ def route_after_version_governance(
     return route_target_after_governance(kind_raw)  # type: ignore[return-value]
 
 
-_LINEAR_EDGES: tuple[tuple[str, str], ...] = (
-    ("source_finding", "source_extraction"),
-    ("source_extraction", "evidence_relations"),
-    ("evidence_relations", "knowledge_ingestion"),
-    ("knowledge_ingestion", "knowledge_handoff"),
-    ("knowledge_handoff", "hypothesis_design"),
-    ("hypothesis_design", "protocol_design"),
-    ("protocol_design", "protocol_review"),
-    ("protocol_review", "protocol_freeze"),
-    ("protocol_freeze", "smoke_gate"),
-    ("smoke_gate", "controlled_run"),
-    ("controlled_run", "result_evaluation"),
-    ("result_evaluation", "iteration_decision"),
-)
-
-
 def build_challenge_cup_graph() -> StateGraph:
     order = _node_order()
     builder: StateGraph = StateGraph(ChallengeCupState)
     for node_id in order:
         builder.add_node(node_id, _make_node_fn(node_id))
     builder.add_edge(START, order[0])
-    for source, target in _LINEAR_EDGES:
+    for source, target in graph_static_edge_pairs():
         builder.add_edge(source, target)
+    iteration_targets = graph_conditional_targets("iteration_decision")
     builder.add_conditional_edges(
         "iteration_decision",
         route_after_iteration_decision,
-        {
-            "controlled_run": "controlled_run",
-            "version_governance": "version_governance",
-            END: END,
-        },
+        {target: target for target in iteration_targets} | {END: END},
     )
+    governance_targets = graph_conditional_targets("version_governance")
     builder.add_conditional_edges(
         "version_governance",
         route_after_version_governance,
-        {
-            "candidate_promotion": "candidate_promotion",
-            "result_package": "result_package",
-            END: END,
-        },
+        {target: target for target in governance_targets} | {END: END},
     )
-    builder.add_edge("candidate_promotion", "result_package")
     builder.add_edge("result_package", END)
     return builder
 
