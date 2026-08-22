@@ -127,10 +127,12 @@ class GraphDispatchWorker:
 
         ``run_created`` is intentionally committed before command acceptance,
         so a process crash can leave a perfectly valid ``created`` row.  The
-        reconciliation is conservative: an attempt, an accepted START_NODE,
-        or a live graph-dispatch outbox action means that the run is still
-        claimable and must not be failed.  Everything else past the deadline
-        is closed atomically with a deterministic ``run_failed`` event.
+        reconciliation is conservative only when a real ``node_attempt``
+        exists.  Command-only or outbox-only remnants are not execution
+        evidence: the normal START_NODE transaction creates the attempt with
+        them, so an orphan without one must be failed after the deadline.
+        Everything else past the deadline is closed atomically with a
+        deterministic ``run_failed`` event.
         """
         now_ms = self._now()
         cutoff_ms = now_ms - self._start_deadline_ms
@@ -152,37 +154,14 @@ class GraphDispatchWorker:
                 if not run_id or not team_id:
                     continue
                 # A START_NODE command and its attempt are normally created in
-                # one writer transaction.  Check both facts because this
-                # reconciler must remain safe for older/partially restored DBs.
+                # one writer transaction.  Only the attempt proves that graph
+                # execution actually started; command/outbox rows can be
+                # stranded by a partial restore and are not sufficient.
                 attempt = uow.repository.execute(
                     "SELECT 1 FROM node_attempts WHERE run_id = ? LIMIT 1",
                     (run_id,),
                 ).fetchone()
                 if attempt is not None:
-                    continue
-                command = uow.repository.execute(
-                    """
-                    SELECT 1 FROM workflow_commands
-                    WHERE run_id = ?
-                      AND command_kind = 'start_node'
-                      AND status IN ('accepted', 'completed')
-                    LIMIT 1
-                    """,
-                    (run_id,),
-                ).fetchone()
-                if command is not None:
-                    continue
-                live_dispatch = uow.repository.execute(
-                    """
-                    SELECT 1 FROM outbox_actions
-                    WHERE run_id = ?
-                      AND action_kind = 'graph_dispatch'
-                      AND status IN ('pending', 'leased')
-                    LIMIT 1
-                    """,
-                    (run_id,),
-                ).fetchone()
-                if live_dispatch is not None:
                     continue
                 run = uow.repository.get_run(run_id)
                 if run is None or run.status != "created":
@@ -193,7 +172,23 @@ class GraphDispatchWorker:
                 # advancing its sequence a second time; otherwise an old
                 # partial repair would create a sequence hole.
                 existing_event = uow.repository.get_event_by_id(event_id)
-                if existing_event is not None and existing_event.run_id == run_id:
+                if existing_event is not None:
+                    try:
+                        existing_payload = json.loads(existing_event.payload_json)
+                    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                        raise RuntimeError(
+                            f"created-run reconciliation event {event_id} is corrupt"
+                        ) from exc
+                    if (
+                        existing_event.run_id != run_id
+                        or existing_event.event_type != "run_failed"
+                        or not isinstance(existing_payload, Mapping)
+                        or existing_payload.get("terminalReason")
+                        != "dispatch_never_started"
+                    ):
+                        raise RuntimeError(
+                            f"created-run reconciliation event {event_id} conflicts with dispatch_never_started"
+                        )
                     if not uow.repository.update_run_status(
                         run_id,
                         team_id,

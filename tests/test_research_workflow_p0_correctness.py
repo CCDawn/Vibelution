@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -79,7 +80,7 @@ def test_created_run_without_start_is_failed_once(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("start_evidence", ["node_attempt", "accepted_command", "live_outbox"])
-def test_created_run_with_start_evidence_is_not_reaped(
+def test_created_run_reconciliation_requires_node_attempt_evidence(
     tmp_path: Path, start_evidence: str
 ) -> None:
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
@@ -105,7 +106,7 @@ def test_created_run_with_start_evidence_is_not_reaped(
                     build_command_record(
                         command_id=f"cmd-{start_evidence}",
                         run_id=run.run_id,
-                        status="accepted",
+                        status="accepted" if start_evidence == "accepted_command" else "failed",
                     )
                 )
             if start_evidence == "node_attempt":
@@ -143,8 +144,19 @@ def test_created_run_with_start_evidence_is_not_reaped(
 
         worker.run_once()
         current = store.get_run(run.run_id)
-        assert current is not None and current.status == "created"
-        assert len(store.list_events(run.run_id)) == 1
+        if start_evidence == "node_attempt":
+            assert current is not None and current.status == "created"
+            assert len(store.list_events(run.run_id)) == 1
+        else:
+            assert current is not None and current.status == "failed"
+            assert current.terminal_reason == "dispatch_never_started"
+            events = store.list_events(run.run_id)
+            assert [event.event_type for event in events] == ["run_created", "run_failed"]
+            assert json.loads(events[-1].payload_json)["terminalReason"] == (
+                "dispatch_never_started"
+            )
+            assert worker.run_once() == 0
+            assert len(store.list_events(run.run_id)) == 2
     finally:
         store.close()
 
@@ -170,12 +182,18 @@ def test_created_run_with_existing_reconciliation_event_fills_status_without_new
                     event_id="evt-created-partial-repair",
                 )
             )
+            reconciliation_event = build_event_record(
+                2,
+                run_id=run.run_id,
+                event_id="evt-dispatch-never-started-run-created-partial-repair",
+                event_type="run_failed",
+            )
             uow.repository.insert_event(
-                build_event_record(
-                    2,
-                    run_id=run.run_id,
-                    event_id="evt-dispatch-never-started-run-created-partial-repair",
-                    event_type="run_failed",
+                replace(
+                    reconciliation_event,
+                    payload_json=json.dumps(
+                        {"terminalReason": "dispatch_never_started"}
+                    ),
                 )
             )
 
@@ -193,6 +211,62 @@ def test_created_run_with_existing_reconciliation_event_fills_status_without_new
         assert failed.last_event_sequence == 2
         assert len(store.list_events(run.run_id)) == 2
         assert worker.run_once() == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("event_type", "terminal_reason"),
+    [("run_created", "dispatch_never_started"), ("run_failed", "other_reason")],
+)
+def test_created_run_with_conflicting_reconciliation_event_rolls_back(
+    tmp_path: Path, event_type: str, terminal_reason: str
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        run = build_run_record(
+            run_id="run-created-conflicting-repair",
+            status="created",
+            last_event_sequence=2,
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(run)
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run.run_id,
+                    event_id="evt-created-run-created-conflicting-repair",
+                )
+            )
+            reconciliation_event = build_event_record(
+                2,
+                run_id=run.run_id,
+                event_id="evt-dispatch-never-started-run-created-conflicting-repair",
+                event_type=event_type,
+            )
+            uow.repository.insert_event(
+                replace(
+                    reconciliation_event,
+                    payload_json=json.dumps({"terminalReason": terminal_reason}),
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        worker = GraphDispatchWorker(
+            store=store,
+            coordinator=ChallengeCupGraphCoordinator(tmp_path / "checkpoints.sqlite"),
+            now_provider=lambda: FIXED_NOW_MS + 2_000,
+            start_deadline_ms=1_000,
+        )
+
+        with pytest.raises(RuntimeError, match="conflicts with dispatch_never_started"):
+            worker.run_once()
+        current = store.get_run(run.run_id)
+        assert current is not None and current.status == "created"
+        assert current.last_event_sequence == 2
+        assert len(store.list_events(run.run_id)) == 2
     finally:
         store.close()
 
