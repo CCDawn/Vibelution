@@ -12,6 +12,7 @@ from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordinator
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    CatalogRunAuthorizationError,
     authorization_to_dict,
     readiness_report_sha256,
     record_catalog_run_authorization,
@@ -19,6 +20,9 @@ from core.web.services.team_workflow.research_runtime.catalog_run_authorization 
 )
 from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
     GraphDispatchWorker,
+)
+from core.web.services.team_workflow.research_runtime.service import (
+    ResearchWorkflowError,
 )
 from core.web.services.team_workflow.research_runtime.team_role_source import (
     heal_agent_binding_from_sibling_freeze,
@@ -226,7 +230,12 @@ def test_catalog_run_authorization_is_hashed_and_idempotent(
         )
 
         monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
-        scope = {"planId": "real-1", "gateId": "G1", "questionIds": ["SCI-091"]}
+        plan = real_plan("real-1")
+        scope = {
+            "planId": "real-1",
+            "gateId": str(plan.gate_id),
+            "questionIds": [str(question_id) for question_id in plan.question_ids],
+        }
         evidence = {"status": "READY", "basis": "report-v1"}
         first = record_catalog_run_authorization(
             "team-p0",
@@ -249,7 +258,12 @@ def test_catalog_run_authorization_is_hashed_and_idempotent(
         assert first.record_hash
         assert store.list_catalog_run_authorizations("team-p0", "real-1") == [first]
 
-        alias_scope = {"planId": "real-5", "gateId": "G5", "questionIds": ["SCI-096"]}
+        alias_plan = real_plan("real-5")
+        alias_scope = {
+            "planId": "real-5",
+            "gateId": str(alias_plan.gate_id),
+            "questionIds": [str(question_id) for question_id in alias_plan.question_ids],
+        }
         alias = record_catalog_run_authorization(
             "team-p0",
             plan_id="real-5",
@@ -260,6 +274,66 @@ def test_catalog_run_authorization_is_hashed_and_idempotent(
         )
         assert alias.readiness_report_sha256 == readiness_report_sha256(evidence)
         assert validate_catalog_run_authorization(alias, team_id="team-p0", plan_id="real-5")
+    finally:
+        store.close()
+
+
+def test_catalog_authorization_rejects_scope_that_does_not_match_canonical_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        with pytest.raises(CatalogRunAuthorizationError, match="canonical"):
+            record_catalog_run_authorization(
+                "team-p0",
+                plan_id="real-1",
+                batch_scope={
+                    "planId": "real-5",
+                    "gateId": "G5",
+                    "questionIds": ["SCI-096"],
+                },
+                approved_by="server-operator",
+                readiness_evidence={"status": "READY"},
+                approved_at_ms=FIXED_NOW_MS,
+            )
+    finally:
+        store.close()
+
+
+def test_catalog_authorization_rejects_question_outside_authorized_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        plan = real_plan("real-1")
+        authorization = record_catalog_run_authorization(
+            "team-p0",
+            plan_id="real-1",
+            batch_scope={
+                "planId": "real-1",
+                "gateId": str(plan.gate_id),
+                "questionIds": list(plan.question_ids),
+            },
+            approved_by="server-operator",
+            readiness_evidence={"status": "READY"},
+            approved_at_ms=FIXED_NOW_MS,
+        )
+        assert not validate_catalog_run_authorization(
+            authorization,
+            team_id="team-p0",
+            plan_id="real-1",
+            question_id="SCI-096",
+        )
     finally:
         store.close()
 
@@ -300,12 +374,17 @@ def test_catalog_authorization_hash_is_recorded_on_run_event(
             (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
             .read_text(encoding="utf-8")
         )
+        run_input = {
+            **fixture["runInput"],
+            "questionId": str(plan.question_ids[0]),
+        }
+        authorization_payload = authorization_to_dict(authorization)
         created = run_creation.create_run(
             CHALLENGE_CUP_WORKFLOW_ID,
-            run_input=fixture["runInput"],
+            run_input=run_input,
             binding_layers=AgentBindingLayers(),
             idempotency_key="p0-catalog-authorization-event",
-            catalog_run_authorization=authorization_to_dict(authorization),
+            catalog_run_authorization=authorization_payload,
         )
         events = store.list_events(created["runId"])
         assert [event.event_type for event in events] == [
@@ -315,5 +394,31 @@ def test_catalog_authorization_hash_is_recorded_on_run_event(
         payload = json.loads(events[-1].payload_json)
         assert payload["recordHash"] == authorization.record_hash
         assert payload["readinessReportSha256"] == authorization.readiness_report_sha256
+        replayed = run_creation.create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input,
+            binding_layers=AgentBindingLayers(),
+            idempotency_key="p0-catalog-authorization-event",
+            catalog_run_authorization=authorization_payload,
+        )
+        assert replayed["runId"] == created["runId"]
+        with pytest.raises(ResearchWorkflowError, match="authorization"):
+            run_creation.create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=run_input,
+                binding_layers=AgentBindingLayers(),
+                idempotency_key="p0-catalog-authorization-event",
+            )
+        with pytest.raises(ResearchWorkflowError, match="authorization"):
+            run_creation.create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=run_input,
+                binding_layers=AgentBindingLayers(),
+                idempotency_key="p0-catalog-authorization-event",
+                catalog_run_authorization={
+                    **authorization_payload,
+                    "recordHash": "f" * 64,
+                },
+            )
     finally:
         store.close()

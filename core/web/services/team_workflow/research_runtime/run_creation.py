@@ -139,6 +139,49 @@ def _ensure_create_fingerprint(run: Any, fingerprints: tuple[str, ...]) -> None:
         )
 
 
+def _load_catalog_run_authorization(
+    store: Any,
+    payload: Mapping[str, Any],
+    *,
+    team_id: str,
+    question_id: str,
+) -> Any:
+    from .catalog_run_authorization import validate_catalog_run_authorization
+
+    authorization_id = str(payload.get("authorizationId") or "").strip()
+    record = store.get_catalog_run_authorization(authorization_id)
+    if record is None or not validate_catalog_run_authorization(
+        record,
+        team_id=team_id,
+        plan_id=str(payload.get("planId") or ""),
+        scope_hash=str(payload.get("scopeHash") or ""),
+        readiness_sha256=str(payload.get("readinessReportSha256") or ""),
+        question_id=question_id,
+    ):
+        raise ResearchWorkflowError(
+            "catalog run authorization is missing or invalid",
+            code="catalog_run_authorization_invalid",
+        )
+    if str(payload.get("recordHash") or "") != record.record_hash:
+        raise ResearchWorkflowError(
+            "catalog run authorization is missing or invalid",
+            code="catalog_run_authorization_invalid",
+        )
+    return record
+
+
+def _catalog_authorization_event(store: Any, run_id: str) -> dict[str, Any] | None:
+    for event in store.list_events(run_id):
+        if event.event_type != "catalog_run_authorized":
+            continue
+        try:
+            payload = json.loads(event.payload_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(payload) if isinstance(payload, Mapping) else {}
+    return None
+
+
 def create_run(
     workflow_id: str,
     *,
@@ -155,6 +198,41 @@ def create_run(
     run_id = run_id_for_create(workflow_id, idempotency_key)
     existing = store.get_run(run_id)
     if existing is not None:
+        existing_authorization = _catalog_authorization_event(store, run_id)
+        if catalog_run_authorization is None:
+            if existing_authorization is not None:
+                raise ResearchWorkflowError(
+                    "catalog run authorization is required to replay this run",
+                    code="catalog_run_authorization_required",
+                )
+        elif not isinstance(catalog_run_authorization, Mapping):
+            raise ResearchWorkflowError(
+                "catalog run authorization is missing or invalid",
+                code="catalog_run_authorization_invalid",
+            )
+        else:
+            if existing_authorization is None:
+                raise ResearchWorkflowError(
+                    "catalog run authorization is required to replay this run",
+                    code="catalog_run_authorization_required",
+                )
+            authorization_record = _load_catalog_run_authorization(
+                store,
+                catalog_run_authorization,
+                team_id=existing.team_id,
+                question_id=existing.question_id,
+            )
+            if (
+                not existing_authorization
+                or authorization_record.authorization_id
+                != str(existing_authorization.get("authorizationId") or "")
+                or authorization_record.record_hash
+                != str(existing_authorization.get("recordHash") or "")
+            ):
+                raise ResearchWorkflowError(
+                    "catalog run authorization does not match the existing run",
+                    code="catalog_run_authorization_invalid",
+                )
         _ensure_create_fingerprint(existing, fingerprints)
         return catalog_dict_from_run(existing)
 
@@ -201,25 +279,17 @@ def create_run(
     )
     authorization_record = None
     if catalog_run_authorization is not None:
-        from .catalog_run_authorization import validate_catalog_run_authorization
-
-        authorization_id = str(
-            catalog_run_authorization.get("authorizationId") or ""
-        ).strip()
-        authorization_record = store.get_catalog_run_authorization(authorization_id)
-        if authorization_record is None or not validate_catalog_run_authorization(
-            authorization_record,
-            team_id=input_snapshot.teamId,
-            plan_id=str(catalog_run_authorization.get("planId") or ""),
-            scope_hash=str(catalog_run_authorization.get("scopeHash") or ""),
-            readiness_sha256=str(
-                catalog_run_authorization.get("readinessReportSha256") or ""
-            ),
-        ):
+        if not isinstance(catalog_run_authorization, Mapping):
             raise ResearchWorkflowError(
                 "catalog run authorization is missing or invalid",
                 code="catalog_run_authorization_invalid",
             )
+        authorization_record = _load_catalog_run_authorization(
+            store,
+            catalog_run_authorization,
+            team_id=input_snapshot.teamId,
+            question_id=input_snapshot.questionId,
+        )
     auth_payload = None
     if authorization_record is not None:
         auth_payload = {

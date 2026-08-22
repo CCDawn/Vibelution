@@ -17,6 +17,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from core.research.competition.real_control_batch import RealBatchError, real_plan
 from core.research.workflow.ledger import CatalogRunAuthorization
 
 from .formal_write_runtime import get_write_store
@@ -72,6 +73,39 @@ def batch_scope_sha256(batch_scope: Mapping[str, Any] | list[Any]) -> str:
     return canonical_sha256(batch_scope)
 
 
+def _canonical_batch_scope(
+    plan_id: str,
+    batch_scope: Mapping[str, Any] | list[Any],
+) -> dict[str, Any]:
+    """Validate a scope against the frozen real-batch plan definition."""
+
+    normalized_plan = str(plan_id or "").strip()
+    try:
+        plan = real_plan(normalized_plan)
+    except (RealBatchError, ValueError) as exc:
+        raise CatalogRunAuthorizationError(
+            "catalog authorization plan does not match a canonical real plan"
+        ) from exc
+    if not isinstance(batch_scope, Mapping):
+        raise CatalogRunAuthorizationError(
+            "catalog authorization scope must be a JSON object"
+        )
+    scope_plan = str(batch_scope.get("planId") or "").strip()
+    scope_gate = str(batch_scope.get("gateId") or "").strip()
+    question_ids = batch_scope.get("questionIds")
+    expected_question_ids = [str(question_id) for question_id in plan.question_ids]
+    if (
+        scope_plan != normalized_plan
+        or scope_gate != str(plan.gate_id)
+        or not isinstance(question_ids, list)
+        or question_ids != expected_question_ids
+    ):
+        raise CatalogRunAuthorizationError(
+            "catalog authorization scope does not match the canonical plan"
+        )
+    return dict(batch_scope)
+
+
 def _record_hash_payload(record: CatalogRunAuthorization) -> dict[str, Any]:
     try:
         scope = json.loads(record.batch_scope_json)
@@ -101,6 +135,7 @@ def validate_catalog_run_authorization(
     plan_id: str | None = None,
     scope_hash: str | None = None,
     readiness_sha256: str | None = None,
+    question_id: str | None = None,
 ) -> bool:
     """Validate immutable content and optional lookup scope before use."""
 
@@ -114,11 +149,14 @@ def validate_catalog_run_authorization(
         )
         expected_scope_hash = _require_sha256(record.scope_hash, label="scope_hash")
         scope = json.loads(record.batch_scope_json)
+        canonical_scope = _canonical_batch_scope(record.plan_id, scope)
     except (CatalogRunAuthorizationError, TypeError, ValueError, json.JSONDecodeError):
         return False
-    if not isinstance(scope, (dict, list)):
+    if batch_scope_sha256(canonical_scope) != expected_scope_hash:
         return False
-    if batch_scope_sha256(scope) != expected_scope_hash:
+    if question_id is not None and str(question_id).strip() not in {
+        str(value).strip() for value in canonical_scope["questionIds"]
+    }:
         return False
     if scope_hash is not None and expected_scope_hash != str(scope_hash):
         return False
@@ -203,6 +241,7 @@ def record_catalog_run_authorization(
         raise CatalogRunAuthorizationError("approved_by is required")
     if not isinstance(batch_scope, (Mapping, list)):
         raise CatalogRunAuthorizationError("batch_scope must be JSON object/array")
+    canonical_scope = _canonical_batch_scope(normalized_plan, batch_scope)
     if (
         readiness_report_sha256_value is not None
         and readiness_report_hash is not None
@@ -233,7 +272,7 @@ def record_catalog_run_authorization(
         )
     report_hash = supplied_hash or evidence_hash
     assert report_hash is not None
-    scope_hash = batch_scope_sha256(batch_scope)
+    scope_hash = batch_scope_sha256(canonical_scope)
     store = get_write_store()
     existing = store.find_catalog_run_authorization(
         team_id=normalized_team,
@@ -266,7 +305,7 @@ def record_catalog_run_authorization(
         )[:32]
     )
     scope_json = json.dumps(
-        batch_scope,
+        canonical_scope,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
