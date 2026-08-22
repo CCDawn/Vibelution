@@ -167,6 +167,20 @@ class GraphDispatchWorker:
                 if run is None or run.status != "created":
                     continue
                 event_id = f"evt-dispatch-never-started-{run_id}"
+                event_payload = {
+                    "terminalReason": "dispatch_never_started",
+                    "reason": (
+                        "created run exceeded START_NODE deadline without an attempt"
+                    ),
+                    "reconciliation": "created_without_start",
+                }
+                latest_sequence = uow.repository.latest_event_sequence(run_id)
+                if latest_sequence != run.last_event_sequence:
+                    raise RuntimeError(
+                        "created-run reconciliation sequence conflict for "
+                        f"{run_id}: run expects {run.last_event_sequence}, "
+                        f"ledger has {latest_sequence}"
+                    )
                 # A prior attempt may have committed the deterministic event
                 # before a process stopped.  Reconcile the row without
                 # advancing its sequence a second time; otherwise an old
@@ -187,7 +201,25 @@ class GraphDispatchWorker:
                         != "dispatch_never_started"
                     ):
                         raise RuntimeError(
-                            f"created-run reconciliation event {event_id} conflicts with dispatch_never_started"
+                            "created-run reconciliation event ID conflict for "
+                            f"{event_id}: conflicts with dispatch_never_started"
+                        )
+                    expected_event = _event_record_for(
+                        run_id=run_id,
+                        sequence=run.last_event_sequence,
+                        run_version=run.run_version,
+                        event_id=event_id,
+                        event_type="run_failed",
+                        correlation_id=run_id,
+                        payload=event_payload,
+                        now_ms=now_ms,
+                    )
+                    if _event_replay_identity(
+                        existing_event
+                    ) != _event_replay_identity(expected_event):
+                        raise RuntimeError(
+                            "created-run reconciliation event ID conflict for "
+                            f"{event_id}: conflicts with dispatch_never_started"
                         )
                     if not uow.repository.update_run_status(
                         run_id,
@@ -202,6 +234,7 @@ class GraphDispatchWorker:
                         continue
                     repaired += 1
                     continue
+                expected_sequence = run.last_event_sequence + 1
                 if not uow.repository.update_run_status(
                     run_id,
                     team_id,
@@ -218,6 +251,11 @@ class GraphDispatchWorker:
                     raise RuntimeError(
                         f"created-run reconciliation lost run {run_id} while advancing the event sequence"
                     )
+                if sequence != expected_sequence:
+                    raise RuntimeError(
+                        "created-run reconciliation sequence conflict for "
+                        f"{run_id}: expected {expected_sequence}, got {sequence}"
+                    )
                 # The status transition and event are one transaction.  A
                 # duplicate event is allowed to raise and roll back the whole
                 # mutation rather than committing a status/sequence mismatch.
@@ -229,11 +267,7 @@ class GraphDispatchWorker:
                         event_id=event_id,
                         event_type="run_failed",
                         correlation_id=run_id,
-                        payload={
-                            "terminalReason": "dispatch_never_started",
-                            "reason": "created run exceeded START_NODE deadline without an attempt",
-                            "reconciliation": "created_without_start",
-                        },
+                        payload=event_payload,
                         now_ms=now_ms,
                     )
                 )
@@ -1714,6 +1748,35 @@ def _event_record_for(
         causation_id=None,
         payload_json=json.dumps(payload, ensure_ascii=False),
         occurred_at_ms=now_ms,
+    )
+
+
+def _canonical_json_text(value: str) -> str:
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return json.dumps(
+        decoded,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _event_replay_identity(event: Any) -> tuple[Any, ...]:
+    """Semantic identity required before a deterministic event replay."""
+
+    return (
+        event.run_id,
+        event.sequence,
+        event.event_id,
+        event.run_version,
+        event.event_type,
+        _canonical_json_text(event.actor_json),
+        event.correlation_id,
+        event.causation_id or "",
+        _canonical_json_text(event.payload_json),
     )
 
 

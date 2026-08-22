@@ -3,14 +3,43 @@ mutating anything."""
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordinator
 from core.research.workflow.ledger.reconciliation import (
     run_ledger_reconciliation,
     run_readonly_reconciliation,
 )
+from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
+    GraphDispatchWorker,
+)
 from tests._support.command_helpers import CommandHarness
-from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_event_record,
+    build_run_record,
+)
+
+
+def _created_run_reconciliation_payload() -> dict[str, str]:
+    return {
+        "terminalReason": "dispatch_never_started",
+        "reason": "created run exceeded START_NODE deadline without an attempt",
+        "reconciliation": "created_without_start",
+    }
+
+
+def _created_run_worker(harness: CommandHarness, tmp_path: Path) -> GraphDispatchWorker:
+    return GraphDispatchWorker(
+        store=harness.store,
+        coordinator=ChallengeCupGraphCoordinator(tmp_path / "checkpoints.sqlite"),
+        now_provider=lambda: FIXED_NOW_MS + 2_000,
+        start_deadline_ms=1_000,
+    )
 
 
 def test_terminal_run_with_pending_outbox_found(tmp_path: Path) -> None:
@@ -93,5 +122,113 @@ def test_reconciliation_is_readonly(tmp_path: Path) -> None:
         run = harness.store.get_run("run-test")
         assert run is not None and run.run_version == 1
         assert harness.store.latest_event_sequence("run-test") == 1
+    finally:
+        harness.close()
+
+
+def test_created_run_reconciliation_rejects_reused_run_created_event_id(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    run_id = "run-created-event-conflict"
+    event_id = f"evt-dispatch-never-started-{run_id}"
+    try:
+        def seed(uow) -> None:
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id=run_id,
+                    status="created",
+                    last_event_sequence=1,
+                    created_at_ms=FIXED_NOW_MS,
+                )
+            )
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run_id,
+                    event_id=event_id,
+                    event_type="run_created",
+                )
+            )
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        before_run = harness.store.get_run(run_id)
+        before_events = harness.store.list_events(run_id)
+        before_attempts = harness.store.list_attempts(run_id)
+
+        with pytest.raises(RuntimeError, match="event ID conflict"):
+            _created_run_worker(harness, tmp_path).run_once()
+
+        assert harness.store.get_run(run_id) == before_run
+        assert harness.store.list_events(run_id) == before_events
+        assert harness.store.list_attempts(run_id) == before_attempts
+        assert harness.store.latest_event_sequence(run_id) == 1
+    finally:
+        harness.close()
+
+
+def test_created_run_reconciliation_accepts_exact_semantic_event_replay(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    run_id = "run-created-event-replay"
+    event_id = f"evt-dispatch-never-started-{run_id}"
+    try:
+        def seed(uow) -> None:
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id=run_id,
+                    status="created",
+                    last_event_sequence=2,
+                    created_at_ms=FIXED_NOW_MS,
+                )
+            )
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                    event_type="run_created",
+                )
+            )
+            replay = build_event_record(
+                2,
+                run_id=run_id,
+                event_id=event_id,
+                event_type="run_failed",
+                correlation_id=run_id,
+            )
+            uow.repository.insert_event(
+                replace(
+                    replay,
+                    actor_json=json.dumps(
+                        {"actorId": "graph-worker", "actorType": "system"},
+                        indent=2,
+                    ),
+                    payload_json=json.dumps(
+                        _created_run_reconciliation_payload(),
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                )
+            )
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        worker = _created_run_worker(harness, tmp_path)
+
+        assert worker.run_once() == 1
+
+        failed = harness.store.get_run(run_id)
+        assert failed is not None
+        assert failed.status == "failed"
+        assert failed.terminal_reason == "dispatch_never_started"
+        assert failed.run_version == 1
+        assert failed.last_event_sequence == 2
+        assert harness.store.list_attempts(run_id) == []
+        assert [event.event_id for event in harness.store.list_events(run_id)] == [
+            f"evt-created-{run_id}",
+            event_id,
+        ]
+        assert worker.run_once() == 0
     finally:
         harness.close()
