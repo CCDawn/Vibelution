@@ -395,7 +395,9 @@ def _resolve_role_agent(
             code="system_capability_not_agent",
         )
 
-    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    canonical_candidates: list[tuple[int, dict[str, Any]]] = []
+    legacy_candidates: list[tuple[int, dict[str, Any]]] = []
+    normalized_expected_team_role = expected_team_role.lower()
     for index, item in enumerate(list(team.get("members") or [])):
         if not isinstance(item, dict) or not _text(item.get("agentId")):
             continue
@@ -403,25 +405,24 @@ def _resolve_role_agent(
         owner = role_contract.resolve_role_owner(observed_role)
         if owner != expected_owner:
             continue
-        candidates.append(
-            (
-                0 if observed_role.lower() == expected_owner[1] else 1,
-                index,
-                item,
-            )
-        )
+        normalized_observed_role = observed_role.lower()
+        if normalized_observed_role == expected_owner[1]:
+            canonical_candidates.append((index, item))
+        elif normalized_observed_role == normalized_expected_team_role:
+            legacy_candidates.append((index, item))
+    candidates = canonical_candidates or legacy_candidates
     candidate_agent_ids = {
-        _text(candidate[2].get("agentId"))
+        _text(candidate[1].get("agentId"))
         for candidate in candidates
-        if _text(candidate[2].get("agentId"))
+        if _text(candidate[1].get("agentId"))
     }
     if len(candidate_agent_ids) > 1:
         raise ResearchProjectAgentTaskError(
             f"Research team role {expected_team_role} is bound to more than one Agent.",
             code="agent_role_ambiguous",
         )
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    member = candidates[0][2] if candidates else None
+    candidates.sort(key=lambda item: item[0])
+    member = candidates[0][1] if candidates else None
     if member is None:
         raise ResearchProjectAgentTaskError(
             f"Research team role {expected_team_role} is not bound to an Agent.",

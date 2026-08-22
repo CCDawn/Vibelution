@@ -80,6 +80,7 @@ def _canonical_team_project_and_agents(tmp_path, monkeypatch):
         ("challenge_cup_evaluator", "独立评估"),
         ("challenge_cup_execution_steward", "执行管理"),
         ("challenge_cup_versioning", "旧版本治理"),
+        ("challenge_cup_experiment_planner", "旧实验规划"),
     )
     members = []
     agents = {}
@@ -217,6 +218,21 @@ def test_canonical_revision_agent_starts_legacy_task_contract(
     ]["agentId"]
     assert started["task"]["roleKey"] == "challenge_cup_experiment_planner"
     assert len(calls) == 1
+
+
+def test_role_resolver_uses_exact_legacy_task_role_without_sibling_ambiguity(
+    tmp_path,
+    monkeypatch,
+):
+    team, _project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+
+    member, agent = research_project_agent_tasks._resolve_role_agent(
+        team["teamId"],
+        research_project_agent_tasks.TASK_KIND_CONTRACTS["experiment_design"],
+    )
+
+    assert member["role"] == "experiment_planner"
+    assert agent["agentId"] == agents["experiment_planner"]["agentId"]
 
 
 def test_role_resolver_accepts_canonical_evaluator_and_execution_but_not_versioning(
