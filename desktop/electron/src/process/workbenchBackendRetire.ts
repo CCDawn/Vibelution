@@ -67,11 +67,16 @@ export async function requestGracefulWorkbenchShutdown(input: {
   port: number;
   host?: string;
   backendPid?: number;
+  controlToken?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   request?: (
     url: string,
-    options: { method: "POST"; signal: AbortSignal }
+    options: {
+      method: "POST";
+      signal: AbortSignal;
+      headers: Record<string, string>;
+    }
   ) => Promise<GracefulWorkbenchShutdownResponse>;
   pidAlive?: (pid: number) => boolean;
   connect?: (port: number, host: string) => Promise<boolean>;
@@ -87,6 +92,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
   const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS));
   const now = input.now ?? Date.now;
   const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
+  const controlToken = String(input.controlToken ?? process.env.VIBELUTION_WEB_CONTROL_TOKEN ?? "").trim();
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
   const request = input.request ?? (async (url, options) => {
     const response = await fetch(url, options);
@@ -102,7 +108,10 @@ export async function requestGracefulWorkbenchShutdown(input: {
     timeoutTimer = setTimeout(() => controller.abort(new Error("graceful shutdown timed out")), timeoutMs);
     const response = await request(`http://${host}:${port}/api/runtime/shutdown`, {
       method: "POST",
-      signal: controller.signal
+      signal: controller.signal,
+      headers: {
+        "X-Vibelution-Control-Token": controlToken
+      }
     });
     if (response.status === 409) {
       return {

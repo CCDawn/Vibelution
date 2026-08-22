@@ -175,6 +175,7 @@ describe("workbenchBackendRetire", () => {
       requestGracefulWorkbenchShutdown({
         port: 8000,
         backendPid: 4242,
+        controlToken: "test-control-token",
         request,
         connect,
         pidAlive,
@@ -183,7 +184,11 @@ describe("workbenchBackendRetire", () => {
     ).resolves.toMatchObject({ requested: true, completed: true, status: 202 });
     expect(request).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/api/runtime/shutdown",
-      expect.objectContaining({ method: "POST", signal: expect.any(AbortSignal) })
+      expect.objectContaining({
+        method: "POST",
+        signal: expect.any(AbortSignal),
+        headers: { "X-Vibelution-Control-Token": "test-control-token" }
+      })
     );
   });
 
@@ -198,6 +203,31 @@ describe("workbenchBackendRetire", () => {
       })
     ).resolves.toMatchObject({ requested: false, completed: false, status: 409 });
     expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("uses the existing Electron control token when no override is supplied", async () => {
+    const previousToken = process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+    process.env.VIBELUTION_WEB_CONTROL_TOKEN = "environment-control-token";
+    const request = vi.fn().mockResolvedValue({ status: 409 });
+    try {
+      await requestGracefulWorkbenchShutdown({
+        port: 8000,
+        request,
+        delay: async () => undefined
+      });
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+      } else {
+        process.env.VIBELUTION_WEB_CONTROL_TOKEN = previousToken;
+      }
+    }
+    expect(request).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/runtime/shutdown",
+      expect.objectContaining({
+        headers: { "X-Vibelution-Control-Token": "environment-control-token" }
+      })
+    );
   });
 
   it("collects registered launcher handles without scanning the process table", () => {
@@ -514,6 +544,28 @@ describe("reclaimStaleWorkbenchBackend", () => {
     });
     expect(result).toMatchObject({ reclaimed: false, verifiedPid: 4242 });
     expect(result.reason).toContain("not verified");
+  });
+
+  it("fails closed when a health-identified backend exits before tree retirement", async () => {
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => true,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: () => false,
+      terminateProcessTree,
+      expectedIdentities: {
+        "4242": { pid: 4242, createTime: 1, executable: "C:/Python/python.exe" }
+      }
+    });
+
+    expect(result).toMatchObject({ reclaimed: false, verifiedPid: 4242 });
+    expect(result.reason).toContain("retirement was not verified");
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
   });
 });
 

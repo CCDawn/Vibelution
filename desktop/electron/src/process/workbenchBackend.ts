@@ -156,6 +156,7 @@ export type ExecuteMainLineWorkbenchInput = {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   ownedDirectPids?: readonly number[];
   readDaemonPid?: (workspaceRoot: string) => number;
@@ -587,6 +588,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   registeredPids?: number[];
   extraPids?: number[];
@@ -707,6 +709,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         port,
         host: input.host,
         backendPid: occupant.pid,
+        controlToken: input.controlToken,
         signal: input.signal,
         pidAlive,
         connect: input.connect,
@@ -724,6 +727,25 @@ export async function reclaimStaleWorkbenchBackend(input: {
           verifiedPid: occupant.pid
         };
       }
+    }
+  } else {
+    // Health identified a same-project backend, but its root disappeared before
+    // retirement began.  Root-PID death does not prove that descendants were
+    // reaped; only the identity-checked tree verifier can establish closure.
+    if (!input.terminateProcessTree) {
+      return {
+        reclaimed: false,
+        reason: `stale backend pid ${occupant.pid} exited before process-tree retirement was verified`,
+        verifiedPid: occupant.pid
+      };
+    }
+    const terminated = await terminateOne(occupant.pid);
+    if (!terminated) {
+      return {
+        reclaimed: false,
+        reason: `stale backend pid ${occupant.pid} process-tree retirement was not verified`,
+        verifiedPid: occupant.pid
+      };
     }
   }
   const extrasStillAliveBeforePortWait = await retireExtras(occupant.pid);
@@ -779,6 +801,7 @@ export async function resolveBindableWorkbenchPort(input: {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
@@ -1310,6 +1333,7 @@ export async function executeMainLineWorkbench(
         killPid: input.killPid,
         terminateProcessTree,
         expectedIdentities,
+        controlToken: input.controlToken,
         gracefulShutdown,
         registeredPids: backendTreePids,
         extraPids
@@ -1352,6 +1376,7 @@ export async function executeMainLineWorkbench(
         killPid: input.killPid,
         terminateProcessTree,
         expectedIdentities,
+        controlToken: input.controlToken,
         registeredPids: backendTreePids,
         extraPids
       });
