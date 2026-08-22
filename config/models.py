@@ -1721,7 +1721,7 @@ class WorkflowSessionScopeV3Config(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
     hypothesis_design: Literal["off", "shadow", "on"] = Field(
-        default="on",
+        default="shadow",
         description="假说设计会话作用域模式：off / shadow / on",
     )
 

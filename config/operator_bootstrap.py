@@ -414,7 +414,7 @@ def build_default_operator_config(
             "lease_seconds": 30,
         },
         "workflow_session_scope_v3": {
-            "hypothesis_design": "on",
+            "hypothesis_design": "shadow",
         },
     }
 

@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from config.models import AppConfig
+from config.operator_bootstrap import build_default_operator_config
 from core.research.workflow.contracts import (
     ArtifactManifest,
     CompetitionEvaluationSnapshot,
@@ -80,6 +82,16 @@ def test_legacy_snapshot_without_scope_mode_defaults_off_and_rehashes() -> None:
     assert parsed.workflowSessionScopeV3 == {"hypothesis_design": "off"}
     assert parsed.snapshotHash != legacy_raw_hash
     assert WorkflowRunInputSnapshot.from_dict(parsed.to_dict()).snapshotHash == parsed.snapshotHash
+
+
+def test_hypothesis_scope_rollout_defaults_to_shadow() -> None:
+    assert AppConfig().workflow_session_scope_v3.hypothesis_design == "shadow"
+    bootstrap = build_default_operator_config(
+        include_unconfigured_providers=False
+    )
+    assert bootstrap["workflow_session_scope_v3"] == {
+        "hypothesis_design": "shadow"
+    }
 
 
 def test_hypothesis_scope_mode_is_server_frozen_and_shadow_is_side_effect_free(
