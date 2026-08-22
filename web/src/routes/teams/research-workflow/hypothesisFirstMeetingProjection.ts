@@ -43,7 +43,8 @@ export function buildHypothesisFirstReviewProjection(
 ): HypothesisFirstReviewProjection {
   const currentSelectionId = normalizedId(selectionId);
   const linksByMeetingId = new Map<string, ReviewRoundLinkRecord[]>();
-  const scopedLinks = currentSelectionId
+  const hasSelectionScopedLinks = (links ?? []).some((link) => normalizedId(link.selectionId));
+  const scopedLinks = currentSelectionId && hasSelectionScopedLinks
     ? (links ?? []).filter((link) => normalizedId(link.selectionId) === currentSelectionId)
     : (links ?? []);
   for (const link of scopedLinks) {
@@ -51,14 +52,15 @@ export function buildHypothesisFirstReviewProjection(
     meetingLinks.push(link);
     linksByMeetingId.set(link.meetingRoundId, meetingLinks);
   }
-  const candidates = (meetings ?? [])
+  const scopedMeetings = (meetings ?? [])
     .filter((meeting) => meeting.meetingType === REVIEW_MEETING_TYPE)
     .filter((meeting) => {
-      if (!currentSelectionId) return true;
+      if (!currentSelectionId || !hasSelectionScopedLinks) return true;
       const meetingSelectionId = normalizedId(meeting.selectionId);
       if (meetingSelectionId) return meetingSelectionId === currentSelectionId;
       return linksByMeetingId.has(meeting.meetingRoundId);
-    })
+    });
+  const candidates = scopedMeetings
     .map((meeting) => {
       const meetingLinks = linksByMeetingId.get(meeting.meetingRoundId) ?? [];
       if (meetingLinks.length > 1) return null;
@@ -89,8 +91,7 @@ export function buildHypothesisFirstReviewProjection(
     });
   const byMeetingId = new Map(rounds.map((round) => [round.meeting.meetingRoundId, round]));
   const byNodeId = new Map(rounds.map((round) => [round.nodeId, round]));
-  const unresolvedMeetingIds = (meetings ?? [])
-    .filter((meeting) => meeting.meetingType === REVIEW_MEETING_TYPE)
+  const unresolvedMeetingIds = scopedMeetings
     .filter((meeting) => !byMeetingId.has(meeting.meetingRoundId))
     .map((meeting) => meeting.meetingRoundId);
 

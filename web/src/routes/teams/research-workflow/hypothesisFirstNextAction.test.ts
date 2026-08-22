@@ -554,7 +554,7 @@ describe("resolveHypothesisFirstNextAction", () => {
       boundChatRoundsTerminal: false,
     });
 
-    expect(next.stage).toBe("review_running");
+    expect(next.stage).toBe("next_review");
     expect(next.targetNodeId).toBe("hf_meeting_2");
     expect(next.meetingRoundId).toBe("current-r2");
   });
