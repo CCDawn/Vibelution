@@ -389,6 +389,49 @@ def test_adapter_rejects_empty_identity_alias() -> None:
         )
 
 
+def test_adapter_accepts_historical_v2_log_ref_as_independent_evidence_locator() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    for row in evidence:
+        row["logRef"] = (
+            f"session:{row['sourceSessionId']}/turn:{row['turnId']}"
+        )
+
+    package = adapt_question_result_package(
+        output,
+        catalog_scope=CatalogScope.from_tracked_resources(),
+        run_binding=binding,
+        authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+        result_package=payload,
+        model_policy=payload["model_policy"],
+        model_invocation_receipts=payload["model_invocation_receipts"],
+        official_model_evidence=_evidence_store(evidence),
+        canonical_turn_resolver=_canonical_resolver(output),
+    )
+
+    assert package.question_id == payload["question_id"]
+
+
+def test_adapter_does_not_accept_log_ref_as_output_ref_alias() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    evidence[0]["logRef"] = (
+        f"session:{evidence[0]['sourceSessionId']}/turn:{evidence[0]['turnId']}"
+    )
+    del evidence[0]["outputRef"]
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="missing fields: outputRef"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
 def test_adapter_normalizes_snake_case_evidence_identity() -> None:
     output, payload, binding, evidence = _package_inputs()
     row = evidence[0]

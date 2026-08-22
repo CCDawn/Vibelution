@@ -305,7 +305,7 @@ def _validated_v2_evidence_rows(
                 "node_id",
             ),
             "outputRef": _row_value(
-                row, "outputRef", "output_ref", "ref", "logRef"
+                row, "outputRef", "output_ref", "ref"
             ),
             "outputSha256": _row_value(
                 row,
@@ -380,7 +380,7 @@ def _validate_receipt_evidence(
         locator = dict(receipt.evidence_locator or {})
         locator_evidence_id = _scope_value(locator, "evidenceId", "evidence_id", "id")
         locator_output_ref = _scope_value(
-            locator, "outputRef", "output_ref", "ref", "logRef"
+            locator, "outputRef", "output_ref", "ref"
         )
         if not locator_output_ref:
             raise QuestionResultPackageAdapterError(
@@ -452,7 +452,7 @@ def _validate_receipt_evidence(
                 "outputHash",
                 "output_hash",
             ),
-            "outputRef": _row_value(row, "outputRef", "output_ref", "ref", "logRef"),
+            "outputRef": _row_value(row, "outputRef", "output_ref", "ref"),
         }
         missing = [key for key, value in required.items() if not value]
         if missing:
@@ -558,7 +558,7 @@ def _validate_receipt_evidence(
             "taskId": _scope_value(binding, "taskId", "task_id", "task"),
             "turnId": _scope_value(binding, "turnId", "turn_id", "turn"),
             "outputRef": _scope_value(
-                binding, "outputRef", "output_ref", "ref", "logRef"
+                binding, "outputRef", "output_ref", "ref"
             ),
             "outputSha256": _scope_value(
                 binding,
