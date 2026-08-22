@@ -391,6 +391,7 @@ export function ResearchProcessWorkspace({
         }}
         responsive={{
           enabled: true,
+          rail: { label: "研究阶段" },
           inspector: { label: "当前任务" },
         }}
         canvas={archiveOpen && inspectorPane ? (
