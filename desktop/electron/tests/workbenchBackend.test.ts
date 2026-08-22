@@ -829,7 +829,12 @@ describe("runWorkbenchLifecycle", () => {
           json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
         }),
         pidAlive: () => false,
-        killPid: () => undefined
+        killPid: () => undefined,
+        captureProcessIdentity: async ({ pid }) => ({
+          pid,
+          createTime: 1,
+          executable: "C:/Python/python.exe"
+        })
       }
     };
   }

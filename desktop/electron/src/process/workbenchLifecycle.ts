@@ -54,7 +54,7 @@ export type RunWorkbenchLifecycleInput = {
   queue?: MainLineCommandQueue;
 } & Pick<
   ExecuteMainLineWorkbenchInput,
-  "fileExists" | "readState" | "writeState" | "listActiveWork" | "ensureFrontend" | "connect" | "fetchHealth" | "pidAlive" | "killPid"
+  "fileExists" | "readState" | "writeState" | "listActiveWork" | "ensureFrontend" | "connect" | "fetchHealth" | "pidAlive" | "killPid" | "captureProcessIdentity"
 >;
 
 export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): Promise<WorkbenchLifecycleResult> {
@@ -89,7 +89,8 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
         connect: input.connect,
         fetchHealth: input.fetchHealth,
         pidAlive: input.pidAlive,
-        killPid: input.killPid
+        killPid: input.killPid,
+        captureProcessIdentity: input.captureProcessIdentity
       });
     },
   });

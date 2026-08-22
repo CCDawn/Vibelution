@@ -1483,10 +1483,8 @@ export async function executeMainLineWorkbench(
     throw error;
   }
   const captureIdentity = input.captureProcessIdentity
-    ?? (!input.spawnImpl
-      ? (captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
-        capturePythonProcessIdentity(captureInput)
-      : undefined);
+    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
+      capturePythonProcessIdentity(captureInput));
   let backendIdentity: PythonProcessIdentity | null = null;
   if (spawnPid > 0 && captureIdentity) {
     backendIdentity = await captureIdentity({
