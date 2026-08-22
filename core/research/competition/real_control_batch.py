@@ -20,6 +20,7 @@ from core.research.competition.catalog_execution import (
     CatalogExecutionPlan,
     CatalogExecutionState,
     QuestionStatus,
+    _validate_checkpoint_envelope,
     build_result_set,
     catalog_plan,
 )
@@ -182,6 +183,11 @@ def project_real_batch_state(
         if state.status(question_id) is QuestionStatus.PENDING
     ]
     checkpoint = state.to_checkpoint()
+    checkpoint_sha256 = (
+        str(checkpoint["checkpoint_sha256"]).strip().upper()
+        if _validate_checkpoint_envelope(checkpoint)
+        else ""
+    )
     result_manifest = build_result_set(state).manifest()
     return {
         "schemaVersion": REAL_BATCH_PROJECTION_SCHEMA_VERSION,
@@ -218,7 +224,7 @@ def project_real_batch_state(
         ),
         "cancelled": bool(cancelled),
         "gateComplete": summary["succeeded"] == len(state.plan.question_ids),
-        "checkpointSha256": checkpoint["checkpoint_sha256"],
+        "checkpointSha256": checkpoint_sha256,
         "resultManifestSha256": result_manifest["manifest_sha256"],
         "packageQualitySummary": state.package_quality_summary(),
         "lastUpdatedAt": updated_at,
