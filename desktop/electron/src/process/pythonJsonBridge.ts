@@ -9,6 +9,7 @@ export const PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS = 20_000;
 export const PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS = 75_000;
 export const PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS = 600_000;
 export const PYTHON_JSON_BRIDGE_TERMINATION_GRACE_MS = 2_000;
+export const PYTHON_JSON_BRIDGE_PROCESS_TREE_TIMEOUT_MS = 10_000;
 
 export type PythonJsonBridgeErrorCode =
   | "timeout"
@@ -52,6 +53,196 @@ export type PythonJsonBridgeSpawn = (
 ) => PythonJsonBridgeChild;
 
 export type PythonJsonBridgeOwnedTreeTerminator = (child: PythonJsonBridgeChild) => void | Promise<void>;
+
+/**
+ * A process-tree root must be classified by the project-owned Python process
+ * inventory before Electron asks the helper to terminate it.  The helper is
+ * intentionally narrow: it never accepts a process-table scan or a shell
+ * command as a kill authority.
+ */
+export type PythonOwnedProcessTreeKind =
+  | "managed_workbench_backend"
+  | "runtime_manager_daemon"
+  | "frontend_build_bridge";
+
+export type PythonOwnedProcessTreeResult = {
+  status: "terminated" | "already_dead" | "not_owned" | "still_alive";
+  pid: number;
+  kind?: string;
+  reason?: string;
+  remainingPids?: number[];
+};
+
+export type PythonOwnedProcessTreeTerminator = (pid: number) => Promise<boolean>;
+
+const PYTHON_OWNED_PROCESS_TREE_SCRIPT = String.raw`
+import json
+import os
+import sys
+
+pid = int(sys.argv[1] or 0)
+workspace = os.path.abspath(sys.argv[2] or os.getcwd())
+allowed = set(json.loads(sys.argv[3] or "[]"))
+
+def emit(status, kind="", reason="", remaining=None):
+    print(json.dumps({
+        "status": status,
+        "pid": pid,
+        "kind": kind,
+        "reason": reason,
+        "remainingPids": list(remaining or []),
+    }, separators=(",", ":")))
+
+if pid <= 0:
+    emit("not_owned", reason="invalid_pid")
+    raise SystemExit(0)
+
+try:
+    import psutil
+except Exception:
+    emit("not_owned", reason="psutil_unavailable")
+    raise SystemExit(0)
+
+def normalized(value):
+    return os.path.normcase(os.path.normpath(str(value or "")))
+
+def build_bridge_owned(process):
+    try:
+        cwd = normalized(process.cwd())
+        command = " ".join(str(item or "") for item in process.cmdline()).replace("\\", "/").lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return False
+    return (
+        cwd == normalized(workspace)
+        and "scripts/vibelution_desktop_entry.py" in command
+        and "ensure-frontend-build" in command
+    )
+
+try:
+    root = psutil.Process(pid)
+    kind = ""
+    if "frontend_build_bridge" in allowed and build_bridge_owned(root):
+        kind = "frontend_build_bridge"
+    else:
+        try:
+            from core.runtime_manager.process_inventory import repo_runtime_process_for_pid
+            classified = repo_runtime_process_for_pid(pid, project_root=workspace)
+            kind = str(getattr(classified, "kind", "") or "")
+        except Exception:
+            kind = ""
+    if kind not in allowed:
+        emit("not_owned", kind=kind, reason="process_identity_unconfirmed")
+        raise SystemExit(0)
+
+    processes = list(root.children(recursive=True))
+    # Descendants first prevents a child from surviving a root termination.
+    for process in reversed(processes):
+        try:
+            process.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    try:
+        root.terminate()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+    all_processes = processes + [root]
+    _, alive = psutil.wait_procs(all_processes, timeout=1.5)
+    for process in alive:
+        try:
+            process.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    if alive:
+        psutil.wait_procs(alive, timeout=1.0)
+    remaining = []
+    for process in all_processes:
+        try:
+            if process.is_running():
+                remaining.append(int(process.pid))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    emit("still_alive" if remaining else "terminated", kind=kind, remaining=remaining)
+except (psutil.NoSuchProcess, psutil.ZombieProcess):
+    emit("already_dead")
+except (psutil.AccessDenied, OSError) as error:
+    emit("not_owned", reason=type(error).__name__)
+`;
+
+/**
+ * Create a fail-closed process-tree terminator for one project root.
+ *
+ * The Python helper is itself a directly spawned child and is therefore safe
+ * to terminate with the bridge's ordinary child policy if it exceeds its
+ * bound.  Only the helper may terminate the target tree, after it has
+ * classified the target against the supplied project-owned process kinds.
+ */
+export function createPythonOwnedProcessTreeTerminator(input: {
+  pythonPath: string;
+  workspaceRoot: string;
+  allowedKinds: readonly PythonOwnedProcessTreeKind[];
+  spawnImpl?: PythonJsonBridgeSpawn;
+  timeoutMs?: number;
+  terminationGraceMs?: number;
+}): PythonOwnedProcessTreeTerminator {
+  const allowedKinds = [...new Set(input.allowedKinds)];
+  if (!input.pythonPath.trim()) {
+    throw new TypeError("python owned-tree terminator requires a pythonPath");
+  }
+  if (!input.workspaceRoot.trim()) {
+    throw new TypeError("python owned-tree terminator requires a workspaceRoot");
+  }
+  if (allowedKinds.length === 0) {
+    throw new TypeError("python owned-tree terminator requires at least one allowed process kind");
+  }
+
+  return async (pid: number): Promise<boolean> => {
+    const normalizedPid = Math.trunc(Number(pid));
+    if (!Number.isFinite(normalizedPid) || normalizedPid <= 0) {
+      return false;
+    }
+
+    let raw: string;
+    try {
+      raw = await runPythonJsonBridge({
+        pythonPath: input.pythonPath,
+        args: [
+          "-c",
+          PYTHON_OWNED_PROCESS_TREE_SCRIPT,
+          String(normalizedPid),
+          input.workspaceRoot,
+          JSON.stringify(allowedKinds)
+        ],
+        cwd: input.workspaceRoot,
+        spawnImpl: input.spawnImpl,
+        failureLabel: `owned process-tree terminator for pid ${normalizedPid}`,
+        maxBytes: 16_000,
+        timeoutMs: input.timeoutMs ?? PYTHON_JSON_BRIDGE_PROCESS_TREE_TIMEOUT_MS,
+        killPolicy: "child",
+        mutation: true,
+        terminationGraceMs: input.terminationGraceMs
+      });
+    } catch {
+      // A bridge failure cannot establish that the target was owned or
+      // terminated.  Returning false keeps callers fail-closed and lets them
+      // perform their normal liveness/error reconciliation.
+      return false;
+    }
+
+    let result: PythonOwnedProcessTreeResult;
+    try {
+      result = parsePythonJsonBridgePayload<PythonOwnedProcessTreeResult>(
+        raw,
+        `owned process-tree terminator for pid ${normalizedPid}`
+      );
+    } catch {
+      return false;
+    }
+    if (result.pid !== normalizedPid) {
+      return false;
+    }
+    return result.status === "terminated" || result.status === "already_dead";
+  };
+}
 
 export function invalidPythonJsonBridgePayload(
   failureLabel: string,

@@ -3,9 +3,14 @@ import { randomUUID } from "node:crypto";
 import { assertLifecycleAdmitted, recordAdmissionOutcome } from "./instanceAdmissionStore.js";
 import {
   clearWorkbenchLauncherRuntimeState,
+  readDaemonPid,
   reclaimStaleWorkbenchBackend,
   type WorkbenchRuntimeStateCleanupResult
 } from "../process/workbenchBackend.js";
+import {
+  requestGracefulWorkbenchShutdown
+} from "../process/workbenchBackendRetire.js";
+import { createPythonOwnedProcessTreeTerminator } from "../process/pythonJsonBridge.js";
 import { knownPidIsAlive } from "./mainLine/observation.js";
 
 /** Isolated-instance lifecycle operations Electron main owns end to end. */
@@ -478,12 +483,24 @@ export async function retireClaimedIsolatedRuntime(input: {
   }
   let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
   try {
+    const daemonPid = readDaemonPid(workspaceRoot);
+    const pythonPath = String(process.env.VIBELUTION_PYTHON_PATH || process.env.PYTHON || "").trim();
+    const terminateProcessTree = pythonPath
+      ? createPythonOwnedProcessTreeTerminator({
+          pythonPath,
+          workspaceRoot,
+          allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
+        })
+      : async (): Promise<boolean> => false;
     staleReclaim = workspaceRoot && port > 0
       ? await dependencies.reclaimBackend({
           port,
           host: String(entry.host || "127.0.0.1"),
           workspaceRoot,
           registeredPids: [registeredSpawnPid],
+          extraPids: [daemonPid],
+          terminateProcessTree,
+          gracefulShutdown: requestGracefulWorkbenchShutdown,
           signal: input.signal
         })
       : {

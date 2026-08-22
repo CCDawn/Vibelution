@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PYTHON_JSON_BRIDGE_MAX_BYTES,
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
+  createPythonOwnedProcessTreeTerminator,
   parsePythonJsonBridgePayload,
   PythonJsonBridgeError,
   runPythonJsonBridge,
@@ -52,6 +53,42 @@ function hangingSpawn(options: { exitOnKill?: boolean } = {}) {
 }
 
 describe("runPythonJsonBridge", () => {
+  it("uses a direct hidden Python bridge for an explicitly allowed owned tree", async () => {
+    const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({ status: "terminated", pid: 42 }));
+    const terminateOwnedTree = createPythonOwnedProcessTreeTerminator({
+      pythonPath: "python",
+      workspaceRoot: "C:/repo",
+      allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"],
+      spawnImpl,
+    });
+
+    await expect(terminateOwnedTree(42)).resolves.toBe(true);
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "python",
+      ["-c", expect.stringContaining("repo_runtime_process_for_pid"), "42", "C:/repo", JSON.stringify([
+        "managed_workbench_backend",
+        "runtime_manager_daemon",
+      ])],
+      expect.objectContaining({ cwd: "C:/repo", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
+    );
+  });
+
+  it("fails closed when the helper cannot prove ownership or complete the tree kill", async () => {
+    const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({
+      status: "not_owned",
+      pid: 42,
+      reason: "process_identity_unconfirmed",
+    }));
+    const terminateOwnedTree = createPythonOwnedProcessTreeTerminator({
+      pythonPath: "python",
+      workspaceRoot: "C:/repo",
+      allowedKinds: ["managed_workbench_backend"],
+      spawnImpl,
+    });
+
+    await expect(terminateOwnedTree(42)).resolves.toBe(false);
+  });
+
   it("accepts launcher-api sized payloads that exceed the default 64KB cap", async () => {
     const payload = "x".repeat(DEFAULT_PYTHON_JSON_BRIDGE_MAX_BYTES + 1024);
     const { spawnImpl } = fakeSpawnWithOutput(payload);

@@ -3,6 +3,7 @@ import { knownPidIsAlive, probeTcpConnect } from "../lifecycle/mainLine/observat
 export const PORT_RELEASE_WAIT_MS = 8_000;
 export const PORT_RELEASE_POLL_MS = 100;
 export const PID_TERMINATE_WAIT_MS = 8_000;
+export const GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS = 12_000;
 
 const HANDLE_KEYS = [
   "backendPid",
@@ -41,6 +42,120 @@ export function terminatePid(pid: number): void {
     process.kill(Math.trunc(pid));
   } catch {
     // Already gone, or the OS refused the signal. Callers re-check liveness.
+  }
+}
+
+export type GracefulWorkbenchShutdownResponse = {
+  status: number;
+};
+
+export type GracefulWorkbenchShutdownResult = {
+  requested: boolean;
+  completed: boolean;
+  status?: number;
+  reason: string;
+};
+
+/**
+ * Ask a verified workbench backend to run its own shutdown cleanup, then wait
+ * for both its process and listener to disappear. A 409 is a deliberate
+ * active-work refusal and must be left for the caller to handle by its normal
+ * force-retire path.
+ */
+export async function requestGracefulWorkbenchShutdown(input: {
+  port: number;
+  host?: string;
+  backendPid?: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  request?: (
+    url: string,
+    options: { method: "POST"; signal: AbortSignal }
+  ) => Promise<GracefulWorkbenchShutdownResponse>;
+  pidAlive?: (pid: number) => boolean;
+  connect?: (port: number, host: string) => Promise<boolean>;
+  now?: () => number;
+  delay?: (ms: number) => Promise<void>;
+}): Promise<GracefulWorkbenchShutdownResult> {
+  input.signal?.throwIfAborted();
+  const port = Math.trunc(input.port);
+  if (!Number.isFinite(port) || port <= 0) {
+    return { requested: false, completed: false, reason: "backend port is unavailable" };
+  }
+  const host = input.host?.trim() || "127.0.0.1";
+  const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS));
+  const now = input.now ?? Date.now;
+  const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
+  const pidAlive = input.pidAlive ?? knownPidIsAlive;
+  const request = input.request ?? (async (url, options) => {
+    const response = await fetch(url, options);
+    return { status: response.status };
+  });
+  const controller = new AbortController();
+  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  const onAbort = (): void => {
+    controller.abort(input.signal?.reason);
+  };
+  input.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    timeoutTimer = setTimeout(() => controller.abort(new Error("graceful shutdown timed out")), timeoutMs);
+    const response = await request(`http://${host}:${port}/api/runtime/shutdown`, {
+      method: "POST",
+      signal: controller.signal
+    });
+    if (response.status === 409) {
+      return {
+        requested: false,
+        completed: false,
+        status: response.status,
+        reason: "backend refused graceful shutdown because active work is running"
+      };
+    }
+    if (response.status !== 202) {
+      return {
+        requested: false,
+        completed: false,
+        status: response.status,
+        reason: `backend graceful shutdown returned HTTP ${response.status}`
+      };
+    }
+
+    const deadline = now() + timeoutMs;
+    const delay = input.delay ?? ((ms) => abortableDelay(ms, input.signal));
+    while (now() < deadline) {
+      input.signal?.throwIfAborted();
+      const processGone = !input.backendPid || !pidAlive(Math.trunc(input.backendPid));
+      const portGone = !(await connect(port, host));
+      if (processGone && portGone) {
+        return {
+          requested: true,
+          completed: true,
+          status: response.status,
+          reason: "backend completed graceful shutdown"
+        };
+      }
+      await delay(Math.min(PORT_RELEASE_POLL_MS, Math.max(1, deadline - now())));
+    }
+    return {
+      requested: true,
+      completed: false,
+      status: response.status,
+      reason: "backend did not complete graceful shutdown before the deadline"
+    };
+  } catch (error: unknown) {
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    return {
+      requested: false,
+      completed: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    if (timeoutTimer !== null) {
+      clearTimeout(timeoutTimer);
+    }
+    input.signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -85,16 +200,47 @@ export async function retireRegisteredHandles(input: {
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
   pidAlive?: (pid: number) => boolean;
-  killPid?: (pid: number) => void;
+  killPid?: (pid: number) => void | Promise<void>;
+  terminateProcessTree?: (pid: number) => boolean | Promise<boolean>;
+  treePids?: readonly number[];
+  /**
+   * PIDs independently proven to be direct children owned by the current
+   * Electron lifecycle owner. Registered browser/window handles are not
+   * included unless their provider supplied this evidence explicitly.
+   */
+  ownedDirectPids?: readonly number[];
   connect?: (port: number, host: string) => Promise<boolean>;
 }): Promise<number[]> {
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
   const killPid = input.killPid ?? terminatePid;
+  const treePids = new Set((input.treePids ?? [])
+    .map((pid) => Math.trunc(Number(pid)))
+    .filter((pid) => Number.isFinite(pid) && pid > 0));
+  const ownedDirectPids = new Set((input.ownedDirectPids ?? [])
+    .map((pid) => Math.trunc(Number(pid)))
+    .filter((pid) => Number.isFinite(pid) && pid > 0));
   const unique = [...new Set(input.pids.filter((pid) => Number.isFinite(pid) && pid > 0).map((pid) => Math.trunc(pid)))];
+  const live = unique.filter((pid) => pidAlive(pid));
+  const unowned = live.filter((pid) => {
+    if (ownedDirectPids.has(pid)) {
+      return false;
+    }
+    if (treePids.has(pid)) {
+      return !input.terminateProcessTree;
+    }
+    return true;
+  });
+  if (unowned.length > 0) {
+    throw new Error(`Refusing to retire unverified registered process handles: ${unowned.join(",")}`);
+  }
   for (const pid of unique.sort((left, right) => right - left)) {
     input.signal?.throwIfAborted();
     if (pidAlive(pid)) {
-      killPid(pid);
+      if (input.terminateProcessTree && treePids.has(pid)) {
+        await input.terminateProcessTree(pid);
+      } else {
+        await killPid(pid);
+      }
     }
   }
   const now = input.now ?? Date.now;
