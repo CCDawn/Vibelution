@@ -9,6 +9,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MeetingDigestDraft } from "../../api/types/hypothesisFirst";
 import { DigestDraftView, MeetingRoundDisplay } from "./meetingRoundDisplay";
+import css from "./meetingRoundDisplay.styles";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -295,6 +296,7 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
       );
     });
     const rootEl = container.querySelector('[data-testid="meeting-round-display"]');
+    expect(rootEl?.className).toBe(css.roundDisplay);
     const html = rootEl?.innerHTML ?? "";
     const digestAt = html.indexOf("讨论结论");
     const actionsAt = html.indexOf("退回重新整理");

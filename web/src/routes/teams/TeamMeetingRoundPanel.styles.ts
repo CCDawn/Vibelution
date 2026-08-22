@@ -5,6 +5,7 @@ const styles: Record<string, string> = {
     "grid scroll-mt-5 gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-4 [&_h3]:m-0 [&_h4]:m-0 [&_p]:m-0",
   heading:
     "flex items-start justify-between gap-2.5 [&>div]:grid [&>div]:gap-0.5 [&_h3]:[font-size:var(--vui-font-md)] [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
+  roundDisplay: "grid min-w-0 gap-3",
   headingActions: "flex shrink-0 flex-wrap items-center justify-end gap-2",
   messageList: "grid gap-[9px]",
   messageCard:

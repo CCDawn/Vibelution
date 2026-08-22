@@ -388,7 +388,7 @@ export function MeetingRoundDisplay({
   });
   const showDiscussionProgress = status === "open" || status === "summarizing";
   return (
-    <div className="grid min-w-0 gap-3" data-testid="meeting-round-display">
+    <div className={css.roundDisplay} data-testid="meeting-round-display">
       <div className={css.heading}>
         <div>
           <h3>{round.meetingType === "hypothesis_candidate_generation" ? (isZh ? "候选生成讨论" : "Candidate generation discussion") : (isZh ? "评审讨论" : "Review discussion")}</h3>
