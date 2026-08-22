@@ -168,6 +168,26 @@ def test_persisted_layers_drop_unknown_and_system_owned_bindings() -> None:
     assert by_node["version_governance"] == ""
 
 
+def test_persisted_stage_overrides_drop_unknown_workflow_stage_ids() -> None:
+    layers = team_role_source.effective_binding_layers(
+        "",
+        AgentBindingLayers(
+            stageOverrides={
+                "knowledge_collection": {
+                    "source_finder": "agent-search-stage",
+                },
+                "unknown_stage": {
+                    "source_finder": "agent-unknown-stage",
+                },
+            }
+        ),
+    )
+
+    assert layers.stageOverrides == {
+        "knowledge_collection": {"source_finder": "agent-search-stage"}
+    }
+
+
 def test_valid_persisted_binding_keeps_priority_over_team_default(monkeypatch) -> None:
     _set_team_sources(
         monkeypatch,
@@ -181,6 +201,53 @@ def test_valid_persisted_binding_keeps_priority_over_team_default(monkeypatch) -
 
     assert layers.workflowDefaults["challenge_cup_search"] == "agent-team-search"
     assert layers.workflowDefaults["source_finder"] == "agent-config-search"
+
+
+def test_live_healing_uses_contract_aliases_without_team_constants(
+    monkeypatch,
+) -> None:
+    from core.web.services.team import team_constants
+
+    class _ForbiddenSecondRoleSource(dict):
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("healing must not read the team constants role map")
+
+    monkeypatch.setattr(
+        team_constants,
+        "RESEARCH_TEAM_MEMBER_ROLE_KEYS",
+        _ForbiddenSecondRoleSource(),
+    )
+    monkeypatch.setattr(
+        team_role_source,
+        "resolve_team_role_bindings",
+        lambda _team_id: {
+            "challenge_cup_experiment_planner": "agent-revision",
+        },
+    )
+
+    healed = team_role_source.heal_agent_binding_for_node(
+        "research-team",
+        "hypothesis_design",
+    )
+
+    assert healed is not None
+    assert healed["agentId"] == "agent-revision"
+
+    monkeypatch.setattr(
+        team_role_source,
+        "resolve_team_role_bindings",
+        lambda _team_id: {
+            "challenge_cup_experiment_planner": "agent-revision-a",
+            "challenge_cup_iteration_planner": "agent-revision-b",
+        },
+    )
+    assert (
+        team_role_source.heal_agent_binding_for_node(
+            "research-team",
+            "hypothesis_design",
+        )
+        is None
+    )
 
 
 def test_live_healing_rejects_system_owned_agent_shaped_node(monkeypatch) -> None:

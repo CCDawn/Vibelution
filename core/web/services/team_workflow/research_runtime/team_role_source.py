@@ -115,6 +115,25 @@ def _filtered_product_role_bindings(values: Mapping[Any, Any]) -> dict[str, str]
     return filtered
 
 
+def _agent_id_for_product_role(
+    bindings: Mapping[str, str],
+    role_key: str,
+) -> str:
+    normalized_role = normalize_role_key(role_key)
+    direct = str(bindings.get(normalized_role) or "").strip()
+    if direct:
+        return direct
+    owner_id = _product_owner_id(normalized_role)
+    if not owner_id:
+        return ""
+    candidates = {
+        str(bindings.get(lookup_key) or "").strip()
+        for lookup_key in _PRODUCT_ROLE_KEYS_BY_OWNER[owner_id]
+        if str(bindings.get(lookup_key) or "").strip()
+    }
+    return next(iter(candidates)) if len(candidates) == 1 else ""
+
+
 def resolve_team_role_bindings(team_id: str) -> dict[str, str]:
     """Return roleKey -> agentId for a team (canvas nodes, then members).
 
@@ -185,21 +204,7 @@ def heal_agent_binding_for_node(
     if not roles:
         return None
     primary = normalize_role_key(node.primaryRoleKey)
-    agent_id = str(roles.get(primary) or roles.get(node.primaryRoleKey) or "").strip()
-    if not agent_id:
-        try:
-            from core.web.services.team.team_constants import (
-                RESEARCH_TEAM_MEMBER_ROLE_KEYS,
-            )
-        except Exception:  # noqa: BLE001 - optional legacy map must fail closed
-            RESEARCH_TEAM_MEMBER_ROLE_KEYS = {}
-        mapped = RESEARCH_TEAM_MEMBER_ROLE_KEYS.get(
-            node.primaryRoleKey
-        ) or RESEARCH_TEAM_MEMBER_ROLE_KEYS.get(primary)
-        if mapped:
-            agent_id = str(
-                roles.get(normalize_role_key(mapped)) or roles.get(mapped) or ""
-            ).strip()
+    agent_id = _agent_id_for_product_role(roles, primary)
     if not agent_id:
         return None
     return {
@@ -278,9 +283,14 @@ def effective_binding_layers(
     The controlled config wins over team roles for the same roleKey; team
     roles fill every gap. Team roles only ever populate workflowDefaults.
     """
-    from core.research.workflow.definition import node_by_id
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+        node_by_id,
+    )
     from core.research.workflow.models import ActorKind
 
+    definition = build_challenge_cup_workflow_definition()
+    valid_stage_ids = {stage.stageId.value for stage in definition.stages}
     team_defaults = (
         resolve_team_role_bindings(team_id) if str(team_id or "").strip() else {}
     )
@@ -290,10 +300,13 @@ def effective_binding_layers(
     for raw_stage_id, values in config.stageOverrides.items():
         if not isinstance(values, Mapping):
             continue
+        stage_id = str(raw_stage_id or "").strip()
+        if stage_id not in valid_stage_ids:
+            continue
         filtered = _filtered_product_role_bindings(values)
         if filtered:
-            stage_overrides[str(raw_stage_id or "").strip()] = filtered
-    nodes = node_by_id()
+            stage_overrides[stage_id] = filtered
+    nodes = node_by_id(definition)
     node_overrides: dict[str, str] = {}
     for raw_node_id, raw_agent_id in config.nodeOverrides.items():
         node_id = str(raw_node_id or "").strip()
