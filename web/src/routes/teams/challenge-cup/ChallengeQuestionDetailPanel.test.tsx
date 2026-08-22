@@ -174,6 +174,22 @@ describe("ChallengeQuestionDetailPanel reset entry", () => {
     expect(detailPanelSource).toContain("重置本题运行");
     expect(detailPanelSource).toContain("ChallengeQuestionRunResetDialog");
   });
+
+  it("keeps the reset entry visible when acceptance artifacts are unavailable", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-004"
+        teamId="research-team"
+        isLoading={false}
+        errorMessage="challenge_question_run_not_found"
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="本题更多操作"');
+    expect(markup).toContain("如需从头验收");
+    expect(detailPanelSource).toMatch(/if \(errorMessage \|\| !detail\)[\s\S]*questionResetMenu/);
+  });
 });
 
 describe("ChallengeQuestionDetailPanel", () => {

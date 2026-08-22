@@ -103,6 +103,41 @@ export function ChallengeQuestionDetailPanel({
     : tokenUsageQuery.isError || !tokenUsageOverview
       ? "error"
       : "success";
+  const resetTargetTeamId = detail?.teamId || teamId;
+  const canResetQuestionRun = Boolean(resetTargetTeamId.trim() && requestedQuestionId.trim());
+  const questionResetMenu = canResetQuestionRun ? (
+    <VDropdownMenu
+      aria-label={isZh ? "本题更多操作" : "More actions for this question"}
+      trigger={
+        <VButton
+          density="compact"
+          variant="secondary"
+          icon={<MoreHorizontal size={15} aria-hidden="true" />}
+          aria-label={isZh ? "本题更多操作" : "More actions for this question"}
+        >
+          {isZh ? "更多操作" : "More actions"}
+        </VButton>
+      }
+      items={[
+        {
+          id: "reset-question-run",
+          label: isZh ? "重置本题运行" : "Reset this question run",
+          icon: <RotateCcw size={15} aria-hidden="true" />,
+          danger: true,
+          onSelect: () => setResetDialogOpen(true),
+        },
+      ]}
+    />
+  ) : null;
+  const resetDialog = canResetQuestionRun ? (
+    <ChallengeQuestionRunResetDialog
+      open={resetDialogOpen}
+      onOpenChange={setResetDialogOpen}
+      teamId={resetTargetTeamId}
+      questionId={requestedQuestionId}
+      onCompleted={(targetNodeId) => onNavigateToNode?.(targetNodeId)}
+    />
+  ) : null;
 
   if (isLoading) {
     return (
@@ -130,8 +165,8 @@ export function ChallengeQuestionDetailPanel({
             }
             summary={
               isZh
-                ? "验收档案暂不可用，假说评审仍可继续"
-                : "Acceptance artifacts are temporarily unavailable; hypothesis review can continue."
+                ? "验收档案暂不可用，假说评审仍可继续；如需从头验收，请在下方“更多操作”中重置本题运行。"
+                : "Acceptance artifacts are temporarily unavailable; hypothesis review can continue. To restart from the beginning, use More actions below to reset this question run."
             }
             details={errorMessage ? <code>{errorMessage}</code> : undefined}
             openLabel={isZh ? "技术细节" : "Technical details"}
@@ -153,19 +188,23 @@ export function ChallengeQuestionDetailPanel({
           </>
         )}
         {canContinueReview ? (
-          <div className={css.section} data-testid="question-detail-fail-soft-ops">
-            <HypothesisSelectionPanel
-              teamId={operableTeamId}
-              questionId={requestedQuestionId}
-              lang={lang}
-              onOpenReviewMeeting={onNavigateToNode}
-            />
-            <TeamMeetingRoundPanel teamId={operableTeamId} questionId={requestedQuestionId} />
-          </div>
+          <>
+            <div className={css.headerActions}>{questionResetMenu}</div>
+            <div className={css.section} data-testid="question-detail-fail-soft-ops">
+              <HypothesisSelectionPanel
+                teamId={operableTeamId}
+                questionId={requestedQuestionId}
+                lang={lang}
+                onOpenReviewMeeting={onNavigateToNode}
+              />
+              <TeamMeetingRoundPanel teamId={operableTeamId} questionId={requestedQuestionId} />
+            </div>
+          </>
         ) : null}
         <VButton density="compact" onPress={onClose} variant="secondary">
           {isZh ? "返回题目列表" : "Back to question list"}
         </VButton>
+        {resetDialog}
       </VSurface>
     );
   }
@@ -203,28 +242,7 @@ export function ChallengeQuestionDetailPanel({
               {isZh ? "登记修订产出" : "Register revision output"}
             </VButton>
           ) : null}
-          <VDropdownMenu
-            aria-label={isZh ? "本题更多操作" : "More actions for this question"}
-            trigger={
-              <VButton
-                density="compact"
-                variant="secondary"
-                icon={<MoreHorizontal size={15} aria-hidden="true" />}
-                aria-label={isZh ? "本题更多操作" : "More actions for this question"}
-              >
-                {isZh ? "更多操作" : "More actions"}
-              </VButton>
-            }
-            items={[
-              {
-                id: "reset-question-run",
-                label: isZh ? "重置本题运行" : "Reset this question run",
-                icon: <RotateCcw size={15} aria-hidden="true" />,
-                danger: true,
-                onSelect: () => setResetDialogOpen(true),
-              },
-            ]}
-          />
+          {questionResetMenu}
           <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
             {isZh ? "返回题目列表" : "Back to question list"}
           </VButton>
@@ -261,13 +279,7 @@ export function ChallengeQuestionDetailPanel({
           lang={lang}
         />
       ) : null}
-      <ChallengeQuestionRunResetDialog
-        open={resetDialogOpen}
-        onOpenChange={setResetDialogOpen}
-        teamId={detail.teamId}
-        questionId={detail.questionId}
-        onCompleted={(targetNodeId) => onNavigateToNode?.(targetNodeId)}
-      />
+      {resetDialog}
     </main>
   );
 }
