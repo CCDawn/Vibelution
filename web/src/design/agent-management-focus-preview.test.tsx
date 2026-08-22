@@ -160,6 +160,8 @@ describe("agent management focus preview", () => {
     });
     const nameInput = host.querySelector<HTMLInputElement>('input[aria-label="名称"]');
     expect(nameInput).toBeTruthy();
+    const roleInput = host.querySelector<HTMLInputElement>('input[aria-label="角色"]');
+    expect(roleInput?.value).toBe("source_finder");
     const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
     await act(async () => {
       proto?.set?.call(nameInput, "白望舒 v2");
@@ -174,6 +176,79 @@ describe("agent management focus preview", () => {
       discardButton?.click();
     });
     expect(host.querySelector('[data-testid="unsaved-bar"]')).toBeNull();
+  });
+
+  it("uses the dense VUI textarea with the visible field label association", async () => {
+    const host = await mountPreview();
+
+    await act(async () => {
+      activateTab(host, "配置");
+    });
+
+    const promptSection = Array.from(host.querySelectorAll("button")).find(
+      (button) => button.textContent === "角色与提示词",
+    );
+    expect(promptSection).toBeTruthy();
+    await act(async () => {
+      promptSection?.click();
+    });
+
+    const textarea = host.querySelector<HTMLTextAreaElement>(
+      'textarea[data-vui="native-textarea"][aria-label="系统提示词"]',
+    );
+    expect(textarea).toBeTruthy();
+    const label = Array.from(host.querySelectorAll("label")).find(
+      (node) => node.textContent?.trim() === "系统提示词",
+    );
+    expect(label?.htmlFor).toBe(textarea?.id);
+  });
+
+  it("confirms before discarding an unsaved draft when switching agents", async () => {
+    const host = await mountPreview();
+
+    await act(async () => {
+      activateTab(host, "配置");
+    });
+    const nameInput = host.querySelector<HTMLInputElement>('input[aria-label="名称"]');
+    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    await act(async () => {
+      proto?.set?.call(nameInput, "资料入库 v2");
+      nameInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const finderButton = () => Array.from(
+      host.querySelector('[aria-label="Agent 目录"]')?.querySelectorAll("button") ?? [],
+    ).find((button) => button.textContent?.includes("白望舒"));
+    await act(async () => {
+      finderButton()?.click();
+    });
+
+    expect(host.querySelector('[data-vui="route-header"] h1')?.textContent).toBe("资料入库");
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain(
+      "放弃未保存变更并切换 Agent？",
+    );
+
+    await act(async () => {
+      const cancelButton = Array.from(document.body.querySelectorAll("button")).find(
+        (button) => button.textContent === "取消",
+      );
+      cancelButton?.click();
+    });
+    expect(host.querySelector('[data-vui="route-header"] h1')?.textContent).toBe("资料入库");
+
+    await act(async () => {
+      finderButton()?.click();
+    });
+    await act(async () => {
+      const confirmButton = Array.from(document.body.querySelectorAll("button")).find(
+        (button) => button.textContent === "放弃并切换",
+      );
+      confirmButton?.click();
+    });
+
+    expect(host.querySelector('[data-vui="route-header"] h1')?.textContent).toBe("白望舒");
+    expect(host.querySelector('[data-testid="unsaved-bar"]')).toBeNull();
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="角色"]')?.value).toBe("source_finder");
   });
 
   it("opens and closes the single test drawer", async () => {
@@ -225,5 +300,43 @@ describe("agent management focus preview", () => {
     expect(host.textContent).toContain("待确认变更");
     const openInspectors = host.querySelectorAll('[aria-label="测试面板"], [aria-label="变更审查"]');
     expect(openInspectors.length).toBe(1);
+  });
+
+  it("clears a stale mock result when the single drawer changes kind", async () => {
+    const host = await mountPreview();
+
+    await act(async () => {
+      activateTab(host, "配置");
+    });
+    const nameInput = host.querySelector<HTMLInputElement>('input[aria-label="名称"]');
+    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    await act(async () => {
+      proto?.set?.call(nameInput, "资料入库 v2");
+      nameInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      const testButton = Array.from(host.querySelectorAll("button")).find(
+        (button) => button.textContent === "测试",
+      );
+      testButton?.click();
+    });
+    await act(async () => {
+      const runButton = Array.from(host.querySelectorAll("button")).find(
+        (button) => button.textContent === "运行 Mock",
+      );
+      runButton?.click();
+    });
+    expect(host.textContent).toContain("Mock 运行完成");
+
+    await act(async () => {
+      const reviewButton = Array.from(host.querySelectorAll("button")).find(
+        (button) => button.textContent === "审查并保存",
+      );
+      reviewButton?.click();
+    });
+
+    expect(host.textContent).toContain("待确认变更");
+    expect(host.textContent).not.toContain("Mock 运行完成");
   });
 });

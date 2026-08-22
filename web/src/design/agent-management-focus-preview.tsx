@@ -5,7 +5,7 @@
  *
  * Open: /agent-management-focus-preview.html
  */
-import { StrictMode, useMemo, useState, type ReactNode } from "react";
+import { StrictMode, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -22,6 +22,7 @@ import {
   VActionGroup,
   VButton,
   VCheckbox,
+  VConfirmDialog,
   VEntityList,
   VFieldRow,
   VIconButton,
@@ -33,6 +34,7 @@ import {
   VStatusChip,
   VSurface,
   VTabs,
+  VNativeTextarea,
   VuiProvider,
 } from "../components/vui";
 import "./tokens.css";
@@ -100,7 +102,7 @@ const PRIMARY_TABS: { id: PrimaryTab; label: string; icon: typeof LayoutDashboar
 ];
 
 function initialDraftFor(agent: Agent): ConfigDraft {
-  return { ...BASE_DRAFT, name: agent.name, model: agent.model };
+  return { ...BASE_DRAFT, name: agent.name, role: agent.role, model: agent.model };
 }
 
 function countDraftChanges(draft: ConfigDraft, baseline: ConfigDraft): number {
@@ -357,11 +359,11 @@ function ConfigView(props: {
       <ConfigSection title="角色与提示词" open={openSections.role} onToggle={() => toggle("role")}>
         <div className={styles.configFields}>
           <VFieldRow label="系统提示词" className={styles.configField}>
-            <textarea
+            <VNativeTextarea
               aria-label="系统提示词"
               value={draft.systemPrompt}
               onChange={(event) => onChange({ systemPrompt: event.target.value })}
-              rows={3}
+              minRows={3}
             />
           </VFieldRow>
         </div>
@@ -469,9 +471,11 @@ function InspectorDrawer(props: {
 }) {
   const { inspector, unsavedCount, onClose } = props;
   const [testResult, setTestResult] = useState<string | null>(null);
+  useEffect(() => {
+    setTestResult(null);
+  }, [inspector?.kind]);
   if (!inspector) return null;
   const isTest = inspector.kind === "test";
-  const isReview = inspector.kind === "review";
 
   return (
     <VSurface as="aside" className={styles.inspectorSurface} ariaLabel={isTest ? "测试面板" : "变更审查"}>
@@ -540,6 +544,7 @@ export function AgentManagementFocusPreviewApp() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<ConfigDraft>(() => initialDraftFor(AGENTS[0]));
   const [inspector, setInspector] = useState<InspectorState>(null);
+  const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
 
   const selectedAgent = useMemo(
     () => AGENTS.find((agent) => agent.id === selectedAgentId) ?? AGENTS[0],
@@ -559,10 +564,20 @@ export function AgentManagementFocusPreviewApp() {
     [draft, selectedAgent],
   );
 
-  const selectAgent = (agent: Agent) => {
+  const commitAgentSelection = (agent: Agent) => {
     setSelectedAgentId(agent.id);
     setDraft(initialDraftFor(agent));
     setInspector(null);
+    setPendingAgentId(null);
+  };
+
+  const selectAgent = (agent: Agent) => {
+    if (agent.id === selectedAgent.id) return;
+    if (unsavedCount > 0) {
+      setPendingAgentId(agent.id);
+      return;
+    }
+    commitAgentSelection(agent);
   };
 
   const toggleBulk = (agentId: string, selected: boolean) => {
@@ -688,23 +703,43 @@ export function AgentManagementFocusPreviewApp() {
     />
   ) : null;
 
+  const pendingAgent = pendingAgentId
+    ? AGENTS.find((agent) => agent.id === pendingAgentId) ?? null
+    : null;
+
   const workspaceLayout = `${styles.workspaceClass} ${
     inspector ? styles.workspaceThreeCol : styles.workspaceTwoCol
   }`;
 
   return (
-    <VListDetailPage
-      className={styles.page}
-      workspaceClassName={workspaceLayout}
-      columnsClassName=""
-      ariaLabel="Agent 配置信息架构预览"
-      title={selectedAgent.name}
-      meta={`${selectedAgent.role} · 挑战杯科研`}
-      actions={headerActions}
-      list={list}
-      detail={detail}
-      aside={aside}
-    />
+    <>
+      <VListDetailPage
+        className={styles.page}
+        workspaceClassName={workspaceLayout}
+        columnsClassName=""
+        ariaLabel="Agent 配置信息架构预览"
+        title={selectedAgent.name}
+        meta={`${selectedAgent.role} · 挑战杯科研`}
+        actions={headerActions}
+        list={list}
+        detail={detail}
+        aside={aside}
+      />
+      <VConfirmDialog
+        open={pendingAgent !== null}
+        title="放弃未保存变更并切换 Agent？"
+        description={pendingAgent ? `当前草稿尚未保存。切换到「${pendingAgent.name}」会放弃这些变更。` : undefined}
+        confirmLabel="放弃并切换"
+        cancelLabel="取消"
+        onOpenChange={(open) => {
+          if (!open) setPendingAgentId(null);
+        }}
+        onCancel={() => setPendingAgentId(null)}
+        onConfirm={() => {
+          if (pendingAgent) commitAgentSelection(pendingAgent);
+        }}
+      />
+    </>
   );
 }
 
