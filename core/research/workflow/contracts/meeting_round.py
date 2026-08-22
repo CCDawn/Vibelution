@@ -20,6 +20,8 @@ from ._validation import (
     ContractValidationError,
     require_int,
     require_list,
+    require_mapping,
+    require_sha256,
     require_text,
 )
 from .research_scope import REQUIRED_SCOPE_FIELDS, scope_hash_for
@@ -31,6 +33,10 @@ MEETING_TYPES = {
     "result_review",
     "iteration_review",
     "scope_review",
+}
+MANAGED_HYPOTHESIS_PARTICIPANT_CONTRACT_TYPES = {
+    "hypothesis_candidate_generation",
+    "hypothesis_review",
 }
 MEETING_STATUSES = {"open", "summarizing", "awaiting_approval", "closed"}
 MEETING_STAGES = {
@@ -115,6 +121,28 @@ def _optional_rounds(payload: Mapping[str, Any]) -> int:
     return require_int(payload, "rounds", minimum=1)
 
 
+def _optional_non_negative_int(payload: Mapping[str, Any], key: str) -> int:
+    if key not in payload or payload.get(key) is None:
+        return 0
+    return require_int(payload, key, minimum=0)
+
+
+def _optional_role_snapshot(
+    payload: Mapping[str, Any], key: str = "participantRoleSnapshot"
+) -> tuple[dict[str, Any], ...]:
+    if key not in payload or payload.get(key) is None:
+        return ()
+    entries = require_list(payload, key)
+    normalized: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            raise ContractValidationError(
+                f"{key}[{index}] must be an object"
+            )
+        normalized.append(require_mapping({key: entry}, key))
+    return tuple(normalized)
+
+
 @dataclass(frozen=True, slots=True)
 class MeetingRound:
     """One scoped, offline agent meeting round with an explicit participant list."""
@@ -143,6 +171,11 @@ class MeetingRound:
     agendaRules: tuple[str, ...] = field(default_factory=tuple)
     rounds: int = DEFAULT_MEETING_ROUNDS
     participantRoleIds: tuple[str, ...] = field(default_factory=tuple)
+    teamRoleContractVersion: int = 0
+    participantPolicyVersion: int = 0
+    roleContractFingerprint: str = ""
+    participantRoleSnapshot: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    resolutionHash: str = ""
     inputArtifactRefs: tuple[str, ...] = field(default_factory=tuple)
     linkedChatRoomId: str = ""
     chatRoomRoundIds: tuple[str, ...] = field(default_factory=tuple)
@@ -176,6 +209,100 @@ class MeetingRound:
             raise ContractValidationError(
                 "only a closed meeting round may carry closedAt and closedBy"
             )
+        team_role_contract_version = _optional_non_negative_int(
+            payload, "teamRoleContractVersion"
+        )
+        participant_policy_version = _optional_non_negative_int(
+            payload, "participantPolicyVersion"
+        )
+        role_contract_fingerprint = str(
+            payload.get("roleContractFingerprint") or ""
+        ).strip().lower()
+        resolution_hash = str(payload.get("resolutionHash") or "").strip().lower()
+        participant_role_snapshot = _optional_role_snapshot(payload)
+        participant_role_ids = _optional_str_tuple(payload, "participantRoleIds")
+        has_challenge_cup_participant_contract_fields = any(
+            (
+                team_role_contract_version,
+                participant_policy_version,
+                role_contract_fingerprint,
+                participant_role_snapshot,
+                resolution_hash,
+            )
+        )
+        has_participant_contract = (
+            has_challenge_cup_participant_contract_fields
+            or (
+                meeting_type in MANAGED_HYPOTHESIS_PARTICIPANT_CONTRACT_TYPES
+                and bool(participant_role_ids)
+            )
+        )
+        if has_participant_contract:
+            if team_role_contract_version < 1:
+                raise ContractValidationError(
+                    "teamRoleContractVersion must be positive for participant contract snapshots"
+                )
+            if participant_policy_version < 1:
+                raise ContractValidationError(
+                    "participantPolicyVersion must be positive for participant contract snapshots"
+                )
+            if not role_contract_fingerprint:
+                raise ContractValidationError(
+                    "roleContractFingerprint is required for participant contract snapshots"
+                )
+            if not resolution_hash:
+                raise ContractValidationError(
+                    "resolutionHash is required for participant contract snapshots"
+                )
+            require_sha256(
+                {"roleContractFingerprint": role_contract_fingerprint},
+                "roleContractFingerprint",
+            )
+            require_sha256({"resolutionHash": resolution_hash}, "resolutionHash")
+            if not participant_role_snapshot:
+                raise ContractValidationError(
+                    "participantRoleSnapshot is required for participant contract snapshots"
+                )
+            if len(participant_role_snapshot) != len(participants):
+                raise ContractValidationError(
+                    "participantRoleSnapshot must contain one entry per participant"
+                )
+            snapshot_role_ids = tuple(
+                str(item.get("roleId") or "").strip()
+                for item in participant_role_snapshot
+            )
+            snapshot_agent_ids = tuple(
+                str(item.get("agentId") or "").strip()
+                for item in participant_role_snapshot
+            )
+            if any(not role_id for role_id in snapshot_role_ids):
+                raise ContractValidationError(
+                    "participantRoleSnapshot entries require roleId"
+                )
+            if any(not agent_id for agent_id in snapshot_agent_ids):
+                raise ContractValidationError(
+                    "participantRoleSnapshot entries require agentId"
+                )
+            if len(set(snapshot_role_ids)) != len(snapshot_role_ids):
+                raise ContractValidationError(
+                    "participantRoleSnapshot roleIds must be unique"
+                )
+            if len(set(snapshot_agent_ids)) != len(snapshot_agent_ids):
+                raise ContractValidationError(
+                    "participantRoleSnapshot agentIds must be unique"
+                )
+            if not participant_role_ids:
+                raise ContractValidationError(
+                    "participantRoleIds is required for participant contract snapshots"
+                )
+            if participant_role_ids != snapshot_role_ids:
+                raise ContractValidationError(
+                    "participantRoleIds must match participantRoleSnapshot roleIds"
+                )
+            if snapshot_agent_ids != participants:
+                raise ContractValidationError(
+                    "participantRoleSnapshot agentIds must match participants"
+                )
         return cls(
             meetingRoundId=require_text(payload, "meetingRoundId"),
             **identity,
@@ -195,7 +322,12 @@ class MeetingRound:
             agendaQuestions=_optional_str_tuple(payload, "agendaQuestions"),
             agendaRules=_optional_str_tuple(payload, "agendaRules"),
             rounds=_optional_rounds(payload),
-            participantRoleIds=_optional_str_tuple(payload, "participantRoleIds"),
+            participantRoleIds=participant_role_ids,
+            teamRoleContractVersion=team_role_contract_version,
+            participantPolicyVersion=participant_policy_version,
+            roleContractFingerprint=role_contract_fingerprint,
+            participantRoleSnapshot=participant_role_snapshot,
+            resolutionHash=resolution_hash,
             inputArtifactRefs=_optional_str_tuple(payload, "inputArtifactRefs"),
             linkedChatRoomId=str(payload.get("linkedChatRoomId") or "").strip(),
             chatRoomRoundIds=_optional_str_tuple(payload, "chatRoomRoundIds"),
@@ -227,6 +359,11 @@ class MeetingRound:
             "agendaRules": list(self.agendaRules),
             "rounds": self.rounds,
             "participantRoleIds": list(self.participantRoleIds),
+            "teamRoleContractVersion": self.teamRoleContractVersion,
+            "participantPolicyVersion": self.participantPolicyVersion,
+            "roleContractFingerprint": self.roleContractFingerprint,
+            "participantRoleSnapshot": [dict(item) for item in self.participantRoleSnapshot],
+            "resolutionHash": self.resolutionHash,
             "inputArtifactRefs": list(self.inputArtifactRefs),
             "linkedChatRoomId": self.linkedChatRoomId,
             "chatRoomRoundIds": list(self.chatRoomRoundIds),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts import ContractValidationError, MeetingRound
 from core.web.services import team_service
 from core.web.services.team_workflow import meeting_rounds as meetings
 from core.web.services.team_workflow import personal_memory_candidates as memories
@@ -93,6 +93,131 @@ def test_close_meeting_emits_digest_decision_and_private_memory_refs(tmp_path, m
     assert alpha["storagePath"] != beta["storagePath"]
     assert alpha["candidates"][0]["summary"].startswith("Prefer bounded")
     assert beta["candidates"][0]["summary"].startswith("Track compilation")
+
+
+def test_meeting_round_persists_participant_contract_snapshot(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    snapshot = [
+        {
+            "roleId": "challenge_cup_search",
+            "agentId": "agent-search",
+            "observedRole": "source_finder",
+        },
+        {
+            "roleId": "challenge_cup_knowledge_manager",
+            "agentId": "agent-knowledge",
+            "observedRole": "source_relation_mapper",
+        },
+        {
+            "roleId": "challenge_cup_experiment_revision",
+            "agentId": "agent-revision",
+            "observedRole": "experiment_planner",
+        },
+        {
+            "roleId": "challenge_cup_evaluator",
+            "agentId": "agent-evaluator",
+            "observedRole": "experiment_ledger",
+        },
+    ]
+    created = meetings.create_meeting_round(
+        team_id,
+        _meeting(
+            participants=[item["agentId"] for item in snapshot],
+            participantRoleIds=[item["roleId"] for item in snapshot],
+            teamRoleContractVersion=2,
+            participantPolicyVersion=2,
+            roleContractFingerprint="a" * 64,
+            participantRoleSnapshot=snapshot,
+            resolutionHash="b" * 64,
+        ),
+    )
+
+    meeting_round = created["meetingRound"]
+    parsed = MeetingRound.from_dict(meeting_round)
+    assert meeting_round["teamRoleContractVersion"] == 2
+    assert meeting_round["participantPolicyVersion"] == 2
+    assert meeting_round["roleContractFingerprint"] == "a" * 64
+    assert meeting_round["resolutionHash"] == "b" * 64
+    assert parsed.participantRoleIds == tuple(item["roleId"] for item in snapshot)
+    assert parsed.participantRoleSnapshot == tuple(snapshot)
+
+
+def test_plan_review_accepts_legacy_participant_role_ids_without_challenge_contract(
+    tmp_path, monkeypatch
+):
+    team_id = _team(tmp_path, monkeypatch)
+
+    created = meetings.create_meeting_round(
+        team_id,
+        _meeting(
+            meetingType="plan_review",
+            participantRoleIds=["plan_author", "plan_reviewer"],
+        ),
+    )
+
+    meeting_round = created["meetingRound"]
+    assert meeting_round["participantRoleIds"] == ["plan_author", "plan_reviewer"]
+    assert meeting_round["participantRoleSnapshot"] == []
+    assert meeting_round["teamRoleContractVersion"] == 0
+
+
+@pytest.mark.parametrize(
+    "meeting_type",
+    ["hypothesis_review", "hypothesis_candidate_generation"],
+)
+def test_meeting_round_rejects_participant_role_ids_without_complete_snapshot(
+    tmp_path, monkeypatch, meeting_type
+):
+    team_id = _team(tmp_path, monkeypatch)
+
+    with pytest.raises(ContractValidationError, match="teamRoleContractVersion"):
+        meetings.create_meeting_round(
+            team_id,
+            _meeting(
+                meetingType=meeting_type,
+                participantRoleIds=["challenge_cup_search", "challenge_cup_evaluator"],
+            ),
+        )
+    with pytest.raises(ContractValidationError, match="participantRoleIds"):
+        meetings.create_meeting_round(
+            team_id,
+            _meeting(
+                participants=["agent-search"],
+                teamRoleContractVersion=2,
+                participantPolicyVersion=2,
+                roleContractFingerprint="a" * 64,
+                participantRoleSnapshot=[
+                    {"roleId": "challenge_cup_search", "agentId": "agent-search"}
+                ],
+                resolutionHash="b" * 64,
+            ),
+        )
+
+
+def test_meeting_round_idempotency_seed_includes_participant_resolution_hash(
+    tmp_path, monkeypatch
+):
+    team_id = _team(tmp_path, monkeypatch)
+    snapshot = [
+        {"roleId": "challenge_cup_search", "agentId": "agent-search"},
+    ]
+    common = _meeting(
+        meetingRoundId="",
+        startedAt="2026-08-23T00:00:00Z",
+        participants=["agent-search"],
+        participantRoleIds=["challenge_cup_search"],
+        teamRoleContractVersion=2,
+        participantPolicyVersion=2,
+        roleContractFingerprint="a" * 64,
+        participantRoleSnapshot=snapshot,
+        resolutionHash="b" * 64,
+    )
+    first = meetings.create_meeting_round(team_id, common)
+    second = meetings.create_meeting_round(
+        team_id, {**common, "resolutionHash": "c" * 64}
+    )
+
+    assert first["meetingRound"]["meetingRoundId"] != second["meetingRound"]["meetingRoundId"]
 
 
 def test_v2_digest_keeps_proposed_candidates():

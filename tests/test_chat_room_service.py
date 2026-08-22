@@ -1877,6 +1877,164 @@ def test_start_chat_room_round_dedupes_duplicate_participants_before_prompt_chai
     assert started_event[1]["fields"]["participantDedupeRemoved"] == 1
 
 
+def test_start_chat_room_round_filters_speakers_to_frozen_participant_agent_ids(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(6)
+    ]
+    room = chat_room_service.create_chat_room(
+        title="六人房间四人会议",
+        participant_agent_ids=[session["agentId"] for session in sessions],
+    )
+    frozen_agent_ids = [
+        sessions[4]["agentId"],
+        sessions[0]["agentId"],
+        sessions[5]["agentId"],
+        sessions[2]["agentId"],
+    ]
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "只允许冻结的四位角色发言",
+        config={"participantAgentIds": frozen_agent_ids},
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已发言",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert [message["agentId"] for message in latest_round["messages"]] == frozen_agent_ids
+    assert [participant["agentId"] for participant in detail["participants"]] == [
+        session["agentId"] for session in sessions
+    ]
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError, match="frozen participant"):
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "缺少冻结成员时必须拒绝",
+            config={"participantAgentIds": [*frozen_agent_ids, "agent-missing"]},
+            agent_runner=lambda participant, prompt, context: {
+                "status": "completed",
+                "raw_output": "unexpected",
+                "summary": "unexpected",
+            },
+        )
+
+
+@pytest.mark.parametrize("failure_mode", ["disabled", "ambiguous"])
+def test_start_chat_room_round_rejects_unavailable_or_ambiguous_frozen_participant(
+    tmp_path, monkeypatch, failure_mode
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结四人会议",
+        participant_agent_ids=frozen_agent_ids,
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    if failure_mode == "disabled":
+        stored_room["participants"][1]["enabled"] = False
+    else:
+        duplicate = dict(stored_room["participants"][1])
+        duplicate["participantId"] = "duplicate-frozen-participant"
+        stored_room["participants"].append(duplicate)
+    chat_room_service._store().save(state)
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError, match="frozen participant"):
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "冻结成员必须完整可用",
+            config={"participantAgentIds": frozen_agent_ids},
+            agent_runner=lambda participant, prompt, context: {
+                "status": "completed",
+                "raw_output": "unexpected",
+                "summary": "unexpected",
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("topic", "purpose", "config_override"),
+    [
+        ("冻结名单不能被 maxSpeakers 截断", "meeting", {"maxSpeakers": 2}),
+        (
+            "宝宝一直哭",
+            "medical_triage",
+            {"heletechMaternalDigitalHealthDemo": True},
+        ),
+    ],
+)
+def test_start_chat_room_round_rejects_scheduler_or_case_reduction_of_frozen_roster(
+    tmp_path, monkeypatch, topic, purpose, config_override
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结四人会议",
+        participant_agent_ids=frozen_agent_ids,
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError, match="frozen participant"):
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            topic,
+            purpose=purpose,
+            config={"participantAgentIds": frozen_agent_ids, **config_override},
+            agent_runner=lambda participant, prompt, context: {
+                "status": "completed",
+                "raw_output": "unexpected",
+                "summary": "unexpected",
+            },
+        )
+    assert chat_room_service.get_chat_room_detail(room["roomId"])["rounds"] == []
+
+
+def test_start_chat_room_round_rejects_priority_reordering_of_frozen_roster(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = [
+        session_service.create_chat_session(title=f"Participant {index}")
+        for index in range(4)
+    ]
+    frozen_agent_ids = [session["agentId"] for session in sessions]
+    room = chat_room_service.create_chat_room(
+        title="冻结四人会议",
+        participant_agent_ids=frozen_agent_ids,
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError, match="frozen participant"):
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "冻结名单顺序不能被 priorityAgentIds 改写",
+            mode="opportunistic",
+            config={
+                "participantAgentIds": frozen_agent_ids,
+                "priorityAgentIds": list(reversed(frozen_agent_ids)),
+            },
+            agent_runner=lambda participant, prompt, context: {
+                "status": "completed",
+                "raw_output": "unexpected",
+                "summary": "unexpected",
+            },
+        )
+    assert chat_room_service.get_chat_room_detail(room["roomId"])["rounds"] == []
+
+
 def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

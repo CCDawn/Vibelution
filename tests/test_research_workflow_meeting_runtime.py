@@ -47,7 +47,20 @@ from tests._support.team_workflow.helpers import (
     _use_tmp_project_root,
 )
 
-_ROLES = ("coordinator", "researcher")
+_TEAM_ROLES = (
+    "challenge_cup_search",
+    "challenge_cup_extractor",
+    "challenge_cup_knowledge_manager",
+    "challenge_cup_execution_steward",
+    "challenge_cup_experiment_revision",
+    "challenge_cup_evaluator",
+)
+_ROLES = (
+    "challenge_cup_search",
+    "challenge_cup_knowledge_manager",
+    "challenge_cup_experiment_revision",
+    "challenge_cup_evaluator",
+)
 
 
 def _team_with_room(tmp_path, monkeypatch):
@@ -55,15 +68,15 @@ def _team_with_room(tmp_path, monkeypatch):
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
     agents: dict[str, str] = {}
-    for role in _ROLES:
+    for role in _TEAM_ROLES:
         agent = agent_directory_service.create_agent_instance(display_name=f"HF2 {role}")
         session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title=f"HF2 {role}")
         agents[role] = agent["agentId"]
     team_id = team_service.create_team(
         name="HF-2 假说评审团队",
-        members=[{"agentId": agents[role], "role": role} for role in _ROLES],
+        members=[{"agentId": agents[role], "role": role} for role in _TEAM_ROLES],
     )["teamId"]
-    return team_id, agents
+    return team_id, {role: agents[role] for role in _ROLES}
 
 
 def _selection_payload(agent_ids, **overrides):
@@ -82,7 +95,6 @@ def _selection_payload(agent_ids, **overrides):
         "agentId": agent_ids[0],
         "mode": "dev",
         "participants": list(agent_ids),
-        "participantRoleIds": list(_ROLES),
     }
     payload.update(overrides)
     return payload
@@ -93,7 +105,7 @@ def _marker_runner(participant, prompt, context):
     if "批评与修订" in str(prompt):
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
     role = str(participant.get("teamRole") or "participant")
-    if role == "coordinator":
+    if role == "challenge_cup_search":
         content = "AGREE: cand-a 的机制证据最完整，进入有界验证"
     else:
         content = (
@@ -138,9 +150,11 @@ def test_candidate_generation_prompt_includes_canonical_question_context(
 ):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
     prompts: list[str] = []
+    speaker_agent_ids: list[str] = []
 
     def capture_runner(participant, prompt, context):
         prompts.append(str(prompt))
+        speaker_agent_ids.append(str(participant.get("agentId") or ""))
         return {
             "status": "completed",
             "raw_output": "CANDIDATE: cand-a | 可证伪机制 | 来自赛题正文",
@@ -167,7 +181,6 @@ def test_candidate_generation_prompt_includes_canonical_question_context(
             "agentId": agent_ids[0],
             "mode": "dev",
             "participants": agent_ids,
-            "participantRoleIds": list(_ROLES),
         },
         agent_runner=capture_runner,
         background=False,
@@ -178,6 +191,7 @@ def test_candidate_generation_prompt_includes_canonical_question_context(
     assert all(str(catalog_question["domain"]) in prompt for prompt in prompts)
     assert all("每位参与者必须直接提出至少一个可证伪候选" in prompt for prompt in prompts)
     assert all("不得等待其他角色代为提出" in prompt for prompt in prompts)
+    assert speaker_agent_ids == list(agents.values())
 
 
 def test_review_prompt_includes_selected_candidate_content(tmp_path, monkeypatch):
@@ -345,6 +359,7 @@ def test_open_hypothesis_review_meeting_binds_room_round_both_ways(tmp_path, mon
     assert bound_round["config"]["scopeHash"] == meeting_round["scopeHash"]
     assert bound_round["config"]["source"] == meeting_runtime.MEETING_SOURCE
     assert bound_round["config"]["discussionRoundIndex"] == 1
+    assert bound_round["config"]["participantAgentIds"] == list(agents.values())
     assert bound_round["status"] == "completed"
     assert len(bound_round["messages"]) == len(_ROLES)
 
@@ -372,20 +387,92 @@ def test_open_hypothesis_review_meeting_validates_selection_and_participants(tmp
         meeting_runtime.open_hypothesis_review_meeting(
             team_id, _selection_payload(agent_ids, selectedCandidateIds=[]), background=False
         )
-    with pytest.raises(ContractValidationError, match="at least one participant"):
+    with pytest.raises(ContractValidationError, match="server-resolved participant roster"):
         meeting_runtime.open_hypothesis_review_meeting(
             team_id, _selection_payload(agent_ids, participants=[]), background=False
         )
-    with pytest.raises(ContractValidationError, match="members of the team linked chat room"):
+    with pytest.raises(ContractValidationError, match="server-resolved participant roster"):
         meeting_runtime.open_hypothesis_review_meeting(
             team_id,
             _selection_payload(agent_ids, participants=[agent_ids[0], "agent-outsider"]),
+            background=False,
+        )
+    room_agent_ids = [
+        participant["agentId"]
+        for participant in chat_room_service.get_chat_room_detail(
+            team_service.get_team(team_id)["linkedChatRoomId"]
+        )["participants"]
+    ]
+    assert len(room_agent_ids) == 6
+    with pytest.raises(ContractValidationError, match="server-resolved participant roster"):
+        meeting_runtime.open_hypothesis_review_meeting(
+            team_id,
+            _selection_payload(agent_ids, participants=room_agent_ids),
             background=False,
         )
     with pytest.raises(ContractValidationError, match="does not match the meeting scope"):
         meeting_runtime.open_hypothesis_review_meeting(
             team_id, _selection_payload(agent_ids, questionId="SCI-999"), background=False
         )
+
+
+def test_direct_meeting_runtime_rejects_partial_or_forged_participant_contract(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    agent_ids = list(agents.values())
+
+    with pytest.raises(ContractValidationError, match="complete participant contract"):
+        meeting_runtime.open_hypothesis_review_meeting(
+            team_id,
+            _selection_payload(
+                agent_ids,
+                participantRoleIds=list(_ROLES),
+            ),
+            background=False,
+        )
+
+    resolved = meeting_runtime.resolve_hypothesis_meeting_participants(
+        team_id,
+        team_service.get_team(team_id)["linkedChatRoomId"],
+        "hypothesis_review",
+    )
+    forged_contracts = {
+        "participantRoleIds": {
+            **resolved,
+            "participantRoleIds": list(reversed(resolved["participantRoleIds"])),
+        },
+        "teamRoleContractVersion": {
+            **resolved,
+            "teamRoleContractVersion": resolved["teamRoleContractVersion"] + 1,
+        },
+        "participantPolicyVersion": {
+            **resolved,
+            "participantPolicyVersion": resolved["participantPolicyVersion"] + 1,
+        },
+        "roleContractFingerprint": {
+            **resolved,
+            "roleContractFingerprint": "e" * 64,
+        },
+        "participantRoleSnapshot": {
+            **resolved,
+            "participantRoleSnapshot": [
+                *resolved["participantRoleSnapshot"][:-1],
+                {
+                    **resolved["participantRoleSnapshot"][-1],
+                    "agentId": resolved["participants"][0],
+                },
+            ],
+        },
+        "resolutionHash": {**resolved, "resolutionHash": "f" * 64},
+    }
+    for field, forged in forged_contracts.items():
+        with pytest.raises(ContractValidationError, match=field):
+            meeting_runtime.open_hypothesis_review_meeting(
+                team_id,
+                _selection_payload(agent_ids, **forged),
+                background=False,
+            )
 
 
 def test_four_state_machine_rejects_illegal_transitions(tmp_path, monkeypatch):
@@ -649,6 +736,10 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
     for round_id in result["chatRoomRoundIds"]:
         bound = next(item for item in room_detail["rounds"] if item["roundId"] == round_id)
         assert bound["config"]["meetingRoundId"] == meeting_round_id
+        assert bound["config"]["participantAgentIds"] == list(agents.values())
+        assert [message["agentId"] for message in bound["messages"]] == list(
+            agents.values()
+        )
 
 
 def test_discussion_driver_stops_at_round_budget(tmp_path, monkeypatch):
@@ -746,6 +837,47 @@ def test_run_meeting_discussion_requires_open_bound_meeting(tmp_path, monkeypatc
         meeting_runtime.ResearchMeetingRuntimeError, match="while the meeting round is open"
     ):
         meeting_runtime.run_meeting_discussion(team_id, bound_round_id, agent_runner=_marker_runner)
+
+
+def test_legacy_meeting_without_participant_snapshot_cannot_continue_discussion(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    _team, room_id = meeting_runtime._ensure_linked_room(team_id)
+    created = meetings.create_meeting_round(
+        team_id,
+        {
+            "meetingRoundId": "meeting-hf2-legacy-bound",
+            "program": "XH-202619",
+            "theme": "cc-neuro-001",
+            "campaign": "cc-campaign-neuro-001",
+            "question": "SCI-096",
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": next(iter(agents.values())),
+            "mode": "dev",
+            "meetingType": "hypothesis_review",
+            "participants": list(agents.values()),
+            "discussionItemRefs": ["hypothesis_candidate:cand-a"],
+            "linkedChatRoomId": room_id,
+        },
+    )
+    meetings.bind_meeting_chat_room_round(
+        team_id,
+        created["meetingRound"]["meetingRoundId"],
+        room_id,
+        "round-legacy-bound",
+    )
+
+    with pytest.raises(
+        meeting_runtime.ResearchMeetingRuntimeError,
+        match="no complete participant snapshot",
+    ):
+        meeting_runtime.run_meeting_discussion(
+            team_id,
+            created["meetingRound"]["meetingRoundId"],
+            agent_runner=_marker_runner,
+        )
 
 
 def test_meeting_status_transition_contract_map():

@@ -915,9 +915,9 @@ def start_chat_room_round(
             participant_seed = copy.deepcopy(room.get("participants") or [])
 
         stage_started_at = _perf_counter()
-        participants = _refresh_chat_room_round_participants(participant_seed)
-        refreshed_participant_count = len(participants)
-        participants = _dedupe_chat_room_participants(participants)
+        refreshed_participants = _refresh_chat_room_round_participants(participant_seed)
+        refreshed_participant_count = len(refreshed_participants)
+        participants = _dedupe_chat_room_participants(refreshed_participants)
         submit_timings["participantDedupeRemoved"] = max(0, refreshed_participant_count - len(participants))
         submit_timings["participantRefreshMs"] = _elapsed_ms(stage_started_at)
 
@@ -966,9 +966,22 @@ def start_chat_room_round(
                 raise
             submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
             round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
+            try:
+                participant_candidates = (
+                    refreshed_participants
+                    if "participantAgentIds" in round_config
+                    else participants
+                )
+                round_participants = _filter_round_participants_by_agent_ids(
+                    participant_candidates, round_config
+                )
+            except ChatRoomValidationError:
+                if background:
+                    _release_chat_room_inflight()
+                raise
             stage_started_at = _perf_counter()
             speakers = scheduler.select_speakers(
-                participants,
+                round_participants,
                 topic=normalized_topic,
                 history=list(room.get("rounds") or []),
                 config=round_config,
@@ -977,16 +990,22 @@ def start_chat_room_round(
                 room=room,
                 topic=normalized_topic,
                 purpose=round_purpose,
-                participants=participants,
+                participants=round_participants,
                 history=list(room.get("rounds") or []),
                 config=round_config,
             )
             speakers = select_speakers_for_case(
                 speakers,
-                participants=participants,
+                participants=round_participants,
                 case_state=case_state,
             )
             speakers = _dedupe_chat_room_participants(speakers)
+            try:
+                _require_exact_frozen_speaker_roster(speakers, round_config)
+            except ChatRoomValidationError:
+                if background:
+                    _release_chat_room_inflight()
+                raise
             submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
             if not speakers:
                 if background:
@@ -3032,6 +3051,85 @@ def _dedupe_chat_room_participants(participants: list[dict[str, Any]]) -> list[d
         deduped.append(participant)
         seen.update(keys)
     return deduped
+
+
+def _filter_round_participants_by_agent_ids(
+    participants: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Apply a persisted meeting roster without mutating room membership."""
+
+    frozen_agent_ids = _frozen_participant_agent_ids(config)
+    if frozen_agent_ids is None:
+        return participants
+    participants_by_agent_id: dict[str, list[dict[str, Any]]] = {
+        agent_id: [] for agent_id in frozen_agent_ids
+    }
+    for participant in participants:
+        agent_id = str(participant.get("agentId") or "").strip()
+        if agent_id in participants_by_agent_id:
+            participants_by_agent_id[agent_id].append(participant)
+    missing = [
+        agent_id for agent_id in frozen_agent_ids if not participants_by_agent_id[agent_id]
+    ]
+    if missing:
+        raise ChatRoomValidationError(
+            "frozen participant agent is missing from the chat room: "
+            + ", ".join(missing)
+        )
+    ambiguous = [
+        agent_id
+        for agent_id in frozen_agent_ids
+        if len(participants_by_agent_id[agent_id]) != 1
+    ]
+    if ambiguous:
+        raise ChatRoomValidationError(
+            "frozen participant agent resolves to ambiguous chat room members: "
+            + ", ".join(ambiguous)
+        )
+    resolved = [participants_by_agent_id[agent_id][0] for agent_id in frozen_agent_ids]
+    disabled = [
+        agent_id
+        for agent_id, participant in zip(frozen_agent_ids, resolved)
+        if participant.get("enabled", True) is not True
+        or bool(participant.get("agentMissing"))
+    ]
+    if disabled:
+        raise ChatRoomValidationError(
+            "frozen participant agent must remain present and enabled: "
+            + ", ".join(disabled)
+        )
+    return resolved
+
+
+def _frozen_participant_agent_ids(config: dict[str, Any]) -> list[str] | None:
+    if "participantAgentIds" not in config:
+        return None
+    raw_agent_ids = config.get("participantAgentIds")
+    if not isinstance(raw_agent_ids, list):
+        raise ChatRoomValidationError("frozen participant agent ids must be a list")
+    frozen_agent_ids = [str(item or "").strip() for item in raw_agent_ids]
+    if not frozen_agent_ids or any(not agent_id for agent_id in frozen_agent_ids):
+        raise ChatRoomValidationError("frozen participant agent ids must be non-empty")
+    if len(set(frozen_agent_ids)) != len(frozen_agent_ids):
+        raise ChatRoomValidationError("frozen participant agent ids must be unique")
+    return frozen_agent_ids
+
+
+def _require_exact_frozen_speaker_roster(
+    speakers: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> None:
+    frozen_agent_ids = _frozen_participant_agent_ids(config)
+    if frozen_agent_ids is None:
+        return
+    speaker_agent_ids = [
+        str(speaker.get("agentId") or "").strip() for speaker in speakers
+    ]
+    if speaker_agent_ids != frozen_agent_ids:
+        raise ChatRoomValidationError(
+            "frozen participant roster must remain complete and in frozen order after speaker selection"
+        )
 
 
 def _chat_room_participant_identity_keys(participant: dict[str, Any]) -> list[str]:

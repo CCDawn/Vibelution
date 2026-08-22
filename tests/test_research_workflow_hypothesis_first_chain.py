@@ -109,7 +109,14 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _InlineExecutor())
     agents: dict[str, str] = {}
-    for role in (*_ROLES, "experiment_planner"):
+    team_roles = (
+        *_ROLES,
+        "source_finder",
+        "source_relation_mapper",
+        "experiment_planner",
+        "experiment_ledger",
+    )
+    for role in team_roles:
         agent = agent_directory_service.create_agent_instance(
             display_name=f"HF4 {role}",
             role_key=role,
@@ -122,9 +129,106 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     team_id = team_service.create_team(
         name="HF-4 假说先行团队",
         purpose="challenge-workflow-hf4",
-        members=[{"agentId": agents[role], "role": role} for role in _ROLES],
+        members=[{"agentId": agents[role], "role": role} for role in team_roles],
     )["teamId"]
     return team_id, agents
+
+
+def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatch):
+    room = {
+        "participants": [
+            {"agentId": "agent-evaluator", "teamRole": "experiment_ledger"},
+            {"agentId": "agent-search", "teamRole": "source_finder"},
+            {
+                "agentId": "agent-revision",
+                "teamRole": "challenge_cup_experiment_planner",
+            },
+            {
+                "agentId": "agent-knowledge",
+                "teamRole": "source_relation_mapper",
+            },
+            {"agentId": "agent-coordinator", "teamRole": "research_coordination"},
+        ]
+    }
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: room if room_id == "room-1" else None,
+    )
+    monkeypatch.setattr(team_service, "get_team", lambda team_id: {"members": []})
+
+    resolved = chain._resolve_hypothesis_participants(
+        "team-1", "room-1", chain.CANDIDATE_GENERATION_MEETING_TYPE
+    )
+
+    assert resolved["participantRoleIds"] == [
+        "challenge_cup_search",
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_experiment_revision",
+        "challenge_cup_evaluator",
+    ]
+    assert resolved["participants"] == [
+        "agent-search",
+        "agent-knowledge",
+        "agent-revision",
+        "agent-evaluator",
+    ]
+    assert [item["roleId"] for item in resolved["participantRoleSnapshot"]] == resolved[
+        "participantRoleIds"
+    ]
+    assert resolved["teamRoleContractVersion"] == 2
+    assert resolved["participantPolicyVersion"] == 2
+    assert len(resolved["resolutionHash"]) == 64
+
+
+@pytest.mark.parametrize(
+    "participants, expected",
+    [
+        (
+            [
+                {"agentId": "agent-search", "teamRole": "source_finder"},
+                {"agentId": "agent-knowledge", "teamRole": "source_relation_mapper"},
+                {"agentId": "agent-revision", "teamRole": "experiment_planner"},
+            ],
+            "missing required participant role",
+        ),
+        (
+            [
+                {"agentId": "agent-search-1", "teamRole": "source_finder"},
+                {"agentId": "agent-search-2", "teamRole": "source_finder"},
+                {"agentId": "agent-knowledge", "teamRole": "source_relation_mapper"},
+                {"agentId": "agent-revision", "teamRole": "experiment_planner"},
+                {"agentId": "agent-evaluator", "teamRole": "experiment_ledger"},
+            ],
+            "multiple agents are bound",
+        ),
+        (
+            [
+                {
+                    "agentId": "agent-ambiguous",
+                    "teamRole": "source_finder",
+                    "teamRoleKey": "experiment_ledger",
+                },
+                {"agentId": "agent-knowledge", "teamRole": "source_relation_mapper"},
+                {"agentId": "agent-revision", "teamRole": "experiment_planner"},
+                {"agentId": "agent-evaluator", "teamRole": "experiment_ledger"},
+            ],
+            "ambiguous",
+        ),
+    ],
+)
+def test_hypothesis_participant_resolution_fails_closed(monkeypatch, participants, expected):
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: {"participants": participants},
+    )
+    monkeypatch.setattr(team_service, "get_team", lambda team_id: {"members": []})
+
+    with pytest.raises(chain.ContractValidationError, match=expected):
+        chain._resolve_hypothesis_participants(
+            "team-1", "room-1", chain.HYPOTHESIS_REVIEW_MEETING_TYPE
+        )
 
 
 def _patch_approved_question(
@@ -218,7 +322,7 @@ def _marker_runner(participant, prompt, context):
     if "批评与修订" in str(prompt):
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
     role = str(participant.get("teamRole") or "participant")
-    if role == "coordinator":
+    if role in {"source_finder", "challenge_cup_search"}:
         content = "AGREE: hyp-a 的机制证据最完整，进入有界验证"
     else:
         content = (
@@ -1540,9 +1644,9 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
 
 
 def _candidate_generation_runner(participant, prompt, context):
-    """Round-0 discussion fixture: the coordinator proposes CANDIDATE markers."""
+    """Round-0 discussion fixture: one required meeting role proposes markers."""
     role = str(participant.get("teamRole") or "participant")
-    if role == "coordinator":
+    if role in {"source_finder", "challenge_cup_search"}:
         content = (
             "CANDIDATE: cand-a | 睡眠剥夺通过腺苷积累损害记忆巩固 | 腺苷受体机制明确\n"
             "CANDIDATE: cand-b | 睡眠剥夺通过突触稳态失衡损害记忆巩固 | 突触稳态假说"

@@ -185,6 +185,11 @@ def _meeting_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "agendaRules",
             "rounds",
             "participantRoleIds",
+            "teamRoleContractVersion",
+            "participantPolicyVersion",
+            "roleContractFingerprint",
+            "participantRoleSnapshot",
+            "resolutionHash",
             "inputArtifactRefs",
             "linkedChatRoomId",
         )
@@ -231,15 +236,31 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         raise ContractValidationError(
             "a meeting round must be created open and closed through close_meeting_round"
         )
+    meeting_type = str(request.get("meetingType") or "hypothesis_review").strip().lower()
+    participant_role_ids = _normalized_str_list(request.get("participantRoleIds"))
+    participant_role_snapshot = [
+        dict(item) if isinstance(item, Mapping) else item
+        for item in list(request.get("participantRoleSnapshot") or [])
+    ]
+    participant_contract_seed = {
+        "teamRoleContractVersion": request.get("teamRoleContractVersion") or 0,
+        "participantPolicyVersion": request.get("participantPolicyVersion") or 0,
+        "roleContractFingerprint": str(
+            request.get("roleContractFingerprint") or ""
+        ).strip().lower(),
+        "participantRoleIds": participant_role_ids,
+        "participantRoleSnapshot": participant_role_snapshot,
+        "resolutionHash": str(request.get("resolutionHash") or "").strip().lower(),
+    }
     meeting_round_id = (
         str(request.get("meetingRoundId") or "").strip()
-        or f"meeting-{_stable_hash({'scopeHash': scope['scopeHash'], 'meetingType': str(request.get('meetingType') or ''), 'startedAt': now})[:16]}"
+        or f"meeting-{_stable_hash({'scopeHash': scope['scopeHash'], 'meetingType': meeting_type, 'startedAt': now, **participant_contract_seed})[:16]}"
     )
     record: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "meetingRoundId": meeting_round_id,
         **scope,
-        "meetingType": str(request.get("meetingType") or "hypothesis_review").strip().lower(),
+        "meetingType": meeting_type,
         "participants": _normalized_str_list(request.get("participants")),
         "discussionItemRefs": _normalized_str_list(request.get("discussionItemRefs")),
         "status": "open",
@@ -252,7 +273,18 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         "agendaQuestions": _normalized_str_list(request.get("agendaQuestions")),
         "agendaRules": _normalized_str_list(request.get("agendaRules")),
         "rounds": request.get("rounds") if request.get("rounds") is not None else 3,
-        "participantRoleIds": _normalized_str_list(request.get("participantRoleIds")),
+        "participantRoleIds": participant_role_ids,
+        "teamRoleContractVersion": request.get("teamRoleContractVersion")
+        if request.get("teamRoleContractVersion") is not None
+        else 0,
+        "participantPolicyVersion": request.get("participantPolicyVersion")
+        if request.get("participantPolicyVersion") is not None
+        else 0,
+        "roleContractFingerprint": str(
+            request.get("roleContractFingerprint") or ""
+        ).strip().lower(),
+        "participantRoleSnapshot": participant_role_snapshot,
+        "resolutionHash": str(request.get("resolutionHash") or "").strip().lower(),
         "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
         "linkedChatRoomId": str(request.get("linkedChatRoomId") or "").strip(),
         "chatRoomRoundIds": [],

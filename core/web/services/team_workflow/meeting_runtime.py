@@ -31,7 +31,11 @@ from core.research.competition.resources import (
     CompetitionResourceError,
     load_science_question_catalog,
 )
-from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+    ContractValidationError,
+    sha256_hex,
+)
 from core.web.services.team_workflow import meeting_rounds
 
 DEFAULT_MAX_MESSAGES = 40
@@ -88,6 +92,24 @@ _GENERATION_AGENDA_RULES = (
 )
 
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
+_PARTICIPANT_CONTRACT_FIELDS = (
+    "participantRoleIds",
+    "teamRoleContractVersion",
+    "participantPolicyVersion",
+    "roleContractFingerprint",
+    "participantRoleSnapshot",
+    "resolutionHash",
+)
+_ROLE_METADATA_FIELDS = (
+    "teamRoleKey",
+    "teamRole",
+    "roleKey",
+    "role",
+    "researchTeamRoleKey",
+    "researchTeamRole",
+    "challengeCupTeamRoleKey",
+    "challengeCupTeamRole",
+)
 _DISCUSSION_DRIVER = threading.local()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
@@ -196,23 +218,225 @@ def _ensure_linked_room(team_id: str) -> tuple[dict[str, Any], str]:
     return team, room_id
 
 
-def _assert_participants_in_room(room_id: str, participants: Sequence[str]) -> None:
-    from core.web.services import chat_room_service
+def _role_owner_index() -> dict[str, str]:
+    contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
+    index: dict[str, str] = {}
+    for role in contract.product_agents:
+        for value in (role.product_role_id, *role.legacy_role_aliases):
+            index[str(value).strip().lower()] = role.product_role_id
+    for capability in contract.system_capabilities:
+        for value in (capability.capability_id, *capability.legacy_role_aliases):
+            index[str(value).strip().lower()] = capability.capability_id
+    return index
 
-    room_detail = chat_room_service.get_chat_room_detail(room_id)
+
+def _role_values(item: Mapping[str, Any], *, source: str) -> list[dict[str, str]]:
+    values: list[dict[str, str]] = []
+    owner_index = _role_owner_index()
+    for field in _ROLE_METADATA_FIELDS:
+        raw = str(item.get(field) or "").strip()
+        owner_id = owner_index.get(raw.lower()) if raw else None
+        if owner_id:
+            values.append(
+                {
+                    "ownerId": owner_id,
+                    "observedRole": raw,
+                    "source": f"{source}.{field}",
+                }
+            )
+    return values
+
+
+def resolve_hypothesis_meeting_participants(
+    team_id: str,
+    room_id: str,
+    meeting_type: str,
+) -> dict[str, Any]:
+    """Resolve and freeze the exact contract-owned roster for a hypothesis meeting."""
+
+    from core.web.services import (
+        agent_directory_service,
+        chat_room_service,
+        team_service,
+    )
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_room_id = str(room_id or "").strip()
+    if not normalized_room_id:
+        raise ContractValidationError("linked chat room id is required for participant resolution")
+    room_detail = chat_room_service.get_chat_room_detail(normalized_room_id)
     if room_detail is None:
         raise ResearchMeetingRuntimeError("Team linked chat room not found.")
-    room_agent_ids = {
-        str(item.get("agentId") or "").strip()
-        for item in list(room_detail.get("participants") or [])
-        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+
+    contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
+    normalized_meeting_type = str(meeting_type or "").strip().lower()
+    policy = contract.participant_policy(normalized_meeting_type)
+    required_role_ids = list(policy.required_product_role_ids)
+    team = team_service.get_team(normalized_team_id) or {}
+    team_members = {
+        str(member.get("agentId") or "").strip(): dict(member)
+        for member in list(team.get("members") or [])
+        if isinstance(member, Mapping) and str(member.get("agentId") or "").strip()
     }
-    missing = [agent_id for agent_id in participants if agent_id not in room_agent_ids]
+    candidates_by_role: dict[str, list[dict[str, str]]] = {
+        role_id: [] for role_id in required_role_ids
+    }
+    seen_agent_ids: set[str] = set()
+    for room_participant in list(room_detail.get("participants") or []):
+        if not isinstance(room_participant, Mapping):
+            continue
+        agent_id = str(room_participant.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        if agent_id in seen_agent_ids:
+            raise ContractValidationError(
+                f"duplicate participant agent binding in linked chat room: {agent_id}"
+            )
+        seen_agent_ids.add(agent_id)
+        merged: dict[str, Any] = dict(team_members.get(agent_id) or {})
+        merged.update(dict(room_participant))
+        try:
+            agent = agent_directory_service.get_agent(agent_id, include_archived=False) or {}
+        except Exception:
+            agent = {}
+        metadata = agent.get("metadata") if isinstance(agent, Mapping) else {}
+        if isinstance(metadata, Mapping):
+            for field in _ROLE_METADATA_FIELDS:
+                if field not in merged and metadata.get(field) is not None:
+                    merged[field] = metadata.get(field)
+
+        resolved_values = _role_values(merged, source="participant")
+        resolved_role_ids = {
+            item["ownerId"]
+            for item in resolved_values
+            if item["ownerId"] in candidates_by_role
+        }
+        if len(resolved_role_ids) > 1:
+            raise ContractValidationError(
+                f"ambiguous participant role binding for agent {agent_id}"
+            )
+        if not resolved_role_ids:
+            continue
+        role_id = next(iter(resolved_role_ids))
+        observed = next(item for item in resolved_values if item["ownerId"] == role_id)
+        candidates_by_role[role_id].append(
+            {
+                "roleId": role_id,
+                "agentId": agent_id,
+                "observedRole": observed["observedRole"],
+                "resolvedFrom": observed["source"],
+            }
+        )
+
+    missing = [role_id for role_id in required_role_ids if not candidates_by_role[role_id]]
     if missing:
         raise ContractValidationError(
-            "meeting participants must be members of the team linked chat room: "
-            + ", ".join(missing)
+            "missing required participant role(s): " + ", ".join(missing)
         )
+    duplicate = [
+        role_id for role_id in required_role_ids if len(candidates_by_role[role_id]) > 1
+    ]
+    if duplicate:
+        raise ContractValidationError(
+            "multiple agents are bound to required participant role(s): "
+            + ", ".join(duplicate)
+        )
+
+    snapshot = [candidates_by_role[role_id][0] for role_id in required_role_ids]
+    resolution_seed = {
+        "teamId": normalized_team_id,
+        "roomId": normalized_room_id,
+        "meetingType": normalized_meeting_type,
+        "teamRoleContractVersion": contract.team_role_contract_version,
+        "participantPolicyVersion": contract.participant_policy_version,
+        "roleContractFingerprint": contract.fingerprint(),
+        "participantRoleSnapshot": snapshot,
+    }
+    return {
+        "participants": [item["agentId"] for item in snapshot],
+        "participantRoleIds": required_role_ids,
+        "participantRoleSnapshot": snapshot,
+        "teamRoleContractVersion": contract.team_role_contract_version,
+        "participantPolicyVersion": contract.participant_policy_version,
+        "roleContractFingerprint": contract.fingerprint(),
+        "resolutionHash": sha256_hex(resolution_seed),
+    }
+
+
+def _validated_participant_resolution(
+    team_id: str,
+    room_id: str,
+    meeting_type: str,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    resolved = resolve_hypothesis_meeting_participants(team_id, room_id, meeting_type)
+    if "participants" in request:
+        raw_participants = request.get("participants")
+        provided_participants = (
+            [str(item or "").strip() for item in raw_participants]
+            if isinstance(raw_participants, (list, tuple))
+            else []
+        )
+        if provided_participants != resolved["participants"]:
+            raise ContractValidationError(
+                "participants must match the server-resolved participant roster"
+            )
+
+    provided_contract_fields = [
+        field for field in _PARTICIPANT_CONTRACT_FIELDS if field in request
+    ]
+    if provided_contract_fields and len(provided_contract_fields) != len(
+        _PARTICIPANT_CONTRACT_FIELDS
+    ):
+        raise ContractValidationError(
+            "callers must provide the complete participant contract snapshot or omit it"
+        )
+    for field in provided_contract_fields:
+        provided: Any = request.get(field)
+        if field == "participantRoleIds":
+            provided = (
+                [str(item or "").strip() for item in provided]
+                if isinstance(provided, (list, tuple))
+                else []
+            )
+        elif field == "participantRoleSnapshot":
+            provided = (
+                [dict(item) for item in provided]
+                if isinstance(provided, (list, tuple))
+                and all(isinstance(item, Mapping) for item in provided)
+                else []
+            )
+        elif field in {"roleContractFingerprint", "resolutionHash"}:
+            provided = str(provided or "").strip().lower()
+        if provided != resolved[field]:
+            raise ContractValidationError(
+                f"{field} must match the server-resolved participant contract"
+            )
+    return resolved
+
+
+def _frozen_participant_agent_ids(meeting_round: Mapping[str, Any]) -> list[str]:
+    participants = _normalized_str_list(meeting_round.get("participants"))
+    snapshot = [
+        dict(item)
+        for item in list(meeting_round.get("participantRoleSnapshot") or [])
+        if isinstance(item, Mapping)
+    ]
+    snapshot_agent_ids = [str(item.get("agentId") or "").strip() for item in snapshot]
+    if (
+        not participants
+        or not snapshot
+        or snapshot_agent_ids != participants
+        or not _normalized_str_list(meeting_round.get("participantRoleIds"))
+        or not int(meeting_round.get("teamRoleContractVersion") or 0)
+        or not int(meeting_round.get("participantPolicyVersion") or 0)
+        or not str(meeting_round.get("roleContractFingerprint") or "").strip()
+        or not str(meeting_round.get("resolutionHash") or "").strip()
+    ):
+        raise ResearchMeetingRuntimeError(
+            "legacy meeting round has no complete participant snapshot and cannot continue discussion"
+        )
+    return participants
 
 
 def _opening_topic(
@@ -324,6 +548,7 @@ def _round_config(
         "agendaQuestions": list(meeting_round.get("agendaQuestions") or []),
         "agendaRules": list(meeting_round.get("agendaRules") or []),
         "selectedCandidateIds": list(selection.get("selectedCandidateIds") or []),
+        "participantAgentIds": _frozen_participant_agent_ids(meeting_round),
     }
 
 
@@ -368,13 +593,10 @@ def open_hypothesis_review_meeting(
 
     request = dict(payload) if isinstance(payload, Mapping) else {}
     selection = _validated_selection(request)
-    participants = _normalized_str_list(request.get("participants"))
-    if not participants:
-        raise ContractValidationError(
-            "opening a hypothesis review meeting requires at least one participant"
-        )
     team, room_id = _ensure_linked_room(str(team_id or "").strip())
-    _assert_participants_in_room(room_id, participants)
+    participant_resolution = _validated_participant_resolution(
+        team["teamId"], room_id, "hypothesis_review", request
+    )
 
     agenda = _normalized_str_list(request.get("agenda")) or list(_DEFAULT_AGENDA)
     agenda_questions = _normalized_str_list(request.get("agendaQuestions")) or list(
@@ -397,11 +619,10 @@ def open_hypothesis_review_meeting(
         team["teamId"],
         {
             **create_request,
+            **participant_resolution,
             "meetingType": "hypothesis_review",
             "stage": str(request.get("stage") or "hypothesis").strip().lower(),
             "roundType": str(request.get("roundType") or "decision_gate").strip().lower(),
-            "participants": participants,
-            "participantRoleIds": _normalized_str_list(request.get("participantRoleIds")),
             "discussionItemRefs": [
                 f"hypothesis_candidate:{candidate_id}"
                 for candidate_id in selection["selectedCandidateIds"]
@@ -492,13 +713,10 @@ def open_candidate_generation_meeting(
         raise ContractValidationError(
             "opening a candidate generation meeting requires a questionId"
         )
-    participants = _normalized_str_list(request.get("participants"))
-    if not participants:
-        raise ContractValidationError(
-            "opening a candidate generation meeting requires at least one participant"
-        )
     team, room_id = _ensure_linked_room(str(team_id or "").strip())
-    _assert_participants_in_room(room_id, participants)
+    participant_resolution = _validated_participant_resolution(
+        team["teamId"], room_id, CANDIDATE_GENERATION_MEETING_TYPE, request
+    )
 
     agenda = _normalized_str_list(request.get("agenda")) or list(_GENERATION_AGENDA)
     agenda_questions = _normalized_str_list(request.get("agendaQuestions")) or list(
@@ -523,11 +741,10 @@ def open_candidate_generation_meeting(
         team["teamId"],
         {
             **create_request,
+            **participant_resolution,
             "meetingType": CANDIDATE_GENERATION_MEETING_TYPE,
             "stage": "hypothesis",
             "roundType": "generation",
-            "participants": participants,
-            "participantRoleIds": _normalized_str_list(request.get("participantRoleIds")),
             "discussionItemRefs": [],
             "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
             "agenda": agenda,
@@ -686,6 +903,7 @@ def _run_meeting_discussion_impl(
         raise ResearchMeetingRuntimeError(
             "meeting round has no bound chat room discussion round"
         )
+    _frozen_participant_agent_ids(meeting_round)
     selection = _selection_from_meeting(meeting_round)
     budget = int(meeting_round.get("rounds") or 3)
     stop_reason = ""

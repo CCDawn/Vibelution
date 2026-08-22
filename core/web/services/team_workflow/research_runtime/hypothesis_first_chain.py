@@ -591,28 +591,16 @@ def list_review_round_links(team_id: str, *, question_id: str = "") -> dict[str,
 # meeting opening (selection -> round 1; handoff -> round N)
 
 
-def _room_participants(room_id: str) -> list[str]:
-    from core.web.services import chat_room_service
+def _resolve_hypothesis_participants(
+    team_id: str,
+    room_id: str,
+    meeting_type: str,
+) -> dict[str, Any]:
+    from core.web.services.team_workflow import meeting_runtime
 
-    room_detail = chat_room_service.get_chat_room_detail(room_id)
-    if room_detail is None:
-        raise HypothesisFirstChainError("Team linked chat room not found.")
-    return [
-        str(item.get("agentId") or "").strip()
-        for item in list(room_detail.get("participants") or [])
-        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
-    ]
-
-
-def _team_role_by_agent(team_id: str) -> dict[str, str]:
-    from core.web.services import team_service
-
-    team = team_service.get_team(team_id)
-    return {
-        str(member.get("agentId") or "").strip(): str(member.get("role") or "").strip()
-        for member in list(team.get("members") or [])
-        if isinstance(member, dict) and str(member.get("agentId") or "").strip()
-    }
+    return meeting_runtime.resolve_hypothesis_meeting_participants(
+        team_id, room_id, meeting_type
+    )
 
 
 def _record_review_round_link(
@@ -682,7 +670,7 @@ def open_review_meeting_for_selection(
     deterministic per selection/round so replays reuse instead of duplicating.
     """
     from core.web.services import team_service
-    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow import meeting_rounds, meeting_runtime
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     selection_record = dict(selection)
@@ -700,16 +688,44 @@ def open_review_meeting_for_selection(
     normalized_previous_id = str(previous_meeting_round_id or "").strip()
     normalized_request_id = str(collection_request_id or "").strip()
 
-    _team, room_id = meeting_runtime._ensure_linked_room(normalized_team_id)
-    participants = _room_participants(room_id)
-    if not participants:
-        raise ContractValidationError(
-            "opening a hypothesis review meeting requires at least one participant"
+    try:
+        existing_round = meeting_rounds.get_meeting_round(
+            normalized_team_id, normalized_meeting_round_id
+        )["meetingRound"]
+    except meeting_rounds.ResearchMeetingRoundNotFoundError:
+        existing_round = None
+    if (
+        isinstance(existing_round, Mapping)
+        and str(existing_round.get("meetingType") or "").strip().lower()
+        == HYPOTHESIS_REVIEW_MEETING_TYPE
+        and _normalized_str_list(existing_round.get("chatRoomRoundIds"))
+    ):
+        link = _record_review_round_link(
+            normalized_team_id,
+            meeting_round_id=normalized_meeting_round_id,
+            previous_meeting_round_id=normalized_previous_id,
+            selection_id=selection_id,
+            collection_request_id=normalized_request_id,
+            question_id=question_id,
+            round_index=normalized_round_index,
+            round_budget=round_budget,
         )
-    role_by_agent = _team_role_by_agent(normalized_team_id)
-    participant_role_ids = [
-        role_by_agent.get(agent_id) or "member" for agent_id in participants
-    ]
+        bound_round_ids = _normalized_str_list(existing_round.get("chatRoomRoundIds"))
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "reused",
+            "meetingRound": existing_round,
+            "roomId": str(existing_round.get("linkedChatRoomId") or ""),
+            "roundId": bound_round_ids[-1],
+            "chatRoomRoundIds": bound_round_ids,
+            "link": link,
+        }
+
+    _team, room_id = meeting_runtime._ensure_linked_room(normalized_team_id)
+    participant_resolution = _resolve_hypothesis_participants(
+        normalized_team_id, room_id, HYPOTHESIS_REVIEW_MEETING_TYPE
+    )
 
     extra_refs: list[str] = []
     if normalized_previous_id:
@@ -729,8 +745,7 @@ def open_review_meeting_for_selection(
             "selectedCandidateIds": list(selection_record.get("selectedCandidateIds") or []),
             "decidedBy": str(selection_record.get("decidedBy") or ""),
             "meetingRoundId": normalized_meeting_round_id,
-            "participants": participants,
-            "participantRoleIds": participant_role_ids,
+            **participant_resolution,
             "inputArtifactRefs": extra_refs,
         }
     )
@@ -1103,6 +1118,20 @@ def open_candidate_generation_meeting(
             normalized_team_id, normalized_question_id
         )
         open_meeting = None
+    if open_meeting is not None and _normalized_str_list(
+        open_meeting.get("chatRoomRoundIds")
+    ):
+        bound_round_ids = _normalized_str_list(open_meeting.get("chatRoomRoundIds"))
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "reused",
+            "meetingRound": open_meeting,
+            "roomId": str(open_meeting.get("linkedChatRoomId") or ""),
+            "roundId": bound_round_ids[-1],
+            "chatRoomRoundIds": bound_round_ids,
+            "questionId": normalized_question_id,
+        }
     if open_meeting is None and meetings:
         # All attempts are closed.  When candidates were registered the latest
         # closed meeting is the answer and replays reuse it; a closed attempt
@@ -1139,20 +1168,14 @@ def open_candidate_generation_meeting(
         attempt = len(meetings) + 1
         meeting_round_id = base_id if attempt == 1 else f"{base_id}-a{attempt}"
     _team, room_id = meeting_runtime._ensure_linked_room(normalized_team_id)
-    participants = _room_participants(room_id)
-    if not participants:
-        raise ContractValidationError(
-            "opening a candidate generation meeting requires at least one participant"
-        )
-    role_by_agent = _team_role_by_agent(normalized_team_id)
+    participant_resolution = _resolve_hypothesis_participants(
+        normalized_team_id, room_id, CANDIDATE_GENERATION_MEETING_TYPE
+    )
     payload = {
         **scope,
         "questionId": normalized_question_id,
         "meetingRoundId": meeting_round_id,
-        "participants": participants,
-        "participantRoleIds": [
-            role_by_agent.get(agent_id) or "member" for agent_id in participants
-        ],
+        **participant_resolution,
     }
     opened = meeting_runtime.open_candidate_generation_meeting(
         normalized_team_id,
