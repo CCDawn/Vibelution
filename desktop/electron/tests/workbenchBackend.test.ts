@@ -13,6 +13,7 @@ import {
   classifyWorkbenchPortOccupant,
   clearWorkbenchLauncherRuntimeState,
   executeMainLineWorkbench,
+  ensureFrontendRelease,
   ensureFrontendBuild,
   FRONTEND_BUILD_TIMEOUT_MS,
   mainLineBackendIsReachable,
@@ -418,6 +419,18 @@ describe("resolveNoConsolePython", () => {
   });
 });
 
+describe("resolveNodeExecutable", () => {
+  it("does not treat Electron or Vibelution.exe as node for the compatibility build helper", () => {
+    expect(
+      resolveNodeExecutable(
+        (path) => path.toLowerCase().replace(/\\/g, "/").endsWith("/electron.exe"),
+        "C:/app/electron.exe",
+        ""
+      )
+    ).toBe("node");
+  });
+});
+
 describe("workbenchBackendEnv", () => {
   it("injects slot data home and shared operator config", () => {
     const env = workbenchBackendEnv({
@@ -493,6 +506,31 @@ describe("clearWorkbenchLauncherRuntimeState", () => {
 });
 
 describe("frontend build supervision", () => {
+  it("routes release preparation through the shared Python builder", async () => {
+    const runBridge = vi.fn(async (input) => {
+      expect(input.pythonPath).toBe("C:/repo/.venv/Scripts/python.exe");
+      expect(input.cwd).toBe("C:/repo");
+      expect(input.args).toEqual([
+        "C:\\repo\\scripts\\vibelution_desktop_entry.py",
+        "--action",
+        "ensure-frontend-build",
+        "--workspace",
+        "C:/repo",
+        "--output",
+        "json"
+      ]);
+      expect(input.mutation).toBe(true);
+      return JSON.stringify({ ok: true });
+    });
+
+    await ensureFrontendRelease({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      runBridge
+    });
+    expect(runBridge).toHaveBeenCalledOnce();
+  });
+
   it("bounds a stuck frontend build and kills its child", async () => {
     const harness = frontendBuildChild();
     await expect(

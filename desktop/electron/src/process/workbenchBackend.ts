@@ -671,24 +671,6 @@ export function shouldRebuildFrontend(input: { distExists: boolean; force: boole
   return input.force || !input.distExists;
 }
 
-function isoNow(now?: () => string): string {
-  return now?.() ?? new Date().toISOString();
-}
-
-function accepted(
-  operation: string,
-  commandId: string,
-  extra: Partial<WorkbenchLifecycleResult> = {}
-): WorkbenchLifecycleResult {
-  return {
-    schemaVersion: 1,
-    accepted: true,
-    operation,
-    commandId,
-    ...extra
-  };
-}
-
 export function resolveNodeExecutable(
   fileExists: (path: string) => boolean,
   execPath = String(process.execPath || ""),

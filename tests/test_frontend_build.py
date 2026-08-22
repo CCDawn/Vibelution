@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -234,7 +236,8 @@ def test_stale_build_lock_is_reclaimed(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert not lock.exists()
 
 
-def test_build_lock_claims_a_newborn_directory_without_removing_it(tmp_path: Path) -> None:
+def test_build_lock_reclaims_an_unfinished_directory_only_after_grace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(frontend_build, "LOCK_INITIALIZATION_GRACE_SECONDS", 0.0)
     lock = frontend_build.frontend_build_lock_path(tmp_path)
     lock.mkdir(parents=True)
 
@@ -243,6 +246,21 @@ def test_build_lock_claims_a_newborn_directory_without_removing_it(tmp_path: Pat
         assert acquired["waited"] is True
         assert holder["pid"] == os.getpid()
     assert not lock.exists()
+
+
+def test_build_lock_does_not_remove_a_replacement_owner_on_release(tmp_path: Path) -> None:
+    lock = frontend_build.frontend_build_lock_path(tmp_path)
+    with frontend_build.frontend_build_lock(tmp_path):
+        original = json.loads((lock / "holder.json").read_text(encoding="utf-8"))
+        assert original["token"]
+        shutil.rmtree(lock)
+        lock.mkdir()
+        (lock / "holder.json").write_text(
+            json.dumps({"pid": os.getpid(), "startedAt": time.time(), "token": "replacement"}),
+            encoding="utf-8",
+        )
+    assert lock.is_dir()
+    shutil.rmtree(lock)
 
 
 def test_missing_compiler_entries_trigger_dependency_recovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

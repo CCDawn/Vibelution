@@ -323,58 +323,80 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
     deadline = time.monotonic() + max(1.0, timeout_seconds)
     waited = False
 
-    def claim_holder() -> bool:
-        holder = {"pid": os.getpid(), "startedAt": time.time()}
+    def claim_holder() -> dict[str, Any] | None:
+        holder = {"pid": os.getpid(), "startedAt": time.time(), "token": uuid.uuid4().hex}
+        staging = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
         try:
-            with (path / "holder.json").open("x", encoding="utf-8") as handle:
+            staging.mkdir()
+            with (staging / "holder.json").open("x", encoding="utf-8") as handle:
                 json.dump(holder, handle)
-        except FileExistsError:
-            return False
-        return True
+            try:
+                # Publish only after the holder is complete.  A waiter can
+                # observe either no lockdir or a fully described lockdir.
+                staging.rename(path)
+            except FileExistsError:
+                return None
+            return holder
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+
+    def read_holder() -> dict[str, Any] | None:
+        try:
+            holder = json.loads((path / "holder.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(holder, dict):
+            return None
+        try:
+            holder_pid = int(holder.get("pid") or 0)
+        except (TypeError, ValueError):
+            return None
+        if holder_pid <= 0:
+            return None
+        return holder
+
+    owned_holder: dict[str, Any] | None = None
 
     while True:
-        try:
-            path.mkdir()
-        except FileExistsError:
-            waited = True
+        claimed = claim_holder()
+        if claimed is not None:
+            owned_holder = claimed
+            break
+
+        waited = True
+        holder = read_holder()
+        holder_pid = int(holder.get("pid") or 0) if holder else 0
+        if holder_pid > 0 and not _pid_is_alive(holder_pid):
             try:
-                holder = json.loads((path / "holder.json").read_text(encoding="utf-8"))
-                holder_pid = int(holder.get("pid") or 0) if isinstance(holder, dict) else 0
-            except (OSError, ValueError, TypeError):
-                holder_pid = 0
-            if holder_pid > 0 and not _pid_is_alive(holder_pid):
+                shutil.rmtree(path)
+            except OSError:
+                pass
+            continue
+        if holder_pid <= 0:
+            try:
+                lock_age = max(0.0, time.time() - path.stat().st_mtime)
+            except OSError:
+                lock_age = 0.0
+            if lock_age >= LOCK_INITIALIZATION_GRACE_SECONDS:
                 try:
                     shutil.rmtree(path)
                 except OSError:
                     pass
                 continue
-            if holder_pid <= 0 and not (path / "holder.json").exists() and claim_holder():
-                break
-            if holder_pid <= 0:
-                try:
-                    lock_age = max(0.0, time.time() - path.stat().st_mtime)
-                except OSError:
-                    lock_age = 0.0
-                if lock_age >= LOCK_INITIALIZATION_GRACE_SECONDS:
-                    try:
-                        shutil.rmtree(path)
-                    except OSError:
-                        pass
-                    continue
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Timed out waiting for the frontend build lock.")
-            time.sleep(0.1)
-            continue
-        if claim_holder():
-            break
-        waited = True
+
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Timed out waiting for the frontend build lock.")
+        time.sleep(0.1)
     try:
-        yield {"waited": waited, "path": str(path)}
+        yield {"waited": waited, "path": str(path), "token": owned_holder["token"]}
     finally:
-        try:
-            shutil.rmtree(path)
-        except OSError:
-            pass
+        current = read_holder()
+        if owned_holder is not None and current and current.get("token") == owned_holder.get("token"):
+            try:
+                shutil.rmtree(path)
+            except OSError:
+                pass
 
 
 def create_staging_release(project_root: Path | str) -> Path:
