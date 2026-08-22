@@ -301,6 +301,141 @@ def test_start_requires_durable_authorization_and_platform_authorization(
         )
 
 
+@pytest.mark.parametrize("inject_launcher", [True, False])
+def test_poll_refill_revalidates_current_readiness_before_any_launcher(
+    harness: _Harness,
+    inject_launcher: bool,
+) -> None:
+    _open_gate(harness, "real-1")
+    _start(harness, "real-5")
+    harness.set_run_status("SCI-096", "succeeded")
+    harness.approve("SCI-096")
+    harness.set_run_status("SCI-002", "succeeded")
+    harness.approve("SCI-002")
+    launch_log_before = list(harness.launch_log)
+    harness.readiness_report = {
+        **harness.readiness_report,
+        "reportId": "real-batch-test-readiness-v2",
+    }
+
+    poll_kwargs = {
+        "run_status_reader": harness.reader,
+        "approved_output_reader": harness.approved_reader,
+        "start_dispatcher": harness.start_dispatcher,
+    }
+    if inject_launcher:
+        poll_kwargs["launcher"] = harness.launcher
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="durable CatalogRunAuthorization",
+    ):
+        svc.poll_real_batch(TEAM_ID, plan_id="real-5", **poll_kwargs)
+    assert harness.launch_log == launch_log_before
+
+
+def test_poll_without_pending_does_not_require_readiness_reauthorization(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    harness.approve("SCI-091")
+    monkeypatch.setattr(
+        svc,
+        "_require_authorization",
+        lambda team_id: pytest.fail("readiness must not be revalidated without refill"),
+    )
+    harness.readiness_report = {
+        **harness.readiness_report,
+        "reportId": "real-batch-test-readiness-v2",
+    }
+
+    polled = _poll(harness, "real-1")
+
+    assert polled["harvested"] == [{"questionId": "SCI-091", "outcome": "succeeded"}]
+    assert polled["statusSummary"]["succeeded"] == 1
+    assert polled["pendingCount"] == 0
+
+
+def test_poll_refill_passes_and_persists_current_authorization_record(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _open_gate(harness, "real-1")
+    _start(harness, "real-5")
+    harness.set_run_status("SCI-096", "succeeded")
+    harness.approve("SCI-096")
+    harness.set_run_status("SCI-002", "succeeded")
+    harness.approve("SCI-002")
+    harness.readiness_report = {
+        **harness.readiness_report,
+        "reportId": "real-batch-test-readiness-v2",
+    }
+    harness.authorize("real-5")
+    current_hash = catalog_run_authorization.readiness_report_sha256(
+        harness.readiness_report
+    )
+    captured_authorizations: list[dict] = []
+
+    def launcher_with_authorization(
+        team_id: str,
+        question_id: str,
+        idempotency_key: str,
+        *,
+        authorization: dict,
+    ) -> dict:
+        captured_authorizations.append(authorization)
+        return harness.launcher(team_id, question_id, idempotency_key)
+
+    monkeypatch.setattr(svc, "_default_question_run_launcher", launcher_with_authorization)
+    polled = svc.poll_real_batch(
+        TEAM_ID,
+        plan_id="real-5",
+        launcher=None,
+        start_dispatcher=harness.start_dispatcher,
+        run_status_reader=harness.reader,
+        approved_output_reader=harness.approved_reader,
+    )
+
+    assert len(captured_authorizations) == 2
+    assert all(
+        authorization["readinessReportSha256"] == current_hash
+        for authorization in captured_authorizations
+    )
+    envelope = svc._load_envelope(TEAM_ID, "real-5")
+    assert envelope is not None
+    assert envelope["catalogRunAuthorization"]["readinessReportSha256"] == current_hash
+    assert len(polled["launched"]) == 2
+
+
+def test_bogus_authorization_required_action_is_rejected(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.authorize("real-1")
+    monkeypatch.setattr(
+        svc,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda team_id: {
+            "nextLegalAction": "BOGUS_AUTHORIZATION_REQUIRED",
+            "report": harness.readiness_report,
+        },
+    )
+
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="not at RESEARCH_AUTHORIZATION_REQUIRED",
+    ):
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-1",
+            confirmed=True,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
+    assert harness.launch_log == []
+
+
 def test_gate_progression_requires_previous_gate_complete(harness: _Harness) -> None:
     with pytest.raises(svc.ChallengeCupRealBatchError, match="real-1 batch"):
         _start(harness, "real-5")

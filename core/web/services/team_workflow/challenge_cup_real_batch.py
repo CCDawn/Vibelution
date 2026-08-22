@@ -381,15 +381,16 @@ def _platform_snapshot_allows_real_batch(snapshot: Mapping[str, Any]) -> bool:
     below remains mandatory in every case.
     """
 
-    action = str(snapshot.get("nextLegalAction") or "").strip().upper()
-    if action.endswith("AUTHORIZATION_REQUIRED"):
-        return True
+    action_value = snapshot.get("nextLegalAction")
+    action = str(action_value or "").strip().upper()
+    if action:
+        return action == "RESEARCH_AUTHORIZATION_REQUIRED"
     report = snapshot.get("report")
     if not isinstance(report, Mapping):
         report = snapshot.get("readinessReport")
     return (
         isinstance(report, Mapping)
-        and str(report.get("status") or "").strip().upper() == "READY"
+        and report.get("status") == "READY"
         and report.get("researchAuthorizationRequired") is True
     )
 
@@ -466,6 +467,16 @@ def _require_catalog_run_authorization(
             code="catalog_run_authorization_required",
         )
     return authorization
+
+
+def _current_catalog_run_authorization(
+    team_id: str,
+    plan_id: str,
+):
+    """Resolve the durable authorization for the current readiness boundary."""
+
+    snapshot = _require_authorization(team_id)
+    return _require_catalog_run_authorization(team_id, plan_id, snapshot)
 
 
 def record_catalog_run_authorization(
@@ -840,23 +851,23 @@ def poll_real_batch(
                     harvested.append({"questionId": question_id, "outcome": "approved"})
         envelope["checkpoint"] = state.to_checkpoint()
         _save_envelope(normalized_team, envelope)
-        authorization = envelope.get("catalogRunAuthorization")
         resolved_refill_launcher = resolved_launcher
         needs_refill = any(
             state.status(question_id) is QuestionStatus.PENDING
             for question_id in state.plan.question_ids
         )
+        current_authorization = None
+        if needs_refill:
+            current_authorization = _current_catalog_run_authorization(
+                normalized_team, normalized_plan
+            )
+            current_authorization_mapping = authorization_to_dict(current_authorization)
+            envelope["catalogRunAuthorization"] = current_authorization_mapping
+            _save_envelope(normalized_team, envelope)
         if launcher is None and needs_refill:
-            if not isinstance(authorization, Mapping) or not authorization.get(
-                "authorizationId"
-            ):
-                raise ChallengeCupRealBatchError(
-                    "The real batch has no durable CatalogRunAuthorization binding.",
-                    code="catalog_run_authorization_required",
-                )
             resolved_refill_launcher = partial(
                 _default_question_run_launcher,
-                authorization=dict(authorization),
+                authorization=current_authorization_mapping,
             )
         refill = _launch_pending(
             normalized_team,
