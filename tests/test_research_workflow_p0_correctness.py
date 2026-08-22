@@ -204,14 +204,22 @@ def test_created_run_with_existing_reconciliation_event_fills_status_without_new
 def test_sibling_binding_never_crosses_role_boundary() -> None:
     wrong_role = {
         "agentBindingSnapshot": [
-            {"agentId": "agent-search", "roleKey": "source_finder"}
+            {
+                "nodeId": "source_finding",
+                "agentId": "agent-search",
+                "roleKey": "source_finder",
+            }
         ]
     }
     assert heal_agent_binding_from_sibling_freeze(wrong_role, "hypothesis_design") is None
 
     same_role = {
         "agentBindingSnapshot": [
-            {"agentId": "agent-planner", "roleKey": "experiment_planner"}
+            {
+                "nodeId": "protocol_design",
+                "agentId": "agent-planner",
+                "roleKey": "experiment_planner",
+            }
         ]
     }
     bound = heal_agent_binding_from_sibling_freeze(same_role, "hypothesis_design")
