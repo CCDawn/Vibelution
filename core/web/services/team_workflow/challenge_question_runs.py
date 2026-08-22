@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
+from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -104,6 +105,73 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     temporary = path.with_suffix(f"{path.suffix}.tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def _replace_staged_json(source: Path, target: Path) -> None:
+    source.replace(target)
+
+
+def _write_json_bundle(entries: list[tuple[Path, dict[str, Any]]]) -> None:
+    """Stage and promote related JSON files with best-effort rollback."""
+
+    token = uuid4().hex
+    operations = [
+        {
+            "target": target,
+            "stage": target.with_name(f".{target.name}.{token}.stage"),
+            "backup": target.with_name(f".{target.name}.{token}.backup"),
+            "backedUp": False,
+            "promoted": False,
+            "value": value,
+        }
+        for target, value in entries
+    ]
+    failure: BaseException | None = None
+    completed = False
+    try:
+        for operation in operations:
+            _write_json(operation["stage"], operation["value"])
+        for operation in operations:
+            target = operation["target"]
+            backup = operation["backup"]
+            if target.exists():
+                _replace_staged_json(target, backup)
+                operation["backedUp"] = True
+            _replace_staged_json(operation["stage"], target)
+            operation["promoted"] = True
+        completed = True
+    except Exception as exc:
+        failure = exc
+        for operation in reversed(operations):
+            target = operation["target"]
+            backup = operation["backup"]
+            try:
+                if operation["promoted"] and target.exists():
+                    target.unlink()
+                if operation["backedUp"] and backup.exists():
+                    _replace_staged_json(backup, target)
+            except Exception as rollback_error:
+                exc.add_note(
+                    f"bundle rollback failed for {target}: {rollback_error}"
+                )
+        raise
+    finally:
+        for operation in operations:
+            stage = operation["stage"]
+            stage_temporary = stage.with_suffix(f"{stage.suffix}.tmp")
+            backup = operation["backup"]
+            for disposable in (stage, stage_temporary):
+                try:
+                    if disposable.exists():
+                        disposable.unlink()
+                except OSError as cleanup_error:
+                    if failure is None:
+                        raise
+                    failure.add_note(
+                        f"bundle cleanup failed for {disposable}: {cleanup_error}"
+                    )
+            if completed and backup.exists() and operation["target"].exists():
+                backup.unlink()
 
 
 def _utc_now() -> str:
@@ -272,6 +340,31 @@ def _read_canonical_turn_output(
             "outputRef": expected_ref,
         }
     return None
+
+
+def _canonical_turn_binding_for_evidence(
+    evidence: dict[str, Any],
+) -> dict[str, Any] | None:
+    source_session_id = str(evidence.get("sourceSessionId") or "").strip()
+    source_run_id = str(evidence.get("sourceRunId") or "").strip()
+    task_id = str(evidence.get("taskId") or "").strip()
+    turn_id = str(evidence.get("turnId") or "").strip()
+    output_ref = str(evidence.get("outputRef") or "").strip()
+    binding = _read_canonical_turn_output(
+        session_id=source_session_id,
+        source_run_id=source_run_id,
+        task_id=task_id,
+        turn_id=turn_id,
+        output_ref=output_ref,
+    )
+    if binding is None:
+        return None
+    output = binding.get("output") if isinstance(binding.get("output"), dict) else {}
+    return {
+        **binding,
+        "questionId": _output_question_id(output),
+        "runId": str((output.get("run") or {}).get("run_id") or "").strip(),
+    }
 
 
 def _canonical_evidence_output_binding(evidence: dict[str, Any]) -> dict[str, str]:
@@ -1575,7 +1668,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         )
 
         canonical_package = adapt_question_result_package(
-            output,
+            raw_output,
             catalog_scope=CatalogScope.from_tracked_resources(),
             run_binding={"questionId": question_id, "runId": run_id},
             authorized_model_policy_sha256=str(authorized_policy_sha256),
@@ -1589,6 +1682,8 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                 or ""
             ),
             package_id=str(payload.get("packageId") or ""),
+            request_identity=payload,
+            canonical_turn_resolver=_canonical_turn_binding_for_evidence,
         )
         package_path = _result_package_artifact_path(team_id, question_id, run_id)
         package_metadata = {
@@ -1713,16 +1808,19 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             for item in records
         ):
             raise ValueError("parentRunId was not found for this challenge question.")
-        _write_json(_artifact_path(team_id, question_id, run_id), output)
+        writes = [(_artifact_path(team_id, question_id, run_id), output)]
         if canonical_package is not None:
-            _write_json(
-                _result_package_artifact_path(team_id, question_id, run_id),
-                canonical_package.to_dict(),
+            writes.append(
+                (
+                    _result_package_artifact_path(team_id, question_id, run_id),
+                    canonical_package.to_dict(),
+                )
             )
         records.append(record)
         store["records"] = records
         store["updatedAt"] = _utc_now()
-        _write_json(_store_path(team_id), store)
+        writes.append((_store_path(team_id), store))
+        _write_json_bundle(writes)
         summary = challenge_question_run_summary(team_id)
     record_runtime_scene_event(
         "team_workflow_orchestration",

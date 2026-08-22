@@ -27,49 +27,105 @@ from tests.test_challenge_question_runs import (
 )
 
 
-def _package_inputs() -> tuple[dict, dict, list[dict]]:
+def _package_inputs() -> tuple[dict, dict, dict, list[dict]]:
+    output = _output(1)
     payload = _valid_payload()
+    payload["question_id"] = output["identity"]["question_id"]
+    payload["run_id"] = output["run"]["run_id"]
+    for field in (
+        "hypotheses",
+        "dimension_reviews",
+        "selection",
+        "research_plan",
+        "feedback_iterations",
+        "result_classification",
+        "competition_result_view",
+    ):
+        payload[field] = deepcopy(output[field])
     policy = payload["model_policy"]
+    output_hash = challenge_question_runs._output_sha256(output)
     evidence: list[dict] = []
     for stage, receipt in payload["model_invocation_receipts"].items():
         evidence_id = f"official-{stage}"
+        task_id = f"task-{stage}"
+        turn_id = f"turn-{stage}"
+        session_id = f"session-{stage}"
+        receipt["runId"] = payload["run_id"]
+        receipt["scope"].update(
+            {
+                "questionId": payload["question_id"],
+                "runId": payload["run_id"],
+                "taskId": task_id,
+                "turnId": turn_id,
+            }
+        )
+        output_ref = challenge_question_runs._canonical_output_ref(
+            session_id,
+            payload["run_id"],
+            task_id,
+            turn_id,
+        )
         receipt["evidenceLocator"] = {
             "kind": "official_model_evidence",
             "evidenceId": evidence_id,
-            "outputRef": f"evidence://{stage}",
-            "outputSha256": "a" * 64,
+            "outputRef": output_ref,
+            "outputSha256": output_hash,
         }
         evidence.append(
             {
                 "schemaVersion": 2,
                 "evidenceId": evidence_id,
+                "receiptId": receipt["receiptId"],
                 "questionId": payload["question_id"],
                 "sourceRunId": payload["run_id"],
-                "taskId": f"task-{stage}",
-                "turnId": f"turn-{stage}",
+                "sourceSessionId": session_id,
+                "taskId": task_id,
+                "turnId": turn_id,
                 "stageId": stage,
                 "modelPolicySha256": policy["policySha256"],
                 "modelProvider": "dashscope",
                 "modelId": "qwen3.6-plus",
                 "status": "canonical_success",
-                "outputSha256": "a" * 64,
-                "outputRef": f"evidence://{stage}",
+                "outputSha256": output_hash,
+                "outputRef": output_ref,
             }
         )
-    return payload, {"questionId": payload["question_id"], "runId": payload["run_id"]}, evidence
+    return (
+        output,
+        payload,
+        {"questionId": payload["question_id"], "runId": payload["run_id"]},
+        evidence,
+    )
+
+
+def _canonical_resolver(output: dict):
+    def resolve(row: dict) -> dict:
+        return {
+            "questionId": output["identity"]["question_id"],
+            "sourceRunId": output["run"]["run_id"],
+            "taskId": row["taskId"],
+            "turnId": row["turnId"],
+            "outputRef": row["outputRef"],
+            "outputSha256": challenge_question_runs._output_sha256(output),
+            "output": deepcopy(output),
+        }
+
+    return resolve
 
 
 def test_adapter_builds_canonical_package_from_complete_receipts() -> None:
-    payload, binding, evidence = _package_inputs()
+    output, payload, binding, evidence = _package_inputs()
 
     package = adapt_question_result_package(
-        payload,
+        output,
         catalog_scope=CatalogScope.from_tracked_resources(),
         run_binding=binding,
         authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+        result_package=payload,
         model_policy=payload["model_policy"],
         model_invocation_receipts=payload["model_invocation_receipts"],
         official_model_evidence=evidence,
+        canonical_turn_resolver=_canonical_resolver(output),
     )
 
     assert package.question_id == payload["question_id"]
@@ -79,57 +135,183 @@ def test_adapter_builds_canonical_package_from_complete_receipts() -> None:
 
 
 def test_adapter_rejects_missing_receipt_stage() -> None:
-    payload, binding, evidence = _package_inputs()
+    output, payload, binding, evidence = _package_inputs()
     receipts = deepcopy(payload["model_invocation_receipts"])
     del receipts["revision"]
 
     with pytest.raises(QuestionResultPackageAdapterError, match="revision"):
         adapt_question_result_package(
-            payload,
+            output,
             catalog_scope=CatalogScope.from_tracked_resources(),
             run_binding=binding,
             authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
             model_policy=payload["model_policy"],
             model_invocation_receipts=receipts,
             official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
         )
 
 
 def test_adapter_rejects_evidence_without_policy_or_output_binding() -> None:
-    payload, binding, evidence = _package_inputs()
+    output, payload, binding, evidence = _package_inputs()
     del evidence[0]["modelPolicySha256"]
     del evidence[0]["outputSha256"]
 
     with pytest.raises(QuestionResultPackageAdapterError, match="modelPolicySha256|outputSha256"):
         adapt_question_result_package(
-            payload,
+            output,
             catalog_scope=CatalogScope.from_tracked_resources(),
             run_binding=binding,
             authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
             model_policy=payload["model_policy"],
             model_invocation_receipts=payload["model_invocation_receipts"],
             official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+@pytest.mark.parametrize("field", ["outputRef", "outputSha256"])
+def test_adapter_requires_both_receipt_locator_output_bindings(field: str) -> None:
+    output, payload, binding, evidence = _package_inputs()
+    receipts = deepcopy(payload["model_invocation_receipts"])
+    del receipts["generation"]["evidenceLocator"][field]
+
+    with pytest.raises(QuestionResultPackageAdapterError, match=field):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=receipts,
+            official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+def test_adapter_rejects_three_way_output_binding_mismatch() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    receipts = deepcopy(payload["model_invocation_receipts"])
+    receipts["review"]["evidenceLocator"]["outputSha256"] = "b" * 64
+    next(item for item in evidence if item["stageId"] == "review")[
+        "outputSha256"
+    ] = "b" * 64
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="three|disagree"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=receipts,
+            official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+def test_adapter_rejects_duplicate_stage_in_receipt_list() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    receipts = list(deepcopy(payload["model_invocation_receipts"]).values())
+    receipts.append(deepcopy(receipts[0]))
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="duplicate stage"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=receipts,
+            official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+def test_adapter_rejects_supplied_package_identity_conflicts() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    valid = adapt_question_result_package(
+        output,
+        catalog_scope=CatalogScope.from_tracked_resources(),
+        run_binding=binding,
+        authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+        result_package=payload,
+        model_policy=payload["model_policy"],
+        model_invocation_receipts=payload["model_invocation_receipts"],
+        official_model_evidence=evidence,
+        canonical_turn_resolver=_canonical_resolver(output),
+    )
+
+    conflicting_hash = deepcopy(payload)
+    conflicting_hash["canonical_sha256"] = valid.canonical_hash
+    conflicting_hash["canonicalHash"] = "f" * 64
+    with pytest.raises(QuestionResultPackageAdapterError, match="canonicalHash"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=conflicting_hash,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+    nested = deepcopy(payload)
+    nested["idempotencyKey"] = "wrong-idempotency-key"
+    with pytest.raises(QuestionResultPackageAdapterError, match="idempotencyKey"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package={"package": nested},
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=evidence,
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+    with pytest.raises(QuestionResultPackageAdapterError, match="packageId"):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=evidence,
+            request_identity={"packageId": "conflicting-package-id"},
+            canonical_turn_resolver=_canonical_resolver(output),
         )
 
 
 def _registration_package() -> tuple[dict, dict, list[dict]]:
-    package, binding, evidence = _package_inputs()
-    package["run_id"] = "run-sci-001"
-    for stage, receipt in package["model_invocation_receipts"].items():
-        receipt["runId"] = "run-sci-001"
-        receipt["scope"]["runId"] = "run-sci-001"
-        evidence_stage = next(item for item in evidence if item["stageId"] == stage)
-        evidence_stage["sourceRunId"] = "run-sci-001"
-    binding["runId"] = "run-sci-001"
-    return package, binding, evidence
+    output, package, _binding, evidence = _package_inputs()
+    return output, package, evidence
 
 
-def test_registration_persists_canonical_package_and_rejects_tampered_replay(
-    tmp_path,
-    monkeypatch,
-) -> None:
+def _registration_request(tmp_path, monkeypatch) -> tuple[dict, dict, list[dict], dict]:
     _isolate_store(tmp_path, monkeypatch)
-    package, _binding, evidence = _registration_package()
+    monkeypatch.setattr(challenge_question_runs, "_project_root", lambda: tmp_path)
+    output, package, evidence = _registration_package()
+    for row in evidence:
+        _append_canonical_turn_output(
+            tmp_path,
+            {
+                "sessionId": row["sourceSessionId"],
+                "runId": row["sourceRunId"],
+                "taskId": row["taskId"],
+                "turn": {"turnId": row["turnId"]},
+            },
+            output,
+        )
     evidence_path = tmp_path / "official_model_evidence" / "index.json"
     evidence_path.write_text(
         json.dumps(
@@ -143,13 +325,36 @@ def test_registration_persists_canonical_package_and_rejects_tampered_replay(
         ),
         encoding="utf-8",
     )
-    output = _output(1)
     request = {
         "output": output,
         "citationChecks": _citation_checks(output),
         "resultPackage": package,
         "authorizedModelPolicySha256": package["model_policy"]["policySha256"],
     }
+    return output, package, evidence, request
+
+
+def test_registration_persists_canonical_package_and_rejects_tampered_replay(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _output_value, package, _evidence, request = _registration_request(
+        tmp_path, monkeypatch
+    )
+
+    tampered_initial = deepcopy(package)
+    tampered_initial["hypotheses"][0]["statement"] = "tampered before first write"
+    with pytest.raises(ValueError, match="canonical output|package"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            {**request, "resultPackage": tampered_initial},
+        )
+    assert not challenge_question_runs._artifact_path(
+        "research-team", "SCI-001", "run-sci-001"
+    ).exists()
+    assert not challenge_question_runs._result_package_artifact_path(
+        "research-team", "SCI-001", "run-sci-001"
+    ).exists()
 
     first = challenge_question_runs.register_challenge_question_output(
         "research-team", request
@@ -179,6 +384,58 @@ def test_registration_persists_canonical_package_and_rejects_tampered_replay(
         challenge_question_runs.register_challenge_question_output(
             "research-team", request
         )
+
+
+@pytest.mark.parametrize(
+    "failing_target",
+    ["run-sci-001.result-package.v2.json", "index.json"],
+)
+def test_registration_rolls_back_partial_artifacts_on_bundle_promotion_failure(
+    tmp_path,
+    monkeypatch,
+    failing_target: str,
+) -> None:
+    _output_value, _package, _evidence, request = _registration_request(
+        tmp_path, monkeypatch
+    )
+    store_path = challenge_question_runs._store_path("research-team")
+    original_store = {
+        "schemaVersion": challenge_question_runs.STORE_SCHEMA_VERSION,
+        "storeKind": challenge_question_runs.STORE_KIND,
+        "teamId": "research-team",
+        "records": [],
+        "updatedAt": "2026-01-01T00:00:00+00:00",
+    }
+    challenge_question_runs._write_json(store_path, original_store)
+    real_replace = challenge_question_runs._replace_staged_json
+    failure_injected = False
+
+    def fail_selected_promotion(source: Path, target: Path) -> None:
+        nonlocal failure_injected
+        if target.name == failing_target and not failure_injected:
+            failure_injected = True
+            raise OSError(f"injected promotion failure: {failing_target}")
+        real_replace(source, target)
+
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "_replace_staged_json",
+        fail_selected_promotion,
+    )
+    with pytest.raises(OSError, match="injected promotion failure"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team", request
+        )
+
+    assert not challenge_question_runs._artifact_path(
+        "research-team", "SCI-001", "run-sci-001"
+    ).exists()
+    assert not challenge_question_runs._result_package_artifact_path(
+        "research-team", "SCI-001", "run-sci-001"
+    ).exists()
+    assert challenge_question_runs._read_json(store_path) == original_store
+    assert not list(tmp_path.rglob("*.stage"))
+    assert not list(tmp_path.rglob("*.backup"))
 
 
 def test_task_model_evidence_persists_three_validated_receipts_and_is_idempotent(

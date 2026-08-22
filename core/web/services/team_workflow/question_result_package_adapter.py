@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
@@ -23,6 +23,30 @@ class QuestionResultPackageAdapterError(QuestionResultPackageError):
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_MISSING = object()
+_BUSINESS_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("hypotheses", ("hypotheses", "candidates")),
+    ("dimension_reviews", ("dimension_reviews", "dimensionReviews")),
+    ("selection", ("selection",)),
+    ("research_plan", ("research_plan", "researchPlan")),
+    ("feedback_iterations", ("feedback_iterations", "feedbackIterations")),
+    (
+        "result_classification",
+        ("result_classification", "resultClassification"),
+    ),
+    (
+        "competition_result_view",
+        ("competition_result_view", "competitionResultView"),
+    ),
+)
+_PACKAGE_ID_ALIASES = ("package_id", "packageId")
+_CANONICAL_HASH_ALIASES = (
+    "canonical_sha256",
+    "canonicalSha256",
+    "canonicalHash",
+    "package_sha256",
+)
+_IDEMPOTENCY_KEY_ALIASES = ("idempotency_key", "idempotencyKey")
 
 
 def _pick(payload: Mapping[str, Any], *keys: str, default: Any = None) -> Any:
@@ -62,6 +86,75 @@ def _scope_value(payload: Mapping[str, Any], *keys: str) -> str:
     return ""
 
 
+def _present_values(
+    payload: Mapping[str, Any],
+    *keys: str,
+) -> list[tuple[str, Any]]:
+    return [(key, deepcopy(payload[key])) for key in keys if key in payload]
+
+
+def _consistent_identity_value(
+    layers: Sequence[tuple[str, Mapping[str, Any]]],
+    aliases: tuple[str, ...],
+    field: str,
+    *,
+    extra_value: str = "",
+) -> str:
+    supplied: list[tuple[str, str]] = []
+    for layer_name, layer in layers:
+        supplied.extend(
+            (f"{layer_name}.{key}", str(value or "").strip())
+            for key, value in _present_values(layer, *aliases)
+        )
+    if extra_value:
+        supplied.append((field, str(extra_value).strip()))
+    if not supplied:
+        return ""
+    first = supplied[0][1]
+    if not first or any(value != first for _, value in supplied[1:]):
+        raise QuestionResultPackageAdapterError(
+            f"{field} identity fields conflict: "
+            + ", ".join(name for name, _ in supplied)
+        )
+    return first
+
+
+def _business_value(
+    authority: Mapping[str, Any],
+    layers: Sequence[tuple[str, Mapping[str, Any]]],
+    field: str,
+    aliases: tuple[str, ...],
+) -> Any:
+    authoritative = _pick(authority, *aliases, default=_MISSING)
+    if authoritative is _MISSING:
+        raise QuestionResultPackageAdapterError(
+            f"canonical output is missing {field}"
+        )
+    for layer_name, layer in layers:
+        for key, value in _present_values(layer, *aliases):
+            if value != authoritative:
+                raise QuestionResultPackageAdapterError(
+                    f"{layer_name}.{key} does not match canonical output {field}"
+                )
+    return deepcopy(authoritative)
+
+
+def _optional_business_value(
+    authority: Mapping[str, Any],
+    layers: Sequence[tuple[str, Mapping[str, Any]]],
+    field: str,
+    aliases: tuple[str, ...],
+) -> Any:
+    authoritative = _pick(authority, *aliases, default=_MISSING)
+    for layer_name, layer in layers:
+        for key, value in _present_values(layer, *aliases):
+            if authoritative is _MISSING or value != authoritative:
+                raise QuestionResultPackageAdapterError(
+                    f"{layer_name}.{key} does not match canonical output {field}"
+                )
+    return authoritative
+
+
 def _receipt_rows(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         receipts = value.get("receipts")
@@ -69,6 +162,8 @@ def _receipt_rows(value: Any) -> dict[str, Any]:
             value = receipts
         else:
             return deepcopy(dict(value))
+    if isinstance(value, Mapping):
+        return deepcopy(dict(value))
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise QuestionResultPackageAdapterError(
             "model_invocation_receipts are required and must be a mapping or list"
@@ -83,6 +178,10 @@ def _receipt_rows(value: Any) -> dict[str, Any]:
         if not stage:
             raise QuestionResultPackageAdapterError(
                 "model_invocation_receipt is missing scope.stageId"
+            )
+        if stage in result:
+            raise QuestionResultPackageAdapterError(
+                f"model_invocation_receipts contains duplicate stage: {stage}"
             )
         result[stage] = deepcopy(dict(item))
     return result
@@ -123,30 +222,59 @@ def _row_value(row: Mapping[str, Any], *keys: str) -> str:
 def _validate_receipt_evidence(
     package: QuestionResultPackage,
     official_model_evidence: Any,
-) -> None:
+    canonical_turn_resolver: Callable[
+        [Mapping[str, Any]], Mapping[str, Any] | None
+    ],
+) -> dict[str, dict[str, Any]]:
     rows = _evidence_rows(official_model_evidence)
+    canonical_bindings: dict[str, dict[str, Any]] = {}
     for stage, receipt in package.model_invocation_receipts.items():
         receipt_dict = receipt.to_dict()
         receipt_id = receipt.receipt_id
+        receipt_scope = dict(receipt.scope or {})
+        receipt_scope_fields = {
+            "questionId": _scope_value(
+                receipt_scope, "questionId", "question_id", "question"
+            ),
+            "runId": _scope_value(receipt_scope, "runId", "run_id"),
+            "taskId": _scope_value(
+                receipt_scope, "taskId", "task_id", "task"
+            ),
+            "turnId": _scope_value(
+                receipt_scope, "turnId", "turn_id", "turn"
+            ),
+            "stageId": _scope_value(
+                receipt_scope, "stageId", "stage_id", "stage", "nodeId"
+            ),
+        }
+        missing_scope = [
+            key for key, value in receipt_scope_fields.items() if not value
+        ]
+        if missing_scope:
+            raise QuestionResultPackageAdapterError(
+                f"receipt.{stage} scope is incomplete; missing fields: "
+                + ", ".join(missing_scope)
+            )
         locator = dict(receipt.evidence_locator or {})
         locator_evidence_id = _scope_value(locator, "evidenceId", "evidence_id", "id")
         locator_output_ref = _scope_value(locator, "outputRef", "output_ref", "ref")
+        if not locator_output_ref:
+            raise QuestionResultPackageAdapterError(
+                f"receipt.{stage}.evidenceLocator.outputRef is required"
+            )
+        locator_output_hash = _sha256(
+            _scope_value(
+                locator,
+                "outputSha256",
+                "output_sha256",
+                "outputHash",
+            ),
+            f"receipt.{stage}.evidenceLocator.outputSha256",
+        )
         matches = [
             row
             for row in rows
-            if (
-                _row_value(row, "receiptId", "receipt_id") == receipt_id
-                or (
-                    locator_evidence_id
-                    and _row_value(row, "evidenceId", "evidence_id", "id")
-                    == locator_evidence_id
-                )
-                or (
-                    locator_output_ref
-                    and _row_value(row, "outputRef", "output_ref", "ref", "logRef")
-                    == locator_output_ref
-                )
-            )
+            if _row_value(row, "receiptId", "receipt_id") == receipt_id
         ]
         if not matches:
             raise QuestionResultPackageAdapterError(
@@ -158,6 +286,8 @@ def _validate_receipt_evidence(
             )
         row = matches[0]
         required = {
+            "receiptId": _row_value(row, "receiptId", "receipt_id"),
+            "evidenceId": _row_value(row, "evidenceId", "evidence_id", "id"),
             "questionId": _row_value(row, "questionId", "question_id", "question"),
             "runId": _row_value(row, "sourceRunId", "runId", "run_id"),
             "taskId": _row_value(row, "taskId", "task_id", "task"),
@@ -186,6 +316,14 @@ def _validate_receipt_evidence(
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} status is not official"
             )
+        if required["receiptId"] != receipt_id:
+            raise QuestionResultPackageAdapterError(
+                f"official_model_evidence for receipt.{stage} receipt binding mismatch"
+            )
+        if locator_evidence_id and required["evidenceId"] != locator_evidence_id:
+            raise QuestionResultPackageAdapterError(
+                f"official_model_evidence for receipt.{stage} evidence id mismatch"
+            )
         if required["questionId"] != package.question_id:
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} question binding mismatch"
@@ -198,6 +336,12 @@ def _validate_receipt_evidence(
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} stage binding mismatch"
             )
+        for field in ("questionId", "runId", "taskId", "turnId", "stageId"):
+            if required[field] != receipt_scope_fields[field]:
+                raise QuestionResultPackageAdapterError(
+                    f"official_model_evidence for receipt.{stage} {field} "
+                    "does not match receipt scope"
+                )
         if required["modelProvider"].lower() != receipt.provider.lower():
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} provider binding mismatch"
@@ -210,21 +354,14 @@ def _validate_receipt_evidence(
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} model policy mismatch"
             )
-        _sha256(required["outputSha256"], f"evidence.{stage}.outputSha256")
-        if locator_output_ref and required["outputRef"] != locator_output_ref:
+        evidence_output_hash = _sha256(
+            required["outputSha256"], f"evidence.{stage}.outputSha256"
+        )
+        if required["outputRef"] != locator_output_ref:
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} output ref mismatch"
             )
-        locator_output_hash = _scope_value(
-            locator,
-            "outputSha256",
-            "output_sha256",
-            "outputHash",
-        )
-        if locator_output_hash and _sha256(
-            locator_output_hash,
-            f"receipt.{stage}.evidenceLocator.outputSha256",
-        ) != _sha256(required["outputSha256"], f"evidence.{stage}.outputSha256"):
+        if locator_output_hash != evidence_output_hash:
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} output hash mismatch"
             )
@@ -236,6 +373,77 @@ def _validate_receipt_evidence(
             raise QuestionResultPackageAdapterError(
                 f"receipt.{stage} receipt identity changed during validation"
             )
+        resolved = canonical_turn_resolver(row)
+        if not isinstance(resolved, Mapping):
+            raise QuestionResultPackageAdapterError(
+                f"canonical turn output for receipt.{stage} was not found"
+            )
+        binding = deepcopy(dict(resolved))
+        canonical_output = binding.get("output")
+        if not isinstance(canonical_output, Mapping):
+            raise QuestionResultPackageAdapterError(
+                f"canonical turn output for receipt.{stage} is missing output content"
+            )
+        binding_fields = {
+            "questionId": _scope_value(
+                binding, "questionId", "question_id", "question"
+            ),
+            "runId": _scope_value(
+                binding, "sourceRunId", "runId", "run_id"
+            ),
+            "taskId": _scope_value(binding, "taskId", "task_id", "task"),
+            "turnId": _scope_value(binding, "turnId", "turn_id", "turn"),
+            "outputRef": _scope_value(
+                binding, "outputRef", "output_ref", "ref"
+            ),
+            "outputSha256": _scope_value(
+                binding, "outputSha256", "output_sha256", "outputHash"
+            ),
+        }
+        missing_binding = [
+            key for key, value in binding_fields.items() if not value
+        ]
+        if missing_binding:
+            raise QuestionResultPackageAdapterError(
+                f"canonical turn binding for receipt.{stage} is incomplete; "
+                "missing fields: "
+                + ", ".join(missing_binding)
+            )
+        if (
+            binding_fields["questionId"] != package.question_id
+            or binding_fields["runId"] != package.run_id
+            or binding_fields["taskId"] != receipt_scope_fields["taskId"]
+            or binding_fields["turnId"] != receipt_scope_fields["turnId"]
+            or binding_fields["outputRef"] != locator_output_ref
+            or _sha256(
+                binding_fields["outputSha256"],
+                f"canonical.{stage}.outputSha256",
+            )
+            != locator_output_hash
+        ):
+            raise QuestionResultPackageAdapterError(
+                f"receipt.{stage}, official evidence and canonical turn binding disagree"
+            )
+        canonical_identity = (
+            canonical_output.get("identity")
+            if isinstance(canonical_output.get("identity"), Mapping)
+            else {}
+        )
+        canonical_run = (
+            canonical_output.get("run")
+            if isinstance(canonical_output.get("run"), Mapping)
+            else {}
+        )
+        if (
+            _scope_value(canonical_identity, "question_id", "questionId")
+            != package.question_id
+            or _scope_value(canonical_run, "run_id", "runId") != package.run_id
+        ):
+            raise QuestionResultPackageAdapterError(
+                f"canonical turn output for receipt.{stage} has wrong question/run identity"
+            )
+        canonical_bindings[stage] = binding
+    return canonical_bindings
 
 
 def adapt_question_result_package(
@@ -250,26 +458,57 @@ def adapt_question_result_package(
     official_model_evidence: Any = None,
     input_snapshot_sha256: str = "",
     package_id: str = "",
+    request_identity: Mapping[str, Any] | None = None,
+    canonical_turn_resolver: Callable[
+        [Mapping[str, Any]], Mapping[str, Any] | None
+    ]
+    | None = None,
 ) -> QuestionResultPackage:
     """Validate and restore one canonical package through ``from_dict``."""
 
     raw_output = _mapping(output, "output")
-    source = _mapping(result_package, "resultPackage") if result_package is not None else raw_output
-    nested = source.get("package")
-    if isinstance(nested, Mapping):
-        source = deepcopy(dict(nested))
+    outer_package = (
+        _mapping(result_package, "resultPackage", allow_empty=True)
+        if result_package is not None
+        else {}
+    )
+    nested_value = outer_package.get("package")
+    nested_package = (
+        _mapping(nested_value, "resultPackage.package", allow_empty=True)
+        if isinstance(nested_value, Mapping)
+        else {}
+    )
+    source = nested_package or outer_package
+    package_layers: list[tuple[str, Mapping[str, Any]]] = []
+    if outer_package:
+        package_layers.append(("resultPackage", outer_package))
+    if nested_package:
+        package_layers.append(("resultPackage.package", nested_package))
+    identity_layers: list[tuple[str, Mapping[str, Any]]] = []
+    if isinstance(request_identity, Mapping):
+        identity_layers.append(("request", request_identity))
+    identity_layers.extend(package_layers)
     identity = raw_output.get("identity") if isinstance(raw_output.get("identity"), Mapping) else {}
     run = raw_output.get("run") if isinstance(raw_output.get("run"), Mapping) else {}
     question_id = _text(
-        _pick(source, "question_id", "questionId", default=None)
-        or _pick(identity, "question_id", "questionId", default=None),
+        _pick(identity, "question_id", "questionId", default=None),
         "question_id",
     )
     run_id = _text(
-        _pick(source, "run_id", "runId", default=None)
-        or _pick(run, "run_id", "runId", default=None),
+        _pick(run, "run_id", "runId", default=None),
         "run_id",
     )
+    for layer_name, layer in package_layers:
+        for key, value in _present_values(layer, "question_id", "questionId"):
+            if str(value or "").strip() != question_id:
+                raise QuestionResultPackageAdapterError(
+                    f"{layer_name}.{key} does not match canonical output question_id"
+                )
+        for key, value in _present_values(layer, "run_id", "runId"):
+            if str(value or "").strip() != run_id:
+                raise QuestionResultPackageAdapterError(
+                    f"{layer_name}.{key} does not match canonical output run_id"
+                )
     bound_question_id = _text(
         _pick(run_binding, "questionId", "question_id", "question", default=None),
         "run_binding.questionId",
@@ -313,72 +552,115 @@ def adapt_question_result_package(
         default=input_snapshot_sha256,
     )
     snapshot = _sha256(snapshot, "input_snapshot_sha256")
-    package_payload: dict[str, Any] = {
-        "schema_version": 2,
-        "package_id": str(
-            package_id
-            or _pick(source, "package_id", "packageId", default="")
-            or f"qrp-{question_id.lower()}-{run_id}"
-        ).strip(),
-        "scope": catalog_scope.to_dict(),
-        "model_policy": deepcopy(dict(policy)),
-        "question_id": question_id,
-        "run_id": run_id,
-        "input_snapshot_sha256": snapshot,
-        "hypotheses": _pick(source, "hypotheses", "candidates", default=_pick(raw_output, "hypotheses")),
-        "dimension_reviews": _pick(
-            source,
-            "dimension_reviews",
-            "dimensionReviews",
-            default=_pick(raw_output, "dimension_reviews"),
-        ),
-        "selection": _pick(source, "selection", default=_pick(raw_output, "selection")),
-        "research_plan": _pick(
-            source,
-            "research_plan",
-            "researchPlan",
-            default=_pick(raw_output, "research_plan"),
-        ),
-        "feedback_iterations": _pick(
-            source,
-            "feedback_iterations",
-            "feedbackIterations",
-            default=_pick(raw_output, "feedback_iterations"),
-        ),
-        "result_classification": _pick(
-            source,
-            "result_classification",
-            "resultClassification",
-            default=_pick(raw_output, "result_classification"),
-        ),
-        "competition_result_view": _pick(
-            source,
-            "competition_result_view",
-            "competitionResultView",
-            default=_pick(raw_output, "competition_result_view"),
-        ),
-        "model_invocation_receipts": receipts,
-    }
-    failure = _pick(source, "failure", default=None)
-    if failure is not None:
-        package_payload["failure"] = deepcopy(failure)
-    try:
-        unsealed = QuestionResultPackage.create(package_payload)
-        canonical = unsealed.to_dict()
-        package = QuestionResultPackage.from_dict(
-            canonical,
-            expected_model_policy_sha256=_sha256(
-                authorized_model_policy_sha256,
-                "authorized_model_policy_sha256",
-            ),
+    supplied_package_id = _consistent_identity_value(
+        identity_layers,
+        _PACKAGE_ID_ALIASES,
+        "packageId",
+        extra_value=package_id,
+    )
+    effective_package_id = (
+        supplied_package_id or f"qrp-{question_id.lower()}-{run_id}"
+    )
+
+    def build_package(authority_output: Mapping[str, Any]) -> QuestionResultPackage:
+        package_payload: dict[str, Any] = {
+            "schema_version": 2,
+            "package_id": effective_package_id,
+            "scope": catalog_scope.to_dict(),
+            "model_policy": deepcopy(dict(policy)),
+            "question_id": question_id,
+            "run_id": run_id,
+            "input_snapshot_sha256": snapshot,
+            "model_invocation_receipts": receipts,
+        }
+        for field, aliases in _BUSINESS_FIELDS:
+            package_payload[field] = _business_value(
+                authority_output,
+                package_layers,
+                field,
+                aliases,
+            )
+        failure = _optional_business_value(
+            authority_output,
+            package_layers,
+            "failure",
+            ("failure",),
         )
-    except QuestionResultPackageError as exc:
-        raise QuestionResultPackageAdapterError(str(exc)) from exc
+        if failure is not _MISSING:
+            package_payload["failure"] = deepcopy(failure)
+        try:
+            unsealed = QuestionResultPackage.create(package_payload)
+            canonical = unsealed.to_dict()
+            return QuestionResultPackage.from_dict(
+                canonical,
+                expected_model_policy_sha256=_sha256(
+                    authorized_model_policy_sha256,
+                    "authorized_model_policy_sha256",
+                ),
+            )
+        except QuestionResultPackageError as exc:
+            raise QuestionResultPackageAdapterError(str(exc)) from exc
+
+    provisional_package = build_package(raw_output)
     if official_model_evidence is None:
         raise QuestionResultPackageAdapterError(
             "official_model_evidence is required to bind package receipts"
         )
-    _validate_receipt_evidence(package, official_model_evidence)
+    if canonical_turn_resolver is None:
+        raise QuestionResultPackageAdapterError(
+            "canonical_turn_resolver is required to bind package receipts"
+        )
+    canonical_bindings = _validate_receipt_evidence(
+        provisional_package,
+        official_model_evidence,
+        canonical_turn_resolver,
+    )
+    revision_binding = canonical_bindings.get("revision") or {}
+    canonical_output = revision_binding.get("output")
+    if not isinstance(canonical_output, Mapping):
+        raise QuestionResultPackageAdapterError(
+            "revision receipt is missing canonical output content"
+        )
+    canonical_comparison_layers = [("output", raw_output), *package_layers]
+    for field, aliases in _BUSINESS_FIELDS:
+        _business_value(
+            canonical_output,
+            canonical_comparison_layers,
+            field,
+            aliases,
+        )
+    _optional_business_value(
+        canonical_output,
+        canonical_comparison_layers,
+        "failure",
+        ("failure",),
+    )
+    package = build_package(canonical_output)
+    supplied_canonical_hash = _consistent_identity_value(
+        identity_layers,
+        _CANONICAL_HASH_ALIASES,
+        "canonicalHash",
+    )
+    if (
+        supplied_canonical_hash
+        and supplied_canonical_hash.lower() != package.canonical_hash
+    ):
+        raise QuestionResultPackageAdapterError(
+            "canonicalHash does not match rebuilt canonical package"
+        )
+    supplied_idempotency_key = _consistent_identity_value(
+        identity_layers,
+        _IDEMPOTENCY_KEY_ALIASES,
+        "idempotencyKey",
+    )
+    if supplied_idempotency_key and supplied_idempotency_key != package.idempotency_key:
+        raise QuestionResultPackageAdapterError(
+            "idempotencyKey does not match rebuilt canonical package"
+        )
+    if package.package_id != effective_package_id:
+        raise QuestionResultPackageAdapterError(
+            "packageId does not match rebuilt canonical package"
+        )
     return package
 
 
