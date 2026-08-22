@@ -353,6 +353,19 @@ class CatalogExecutionState:
         record.last_error = None
         record.result = None
 
+    def _begin_batch_attempt(self, question_id: str) -> None:
+        self._require_in_plan(question_id)
+        record = self._records[question_id]
+        if record.result is not None and record.result.is_package_backed:
+            if not record.invalidated:
+                raise CatalogExecutionError(
+                    f"Question {question_id} package-backed batch attempt "
+                    "requires explicit invalidation."
+                )
+            self._begin_package_attempt(question_id)
+            return
+        self.mark_running(question_id)
+
     def record_success(self, question_id: str, result: QuestionResult) -> None:
         self._require_in_plan(question_id)
         if result.locator.identity_key() != self.identity_key(question_id):
@@ -651,7 +664,7 @@ def run_pending_batch(
         pending = pending[:max_items]
     outcomes: list[dict[str, Any]] = []
     for question_id in pending:
-        state.mark_running(question_id)
+        state._begin_batch_attempt(question_id)
         try:
             result = execute_question(question_id)
             if result.is_package_backed:

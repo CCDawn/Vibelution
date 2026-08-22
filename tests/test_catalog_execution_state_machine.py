@@ -231,6 +231,69 @@ def test_invalidate_then_rerun_increments_attempts() -> None:
     assert state.pending_question_ids() == ()
 
 
+@pytest.mark.parametrize(
+    ("gate_decision", "quality_status", "terminal_status"),
+    [
+        ("approved", "failed", QuestionStatus.FAILED),
+        ("rejected", "approved", QuestionStatus.BLOCKED),
+        ("approved", "approved", QuestionStatus.SUCCEEDED),
+    ],
+)
+def test_invalidated_package_batch_retry_enters_execute_and_counts_one_attempt(
+    gate_decision: str,
+    quality_status: str,
+    terminal_status: QuestionStatus,
+) -> None:
+    scope = _scope()
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    initial = _package(
+        scope,
+        "SCI-091",
+        gate_decision=gate_decision,
+        quality_status=quality_status,
+    )
+    replacement = _package(
+        scope,
+        "SCI-091",
+        input_snapshot_sha256="b" * 64,
+    )
+    state.record_package(initial)
+    assert state.status("SCI-091") is terminal_status
+    assert state.attempts("SCI-091") == 1
+    state.invalidate("SCI-091", "retry the package attempt")
+    executed: list[str] = []
+
+    summary = run_pending_batch(
+        state,
+        lambda question_id: (
+            executed.append(question_id) or QuestionResult.from_package(replacement)
+        ),
+    )
+
+    assert executed == ["SCI-091"]
+    assert summary["attempted"] == ["SCI-091"]
+    assert summary["outcomes"] == [
+        {"question_id": "SCI-091", "outcome": "succeeded"}
+    ]
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert state.attempts("SCI-091") == 2
+    assert state.result_for("SCI-091").package_snapshot == replacement.to_dict()
+
+
+def test_run_pending_batch_legacy_pending_counts_one_attempt() -> None:
+    scope = _scope()
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+
+    summary = run_pending_batch(
+        state,
+        lambda question_id: _result(scope, question_id),
+    )
+
+    assert summary["attempted"] == ["SCI-091"]
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert state.attempts("SCI-091") == 1
+
+
 def test_checkpoint_round_trip_preserves_resume_semantics() -> None:
     scope = _scope()
     plan = dev_plan("dev-12")
