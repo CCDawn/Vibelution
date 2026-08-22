@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from core.infrastructure.no_console_git import no_console_subprocess_kwargs
 from core.research.competition.catalog_execution import (
     CatalogExecutionState,
     QuestionStatus,
@@ -33,14 +34,22 @@ from core.research.competition.dev_control_batch import (
     validate_dev_batch_plan,
 )
 from core.research.competition.platform_flow_ready import REPORT_KIND
+from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
+    CATALOG_HYPOTHESIS_FLOW_GATE_DEFINITIONS,
+    CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
+    CatalogHypothesisFlowReadinessReport,
+)
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
 )
-from core.infrastructure.no_console_git import no_console_subprocess_kwargs
-from core.web.routes.team_workflows import challenge_cup_dev_controls as dev_controls_routes
+from core.web.routes.team_workflows import (
+    challenge_cup_dev_controls as dev_controls_routes,
+)
 from core.web.services import team_service
-from core.web.services.team_workflow import challenge_cup_dev_controls as dev_controls_service
+from core.web.services.team_workflow import (
+    challenge_cup_dev_controls as dev_controls_service,
+)
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 
@@ -262,6 +271,7 @@ def test_readiness_run_requires_clean_tree_and_persists_report(
     )
     response = dev_controls_service.run_challenge_cup_dev_readiness("team-1")
     assert response["cleanedUp"] is True
+    assert response["catalogHypothesisReadiness"]["reportKind"] == CATALOG_HYPOTHESIS_FLOW_REPORT_KIND
     assert calls[0]["mode"] == "dev"
     assert calls[0]["runPytest"] is True
     assert calls[0]["requireClean"] is True
@@ -272,6 +282,13 @@ def test_readiness_run_requires_clean_tree_and_persists_report(
     envelope = json.loads(report_file.read_text(encoding="utf-8"))
     assert envelope["realCampaignAllowed"] is False
     assert envelope["report"]["status"] == "READY"
+    catalog_report_file = (
+        controls_root
+        / "team-1"
+        / "challenge_cup_dev_controls"
+        / "catalog_hypothesis_readiness_report.json"
+    )
+    assert catalog_report_file.is_file()
 
     snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
     assert snapshot["report"] is not None
@@ -343,6 +360,41 @@ def test_next_legal_action_advances_only_after_persisted_state(
     assert action() == "RESEARCH_AUTHORIZATION_REQUIRED"
 
 
+def test_persisted_catalog_hypothesis_failure_owns_next_legal_action(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    report = _persist_catalog_hypothesis_report(
+        controls_root,
+        "team-1",
+        failed_gate_id="question_model_receipts",
+    )
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+    assert snapshot["catalogHypothesisReadiness"]["status"] == "NOT_READY"
+    assert snapshot["catalogHypothesisReadiness"]["reportHash"] == report["reportHash"]
+    assert snapshot["nextLegalAction"] == "repair_catalog_hypothesis_question_model_receipts"
+
+
+def test_snapshot_exposes_stable_catalog_readiness_hash_after_all_gates_pass(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    report = _persist_catalog_hypothesis_report(controls_root, "team-1")
+
+    first = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    second = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+    assert first["catalogHypothesisReadiness"]["status"] == "READY"
+    assert first["catalogHypothesisReadiness"]["g1PilotAllowed"] is True
+    assert first["readinessReportSha256"] == report["reportHash"]
+    assert first["catalogReadinessReportSha256"] == report["reportHash"]
+    assert second["readinessReportSha256"] == first["readinessReportSha256"]
+    assert second["catalogReadinessReportSha256"] == first["catalogReadinessReportSha256"]
+    assert first["nextLegalAction"] == "run_dev_1_fixture_batch"
+
+
 def _persist_readiness_report(controls_root: Path, team_id: str) -> None:
     path = controls_root / team_id / "challenge_cup_dev_controls" / "readiness_report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -358,6 +410,38 @@ def _persist_readiness_report(controls_root: Path, team_id: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _catalog_hypothesis_report(*, failed_gate_id: str | None = None) -> dict:
+    return CatalogHypothesisFlowReadinessReport.build(
+        gates=[
+            {
+                "gateId": gate_id,
+                "status": "FAIL" if gate_id == failed_gate_id else "PASS",
+                "detail": f"{gate_id} fixture {'FAIL' if gate_id == failed_gate_id else 'PASS'}",
+            }
+            for gate_id, _label, _repair_action in CATALOG_HYPOTHESIS_FLOW_GATE_DEFINITIONS
+        ],
+        generated_at="2026-08-18T00:00:00Z",
+    ).to_dict()
+
+
+def _persist_catalog_hypothesis_report(
+    controls_root: Path,
+    team_id: str,
+    *,
+    failed_gate_id: str | None = None,
+) -> dict:
+    report = _catalog_hypothesis_report(failed_gate_id=failed_gate_id)
+    envelope = dev_controls_service._persist_catalog_hypothesis_report(team_id, report)
+    assert envelope["report"]["reportHash"] == report["reportHash"]
+    assert (
+        controls_root
+        / team_id
+        / "challenge_cup_dev_controls"
+        / "catalog_hypothesis_readiness_report.json"
+    ).is_file()
+    return report
 
 
 def _test_readiness_evidence(controls_root: Path, team_id: str) -> dict:

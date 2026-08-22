@@ -34,6 +34,29 @@ class ChallengeCupDevReadinessProjectionResponse(BaseModel):
     gates: list[ChallengeCupDevGateResponse] = Field(default_factory=list)
 
 
+class ChallengeCupCatalogHypothesisGateResponse(BaseModel):
+    gateId: str = ""
+    label: str = ""
+    status: str = ""
+    detail: str = ""
+    repairAction: str = ""
+
+
+class ChallengeCupCatalogHypothesisReadinessResponse(BaseModel):
+    schemaVersion: int = 1
+    reportKind: str = "CatalogHypothesisFlowReadinessReport"
+    status: str = ""
+    mode: str = "dev"
+    realCampaignAllowed: bool = False
+    humanAuthorizationRequired: bool = True
+    g1PilotAllowed: bool = False
+    gates: list[ChallengeCupCatalogHypothesisGateResponse] = Field(default_factory=list)
+    nextLegalAction: str = ""
+    generatedAt: str = ""
+    updatedAt: str = ""
+    reportHash: str = ""
+
+
 class ChallengeCupDevStatusSummaryResponse(BaseModel):
     pending: int = 0
     running: int = 0
@@ -76,8 +99,11 @@ class ChallengeCupDevControlSnapshotResponse(BaseModel):
     generatedAt: str = ""
     mode: str = "dev"
     realCampaignAllowed: bool = False
+    readinessReportSha256: str = ""
+    catalogReadinessReportSha256: str = ""
     nextLegalAction: str = ""
     report: ChallengeCupDevReadinessProjectionResponse | None = None
+    catalogHypothesisReadiness: ChallengeCupCatalogHypothesisReadinessResponse | None = None
     batches: dict[str, ChallengeCupDevBatchProjectionResponse] = Field(default_factory=dict)
     boundary: ChallengeCupDevBoundaryResponse = Field(
         default_factory=ChallengeCupDevBoundaryResponse
@@ -92,6 +118,7 @@ class ChallengeCupDevReadinessRunResponse(BaseModel):
     schemaVersion: int = 1
     teamId: str = ""
     report: ChallengeCupDevReadinessProjectionResponse
+    catalogHypothesisReadiness: ChallengeCupCatalogHypothesisReadinessResponse | None = None
     cleanedUp: Literal[True]
     updatedAt: str = ""
 

@@ -32,6 +32,9 @@ from core.research.competition.catalog_execution import (
     QuestionStatus,
     dev_plan,
 )
+from core.research.competition.catalog_hypothesis_flow_ready import (
+    build_catalog_hypothesis_flow_readiness_report,
+)
 from core.research.competition.dev_control_batch import (
     ALLOWED_DEV_BATCH_PLAN_IDS,
     FORBIDDEN_DEV_BATCH_PLAN_IDS,
@@ -59,17 +62,26 @@ from core.research.competition.resources import (
 from core.research.competition.result_set import CatalogScope, ResultSetContractError
 from core.research.competition.source_boundary import git_is_dirty, git_output
 from core.research.workflow.contracts._validation import ContractValidationError
-from core.research.workflow.contracts.model_invocation_receipt import ModelInvocationReceipt
+from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
+    CATALOG_HYPOTHESIS_FLOW_G1_ACTION,
+    CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
+    CatalogHypothesisFlowReadinessReport,
+)
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+)
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_workflow.research_projects import team_workspace_root
 
 CONTROLS_DIRNAME = "challenge_cup_dev_controls"
 REPORT_FILENAME = "readiness_report.json"
+CATALOG_HYPOTHESIS_REPORT_FILENAME = "catalog_hypothesis_readiness_report.json"
 BATCH_DIRNAME = "batches"
 REPORT_ENVELOPE_SCHEMA_VERSION = 1
 BATCH_ENVELOPE_SCHEMA_VERSION = 2
 REPORT_SCHEMA_VERSION = 1
+CATALOG_HYPOTHESIS_REPORT_SCHEMA_VERSION = 1
 SNAPSHOT_SCHEMA_VERSION = 1
 CATALOG_OVERVIEW_SCHEMA_VERSION = 1
 TOKEN_USAGE_SCHEMA_VERSION = 1
@@ -155,6 +167,10 @@ def _controls_root(team_id: str) -> Path:
 
 def _report_path(team_id: str) -> Path:
     return _controls_root(team_id) / REPORT_FILENAME
+
+
+def _catalog_hypothesis_report_path(team_id: str) -> Path:
+    return _controls_root(team_id) / CATALOG_HYPOTHESIS_REPORT_FILENAME
 
 
 def _batch_path(team_id: str, plan_id: str) -> Path:
@@ -376,6 +392,45 @@ def _validate_report_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
+def _validate_catalog_hypothesis_report_envelope(
+    envelope: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate the upper-level catalog report without granting authorization."""
+
+    if not isinstance(envelope, dict):
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness envelope root is not an object."
+        )
+    if str(envelope.get("schemaVersion") or "") != str(
+        CATALOG_HYPOTHESIS_REPORT_SCHEMA_VERSION
+    ):
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness envelope schema version mismatch."
+        )
+    if envelope.get("realCampaignAllowed") is not False:
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness envelope must never allow a real campaign."
+        )
+    raw_report = envelope.get("report")
+    if not isinstance(raw_report, dict):
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness envelope has no report object."
+        )
+    try:
+        report = CatalogHypothesisFlowReadinessReport.from_dict(raw_report)
+    except (ContractValidationError, TypeError, ValueError) as exc:
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness report is malformed."
+        ) from exc
+    if report.reportKind != CATALOG_HYPOTHESIS_FLOW_REPORT_KIND:
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness report kind mismatch."
+        )
+    updated_at = str(envelope.get("updatedAt") or "")
+    _parse_utc_timestamp(updated_at, label="Catalog hypothesis readiness updatedAt")
+    return report.to_dict()
+
+
 def _validate_batch_checkpoint(checkpoint: dict[str, Any], plan_id: str) -> None:
     expected_plan = dev_plan(plan_id)
     plan = checkpoint.get("plan")
@@ -564,6 +619,18 @@ def _read_report_state(
     return projection, evidence
 
 
+def _read_catalog_hypothesis_report_state(
+    team_id: str,
+) -> dict[str, Any] | None:
+    path = _catalog_hypothesis_report_path(team_id)
+    if not path.exists():
+        return None
+    envelope = _read_strict_json(path)
+    report = _validate_catalog_hypothesis_report_envelope(envelope)
+    report["updatedAt"] = str(envelope.get("updatedAt") or "")
+    return report
+
+
 def _project_report(team_id: str) -> dict[str, Any] | None:
     state = _read_report_state(team_id)
     return state[0] if state is not None else None
@@ -620,6 +687,7 @@ def _record_scene_event(
 def _snapshot_next_legal_action(
     report: dict[str, Any] | None,
     batches: dict[str, Any],
+    catalog_hypothesis_report: dict[str, Any] | None = None,
 ) -> str:
     """Derive the next legal action from persisted state, never a parallel lifecycle.
 
@@ -631,6 +699,14 @@ def _snapshot_next_legal_action(
         return "run_dev_readiness"
     if report["status"] != "READY":
         return "repair_failed_platform_gates"
+    if catalog_hypothesis_report is not None:
+        catalog_status = str(catalog_hypothesis_report.get("status") or "")
+        if catalog_status != "READY":
+            action = str(catalog_hypothesis_report.get("nextLegalAction") or "").strip()
+            if action:
+                return action
+        elif bool(catalog_hypothesis_report.get("g1PilotAllowed")) is not True:
+            return str(catalog_hypothesis_report.get("nextLegalAction") or "") or CATALOG_HYPOTHESIS_FLOW_G1_ACTION
     dev_1 = batches.get("dev-1")
     if dev_1 is not None and (dev_1["failedCount"] > 0 or dev_1["blockedCount"] > 0):
         return "repair_dev_1_fixture_batch"
@@ -714,6 +790,9 @@ def _get_challenge_cup_dev_control_snapshot_transaction(
     report_state = _read_report_state(authoritative_team_id)
     report = report_state[0] if report_state is not None else None
     readiness_evidence = report_state[1] if report_state is not None else None
+    catalog_hypothesis_report = _read_catalog_hypothesis_report_state(
+        authoritative_team_id
+    )
     batches: dict[str, Any] = {}
     for plan_id in ALLOWED_DEV_BATCH_PLAN_IDS:
         projection = _project_batch(
@@ -730,8 +809,21 @@ def _get_challenge_cup_dev_control_snapshot_transaction(
         "generatedAt": _utc_now(),
         "mode": DEV_ONLY_MODE,
         "realCampaignAllowed": False,
-        "nextLegalAction": _snapshot_next_legal_action(report, batches),
+        # P0 real-batch authorization binds to this immutable upper-level
+        # report hash when available.  The legacy platform ``report`` remains
+        # projected for compatibility, but no mutable marker is used as the
+        # readiness evidence source.
+        "readinessReportSha256": str(
+            (catalog_hypothesis_report or {}).get("reportHash") or ""
+        ),
+        "catalogReadinessReportSha256": str(
+            (catalog_hypothesis_report or {}).get("reportHash") or ""
+        ),
+        "nextLegalAction": _snapshot_next_legal_action(
+            report, batches, catalog_hypothesis_report
+        ),
         "report": report,
+        "catalogHypothesisReadiness": catalog_hypothesis_report,
         "batches": batches,
         "boundary": _boundary_fields(),
     }
@@ -1051,6 +1143,34 @@ def _persist_report(team_id: str, report: dict[str, Any]) -> dict[str, Any]:
     return envelope
 
 
+def _persist_catalog_hypothesis_report(
+    team_id: str,
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist the DEV-only upper-level report as separate audit evidence."""
+
+    try:
+        validated = CatalogHypothesisFlowReadinessReport.from_dict(report).to_dict()
+    except (ContractValidationError, TypeError, ValueError) as exc:
+        raise DevControlsStorageError(
+            "Catalog hypothesis readiness report cannot be persisted."
+        ) from exc
+    if validated.get("realCampaignAllowed") is not False:
+        raise ChallengeCupDevControlsError(
+            "Catalog hypothesis readiness must never allow a real campaign."
+        )
+    envelope = {
+        "schemaVersion": CATALOG_HYPOTHESIS_REPORT_SCHEMA_VERSION,
+        "report": validated,
+        "realCampaignAllowed": False,
+        "updatedAt": _utc_now(),
+    }
+    _validate_catalog_hypothesis_report_envelope(envelope)
+    with _STORE_LOCK:
+        _strict_json_write(_catalog_hypothesis_report_path(team_id), envelope)
+    return envelope
+
+
 def run_challenge_cup_dev_readiness(team_id: str, *, mode: str = DEV_ONLY_MODE) -> dict[str, Any]:
     """Build and atomically persist the DEV readiness report (R1 pytest included).
 
@@ -1101,6 +1221,17 @@ def _run_readiness_transaction(authoritative_team_id: str) -> dict[str, Any]:
                 run_pytest=True,
                 mode=DEV_ONLY_MODE,
             )
+        catalog_hypothesis_report = build_catalog_hypothesis_flow_readiness_report(
+            PROJECT_ROOT,
+            require_clean=True,
+            run_pytest=True,
+            mode=DEV_ONLY_MODE,
+            platform_report=report,
+        )
+        catalog_hypothesis_envelope = _persist_catalog_hypothesis_report(
+            authoritative_team_id,
+            catalog_hypothesis_report,
+        )
         envelope = _persist_report(authoritative_team_id, report)
         _record_scene_event(
             "challenge_cup_dev_controls.readiness.succeeded",
@@ -1110,14 +1241,26 @@ def _run_readiness_transaction(authoritative_team_id: str) -> dict[str, Any]:
                 "teamId": authoritative_team_id,
                 "status": str(report.get("status") or ""),
                 "nextLegalAction": str(report.get("nextLegalAction") or ""),
+                "catalogHypothesisStatus": str(
+                    catalog_hypothesis_report.get("status") or ""
+                ),
+                "catalogHypothesisNextLegalAction": str(
+                    catalog_hypothesis_report.get("nextLegalAction") or ""
+                ),
             },
         )
         return {
             "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
             "teamId": authoritative_team_id,
             "report": _project_report(authoritative_team_id),
+            "catalogHypothesisReadiness": _read_catalog_hypothesis_report_state(
+                authoritative_team_id
+            ),
             "cleanedUp": True,
             "updatedAt": str(envelope.get("updatedAt") or ""),
+            "catalogHypothesisUpdatedAt": str(
+                catalog_hypothesis_envelope.get("updatedAt") or ""
+            ),
         }
     except Exception as exc:
         _record_scene_event(
@@ -1142,13 +1285,17 @@ def _next_legal_action(
     report_state = _read_report_state(team_id)
     report = report_state[0] if report_state is not None else None
     readiness_evidence = report_state[1] if report_state is not None else None
+    catalog_hypothesis_report = _read_catalog_hypothesis_report_state(team_id)
     batches: dict[str, Any] = {}
     for plan_id in ALLOWED_DEV_BATCH_PLAN_IDS:
         projection = _project_batch(team_id, plan_id, readiness_evidence)
         if projection is not None:
             batches[plan_id] = projection
     _validate_cross_plan_invariants(team_id, batches, readiness_evidence)
-    return _snapshot_next_legal_action(report, batches), readiness_evidence
+    return (
+        _snapshot_next_legal_action(report, batches, catalog_hypothesis_report),
+        readiness_evidence,
+    )
 
 
 def _enforce_batch_flow(plan_id: str, *, next_action: str, retry_failed: bool) -> None:
