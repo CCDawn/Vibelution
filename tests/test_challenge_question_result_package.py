@@ -646,6 +646,34 @@ def test_receipt_scope_must_bind_authorized_policy_hash() -> None:
         _create(payload)
 
 
+@pytest.mark.parametrize(
+    "canonical_key, alias_key, conflicting_value",
+    [
+        ("stageId", "stage", "review"),
+        ("stageId", "nodeId", "review"),
+        ("questionId", "question", "SCI-096"),
+        ("runId", "run_id", "run-other"),
+        ("modelPolicySha256", "model_policy_sha256", "0" * 64),
+        ("catalogId", "catalog_id", "other-catalog"),
+        ("catalogVersion", "catalog_version", "other-version"),
+        ("catalogSha256", "catalog_sha256", "0" * 64),
+        ("scopeHash", "scope_hash", "0" * 64),
+    ],
+)
+def test_receipt_scope_rejects_conflicting_alias_values(
+    canonical_key: str,
+    alias_key: str,
+    conflicting_value: str,
+) -> None:
+    payload = _valid_payload()
+    scope = payload["model_invocation_receipts"]["generation"]["scope"]
+    assert canonical_key in scope
+    scope[alias_key] = conflicting_value
+
+    with pytest.raises(QuestionResultPackageError, match="conflicting.*alias"):
+        _create(payload)
+
+
 def test_selection_comparison_method_is_fixed() -> None:
     payload = _valid_payload()
     payload["selection"]["comparison_method"] = "aggregate_score"
@@ -678,6 +706,31 @@ def test_decided_human_gate_requires_reviewer_and_timestamp(section: str) -> Non
     payload[section]["human_gate"]["decision"] = "approved"
 
     with pytest.raises(QuestionResultPackageError, match="reviewer|decided_at"):
+        _create(payload)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("decision", True),
+        ("rationale", 123),
+        ("reviewer", False),
+        ("decided_at", 123),
+    ],
+)
+def test_human_gate_rejects_non_string_v2_fields(field: str, value: object) -> None:
+    payload = _valid_payload()
+    gate = payload["selection"]["human_gate"]
+    gate.update(
+        {
+            "decision": "approved",
+            "reviewer": "reviewer-1",
+            "decided_at": "2026-08-23T10:00:00Z",
+        }
+    )
+    gate[field] = value
+
+    with pytest.raises(QuestionResultPackageError, match="must be a string"):
         _create(payload)
 
 

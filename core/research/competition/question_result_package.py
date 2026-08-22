@@ -174,8 +174,19 @@ def _text(value: Any, field: str) -> str:
     return result
 
 
-def _optional_text(value: Any) -> str:
-    return str(value or "").strip()
+def _strict_text(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise QuestionResultPackageError(f"{field} must be a string")
+    result = value.strip()
+    if not result:
+        raise QuestionResultPackageError(f"{field} must be a non-empty string")
+    return result
+
+
+def _optional_strict_text(payload: Mapping[str, Any], key: str, field: str) -> str:
+    if key not in payload:
+        return ""
+    return _strict_text(payload[key], field)
 
 
 def _list(value: Any, field: str, *, allow_empty: bool = True) -> list[Any]:
@@ -412,16 +423,16 @@ def _normalize_human_gate(payload: Any, field: str) -> dict[str, Any]:
         )
     if gate.get("required") is not True:
         raise QuestionResultPackageError(f"{field}.required must be true")
-    decision = _text(gate.get("decision"), f"{field}.decision").lower()
+    decision = _strict_text(gate.get("decision"), f"{field}.decision").lower()
     if decision not in _HUMAN_GATE_DECISIONS:
         raise QuestionResultPackageError(f"{field}.decision is unsupported")
     normalized = {
         "required": True,
         "decision": decision,
-        "rationale": _text(gate.get("rationale"), f"{field}.rationale"),
+        "rationale": _strict_text(gate.get("rationale"), f"{field}.rationale"),
     }
-    reviewer = _optional_text(gate.get("reviewer"))
-    decided_at = _optional_text(gate.get("decided_at"))
+    reviewer = _optional_strict_text(gate, "reviewer", f"{field}.reviewer")
+    decided_at = _optional_strict_text(gate, "decided_at", f"{field}.decided_at")
     if decision == "pending" and (reviewer or decided_at):
         raise QuestionResultPackageError(
             f"{field}.reviewer and {field}.decided_at are not allowed while pending"
@@ -822,11 +833,20 @@ def _validate_execution_view(
 
 
 def _scope_value(scope: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = str(scope.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    values = [
+        (key, str(scope.get(key) or "").strip())
+        for key in keys
+        if key in scope
+    ]
+    if not values:
+        return ""
+    first_value = values[0][1]
+    if any(value.casefold() != first_value.casefold() for _, value in values[1:]):
+        present_keys = ", ".join(key for key, _ in values)
+        raise QuestionResultPackageError(
+            "receipt scope contains conflicting alias values: " + present_keys
+        )
+    return first_value
 
 
 def _validate_receipt(
@@ -1040,6 +1060,8 @@ class QuestionResultPackage:
         *,
         expected_model_policy_sha256: str,
     ) -> QuestionResultPackage:
+        """Restore persisted data only against an externally authorized policy hash."""
+
         return cls._parse(
             payload,
             require_canonical_hash=True,
@@ -1340,6 +1362,14 @@ class QuestionResultPackage:
         package_id: str = "question-result-package",
         failure: Mapping[str, Any] | None = None,
     ) -> QuestionResultPackage:
+        """Build from trusted runtime output before persistence.
+
+        This constructor validates and seals an in-memory package but does not
+        establish the external model-policy trust boundary.  Raw or persisted
+        input must use :meth:`from_dict`, which requires the authorized policy
+        hash supplied by the runtime rather than trusting the payload itself.
+        """
+
         if payload is not None:
             if scope is not None or model_policy is not None:
                 raise QuestionResultPackageError(
