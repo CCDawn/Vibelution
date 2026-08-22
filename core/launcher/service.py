@@ -2680,10 +2680,22 @@ def _recent_command_files(directory: Path, *, limit: int) -> list[dict[str, Any]
 def _recent_result_files(directory: Path, *, limit: int) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     try:
-        files = sorted((path for path in directory.glob("*.json") if path.is_file()), key=lambda path: path.stat().st_mtime, reverse=True)
+        entries = list(directory.glob("*.json"))
     except OSError:
         return results
-    for path in files[: max(0, limit)]:
+    files: list[tuple[int, Path]] = []
+    for path in entries:
+        try:
+            metadata = path.stat()
+        except OSError:
+            # A result can be atomically renamed or removed between discovery
+            # and stat. Keep the remaining results observable.
+            continue
+        if not stat_module.S_ISREG(metadata.st_mode):
+            continue
+        files.append((int(metadata.st_mtime_ns), path))
+    files.sort(key=lambda item: item[0], reverse=True)
+    for _mtime_ns, path in files[: max(0, limit)]:
         payload = _load_json_file(path)
         if payload:
             summary = _result_summary(payload)

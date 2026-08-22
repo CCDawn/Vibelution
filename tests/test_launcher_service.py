@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -3355,6 +3356,26 @@ def test_status_watchdog_does_not_restart_daemon_for_fresh_open_command(monkeypa
     )
 
     assert recovered is False
+
+
+def test_recent_result_files_skips_file_that_disappears_during_stat(tmp_path, monkeypatch):
+    surviving = tmp_path / "surviving.json"
+    disappearing = tmp_path / "disappearing.json"
+    surviving.write_text(json.dumps({"commandId": "surviving", "ok": True}), encoding="utf-8")
+    disappearing.write_text(json.dumps({"commandId": "disappearing", "ok": False}), encoding="utf-8")
+    original_stat = Path.stat
+
+    def stat_without_disappearing(self, *args, **kwargs):
+        if self == disappearing:
+            raise FileNotFoundError(str(self))
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stat_without_disappearing)
+
+    results = launcher_service._recent_result_files(tmp_path, limit=5)
+
+    assert len(results) == 1
+    assert results[0]["commandId"] == "surviving"
 
 
 def test_ensure_runtime_manager_daemon_alive_records_recovery_failure_but_still_restarts(monkeypatch):
