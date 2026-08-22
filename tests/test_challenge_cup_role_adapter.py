@@ -225,6 +225,50 @@ def test_source_assignment_rejects_cross_role_agent_reuse_in_legacy_team(
         )
 
 
+@pytest.mark.parametrize(
+    ("nodes", "roles"),
+    [
+        (
+            [
+                {"role": "challenge_cup_search", "agentId": "agent-search-a"},
+                {"role": "challenge_cup_search", "agentId": "agent-search-b"},
+            ],
+            ["source_finder"],
+        ),
+        (
+            [
+                {"role": "source_finder", "agentId": "agent-search-a"},
+                {"role": "source_finder", "agentId": "agent-search-b"},
+            ],
+            ["source_finder"],
+        ),
+        (
+            [
+                {
+                    "role": "source_relation_mapper",
+                    "agentId": "agent-knowledge-a",
+                },
+                {"role": "source_ingestor", "agentId": "agent-knowledge-b"},
+            ],
+            ["source_relation_mapper", "source_ingestor"],
+        ),
+    ],
+)
+def test_source_assignment_rejects_multiple_agents_in_selected_owner_layer(
+    source_assignment_service,
+    nodes,
+    roles,
+):
+    del source_assignment_service
+
+    with pytest.raises(_WorkflowError, match="selected role layer"):
+        knowledge_kernel._source_collection_team_agent_ids(
+            {"canvas": {"nodes": nodes}},
+            roles,
+            {},
+        )
+
+
 def test_source_assignment_fails_closed_on_empty_active_binding(
     source_assignment_service,
 ):

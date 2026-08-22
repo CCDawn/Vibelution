@@ -3649,22 +3649,37 @@ def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], pa
                 continue
             candidates.append((source_priority, observed_role, owner[1], agent_id))
 
-    canonical_by_owner: dict[str, str] = {}
-    exact_by_role: dict[str, str] = {}
+    canonical_agent_ids_by_owner: dict[str, set[str]] = {}
+    legacy_agent_ids_by_owner: dict[str, set[str]] = {}
     candidate_owners_by_agent: dict[str, set[str]] = {}
     for _, observed_role, owner_id, agent_id in candidates:
         candidate_owners_by_agent.setdefault(agent_id, set()).add(owner_id)
-        if observed_role == owner_id and owner_id not in canonical_by_owner:
-            canonical_by_owner[owner_id] = agent_id
-        if observed_role not in exact_by_role:
-            exact_by_role[observed_role] = agent_id
+        target = (
+            canonical_agent_ids_by_owner
+            if observed_role == owner_id
+            else legacy_agent_ids_by_owner
+        )
+        target.setdefault(owner_id, set()).add(agent_id)
 
     if any(len(owner_ids) > 1 for owner_ids in candidate_owners_by_agent.values()):
         raise s.TeamWorkflowOrchestrationError(
             "Source collection Team bindings assign one Agent to more than one product role."
         )
 
-    canonical_explicit_by_owner: dict[str, str] = {}
+    selected_agent_by_owner: dict[str, str] = {}
+    for owner_id in set(canonical_agent_ids_by_owner) | set(legacy_agent_ids_by_owner):
+        selected_agent_ids = (
+            canonical_agent_ids_by_owner.get(owner_id)
+            or legacy_agent_ids_by_owner.get(owner_id)
+            or set()
+        )
+        if len(selected_agent_ids) > 1:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection selected role layer for {owner_id} is bound to more than one Agent."
+            )
+        if selected_agent_ids:
+            selected_agent_by_owner[owner_id] = next(iter(selected_agent_ids))
+
     explicit_owner_by_agent: dict[str, str] = {}
     explicit_agent_ids_by_owner: dict[str, set[str]] = {}
     for role, (agent_id, owner_id) in explicit.items():
@@ -3674,44 +3689,31 @@ def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], pa
                 "Source collection agentIds assigns one Agent to more than one product role."
             )
         explicit_owner_by_agent[agent_id] = owner_id
-        if role == owner_id:
-            previous = canonical_explicit_by_owner.get(owner_id)
-            if previous is not None and previous != agent_id:
-                raise s.TeamWorkflowOrchestrationError(
-                    f"Source collection agentIds contains conflicting canonical bindings for {owner_id}."
-                )
-            canonical_explicit_by_owner[owner_id] = agent_id
         explicit_agent_ids_by_owner.setdefault(owner_id, set()).add(agent_id)
-        if owner_id not in candidate_owners_by_agent.get(agent_id, set()):
-            raise s.TeamWorkflowOrchestrationError(
-                f"Explicit Agent id for {role} is not a matching Team role binding."
-            )
 
     for owner_id, agent_ids in explicit_agent_ids_by_owner.items():
         if len(agent_ids) > 1:
             raise s.TeamWorkflowOrchestrationError(
                 f"Source collection agentIds contains conflicting explicit bindings for {owner_id}."
             )
-        canonical_agent_id = canonical_by_owner.get(owner_id, "")
-        if canonical_agent_id and canonical_agent_id not in agent_ids:
+        selected_agent_id = selected_agent_by_owner.get(owner_id, "")
+        if not selected_agent_id:
             raise s.TeamWorkflowOrchestrationError(
-                f"Explicit Agent id for {owner_id} conflicts with the canonical Team role binding."
+                f"Explicit Agent id for {owner_id} is not a matching Team role binding."
+            )
+        if selected_agent_id not in agent_ids:
+            binding_kind = (
+                "canonical Team role binding"
+                if canonical_agent_ids_by_owner.get(owner_id)
+                else "selected Team role binding"
+            )
+            raise s.TeamWorkflowOrchestrationError(
+                f"Explicit Agent id for {owner_id} conflicts with the {binding_kind}."
             )
 
     mapped: dict[str, str] = {}
     for role, owner_id in requested:
-        explicit_binding = explicit.get(role)
-        canonical_explicit = canonical_explicit_by_owner.get(owner_id, "")
-        if explicit_binding and canonical_explicit and explicit_binding[0] != canonical_explicit:
-            raise s.TeamWorkflowOrchestrationError(
-                f"Source collection agentIds contains conflicting alias bindings for {owner_id}."
-            )
-        agent_id = (
-            canonical_by_owner.get(owner_id, "")
-            or canonical_explicit
-            or (explicit_binding[0] if explicit_binding else "")
-            or exact_by_role.get(role, "")
-        )
+        agent_id = selected_agent_by_owner.get(owner_id, "")
         if agent_id:
             mapped[role] = agent_id
     return mapped

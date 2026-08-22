@@ -410,6 +410,7 @@ def _resolve_role_agent(
             canonical_candidates.append((index, item))
         elif normalized_observed_role == normalized_expected_team_role:
             legacy_candidates.append((index, item))
+    using_canonical_role = bool(canonical_candidates)
     candidates = canonical_candidates or legacy_candidates
     candidate_agent_ids = {
         _text(candidate[1].get("agentId"))
@@ -442,8 +443,10 @@ def _resolve_role_agent(
             code="agent_role_unbound",
         )
     actual_role_key = _text(agent.get("roleKey"), limit=80)
-    actual_owner = role_contract.resolve_role_owner(actual_role_key)
-    if actual_role_key and actual_owner != expected_owner:
+    required_directory_role = (
+        expected_owner[1] if using_canonical_role else expected_role_key.lower()
+    )
+    if actual_role_key.lower() != required_directory_role:
         raise ResearchProjectAgentTaskError(
             f"Agent role mismatch for {expected_team_role}: expected {expected_role_key}.",
             code="agent_role_mismatch",

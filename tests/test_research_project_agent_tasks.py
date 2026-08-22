@@ -299,6 +299,47 @@ def test_role_resolver_rejects_multiple_agents_for_one_canonical_role(
     assert exc.value.code == "agent_role_ambiguous"
 
 
+@pytest.mark.parametrize(
+    ("member_role", "directory_role"),
+    [
+        ("experiment_planner", "challenge_cup_iteration_planner"),
+        (
+            "challenge_cup_experiment_revision",
+            "challenge_cup_experiment_planner",
+        ),
+    ],
+)
+def test_role_resolver_rejects_member_directory_role_alias_mismatch(
+    tmp_path,
+    monkeypatch,
+    member_role,
+    directory_role,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="错配实验 Agent",
+        role_key=directory_role,
+    )
+    team = team_service.create_team(
+        name="身份错配团队",
+        members=[
+            {
+                "agentId": agent["agentId"],
+                "agentName": agent["displayName"],
+                "role": member_role,
+            }
+        ],
+    )
+
+    with pytest.raises(ResearchProjectAgentTaskError) as exc:
+        research_project_agent_tasks._resolve_role_agent(
+            team["teamId"],
+            research_project_agent_tasks.TASK_KIND_CONTRACTS["experiment_design"],
+        )
+
+    assert exc.value.code == "agent_role_mismatch"
+
+
 def test_task_start_requires_explicit_agent_to_match_team_role_snapshot(
     tmp_path, monkeypatch
 ):
