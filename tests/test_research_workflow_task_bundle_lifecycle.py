@@ -759,7 +759,7 @@ def test_candidate_fan_out_fails_closed_when_selection_exceeds_effective_concurr
     assert store.get_run("run-1")["taskBundles"] == []
 
 
-def test_shadow_candidate_scope_is_observation_only_and_creates_no_runtime_objects(
+def test_shadow_candidate_scope_keeps_legacy_single_session_execution(
     monkeypatch, tmp_path
 ) -> None:
     store = WorkflowRunStore(tmp_path)
@@ -774,20 +774,17 @@ def test_shadow_candidate_scope_is_observation_only_and_creates_no_runtime_objec
         lambda _record: _candidate_fan_out_input(),
     )
 
-    def unexpected_call(*_args, **_kwargs):
-        pytest.fail("shadow mode must not enter the runtime task path")
+    _patch_candidate_start_dependencies(monkeypatch)
+    starts: list[dict] = []
 
-    for dependency in (
-        "select_model_route",
-        "ensure_task_bundle_capacity",
-        "reserve_node_budget",
-        "create_agent_task_bundle",
-        "_start_external_task",
-    ):
-        monkeypatch.setattr(
-            f"core.web.services.team_workflow.research_runtime.agent_node_execution.{dependency}",
-            unexpected_call,
-        )
+    def start_legacy(_store, current, **kwargs):
+        starts.append(dict(kwargs["payload"]))
+        return current, _candidate_started("H1")
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_node_execution._start_external_task",
+        start_legacy,
+    )
 
     before = store.get_run("run-1")
     result = start_agent_node_execution(
@@ -797,21 +794,20 @@ def test_shadow_candidate_scope_is_observation_only_and_creates_no_runtime_objec
         payload={"idempotencyKey": "shadow-dispatch"},
     )
 
-    assert result["taskId"] == ""
-    assert result["taskIds"] == []
-    assert result["chatRoute"] == ""
-    assert result["sessionBinding"] == {}
-    assert result["taskBundle"] == {}
-    assert result["modelRoute"] == {}
-    assert result["selection"] == _candidate_fan_out_input()["selection"]
+    assert result["taskId"] == "task-h1"
+    assert result["chatRoute"] == "/chat?session=session-h1"
+    assert result["sessionBinding"]["sessionId"] == "session-h1"
+    assert len(result["taskBundle"]["subtasks"]) == 1
+    assert starts == [{"idempotencyKey": "shadow-dispatch"}]
     assert result["sessionScopeShadow"]["candidateCount"] == 3
     assert len(result["sessionScopeShadow"]["scopeHash"]) == 64
     assert result["idempotentReplay"] is False
-    assert store.get_run("run-1") == before
+    after_start = store.get_run("run-1")
+    assert after_start["nodeRuns"][0]["status"] == "running"
 
     with pytest.raises(
         AgentNodeExecutionError,
-        match="retryCandidateId is only valid when candidate fan-out is enabled",
+        match="retryCandidateId is only valid for candidate fan-out nodes",
     ) as exc_info:
         start_agent_node_execution(
             store,
@@ -823,7 +819,7 @@ def test_shadow_candidate_scope_is_observation_only_and_creates_no_runtime_objec
             },
         )
     assert exc_info.value.code == "candidate_retry_not_supported"
-    assert store.get_run("run-1") == before
+    assert store.get_run("run-1") == after_start
 
 
 def test_start_agent_task_retry_first_candidate_syncs_node_run_and_binding(

@@ -640,16 +640,6 @@ class RealDomainPorts:
         if adapter_spec is None:
             raise RuntimeError(f"agent node {action.node_id} has no task adapter")
         snapshot = self._run_input_snapshot(action.run_id)
-        shadow = self.evaluate_hypothesis_scope_shadow(action, snapshot=snapshot)
-        if shadow is not None:
-            return AgentTaskHandle(
-                session_id="",
-                session_attempt=0,
-                task_id="",
-                turn_id="",
-                root_status="shadow",
-                observation_only=True,
-            )
         if _bounded_agent_node_can_complete(
             action.node_id,
             team_id=str(snapshot.get("teamId") or ""),

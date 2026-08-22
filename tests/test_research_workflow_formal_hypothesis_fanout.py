@@ -243,7 +243,7 @@ def test_hypothesis_authority_read_failure_is_not_treated_as_absence(
         )
 
 
-def test_formal_shadow_validates_scope_without_starting_child_tasks(
+def test_formal_shadow_validates_scope_and_keeps_legacy_task_execution(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -303,9 +303,9 @@ def test_formal_shadow_validates_scope_without_starting_child_tasks(
         )
 
         shadow_handle = ports.create_agent_task(action=action)
-        assert shadow_handle.observation_only is True
-        assert shadow_handle.session_id == ""
-        assert fallback.session_id == "legacy-session"
+        assert shadow_handle == fallback
+        assert shadow_handle.observation_only is False
+        assert shadow_handle.session_id == "legacy-session"
         events = harness.store.list_events("run-1")
         scope_events = [
             item

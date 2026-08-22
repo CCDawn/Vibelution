@@ -853,39 +853,10 @@ def start_agent_node_execution(
                     str(exc),
                     code="hypothesis_scope_shadow_invalid",
                 ) from exc
-            # Shadow is an observation-only contract.  Stop before model
-            # routing, budget reservation, TaskBundle creation, session
-            # binding, or the external task adapter so enabling it cannot
-            # accidentally create the candidate-scoped runtime objects it
-            # is meant to measure.
-            if retry_candidate_id:
-                raise AgentNodeExecutionError(
-                    "retryCandidateId is only valid when candidate fan-out is enabled",
-                    code="candidate_retry_not_supported",
-                )
-            if node_run.get("status") != "ready":
-                raise AgentNodeExecutionError(
-                    f"Agent node must be ready, got {node_run.get('status')}",
-                    code="invalid_node_state",
-                )
-            if not agent_id:
-                raise AgentNodeExecutionError(
-                    "agent node is unbound",
-                    code="agent_unbound",
-                )
-            return {
-                "command": "start_agent_task",
-                "taskId": "",
-                "taskIds": [],
-                "chatRoute": "",
-                "sessionBinding": {},
-                "taskBundle": {},
-                "modelRoute": {},
-                "selection": dict(candidate_fan_out["selection"]),
-                "sessionScopeShadow": scope_shadow,
-                "idempotentReplay": False,
-            }
-        fan_out = candidate_fan_out
+        # Shadow evaluates the v3 scope contract but preserves the legacy
+        # single-session execution.  Only explicit ``on`` may fan out into
+        # candidate child sessions.
+        fan_out = candidate_fan_out if scope_mode == "on" else None
     if node_run.get("status") == "running" and node_run.get("taskId") and not retry_candidate_id:
         binding = store.get_session_binding(str(record.get("runId") or ""), node_id)
         bundle_id = task_bundle_id(str(node_run["nodeRunId"]))

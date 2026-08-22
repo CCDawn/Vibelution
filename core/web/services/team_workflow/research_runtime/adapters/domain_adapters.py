@@ -42,16 +42,6 @@ class AgentActionAdapter:
                 outcome="failed",
                 problem={"code": "actor_mismatch", "detail": "agent adapter got non-agent action"},
             )
-        shadow_resolver = getattr(self._ports, "evaluate_hypothesis_scope_shadow", None)
-        if callable(shadow_resolver):
-            shadow = shadow_resolver(action)
-            if shadow is not None:
-                return AdapterResult(
-                    action_id=action.action_id,
-                    outcome="succeeded",
-                    usage={"sessionScopeShadow": dict(shadow)},
-                    observation_only=True,
-                )
         binding = self._ports.resolve_binding(action)
         reservation = self._ports.reserve_budget(
             action=action, estimate_tokens=self._estimate_tokens
