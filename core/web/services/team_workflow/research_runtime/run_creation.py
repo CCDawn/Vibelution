@@ -452,6 +452,8 @@ def create_run(
         # replays idempotently instead of hitting the run_id primary key.
         existing_in_tx = uow.repository.get_run(run_id)
         if existing_in_tx is not None:
+            _ensure_create_fingerprint(existing_in_tx, fingerprints)
+            _ensure_existing_run_identity(existing_in_tx, run_input)
             if auth_payload is not None:
                 _ensure_catalog_authorization_event(
                     uow,

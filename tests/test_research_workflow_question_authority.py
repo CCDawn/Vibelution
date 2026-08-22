@@ -525,6 +525,38 @@ def _isolate_research_projects_store(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(research_projects, "_record_project_event", lambda *args, **kwargs: None)
 
 
+def test_dev_authorization_requires_exact_research_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow import challenge_cup_dev_controls
+    from core.web.services.team_workflow.research_runtime import (
+        catalog_run_authorization,
+    )
+
+    snapshot = {
+        "nextLegalAction": "BOGUS_AUTHORIZATION_REQUIRED",
+        "report": {
+            "status": "READY",
+            "researchAuthorizationRequired": True,
+        },
+    }
+    monkeypatch.setattr(
+        challenge_cup_dev_controls,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda _team_id: snapshot,
+    )
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "find_catalog_run_authorization",
+        lambda *args, **kwargs: object(),
+    )
+
+    assert question_launch._dev_authorization_ready("research-team") is False
+
+    snapshot["nextLegalAction"] = "RESEARCH_AUTHORIZATION_REQUIRED"
+    assert question_launch._dev_authorization_ready("research-team") is True
+
+
 def test_experiment_options_stay_visible_when_questions_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         question_launch,

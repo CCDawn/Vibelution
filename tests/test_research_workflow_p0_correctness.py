@@ -674,3 +674,94 @@ def test_legacy_replay_rejects_team_or_question_identity_mismatch(
         assert store.get_run(run_id).last_event_sequence == 1
     finally:
         store.close()
+
+
+def test_concurrent_create_checks_identity_before_authorization_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+            run_creation,
+            run_lifecycle,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        monkeypatch.setattr(run_creation, "get_write_store", lambda: store)
+        monkeypatch.setattr(
+            run_creation,
+            "research_workflow_data_root",
+            lambda: tmp_path / "runtime-data",
+        )
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            .read_text(encoding="utf-8")
+        )
+        idempotency_key = "concurrent-create-identity-before-auth"
+        run_id = run_lifecycle.run_id_for_create(CHALLENGE_CUP_WORKFLOW_ID, idempotency_key)
+        existing = replace(
+            build_run_record(
+                run_id=run_id,
+                team_id="legacy-team",
+                last_event_sequence=1,
+            ),
+            question_id="SCI-002",
+        )
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(existing)
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        authorization = record_catalog_run_authorization(
+            "acceptance-research-team",
+            plan_id="real-1",
+            batch_scope={
+                "planId": "real-1",
+                "gateId": "G1",
+                "questionIds": ["SCI-091"],
+            },
+            approved_by="server-operator",
+            readiness_evidence={"status": "READY", "basis": "concurrent-identity"},
+            approved_at_ms=FIXED_NOW_MS,
+        )
+        run_input = {
+            **fixture["runInput"],
+            "teamId": "acceptance-research-team",
+            "questionId": "SCI-091",
+        }
+        original_get_run = store.get_run
+        first_read = True
+
+        def hide_first_read(requested_run_id: str):
+            nonlocal first_read
+            if first_read:
+                first_read = False
+                return None
+            return original_get_run(requested_run_id)
+
+        monkeypatch.setattr(store, "get_run", hide_first_read)
+        with pytest.raises(
+            run_creation.ResearchWorkflowError,
+            match="idempotencyKey was already used with different run input",
+        ) as exc_info:
+            run_creation.create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=run_input,
+                binding_layers=AgentBindingLayers(),
+                idempotency_key=idempotency_key,
+                catalog_run_authorization=authorization_to_dict(authorization),
+            )
+        assert exc_info.value.code == "idempotency_conflict"
+        events = store.list_events(run_id)
+        assert [event.event_type for event in events] == ["run_created"]
+        assert store.get_run(run_id).last_event_sequence == 1
+    finally:
+        store.close()

@@ -221,11 +221,14 @@ def _dev_authorization_ready(team_id: str) -> bool:
     report = snapshot.get("report")
     if not isinstance(report, Mapping):
         report = snapshot.get("readinessReport")
-    platform_ready = action.endswith("AUTHORIZATION_REQUIRED") or (
-        isinstance(report, Mapping)
-        and _text(report.get("status")).upper() == "READY"
-        and report.get("researchAuthorizationRequired") is True
-    )
+    if action:
+        platform_ready = action == "RESEARCH_AUTHORIZATION_REQUIRED"
+    else:
+        platform_ready = (
+            isinstance(report, Mapping)
+            and _text(report.get("status")).upper() == "READY"
+            and report.get("researchAuthorizationRequired") is True
+        )
     if not platform_ready:
         return False
     report_hash = ""
