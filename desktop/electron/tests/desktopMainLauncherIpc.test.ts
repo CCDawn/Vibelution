@@ -149,6 +149,22 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("signal: intentLease.signal");
   });
 
+  it("keeps command ids on reused main-line starts and accepted stop results", () => {
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle", lifecycleStart);
+    const lifecycleBody = mainSource.slice(lifecycleStart, lifecycleEnd);
+    const reuseStart = lifecycleBody.indexOf("mainLineBackendIsReusable(paths.workspaceRoot)");
+    const reuseEnd = lifecycleBody.indexOf("const intentLease", reuseStart);
+    const reuseBody = lifecycleBody.slice(reuseStart, reuseEnd);
+
+    expect(reuseBody).toContain("commandId: randomUUID()");
+    expect(lifecycleBody).toContain("mutation.value.accepted && !mutation.value.commandId?.trim()");
+    expect(lifecycleBody).toContain("commandId: randomUUID()");
+    expect(lifecycleBody).toContain('desiredState === "closed"');
+    expect(lifecycleBody).toContain("&& result.commandId");
+    expect(lifecycleBody).toContain("approveWorkbenchCloseOnce");
+  });
+
   it("authorizes every main and isolated force operation before creating its lifecycle intent", () => {
     expect(mainSource).toContain('from "./lifecycle/forceLifecycleAuthorization.js"');
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");

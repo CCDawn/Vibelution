@@ -2725,6 +2725,10 @@ async function orchestrateLauncherLifecycle(
         schemaVersion: 1,
         accepted: true,
         operation,
+        // Even a reused backend needs a correlation id: Launcher IPC clients use
+        // it to settle the open command and the lifecycle supervisor uses the
+        // same shape for every accepted main-line result.
+        commandId: randomUUID(),
         ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {}),
         message: "已打开工作台窗口。"
       };
@@ -2789,7 +2793,12 @@ async function orchestrateLauncherLifecycle(
   if (mutation.outcome === "ignored") {
     return supersededLifecycleResult(operation);
   }
-  const result = mutation.value;
+  // Keep the accepted-result contract total at the Electron boundary. The
+  // normal queue path supplies commandId, but a legacy/short-circuit bridge
+  // result must not prevent the window orchestration gates from running.
+  const result = mutation.value.accepted && !mutation.value.commandId?.trim()
+    ? { ...mutation.value, commandId: randomUUID() }
+    : mutation.value;
   if (mutation.outcome === "superseded") {
     return supersededLifecycleResult(operation, result.commandId);
   }
