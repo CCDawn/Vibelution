@@ -63,9 +63,11 @@ export type ElectronWindowProviderOptions = {
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   shouldInterceptWorkbenchClose?: () => boolean;
+  shouldInterceptInstanceClose?: (instanceId: string) => boolean;
   onWorkbenchCloseRequest?: () => void | Promise<void>;
   onWorkbenchClosed?: () => void | Promise<void>;
   onWorkbenchOpenRequest?: () => void | Promise<void>;
+  onInstanceCloseRequest?: (instanceId: string) => void | Promise<void>;
   onWorkbenchFocusAttentionClear?: () => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   hungCloseDestroyAfterMs?: number;
@@ -122,9 +124,11 @@ export class ElectronWindowProvider {
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
   private readonly shouldInterceptWorkbenchClose: () => boolean;
+  private readonly shouldInterceptInstanceClose: (instanceId: string) => boolean;
   private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
   private readonly onWorkbenchClosed: () => void | Promise<void>;
   private readonly onWorkbenchOpenRequest: () => void | Promise<void>;
+  private readonly onInstanceCloseRequest: (instanceId: string) => void | Promise<void>;
   private readonly onWorkbenchFocusAttentionClear: () => void;
   private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   private workbenchUrl: string;
@@ -132,6 +136,8 @@ export class ElectronWindowProvider {
   private workbenchNavigation: Promise<ManagedWindowState> | null = null;
   private workbenchCloseAuthorized = false;
   private workbenchCloseInFlight = false;
+  private readonly instanceCloseAuthorized = new Map<string, ElectronWindowLike>();
+  private readonly instanceCloseInFlight = new Set<string>();
   private launcherOpen: Promise<ManagedWindowState> | null = null;
   private readonly attachedWindows = new Set<ElectronWindowLike>();
   private readonly listLauncherWindows: (launcherOrigin: string) => ElectronWindowLike[];
@@ -152,11 +158,14 @@ export class ElectronWindowProvider {
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
+    this.shouldInterceptInstanceClose = options.shouldInterceptInstanceClose
+      ?? (options.onInstanceCloseRequest ? (() => true) : (() => false));
     this.onWorkbenchCloseRequest = options.onWorkbenchCloseRequest ?? (() => undefined);
     this.onWorkbenchClosed = options.onWorkbenchClosed ?? (() => undefined);
     this.onWorkbenchOpenRequest = options.onWorkbenchOpenRequest ?? (async () => {
       await this.openOrFocusWorkbench();
     });
+    this.onInstanceCloseRequest = options.onInstanceCloseRequest ?? (() => undefined);
     this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
     this.onOsSessionEnd = options.onOsSessionEnd ?? (() => undefined);
     this.hungCloseDestroyAfterMs =
@@ -297,21 +306,33 @@ export class ElectronWindowProvider {
     const entry = this.instanceWindows.get(id);
     if (!entry || entry.window.isDestroyed()) {
       this.instanceWindows.delete(id);
+      this.instanceCloseAuthorized.delete(id);
+      this.instanceCloseInFlight.delete(id);
       return { ...closedWindowState("workbench"), instanceId: id };
     }
-    entry.window.close();
-    if (!entry.window.isDestroyed()) {
-      const outcome = await waitForWindowClosed(entry.window, this.hungCloseDestroyAfterMs);
-      if (outcome === "timeout" && !entry.window.isDestroyed()) {
-        try {
-          entry.window.destroy();
-        } catch {
-          // A hung isolated window must not keep a stale renderer.
+    this.instanceCloseAuthorized.set(id, entry.window);
+    try {
+      entry.window.close();
+      if (!entry.window.isDestroyed()) {
+        const outcome = await waitForWindowClosed(entry.window, this.hungCloseDestroyAfterMs);
+        if (outcome === "timeout" && !entry.window.isDestroyed()) {
+          try {
+            entry.window.destroy();
+          } catch {
+            // A hung isolated window must not keep a stale renderer.
+          }
         }
       }
+    } finally {
+      if (this.instanceCloseAuthorized.get(id) === entry.window) {
+        this.instanceCloseAuthorized.delete(id);
+      }
+      this.instanceCloseInFlight.delete(id);
+      if (this.instanceWindows.get(id)?.window === entry.window) {
+        this.instanceWindows.delete(id);
+      }
+      this.attachedWindows.delete(entry.window);
     }
-    this.instanceWindows.delete(id);
-    this.attachedWindows.delete(entry.window);
     return { ...closedWindowState("workbench"), instanceId: id };
   }
 
@@ -453,8 +474,32 @@ export class ElectronWindowProvider {
       return;
     }
     this.attachedWindows.add(window);
+    window.on("close", (event) => {
+      const entry = this.instanceWindows.get(instanceId);
+      if (
+        entry?.window !== window
+        || this.instanceCloseAuthorized.get(instanceId) === window
+        || !this.shouldInterceptInstanceClose(instanceId)
+      ) {
+        return;
+      }
+      preventWindowClose(event);
+      if (this.instanceCloseInFlight.has(instanceId)) {
+        return;
+      }
+      this.instanceCloseInFlight.add(instanceId);
+      void Promise.resolve(this.onInstanceCloseRequest(instanceId))
+        .catch(() => undefined)
+        .finally(() => {
+          this.instanceCloseInFlight.delete(instanceId);
+        });
+    });
     window.on("closed", () => {
       this.attachedWindows.delete(window);
+      if (this.instanceCloseAuthorized.get(instanceId) === window) {
+        this.instanceCloseAuthorized.delete(instanceId);
+      }
+      this.instanceCloseInFlight.delete(instanceId);
       const entry = this.instanceWindows.get(instanceId);
       if (entry?.window === window) {
         this.instanceWindows.delete(instanceId);
@@ -501,6 +546,10 @@ export class ElectronWindowProvider {
     if (entry?.window === window) {
       this.instanceWindows.delete(instanceId);
     }
+    if (this.instanceCloseAuthorized.get(instanceId) === window) {
+      this.instanceCloseAuthorized.delete(instanceId);
+    }
+    this.instanceCloseInFlight.delete(instanceId);
     this.attachedWindows.delete(window);
     if (!window.isDestroyed()) {
       try {

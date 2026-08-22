@@ -55,6 +55,7 @@ describe("Electron main tray integration", () => {
     expect(beforeQuitSource).toContain("if (shutdownApproved)");
     expect(mainSource).toContain("claimElectronDesktopShellOwner(paths.workspaceRoot)");
     expect(mainSource).toContain("stopLeftoverPythonLauncher: stopOwnedPythonLauncherService");
+    expect(mainSource).toContain("shouldInterceptInstanceClose: () => !shutdownApproved");
     expect(mainSource).not.toContain("stopPythonLauncher: ownershipMode === \"started\"");
   });
 
@@ -106,5 +107,62 @@ describe("Electron main tray integration", () => {
     expect(mainSource.slice(forcedStart, forcedEnd)).toContain(
       "已取消退出，当前窗口、运行时和任务均保留。"
     );
+  });
+
+  it("stops every live isolated row before approved shell exit", () => {
+    expect(mainSource).toContain("captureShutdownInstanceIds");
+    expect(mainSource).toContain("stopIsolatedInstancesForApprovedShutdown");
+    const captureStart = mainSource.indexOf("async function captureShutdownIsolatedInstanceIds");
+    const captureEnd = mainSource.indexOf("\nasync function stopIsolatedInstancesForApprovedShutdown", captureStart);
+    const captureSource = mainSource.slice(captureStart, captureEnd);
+    expect(captureStart).toBeGreaterThan(-1);
+    expect(captureEnd).toBeGreaterThan(captureStart);
+    expect(captureSource).toContain("Promise.allSettled");
+    expect(captureSource).toContain("launcherStateStore.refresh");
+    expect(captureSource).toContain("fetchLauncherBranchInstances");
+    expect(captureSource).toContain("readRegistry(instancesRegistryPath())");
+    expect(captureSource).toContain("registryEntriesToShutdownInstanceSnapshots");
+    expect(captureSource).toContain("withDesktopShellExitTimeout");
+    expect(captureSource).not.toContain('snapshot.freshness === "fresh"');
+    const quitStart = mainSource.indexOf("async function requestDesktopShellExit");
+    const quitEnd = mainSource.indexOf("function notifyDesktopTray", quitStart);
+    const quitSource = mainSource.slice(quitStart, quitEnd);
+    const quitApprovedStart = quitSource.indexOf("runApproved: async (decision)");
+    const quitFailOpenStart = quitSource.indexOf("failOpenAfterApproval:", quitApprovedStart);
+    const quitApprovedSource = quitSource.slice(quitApprovedStart, quitFailOpenStart);
+    const quitTimeoutStart = quitApprovedSource.indexOf("await withDesktopShellExitTimeout(");
+    const quitBudgetIndex = quitApprovedSource.lastIndexOf("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    const quitExitSource = quitApprovedSource.slice(quitTimeoutStart, quitBudgetIndex);
+    expect(quitApprovedStart).toBeGreaterThan(-1);
+    expect(quitFailOpenStart).toBeGreaterThan(quitApprovedStart);
+    expect(quitTimeoutStart).toBeGreaterThan(-1);
+    expect(quitBudgetIndex).toBeGreaterThan(quitTimeoutStart);
+    expect(quitExitSource).toContain("await bestEffortStopIsolatedInstancesForShutdown");
+    expect(quitExitSource).toContain("await executeApprovedDesktopShellShutdown");
+    expect(quitExitSource.indexOf("await bestEffortStopIsolatedInstancesForShutdown")).toBeLessThan(
+      quitExitSource.indexOf("await executeApprovedDesktopShellShutdown")
+    );
+    expect(quitApprovedSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
+    const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
+    const forcedSource = mainSource.slice(forcedStart, forcedEnd);
+    const forcedTimeoutStart = forcedSource.indexOf("await withDesktopShellExitTimeout(");
+    const forcedBudgetIndex = forcedSource.lastIndexOf("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    const forcedExitSource = forcedSource.slice(forcedTimeoutStart, forcedBudgetIndex);
+    expect(forcedStart).toBeGreaterThan(-1);
+    expect(forcedEnd).toBeGreaterThan(forcedStart);
+    expect(forcedTimeoutStart).toBeGreaterThan(-1);
+    expect(forcedBudgetIndex).toBeGreaterThan(forcedTimeoutStart);
+    expect(forcedExitSource).toContain("await bestEffortStopIsolatedInstancesForShutdown");
+    expect(forcedExitSource).toContain("await executeApprovedDesktopShellShutdown");
+    expect(forcedExitSource.indexOf("await bestEffortStopIsolatedInstancesForShutdown")).toBeLessThan(
+      forcedExitSource.indexOf("await executeApprovedDesktopShellShutdown")
+    );
+    expect(forcedSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    const failOpenStart = quitSource.indexOf("failOpenAfterApproval:", quitApprovedStart);
+    const failOpenSource = quitSource.slice(failOpenStart);
+    expect(failOpenSource).not.toContain("stopIsolatedInstancesForApprovedShutdown()");
+    expect(failOpenSource).toContain("retrySuppressed: true");
+    expect(mainSource).toContain("observedState");
   });
 });

@@ -94,7 +94,9 @@ describe("isolated lifecycle recovery", () => {
     expect(mainSource.slice(closeStart, closeEnd)).toContain("await provider.closeInstanceWorkbench(instanceId)");
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
     const stopGate = mainSource.indexOf('desiredState === "closed"', branchStart);
-    expect(mainSource.slice(stopGate, stopGate + 320)).toContain("await closeOrchestratedWorkbenchWindow(instanceId)");
+    const stopGateSource = mainSource.slice(stopGate - 80, stopGate + 320);
+    expect(stopGateSource).toContain("&& !result.code");
+    expect(stopGateSource).toContain("await closeOrchestratedWorkbenchWindow(instanceId)");
   });
 
   it("reclaims expired stopping rows through the TS registry writer before refresh", () => {

@@ -14,6 +14,12 @@ import {
 import { closedWindowState } from "../src/windows/windowProviderTypes.js";
 import type { DesktopPaths } from "../src/paths.js";
 
+vi.mock("electron", () => ({
+  protocol: {
+    handle: vi.fn()
+  }
+}));
+
 class FakeWindow implements ElectronWindowLike {
   readonly id: number;
   readonly webContents: ElectronWindowLike["webContents"];
@@ -105,6 +111,15 @@ class FakeWindow implements ElectronWindowLike {
 
   close(): void {
     this.closeCount += 1;
+    let prevented = false;
+    this.emit("close", {
+      preventDefault: () => {
+        prevented = true;
+      }
+    });
+    if (prevented) {
+      return;
+    }
     if (!this.closeEmitsClosed) {
       return;
     }
@@ -241,6 +256,90 @@ describe("Electron window provider state", () => {
     await provider.closeInstanceWorkbench("worktree:task");
     expect(isolated.closeCount).toBe(1);
     expect(provider.snapshot().workbench.open).toBe(true);
+  });
+
+  it("intercepts an isolated instance X and coalesces repeated close requests", async () => {
+    const isolated = new FakeWindow(99, "", 9999, false);
+    const closeRequests: string[] = [];
+    let release: (() => void) | null = null;
+    const closePending = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => isolated,
+      onInstanceCloseRequest: async (instanceId) => {
+        closeRequests.push(instanceId);
+        await closePending;
+      }
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/"
+    });
+
+    const firstClose = { preventDefault: vi.fn() };
+    isolated.emit("close", firstClose);
+    const secondClose = { preventDefault: vi.fn() };
+    isolated.emit("close", secondClose);
+
+    expect(firstClose.preventDefault).toHaveBeenCalledTimes(1);
+    expect(secondClose.preventDefault).toHaveBeenCalledTimes(1);
+    expect(closeRequests).toEqual(["worktree:task"]);
+    expect(isolated.closeCount).toBe(0);
+
+    release?.();
+    await closePending;
+  });
+
+  it("allows an authorized isolated close without starting another stop request", async () => {
+    const isolated = new FakeWindow(99, "", 9999);
+    const closeRequests: string[] = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => isolated,
+      onInstanceCloseRequest: (instanceId) => {
+        closeRequests.push(instanceId);
+      }
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/"
+    });
+    await provider.closeInstanceWorkbench("worktree:task");
+
+    expect(isolated.closeCount).toBe(1);
+    expect(closeRequests).toEqual([]);
+    expect(provider.instanceWindowStates()).toEqual([]);
+  });
+
+  it("allows an isolated close without interception after shell shutdown is approved", async () => {
+    const isolated = new FakeWindow(99, "", 9999);
+    const closeRequests: string[] = [];
+    let shutdownApproved = false;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => isolated,
+      shouldInterceptInstanceClose: () => !shutdownApproved,
+      onInstanceCloseRequest: (instanceId) => {
+        closeRequests.push(instanceId);
+      }
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/"
+    });
+    shutdownApproved = true;
+
+    const closeEvent = { preventDefault: vi.fn() };
+    isolated.emit("close", closeEvent);
+
+    expect(closeEvent.preventDefault).not.toHaveBeenCalled();
+    expect(closeRequests).toEqual([]);
+    expect(isolated.closeCount).toBe(0);
   });
 
   it("keeps the current instance title when a reused window receives a page title update", async () => {

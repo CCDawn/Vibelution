@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import type { RegistryEntry } from "../lifecycle/instanceRegistryStore.js";
 import type { TrayBranchInstance } from "./desktopTray.js";
 
 export const TRAY_RESTART_ALL_PENDING_FILENAME = "tray-restart-all-pending.json";
@@ -19,6 +20,28 @@ export type TrayRestartAllRestoreResult = {
   skipped: string[];
 };
 
+export type ShutdownInstanceSnapshot = {
+  id: string;
+  observedState: string;
+  phase: string;
+  pid: number;
+  port: number;
+  window: { open: boolean };
+};
+
+export function registryEntriesToShutdownInstanceSnapshots(
+  instances: Record<string, RegistryEntry>
+): ShutdownInstanceSnapshot[] {
+  return Object.entries(instances).map(([id, entry]) => ({
+    id,
+    observedState: [String(entry.status || ""), String(entry.desiredState || "")].filter(Boolean).join(" "),
+    phase: String(entry.phase || ""),
+    pid: Number(entry.spawnPid || 0),
+    port: Number(entry.port || 0),
+    window: { open: Number(entry.windowPid || 0) > 0 }
+  }));
+}
+
 export function trayRestartAllPendingPath(workspaceRoot: string): string {
   return resolve(workspaceRoot, ".runtime", "launcher", TRAY_RESTART_ALL_PENDING_FILENAME);
 }
@@ -26,6 +49,40 @@ export function trayRestartAllPendingPath(workspaceRoot: string): string {
 export function captureRunningInstanceIds(instances: TrayBranchInstance[]): string[] {
   const running = instances.filter((item) => item.stoppable).map((item) => item.id.trim()).filter(Boolean);
   return Array.from(new Set(running));
+}
+
+/**
+ * Capture every isolated row that still needs a lifecycle stop during shell
+ * exit. Transitional rows are intentionally included even though the tray
+ * menu marks them non-stoppable, because an in-flight claim can still own a
+ * live backend or window.
+ */
+export function captureShutdownInstanceIds(instances: ShutdownInstanceSnapshot[]): string[] {
+  const transitionalStates = new Set([
+    "starting",
+    "stopping",
+    "restarting",
+    "open",
+    "running",
+    "partial",
+    "error"
+  ]);
+  const live = instances
+    .filter((item) => {
+      const id = String(item.id || "").trim();
+      if (!id || id === "main") {
+        return false;
+      }
+      const state = `${String(item.observedState || "")} ${String(item.phase || "")}`.trim().toLowerCase();
+      return (
+        Number(item.pid || 0) > 0
+        || item.window?.open === true
+        || [...transitionalStates].some((candidate) => state.includes(candidate))
+      );
+    })
+    .map((item) => String(item.id || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(live));
 }
 
 export function writeTrayRestartAllPending(
