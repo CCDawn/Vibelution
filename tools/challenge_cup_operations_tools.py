@@ -7,16 +7,6 @@ import json
 from typing import Any
 
 
-_CANONICAL_CHALLENGE_CUP_ROLES = frozenset(
-    {
-        "challenge_cup_search",
-        "challenge_cup_extractor",
-        "challenge_cup_knowledge_manager",
-        "challenge_cup_execution_steward",
-        "challenge_cup_experiment_revision",
-        "challenge_cup_evaluator",
-    }
-)
 _CANONICAL_EXPERIMENT_WRITEBACK_RULES: dict[str, dict[str, tuple[str, ...]]] = {
     "challenge_cup_experiment_revision": {
         "record_hypothesis_fragment": ("hypothesis_design",),
@@ -1030,7 +1020,11 @@ def _project_task_binding(
             if _text((item.get("turn") or {}).get("turnId"))
             == runtime_turn_id
         ]
-        used_session_fallback = not candidates and len(session_candidates) == 1
+        used_session_fallback = (
+            not require_binding
+            and not candidates
+            and len(session_candidates) == 1
+        )
         if used_session_fallback:
             candidates = session_candidates
         if len(candidates) != 1:
@@ -1099,57 +1093,173 @@ def _canonical_writeback_authority(
     recorded_by_agent: str,
 ) -> dict[str, Any] | None:
     from core.web.services import agent_directory_service
+    from core.research.workflow.contracts.research_team_role_contract import (
+        CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+    )
 
     runtime = agent_directory_service.current_agent_runtime()
     if not isinstance(runtime, dict):
-        return None
-    agent = runtime.get("agent") if isinstance(runtime.get("agent"), dict) else {}
-    metadata = (
-        agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        runtime = {}
+    runtime_agent = (
+        runtime.get("agent") if isinstance(runtime.get("agent"), dict) else None
     )
-    role_candidates = {
-        _text(value).lower()
-        for value in (
-            metadata.get("challengeCupTeamRoleKey"),
-            metadata.get("challengeCupTeamRole"),
-            agent.get("roleKey"),
-            runtime.get("roleKey"),
+    runtime_agent_id = _text(runtime.get("agentId"))
+    nested_agent_id = _text((runtime_agent or {}).get("agentId"))
+    requested_actor = _text(recorded_by_agent)
+    directory_agents = []
+    for lookup_agent_id in dict.fromkeys(
+        (runtime_agent_id, nested_agent_id, requested_actor)
+    ):
+        if not lookup_agent_id:
+            continue
+        directory_agent = agent_directory_service.get_agent(lookup_agent_id)
+        if isinstance(directory_agent, dict):
+            directory_agents.append(directory_agent)
+
+    agent_sources = [
+        item
+        for item in (runtime_agent, *directory_agents)
+        if isinstance(item, dict)
+    ]
+    product_role_ids = set(CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_role_ids)
+    runtime_role = _text(runtime.get("roleKey")).lower()
+    has_managed_signal = (
+        runtime_role in product_role_ids
+        or runtime_role.startswith("challenge_cup_")
+        or any(
+            _agent_has_managed_role_signal(
+                item,
+                product_role_ids=product_role_ids,
+            )
+            for item in agent_sources
         )
-        if _text(value).lower() in _CANONICAL_CHALLENGE_CUP_ROLES
-    }
-    if not role_candidates:
+    )
+    if not has_managed_signal:
         return None
-    if len(role_candidates) != 1:
+    if not agent_sources:
         raise _CanonicalRoleWritebackError(
             "role_operation_denied",
-            "Canonical Challenge Cup runtime exposes conflicting product roles.",
+            "Canonical Challenge Cup authority is missing its managed Agent record.",
         )
-    role_key = next(iter(role_candidates))
-    runtime_agent_id = _text(runtime.get("agentId"))
-    nested_agent_id = _text(agent.get("agentId"))
-    if runtime_agent_id and nested_agent_id and runtime_agent_id != nested_agent_id:
+    if runtime and runtime_agent is not None and not runtime_agent_id:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Canonical Challenge Cup runtime is missing agentId.",
+        )
+
+    source_agent_ids = {
+        _text(value)
+        for value in (
+            runtime_agent_id,
+            nested_agent_id,
+            requested_actor,
+            *(_text(item.get("agentId")) for item in agent_sources),
+        )
+        if _text(value)
+    }
+    if len(source_agent_ids) != 1:
         raise _CanonicalRoleWritebackError(
             "role_operation_denied",
             "Canonical Challenge Cup runtime Agent identity is inconsistent.",
         )
-    agent_id = runtime_agent_id or nested_agent_id
+    agent_id = next(iter(source_agent_ids), "")
     if not agent_id:
         raise _CanonicalRoleWritebackError(
             "formal_task_binding_required",
             "Canonical Challenge Cup writeback requires a runtime Agent identity.",
         )
-    managed_team_id = _text(metadata.get("challengeCupTeamId"))
-    if managed_team_id and managed_team_id != _text(team_id):
+
+    role_values = [runtime_role] if runtime_role else []
+    runtime_team_id = _text(runtime.get("teamId"))
+    team_values = [runtime_team_id] if runtime_team_id else []
+    for agent in agent_sources:
+        metadata = (
+            agent.get("metadata")
+            if isinstance(agent.get("metadata"), dict)
+            else {}
+        )
+        required_metadata = (
+            "challengeCupTeamManagedVersion",
+            "challengeCupTeamId",
+            "challengeCupTeamRole",
+            "challengeCupTeamRoleKey",
+        )
+        if (
+            not _text(agent.get("agentId"))
+            or not _text(agent.get("roleKey"))
+            or any(not _text(metadata.get(key)) for key in required_metadata)
+        ):
+            raise _CanonicalRoleWritebackError(
+                "role_operation_denied",
+                "Canonical Challenge Cup Agent metadata is incomplete.",
+            )
+        try:
+            managed_version = int(metadata["challengeCupTeamManagedVersion"])
+        except (TypeError, ValueError) as exc:
+            raise _CanonicalRoleWritebackError(
+                "role_operation_denied",
+                "Canonical Challenge Cup managed version is invalid.",
+            ) from exc
+        if (
+            managed_version
+            != CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.team_role_contract_version
+        ):
+            raise _CanonicalRoleWritebackError(
+                "role_operation_denied",
+                "Canonical Challenge Cup managed version does not match the active contract.",
+            )
+        team_values.extend(
+            _text(value)
+            for value in (
+                metadata.get("challengeCupTeamId"),
+                metadata.get("teamId"),
+            )
+            if _text(value)
+        )
+        alias_resolution = (
+            metadata.get("challengeCupTeamAliasResolution")
+            if isinstance(metadata.get("challengeCupTeamAliasResolution"), dict)
+            else {}
+        )
+        for value in (
+            agent.get("roleKey"),
+            metadata.get("challengeCupTeamRole"),
+            metadata.get("challengeCupTeamRoleKey"),
+            metadata.get("challengeCupTeamLegacyRole"),
+            metadata.get("researchTeamRole"),
+            metadata.get("researchTeamRoleKey"),
+            metadata.get("researchAgentKey"),
+            metadata.get("teamRole"),
+            metadata.get("teamRoleKey"),
+            alias_resolution.get("sourceRole"),
+            alias_resolution.get("ownerId"),
+        ):
+            if _text(value):
+                role_values.append(_text(value).lower())
+        legacy_aliases = metadata.get("challengeCupTeamLegacyRoleAliases")
+        if isinstance(legacy_aliases, (list, tuple)):
+            role_values.extend(
+                _text(value).lower()
+                for value in legacy_aliases
+                if _text(value)
+            )
+
+    normalized_team_id = _text(team_id)
+    if not team_values or any(value != normalized_team_id for value in team_values):
         raise _CanonicalRoleWritebackError(
             "role_operation_denied",
             "Canonical Challenge Cup runtime belongs to another team.",
         )
-    requested_actor = _text(recorded_by_agent)
-    if requested_actor and requested_actor != agent_id:
+
+    role_owners = {
+        _canonical_product_role_owner(value) for value in role_values
+    }
+    if "" in role_owners or len(role_owners) != 1:
         raise _CanonicalRoleWritebackError(
             "role_operation_denied",
-            "Writeback actor does not match the canonical runtime Agent.",
+            "Canonical Challenge Cup Agent role metadata is unknown or conflicting.",
         )
+    role_key = next(iter(role_owners))
     rules = (
         _CANONICAL_EXPERIMENT_WRITEBACK_RULES
         if surface == "experiment"
@@ -1166,6 +1276,35 @@ def _canonical_writeback_authority(
         "roleKey": role_key,
         "allowedTaskKinds": allowed_task_kinds,
     }
+
+
+def _agent_has_managed_role_signal(
+    agent: dict[str, Any],
+    *,
+    product_role_ids: set[str],
+) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return (
+        _text(agent.get("roleKey")).lower() in product_role_ids
+        or _text(agent.get("roleKey")).lower().startswith("challenge_cup_")
+        or any(str(key).startswith("challengeCupTeam") for key in metadata)
+    )
+
+
+def _canonical_product_role_owner(role_key: Any) -> str:
+    from core.research.workflow.contracts.research_team_role_contract import (
+        CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+    )
+
+    normalized = _text(role_key).lower()
+    if not normalized:
+        return ""
+    for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
+        if normalized == role.product_role_id or normalized in set(
+            role.legacy_role_aliases
+        ):
+            return role.product_role_id
+    return ""
 
 
 def _validate_canonical_task_binding(
@@ -1189,6 +1328,12 @@ def _validate_canonical_task_binding(
         raise _CanonicalRoleWritebackError(
             "role_operation_denied",
             "Formal task is assigned to another Agent.",
+        )
+    task_role_owner = _canonical_product_role_owner(task.get("roleKey"))
+    if not task_role_owner or task_role_owner != authority["roleKey"]:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Formal task role does not match the canonical runtime role.",
         )
     if _text(task.get("taskKind")) not in set(authority["allowedTaskKinds"]):
         raise _CanonicalRoleWritebackError(

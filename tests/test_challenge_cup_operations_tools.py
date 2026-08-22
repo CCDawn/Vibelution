@@ -37,6 +37,10 @@ def _canonical_agent_runtime(role_key: str) -> dict:
     }
 
 
+def _canonical_agent_record(role_key: str) -> dict:
+    return _canonical_agent_runtime(role_key)["agent"]
+
+
 def test_canonical_managed_agents_fail_closed_without_formal_task_binding(
     monkeypatch,
 ):
@@ -131,6 +135,7 @@ def test_canonical_bound_experiment_writeback_enforces_role_operation_matrix(
             "taskId": task_id,
             "taskKind": task_kinds[task_id],
             "agentId": runtime["value"]["agentId"],
+            "roleKey": runtime["value"]["agent"]["roleKey"],
             "researchProjectId": project_id,
         },
         raising=False,
@@ -243,6 +248,7 @@ def test_canonical_bound_iteration_writeback_enforces_role_operation_matrix(
             "taskId": task_id,
             "taskKind": task_kinds[task_id],
             "agentId": runtime["value"]["agentId"],
+            "roleKey": runtime["value"]["agent"]["roleKey"],
             "researchProjectId": project_id,
         },
         raising=False,
@@ -317,6 +323,245 @@ def test_canonical_bound_iteration_writeback_enforces_role_operation_matrix(
         "record_evidence",
     )["errorType"] == "role_operation_denied"
     assert [item[0] for item in writes] == ["record_decision", "record_evidence"]
+
+
+def test_directory_only_canonical_actor_still_requires_formal_binding(monkeypatch):
+    agent = _canonical_agent_record("challenge_cup_experiment_revision")
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {})
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agent if agent_id == agent["agentId"] else None,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("directory-only canonical actor must not reach writes")
+        ),
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            operation="create_plan",
+            recorded_by_agent=agent["agentId"],
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["errorType"] == "formal_task_binding_required"
+
+
+def test_directory_canonical_actor_cannot_hide_behind_legacy_runtime(monkeypatch):
+    agent = _canonical_agent_record("challenge_cup_experiment_revision")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-legacy-runtime",
+            "agent": {
+                "agentId": "agent-legacy-runtime",
+                "roleKey": "legacy_experiment_writer",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agent if agent_id == agent["agentId"] else None,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("managed actor identity conflict must not reach writes")
+        ),
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-1",
+            operation="create_plan",
+            recorded_by_agent=agent["agentId"],
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["errorType"] == "role_operation_denied"
+
+
+def test_managed_runtime_rejects_incomplete_unknown_and_conflicting_roles(
+    monkeypatch,
+):
+    runtime = {
+        "value": _canonical_agent_runtime("challenge_cup_experiment_revision")
+    }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime["value"],
+    )
+
+    cases = []
+    missing_team = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    missing_team["agent"]["metadata"].pop("challengeCupTeamId")
+    cases.append(missing_team)
+    unknown_role = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    unknown_role["agent"]["metadata"]["challengeCupTeamRoleKey"] = "mystery_role"
+    cases.append(unknown_role)
+    conflicting_role = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    conflicting_role["agent"]["metadata"]["challengeCupTeamRole"] = (
+        "challenge_cup_evaluator"
+    )
+    cases.append(conflicting_role)
+    conflicting_legacy_role = _canonical_agent_runtime(
+        "challenge_cup_experiment_revision"
+    )
+    conflicting_legacy_role["agent"]["metadata"]["teamRoleKey"] = (
+        "challenge_cup_evaluator"
+    )
+    cases.append(conflicting_legacy_role)
+    conflicting_team = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    conflicting_team["agent"]["metadata"]["teamId"] = "another-team"
+    cases.append(conflicting_team)
+    stale_version = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    stale_version["agent"]["metadata"]["challengeCupTeamManagedVersion"] = 1
+    cases.append(stale_version)
+    conflicting_agent = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    conflicting_agent["agent"]["agentId"] = "agent-other"
+    cases.append(conflicting_agent)
+
+    for candidate in cases:
+        runtime["value"] = candidate
+        result = json.loads(
+            challenge_cup_experiment_writeback_tool(
+                team_id="research-team",
+                operation="create_plan",
+            )
+        )
+        assert result["status"] == "error"
+        assert result["errorType"] == "role_operation_denied"
+
+
+def test_canonical_runtime_does_not_reuse_old_turn_session_task(monkeypatch):
+    runtime = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *_args, **_kwargs: {
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "project-1",
+                "agentId": runtime["agentId"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_status",
+        lambda *_args, **_kwargs: {
+            "tasks": [
+                {
+                    "taskId": "task-old-turn",
+                    "taskKind": "experiment_design",
+                    "agentId": runtime["agentId"],
+                    "roleKey": "challenge_cup_experiment_revision",
+                    "researchProjectId": "project-1",
+                    "sessionId": runtime["sessionId"],
+                    "turn": {"turnId": "turn-old"},
+                    "status": "incomplete",
+                    "failureCode": "task_result_not_recorded",
+                    "resultRefs": [],
+                }
+            ]
+        },
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            operation="create_plan",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["errorType"] == "formal_task_binding_required"
+
+
+def test_canonical_task_role_owner_must_match_runtime_role(monkeypatch):
+    runtime = _canonical_agent_runtime("challenge_cup_experiment_revision")
+    task_role = {"value": ""}
+    writes = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": "experiment_design",
+            "agentId": runtime["agentId"],
+            "roleKey": task_role["value"],
+            "researchProjectId": project_id,
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda _team_id, payload: writes.append(payload["createdByAgent"])
+        or {"plan": {"planId": "plan-1", "researchProjectId": "project-1"}},
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda _team_id, _project_id, task_id, **kwargs: {
+            "taskId": task_id,
+            "status": kwargs["status"],
+        },
+    )
+
+    missing = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-1",
+            operation="create_plan",
+        )
+    )
+    task_role["value"] = "challenge_cup_evaluator"
+    mismatched = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-1",
+            operation="create_plan",
+        )
+    )
+    task_role["value"] = "experiment_planner"
+    allowed = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-1",
+            operation="create_plan",
+        )
+    )
+
+    assert missing["errorType"] == "role_operation_denied"
+    assert mismatched["errorType"] == "role_operation_denied"
+    assert allowed["status"] == "ok"
+    assert writes == [runtime["agentId"]]
 
 
 def test_challenge_cup_experiment_tool_wraps_ledger_without_execution(monkeypatch):
