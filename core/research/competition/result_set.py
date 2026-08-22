@@ -366,6 +366,11 @@ class QuestionResult:
             normalized_locator = _manifest_evidence_locator(
                 evidence_locator if isinstance(evidence_locator, dict) else {}
             )
+            if not normalized_locator:
+                raise ResultSetContractError(
+                    f"Question result {self.question_id} package receipt {stage} "
+                    "has no stable identity in its evidence locator."
+                )
             receipt_identities[stage] = {
                 "receipt_id": str(receipt.get("receiptId") or ""),
                 "node_run_id": str(receipt.get("nodeRunId") or ""),

@@ -221,6 +221,14 @@ def _validate_record_semantics(
         raise CatalogExecutionError(
             "CatalogExecutionState SUCCEEDED record requires a result."
         )
+    if (
+        is_v2
+        and record.invalidated
+        and record.status not in {QuestionStatus.FAILED, QuestionStatus.BLOCKED}
+    ):
+        raise CatalogExecutionError(
+            "CatalogExecutionState invalidated v2 record semantics are invalid."
+        )
     if not is_v2 and (result is None or not result.is_package_backed):
         return
     if result is not None and not result.is_package_backed:
@@ -319,9 +327,31 @@ class CatalogExecutionState:
     def mark_running(self, question_id: str) -> None:
         self._require_in_plan(question_id)
         record = self._records[question_id]
+        if record.result is not None and record.result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} has a package-backed attempt; "
+                "use record_package after explicit invalidation."
+            )
         record.status = QuestionStatus.RUNNING
         record.invalidated = False
         record.attempts += 1
+
+    def _begin_package_attempt(self, question_id: str) -> None:
+        record = self._records[question_id]
+        if (
+            record.result is not None
+            and record.result.is_package_backed
+            and not record.invalidated
+        ):
+            raise CatalogExecutionError(
+                f"Question {question_id} package attempt requires explicit "
+                "invalidation."
+            )
+        record.status = QuestionStatus.RUNNING
+        record.invalidated = False
+        record.attempts += 1
+        record.last_error = None
+        record.result = None
 
     def record_success(self, question_id: str, result: QuestionResult) -> None:
         self._require_in_plan(question_id)
@@ -329,7 +359,17 @@ class CatalogExecutionState:
             raise CatalogExecutionError(
                 f"Result locator does not match question and scope: {question_id}."
             )
+        if result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} package-backed result must be recorded "
+                "through record_package."
+            )
         record = self._records[question_id]
+        if record.result is not None and record.result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} package-backed attempt cannot be "
+                "overwritten by a legacy result."
+            )
         record.status = QuestionStatus.SUCCEEDED
         record.invalidated = False
         record.last_error = None
@@ -344,6 +384,16 @@ class CatalogExecutionState:
     ) -> None:
         self._require_in_plan(question_id)
         record = self._records[question_id]
+        if result is not None and result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} package-backed result must be recorded "
+                "through record_package."
+            )
+        if record.result is not None and record.result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} package-backed attempt must advance "
+                "through record_package."
+            )
         record.status = QuestionStatus.FAILED
         record.last_error = str(reason)
         record.result = result
@@ -357,6 +407,16 @@ class CatalogExecutionState:
     ) -> None:
         self._require_in_plan(question_id)
         record = self._records[question_id]
+        if result is not None and result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} package-backed result must be recorded "
+                "through record_package."
+            )
+        if record.result is not None and record.result.is_package_backed:
+            raise CatalogExecutionError(
+                f"Question {question_id} package-backed attempt must advance "
+                "through record_package."
+            )
         record.status = QuestionStatus.BLOCKED
         record.last_error = str(reason)
         record.result = result
@@ -395,7 +455,7 @@ class CatalogExecutionState:
 
         starts_new_attempt = record.status is QuestionStatus.PENDING or record.invalidated
         if starts_new_attempt:
-            self.mark_running(question_id)
+            self._begin_package_attempt(question_id)
             record = self._records[question_id]
         elif record.status is QuestionStatus.RUNNING and existing_result is not None:
             if (
@@ -421,21 +481,26 @@ class CatalogExecutionState:
                 if isinstance(failure, dict)
                 else "package failed"
             )
-            self.record_failure(question_id, reason, result=result)
+            record.status = QuestionStatus.FAILED
+            record.invalidated = False
+            record.last_error = reason
+            record.result = result
             return
         if quality_status == "blocked" or human_gate_status == "blocked":
-            self.record_blocked(
-                question_id,
-                "package blocked by quality or human review",
-                result=result,
-            )
+            record.status = QuestionStatus.BLOCKED
+            record.invalidated = False
+            record.last_error = "package blocked by quality or human review"
+            record.result = result
             return
         if quality_status != "approved":
             raise CatalogExecutionError(
                 f"Package has unsupported quality status: {quality_status}."
             )
         if human_gate_status == "approved":
-            self.record_success(question_id, result)
+            record.status = QuestionStatus.SUCCEEDED
+            record.invalidated = False
+            record.last_error = None
+            record.result = result
             return
         record.status = QuestionStatus.RUNNING
         record.invalidated = False
@@ -589,8 +654,20 @@ def run_pending_batch(
         state.mark_running(question_id)
         try:
             result = execute_question(question_id)
-            state.record_success(question_id, result)
-            outcomes.append({"question_id": question_id, "outcome": "succeeded"})
+            if result.is_package_backed:
+                from .question_result_package import QuestionResultPackage
+
+                package_snapshot = result.package_snapshot
+                if package_snapshot is None:
+                    raise CatalogExecutionError(
+                        "Package-backed result has no package snapshot."
+                    )
+                state.record_package(QuestionResultPackage.create(package_snapshot))
+                outcome = state.status(question_id).value
+            else:
+                state.record_success(question_id, result)
+                outcome = "succeeded"
+            outcomes.append({"question_id": question_id, "outcome": outcome})
         except QuestionBlockedError as exc:
             state.record_blocked(question_id, str(exc))
             outcomes.append({"question_id": question_id, "outcome": "blocked"})

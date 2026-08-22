@@ -293,6 +293,23 @@ def test_manifest_receipt_locator_projects_only_stable_identity_fields() -> None
     assert "freeForm" not in json.dumps(receipt, ensure_ascii=False)
 
 
+def test_manifest_rejects_receipt_locator_without_stable_identity() -> None:
+    scope = _scope()
+    package = _package(
+        scope,
+        "SCI-001",
+        evidence_locator_override={
+            "fullContent": "free-form content is not a stable locator identity",
+            "metadata": {"path": "mutable/path"},
+        },
+    )
+    result_set = FullCatalogResultSet(scope=scope)
+    result_set.add_result(QuestionResult.from_package(package))
+
+    with pytest.raises(ResultSetContractError, match="stable identity"):
+        result_set.manifest()
+
+
 def test_legacy_or_pending_gate_results_cannot_be_submission_ready() -> None:
     scope = _scope()
     legacy = FullCatalogResultSet(scope=scope)

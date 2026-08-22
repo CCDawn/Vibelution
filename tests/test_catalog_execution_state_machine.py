@@ -61,6 +61,7 @@ def _package(
     quality_status: str = "approved",
     input_snapshot_sha256: str = "a" * 64,
     evidence_locator_extras: dict | None = None,
+    evidence_locator_override: dict | None = None,
 ) -> QuestionResultPackage:
     payload = deepcopy(_valid_payload())
     run_id = f"run-{question_id.lower()}-r1"
@@ -108,7 +109,9 @@ def _package(
                 "scopeHash": scope.scope_hash,
             }
         )
-        if evidence_locator_extras:
+        if evidence_locator_override is not None:
+            receipt["evidenceLocator"] = deepcopy(evidence_locator_override)
+        elif evidence_locator_extras:
             receipt["evidenceLocator"].update(deepcopy(evidence_locator_extras))
     return QuestionResultPackage.create(payload)
 
@@ -437,6 +440,53 @@ def test_pending_package_can_only_advance_with_the_same_idempotency_identity() -
     assert rejected.result_for("SCI-091").package_snapshot == pending.to_dict()
 
 
+def test_generic_state_methods_cannot_downgrade_a_package_attempt_to_legacy() -> None:
+    scope = _scope()
+    pending = _package(scope, "SCI-091", gate_decision="pending")
+    approved = _package(scope, "SCI-091")
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    state.record_package(pending)
+
+    with pytest.raises(CatalogExecutionError, match="package-backed"):
+        state.mark_running("SCI-091")
+    with pytest.raises(CatalogExecutionError, match="package-backed"):
+        state.record_success("SCI-091", _result(scope, "SCI-091"))
+    with pytest.raises(CatalogExecutionError, match="record_package"):
+        state.record_success("SCI-091", QuestionResult.from_package(approved))
+    with pytest.raises(CatalogExecutionError, match="package-backed"):
+        state.record_failure("SCI-091", "cannot erase package lineage")
+    with pytest.raises(CatalogExecutionError, match="package-backed"):
+        state.record_blocked("SCI-091", "cannot erase package lineage")
+
+    assert state.status("SCI-091") is QuestionStatus.RUNNING
+    assert state.result_for("SCI-091").package_snapshot == pending.to_dict()
+    state.record_package(approved)
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+
+
+def test_package_results_cannot_bypass_record_package_on_a_fresh_state() -> None:
+    scope = _scope()
+    approved = QuestionResult.from_package(_package(scope, "SCI-091"))
+    failed = QuestionResult.from_package(
+        _package(scope, "SCI-091", quality_status="failed")
+    )
+    blocked = QuestionResult.from_package(
+        _package(scope, "SCI-091", gate_decision="rejected")
+    )
+
+    for operation in (
+        lambda state: state.record_success("SCI-091", approved),
+        lambda state: state.record_failure("SCI-091", "failed", result=failed),
+        lambda state: state.record_blocked("SCI-091", "blocked", result=blocked),
+    ):
+        state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+        with pytest.raises(CatalogExecutionError, match="record_package"):
+            operation(state)
+        assert state.status("SCI-091") is QuestionStatus.PENDING
+        assert state.attempts("SCI-091") == 0
+        assert state.result_for("SCI-091") is None
+
+
 def test_package_checkpoint_requires_hash_and_external_policy_authority() -> None:
     scope = _scope()
     state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
@@ -520,6 +570,77 @@ def test_v2_checkpoint_rejects_rehashed_illegal_status_result_combinations() -> 
             pending_record,
             expected_model_policy_sha256=pending.model_policy["policySha256"],
         )
+
+
+def test_v2_checkpoint_rejects_invalidated_non_retry_statuses() -> None:
+    scope = _scope()
+    states: list[tuple[CatalogExecutionState, str | None]] = []
+
+    pending = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    states.append((pending, None))
+
+    running = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    running.mark_running("SCI-091")
+    states.append((running, None))
+
+    approved = _package(scope, "SCI-091")
+    succeeded = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    succeeded.record_package(approved)
+    states.append((succeeded, approved.model_policy["policySha256"]))
+
+    for state, policy_sha256 in states:
+        checkpoint = state.to_checkpoint()
+        checkpoint["records"][0]["invalidated"] = True
+        _rehash_checkpoint(checkpoint)
+        with pytest.raises(
+            CatalogExecutionError,
+            match="invalidated.*record semantics",
+        ):
+            CatalogExecutionState.from_checkpoint(
+                checkpoint,
+                expected_model_policy_sha256=policy_sha256,
+            )
+
+    succeeded.invalidate("SCI-091", "invalid package success retry")
+    with pytest.raises(
+        CatalogExecutionError,
+        match="invalidated.*record semantics",
+    ):
+        succeeded.to_checkpoint()
+
+
+@pytest.mark.parametrize(
+    ("gate_decision", "quality_status", "terminal_status"),
+    [
+        ("approved", "failed", QuestionStatus.FAILED),
+        ("rejected", "approved", QuestionStatus.BLOCKED),
+    ],
+)
+def test_v2_checkpoint_round_trips_invalidated_retry_statuses(
+    gate_decision: str,
+    quality_status: str,
+    terminal_status: QuestionStatus,
+) -> None:
+    scope = _scope()
+    package = _package(
+        scope,
+        "SCI-091",
+        gate_decision=gate_decision,
+        quality_status=quality_status,
+    )
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    state.record_package(package)
+    state.invalidate("SCI-091", "retry the terminal package")
+
+    restored = CatalogExecutionState.from_checkpoint(
+        state.to_checkpoint(),
+        expected_model_policy_sha256=package.model_policy["policySha256"],
+    )
+
+    assert restored.status("SCI-091") is terminal_status
+    assert restored.pending_question_ids() == ("SCI-091",)
+    assert restored.attempts("SCI-091") == 1
+    assert restored.result_for("SCI-091").package_snapshot == package.to_dict()
 
 
 def test_v2_writer_keeps_legacy_success_in_unversioned_compatibility_format() -> None:
