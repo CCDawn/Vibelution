@@ -17,6 +17,9 @@ def default_checkpoint_path() -> Path:
     override = os.environ.get("VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH", "").strip()
     if override:
         return Path(override)
+    data_root = os.environ.get("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", "").strip()
+    if data_root:
+        return Path(data_root) / "checkpoints.sqlite"
     return resolve_project_data_home(PROJECT_ROOT) / "research_workflows" / "checkpoints.sqlite"
 
 

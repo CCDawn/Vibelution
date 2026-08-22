@@ -107,6 +107,17 @@ def test_direct_backend_defaults_use_canonical_project_storage(monkeypatch, tmp_
     assert Path(runtime._store.root) == expected_data / "runs"
 
 
+def test_data_root_override_controls_checkpoint_defaults(monkeypatch, tmp_path):
+    data_root = tmp_path / "workflow-data"
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(data_root))
+    monkeypatch.delenv("VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH", raising=False)
+
+    expected = data_root / "checkpoints.sqlite"
+    assert default_checkpoint_path() == expected
+    runtime = ResearchWorkflowRuntimeService(run_store=store.WorkflowRunStore(tmp_path / "runs"))
+    assert Path(runtime._checkpoint_path) == expected
+
+
 def test_audit_default_data_root_follows_custom_project_root_after_parse(monkeypatch, tmp_path):
     project_root = tmp_path / "other-checkout"
     project_root.mkdir()

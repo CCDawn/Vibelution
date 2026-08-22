@@ -88,6 +88,7 @@ class WorkflowBindingConfigStore:
         agent_nodes = [n for n in definition.nodes if n.actorKind is ActorKind.AGENT]
         role_keys = {n.primaryRoleKey for n in agent_nodes}
         stage_ids = {s.stageId.value for s in definition.stages}
+        node_ids = {n.nodeId for n in agent_nodes}
 
         for role, agent_id in (payload.get("workflowDefaults") or {}).items():
             if str(role) not in role_keys:
