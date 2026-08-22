@@ -22,7 +22,6 @@ import {
 } from "./researchProcessGraphModel";
 import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
-import { ResearchProcessRail } from "./ResearchProcessRail";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import {
@@ -309,20 +308,8 @@ export function ResearchProcessWorkspace({
         )}
         layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
         resize={{
-          sidebar: { id: "rail", defaultWidth: 280, minWidth: 240, maxWidth: 360 },
           aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
         }}
-        rail={(
-          <ResearchProcessRail
-            lang={lang}
-            graph={graph}
-            selectedNodeId={location.selectedNodeId}
-            runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
-            nextAction={nextAction}
-            onSelectNode={(nodeId) => location.selectNode(nodeId)}
-            onNavigateCurrent={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
-          />
-        )}
         canvas={(
           <ResearchWorkflowCanvasPane
             graph={graph}
@@ -365,7 +352,6 @@ export function ResearchProcessWorkspace({
             />
           ) : undefined
         }
-        railClassName={styles.rail}
         canvasClassName={styles.canvas}
         inspectorClassName={styles.inspector}
         className={styles.page}

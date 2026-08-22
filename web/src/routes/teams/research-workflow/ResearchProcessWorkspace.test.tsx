@@ -106,8 +106,8 @@ vi.mock("../../../components/vui", async () => {
     }) => (
       <div data-testid={props.shellTestId ?? "research-process-workspace-shell"}>
         {props.toolbar}
-        <div data-vui="canvas-workbench-rail">{props.rail}</div>
-        {props.canvas}
+        {props.rail ? <div data-vui="canvas-workbench-rail">{props.rail}</div> : null}
+        <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
         <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
       </div>
     ),
@@ -254,12 +254,13 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')).not.toBeNull();
   });
 
-  it("mounts the current-task rail beside the canvas", async () => {
+  it("leaves overall progress to the parent rail and keeps this workspace focused on canvas details", async () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.querySelector('[data-testid="research-process-rail"]')).not.toBeNull();
-    expect(rendered.container.querySelector('[data-testid="research-process-rail-current"]')?.textContent).toContain("当前任务");
+    expect(rendered.container.querySelector('[data-testid="research-process-rail"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-rail"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')).not.toBeNull();
   });
 
   it("surfaces run-state errors on the canvas host", async () => {

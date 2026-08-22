@@ -85,6 +85,7 @@ import teamsCanvasComposerSource from "./teams/TeamsCanvasComposer.tsx?raw";
 import teamsOverviewComposerSource from "./teams/TeamsOverviewComposer.tsx?raw";
 import renderTeamsWorkbenchCanvasPageSource from "./teams/renderTeamsWorkbenchCanvasPage.tsx?raw";
 import renderTeamsWorkbenchBoardPageSource from "./teams/renderTeamsWorkbenchBoardPage.tsx?raw";
+import researchProcessWorkspaceSource from "./teams/research-workflow/ResearchProcessWorkspace.tsx?raw";
 import deriveSourceCollectionOperationFlagsSource from "./teams/source-collection/deriveSourceCollectionOperationFlags.ts?raw";
 import researchStageWorkbenchShellSource from "./teams/ResearchStageWorkbenchShell.tsx?raw";
 import sourceCollectionComposerSource from "./teams/SourceCollectionComposer.tsx?raw";
@@ -287,6 +288,13 @@ describe("research project workspace", () => {
     expect(teamResearchPrimarySurfaceRenderersSource).toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain('surface="workspace"');
+  });
+
+  it("keeps one overall progress rail outside the challenge research workspace", () => {
+    expect(renderTeamsWorkbenchBoardPageSource).toContain("rail={p.teamShellRail}");
+    expect(researchProcessWorkspaceSource).not.toContain("<ResearchProcessRail");
+    expect(researchProcessWorkspaceSource).not.toContain('sidebar: { id: "rail"');
+    expect(researchProcessWorkspaceSource).toContain('aside: { id: "inspector"');
   });
 
   it("mounts persistent project switching above the three-stage workspace", () => {

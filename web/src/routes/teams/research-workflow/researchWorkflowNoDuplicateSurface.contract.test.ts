@@ -32,6 +32,10 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(canvasSource).toContain("showLegend={false}");
     expect(inspectorSource).toContain("ResearchProcessNodeInspector");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
+    expect(workspaceSource).not.toContain("ResearchProcessRail");
+    expect(workspaceSource).not.toContain('sidebar: { id: "rail"');
+    expect(workspaceSource).not.toContain("railClassName=");
+    expect(workspaceSource).toContain('aside: { id: "inspector"');
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
     expect(workspaceSource).not.toContain("ResearchStageNav");
     expect(workspaceSource).not.toContain("TeamKnowledgeCollectionCompletionFlowPanel");
