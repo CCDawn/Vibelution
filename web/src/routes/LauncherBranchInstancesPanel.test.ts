@@ -6,6 +6,7 @@ import panelStyles from "./LauncherBranchInstancesPanel.styles";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
   canStartInstance,
+  canForceStopInstance,
   canStopInstance,
   formatAdmissionReason,
   isAdmissionBlocked,
@@ -407,6 +408,26 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(formatAttentionReason(unknownLeftover, true)).toContain("身份未知，仅可诊断");
     expect(formatAttentionReason(unknownLeftover, true)).toContain("端口租约 reclaimable");
     expect(canStopInstance(unknownStarting, { instanceId: unknownStarting.id, operation: "start" })).toBe(true);
+  });
+
+  it("keeps force-stop available for every non-current row, including stale stopping rows", () => {
+    const stale = instance({
+      alive: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "stopping",
+        backend: {
+          ...instance().runtime.backend,
+          alive: false,
+          listening: false,
+          port: 0,
+        },
+      },
+    });
+    const current = instance({ current: true, id: "main", kind: "main", branch: "main" });
+
+    expect(canForceStopInstance(stale)).toBe(true);
+    expect(canForceStopInstance(current)).toBe(false);
   });
 
   it("lets an unknown missing-worktree leftover close without cleanup", () => {

@@ -45,6 +45,7 @@ PORT_LEASE_RECLAIMABLE = frozenset({"quarantined", "reclaimable"})
 OWNER_LEASE_TTL_MS = 15_000
 OWNER_LEASE_HEARTBEAT_MS = 5_000
 START_SUPERVISOR_LOST_MESSAGE = "启动监督进程已退出且超过启动期限，启动未完成。"
+ISOLATED_START_TIMEOUT_SECONDS = 180
 _READ_RETRY_ATTEMPTS = 3
 _READ_RETRY_DELAY_SECONDS = 0.05
 _LOCK_TIMEOUT_SECONDS = LOCK_TIMEOUT_SECONDS
@@ -319,6 +320,7 @@ def apply_claim_stop(
     *,
     instance_id: str,
     project_root: str = "",
+    command_id: str = "",
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Bump generation first so in-flight start observers cannot write back."""
@@ -330,6 +332,14 @@ def apply_claim_stop(
     entry["phase"] = "stopping"
     entry["desiredState"] = "closed"
     entry["generation"] = generation
+    stop_deadline = _iso_timestamp_seconds(
+        _as_utc(now) + timedelta(seconds=ISOLATED_START_TIMEOUT_SECONDS)
+    )
+    entry["deadlineAt"] = stop_deadline
+    entry["inFlightDeadlineAt"] = stop_deadline
+    normalized_command_id = str(command_id or "").strip()
+    if normalized_command_id:
+        entry["commandId"] = normalized_command_id
     entry["failureMessage"] = ""
     entry.pop("ownerLease", None)
     root = str(project_root or "").strip()
@@ -412,6 +422,7 @@ def apply_reclaim_stale_in_flight_start(
     payload: dict[str, Any],
     *,
     instance_id: str,
+    expected_generation: int | None = None,
     now: datetime | None = None,
     backend_alive: bool = False,
     backend_listening: bool = False,
@@ -422,6 +433,20 @@ def apply_reclaim_stale_in_flight_start(
     entry = instances.get(wanted)
     if not isinstance(entry, dict):
         return False, {}
+    expected = int(expected_generation or 0)
+    if expected > 0 and int(entry.get("generation") or 0) != expected:
+        return False, dict(entry)
+    if is_stale_in_flight_stop(entry, now=now):
+        entry["status"] = "closed"
+        entry["phase"] = "steady"
+        entry["desiredState"] = "closed"
+        entry["failureMessage"] = ""
+        entry["spawnPid"] = 0
+        entry["windowPid"] = 0
+        entry["portLeaseStatus"] = "reclaimable"
+        entry.pop("ownerLease", None)
+        _touch_entry(entry, now=now)
+        return True, dict(entry)
     if not is_stale_in_flight_start(
         entry,
         now=now,
@@ -696,6 +721,22 @@ def is_stale_in_flight_start(
     if str(entry.get("desiredState") or "").strip().lower() != "open":
         return False
     if backend_alive or backend_listening or window_open:
+        return False
+    stamp = _as_utc(now)
+    return _deadline_expired(entry, stamp) and owner_lease_expired(entry, stamp)
+
+
+def is_stale_in_flight_stop(
+    entry: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not isinstance(entry, dict) or not entry:
+        return False
+    status = str(entry.get("status") or "").strip().lower()
+    if status != "stopping":
+        return False
+    if str(entry.get("desiredState") or "").strip().lower() != "closed":
         return False
     stamp = _as_utc(now)
     return _deadline_expired(entry, stamp) and owner_lease_expired(entry, stamp)

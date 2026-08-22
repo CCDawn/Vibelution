@@ -1,4 +1,4 @@
-import { GitBranch, LoaderCircle } from "lucide-react";
+import { GitBranch, LoaderCircle, ShieldAlert } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -10,6 +10,7 @@ import { LauncherBranchStatusHelp } from "./LauncherBranchStatusHelp";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
   canRequestOpenInstance,
+  canForceStopInstance,
   canStopInstance,
   cleanupRiskLabels,
   filterBranchInstances,
@@ -29,6 +30,7 @@ import {
   overlayCleanupMetadata,
   paginateItems,
   lifecycleIntentRejectMessage,
+  resolveItemPending,
   shouldHoldOpenClickGuard,
   type InstanceListFilters,
   type LifecyclePendingInput,
@@ -63,7 +65,7 @@ type LauncherBranchInstancesPanelProps = {
   lifecyclePending?: boolean;
   onLifecycle?: (
     instanceId: string,
-    operation: Extract<LauncherOperation, "start" | "stop">,
+    operation: Extract<LauncherOperation, "start" | "stop" | "force-stop">,
   ) => LifecycleRequestOutcome | void;
   onStopMany?: (instanceIds: string[]) => void;
 };
@@ -194,6 +196,8 @@ export function LauncherBranchInstancesPanel({
         focusWindow: "聚焦窗口",
         retryStart: "重新启动",
         stop: "停止",
+        forceStop: "强制停止",
+        forceStopHint: "普通停止无法收口时使用",
         close: "关闭",
         stopAll: "停止全部",
         closeAll: "全部关闭",
@@ -254,6 +258,8 @@ export function LauncherBranchInstancesPanel({
         focusWindow: "Focus window",
         retryStart: "Retry start",
         stop: "Stop",
+        forceStop: "Force stop",
+        forceStopHint: "Use when normal Stop cannot settle",
         close: "Close",
         stopAll: "Stop all",
         closeAll: "Close all",
@@ -464,6 +470,8 @@ export function LauncherBranchInstancesPanel({
     const admissionBlocked = isAdmissionBlocked(item);
     const showOpen = canRequestOpenInstance(item, pendingOperation);
     const showStop = canStopInstance(item, pendingOperation) || stopBusy;
+    const showForceStop = canForceStopInstance(item);
+    const forceStopPending = lifecyclePending && Boolean(resolveItemPending(item, pendingOperation));
     const requestOpen = () => {
       if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id)) {
         return;
@@ -535,6 +543,20 @@ export function LauncherBranchInstancesPanel({
           >
             {stopBusy ? instanceRuntimeStateLabel(state, zh) : instanceStopLabel(item, zh, pendingOperation)}
           </VButton>
+        ) : null}
+        {showForceStop ? (
+          <VButton
+            type="button"
+            variant="danger"
+            density="compact"
+            isIconOnly
+            aria-label={labels.forceStop}
+            tooltip={labels.forceStopHint}
+            isDisabled={lifecyclePending}
+            isPending={forceStopPending}
+            icon={<ShieldAlert size={14} aria-hidden="true" />}
+            onPress={() => onLifecycle?.(item.id, "force-stop")}
+          />
         ) : null}
       </VActionGroup>
     );

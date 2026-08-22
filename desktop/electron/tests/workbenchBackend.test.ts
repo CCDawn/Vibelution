@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import {
 } from "../src/process/workbenchBackendRetire.js";
 import {
   classifyWorkbenchPortOccupant,
+  clearWorkbenchLauncherRuntimeState,
   executeMainLineWorkbench,
   ensureFrontendBuild,
   FRONTEND_BUILD_TIMEOUT_MS,
@@ -18,6 +19,7 @@ import {
   mainLineBackendIsReusable,
   mainLineRunningCodeIsCurrent,
   resolveBindableWorkbenchPort,
+  reclaimStaleWorkbenchBackend,
   resolveNoConsolePython,
   resolveNodeExecutable,
   runWaitable,
@@ -28,6 +30,7 @@ import {
   workbenchBackendArgs,
   workbenchBackendEnv
 } from "../src/process/workbenchBackend.js";
+import { resolveCanonicalRuntimeHome } from "../src/lifecycle/projectStoragePaths.js";
 import { ACTIVE_WORK_BLOCK_MESSAGE_STOP, blockLifecycleIfActiveWork } from "../src/process/activeWorkGuard.js";
 import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
@@ -260,6 +263,74 @@ describe("classifyWorkbenchPortOccupant", () => {
   });
 });
 
+describe("reclaimStaleWorkbenchBackend", () => {
+  it("does not claim a registered pid is safe when the health identity is not confirmed", async () => {
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => true,
+      fetchHealth: async () => ({ status: 404 }),
+      pidAlive: () => true,
+      killPid: vi.fn()
+    });
+
+    expect(result.reclaimed).toBe(false);
+    expect(result.reason).toContain("unknown");
+  });
+
+  it("treats an already released port as a confirmed close", async () => {
+    await expect(
+      reclaimStaleWorkbenchBackend({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect: async () => false
+      })
+    ).resolves.toMatchObject({ reclaimed: true });
+  });
+
+  it("does not confirm close when a registered backend pid is alive before listen", async () => {
+    await expect(
+      reclaimStaleWorkbenchBackend({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect: async () => false,
+        registeredPids: [4242],
+        pidAlive: () => true
+      })
+    ).resolves.toMatchObject({
+      reclaimed: false,
+      reason: expect.stringContaining("registered backend pid 4242")
+    });
+  });
+
+  it("does not confirm close when a verified backend pid survives port release", async () => {
+    let clock = 0;
+    let listening = true;
+    await expect(
+      reclaimStaleWorkbenchBackend({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect: async () => {
+          const current = listening;
+          listening = false;
+          return current;
+        },
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+        }),
+        pidAlive: () => true,
+        killPid: () => undefined,
+        now: () => (clock += 10_000),
+        delay: async () => undefined
+      })
+    ).resolves.toMatchObject({
+      reclaimed: false,
+      reason: expect.stringContaining("remains alive after port")
+    });
+  });
+});
+
 describe("resolveBindableWorkbenchPort", () => {
   it("binds the preferred port when it is free", async () => {
     await expect(
@@ -392,6 +463,42 @@ describe("writeLauncherStateFile", () => {
       });
       expect(readFileSync(sharedTempPath, "utf8")).toBe("sentinel");
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("clearWorkbenchLauncherRuntimeState", () => {
+  it("removes both checkout and canonical launcher state after close", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-workbench-runtime-clear-"));
+    const previousProjectsHome = process.env.VIBELUTION_PROJECTS_HOME;
+    try {
+      process.env.VIBELUTION_PROJECTS_HOME = join(dir, "projects");
+      mkdirSync(join(dir, ".vibelution"), { recursive: true });
+      writeFileSync(join(dir, ".vibelution", "project.json"), JSON.stringify({ projectId: "project-clear" }), "utf8");
+      const runtimeDir = join(dir, ".runtime", "launcher");
+      const canonicalRuntimeDir = join(resolveCanonicalRuntimeHome(dir) || "", "launcher");
+      mkdirSync(runtimeDir, { recursive: true });
+      mkdirSync(canonicalRuntimeDir, { recursive: true });
+      const paths = [
+        join(runtimeDir, "state.json"),
+        join(runtimeDir, "ports.json"),
+        join(canonicalRuntimeDir, "state.json"),
+        join(canonicalRuntimeDir, "ports.json")
+      ];
+      writeFileSync(paths[0], JSON.stringify({ backendPid: 41, backendPort: 8012 }), "utf8");
+      writeFileSync(paths[1], JSON.stringify({ backendPort: 8012 }), "utf8");
+      writeFileSync(paths[2], JSON.stringify({ backendPid: 42, backendPort: 8012 }), "utf8");
+      writeFileSync(paths[3], JSON.stringify({ backendPort: 8012 }), "utf8");
+
+      expect(clearWorkbenchLauncherRuntimeState(dir)).toMatchObject({ cleared: true, removedCount: 4 });
+      expect(paths.every((path) => !existsSync(path))).toBe(true);
+    } finally {
+      if (previousProjectsHome === undefined) {
+        delete process.env.VIBELUTION_PROJECTS_HOME;
+      } else {
+        process.env.VIBELUTION_PROJECTS_HOME = previousProjectsHome;
+      }
       rmSync(dir, { recursive: true, force: true });
     }
   });
