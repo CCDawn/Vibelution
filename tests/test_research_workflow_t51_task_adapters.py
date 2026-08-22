@@ -1180,6 +1180,18 @@ def test_result_evaluation_binding_heals_from_sibling_freeze(
                 "teamId": "research-team",
                 "agentBindingSnapshot": [
                     {
+                        "nodeId": "source_finding",
+                        "agentId": "agent-unrelated-search",
+                        "roleKey": "source_finder",
+                        "snapshotId": "snap:unrelated",
+                    },
+                    {
+                        "nodeId": "source_finding",
+                        "agentId": "agent-conflicting-owner",
+                        "roleKey": "experiment_ledger",
+                        "snapshotId": "snap:conflicting-owner",
+                    },
+                    {
                         "nodeId": "protocol_review",
                         "agentId": "agent-from-freeze",
                         "roleKey": "protocol_reviewer",
@@ -1218,6 +1230,28 @@ def test_result_evaluation_binding_heals_from_sibling_freeze(
         assert resolved.agent_id == "agent-from-freeze"
     finally:
         harness.close()
+
+
+def test_system_capability_binding_does_not_heal_from_product_sibling() -> None:
+    from core.web.services.team_workflow.research_runtime.team_role_source import (
+        heal_agent_binding_from_sibling_freeze,
+    )
+
+    snapshot = {
+        "agentBindingSnapshot": [
+            {
+                "nodeId": "source_finding",
+                "agentId": "agent-search",
+                "roleKey": "source_finder",
+                "snapshotId": "snap:search",
+            }
+        ]
+    }
+
+    assert (
+        heal_agent_binding_from_sibling_freeze(snapshot, "version_governance")
+        is None
+    )
 
 
 def test_result_evaluation_binding_heals_empty_freeze_from_team_role(

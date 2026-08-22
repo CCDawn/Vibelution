@@ -80,7 +80,6 @@ def _canonical_team_project_and_agents(tmp_path, monkeypatch):
         ("challenge_cup_evaluator", "独立评估"),
         ("challenge_cup_execution_steward", "执行管理"),
         ("challenge_cup_versioning", "旧版本治理"),
-        ("challenge_cup_experiment_planner", "旧实验规划"),
     )
     members = []
     agents = {}
@@ -253,6 +252,35 @@ def test_role_resolver_accepts_canonical_evaluator_and_execution_but_not_version
             research_project_agent_tasks.TASK_KIND_CONTRACTS["version_governance"],
         )
     assert exc.value.code == "system_capability_not_agent"
+
+
+def test_role_resolver_rejects_multiple_agents_for_one_canonical_role(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    members = []
+    for label in ("实验修订甲", "实验修订乙"):
+        agent = agent_directory_service.create_agent_instance(
+            display_name=label,
+            role_key="challenge_cup_experiment_revision",
+        )
+        members.append(
+            {
+                "agentId": agent["agentId"],
+                "agentName": label,
+                "role": "challenge_cup_experiment_revision",
+            }
+        )
+    team = team_service.create_team(name="重复角色团队", members=members)
+
+    with pytest.raises(ResearchProjectAgentTaskError) as exc:
+        research_project_agent_tasks._resolve_role_agent(
+            team["teamId"],
+            research_project_agent_tasks.TASK_KIND_CONTRACTS["experiment_design"],
+        )
+
+    assert exc.value.code == "agent_role_ambiguous"
 
 
 def test_task_start_requires_explicit_agent_to_match_team_role_snapshot(

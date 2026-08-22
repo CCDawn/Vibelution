@@ -143,16 +143,34 @@ def heal_agent_binding_from_sibling_freeze(
     from core.research.workflow.definition import node_by_id
     from core.research.workflow.models import ActorKind
 
-    node = node_by_id().get(str(node_id or "").strip())
+    nodes = node_by_id()
+    node = nodes.get(str(node_id or "").strip())
     if node is None or node.actorKind != ActorKind.AGENT:
         return None
     preferred = normalize_role_key(node.primaryRoleKey)
-    fallback: dict[str, str] | None = None
+    contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
+    preferred_owner = contract.resolve_role_owner(preferred)
+    if preferred_owner is None or preferred_owner[0] != "product_agent":
+        return None
     for binding in (snapshot or {}).get("agentBindingSnapshot") or []:
         if not isinstance(binding, Mapping):
             continue
         agent_id = str(binding.get("agentId") or "").strip()
         if not agent_id:
+            continue
+        role_owner = contract.resolve_role_owner(
+            normalize_role_key(str(binding.get("roleKey") or ""))
+        )
+        sibling_node = nodes.get(str(binding.get("nodeId") or "").strip())
+        node_owner = None
+        if sibling_node is not None and sibling_node.actorKind == ActorKind.AGENT:
+            node_owner = contract.resolve_role_owner(
+                normalize_role_key(sibling_node.primaryRoleKey)
+            )
+        if role_owner is not None and node_owner is not None and role_owner != node_owner:
+            continue
+        binding_owner = role_owner or node_owner
+        if binding_owner != preferred_owner:
             continue
         item = {
             "nodeId": node.nodeId,
@@ -161,11 +179,8 @@ def heal_agent_binding_from_sibling_freeze(
             "resolvedFrom": "sibling_freeze",
             "snapshotId": f"heal-sibling:{node.nodeId}",
         }
-        if normalize_role_key(str(binding.get("roleKey") or "")) == preferred:
-            return item
-        if fallback is None:
-            fallback = item
-    return fallback
+        return item
+    return None
 
 
 def effective_binding_layers(

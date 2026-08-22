@@ -118,11 +118,17 @@ def test_source_assignment_preserves_legacy_team_stage_bindings(
     source_assignment_service,
 ):
     del source_assignment_service
+    legacy_bindings = {
+        "source_finder": "agent-source-finder",
+        "source_extractor": "agent-source-extractor",
+        "source_relation_mapper": "agent-knowledge-manager",
+        "source_ingestor": "agent-knowledge-manager",
+    }
     team = {
         "canvas": {
             "nodes": [
-                {"role": role, "agentId": f"agent-{role}"}
-                for role in LEGACY_SOURCE_ROLES
+                {"role": role, "agentId": agent_id}
+                for role, agent_id in legacy_bindings.items()
             ]
         }
     }
@@ -131,15 +137,92 @@ def test_source_assignment_preserves_legacy_team_stage_bindings(
         team,
         LEGACY_SOURCE_ROLES,
         {
-            "agentIds": {
-                role: f"agent-{role}" for role in LEGACY_SOURCE_ROLES
-            }
+            "agentIds": legacy_bindings
         },
     )
 
-    assert resolved == {
-        role: f"agent-{role}" for role in LEGACY_SOURCE_ROLES
+    assert resolved == legacy_bindings
+
+
+def test_source_assignment_rejects_legacy_explicit_binding_over_canonical_team_role(
+    source_assignment_service,
+):
+    del source_assignment_service
+    team = {
+        "canvas": {
+            "nodes": [
+                {
+                    "role": "challenge_cup_search",
+                    "agentId": "agent-canonical-search",
+                },
+                {"role": "source_finder", "agentId": "agent-legacy-search"},
+            ]
+        }
     }
+
+    with pytest.raises(_WorkflowError, match="canonical Team role binding"):
+        knowledge_kernel._source_collection_team_agent_ids(
+            team,
+            ["source_finder"],
+            {"agentIds": {"source_finder": "agent-legacy-search"}},
+        )
+
+
+def test_source_assignment_rejects_unrequested_alias_conflicting_with_canonical_explicit(
+    source_assignment_service,
+):
+    del source_assignment_service
+    team = {
+        "canvas": {
+            "nodes": [
+                {
+                    "role": "challenge_cup_knowledge_manager",
+                    "agentId": "agent-canonical-knowledge",
+                },
+                {
+                    "role": "source_relation_mapper",
+                    "agentId": "agent-legacy-knowledge",
+                },
+                {
+                    "role": "source_ingestor",
+                    "agentId": "agent-canonical-knowledge",
+                },
+            ]
+        }
+    }
+
+    with pytest.raises(_WorkflowError, match="conflicting explicit bindings"):
+        knowledge_kernel._source_collection_team_agent_ids(
+            team,
+            ["source_ingestor"],
+            {
+                "agentIds": {
+                    "challenge_cup_knowledge_manager": "agent-canonical-knowledge",
+                    "source_relation_mapper": "agent-legacy-knowledge",
+                }
+            },
+        )
+
+
+def test_source_assignment_rejects_cross_role_agent_reuse_in_legacy_team(
+    source_assignment_service,
+):
+    del source_assignment_service
+    team = {
+        "canvas": {
+            "nodes": [
+                {"role": "source_finder", "agentId": "agent-shared"},
+                {"role": "source_extractor", "agentId": "agent-shared"},
+            ]
+        }
+    }
+
+    with pytest.raises(_WorkflowError, match="more than one product role"):
+        knowledge_kernel._source_collection_team_agent_ids(
+            team,
+            ["source_finder", "source_extractor"],
+            {},
+        )
 
 
 def test_source_assignment_fails_closed_on_empty_active_binding(

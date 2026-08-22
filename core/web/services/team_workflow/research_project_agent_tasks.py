@@ -410,6 +410,16 @@ def _resolve_role_agent(
                 item,
             )
         )
+    candidate_agent_ids = {
+        _text(candidate[2].get("agentId"))
+        for candidate in candidates
+        if _text(candidate[2].get("agentId"))
+    }
+    if len(candidate_agent_ids) > 1:
+        raise ResearchProjectAgentTaskError(
+            f"Research team role {expected_team_role} is bound to more than one Agent.",
+            code="agent_role_ambiguous",
+        )
     candidates.sort(key=lambda item: (item[0], item[1]))
     member = candidates[0][2] if candidates else None
     if member is None:

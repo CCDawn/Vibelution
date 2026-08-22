@@ -3659,8 +3659,14 @@ def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], pa
         if observed_role not in exact_by_role:
             exact_by_role[observed_role] = agent_id
 
+    if any(len(owner_ids) > 1 for owner_ids in candidate_owners_by_agent.values()):
+        raise s.TeamWorkflowOrchestrationError(
+            "Source collection Team bindings assign one Agent to more than one product role."
+        )
+
     canonical_explicit_by_owner: dict[str, str] = {}
     explicit_owner_by_agent: dict[str, str] = {}
+    explicit_agent_ids_by_owner: dict[str, set[str]] = {}
     for role, (agent_id, owner_id) in explicit.items():
         previous_owner = explicit_owner_by_agent.get(agent_id)
         if previous_owner is not None and previous_owner != owner_id:
@@ -3675,9 +3681,21 @@ def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], pa
                     f"Source collection agentIds contains conflicting canonical bindings for {owner_id}."
                 )
             canonical_explicit_by_owner[owner_id] = agent_id
+        explicit_agent_ids_by_owner.setdefault(owner_id, set()).add(agent_id)
         if owner_id not in candidate_owners_by_agent.get(agent_id, set()):
             raise s.TeamWorkflowOrchestrationError(
                 f"Explicit Agent id for {role} is not a matching Team role binding."
+            )
+
+    for owner_id, agent_ids in explicit_agent_ids_by_owner.items():
+        if len(agent_ids) > 1:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Source collection agentIds contains conflicting explicit bindings for {owner_id}."
+            )
+        canonical_agent_id = canonical_by_owner.get(owner_id, "")
+        if canonical_agent_id and canonical_agent_id not in agent_ids:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Explicit Agent id for {owner_id} conflicts with the canonical Team role binding."
             )
 
     mapped: dict[str, str] = {}
@@ -3689,9 +3707,9 @@ def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], pa
                 f"Source collection agentIds contains conflicting alias bindings for {owner_id}."
             )
         agent_id = (
-            canonical_explicit
+            canonical_by_owner.get(owner_id, "")
+            or canonical_explicit
             or (explicit_binding[0] if explicit_binding else "")
-            or canonical_by_owner.get(owner_id, "")
             or exact_by_role.get(role, "")
         )
         if agent_id:
