@@ -50,8 +50,6 @@ def test_terminal_run_with_pending_outbox_found(tmp_path: Path) -> None:
         harness.service.submit(harness.request(idempotency_key="ui:key-1"))
 
         def cancel(uow):
-            from core.research.workflow.ledger import CommandRecord
-
             uow.repository.update_run_status(
                 "run-test", "research-team", "cancelled", FIXED_NOW_MS
             )
@@ -231,6 +229,78 @@ def test_created_run_reconciliation_accepts_exact_semantic_event_replay(
             event_id,
         ]
         assert worker.run_once() == 0
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize(
+    "legacy_conflict",
+    ["actor", "correlation", "payload", "causation", "event_type", "run_version"],
+)
+def test_created_run_reconciliation_rejects_legacy_identity_conflict_without_mutation(
+    tmp_path: Path, legacy_conflict: str
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    run_id = f"run-created-legacy-{legacy_conflict}"
+    event_id = f"evt-dispatch-never-started-{run_id}"
+    try:
+        def seed(uow) -> None:
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id=run_id,
+                    status="created",
+                    last_event_sequence=2,
+                    created_at_ms=FIXED_NOW_MS,
+                )
+            )
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                    event_type="run_created",
+                )
+            )
+            replay = build_event_record(
+                2,
+                run_id=run_id,
+                event_id=event_id,
+                event_type="run_failed",
+            )
+            if legacy_conflict == "actor":
+                replay = replace(
+                    replay,
+                    actor_json=json.dumps(
+                        {"actorType": "system", "actorId": "untrusted-writer"}
+                    ),
+                )
+            elif legacy_conflict == "correlation":
+                replay = replace(replay, correlation_id="corr-conflict")
+            elif legacy_conflict == "causation":
+                replay = replace(replay, causation_id="cause-conflict")
+            elif legacy_conflict == "event_type":
+                replay = replace(replay, event_type="run_created")
+            elif legacy_conflict == "run_version":
+                replay = replace(replay, run_version=2)
+            else:
+                replay = replace(
+                    replay,
+                    payload_json=json.dumps({"sequence": 2, "tampered": True}),
+                )
+            uow.repository.insert_event(replay)
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        before_run = harness.store.get_run(run_id)
+        before_events = harness.store.list_events(run_id)
+        before_attempts = harness.store.list_attempts(run_id)
+
+        with pytest.raises(RuntimeError, match="event ID conflict"):
+            _created_run_worker(harness, tmp_path).run_once()
+
+        assert harness.store.get_run(run_id) == before_run
+        assert harness.store.list_events(run_id) == before_events
+        assert harness.store.list_attempts(run_id) == before_attempts
+        assert harness.store.latest_event_sequence(run_id) == 2
     finally:
         harness.close()
 

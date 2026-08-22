@@ -218,12 +218,20 @@ class GraphDispatchWorker:
                         payload=event_payload,
                         now_ms=now_ms,
                     )
-                    if _event_replay_identity(
+                    exact_replay = _event_replay_identity(
                         existing_event
-                    ) != _event_replay_identity(expected_event):
+                    ) == _event_replay_identity(expected_event)
+                    legacy_replay = _is_legacy_graph_repair_replay(
+                        existing_event,
+                        run_id=run_id,
+                        sequence=run.last_event_sequence,
+                        run_version=run.run_version,
+                        event_id=event_id,
+                    )
+                    if not exact_replay and not legacy_replay:
                         raise RuntimeError(
                             "created-run reconciliation event ID conflict for "
-                            f"{event_id}"
+                            f"{event_id}: conflicts with dispatch_never_started"
                         )
                     if not uow.repository.update_run_status(
                         run_id,
@@ -1784,6 +1792,49 @@ def _event_replay_identity(event: Any) -> tuple[Any, ...]:
         # which records that no causation identity was supplied.
         event.causation_id,
         _canonical_json_text(event.payload_json),
+    )
+
+
+def _is_legacy_graph_repair_replay(
+    event: Any,
+    *,
+    run_id: str,
+    sequence: int,
+    run_version: int,
+    event_id: str,
+) -> bool:
+    """Accept only the two known pre-replay graph-repair event shapes.
+
+    Older ledger writers used the generic ``ledger`` actor and ``corr-1``
+    correlation marker.  They persisted either the sequence-only fixture
+    payload or the earlier terminal marker.  This compatibility path is
+    intentionally narrower than the normal semantic replay guard: every
+    identity field is still fixed, causation remains strictly absent, and
+    the payload must be one of the historical canonical objects.
+    """
+
+    if (
+        event.run_id != run_id
+        or event.sequence != sequence
+        or event.event_id != event_id
+        or event.run_version != run_version
+        or event.event_type != "run_failed"
+        or event.correlation_id != "corr-1"
+        or event.causation_id is not None
+    ):
+        return False
+    try:
+        actor = json.loads(event.actor_json)
+        payload = json.loads(event.payload_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return (
+        actor == {"actorType": "system", "actorId": "ledger"}
+        and payload
+        in (
+            {"sequence": sequence},
+            {"terminalReason": "dispatch_never_started"},
+        )
     )
 
 
