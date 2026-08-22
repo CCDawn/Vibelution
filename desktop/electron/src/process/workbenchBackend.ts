@@ -710,6 +710,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         host: input.host,
         backendPid: occupant.pid,
         controlToken: input.controlToken,
+        healthVerified: true,
         signal: input.signal,
         pidAlive,
         connect: input.connect,

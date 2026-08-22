@@ -197,6 +197,7 @@ describe("workbenchBackendRetire", () => {
     await expect(
       requestGracefulWorkbenchShutdown({
         port: 8000,
+        controlToken: "test-control-token",
         request: async () => ({ status: 409 }),
         connect,
         delay: async () => undefined
@@ -228,6 +229,78 @@ describe("workbenchBackendRetire", () => {
         headers: { "X-Vibelution-Control-Token": "environment-control-token" }
       })
     );
+  });
+
+  it("bootstraps a backend token only after health identity is verified", async () => {
+    const previousToken = process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+    delete process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+    const request = vi.fn()
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ controlToken: "backend-control-token" }) })
+      .mockResolvedValueOnce({ status: 202 });
+    const connect = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const pidAlive = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    try {
+      await expect(
+        requestGracefulWorkbenchShutdown({
+          port: 8000,
+          backendPid: 4242,
+          healthVerified: true,
+          request,
+          connect,
+          pidAlive,
+          delay: async () => undefined
+        })
+      ).resolves.toMatchObject({ requested: true, completed: true, status: 202 });
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+      } else {
+        process.env.VIBELUTION_WEB_CONTROL_TOKEN = previousToken;
+      }
+    }
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/control-token",
+      expect.objectContaining({ method: "GET", signal: expect.any(AbortSignal) })
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/runtime/shutdown",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "X-Vibelution-Control-Token": "backend-control-token" }
+      })
+    );
+  });
+
+  it("fails closed instead of bootstrapping a token without verified backend identity", async () => {
+    const previousToken = process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+    delete process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+    const request = vi.fn();
+    try {
+      await expect(
+        requestGracefulWorkbenchShutdown({
+          port: 8000,
+          request,
+          delay: async () => undefined
+        })
+      ).resolves.toMatchObject({
+        requested: false,
+        completed: false,
+        reason: expect.stringContaining("control token is unavailable")
+      });
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.VIBELUTION_WEB_CONTROL_TOKEN;
+      } else {
+        process.env.VIBELUTION_WEB_CONTROL_TOKEN = previousToken;
+      }
+    }
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("collects registered launcher handles without scanning the process table", () => {
@@ -566,6 +639,49 @@ describe("reclaimStaleWorkbenchBackend", () => {
     expect(result).toMatchObject({ reclaimed: false, verifiedPid: 4242 });
     expect(result.reason).toContain("retirement was not verified");
     expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
+  });
+
+  it("marks the same-project health identity before graceful token bootstrap", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ controlToken: "backend-control-token" }) })
+      .mockResolvedValueOnce({ status: 202 });
+    const connect = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValue(false);
+    const pidAlive = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    const gracefulShutdown = (input: Parameters<typeof requestGracefulWorkbenchShutdown>[0]) =>
+      requestGracefulWorkbenchShutdown({ ...input, request });
+
+    await expect(
+      reclaimStaleWorkbenchBackend({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+        }),
+        pidAlive,
+        gracefulShutdown,
+        delay: async () => undefined
+      })
+    ).resolves.toMatchObject({ reclaimed: true });
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8012/api/control-token",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8012/api/runtime/shutdown",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "X-Vibelution-Control-Token": "backend-control-token" }
+      })
+    );
   });
 });
 

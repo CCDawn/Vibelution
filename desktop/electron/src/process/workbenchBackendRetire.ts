@@ -48,6 +48,7 @@ export function terminatePid(pid: number): void {
 
 export type GracefulWorkbenchShutdownResponse = {
   status: number;
+  json?: () => Promise<unknown>;
 };
 
 export type GracefulWorkbenchShutdownResult = {
@@ -68,14 +69,16 @@ export async function requestGracefulWorkbenchShutdown(input: {
   host?: string;
   backendPid?: number;
   controlToken?: string;
+  /** The caller has already matched /api/health to this project's workspace. */
+  healthVerified?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   request?: (
     url: string,
     options: {
-      method: "POST";
+      method: "GET" | "POST";
       signal: AbortSignal;
-      headers: Record<string, string>;
+      headers?: Record<string, string>;
     }
   ) => Promise<GracefulWorkbenchShutdownResponse>;
   pidAlive?: (pid: number) => boolean;
@@ -92,11 +95,11 @@ export async function requestGracefulWorkbenchShutdown(input: {
   const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS));
   const now = input.now ?? Date.now;
   const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
-  const controlToken = String(input.controlToken ?? process.env.VIBELUTION_WEB_CONTROL_TOKEN ?? "").trim();
+  let controlToken = String(input.controlToken ?? process.env.VIBELUTION_WEB_CONTROL_TOKEN ?? "").trim();
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
   const request = input.request ?? (async (url, options) => {
     const response = await fetch(url, options);
-    return { status: response.status };
+    return { status: response.status, json: () => response.json() };
   });
   const controller = new AbortController();
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,6 +109,25 @@ export async function requestGracefulWorkbenchShutdown(input: {
   input.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     timeoutTimer = setTimeout(() => controller.abort(new Error("graceful shutdown timed out")), timeoutMs);
+    if (!controlToken && input.healthVerified && isLoopbackHost(host)) {
+      const tokenResponse = await request(`http://${host}:${port}/api/control-token`, {
+        method: "GET",
+        signal: controller.signal
+      });
+      if (tokenResponse.status === 200 && tokenResponse.json) {
+        const payload = await tokenResponse.json();
+        if (isRecord(payload) && typeof payload.controlToken === "string") {
+          controlToken = payload.controlToken.trim();
+        }
+      }
+    }
+    if (!controlToken) {
+      return {
+        requested: false,
+        completed: false,
+        reason: "backend control token is unavailable; falling back to verified process-tree retirement"
+      };
+    }
     const response = await request(`http://${host}:${port}/api/runtime/shutdown`, {
       method: "POST",
       signal: controller.signal,
@@ -167,6 +189,15 @@ export async function requestGracefulWorkbenchShutdown(input: {
     }
     input.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 
 export async function waitForPortRelease(input: {
