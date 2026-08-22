@@ -18,6 +18,307 @@ from tools.challenge_cup_operations_tools import (
 )
 
 
+def _canonical_agent_runtime(role_key: str) -> dict:
+    agent_id = f"agent-{role_key}"
+    return {
+        "agentId": agent_id,
+        "sessionId": f"session-{role_key}",
+        "turnId": "turn-1",
+        "agent": {
+            "agentId": agent_id,
+            "roleKey": role_key,
+            "metadata": {
+                "challengeCupTeamId": "research-team",
+                "challengeCupTeamManagedVersion": 2,
+                "challengeCupTeamRole": role_key,
+                "challengeCupTeamRoleKey": role_key,
+            },
+        },
+    }
+
+
+def test_canonical_managed_agents_fail_closed_without_formal_task_binding(
+    monkeypatch,
+):
+    runtime = {"value": _canonical_agent_runtime("challenge_cup_search")}
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime["value"],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *_args, **_kwargs: {},
+    )
+
+    def unexpected_write(*_args, **_kwargs):
+        raise AssertionError("canonical direct sessions must not reach ledger writes")
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        unexpected_write,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "register_experiment_smoke_result",
+        unexpected_write,
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "record_research_loop_evidence",
+        unexpected_write,
+    )
+
+    cases = (
+        ("challenge_cup_search", "experiment", "create_plan"),
+        ("challenge_cup_extractor", "experiment", "create_plan"),
+        ("challenge_cup_knowledge_manager", "experiment", "create_plan"),
+        (
+            "challenge_cup_execution_steward",
+            "experiment",
+            "register_smoke_result",
+        ),
+        ("challenge_cup_experiment_revision", "experiment", "create_plan"),
+        ("challenge_cup_evaluator", "iteration", "record_evidence"),
+    )
+    for role_key, surface, operation in cases:
+        runtime["value"] = _canonical_agent_runtime(role_key)
+        if surface == "experiment":
+            raw = challenge_cup_experiment_writeback_tool(
+                team_id="research-team",
+                operation=operation,
+                plan_id="plan-1",
+                payload_json='{"status":"passed"}',
+            )
+        else:
+            raw = challenge_cup_iteration_writeback_tool(
+                team_id="research-team",
+                operation=operation,
+                loop_id="loop-1",
+                payload_json='{"evidenceType":"review","summary":"bounded"}',
+            )
+        result = json.loads(raw)
+        assert result["status"] == "error", role_key
+        assert result["errorType"] in {
+            "formal_task_binding_required",
+            "role_operation_denied",
+        }, role_key
+
+
+def test_canonical_bound_experiment_writeback_enforces_role_operation_matrix(
+    monkeypatch,
+):
+    runtime = {
+        "value": _canonical_agent_runtime("challenge_cup_experiment_revision")
+    }
+    writes: list[tuple[str, str]] = []
+    task_kinds = {
+        "task-revision": "experiment_design",
+        "task-evaluator": "experiment_evidence_review",
+        "task-execution": "experiment_evidence_review",
+    }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime["value"],
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": task_kinds[task_id],
+            "agentId": runtime["value"]["agentId"],
+            "researchProjectId": project_id,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_experiment_plan",
+        lambda *_args, **_kwargs: {},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda _team_id, payload: writes.append(("create_plan", payload["createdByAgent"]))
+        or {
+            "plan": {
+                "planId": "plan-1",
+                "researchProjectId": payload["researchProjectId"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "register_experiment_full_run_result",
+        lambda _team_id, _plan_id, payload: writes.append(
+            ("register_full_run_result", payload["recordedByAgent"])
+        )
+        or {"fullRunResult": {"fullRunResultId": "full-1"}},
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda _team_id, _project_id, task_id, **kwargs: {
+            "taskId": task_id,
+            "status": kwargs["status"],
+        },
+    )
+
+    def call(role_key: str, task_id: str, operation: str) -> dict:
+        runtime["value"] = _canonical_agent_runtime(role_key)
+        return json.loads(
+            challenge_cup_experiment_writeback_tool(
+                team_id="research-team",
+                research_project_id="project-1",
+                task_id=task_id,
+                operation=operation,
+                plan_id="plan-1",
+                payload_json='{"status":"passed"}',
+                recorded_by_agent=runtime["value"]["agentId"],
+            )
+        )
+
+    assert call(
+        "challenge_cup_experiment_revision",
+        "task-revision",
+        "create_plan",
+    )["status"] == "ok"
+    assert call(
+        "challenge_cup_experiment_revision",
+        "task-revision",
+        "register_full_run_result",
+    )["errorType"] == "role_operation_denied"
+    assert call(
+        "challenge_cup_evaluator",
+        "task-evaluator",
+        "create_plan",
+    )["errorType"] == "role_operation_denied"
+    assert call(
+        "challenge_cup_evaluator",
+        "task-evaluator",
+        "register_full_run_result",
+    )["status"] == "ok"
+    assert call(
+        "challenge_cup_execution_steward",
+        "task-execution",
+        "register_full_run_result",
+    )["status"] == "ok"
+    assert call(
+        "challenge_cup_execution_steward",
+        "task-execution",
+        "create_plan",
+    )["errorType"] == "role_operation_denied"
+    assert [item[0] for item in writes] == [
+        "create_plan",
+        "register_full_run_result",
+        "register_full_run_result",
+    ]
+
+
+def test_canonical_bound_iteration_writeback_enforces_role_operation_matrix(
+    monkeypatch,
+):
+    runtime = {
+        "value": _canonical_agent_runtime("challenge_cup_experiment_revision")
+    }
+    writes: list[tuple[str, str]] = []
+    task_kinds = {
+        "task-revision": "iteration_decision",
+        "task-evaluator": "experiment_evidence_review",
+    }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime["value"],
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": task_kinds[task_id],
+            "agentId": runtime["value"]["agentId"],
+            "researchProjectId": project_id,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "require_research_loop",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "record_research_loop_evidence",
+        lambda _team_id, _loop_id, payload: writes.append(
+            ("record_evidence", payload["recordedByAgent"])
+        )
+        or {"evidence": {"evidenceId": "evidence-1"}},
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "record_research_loop_decision",
+        lambda _team_id, _loop_id, payload: writes.append(
+            ("record_decision", payload["decidedByAgent"])
+        )
+        or {"decision": {"decisionId": "decision-1"}},
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda _team_id, _project_id, task_id, **kwargs: {
+            "taskId": task_id,
+            "status": kwargs["status"],
+        },
+    )
+
+    def call(role_key: str, task_id: str, operation: str) -> dict:
+        runtime["value"] = _canonical_agent_runtime(role_key)
+        payload = (
+            '{"decision":"repair_and_repeat","rationale":"bounded"}'
+            if operation == "record_decision"
+            else '{"evidenceType":"review","summary":"bounded"}'
+        )
+        return json.loads(
+            challenge_cup_iteration_writeback_tool(
+                team_id="research-team",
+                research_project_id="project-1",
+                task_id=task_id,
+                loop_id="loop-1",
+                operation=operation,
+                payload_json=payload,
+                recorded_by_agent=runtime["value"]["agentId"],
+            )
+        )
+
+    assert call(
+        "challenge_cup_experiment_revision",
+        "task-revision",
+        "record_decision",
+    )["status"] == "ok"
+    assert call(
+        "challenge_cup_evaluator",
+        "task-evaluator",
+        "record_evidence",
+    )["status"] == "ok"
+    assert call(
+        "challenge_cup_evaluator",
+        "task-evaluator",
+        "record_decision",
+    )["errorType"] == "role_operation_denied"
+    assert call(
+        "challenge_cup_execution_steward",
+        "task-evaluator",
+        "record_evidence",
+    )["errorType"] == "role_operation_denied"
+    assert [item[0] for item in writes] == ["record_decision", "record_evidence"]
+
+
 def test_challenge_cup_experiment_tool_wraps_ledger_without_execution(monkeypatch):
     scene_events = []
     monkeypatch.setattr(

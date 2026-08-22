@@ -464,8 +464,6 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "challenge_cup_extractor",
         allowed_tools=(
             "agent_message_tool",
-            "unified_memory_search_tool",
-            "research_knowledge_query_tool",
             "task_list_tool",
             "task_create_tool",
             "task_update_tool",
@@ -477,7 +475,6 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "source_collection_context_tool",
             "search_summarize_sources_tool",
             "source_collection_stage_writeback_tool",
-            "unified_memory_search_tool",
             "agent_message_tool",
         ),
         forbidden_tools=(
@@ -486,6 +483,8 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             *SEARCH_DISCOVERY_TOOLS,
             *FETCH_TOOLS,
             *SEARCH_DISABLED_TOOLS,
+            "unified_memory_search_tool",
+            "research_knowledge_query_tool",
             HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
             *CHALLENGE_CUP_LEDGER_SURFACE_TOOLS,
         ),

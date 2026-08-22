@@ -100,6 +100,8 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
             "project_search_tool",
             "news_search_tool",
             "web_fetch_tool",
+            "unified_memory_search_tool",
+            "research_knowledge_query_tool",
             "knowledge_proposal_tool",
             "cli_tool",
         },
@@ -172,6 +174,8 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
         "news_search_tool",
         "web_search_tool",
         "web_fetch_tool",
+        "unified_memory_search_tool",
+        "research_knowledge_query_tool",
     }.isdisjoint(svc.ROLE_TOOL_PROFILES["challenge_cup_extractor"]["allowedTools"])
 
 
@@ -355,4 +359,4 @@ def test_role_capability_contract_snapshot_is_stable():
     snapshot = svc.role_capability_contract_snapshot()
     assert [item["roleKey"] for item in snapshot] == sorted(item["roleKey"] for item in snapshot)
     assert {item["roleKey"] for item in snapshot} == set(svc.ROLE_CAPABILITY_CONTRACTS)
-    assert svc.role_capability_contract_fingerprint() == "4d01e06194fb7cbd6d6cc3376e0658fc749bfdcef68fcfde467e95c98b3167eb"
+    assert svc.role_capability_contract_fingerprint() == "dfbb58cd0ed9fb26537d77fac1d0b5c6a8921fbc6a5889412cb4c8cef2c8c91f"

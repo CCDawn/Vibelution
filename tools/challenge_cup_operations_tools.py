@@ -7,6 +7,52 @@ import json
 from typing import Any
 
 
+_CANONICAL_CHALLENGE_CUP_ROLES = frozenset(
+    {
+        "challenge_cup_search",
+        "challenge_cup_extractor",
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_execution_steward",
+        "challenge_cup_experiment_revision",
+        "challenge_cup_evaluator",
+    }
+)
+_CANONICAL_EXPERIMENT_WRITEBACK_RULES: dict[str, dict[str, tuple[str, ...]]] = {
+    "challenge_cup_experiment_revision": {
+        "record_hypothesis_fragment": ("hypothesis_design",),
+        "record_hypothesis_set": ("hypothesis_design",),
+        "create_plan": ("experiment_design",),
+    },
+    "challenge_cup_evaluator": {
+        "record_protocol_review": ("protocol_review",),
+        "register_baseline_artifact": ("experiment_evidence_review",),
+        "register_smoke_result": ("experiment_evidence_review",),
+        "register_full_run_result": ("experiment_evidence_review",),
+    },
+    "challenge_cup_execution_steward": {
+        "register_baseline_artifact": ("experiment_evidence_review",),
+        "register_smoke_result": ("experiment_evidence_review",),
+        "register_full_run_result": ("experiment_evidence_review",),
+    },
+}
+_CANONICAL_ITERATION_WRITEBACK_RULES: dict[str, dict[str, tuple[str, ...]]] = {
+    "challenge_cup_experiment_revision": {
+        "create_loop": ("iteration_decision",),
+        "record_evidence": ("iteration_decision",),
+        "record_decision": ("iteration_decision",),
+    },
+    "challenge_cup_evaluator": {
+        "record_evidence": ("experiment_evidence_review",),
+    },
+}
+
+
+class _CanonicalRoleWritebackError(ValueError):
+    def __init__(self, error_type: str, message: str) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+
+
 def _iteration_writeback_contract() -> dict[str, Any]:
     return {
         "create_loop": {
@@ -178,6 +224,15 @@ def challenge_cup_experiment_writeback_tool(
             allowed_task_kinds = ("protocol_review",)
         else:
             allowed_task_kinds = ("experiment_evidence_review",)
+        canonical_authority = _canonical_writeback_authority(
+            surface="experiment",
+            operation=normalized_operation,
+            team_id=team_id,
+            recorded_by_agent=recorded_by_agent,
+        )
+        if canonical_authority:
+            allowed_task_kinds = canonical_authority["allowedTaskKinds"]
+            recorded_by_agent = canonical_authority["agentId"]
         task_binding = _project_task_binding(
             workflow_service,
             team_id=team_id,
@@ -191,7 +246,9 @@ def challenge_cup_experiment_writeback_tool(
                 "record_hypothesis_set",
                 "record_protocol_review",
             },
+            require_binding=bool(canonical_authority),
         )
+        _validate_canonical_task_binding(canonical_authority, task_binding)
         bound_project_id, bound_task_id = _project_task_identity(task_binding)
         task = (
             task_binding.get("task")
@@ -487,14 +544,29 @@ def challenge_cup_iteration_writeback_tool(
         )
 
         normalized_operation = _text(operation)
+        canonical_authority = _canonical_writeback_authority(
+            surface="iteration",
+            operation=normalized_operation,
+            team_id=team_id,
+            recorded_by_agent=recorded_by_agent,
+        )
+        allowed_task_kinds = (
+            canonical_authority["allowedTaskKinds"]
+            if canonical_authority
+            else ("iteration_decision",)
+        )
+        if canonical_authority:
+            recorded_by_agent = canonical_authority["agentId"]
         task = _project_task_binding(
             workflow_service,
             team_id=team_id,
             research_project_id=research_project_id,
             task_id=task_id,
-            allowed_task_kinds=("iteration_decision",),
+            allowed_task_kinds=allowed_task_kinds,
             recorded_by_agent=recorded_by_agent,
+            require_binding=bool(canonical_authority),
         )
+        _validate_canonical_task_binding(canonical_authority, task)
         bound_project_id, bound_task_id = _project_task_identity(task)
         payload = _json_object(payload_json)
         actor_agent_id = (
@@ -863,6 +935,7 @@ def _project_task_binding(
     allowed_task_kinds: tuple[str, ...],
     recorded_by_agent: str,
     load_context: bool = False,
+    require_binding: bool = False,
 ) -> dict[str, Any] | None:
     project_id = _text(research_project_id)
     normalized_task_id = _text(task_id)
@@ -879,6 +952,11 @@ def _project_task_binding(
         runtime_turn_id = _text(runtime.get("turnId"))
         runtime_agent_id = _text(runtime.get("agentId"))
         if not runtime_session_id or not runtime_turn_id:
+            if require_binding:
+                raise _CanonicalRoleWritebackError(
+                    "formal_task_binding_required",
+                    "Canonical Challenge Cup writeback requires a formal task-bound runtime.",
+                )
             return None
         detail = session_service.get_session_detail(
             runtime_session_id,
@@ -892,13 +970,28 @@ def _project_task_binding(
             else {}
         )
         if not experiment_binding:
+            if require_binding:
+                raise _CanonicalRoleWritebackError(
+                    "formal_task_binding_required",
+                    "Canonical Challenge Cup writeback requires a formal task binding.",
+                )
             return None
         if _text(experiment_binding.get("teamId")) != _text(team_id):
+            if require_binding:
+                raise _CanonicalRoleWritebackError(
+                    "role_operation_denied",
+                    "Current runtime research project task belongs to another team.",
+                )
             raise ValueError(
                 "Current runtime research project task belongs to another team."
             )
         project_id = _text(experiment_binding.get("researchProjectId"))
         if not project_id:
+            if require_binding:
+                raise _CanonicalRoleWritebackError(
+                    "formal_task_binding_required",
+                    "Current runtime experiment binding is missing researchProjectId.",
+                )
             raise ValueError(
                 "Current runtime experiment binding is missing researchProjectId."
             )
@@ -908,6 +1001,11 @@ def _project_task_binding(
             and binding_agent_id
             and runtime_agent_id != binding_agent_id
         ):
+            if require_binding:
+                raise _CanonicalRoleWritebackError(
+                    "role_operation_denied",
+                    "Current runtime Agent does not match the experiment binding.",
+                )
             raise ValueError(
                 "Current runtime Agent does not match the experiment binding."
             )
@@ -936,6 +1034,11 @@ def _project_task_binding(
         if used_session_fallback:
             candidates = session_candidates
         if len(candidates) != 1:
+            if require_binding:
+                raise _CanonicalRoleWritebackError(
+                    "formal_task_binding_required",
+                    "Current runtime does not resolve to exactly one compatible research project Agent task.",
+                )
             raise ValueError(
                 "Current runtime does not resolve to exactly one compatible "
                 "research project Agent task."
@@ -968,14 +1071,130 @@ def _project_task_binding(
                 "Research project Agent task responsibility does not allow this context."
             )
         return context
-    return workflow_service.require_research_project_agent_task(
-        team_id,
-        project_id,
-        normalized_task_id,
-        allowed_task_kinds=allowed_task_kinds,
-        recorded_by_agent=_text(recorded_by_agent),
-        require_active=not allow_incomplete_recovery,
+    try:
+        return workflow_service.require_research_project_agent_task(
+            team_id,
+            project_id,
+            normalized_task_id,
+            allowed_task_kinds=allowed_task_kinds,
+            recorded_by_agent=_text(recorded_by_agent),
+            require_active=not allow_incomplete_recovery,
+        )
+    except workflow_service.ResearchProjectAgentTaskError as exc:
+        if not require_binding:
+            raise
+        error_type = (
+            "formal_task_binding_required"
+            if _text(getattr(exc, "code", "")) == "task_not_found"
+            else "role_operation_denied"
+        )
+        raise _CanonicalRoleWritebackError(error_type, str(exc)) from exc
+
+
+def _canonical_writeback_authority(
+    *,
+    surface: str,
+    operation: str,
+    team_id: str,
+    recorded_by_agent: str,
+) -> dict[str, Any] | None:
+    from core.web.services import agent_directory_service
+
+    runtime = agent_directory_service.current_agent_runtime()
+    if not isinstance(runtime, dict):
+        return None
+    agent = runtime.get("agent") if isinstance(runtime.get("agent"), dict) else {}
+    metadata = (
+        agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     )
+    role_candidates = {
+        _text(value).lower()
+        for value in (
+            metadata.get("challengeCupTeamRoleKey"),
+            metadata.get("challengeCupTeamRole"),
+            agent.get("roleKey"),
+            runtime.get("roleKey"),
+        )
+        if _text(value).lower() in _CANONICAL_CHALLENGE_CUP_ROLES
+    }
+    if not role_candidates:
+        return None
+    if len(role_candidates) != 1:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Canonical Challenge Cup runtime exposes conflicting product roles.",
+        )
+    role_key = next(iter(role_candidates))
+    runtime_agent_id = _text(runtime.get("agentId"))
+    nested_agent_id = _text(agent.get("agentId"))
+    if runtime_agent_id and nested_agent_id and runtime_agent_id != nested_agent_id:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Canonical Challenge Cup runtime Agent identity is inconsistent.",
+        )
+    agent_id = runtime_agent_id or nested_agent_id
+    if not agent_id:
+        raise _CanonicalRoleWritebackError(
+            "formal_task_binding_required",
+            "Canonical Challenge Cup writeback requires a runtime Agent identity.",
+        )
+    managed_team_id = _text(metadata.get("challengeCupTeamId"))
+    if managed_team_id and managed_team_id != _text(team_id):
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Canonical Challenge Cup runtime belongs to another team.",
+        )
+    requested_actor = _text(recorded_by_agent)
+    if requested_actor and requested_actor != agent_id:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Writeback actor does not match the canonical runtime Agent.",
+        )
+    rules = (
+        _CANONICAL_EXPERIMENT_WRITEBACK_RULES
+        if surface == "experiment"
+        else _CANONICAL_ITERATION_WRITEBACK_RULES
+    )
+    allowed_task_kinds = rules.get(role_key, {}).get(operation)
+    if not allowed_task_kinds:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            f"Canonical role {role_key} may not perform {surface} operation {operation}.",
+        )
+    return {
+        "agentId": agent_id,
+        "roleKey": role_key,
+        "allowedTaskKinds": allowed_task_kinds,
+    }
+
+
+def _validate_canonical_task_binding(
+    authority: dict[str, Any] | None,
+    binding: dict[str, Any] | None,
+) -> None:
+    if not authority:
+        return
+    if not isinstance(binding, dict):
+        raise _CanonicalRoleWritebackError(
+            "formal_task_binding_required",
+            "Canonical Challenge Cup writeback requires a formal task binding.",
+        )
+    task = binding.get("task") if isinstance(binding.get("task"), dict) else binding
+    if not isinstance(task, dict) or not _text(task.get("taskId")):
+        raise _CanonicalRoleWritebackError(
+            "formal_task_binding_required",
+            "Canonical Challenge Cup writeback requires an identified formal task.",
+        )
+    if _text(task.get("agentId")) != authority["agentId"]:
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Formal task is assigned to another Agent.",
+        )
+    if _text(task.get("taskKind")) not in set(authority["allowedTaskKinds"]):
+        raise _CanonicalRoleWritebackError(
+            "role_operation_denied",
+            "Formal task responsibility does not allow this role operation.",
+        )
 
 
 def _project_task_identity(
@@ -1286,11 +1505,12 @@ def _unsupported_operation(operation: str, *, boundary: str) -> str:
 
 
 def _tool_error(exc: Exception, *, event_code: str, fields: dict[str, Any]) -> str:
-    _record_tool_event(event_code, level="warning", outcome="failed", fields={**fields, "errorType": type(exc).__name__})
+    error_type = _text(getattr(exc, "error_type", "")) or type(exc).__name__
+    _record_tool_event(event_code, level="warning", outcome="failed", fields={**fields, "errorType": error_type})
     return _json_dump(
         {
             "status": "error",
-            "errorType": type(exc).__name__,
+            "errorType": error_type,
             "message": str(exc),
             "boundaries": _operation_boundaries("manual_ledger_only"),
         }
