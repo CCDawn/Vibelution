@@ -353,6 +353,61 @@ def test_directory_only_canonical_actor_still_requires_formal_binding(monkeypatc
     assert result["errorType"] == "formal_task_binding_required"
 
 
+def test_directory_only_canonical_actor_rejects_explicit_formal_task(monkeypatch):
+    agent = _canonical_agent_record("challenge_cup_experiment_revision")
+    writes = []
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {})
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agent if agent_id == agent["agentId"] else None,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": "experiment_design",
+            "agentId": agent["agentId"],
+            "roleKey": agent["roleKey"],
+            "researchProjectId": project_id,
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda _team_id, payload: writes.append(dict(payload))
+        or {
+            "plan": {
+                "planId": "plan-1",
+                "researchProjectId": payload["researchProjectId"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda _team_id, _project_id, task_id, **kwargs: {
+            "taskId": task_id,
+            "status": kwargs["status"],
+        },
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-1",
+            operation="create_plan",
+            recorded_by_agent=agent["agentId"],
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["errorType"] == "formal_task_binding_required"
+    assert writes == []
+
+
 def test_directory_canonical_actor_cannot_hide_behind_legacy_runtime(monkeypatch):
     agent = _canonical_agent_record("challenge_cup_experiment_revision")
     monkeypatch.setattr(

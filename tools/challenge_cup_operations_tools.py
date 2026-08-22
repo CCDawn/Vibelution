@@ -1136,6 +1136,12 @@ def _canonical_writeback_authority(
     )
     if not has_managed_signal:
         return None
+    if not runtime_agent_id:
+        raise _CanonicalRoleWritebackError(
+            "formal_task_binding_required",
+            "Canonical Challenge Cup writeback requires an authenticated "
+            "current Agent runtime; a directory record alone cannot authorize writes.",
+        )
     if not agent_sources:
         raise _CanonicalRoleWritebackError(
             "role_operation_denied",
