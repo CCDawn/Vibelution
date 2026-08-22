@@ -24,6 +24,7 @@ export type IsolatedInstanceSuperviseInput = {
   openWindow: () => Promise<void>;
   closeWindowIfSuperseded: () => Promise<void>;
   closeWindowAfterReadyFailure: () => Promise<void>;
+  retireBackend?: (message: string) => Promise<void>;
   markReady: (generation: number) => Promise<void>;
   markError: (generation: number, message: string) => Promise<void>;
   renewLease?: () => Promise<void>;
@@ -46,6 +47,7 @@ export async function superviseIsolatedInstanceStart(
   const timeoutMs = resolveIsolatedReadyTimeoutMs(input);
   const heartbeatMs = Math.max(1, input.heartbeatMs ?? OWNER_LEASE_HEARTBEAT_MS);
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let httpReady = false;
   const stopHeartbeat = (): void => {
     if (heartbeat !== undefined) {
       clearInterval(heartbeat);
@@ -60,8 +62,12 @@ export async function superviseIsolatedInstanceStart(
       }, heartbeatMs);
     }
     await input.waitForHttp(input.url, timeoutMs, input.lease.signal);
-    if (!input.isCurrent(input.lease) || !input.claimReady(input.lease)) {
+    httpReady = true;
+    if (!input.isCurrent(input.lease)) {
       return "ignored";
+    }
+    if (!input.claimReady(input.lease)) {
+      throw new Error(`isolated lifecycle READY claim failed for ${input.instanceId}`);
     }
     await input.openWindow();
     if (!input.isCurrent(input.lease)) {
@@ -74,7 +80,6 @@ export async function superviseIsolatedInstanceStart(
       return "ignored";
     }
     if (!input.completeReady(input.lease)) {
-      await input.closeWindowAfterReadyFailure();
       throw new Error(`isolated lifecycle READY completion failed for ${input.instanceId}`);
     }
   } catch (error: unknown) {
@@ -83,8 +88,31 @@ export async function superviseIsolatedInstanceStart(
     }
     input.releaseReadyClaim(input.lease);
     const message = error instanceof Error ? error.message : String(error);
+    const compensationErrors: string[] = [];
+    if (httpReady && input.isCurrent(input.lease)) {
+      try {
+        await input.closeWindowAfterReadyFailure();
+      } catch (closeError: unknown) {
+        compensationErrors.push(
+          `isolated window compensation failed: ${closeError instanceof Error ? closeError.message : String(closeError)}`
+        );
+      }
+    }
+    if (input.isCurrent(input.lease) && input.retireBackend) {
+      try {
+        await input.retireBackend(message);
+      } catch (retireError: unknown) {
+        compensationErrors.push(
+          `isolated backend compensation failed: ${retireError instanceof Error ? retireError.message : String(retireError)}`
+        );
+      }
+    }
+    if (input.lease.signal.aborted || !input.isCurrent(input.lease)) {
+      return "ignored";
+    }
+    const failureMessage = [message, ...compensationErrors].filter(Boolean).join("; ");
     try {
-      await input.markError(input.lease.generation, message);
+      await input.markError(input.lease.generation, failureMessage);
     } catch (markErrorFailure: unknown) {
       if (input.lease.signal.aborted || !input.isCurrent(input.lease)) {
         return "ignored";

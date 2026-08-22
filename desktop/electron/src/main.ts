@@ -95,29 +95,30 @@ import {
   type WorkbenchLifecycleOperation
 } from "./process/workbenchLifecycle.js";
 import {
-  clearWorkbenchLauncherRuntimeState,
   mainLineBackendIsReusable,
-  reclaimStaleWorkbenchBackend,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
-import { knownPidIsAlive } from "./lifecycle/mainLine/observation.js";
+import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
 import {
+  claimStopIfGeneration,
   instancesRegistryPath,
   reclaimStaleInFlightStops,
-  recordSpawnPid
+  readRegistry,
+  recordSpawnPid,
+  upsert
 } from "./lifecycle/instanceRegistryStore.js";
 import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
 import {
   type BranchInstanceOperation,
-  claimIsolatedStart,
   claimIsolatedStop,
-  completeIsolatedStop,
   observeIsolatedError,
   observeIsolatedReady,
+  prepareIsolatedStart,
+  retireClaimedIsolatedRuntime,
   renewIsolatedOwnerLease,
   resolveIsolatedClaimTarget
 } from "./lifecycle/isolatedInstanceRegistryHost.js";
@@ -3074,6 +3075,67 @@ async function openWorkbenchAfterLifecycleReady(
   }
 }
 
+async function retireIsolatedBackendAfterStartFailure(input: {
+  instanceId: string;
+  workspaceRoot: string;
+  generation: number;
+  commandId: string;
+  message: string;
+  isCurrent?: () => boolean;
+  beforeRetire?: () => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const registryPath = instancesRegistryPath();
+  const registry = await readRegistry(registryPath);
+  const entry = registry.instances[input.instanceId];
+  const generation = Number(entry?.generation || 0);
+  const status = String(entry?.status || "").trim().toLowerCase();
+  const commandId = String(entry?.commandId || "").trim();
+  const ownerPid = Number(entry?.ownerPid || 0);
+  if (
+    !entry
+    || generation !== input.generation
+    || commandId !== input.commandId
+    || (ownerPid > 0 && ownerPid !== process.pid)
+    || (status !== "starting" && status !== "restarting" && status !== "steady")
+  ) {
+    return;
+  }
+  const claimed = await claimStopIfGeneration(registryPath, {
+    instanceId: input.instanceId,
+    expectedGeneration: input.generation,
+    expectedCommandId: input.commandId,
+    projectRoot: String(entry.projectRoot || input.workspaceRoot || "").trim(),
+    commandId: `retire-after-start-failure:${randomUUID()}`
+  });
+  if (!claimed.applied) {
+    return;
+  }
+  let directKillError = "";
+  try {
+    input.beforeRetire?.();
+  } catch (error: unknown) {
+    directKillError = error instanceof Error ? error.message : String(error);
+  }
+  const retired = await retireClaimedIsolatedRuntime({
+    instanceId: input.instanceId,
+    workspaceRoot: input.workspaceRoot,
+    entry: claimed.entry,
+    registryPath,
+    signal: input.signal,
+    isCurrent: input.isCurrent,
+    desiredStateOnFailure: "open",
+    successFailureMessage: input.message
+  });
+  await recordAdmissionOutcome({
+    instanceId: input.instanceId,
+    outcome: "failure"
+  });
+  if (!retired.ok) {
+    throw new Error([directKillError, retired.message].filter(Boolean).join("; "));
+  }
+}
+
 async function runIsolatedRegistryMutation(input: {
   operation: BranchInstanceOperation;
   instanceId: string;
@@ -3081,6 +3143,7 @@ async function runIsolatedRegistryMutation(input: {
   pythonPath: string;
   operatorConfigPath: string;
   signal?: AbortSignal;
+  isCurrent?: () => boolean;
 }): Promise<OrchestratedBranchInstanceResult> {
   if (input.operation === "observe-error" || input.operation === "observe-ready") {
     throw new Error("isolated observe must use instanceRegistryStore, not the Python bridge");
@@ -3102,11 +3165,13 @@ async function runIsolatedRegistryMutation(input: {
       };
     }
     if (target) {
-      const claimed = await claimIsolatedStart({
+      const claimed = await prepareIsolatedStart({
         instanceId: input.instanceId,
         branchInstances: payload,
         operation: input.operation,
-        commandId: randomUUID()
+        commandId: randomUUID(),
+        signal: input.signal,
+        isCurrent: input.isCurrent
       });
       if (!claimed.ok) {
         return {
@@ -3115,8 +3180,8 @@ async function runIsolatedRegistryMutation(input: {
           operation: input.operation,
           instanceId: input.instanceId,
           generation: claimed.generation,
-          code: "instance_busy",
-          message: "该分支实例正在执行生命周期操作。"
+          code: claimed.code,
+          message: claimed.message
         };
       }
       const port = Number(claimed.entry.port || target.preferredBackend || 0);
@@ -3167,7 +3232,25 @@ async function runIsolatedRegistryMutation(input: {
           }
         });
       } catch (error: unknown) {
-        spawned.child.kill();
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          await retireIsolatedBackendAfterStartFailure({
+            instanceId: input.instanceId,
+            workspaceRoot: target.projectRoot,
+            generation,
+            commandId: String(claimed.entry.commandId || ""),
+            message,
+            isCurrent: input.isCurrent,
+            signal: input.signal,
+            beforeRetire: () => {
+              spawned.child.kill();
+            }
+          });
+        } catch (compensationError: unknown) {
+          throw new Error(
+            `${message}; isolated backend compensation failed: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`
+          );
+        }
         throw error;
       }
       return {
@@ -3203,36 +3286,14 @@ async function runIsolatedRegistryMutation(input: {
       target?.projectRoot
       || claimed.entry.projectRoot
     ).trim();
-    const stopPort = Number(claimed.entry.port || target?.preferredBackend || 0);
-    const staleReclaim = stopWorkspaceRoot
-      ? await reclaimStaleWorkbenchBackend({
-          port: stopPort,
-          host: String(claimed.entry.host || "127.0.0.1"),
-          workspaceRoot: stopWorkspaceRoot,
-          registeredPids: [Number(claimed.entry.spawnPid || 0)],
-          signal: input.signal
-        })
-      : {
-          reclaimed: false,
-          reason: "isolated stop target has no verified project root"
-        };
-    const registeredSpawnPid = Number(claimed.entry.spawnPid || 0);
-    const registeredSpawnPidAlive = registeredSpawnPid > 0 && knownPidIsAlive(registeredSpawnPid);
-    const backendConfirmedClosed = staleReclaim.reclaimed && (
-      staleReclaim.verifiedPid !== undefined
-      || registeredSpawnPid <= 0
-      || !registeredSpawnPidAlive
-    );
-    const runtimeCleanup = backendConfirmedClosed
-      ? clearWorkbenchLauncherRuntimeState(stopWorkspaceRoot)
-      : null;
-    const completed = await completeIsolatedStop({
+    const retired = await retireClaimedIsolatedRuntime({
       instanceId: input.instanceId,
-      expectedGeneration: Number(claimed.entry.generation || 0)
+      workspaceRoot: stopWorkspaceRoot,
+      entry: claimed.entry,
+      signal: input.signal,
+      isCurrent: input.isCurrent,
+      desiredStateOnFailure: "closed"
     });
-    if (!completed.applied) {
-      throw new Error(`isolated instance stop completion lost its generation for ${input.instanceId}`);
-    }
     const commandId = String(claimed.entry.commandId || stopCommandId);
     return {
       schemaVersion: 1,
@@ -3242,17 +3303,10 @@ async function runIsolatedRegistryMutation(input: {
       generation: Number(claimed.entry.generation || 0),
       commandId,
       ...(
-        !backendConfirmedClosed || runtimeCleanup?.failedCount
+        !retired.ok
           ? {
               code: "backend_retire_incomplete",
-              message: [
-                !staleReclaim.reclaimed
-                  ? staleReclaim.reason
-                  : registeredSpawnPidAlive
-                    ? `port ${stopPort} is released but registered spawn pid ${registeredSpawnPid} is still alive and was not health-verified`
-                    : "",
-                runtimeCleanup?.failedCount ? "workbench launcher runtime state could not be fully cleared" : ""
-              ].filter(Boolean).join("; ")
+              message: retired.message
             }
           : {}
       )
@@ -3316,7 +3370,8 @@ async function orchestrateBranchInstanceLifecycle(
       pythonPath,
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-      signal: intentLease.signal
+      signal: intentLease.signal,
+      isCurrent: () => launcherLifecycleSupervisor.isCurrent(intentLease)
     }),
     reconcile: async () => {
       scheduleLauncherStatusCliRefresh();
@@ -3372,18 +3427,62 @@ async function orchestrateBranchInstanceLifecycle(
             await provider.closeInstanceWorkbench(instanceId);
           }
         },
+        retireBackend: async (message) => {
+          await retireIsolatedBackendAfterStartFailure({
+            instanceId,
+            workspaceRoot: paths.workspaceRoot,
+            generation: lease.generation,
+            commandId: lease.commandId,
+            message,
+            isCurrent: () => launcherLifecycleSupervisor.isCurrent(lease),
+            signal: lease.signal
+          });
+        },
         markReady: async (observedGeneration) => {
-          await observeIsolatedReady({
+          const observed = await observeIsolatedReady({
             instanceId,
             expectedGeneration: observedGeneration
           });
+          if (!observed.applied) {
+            throw new Error(`isolated observe-ready CAS missed for ${instanceId}`);
+          }
         },
         markError: async (observedGeneration, message) => {
-          await observeIsolatedError({
+          const observed = await observeIsolatedError({
             instanceId,
             expectedGeneration: observedGeneration,
             message
           });
+          if (observed.applied || !launcherLifecycleSupervisor.isCurrent(lease)) {
+            return;
+          }
+          const registryPath = instancesRegistryPath();
+          const registry = await readRegistry(registryPath);
+          const entry = registry.instances[instanceId];
+          const status = String(entry?.status || "").trim().toLowerCase();
+          const commandId = String(entry?.commandId || "").trim();
+          if (
+            !entry
+            || Number(entry.generation || 0) !== observedGeneration
+            || commandId !== lease.commandId
+            || !["starting", "restarting", "steady"].includes(status)
+          ) {
+            return;
+          }
+          const repaired = await upsert(
+            registryPath,
+            instanceId,
+            {
+              status: "failed",
+              phase: "failed",
+              desiredState: "open",
+              failureMessage: message
+            },
+            observedGeneration
+          );
+          if (!repaired.applied) {
+            throw new Error(`isolated observe-error fallback lost registry generation for ${instanceId}`);
+          }
         },
         renewLease: async () => {
           await renewIsolatedOwnerLease({

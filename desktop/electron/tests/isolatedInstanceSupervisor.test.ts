@@ -69,9 +69,10 @@ describe("superviseIsolatedInstanceStart", () => {
     expect(supervisor.snapshot("worktree:task")?.phase).toBe("ready");
   });
 
-  it("writes observe-error for the same generation when HTTP times out", async () => {
+  it("retires the backend and writes observe-error for the same generation when HTTP times out", async () => {
     const { supervisor, lease } = currentLease(7);
     const markError = vi.fn().mockResolvedValue(undefined);
+    const retireBackend = vi.fn().mockResolvedValue(undefined);
     const result = await superviseIsolatedInstanceStart({
       instanceId: "worktree:task",
       url: "http://127.0.0.1:8003/",
@@ -82,6 +83,7 @@ describe("superviseIsolatedInstanceStart", () => {
       releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
       closeWindowIfSuperseded: async () => undefined,
       closeWindowAfterReadyFailure: async () => undefined,
+      retireBackend,
       timeoutMs: 10,
       waitForHttp: async () => {
         throw new Error("workbench HTTP was not reachable");
@@ -94,6 +96,102 @@ describe("superviseIsolatedInstanceStart", () => {
     });
     expect(result).toBe("error");
     expect(markError).toHaveBeenCalledWith(7, "workbench HTTP was not reachable");
+    expect(retireBackend).toHaveBeenCalledWith("workbench HTTP was not reachable");
+  });
+
+  it("retires the backend when opening the isolated window fails after HTTP is ready", async () => {
+    const { supervisor, lease } = currentLease(12);
+    const closeWindowAfterReadyFailure = vi.fn().mockResolvedValue(undefined);
+    const retireBackend = vi.fn().mockResolvedValue(undefined);
+    const markError = vi.fn().mockResolvedValue(undefined);
+    const result = await superviseIsolatedInstanceStart({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8003/",
+      lease,
+      isCurrent: (candidate) => supervisor.isCurrent(candidate),
+      claimReady: (candidate) => supervisor.claimReady(candidate),
+      completeReady: (candidate) => supervisor.completeReady(candidate),
+      releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
+      closeWindowIfSuperseded: async () => undefined,
+      closeWindowAfterReadyFailure,
+      retireBackend,
+      timeoutMs: 50,
+      waitForHttp: async () => undefined,
+      openWindow: async () => {
+        throw new Error("window could not be opened");
+      },
+      markReady: async () => undefined,
+      markError
+    });
+
+    expect(result).toBe("error");
+    expect(closeWindowAfterReadyFailure).toHaveBeenCalledOnce();
+    expect(retireBackend).toHaveBeenCalledWith("window could not be opened");
+    expect(markError).toHaveBeenCalledWith(12, "window could not be opened");
+  });
+
+  it("compensates a current observer when the READY claim fails", async () => {
+    const { supervisor, lease } = currentLease(13);
+    const closeWindowAfterReadyFailure = vi.fn().mockResolvedValue(undefined);
+    const retireBackend = vi.fn().mockResolvedValue(undefined);
+    const markError = vi.fn().mockResolvedValue(undefined);
+    const openWindow = vi.fn().mockResolvedValue(undefined);
+    const result = await superviseIsolatedInstanceStart({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8003/",
+      lease,
+      isCurrent: (candidate) => supervisor.isCurrent(candidate),
+      claimReady: () => false,
+      completeReady: (candidate) => supervisor.completeReady(candidate),
+      releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
+      closeWindowIfSuperseded: async () => undefined,
+      closeWindowAfterReadyFailure,
+      retireBackend,
+      timeoutMs: 50,
+      waitForHttp: async () => undefined,
+      openWindow,
+      markReady: async () => undefined,
+      markError
+    });
+
+    const message = "isolated lifecycle READY claim failed for worktree:task";
+    expect(result).toBe("error");
+    expect(openWindow).not.toHaveBeenCalled();
+    expect(closeWindowAfterReadyFailure).toHaveBeenCalledOnce();
+    expect(retireBackend).toHaveBeenCalledWith(message);
+    expect(markError).toHaveBeenCalledWith(13, message);
+  });
+
+  it("compensates when observe-ready loses its registry CAS", async () => {
+    const { supervisor, lease } = currentLease(14);
+    const closeWindowAfterReadyFailure = vi.fn().mockResolvedValue(undefined);
+    const retireBackend = vi.fn().mockResolvedValue(undefined);
+    const markError = vi.fn().mockResolvedValue(undefined);
+    const result = await superviseIsolatedInstanceStart({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8003/",
+      lease,
+      isCurrent: (candidate) => supervisor.isCurrent(candidate),
+      claimReady: (candidate) => supervisor.claimReady(candidate),
+      completeReady: (candidate) => supervisor.completeReady(candidate),
+      releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
+      closeWindowIfSuperseded: async () => undefined,
+      closeWindowAfterReadyFailure,
+      retireBackend,
+      timeoutMs: 50,
+      waitForHttp: async () => undefined,
+      openWindow: async () => undefined,
+      markReady: async () => {
+        throw new Error("isolated observe-ready CAS missed for worktree:task");
+      },
+      markError
+    });
+
+    const message = "isolated observe-ready CAS missed for worktree:task";
+    expect(result).toBe("error");
+    expect(closeWindowAfterReadyFailure).toHaveBeenCalledOnce();
+    expect(retireBackend).toHaveBeenCalledWith(message);
+    expect(markError).toHaveBeenCalledWith(14, message);
   });
 
   it("ignores a stale observer that resolves after a newer generation", async () => {
@@ -101,6 +199,7 @@ describe("superviseIsolatedInstanceStart", () => {
     const openWindow = vi.fn();
     const markReady = vi.fn();
     const markError = vi.fn();
+    const retireBackend = vi.fn().mockResolvedValue(undefined);
     const waitForHttp = vi.fn(async () => {
       supervisor.beginIntent({
         instanceId: "worktree:task",
@@ -119,6 +218,7 @@ describe("superviseIsolatedInstanceStart", () => {
       releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
       closeWindowIfSuperseded: async () => undefined,
       closeWindowAfterReadyFailure: async () => undefined,
+      retireBackend,
       timeoutMs: 50,
       waitForHttp,
       openWindow,
@@ -129,6 +229,7 @@ describe("superviseIsolatedInstanceStart", () => {
     expect(openWindow).not.toHaveBeenCalled();
     expect(markReady).not.toHaveBeenCalled();
     expect(markError).not.toHaveBeenCalled();
+    expect(retireBackend).not.toHaveBeenCalled();
   });
 
   it("closes a window opened by a start that is superseded by stop during the open call", async () => {
@@ -164,6 +265,7 @@ describe("superviseIsolatedInstanceStart", () => {
   it("closes and reports an observer error when READY completion violates the current lease", async () => {
     const { supervisor, lease } = currentLease(10);
     const closeWindowAfterReadyFailure = vi.fn(async () => undefined);
+    const retireBackend = vi.fn(async () => undefined);
     const markError = vi.fn(async () => undefined);
     const result = await superviseIsolatedInstanceStart({
       instanceId: "worktree:task",
@@ -175,6 +277,7 @@ describe("superviseIsolatedInstanceStart", () => {
       releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
       closeWindowIfSuperseded: async () => undefined,
       closeWindowAfterReadyFailure,
+      retireBackend,
       timeoutMs: 50,
       waitForHttp: async () => undefined,
       openWindow: async () => undefined,
@@ -184,6 +287,9 @@ describe("superviseIsolatedInstanceStart", () => {
 
     expect(result).toBe("error");
     expect(closeWindowAfterReadyFailure).toHaveBeenCalledOnce();
+    expect(retireBackend).toHaveBeenCalledWith(
+      "isolated lifecycle READY completion failed for worktree:task"
+    );
     expect(markError).toHaveBeenCalledWith(10, "isolated lifecycle READY completion failed for worktree:task");
   });
 

@@ -1,16 +1,24 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdmissionDeniedError } from "../src/lifecycle/instanceAdmissionControl.js";
-import { admitLifecycleCommand, resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
+import {
+  admitLifecycleCommand,
+  recordAdmissionOutcome,
+  resetAdmissionCacheForTests
+} from "../src/lifecycle/instanceAdmissionStore.js";
 import {
   claimIsolatedStart,
   claimIsolatedStop,
   collectExtraUsedPorts,
-  resolveIsolatedClaimTarget
+  prepareIsolatedStart,
+  resolveIsolatedClaimTarget,
+  retireClaimedIsolatedRuntime,
+  retireIsolatedRuntimeBeforeStart
 } from "../src/lifecycle/isolatedInstanceRegistryHost.js";
+import { claimStopIfGeneration, readRegistry } from "../src/lifecycle/instanceRegistryStore.js";
 
 afterEach(() => {
   resetAdmissionCacheForTests();
@@ -74,6 +82,101 @@ describe("isolatedInstanceRegistryHost", () => {
     ).rejects.toBeInstanceOf(AdmissionDeniedError);
   });
 
+  it("rejects admission before touching a previously healthy runtime", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-admission-before-retire-"));
+    const admissionStorePath = join(dir, "instance-admission.json");
+    const registryPath = join(dir, "instances.json");
+    const nowMs = 1_787_227_200_000;
+    const original = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          projectRoot: "C:/wt/task",
+          port: 8003,
+          controlPort: 8768,
+          status: "steady",
+          desiredState: "open",
+          generation: 4,
+          commandId: "healthy-command",
+          spawnPid: 4242,
+          portLeaseStatus: "held"
+        }
+      }
+    };
+    await writeFile(registryPath, JSON.stringify(original), "utf8");
+    for (let index = 0; index < 3; index += 1) {
+      await admitLifecycleCommand({
+        instanceId: "worktree:task",
+        operation: "start",
+        storePath: admissionStorePath,
+        nowMs: nowMs + index
+      });
+    }
+    const reclaimBackend = vi.fn();
+
+    await expect(prepareIsolatedStart({
+      instanceId: "worktree:task",
+      branchInstances: payload,
+      operation: "restart",
+      commandId: "denied-restart",
+      nowMs: nowMs + 10,
+      registryPath,
+      admissionStorePath,
+      retireDependencies: { reclaimBackend }
+    })).rejects.toBeInstanceOf(AdmissionDeniedError);
+
+    expect(reclaimBackend).not.toHaveBeenCalled();
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject(
+      original.instances["worktree:task"]
+    );
+  });
+
+  it("does not retire a healthy runtime during crash-loop cooldown", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-cooldown-before-retire-"));
+    const admissionStorePath = join(dir, "instance-admission.json");
+    const registryPath = join(dir, "instances.json");
+    const nowMs = 1_787_227_200_000;
+    await writeFile(registryPath, JSON.stringify({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          projectRoot: "C:/wt/task",
+          port: 8003,
+          status: "steady",
+          generation: 4,
+          commandId: "healthy-command",
+          spawnPid: 4242,
+          portLeaseStatus: "held"
+        }
+      }
+    }), "utf8");
+    await recordAdmissionOutcome({
+      instanceId: "worktree:task",
+      outcome: "failure",
+      storePath: admissionStorePath,
+      nowMs
+    });
+    const reclaimBackend = vi.fn();
+
+    await expect(prepareIsolatedStart({
+      instanceId: "worktree:task",
+      branchInstances: payload,
+      operation: "restart",
+      commandId: "cooldown-restart",
+      nowMs: nowMs + 1_000,
+      registryPath,
+      admissionStorePath,
+      retireDependencies: { reclaimBackend }
+    })).rejects.toMatchObject({ code: "crash_loop_backoff" });
+    expect(reclaimBackend).not.toHaveBeenCalled();
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject({
+      status: "steady",
+      generation: 4,
+      commandId: "healthy-command",
+      spawnPid: 4242
+    });
+  });
+
   it("persists the stop command id through the registry claim", async () => {
     const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-stop-command-"));
     const registryPath = join(dir, "instances.json");
@@ -101,5 +204,462 @@ describe("isolatedInstanceRegistryHost", () => {
     });
     expect(claimed.entry.commandId).toBe("stop-cmd");
     expect(claimed.entry.status).toBe("stopping");
+  });
+
+  it("reclaims the registered backend before completing a pre-start retirement", async () => {
+    const events: string[] = [];
+    const existing = {
+      projectRoot: "C:/wt/task",
+      host: "127.0.0.1",
+      port: 8003,
+      spawnPid: 4242,
+      status: "steady",
+      desiredState: "open",
+      generation: 4
+    };
+    const claimed = { ...existing, status: "stopping", desiredState: "closed", generation: 5 };
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      registryPath: "C:/tmp/instances.json",
+      dependencies: {
+        readRegistry: async () => ({ schemaVersion: 3, instances: { "worktree:task": existing } }),
+        claimStopIfGeneration: async () => {
+          events.push("claim-stop");
+          return { applied: true, entry: claimed };
+        },
+        reclaimBackend: async (input) => {
+          events.push(`reclaim:${input.port}:${input.registeredPids?.join(",") || ""}`);
+          return { reclaimed: true, reason: "reclaimed", verifiedPid: 4242 };
+        },
+        clearRuntimeState: () => {
+          events.push("clear-runtime-state");
+          return { cleared: true, removedCount: 2, failedCount: 0 };
+        },
+        completeStop: async () => {
+          events.push("complete-stop");
+          return { applied: true, entry: { ...claimed, status: "closed" } };
+        },
+        pidAlive: () => false
+      }
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(events).toEqual([
+      "claim-stop",
+      "reclaim:8003:4242",
+      "clear-runtime-state",
+      "complete-stop"
+    ]);
+  });
+
+  it("keeps an alive registered pid from being confirmed closed before a new start", async () => {
+    const upsert = vi.fn(async () => ({
+      applied: true,
+      entry: { status: "failed", generation: 5 }
+    }));
+    const completeStop = vi.fn(async () => ({ applied: true, entry: {} }));
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      registryPath: "C:/tmp/instances.json",
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              projectRoot: "C:/wt/task",
+              host: "127.0.0.1",
+              port: 8003,
+              spawnPid: 4242,
+              status: "steady",
+              desiredState: "open",
+              generation: 4
+            }
+          }
+        }),
+        claimStopIfGeneration: async () => ({
+          applied: true,
+          entry: {
+            projectRoot: "C:/wt/task",
+            host: "127.0.0.1",
+            port: 8003,
+            spawnPid: 4242,
+            status: "stopping",
+            desiredState: "closed",
+            generation: 5
+          }
+        }),
+        reclaimBackend: async () => ({ reclaimed: true, reason: "port released", verifiedPid: 9911 }),
+        clearRuntimeState: () => ({ cleared: true, removedCount: 0, failedCount: 0 }),
+        completeStop,
+        upsert,
+        pidAlive: () => true
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("backend_retire_incomplete");
+      expect(result.message).toContain("registered spawn pid 4242 is still alive");
+    }
+    expect(upsert).toHaveBeenCalledWith(
+      "C:/tmp/instances.json",
+      "worktree:task",
+      expect.objectContaining({ status: "failed", phase: "failed" }),
+      5
+    );
+    expect(completeStop).not.toHaveBeenCalled();
+  });
+
+  it("does not kill a newer runtime when the conditional stop claim loses its generation", async () => {
+    const reclaimBackend = vi.fn();
+    const claimStopIfGeneration = vi.fn(async () => ({
+      applied: false,
+      entry: {
+        status: "starting",
+        generation: 5,
+        commandId: "newer-command",
+        spawnPid: 5555,
+        port: 8010
+      }
+    }));
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      registryPath: "C:/tmp/instances.json",
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              projectRoot: "C:/wt/task",
+              status: "steady",
+              generation: 4,
+              commandId: "old-command",
+              spawnPid: 4444,
+              port: 8003
+            }
+          }
+        }),
+        claimStopIfGeneration,
+        reclaimBackend
+      }
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "instance_busy", generation: 5 });
+    expect(claimStopIfGeneration).toHaveBeenCalledWith(
+      "C:/tmp/instances.json",
+      expect.objectContaining({ expectedGeneration: 4, expectedCommandId: "old-command" })
+    );
+    expect(reclaimBackend).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active start busy but retires an expired start owner", async () => {
+    const base = {
+      projectRoot: "C:/wt/task",
+      host: "127.0.0.1",
+      port: 8003,
+      spawnPid: 4242,
+      status: "starting",
+      desiredState: "open",
+      generation: 4,
+      commandId: "start-command",
+      deadlineAt: "2026-08-20T11:59:00Z"
+    };
+    const reclaimBackend = vi.fn(async () => ({ reclaimed: true, reason: "reclaimed", verifiedPid: 4242 }));
+    const claimStopIfGeneration = vi.fn(async () => ({
+      applied: true,
+      entry: { ...base, status: "stopping", desiredState: "closed", generation: 5 }
+    }));
+    const active = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      nowMs: Date.parse("2026-08-20T12:00:00Z"),
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              ...base,
+              ownerLease: { ownerId: "pid:1", expiresAt: "2026-08-20T12:01:00Z" }
+            }
+          }
+        }),
+        claimStopIfGeneration,
+        reclaimBackend
+      }
+    });
+    expect(active).toMatchObject({ ok: false, code: "instance_busy", generation: 4 });
+    expect(claimStopIfGeneration).not.toHaveBeenCalled();
+
+    const completed = vi.fn(async () => ({ applied: true, entry: { status: "closed", generation: 5 } }));
+    const stale = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      nowMs: Date.parse("2026-08-20T12:00:00Z"),
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              ...base,
+              ownerLease: { ownerId: "pid:1", expiresAt: "2026-08-20T11:58:00Z" }
+            }
+          }
+        }),
+        claimStopIfGeneration,
+        reclaimBackend,
+        completeStop: completed,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 2, failedCount: 0 }),
+        pidAlive: () => false
+      }
+    });
+    expect(stale).toEqual({ ok: true });
+    expect(claimStopIfGeneration).toHaveBeenCalledOnce();
+    expect(reclaimBackend).toHaveBeenCalledOnce();
+    expect(completed).toHaveBeenCalledOnce();
+  });
+
+  it("settles a superseded pre-start stop claim to failed without killing its backend", async () => {
+    const reclaimBackend = vi.fn();
+    const upsert = vi.fn(async () => ({ applied: true, entry: { status: "failed", generation: 5 } }));
+    const isCurrent = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      isCurrent,
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              projectRoot: "C:/wt/task",
+              status: "steady",
+              generation: 4,
+              commandId: "old-command",
+              spawnPid: 4242,
+              port: 8003
+            }
+          }
+        }),
+        claimStopIfGeneration: async () => ({
+          applied: true,
+          entry: {
+            projectRoot: "C:/wt/task",
+            status: "stopping",
+            generation: 5,
+            commandId: "retire-command",
+            spawnPid: 4242,
+            port: 8003
+          }
+        }),
+        reclaimBackend,
+        upsert
+      }
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "backend_retire_incomplete", generation: 5 });
+    expect(reclaimBackend).not.toHaveBeenCalled();
+    expect(upsert).toHaveBeenCalledWith(
+      expect.any(String),
+      "worktree:task",
+      expect.objectContaining({ status: "failed" }),
+      5
+    );
+    expect(upsert.mock.calls[0]?.[2]).not.toHaveProperty("spawnPid");
+  });
+
+  it("closes a reclaimed backend but does not start again after supersession", async () => {
+    let current = true;
+    const completeStop = vi.fn(async () => ({ applied: true, entry: { status: "closed", generation: 5 } }));
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      isCurrent: () => current,
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              projectRoot: "C:/wt/task",
+              status: "steady",
+              generation: 4,
+              commandId: "old-command",
+              spawnPid: 4242,
+              port: 8003
+            }
+          }
+        }),
+        claimStopIfGeneration: async () => ({
+          applied: true,
+          entry: {
+            projectRoot: "C:/wt/task",
+            status: "stopping",
+            generation: 5,
+            commandId: "retire-command",
+            spawnPid: 4242,
+            port: 8003
+          }
+        }),
+        reclaimBackend: async () => {
+          current = false;
+          return { reclaimed: true, reason: "reclaimed", verifiedPid: 4242 };
+        },
+        pidAlive: () => false,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 2, failedCount: 0 }),
+        completeStop
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "lifecycle_intent_superseded",
+      generation: 5
+    });
+    expect(completeStop).toHaveBeenCalledOnce();
+  });
+
+  it("preserves incomplete stop handles so a later restart can retire them", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-stop-retry-"));
+    const registryPath = join(dir, "instances.json");
+    const admissionStorePath = join(dir, "admission.json");
+    await writeFile(registryPath, JSON.stringify({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          projectRoot: "C:/wt/task",
+          host: "127.0.0.1",
+          port: 8003,
+          controlPort: 8768,
+          status: "steady",
+          desiredState: "open",
+          generation: 4,
+          commandId: "start-command",
+          spawnPid: 4242,
+          portLeaseStatus: "held"
+        }
+      }
+    }), "utf8");
+    const claimed = await claimIsolatedStop({
+      instanceId: "worktree:task",
+      branchInstances: payload,
+      commandId: "stop-command",
+      registryPath
+    });
+    const incomplete = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      entry: claimed.entry,
+      registryPath,
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        reclaimBackend: async () => ({ reclaimed: false, reason: "health identity unavailable" }),
+        pidAlive: () => true
+      }
+    });
+    expect(incomplete).toMatchObject({ ok: false, code: "backend_retire_incomplete" });
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject({
+      status: "failed",
+      desiredState: "closed",
+      spawnPid: 4242,
+      port: 8003,
+      portLeaseStatus: "held"
+    });
+
+    const retired = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      registryPath,
+      dependencies: {
+        reclaimBackend: async () => ({ reclaimed: true, reason: "reclaimed", verifiedPid: 4242 }),
+        pidAlive: () => false,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 2, failedCount: 0 })
+      }
+    });
+    expect(retired).toEqual({ ok: true });
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject({
+      status: "closed",
+      spawnPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+
+    const restarted = await claimIsolatedStart({
+      instanceId: "worktree:task",
+      branchInstances: payload,
+      operation: "restart",
+      commandId: "restart-command",
+      registryPath,
+      admissionStorePath,
+      storeOptions: { portIsFree: async () => true }
+    });
+    expect(restarted.ok).toBe(true);
+    if (restarted.ok) {
+      expect(restarted.entry).toMatchObject({ status: "restarting", spawnPid: 0 });
+    }
+  });
+
+  it("marks a cleaned health-wait failure retryable without stale spawn handles", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-health-failure-"));
+    const registryPath = join(dir, "instances.json");
+    const admissionStorePath = join(dir, "admission.json");
+    await writeFile(registryPath, JSON.stringify({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          projectRoot: "C:/wt/task",
+          host: "127.0.0.1",
+          port: 8003,
+          controlPort: 8768,
+          status: "starting",
+          desiredState: "open",
+          generation: 4,
+          commandId: "start-command",
+          spawnPid: 4242,
+          portLeaseStatus: "held"
+        }
+      }
+    }), "utf8");
+    const claimed = await claimStopIfGeneration(registryPath, {
+      instanceId: "worktree:task",
+      expectedGeneration: 4,
+      expectedCommandId: "start-command",
+      commandId: "retire-health-failure"
+    });
+    expect(claimed.applied).toBe(true);
+    const cleaned = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      entry: claimed.entry,
+      registryPath,
+      desiredStateOnFailure: "open",
+      successFailureMessage: "workbench HTTP was not reachable",
+      dependencies: {
+        reclaimBackend: async () => ({ reclaimed: true, reason: "reclaimed", verifiedPid: 4242 }),
+        pidAlive: () => false,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 2, failedCount: 0 })
+      }
+    });
+    expect(cleaned).toEqual({ ok: true });
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject({
+      status: "failed",
+      desiredState: "open",
+      failureMessage: "workbench HTTP was not reachable",
+      spawnPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+
+    const retried = await claimIsolatedStart({
+      instanceId: "worktree:task",
+      branchInstances: payload,
+      commandId: "retry-command",
+      registryPath,
+      admissionStorePath,
+      storeOptions: { portIsFree: async () => true }
+    });
+    expect(retried.ok).toBe(true);
   });
 });

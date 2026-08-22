@@ -511,6 +511,10 @@ export function applyClaimStop(
   entry.generation = generation;
   entry.deadlineAt = stopDeadlineAt;
   entry.inFlightDeadlineAt = stopDeadlineAt;
+  // A stop claim owns the registered handles until retirement is confirmed.
+  // This also repairs legacy/partial rows that incorrectly exposed a live
+  // runtime with a reclaimable port lease.
+  entry.portLeaseStatus = "held";
   const commandId = String(input.commandId || "").trim();
   if (commandId) {
     entry.commandId = commandId;
@@ -522,6 +526,39 @@ export function applyClaimStop(
     entry.projectRoot = projectRoot;
   }
   return { ok: true, entry: { ...entry } };
+}
+
+/**
+ * Claim stop only while the caller still owns the observed generation (and,
+ * when supplied, command id). The comparison and generation increment happen
+ * under the same registry lock in claimStopIfGeneration, so a stale reader
+ * cannot overwrite a newer lifecycle row before killing its backend.
+ */
+export function applyClaimStopIfGeneration(
+  payload: RegistryPayload,
+  input: {
+    instanceId: string;
+    expectedGeneration: number;
+    expectedCommandId?: string;
+    projectRoot?: string;
+    nowMs?: number;
+    commandId?: string;
+  }
+): ObserveResult {
+  const instanceId = String(input.instanceId || "").trim();
+  if (!instanceId) {
+    throw new Error("instance_id must not be empty");
+  }
+  const entry = payload.instances[instanceId];
+  if (!entry || positiveInt(entry.generation) !== positiveInt(input.expectedGeneration)) {
+    return { applied: false, entry: entry ? { ...entry } : {} };
+  }
+  const expectedCommandId = String(input.expectedCommandId || "").trim();
+  if (expectedCommandId && String(entry.commandId || "").trim() !== expectedCommandId) {
+    return { applied: false, entry: { ...entry } };
+  }
+  const claimed = applyClaimStop(payload, input);
+  return { applied: true, entry: claimed.entry };
 }
 
 /**
@@ -779,6 +816,21 @@ export async function claimStop(
   options: RegistryStoreOptions = {}
 ): Promise<{ ok: true; entry: RegistryEntry }> {
   return mutateRegistry(registryPath, (payload) => applyClaimStop(payload, input), options);
+}
+
+export async function claimStopIfGeneration(
+  registryPath: string,
+  input: {
+    instanceId: string;
+    expectedGeneration: number;
+    expectedCommandId?: string;
+    projectRoot?: string;
+    nowMs?: number;
+    commandId?: string;
+  },
+  options: RegistryStoreOptions = {}
+): Promise<ObserveResult> {
+  return mutateRegistry(registryPath, (payload) => applyClaimStopIfGeneration(payload, input), options);
 }
 
 export async function completeStop(

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyClaimStart,
   applyClaimStop,
+  applyClaimStopIfGeneration,
   applyCompleteStop,
   applyObserve,
   applyRecordSpawnPid,
@@ -15,6 +16,7 @@ import {
   applyUpsert,
   claimStart,
   claimStop,
+  claimStopIfGeneration,
   ownerLeaseOf,
   reclaimStaleInFlightStops,
   recordSpawnPid,
@@ -252,6 +254,7 @@ describe("instanceRegistryStore shared fixture", () => {
     writeFileSync(registryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     const claimed = await claimStop(registryPath, { instanceId: "worktree:task" });
     expect(claimed.entry.generation).toBe(2);
+    expect(claimed.entry.portLeaseStatus).toBe("held");
     const stale = await recordSpawnPid(registryPath, {
       instanceId: "worktree:task",
       spawnPid: 9999,
@@ -260,6 +263,74 @@ describe("instanceRegistryStore shared fixture", () => {
     expect(stale.applied).toBe(false);
     expect(stale.entry.spawnPid).toBe(4242);
     expect(stale.entry.status).toBe("stopping");
+  });
+
+  it("does not let a stale read claim stop over a newer generation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-stop-cas-"));
+    tempDirs.push(dir);
+    const registryPath = join(dir, "instances.json");
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "steady",
+          desiredState: "open",
+          generation: 4,
+          commandId: "old-command",
+          spawnPid: 4242,
+          port: 8003
+        }
+      }
+    });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(registryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const newer = await claimStop(registryPath, {
+      instanceId: "worktree:task",
+      commandId: "newer-command"
+    });
+    expect(newer.entry.generation).toBe(5);
+
+    const stale = await claimStopIfGeneration(registryPath, {
+      instanceId: "worktree:task",
+      expectedGeneration: 4,
+      expectedCommandId: "old-command",
+      commandId: "stale-retire"
+    });
+    expect(stale.applied).toBe(false);
+    expect(stale.entry).toMatchObject({
+      generation: 5,
+      commandId: "newer-command",
+      status: "stopping",
+      spawnPid: 4242
+    });
+  });
+
+  it("checks command id in the same conditional stop claim", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "steady",
+          generation: 7,
+          commandId: "current-command",
+          spawnPid: 7007
+        }
+      }
+    });
+    const result = applyClaimStopIfGeneration(payload, {
+      instanceId: "worktree:task",
+      expectedGeneration: 7,
+      expectedCommandId: "stale-command",
+      commandId: "retire-command"
+    });
+    expect(result.applied).toBe(false);
+    expect(result.entry).toMatchObject({
+      generation: 7,
+      commandId: "current-command",
+      status: "steady",
+      spawnPid: 7007
+    });
   });
 
   it("settles a successful stop to closed and releases its port lease", () => {

@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
+const registryHostSource = readFileSync(
+  fileURLToPath(new URL("../src/lifecycle/isolatedInstanceRegistryHost.ts", import.meta.url)),
+  "utf8"
+);
 
 describe("isolated lifecycle recovery", () => {
   it("returns a command id for already-alive starts so the window supervisor can open it", () => {
@@ -19,9 +23,16 @@ describe("isolated lifecycle recovery", () => {
     expect(functionStart).toBeGreaterThan(0);
     expect(functionEnd).toBeGreaterThan(functionStart);
     const body = mainSource.slice(functionStart, functionEnd);
-    expect(body).toContain("reclaimStaleWorkbenchBackend");
-    expect(body).toContain("clearWorkbenchLauncherRuntimeState");
-    expect(body).not.toContain("retireRegisteredHandles");
+    expect(body).toContain("retireClaimedIsolatedRuntime");
+    expect(body).not.toContain("completeIsolatedStop");
+
+    const retireStart = registryHostSource.indexOf("export async function retireClaimedIsolatedRuntime");
+    const retireEnd = registryHostSource.indexOf("\nexport async function claimIsolatedStop", retireStart);
+    const retireBody = registryHostSource.slice(retireStart, retireEnd);
+    expect(retireBody).toContain("dependencies.reclaimBackend");
+    expect(retireBody).toContain("dependencies.clearRuntimeState");
+    expect(retireBody).toContain("dependencies.completeStop");
+    expect(retireBody).toContain("settleFailed");
 
     const stopReturnStart = body.indexOf('if (input.operation === "stop" || input.operation === "force-stop")');
     const stopReturn = body.slice(stopReturnStart);
@@ -29,10 +40,52 @@ describe("isolated lifecycle recovery", () => {
     expect(stopReturn).toContain("const commandId = String(claimed.entry.commandId || stopCommandId)");
     expect(stopReturn).toContain("      commandId,");
     expect(stopReturn).toContain("backend_retire_incomplete");
-    expect(stopReturn).toContain("knownPidIsAlive");
-    expect(stopReturn).toContain("registeredPids");
-    expect(stopReturn).toContain("registeredSpawnPidAlive");
-    expect(stopReturn).toContain("backendConfirmedClosed");
+    expect(stopReturn).toContain('desiredStateOnFailure: "closed"');
+  });
+
+  it("admits once before retiring and claiming a new isolated start", () => {
+    const prepareStart = registryHostSource.indexOf("export async function prepareIsolatedStart");
+    const prepareEnd = registryHostSource.indexOf("\nfunction normalizedStatus", prepareStart);
+    const prepareBody = registryHostSource.slice(prepareStart, prepareEnd);
+    expect(prepareBody.indexOf("assertLifecycleAdmitted({")).toBeGreaterThan(-1);
+    expect(prepareBody.indexOf("assertLifecycleAdmitted({")).toBeLessThan(
+      prepareBody.indexOf("retireIsolatedRuntimeBeforeStart({")
+    );
+    expect(prepareBody.indexOf("retireIsolatedRuntimeBeforeStart({")).toBeLessThan(
+      prepareBody.indexOf("claimResolvedIsolatedStart")
+    );
+
+    const mutationStart = mainSource.indexOf("async function runIsolatedRegistryMutation");
+    const mutationEnd = mainSource.indexOf("\nasync function orchestrateBranchInstanceLifecycle", mutationStart);
+    const body = mainSource.slice(mutationStart, mutationEnd);
+    expect(body).toContain("const claimed = await prepareIsolatedStart({");
+    expect(body).not.toContain("claimIsolatedStart({");
+  });
+
+  it("passes a backend retirement compensation callback to isolated start supervision", () => {
+    const orchestrationStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const orchestrationBody = mainSource.slice(orchestrationStart);
+    expect(orchestrationBody).toContain("retireBackend: async (message)");
+    expect(orchestrationBody).toContain("retireIsolatedBackendAfterStartFailure");
+    expect(orchestrationBody).toContain("if (!observed.applied)");
+  });
+
+  it("claims the failed start generation before killing its spawned child", () => {
+    const compensationStart = mainSource.indexOf("async function retireIsolatedBackendAfterStartFailure");
+    const compensationEnd = mainSource.indexOf("\nasync function runIsolatedRegistryMutation", compensationStart);
+    const compensationBody = mainSource.slice(compensationStart, compensationEnd);
+    expect(compensationBody.indexOf("claimStopIfGeneration")).toBeGreaterThan(-1);
+    expect(compensationBody.indexOf("claimStopIfGeneration")).toBeLessThan(
+      compensationBody.indexOf("input.beforeRetire?.()")
+    );
+
+    const mutationStart = mainSource.indexOf("async function runIsolatedRegistryMutation");
+    const mutationEnd = mainSource.indexOf("\nasync function orchestrateBranchInstanceLifecycle", mutationStart);
+    const mutationBody = mainSource.slice(mutationStart, mutationEnd);
+    const healthCatch = mutationBody.slice(mutationBody.indexOf("} catch (error: unknown) {"));
+    expect(healthCatch).toContain("retireIsolatedBackendAfterStartFailure");
+    expect(healthCatch).toContain("beforeRetire: () =>");
+    expect(healthCatch).toContain("spawned.child.kill();");
   });
 
   it("awaits isolated window close after a successful stop result", () => {
