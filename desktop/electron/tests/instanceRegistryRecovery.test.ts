@@ -32,9 +32,10 @@ function createRegistry(instances: RegistryPayload["instances"]): string {
 
 function retirementStub() {
   return vi.fn(async (input: Parameters<typeof retireClaimedIsolatedRuntime>[0]) => {
-    const completed = await completeStop(input.registryPath || "", {
-      instanceId: input.instanceId,
-      expectedGeneration: Number(input.entry.generation || 0)
+      const completed = await completeStop(input.registryPath || "", {
+        instanceId: input.instanceId,
+        expectedGeneration: Number(input.entry.generation || 0),
+        retainWindowPid: input.retainedWindowPid
     });
     if (completed.applied && input.successFailureMessage) {
       await upsert(
@@ -172,6 +173,44 @@ describe("instance registry startup recovery", () => {
       status: "failed",
       desiredState: "open",
       spawnPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+  });
+
+  it("keeps an unverified window visible without blocking verified backend retirement", async () => {
+    const registryPath = createRegistry({
+      "worktree:window": {
+        status: "stopping",
+        phase: "stopping",
+        desiredState: "closed",
+        generation: 4,
+        commandId: "stop-1",
+        ownerPid: 101,
+        spawnPid: 202,
+        windowPid: 303,
+        port: 8010,
+        portLeaseStatus: "held",
+        deadlineAt: "2026-08-20T11:59:00Z"
+      }
+    });
+    const retire = retirementStub();
+
+    const result = await reconcileOrphanedInstanceRegistry({
+      registryPath,
+      nowMs: Date.parse("2026-08-20T12:00:00Z"),
+      dependencies: {
+        retireClaimed: retire,
+        pidAlive: (pid) => pid === 303
+      }
+    });
+
+    expect(result).toEqual({ reconciled: ["worktree:window"], retained: [] });
+    expect(retire).toHaveBeenCalledWith(expect.objectContaining({ retainedWindowPid: 303 }));
+    expect((await readRegistry(registryPath)).instances["worktree:window"]).toMatchObject({
+      status: "closed",
+      spawnPid: 0,
+      windowPid: 303,
+      lifecycleWarning: "unverified browser/window handle retained: 303",
       portLeaseStatus: "reclaimable"
     });
   });

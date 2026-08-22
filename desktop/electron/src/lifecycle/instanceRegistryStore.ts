@@ -572,7 +572,7 @@ export function applyClaimStopIfGeneration(
  */
 export function applyCompleteStop(
   payload: RegistryPayload,
-  input: { instanceId: string; expectedGeneration?: number }
+  input: { instanceId: string; expectedGeneration?: number; retainWindowPid?: number }
 ): ObserveResult {
   const instanceId = String(input.instanceId || "").trim();
   const entry = payload.instances[instanceId];
@@ -597,7 +597,13 @@ export function applyCompleteStop(
   entry.spawnPid = 0;
   delete entry.spawnCreateTime;
   delete entry.spawnExecutable;
-  entry.windowPid = 0;
+  const retainedWindowPid = positiveInt(input.retainWindowPid);
+  entry.windowPid = retainedWindowPid;
+  if (retainedWindowPid > 0) {
+    entry.lifecycleWarning = `unverified browser/window handle retained: ${retainedWindowPid}`;
+  } else {
+    delete entry.lifecycleWarning;
+  }
   entry.portLeaseStatus = "reclaimable";
   delete entry.ownerLease;
   return { applied: true, entry: { ...entry } };
@@ -860,7 +866,7 @@ export async function claimStopIfGeneration(
 
 export async function completeStop(
   registryPath: string,
-  input: { instanceId: string; expectedGeneration?: number },
+  input: { instanceId: string; expectedGeneration?: number; retainWindowPid?: number },
   options: RegistryStoreOptions = {}
 ): Promise<ObserveResult> {
   return mutateRegistry(registryPath, (payload) => applyCompleteStop(payload, input), options);

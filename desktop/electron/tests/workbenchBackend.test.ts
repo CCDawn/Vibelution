@@ -263,6 +263,22 @@ describe("workbenchBackendRetire", () => {
     ).rejects.toThrow("process tree 11");
     expect(reported).toEqual([9911]);
   });
+
+  it("does not accept a dead tree root as proof that its descendants are gone", async () => {
+    const terminateProcessTree = vi.fn(async () => false);
+    await expect(
+      retireRegisteredHandles({
+        pids: [11],
+        pidAlive: () => false,
+        treePids: [11],
+        expectedIdentities: {
+          "11": { pid: 11, createTime: 1, executable: "C:/Python/python.exe" }
+        },
+        terminateProcessTree
+      })
+    ).rejects.toThrow("process tree 11");
+    expect(terminateProcessTree).toHaveBeenCalledWith(11, expect.objectContaining({ pid: 11 }));
+  });
 });
 
 describe("classifyWorkbenchPortOccupant", () => {
@@ -350,6 +366,9 @@ describe("reclaimStaleWorkbenchBackend", () => {
       }),
       pidAlive: (pid) => alive.has(pid),
       terminateProcessTree,
+      expectedIdentities: {
+        "4242": { pid: 4242, createTime: 1, executable: "C:/Python/python.exe" }
+      },
       gracefulShutdown,
       delay: async () => undefined
     });
@@ -381,13 +400,16 @@ describe("reclaimStaleWorkbenchBackend", () => {
       }),
       pidAlive: (pid) => alive.has(pid),
       terminateProcessTree,
+      expectedIdentities: {
+        "4242": { pid: 4242, createTime: 1, executable: "C:/Python/python.exe" }
+      },
       gracefulShutdown,
       delay: async () => undefined
     });
 
     expect(result).toMatchObject({ reclaimed: true, verifiedPid: 4242 });
     expect(gracefulShutdown).toHaveBeenCalledOnce();
-    expect(terminateProcessTree).toHaveBeenCalledWith(4242);
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
   });
 
   it("does not claim a registered pid is safe when the health identity is not confirmed", async () => {
@@ -427,6 +449,27 @@ describe("reclaimStaleWorkbenchBackend", () => {
       reclaimed: false,
       reason: expect.stringContaining("registered backend pid 4242")
     });
+  });
+
+  it("does not reclaim a released port when the registered tree root is gone but descendants are unverified", async () => {
+    const terminateProcessTree = vi.fn(async () => false);
+    await expect(
+      reclaimStaleWorkbenchBackend({
+        port: 8012,
+        workspaceRoot: "C:/repo",
+        connect: async () => false,
+        registeredPids: [4242],
+        expectedIdentities: {
+          "4242": { pid: 4242, createTime: 1, executable: "C:/Python/python.exe" }
+        },
+        pidAlive: () => false,
+        terminateProcessTree
+      })
+    ).resolves.toMatchObject({
+      reclaimed: false,
+      reason: expect.stringContaining("retirement was not verified")
+    });
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
   });
 
   it("does not confirm close when a verified backend pid survives port release", async () => {
@@ -673,8 +716,9 @@ describe("frontend build supervision", () => {
     expect(runBridge).toHaveBeenCalledOnce();
   });
 
-  it("bounds a stuck frontend build and kills its child", async () => {
+  it("does not use a direct-child kill when a build has no verifiable tree identity", async () => {
     const harness = frontendBuildChild();
+    Object.assign(harness.child, { pid: 5151 });
     await expect(
       runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
         phase: "tsc",
@@ -683,15 +727,15 @@ describe("frontend build supervision", () => {
       })
     ).rejects.toMatchObject({
       name: "WorkbenchFrontendBuildError",
-      code: "frontend_build_timeout",
-      phase: "tsc",
-      timeoutMs: 10
+      code: "frontend_build_failed",
+      phase: "tsc"
     });
-    expect(harness.child.kill).toHaveBeenCalledOnce();
+    expect(harness.child.kill).not.toHaveBeenCalled();
   });
 
-  it("aborts a running build and kills its child", async () => {
+  it("does not use a direct-child kill when an unverified build is aborted", async () => {
     const harness = frontendBuildChild();
+    Object.assign(harness.child, { pid: 5151 });
     const controller = new AbortController();
     const pending = runWaitable("node", ["vite", "build"], "C:/repo/web", {
       phase: "vite",
@@ -701,10 +745,10 @@ describe("frontend build supervision", () => {
     });
     controller.abort();
     await expect(pending).rejects.toMatchObject({
-      code: "frontend_build_aborted",
+      code: "frontend_build_failed",
       phase: "vite"
     });
-    expect(harness.child.kill).toHaveBeenCalledOnce();
+    expect(harness.child.kill).not.toHaveBeenCalled();
   });
 
   it("uses the verified frontend process tree when a build is interrupted", async () => {
@@ -726,6 +770,29 @@ describe("frontend build supervision", () => {
         terminateProcessTree
       })
     ).rejects.toMatchObject({ code: "frontend_build_failed", phase: "vite" });
+    expect(terminateProcessTree).toHaveBeenCalledWith(5151, expect.objectContaining({ pid: 5151 }));
+    expect(harness.child.kill).not.toHaveBeenCalled();
+  });
+
+  it("fails closed after a non-zero root exit when tree retirement cannot be verified", async () => {
+    const harness = frontendBuildChild();
+    Object.assign(harness.child, { pid: 5151 });
+    const terminateProcessTree = vi.fn(async () => false);
+    const pending = runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
+      phase: "tsc",
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      timeoutMs: FRONTEND_BUILD_TIMEOUT_MS,
+      spawnImpl: () => harness.child,
+      captureProcessIdentity: async () => ({
+        pid: 5151,
+        createTime: 1,
+        executable: "C:/Program Files/nodejs/node.exe"
+      }),
+      terminateProcessTree
+    });
+    harness.close(2, null);
+    await expect(pending).rejects.toMatchObject({ code: "frontend_build_failed", phase: "tsc" });
     expect(terminateProcessTree).toHaveBeenCalledWith(5151, expect.objectContaining({ pid: 5151 }));
     expect(harness.child.kill).not.toHaveBeenCalled();
   });

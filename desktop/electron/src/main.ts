@@ -132,7 +132,8 @@ import {
   PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
   runPythonJsonBridge,
-  capturePythonProcessIdentity
+  capturePythonProcessIdentity,
+  createPythonOwnedProcessTreeTerminator
 } from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
@@ -3256,7 +3257,6 @@ async function retireIsolatedBackendAfterStartFailure(input: {
   commandId: string;
   message: string;
   isCurrent?: () => boolean;
-  beforeRetire?: () => void;
   signal?: AbortSignal;
   pythonPath: string;
 }): Promise<void> {
@@ -3286,12 +3286,6 @@ async function retireIsolatedBackendAfterStartFailure(input: {
   if (!claimed.applied) {
     return;
   }
-  let directKillError = "";
-  try {
-    input.beforeRetire?.();
-  } catch (error: unknown) {
-    directKillError = error instanceof Error ? error.message : String(error);
-  }
   const retired = await retireClaimedIsolatedRuntime({
     instanceId: input.instanceId,
     workspaceRoot: input.workspaceRoot,
@@ -3308,7 +3302,7 @@ async function retireIsolatedBackendAfterStartFailure(input: {
     outcome: "failure"
   });
   if (!retired.ok) {
-    throw new Error([directKillError, retired.message].filter(Boolean).join("; "));
+    throw new Error(retired.message);
   }
 }
 
@@ -3392,13 +3386,35 @@ async function runIsolatedRegistryMutation(input: {
           })
         : null;
       if (spawnPid > 0 && !spawnIdentity) {
-        try {
-          spawned.child.kill();
-        } catch {
-          // Preserve the lifecycle claim; the missing identity is fail-closed.
+        const retained = generation > 0
+          ? await recordSpawnPid(instancesRegistryPath(), {
+              instanceId: input.instanceId,
+              spawnPid,
+              expectedGeneration: generation
+            })
+          : { applied: false };
+        if (!retained.applied) {
+          throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}; lifecycle claim could not retain its handle`);
         }
-        throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}`);
+        throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}; registered handle retained`);
       }
+      const retireSpawnedTree = async (): Promise<void> => {
+        if (spawnPid <= 0) {
+          return;
+        }
+        if (!spawnIdentity) {
+          throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}`);
+        }
+        const terminateProcessTree = createPythonOwnedProcessTreeTerminator({
+          pythonPath: spawned.pythonPath,
+          workspaceRoot: target.projectRoot,
+          allowedKinds: ["managed_workbench_backend"],
+          expectedIdentities: { [String(spawnPid)]: spawnIdentity }
+        });
+        if (!(await terminateProcessTree(spawnPid, spawnIdentity))) {
+          throw new Error(`isolated workbench backend process-tree retirement was not verified for pid ${spawnPid}`);
+        }
+      };
       if (spawnPid > 0 && generation > 0) {
         const recorded = await recordSpawnPid(instancesRegistryPath(), {
           instanceId: input.instanceId,
@@ -3412,7 +3428,13 @@ async function runIsolatedRegistryMutation(input: {
             : {})
         });
         if (!recorded.applied) {
-          spawned.child.kill();
+          try {
+            await retireSpawnedTree();
+          } catch (retirementError: unknown) {
+            throw new Error(
+              `isolated workbench backend spawn pid CAS missed and its process tree remains unverified: ${retirementError instanceof Error ? retirementError.message : String(retirementError)}`
+            );
+          }
           return {
             schemaVersion: 1,
             accepted: false,
@@ -3448,9 +3470,6 @@ async function runIsolatedRegistryMutation(input: {
             isCurrent: input.isCurrent,
             signal: input.signal,
             pythonPath: input.pythonPath,
-            beforeRetire: () => {
-              spawned.child.kill();
-            }
           });
         } catch (compensationError: unknown) {
           throw new Error(

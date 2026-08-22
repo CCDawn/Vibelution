@@ -245,18 +245,20 @@ export async function retireRegisteredHandles(input: {
   const actionable = unique.filter((pid) => !unowned.includes(pid));
   for (const pid of actionable.sort((left, right) => right - left)) {
     input.signal?.throwIfAborted();
-    if (pidAlive(pid)) {
-      if (input.terminateProcessTree && treePids.has(pid)) {
-        const expectedIdentity = input.expectedIdentities?.[String(pid)];
-        const terminated = expectedIdentity
-          ? await input.terminateProcessTree(pid, expectedIdentity)
-          : await input.terminateProcessTree(pid);
-        if (!terminated) {
-          throw new Error(`Failed to verify retirement of owned process tree ${pid}`);
-        }
-      } else {
-        await killPid(pid);
+    if (input.terminateProcessTree && treePids.has(pid)) {
+      // A dead root PID does not establish that its children also exited:
+      // Windows can re-parent descendants before the next reconciliation.
+      // The verified helper deliberately rejects a missing root, preserving
+      // the registered handle instead of washing an unknown tree as closed.
+      const expectedIdentity = input.expectedIdentities?.[String(pid)];
+      const terminated = expectedIdentity
+        ? await input.terminateProcessTree(pid, expectedIdentity)
+        : await input.terminateProcessTree(pid);
+      if (!terminated) {
+        throw new Error(`Failed to verify retirement of owned process tree ${pid}`);
       }
+    } else if (pidAlive(pid)) {
+      await killPid(pid);
     }
   }
   const now = input.now ?? Date.now;

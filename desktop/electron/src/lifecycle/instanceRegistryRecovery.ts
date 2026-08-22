@@ -52,9 +52,9 @@ function ownerProcessGone(entry: RegistryEntry, pidAlive: (pid: number) => boole
   return ownerPid > 0 && !pidAlive(ownerPid);
 }
 
-function hasLiveRegisteredWindow(entry: RegistryEntry, pidAlive: (pid: number) => boolean): boolean {
+function liveRegisteredWindowPid(entry: RegistryEntry, pidAlive: (pid: number) => boolean): number {
   const windowPid = positiveInt(entry.windowPid);
-  return windowPid > 0 && pidAlive(windowPid);
+  return windowPid > 0 && pidAlive(windowPid) ? windowPid : 0;
 }
 
 function isRecoverableOrphan(
@@ -107,12 +107,8 @@ export async function reconcileOrphanedInstanceRegistry(input: {
     if (!isRecoverableOrphan(observed, nowMs, dependencies.pidAlive)) {
       continue;
     }
-    if (hasLiveRegisteredWindow(observed, dependencies.pidAlive)) {
-      retained.push(instanceId);
-      continue;
-    }
-
     const status = normalizedStatus(observed);
+    const retainedWindowPid = liveRegisteredWindowPid(observed, dependencies.pidAlive);
     const claimed = await dependencies.claimStopIfGeneration(registryPath, {
       instanceId,
       expectedGeneration: positiveInt(observed.generation),
@@ -136,7 +132,8 @@ export async function reconcileOrphanedInstanceRegistry(input: {
         registryPath,
         pythonPath: input.pythonPath,
         desiredStateOnFailure: status === "stopping" ? "closed" : "open",
-        successFailureMessage: recoveryFailureMessage(status)
+        successFailureMessage: recoveryFailureMessage(status),
+        retainedWindowPid: retainedWindowPid || undefined
       });
     } catch {
       // The retirement owner is responsible for preserving the fenced row on

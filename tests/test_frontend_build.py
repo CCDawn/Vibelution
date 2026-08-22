@@ -3,17 +3,16 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import time
 from pathlib import Path
 
 import pytest
 
-from core.launcher import frontend_build
-from core.launcher import maintenance_reset
-from core.launcher.branch_instance_lifecycle import _bundled_frontend_ready
-from core.runtime_manager import hot_restart_backup
-from core.runtime_manager import daemon
 import scripts.vibelution_launcher as launcher
+from core.launcher import frontend_build, maintenance_reset
+from core.launcher.branch_instance_lifecycle import _bundled_frontend_ready
+from core.runtime_manager import daemon, hot_restart_backup
 
 
 def _write_project(root: Path, *, source: str = "export const app = 1;\n") -> Path:
@@ -148,7 +147,7 @@ def test_damaged_matching_release_is_not_reactivated(monkeypatch: pytest.MonkeyP
     _activate(tmp_path, damaged.name, key=key)
     monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
 
-    result = frontend_build.ensure_frontend_build(tmp_path)
+    frontend_build.ensure_frontend_build(tmp_path)
 
     active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
     assert active["release"] != damaged.name
@@ -279,6 +278,25 @@ def test_missing_compiler_entries_trigger_dependency_recovery(monkeypatch: pytes
     frontend_build.ensure_frontend_build(tmp_path)
 
     assert calls == ["node npm-cli.js ci", "tsc -b", "vite build"]
+
+
+def test_checked_build_timeout_terminates_the_owned_process_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class TimedOutProcess:
+        returncode: int | None = None
+
+        def communicate(self, *, timeout: float) -> tuple[str, str]:
+            assert timeout == 900
+            raise subprocess.TimeoutExpired(["node", "tsc", "-b"], timeout)
+
+    process = TimedOutProcess()
+    terminated: list[object] = []
+    monkeypatch.setattr(frontend_build.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(frontend_build, "terminate_process_tree", lambda candidate: terminated.append(candidate))
+
+    with pytest.raises(RuntimeError, match=r"tsc -b failed: TimeoutExpired"):
+        frontend_build._run_checked(["node", "tsc", "-b"], cwd=tmp_path, label="tsc -b")
+
+    assert terminated == [process]
 
 
 def test_maintenance_reset_treats_active_releases_as_rebuildable_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

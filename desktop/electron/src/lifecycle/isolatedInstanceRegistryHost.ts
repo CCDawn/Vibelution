@@ -87,7 +87,7 @@ type IsolatedStartRetireDependencies = {
   reclaimBackend: typeof reclaimStaleWorkbenchBackend;
   completeStop: (
     registryPath: string,
-    input: { instanceId: string; expectedGeneration?: number }
+    input: { instanceId: string; expectedGeneration?: number; retainWindowPid?: number }
   ) => Promise<ObserveResult>;
   clearRuntimeState: (workspaceRoot: string) => WorkbenchRuntimeStateCleanupResult;
   upsert: (
@@ -450,6 +450,7 @@ export async function retireClaimedIsolatedRuntime(input: {
   isCurrent?: () => boolean;
   desiredStateOnFailure: "open" | "closed";
   successFailureMessage?: string;
+  retainedWindowPid?: number;
   dependencies?: Partial<IsolatedStartRetireDependencies>;
 }): Promise<IsolatedStartRetireResult> {
   const registryPath = input.registryPath || instancesRegistryPath();
@@ -560,7 +561,8 @@ export async function retireClaimedIsolatedRuntime(input: {
 
   const completed = await dependencies.completeStop(registryPath, {
     instanceId: input.instanceId,
-    expectedGeneration: generation
+    expectedGeneration: generation,
+    retainWindowPid: input.retainedWindowPid
   });
   if (!completed.applied) {
     return {

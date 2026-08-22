@@ -70,22 +70,20 @@ describe("isolated lifecycle recovery", () => {
     expect(orchestrationBody).toContain("if (!observed.applied)");
   });
 
-  it("claims the failed start generation before killing its spawned child", () => {
+  it("claims the failed start generation before verified-tree retirement", () => {
     const compensationStart = mainSource.indexOf("async function retireIsolatedBackendAfterStartFailure");
     const compensationEnd = mainSource.indexOf("\nasync function runIsolatedRegistryMutation", compensationStart);
     const compensationBody = mainSource.slice(compensationStart, compensationEnd);
     expect(compensationBody.indexOf("claimStopIfGeneration")).toBeGreaterThan(-1);
-    expect(compensationBody.indexOf("claimStopIfGeneration")).toBeLessThan(
-      compensationBody.indexOf("input.beforeRetire?.()")
-    );
+    expect(compensationBody).not.toContain("beforeRetire");
 
     const mutationStart = mainSource.indexOf("async function runIsolatedRegistryMutation");
     const mutationEnd = mainSource.indexOf("\nasync function orchestrateBranchInstanceLifecycle", mutationStart);
     const mutationBody = mainSource.slice(mutationStart, mutationEnd);
     const healthCatch = mutationBody.slice(mutationBody.indexOf("} catch (error: unknown) {"));
     expect(healthCatch).toContain("retireIsolatedBackendAfterStartFailure");
-    expect(healthCatch).toContain("beforeRetire: () =>");
-    expect(healthCatch).toContain("spawned.child.kill();");
+    expect(healthCatch).not.toContain("beforeRetire:");
+    expect(healthCatch).not.toContain("spawned.child.kill();");
   });
 
   it("awaits isolated window close after a successful stop result", () => {

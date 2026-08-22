@@ -21,6 +21,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.codex_sandbox.process import terminate_process_tree
+
 BUILD_SCHEMA_VERSION = 2
 RELEASES_DIR_NAME = ".vibelution-builds"
 ACTIVE_RELEASE_NAME = "active.json"
@@ -486,25 +488,39 @@ def _npm_cli(node_command: str) -> str:
 
 
 def _run_checked(command: list[str], *, cwd: Path, label: str) -> str:
+    process: subprocess.Popen[str] | None = None
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=str(cwd),
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=900,
-            check=False,
             **_hidden_subprocess_kwargs(),
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        stdout, stderr = process.communicate(timeout=900)
+    except subprocess.TimeoutExpired as exc:
+        # `subprocess.run(..., timeout=...)` only owns the direct process.
+        # This builder owns a live Popen handle, so reuse the project helper
+        # to terminate descendants before the root and keep Windows hidden.
+        if process is not None:
+            try:
+                terminate_process_tree(process)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as terminate_error:
+                raise RuntimeError(
+                    f"{label} timed out and its process tree could not be retired: "
+                    f"{type(terminate_error).__name__}: {terminate_error}"
+                ) from exc
         raise RuntimeError(f"{label} failed: {type(exc).__name__}: {exc}") from exc
-    if int(result.returncode or 0) != 0:
-        detail = str(result.stderr or result.stdout or "").strip()[-1200:]
-        raise RuntimeError(f"{label} failed with exit code {result.returncode}: {detail}")
-    return str(result.stdout or "")
+    except OSError as exc:
+        raise RuntimeError(f"{label} failed: {type(exc).__name__}: {exc}") from exc
+    if int(process.returncode or 0) != 0:
+        detail = str(stderr or stdout or "").strip()[-1200:]
+        raise RuntimeError(f"{label} failed with exit code {process.returncode}: {detail}")
+    return str(stdout or "")
 
 
 def ensure_frontend_build(
