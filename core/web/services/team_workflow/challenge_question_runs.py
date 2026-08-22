@@ -1638,8 +1638,6 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         if not isinstance(package_input, dict):
             package_input = {}
         evidence_store = _official_model_evidence_store(team_id)
-        explicit_evidence = payload.get("officialModelEvidence")
-        evidence_rows = explicit_evidence if explicit_evidence is not None else evidence_store["evidence"]
         explicit_receipts = payload.get("packageReceipts")
         if explicit_receipts is None:
             explicit_receipts = payload.get("modelInvocationReceipts")
@@ -1675,7 +1673,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             result_package=package_input,
             model_policy=model_policy if isinstance(model_policy, dict) else None,
             model_invocation_receipts=receipts,
-            official_model_evidence=evidence_rows,
+            official_model_evidence=evidence_store,
             input_snapshot_sha256=str(
                 payload.get("inputSnapshotSha256")
                 or payload.get("input_snapshot_sha256")

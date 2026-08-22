@@ -113,6 +113,14 @@ def _canonical_resolver(output: dict):
     return resolve
 
 
+def _evidence_store(evidence: list[dict]) -> dict:
+    return {
+        "schemaVersion": 2,
+        "storeKind": "official_model_evidence_store",
+        "evidence": evidence,
+    }
+
+
 def test_adapter_builds_canonical_package_from_complete_receipts() -> None:
     output, payload, binding, evidence = _package_inputs()
 
@@ -124,7 +132,7 @@ def test_adapter_builds_canonical_package_from_complete_receipts() -> None:
         result_package=payload,
         model_policy=payload["model_policy"],
         model_invocation_receipts=payload["model_invocation_receipts"],
-        official_model_evidence=evidence,
+        official_model_evidence=_evidence_store(evidence),
         canonical_turn_resolver=_canonical_resolver(output),
     )
 
@@ -147,7 +155,7 @@ def test_adapter_rejects_missing_receipt_stage() -> None:
             authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
             model_policy=payload["model_policy"],
             model_invocation_receipts=receipts,
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -166,7 +174,7 @@ def test_adapter_rejects_evidence_without_policy_or_output_binding() -> None:
             result_package=payload,
             model_policy=payload["model_policy"],
             model_invocation_receipts=payload["model_invocation_receipts"],
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -186,7 +194,7 @@ def test_adapter_requires_both_receipt_locator_output_bindings(field: str) -> No
             result_package=payload,
             model_policy=payload["model_policy"],
             model_invocation_receipts=receipts,
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -208,7 +216,7 @@ def test_adapter_rejects_three_way_output_binding_mismatch() -> None:
             result_package=payload,
             model_policy=payload["model_policy"],
             model_invocation_receipts=receipts,
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -227,7 +235,58 @@ def test_adapter_rejects_duplicate_stage_in_receipt_list() -> None:
             result_package=payload,
             model_policy=payload["model_policy"],
             model_invocation_receipts=receipts,
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
+        )
+
+
+@pytest.mark.parametrize(
+    "identity_kind",
+    ["receiptId", "evidenceId", "outputRef", "canonicalTurn"],
+)
+def test_adapter_rejects_reused_stage_invocation_identity(
+    identity_kind: str,
+) -> None:
+    output, payload, binding, evidence = _package_inputs()
+    receipts = deepcopy(payload["model_invocation_receipts"])
+    evidence = deepcopy(evidence)
+    generation_receipt = receipts["generation"]
+    review_receipt = receipts["review"]
+    generation_evidence = next(
+        item for item in evidence if item["stageId"] == "generation"
+    )
+    review_evidence = next(item for item in evidence if item["stageId"] == "review")
+
+    if identity_kind == "receiptId":
+        review_receipt["receiptId"] = generation_receipt["receiptId"]
+    elif identity_kind == "evidenceId":
+        review_receipt["evidenceLocator"]["evidenceId"] = generation_receipt[
+            "evidenceLocator"
+        ]["evidenceId"]
+        review_evidence["evidenceId"] = generation_evidence["evidenceId"]
+    elif identity_kind == "outputRef":
+        review_receipt["evidenceLocator"]["outputRef"] = generation_receipt[
+            "evidenceLocator"
+        ]["outputRef"]
+        review_evidence["outputRef"] = generation_evidence["outputRef"]
+    else:
+        for field in ("taskId", "turnId"):
+            review_receipt["scope"][field] = generation_receipt["scope"][field]
+            review_evidence[field] = generation_evidence[field]
+
+    with pytest.raises(
+        QuestionResultPackageAdapterError,
+        match="unique|independent|invocation identit",
+    ):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=receipts,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -242,7 +301,7 @@ def test_adapter_rejects_supplied_package_identity_conflicts() -> None:
         result_package=payload,
         model_policy=payload["model_policy"],
         model_invocation_receipts=payload["model_invocation_receipts"],
-        official_model_evidence=evidence,
+        official_model_evidence=_evidence_store(evidence),
         canonical_turn_resolver=_canonical_resolver(output),
     )
 
@@ -258,7 +317,7 @@ def test_adapter_rejects_supplied_package_identity_conflicts() -> None:
             result_package=conflicting_hash,
             model_policy=payload["model_policy"],
             model_invocation_receipts=payload["model_invocation_receipts"],
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -273,7 +332,7 @@ def test_adapter_rejects_supplied_package_identity_conflicts() -> None:
             result_package={"package": nested},
             model_policy=payload["model_policy"],
             model_invocation_receipts=payload["model_invocation_receipts"],
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             canonical_turn_resolver=_canonical_resolver(output),
         )
 
@@ -286,7 +345,7 @@ def test_adapter_rejects_supplied_package_identity_conflicts() -> None:
             result_package=payload,
             model_policy=payload["model_policy"],
             model_invocation_receipts=payload["model_invocation_receipts"],
-            official_model_evidence=evidence,
+            official_model_evidence=_evidence_store(evidence),
             request_identity={"packageId": "conflicting-package-id"},
             canonical_turn_resolver=_canonical_resolver(output),
         )
@@ -383,6 +442,54 @@ def test_registration_persists_canonical_package_and_rejects_tampered_replay(
     with pytest.raises(ValueError, match="invalid|immutable|package"):
         challenge_question_runs.register_challenge_question_output(
             "research-team", request
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("schemaVersion", 1), ("storeKind", "legacy_official_evidence_store")],
+)
+def test_registration_rejects_non_v2_official_evidence_store(
+    tmp_path,
+    monkeypatch,
+    field: str,
+    value: object,
+) -> None:
+    _output_value, _package, _evidence, request = _registration_request(
+        tmp_path, monkeypatch
+    )
+    evidence_path = tmp_path / "official_model_evidence" / "index.json"
+    store = json.loads(evidence_path.read_text(encoding="utf-8"))
+    store[field] = value
+    evidence_path.write_text(json.dumps(store), encoding="utf-8")
+
+    with pytest.raises(
+        QuestionResultPackageAdapterError,
+        match=f"official_model_evidence\\.{field}",
+    ):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team", request
+        )
+
+
+def test_adapter_rejects_v1_official_evidence_row_with_v2_fields() -> None:
+    output, payload, binding, evidence = _package_inputs()
+    evidence[0]["schemaVersion"] = 1
+
+    with pytest.raises(
+        QuestionResultPackageAdapterError,
+        match=r"receipt\.generation\.schemaVersion must be 2",
+    ):
+        adapt_question_result_package(
+            output,
+            catalog_scope=CatalogScope.from_tracked_resources(),
+            run_binding=binding,
+            authorized_model_policy_sha256=payload["model_policy"]["policySha256"],
+            result_package=payload,
+            model_policy=payload["model_policy"],
+            model_invocation_receipts=payload["model_invocation_receipts"],
+            official_model_evidence=_evidence_store(evidence),
+            canonical_turn_resolver=_canonical_resolver(output),
         )
 
 

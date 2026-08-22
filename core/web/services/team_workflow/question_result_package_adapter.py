@@ -24,6 +24,8 @@ class QuestionResultPackageAdapterError(QuestionResultPackageError):
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MISSING = object()
+_OFFICIAL_EVIDENCE_SCHEMA_VERSION = 2
+_OFFICIAL_EVIDENCE_STORE_KIND = "official_model_evidence_store"
 _BUSINESS_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("hypotheses", ("hypotheses", "candidates")),
     ("dimension_reviews", ("dimension_reviews", "dimensionReviews")),
@@ -188,17 +190,29 @@ def _receipt_rows(value: Any) -> dict[str, Any]:
 
 
 def _evidence_rows(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, Mapping):
-        if isinstance(value.get("evidence"), list):
-            value = value["evidence"]
-        else:
-            value = list(value.values())
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+    if not isinstance(value, Mapping):
         raise QuestionResultPackageAdapterError(
-            "official_model_evidence is required and must be a list of rows"
+            "official_model_evidence must be the authoritative evidence store"
         )
-    rows = [deepcopy(dict(item)) for item in value if isinstance(item, Mapping)]
-    if len(rows) != len(value):
+    store_schema_version = value.get("schemaVersion")
+    if (
+        type(store_schema_version) is not int
+        or store_schema_version != _OFFICIAL_EVIDENCE_SCHEMA_VERSION
+    ):
+        raise QuestionResultPackageAdapterError(
+            "official_model_evidence.schemaVersion must be 2"
+        )
+    if str(value.get("storeKind") or "") != _OFFICIAL_EVIDENCE_STORE_KIND:
+        raise QuestionResultPackageAdapterError(
+            "official_model_evidence.storeKind must be official_model_evidence_store"
+        )
+    evidence = value.get("evidence")
+    if not isinstance(evidence, list):
+        raise QuestionResultPackageAdapterError(
+            "official_model_evidence.evidence must be a list of rows"
+        )
+    rows = [deepcopy(dict(item)) for item in evidence if isinstance(item, Mapping)]
+    if len(rows) != len(evidence):
         raise QuestionResultPackageAdapterError(
             "official_model_evidence contains a non-object row"
         )
@@ -228,9 +242,26 @@ def _validate_receipt_evidence(
 ) -> dict[str, dict[str, Any]]:
     rows = _evidence_rows(official_model_evidence)
     canonical_bindings: dict[str, dict[str, Any]] = {}
+    stage_identity_owners: dict[str, dict[object, str]] = {
+        "receiptId": {},
+        "evidenceId": {},
+        "outputRef": {},
+        "canonicalTurn": {},
+    }
+
+    def require_independent_identity(kind: str, value: object, stage: str) -> None:
+        previous_stage = stage_identity_owners[kind].get(value)
+        if previous_stage is not None:
+            raise QuestionResultPackageAdapterError(
+                f"receipt stages {previous_stage} and {stage} must use independent "
+                f"{kind} invocation identities"
+            )
+        stage_identity_owners[kind][value] = stage
+
     for stage, receipt in package.model_invocation_receipts.items():
         receipt_dict = receipt.to_dict()
         receipt_id = receipt.receipt_id
+        require_independent_identity("receiptId", receipt_id, stage)
         receipt_scope = dict(receipt.scope or {})
         receipt_scope_fields = {
             "questionId": _scope_value(
@@ -285,6 +316,14 @@ def _validate_receipt_evidence(
                 f"receipt.{stage} has ambiguous official_model_evidence binding"
             )
         row = matches[0]
+        row_schema_version = row.get("schemaVersion")
+        if (
+            type(row_schema_version) is not int
+            or row_schema_version != _OFFICIAL_EVIDENCE_SCHEMA_VERSION
+        ):
+            raise QuestionResultPackageAdapterError(
+                f"official_model_evidence for receipt.{stage}.schemaVersion must be 2"
+            )
         required = {
             "receiptId": _row_value(row, "receiptId", "receipt_id"),
             "evidenceId": _row_value(row, "evidenceId", "evidence_id", "id"),
@@ -342,6 +381,13 @@ def _validate_receipt_evidence(
                     f"official_model_evidence for receipt.{stage} {field} "
                     "does not match receipt scope"
                 )
+        require_independent_identity("evidenceId", required["evidenceId"], stage)
+        require_independent_identity("outputRef", required["outputRef"], stage)
+        require_independent_identity(
+            "canonicalTurn",
+            (required["taskId"], required["turnId"]),
+            stage,
+        )
         if required["modelProvider"].lower() != receipt.provider.lower():
             raise QuestionResultPackageAdapterError(
                 f"official_model_evidence for receipt.{stage} provider binding mismatch"
