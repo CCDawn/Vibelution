@@ -14,6 +14,8 @@ const STATUS_LABEL: Record<ResearchWorkflowTaskStatus, string> = {
   waiting_user: "等待你确认",
   recoverable_error: "可以恢复",
   blocked: "已阻塞",
+  never_started: "从未启动",
+  failed_to_dispatch: "启动失败",
   completed: "已完成",
 };
 
@@ -24,11 +26,18 @@ const STATUS_TONE: Record<ResearchWorkflowTaskStatus, VStatusTone> = {
   waiting_user: "warning",
   recoverable_error: "danger",
   blocked: "danger",
+  never_started: "warning",
+  failed_to_dispatch: "danger",
   completed: "success",
 };
 
 function liveRole(status: ResearchWorkflowTaskStatus): "alert" | "status" {
-  return status === "recoverable_error" || status === "blocked" ? "alert" : "status";
+  return status === "recoverable_error"
+    || status === "blocked"
+    || status === "never_started"
+    || status === "failed_to_dispatch"
+    ? "alert"
+    : "status";
 }
 
 export type ResearchCurrentTaskInspectorProps = {
@@ -37,6 +46,8 @@ export type ResearchCurrentTaskInspectorProps = {
   /** Command area stays outside the scroll container so the primary action is always perceptible. */
   footer?: ReactNode;
   onReturnCurrentTask?: () => void;
+  onRetryDispatch?: () => void;
+  retryPending?: boolean;
 };
 
 export function ResearchCurrentTaskInspector({
@@ -44,6 +55,8 @@ export function ResearchCurrentTaskInspector({
   children,
   footer,
   onReturnCurrentTask,
+  onRetryDispatch,
+  retryPending = false,
 }: ResearchCurrentTaskInspectorProps) {
   const task = context.currentTask;
   const historyMode = Boolean(
@@ -80,6 +93,7 @@ export function ResearchCurrentTaskInspector({
       data-vui="research-current-task-inspector"
       data-history-mode={historyMode ? "true" : "false"}
       data-current-task-key={task.key}
+      data-task-status={task.status}
     >
       <header className={styles.header}>
         <div className={styles.eyebrow}>{historyMode ? "历史回顾 · 只读" : "当前任务 · 唯一操作面"}</div>
@@ -109,8 +123,19 @@ export function ResearchCurrentTaskInspector({
       <div className={styles.body} data-vui-region="current-task-body">
         {children}
       </div>
-      {!historyMode && footer ? (
+      {!historyMode && (footer || (task.retryAction && onRetryDispatch)) ? (
         <footer className={styles.footer} data-vui-region="current-task-action">
+          {task.retryAction && onRetryDispatch ? (
+            <VButton
+              type="button"
+              variant="primary"
+              isPending={retryPending}
+              isDisabled={retryPending}
+              onClick={onRetryDispatch}
+            >
+              {task.retryAction.label}
+            </VButton>
+          ) : null}
           {footer}
         </footer>
       ) : null}

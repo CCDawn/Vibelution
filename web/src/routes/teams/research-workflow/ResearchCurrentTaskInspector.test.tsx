@@ -104,4 +104,36 @@ describe("ResearchCurrentTaskInspector", () => {
 
     await act(async () => root.unmount());
   });
+
+  it("announces dispatch failure assertively and exposes a retry action", async () => {
+    const failed = context();
+    failed.currentTask = {
+      ...failed.currentTask!,
+      status: "failed_to_dispatch",
+      title: "运行启动失败",
+      detail: "运行在派发节点尝试前失败（dispatch_never_started），可以重试启动。",
+      commandAction: null,
+      retryAction: { label: "重试启动" },
+    };
+    const onRetry = vi.fn();
+    const { container, root } = await render(
+      <ResearchCurrentTaskInspector
+        context={failed}
+        onRetryDispatch={onRetry}
+      />,
+    );
+
+    expect(container.querySelector('[data-task-status="failed_to_dispatch"]')).not.toBeNull();
+    const detail = container.querySelector('[aria-live="assertive"]');
+    expect(detail?.getAttribute("role")).toBe("alert");
+    expect(detail?.textContent).toContain("dispatch_never_started");
+    const retry = Array.from(container.querySelectorAll("button")).find((button) => (
+      button.textContent?.includes("重试启动")
+    ));
+    expect(retry).not.toBeUndefined();
+    await act(async () => retry?.click());
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.unmount());
+  });
 });
