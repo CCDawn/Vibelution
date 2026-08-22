@@ -325,7 +325,11 @@ def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
             ],
             "requestId",
         ).items()
+        # A legacy pending request with no child run cannot represent work that
+        # can still mutate data. Keep the guard for every linked active request,
+        # while allowing that unlinked residue to be reset.
         if str(request.get("status") or "").strip().lower() in _ACTIVE_COLLECTION_STATUSES
+        and str(request.get("collectionRunId") or "").strip()
     ]
     return {
         "questionId": normalized_question_id,

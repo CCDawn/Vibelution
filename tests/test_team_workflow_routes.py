@@ -813,6 +813,56 @@ def test_question_run_reset_routes_preview_then_clear_one_question_chain(tmp_pat
     assert hypothesis_first_chain.list_hypothesis_candidates(team_id, question_id="SCI-096")["candidates"] == []
 
 
+def test_question_run_reset_allows_orphaned_pending_collection_request(tmp_path, monkeypatch):
+    """A legacy request without a child run cannot be active work forever."""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    client = _client()
+    team_id = client.post("/api/teams", json={"name": "Orphaned request reset team"}).json()["teamId"]
+    hypothesis_first_chain._append_jsonl(
+        hypothesis_first_chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": hypothesis_first_chain.CANDIDATE_KIND,
+            "candidateId": "candidate-sci-097",
+            "questionId": "SCI-097",
+            "statement": "Legacy candidate",
+        },
+    )
+    hypothesis_first_chain._append_jsonl(
+        hypothesis_first_chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": hypothesis_first_chain.COLLECTION_REQUEST_KIND,
+            "requestId": "hfcr-orphaned",
+            "questionId": "SCI-097",
+            "status": "pending",
+            "collectionRunId": "",
+        },
+    )
+
+    preview = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-097/run-reset-preview",
+    )
+    reset = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-097/run-reset",
+        json={"confirmationQuestionId": "SCI-097"},
+    )
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["canReset"] is True
+    assert preview.json()["impact"]["collectionRequestCount"] == 1
+    assert preview.json()["impact"]["collectionRunCount"] == 0
+    assert reset.status_code == 200, reset.text
+    assert all(
+        record.get("questionId") != "SCI-097"
+        for record in hypothesis_first_chain._collection_requests(
+            hypothesis_first_chain._records(team_id)
+        )
+    )
+
+
 def test_project_source_collection_reset_ignores_other_project_downstream(tmp_path, monkeypatch):
     """Sibling-project experiment/iteration must not block Stage-1 reset of the active project."""
 

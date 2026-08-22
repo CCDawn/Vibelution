@@ -534,6 +534,37 @@ def test_question_reset_refuses_active_discussion_and_mismatched_confirmation(
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
 
 
+def test_question_reset_refuses_pending_collection_request_with_child_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending request remains protected when it still identifies child work."""
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": "request-live-child-run",
+            "questionId": _QUESTION_ID,
+            "status": "pending",
+            "collectionRunId": "source-run-live-child",
+        },
+    )
+
+    preview = chain.preview_question_reset(team_id, _QUESTION_ID)
+
+    assert preview["canReset"] is False
+    assert "资料搜集仍在进行" in preview["blockingReason"]
+    with pytest.raises(chain.HypothesisFirstChainError, match="资料搜集仍在进行"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id=_QUESTION_ID,
+        )
+
+
 def test_question_reset_keeps_source_collection_untouched_if_ledger_rewrite_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
