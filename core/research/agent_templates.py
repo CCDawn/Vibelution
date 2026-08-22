@@ -1,4 +1,9 @@
-"""Research agent template catalog and workspace bindings."""
+"""Research agent template catalog and workspace bindings.
+
+The five templates in this module are legacy topic-discovery tools only. They
+do not define or bind Challenge Cup workflow nodes; workflow nodes resolve
+their roles from ``definition.primaryRoleKey`` and the team role catalog.
+"""
 
 from __future__ import annotations
 
