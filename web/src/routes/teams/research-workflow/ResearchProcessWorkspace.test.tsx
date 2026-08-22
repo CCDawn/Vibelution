@@ -321,6 +321,7 @@ describe("ResearchProcessWorkspace", () => {
 
     expect(rendered.container.textContent).toContain("正在切换题目");
     expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
+    expect(rendered.container.textContent).not.toContain("选择题目开始研究");
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });

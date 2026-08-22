@@ -91,6 +91,9 @@ export function ResearchWorkflowToolbar(props: {
   formalRuntimeActive?: boolean;
   /** Authoritative hypothesis-first stage when no formal runtime node exists. */
   nextActionStage?: HypothesisFirstStage;
+  /** Fail-closed scope transition state: show status instead of a launch action. */
+  scopeMismatch?: boolean;
+  statusMessage?: string;
   atCurrentTask?: boolean;
   /** Review-round progress for the hypothesis-first chain (K of budget). */
   chainRound?: { current: number; budget: number } | null;
@@ -230,7 +233,12 @@ export function ResearchWorkflowToolbar(props: {
             {(props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
           </VButton>
         ) : null}
-        {!workflowActive ? (
+        {props.scopeMismatch && props.statusMessage ? (
+          <VStatusChip tone="warning" role="status" className={styles.primary}>
+            {props.statusMessage}
+          </VStatusChip>
+        ) : null}
+        {!workflowActive && !props.scopeMismatch ? (
           <VButton
             type="button"
             density="compact"

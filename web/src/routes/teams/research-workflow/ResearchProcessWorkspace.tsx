@@ -365,6 +365,8 @@ export function ResearchProcessWorkspace({
             onOpenPanel={location.openPanel}
             navigationLabel={workflowActive && hypothesisFirstReady ? safeNextAction.navigationLabel : undefined}
             nextActionStage={workflowActive && hypothesisFirstReady ? safeNextAction.stage : undefined}
+            scopeMismatch={hypothesisFirstChain.scopeMismatch}
+            statusMessage={hypothesisFirstChain.scopeMismatch ? safeNextAction.statusMessage : undefined}
             chainRound={
               workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
                 ? {
