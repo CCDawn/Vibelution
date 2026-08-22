@@ -139,6 +139,169 @@ def _ensure_create_fingerprint(run: Any, fingerprints: tuple[str, ...]) -> None:
         )
 
 
+def _ensure_existing_run_identity(run: Any, run_input: Mapping[str, Any]) -> None:
+    expected_team_id = str(run_input.get("teamId") or "").strip()
+    expected_question_id = str(run_input.get("questionId") or "").strip().upper()
+    if (
+        str(run.team_id or "").strip() != expected_team_id
+        or str(run.question_id or "").strip().upper() != expected_question_id
+    ):
+        raise ResearchWorkflowError(
+            "idempotencyKey was already used with different run input",
+            code="idempotency_conflict",
+        )
+
+
+def _catalog_authorization_payload(authorization_record: Any) -> dict[str, Any]:
+    return {
+        "authorizationId": authorization_record.authorization_id,
+        "planId": authorization_record.plan_id,
+        "scopeHash": authorization_record.scope_hash,
+        "readinessReportSha256": authorization_record.readiness_report_sha256,
+        "recordHash": authorization_record.record_hash,
+        "approvedBy": authorization_record.approved_by,
+        "approvedAtMs": authorization_record.approved_at_ms,
+    }
+
+
+def _authorization_scope_allows_question(
+    authorization_record: Any,
+    *,
+    plan_id: str,
+    question_id: str,
+) -> bool:
+    """Validate and enforce the durable approval's semantic question scope."""
+
+    try:
+        scope = json.loads(authorization_record.batch_scope_json)
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(scope, Mapping):
+        return False
+    normalized_plan = str(plan_id or "").strip()
+    scope_plan = scope.get("planId")
+    gate_id = scope.get("gateId")
+    if (
+        not normalized_plan
+        or str(authorization_record.plan_id or "").strip() != normalized_plan
+        or not isinstance(scope_plan, str)
+        or scope_plan.strip() != normalized_plan
+        or not isinstance(gate_id, str)
+        or not gate_id.strip()
+    ):
+        return False
+    question_ids = scope.get("questionIds")
+    if not isinstance(question_ids, list) or not question_ids:
+        return False
+    normalized_question_ids: set[str] = set()
+    for value in question_ids:
+        if not isinstance(value, str):
+            return False
+        normalized_value = value.strip().upper()
+        if not normalized_value or normalized_value in normalized_question_ids:
+            return False
+        normalized_question_ids.add(normalized_value)
+    return str(question_id or "").strip().upper() in normalized_question_ids
+
+
+def _ensure_catalog_authorization_event(
+    uow: Any,
+    *,
+    run_id: str,
+    payload: Mapping[str, Any],
+    correlation_id: str,
+    now_ms: int,
+) -> None:
+    """Atomically attach or verify the deterministic authorization audit event."""
+
+    event_id = f"evt-catalog-run-authorized-{run_id}"
+    existing_event = uow.repository.get_event_by_id(event_id)
+    if existing_event is not None:
+        try:
+            existing_payload = json.loads(existing_event.payload_json)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ResearchWorkflowError(
+                "catalog authorization event is corrupt",
+                code="catalog_run_authorization_invalid",
+            ) from exc
+        if (
+            existing_event.run_id != run_id
+            or existing_event.event_type != "catalog_run_authorized"
+            or existing_payload != dict(payload)
+        ):
+            raise ResearchWorkflowError(
+                "catalog authorization event conflicts with the durable record",
+                code="catalog_run_authorization_invalid",
+            )
+        return
+    run = uow.repository.get_run(run_id)
+    if run is None:
+        raise ResearchWorkflowError(
+            "run disappeared while binding catalog authorization",
+            code="workflow_ledger_unavailable",
+        )
+    sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
+    if sequence is None:
+        raise ResearchWorkflowError(
+            "catalog authorization event could not be appended",
+            code="workflow_ledger_unavailable",
+        )
+    uow.repository.insert_event(
+        EventRecord(
+            run_id=run_id,
+            sequence=sequence,
+            event_id=event_id,
+            run_version=int(run.run_version or 1),
+            event_type="catalog_run_authorized",
+            actor_json=json.dumps(
+                {"actorType": "system", "actorId": "catalog-run-authorization"}
+            ),
+            correlation_id=correlation_id,
+            causation_id=f"evt-created-{run_id}",
+            payload_json=json.dumps(dict(payload), ensure_ascii=False),
+            occurred_at_ms=now_ms,
+        )
+    )
+
+
+def _load_catalog_authorization(
+    store: Any,
+    *,
+    run_input: Mapping[str, Any],
+    supplied: Mapping[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    from .catalog_run_authorization import validate_catalog_run_authorization
+
+    if not isinstance(supplied, Mapping):
+        raise ResearchWorkflowError(
+            "catalog run authorization is missing or invalid",
+            code="catalog_run_authorization_invalid",
+        )
+    authorization_id = str(supplied.get("authorizationId") or "").strip()
+    authorization_record = store.get_catalog_run_authorization(authorization_id)
+    plan_id = str(supplied.get("planId") or "").strip()
+    if (
+        authorization_record is None
+        or not validate_catalog_run_authorization(
+            authorization_record,
+            team_id=str(run_input.get("teamId") or "").strip(),
+            plan_id=plan_id,
+            scope_hash=str(supplied.get("scopeHash") or ""),
+            readiness_sha256=str(supplied.get("readinessReportSha256") or ""),
+        )
+        or not _authorization_scope_allows_question(
+            authorization_record,
+            plan_id=plan_id,
+            question_id=str(run_input.get("questionId") or ""),
+        )
+    ):
+        raise ResearchWorkflowError(
+            "catalog run authorization is missing, invalid, or outside the batch scope",
+            code="catalog_run_authorization_invalid",
+        )
+    return authorization_record, _catalog_authorization_payload(authorization_record)
+
+
 def create_run(
     workflow_id: str,
     *,
@@ -153,9 +316,28 @@ def create_run(
     fingerprints = _create_request_fingerprints(run_input)
     fingerprint = fingerprints[0]
     run_id = run_id_for_create(workflow_id, idempotency_key)
+    auth_payload = None
+    if catalog_run_authorization is not None:
+        _authorization_record, auth_payload = _load_catalog_authorization(
+            store,
+            run_input=run_input,
+            supplied=catalog_run_authorization,
+        )
     existing = store.get_run(run_id)
     if existing is not None:
         _ensure_create_fingerprint(existing, fingerprints)
+        _ensure_existing_run_identity(existing, run_input)
+        if auth_payload is not None:
+            store.submit(
+                lambda uow: _ensure_catalog_authorization_event(
+                    uow,
+                    run_id=run_id,
+                    payload=auth_payload,
+                    correlation_id=idempotency_key or run_id,
+                    now_ms=int(time.time() * 1000),
+                ),
+                force_flush=True,
+            ).result(timeout=15)
         return catalog_dict_from_run(existing)
 
     team_id = str(run_input.get("teamId") or "").strip()
@@ -199,38 +381,6 @@ def create_run(
     binding_set_id = str(
         (binding_payloads[0] if binding_payloads else {}).get("snapshotId") or f"binding-{run_id}"
     )
-    authorization_record = None
-    if catalog_run_authorization is not None:
-        from .catalog_run_authorization import validate_catalog_run_authorization
-
-        authorization_id = str(
-            catalog_run_authorization.get("authorizationId") or ""
-        ).strip()
-        authorization_record = store.get_catalog_run_authorization(authorization_id)
-        if authorization_record is None or not validate_catalog_run_authorization(
-            authorization_record,
-            team_id=input_snapshot.teamId,
-            plan_id=str(catalog_run_authorization.get("planId") or ""),
-            scope_hash=str(catalog_run_authorization.get("scopeHash") or ""),
-            readiness_sha256=str(
-                catalog_run_authorization.get("readinessReportSha256") or ""
-            ),
-        ):
-            raise ResearchWorkflowError(
-                "catalog run authorization is missing or invalid",
-                code="catalog_run_authorization_invalid",
-            )
-    auth_payload = None
-    if authorization_record is not None:
-        auth_payload = {
-            "authorizationId": authorization_record.authorization_id,
-            "planId": authorization_record.plan_id,
-            "scopeHash": authorization_record.scope_hash,
-            "readinessReportSha256": authorization_record.readiness_report_sha256,
-            "recordHash": authorization_record.record_hash,
-            "approvedBy": authorization_record.approved_by,
-            "approvedAtMs": authorization_record.approved_at_ms,
-        }
     record = RunRecord(
         run_id=run_id,
         team_id=input_snapshot.teamId,
@@ -300,7 +450,16 @@ def create_run(
         # Concurrent create with the same key: the single writer serializes
         # mutations, so the later request sees the winner's row here and
         # replays idempotently instead of hitting the run_id primary key.
-        if uow.repository.get_run(run_id) is not None:
+        existing_in_tx = uow.repository.get_run(run_id)
+        if existing_in_tx is not None:
+            if auth_payload is not None:
+                _ensure_catalog_authorization_event(
+                    uow,
+                    run_id=run_id,
+                    payload=auth_payload,
+                    correlation_id=idempotency_key or run_id,
+                    now_ms=now_ms,
+                )
             return
         uow.repository.insert_run(record)
         uow.repository.insert_event(event)
@@ -311,6 +470,7 @@ def create_run(
     created = store.get_run(run_id)
     if created is not None:
         _ensure_create_fingerprint(created, fingerprints)
+        _ensure_existing_run_identity(created, run_input)
     if created is None:
         raise ResearchWorkflowError("created run was not readable", code="workflow_ledger_unavailable")
     return catalog_dict_from_run(created)

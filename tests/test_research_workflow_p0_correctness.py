@@ -374,9 +374,10 @@ def test_catalog_authorization_hash_is_recorded_on_run_event(
             (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
             .read_text(encoding="utf-8")
         )
+        run_input = {**fixture["runInput"], "questionId": "SCI-091"}
         created = run_creation.create_run(
             CHALLENGE_CUP_WORKFLOW_ID,
-            run_input=fixture["runInput"],
+            run_input=run_input,
             binding_layers=AgentBindingLayers(),
             idempotency_key="p0-catalog-authorization-event",
             catalog_run_authorization=authorization_to_dict(authorization),
@@ -389,5 +390,287 @@ def test_catalog_authorization_hash_is_recorded_on_run_event(
         payload = json.loads(events[-1].payload_json)
         assert payload["recordHash"] == authorization.record_hash
         assert payload["readinessReportSha256"] == authorization.readiness_report_sha256
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"planId": "real-1", "gateId": "G1", "questionIds": ["SCI-091"]},
+        ["SCI-091"],
+    ],
+)
+def test_create_run_rejects_question_outside_or_malformed_authorization_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+            run_creation,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        monkeypatch.setattr(run_creation, "get_write_store", lambda: store)
+        monkeypatch.setattr(
+            run_creation,
+            "research_workflow_data_root",
+            lambda: tmp_path / "runtime-data",
+        )
+        evidence = {"status": "READY", "basis": "scope-membership-test"}
+        authorization = record_catalog_run_authorization(
+            "acceptance-research-team",
+            plan_id="real-1",
+            batch_scope=scope,
+            approved_by="server-operator",
+            readiness_evidence=evidence,
+            approved_at_ms=FIXED_NOW_MS,
+        )
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            .read_text(encoding="utf-8")
+        )
+        run_input = {**fixture["runInput"], "questionId": "SCI-002"}
+        with pytest.raises(
+            run_creation.ResearchWorkflowError,
+            match="outside the batch scope",
+        ):
+            run_creation.create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=run_input,
+                binding_layers=AgentBindingLayers(),
+                idempotency_key="scope-membership-rejection",
+                catalog_run_authorization=authorization_to_dict(authorization),
+            )
+        assert store.list_runs_for_team(
+            "acceptance-research-team", CHALLENGE_CUP_WORKFLOW_ID
+        ) == []
+    finally:
+        store.close()
+
+
+def test_legacy_run_replay_binds_catalog_authorization_event_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+            run_creation,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        monkeypatch.setattr(run_creation, "get_write_store", lambda: store)
+        monkeypatch.setattr(
+            run_creation,
+            "research_workflow_data_root",
+            lambda: tmp_path / "runtime-data",
+        )
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            .read_text(encoding="utf-8")
+        )
+        run_input = {**fixture["runInput"], "questionId": "SCI-091"}
+        legacy = run_creation.create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input,
+            binding_layers=AgentBindingLayers(),
+            idempotency_key="legacy-replay-authorization",
+        )
+        evidence = {"status": "READY", "basis": "legacy-replay-test"}
+        authorization = record_catalog_run_authorization(
+            "acceptance-research-team",
+            plan_id="real-1",
+            batch_scope={
+                "planId": "real-1",
+                "gateId": "G1",
+                "questionIds": ["SCI-091"],
+            },
+            approved_by="server-operator",
+            readiness_evidence=evidence,
+            approved_at_ms=FIXED_NOW_MS,
+        )
+        replay = run_creation.create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input,
+            binding_layers=AgentBindingLayers(),
+            idempotency_key="legacy-replay-authorization",
+            catalog_run_authorization=authorization_to_dict(authorization),
+        )
+        assert replay["runId"] == legacy["runId"]
+        events = store.list_events(legacy["runId"])
+        assert [event.event_type for event in events] == [
+            "run_created",
+            "catalog_run_authorized",
+        ]
+        assert json.loads(events[-1].payload_json)["recordHash"] == authorization.record_hash
+        assert store.get_run(legacy["runId"]).last_event_sequence == 2
+
+        run_creation.create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input,
+            binding_layers=AgentBindingLayers(),
+            idempotency_key="legacy-replay-authorization",
+            catalog_run_authorization=authorization_to_dict(authorization),
+        )
+        assert len(store.list_events(legacy["runId"])) == 2
+    finally:
+        store.close()
+
+
+def test_legacy_replay_rejects_conflicting_catalog_authorization_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+            run_creation,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        monkeypatch.setattr(run_creation, "get_write_store", lambda: store)
+        monkeypatch.setattr(
+            run_creation,
+            "research_workflow_data_root",
+            lambda: tmp_path / "runtime-data",
+        )
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            .read_text(encoding="utf-8")
+        )
+        run_input = {**fixture["runInput"], "questionId": "SCI-091"}
+        legacy = run_creation.create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input,
+            binding_layers=AgentBindingLayers(),
+            idempotency_key="legacy-replay-conflict",
+        )
+        evidence = {"status": "READY", "basis": "legacy-replay-conflict"}
+        authorization = record_catalog_run_authorization(
+            "acceptance-research-team",
+            plan_id="real-1",
+            batch_scope={
+                "planId": "real-1",
+                "gateId": "G1",
+                "questionIds": ["SCI-091"],
+            },
+            approved_by="server-operator",
+            readiness_evidence=evidence,
+            approved_at_ms=FIXED_NOW_MS,
+        )
+
+        def seed_conflict(uow) -> None:
+            sequence = uow.repository.advance_last_sequence(
+                legacy["runId"], 1, FIXED_NOW_MS
+            )
+            assert sequence == 2
+            uow.repository.insert_event(
+                replace(
+                    build_event_record(
+                        sequence,
+                        run_id=legacy["runId"],
+                        event_id=f"evt-catalog-run-authorized-{legacy['runId']}",
+                        event_type="catalog_run_authorized",
+                    ),
+                    payload_json=json.dumps({"recordHash": "conflict"}),
+                )
+            )
+
+        store.submit(seed_conflict, force_flush=True).result(timeout=10)
+        with pytest.raises(
+            run_creation.ResearchWorkflowError,
+            match="conflicts with the durable record",
+        ):
+            run_creation.create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=run_input,
+                binding_layers=AgentBindingLayers(),
+                idempotency_key="legacy-replay-conflict",
+                catalog_run_authorization=authorization_to_dict(authorization),
+            )
+        assert len(store.list_events(legacy["runId"])) == 2
+        assert store.get_run(legacy["runId"]).last_event_sequence == 2
+    finally:
+        store.close()
+
+
+def test_legacy_replay_rejects_team_or_question_identity_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            catalog_run_authorization,
+            run_creation,
+            run_lifecycle,
+        )
+
+        monkeypatch.setattr(catalog_run_authorization, "get_write_store", lambda: store)
+        monkeypatch.setattr(run_creation, "get_write_store", lambda: store)
+        monkeypatch.setattr(
+            run_creation,
+            "research_workflow_data_root",
+            lambda: tmp_path / "runtime-data",
+        )
+        idempotency_key = "legacy-replay-identity-mismatch"
+        run_id = run_lifecycle.run_id_for_create(
+            CHALLENGE_CUP_WORKFLOW_ID, idempotency_key
+        )
+        legacy_run = replace(
+            build_run_record(
+                run_id=run_id,
+                team_id="acceptance-research-team",
+                last_event_sequence=1,
+            ),
+            question_id="SCI-091",
+        )
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(legacy_run)
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        authorization = record_catalog_run_authorization(
+            "acceptance-research-team",
+            plan_id="real-5",
+            batch_scope={
+                "planId": "real-5",
+                "gateId": "G5",
+                "questionIds": ["SCI-091", "SCI-002"],
+            },
+            approved_by="server-operator",
+            readiness_evidence={"status": "READY", "basis": "identity-mismatch"},
+            approved_at_ms=FIXED_NOW_MS,
+        )
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            .read_text(encoding="utf-8")
+        )
+        mismatched_input = {
+            **fixture["runInput"],
+            "teamId": "acceptance-research-team",
+            "questionId": "SCI-002",
+        }
+        with pytest.raises(
+            run_creation.ResearchWorkflowError,
+            match="idempotencyKey was already used with different run input",
+        ):
+            run_creation.create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=mismatched_input,
+                binding_layers=AgentBindingLayers(),
+                idempotency_key=idempotency_key,
+                catalog_run_authorization=authorization_to_dict(authorization),
+            )
+        assert len(store.list_events(run_id)) == 1
+        assert store.get_run(run_id).last_event_sequence == 1
     finally:
         store.close()
