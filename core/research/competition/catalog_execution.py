@@ -206,6 +206,60 @@ class QuestionRunRecord:
         return record
 
 
+def _package_identity(result: QuestionResult, field: str) -> str:
+    snapshot = result.package_snapshot
+    return str(snapshot.get(field) or "") if snapshot is not None else ""
+
+
+def _validate_record_semantics(
+    record: QuestionRunRecord,
+    *,
+    is_v2: bool,
+) -> None:
+    result = record.result
+    if record.status is QuestionStatus.SUCCEEDED and result is None:
+        raise CatalogExecutionError(
+            "CatalogExecutionState SUCCEEDED record requires a result."
+        )
+    if not is_v2 and (result is None or not result.is_package_backed):
+        return
+    if result is not None and not result.is_package_backed:
+        raise CatalogExecutionError(
+            "CatalogExecutionState v2 result records must be package-backed."
+        )
+    if result is None:
+        if record.status in {
+            QuestionStatus.PENDING,
+            QuestionStatus.RUNNING,
+            QuestionStatus.FAILED,
+            QuestionStatus.BLOCKED,
+        }:
+            return
+        raise CatalogExecutionError(
+            "CatalogExecutionState v2 record semantics are invalid."
+        )
+
+    quality_status = result.quality_status
+    human_gate_status = result.human_gate_status
+    valid = {
+        QuestionStatus.PENDING: False,
+        QuestionStatus.RUNNING: (
+            quality_status == "approved" and human_gate_status == "pending"
+        ),
+        QuestionStatus.SUCCEEDED: (
+            quality_status == "approved" and human_gate_status == "approved"
+        ),
+        QuestionStatus.FAILED: quality_status == "failed",
+        QuestionStatus.BLOCKED: (
+            quality_status == "blocked" or human_gate_status == "blocked"
+        ),
+    }[record.status]
+    if not valid:
+        raise CatalogExecutionError(
+            "CatalogExecutionState v2 record semantics are invalid."
+        )
+
+
 class CatalogExecutionState:
     """Idempotent per-question batch state machine bound to one catalog scope."""
 
@@ -292,8 +346,7 @@ class CatalogExecutionState:
         record = self._records[question_id]
         record.status = QuestionStatus.FAILED
         record.last_error = str(reason)
-        if result is not None:
-            record.result = result
+        record.result = result
 
     def record_blocked(
         self,
@@ -306,8 +359,7 @@ class CatalogExecutionState:
         record = self._records[question_id]
         record.status = QuestionStatus.BLOCKED
         record.last_error = str(reason)
-        if result is not None:
-            record.result = result
+        record.result = result
 
     def record_package(self, package: QuestionResultPackage) -> None:
         """Map package quality and human decisions onto the existing state machine."""
@@ -320,9 +372,45 @@ class CatalogExecutionState:
                 f"Package locator does not match question and scope: {question_id}."
             )
         record = self._records[question_id]
-        if record.status is QuestionStatus.PENDING:
+        existing_result = record.result
+        if record.status is QuestionStatus.SUCCEEDED:
+            existing_hash = (
+                _package_identity(existing_result, "canonical_sha256")
+                if existing_result is not None and existing_result.is_package_backed
+                else ""
+            )
+            incoming_hash = _package_identity(result, "canonical_sha256")
+            if existing_hash and existing_hash == incoming_hash:
+                return
+            raise CatalogExecutionError(
+                f"Question {question_id} already succeeded with a different package."
+            )
+        if (
+            record.status in {QuestionStatus.FAILED, QuestionStatus.BLOCKED}
+            and not record.invalidated
+        ):
+            raise CatalogExecutionError(
+                f"Question {question_id} must be explicitly invalidated before recording a new package."
+            )
+
+        starts_new_attempt = record.status is QuestionStatus.PENDING or record.invalidated
+        if starts_new_attempt:
             self.mark_running(question_id)
             record = self._records[question_id]
+        elif record.status is QuestionStatus.RUNNING and existing_result is not None:
+            if (
+                not existing_result.is_package_backed
+                or existing_result.human_gate_status != "pending"
+            ):
+                raise CatalogExecutionError(
+                    f"Question {question_id} has invalid RUNNING package state."
+                )
+            if _package_identity(
+                existing_result, "idempotency_key"
+            ) != _package_identity(result, "idempotency_key"):
+                raise CatalogExecutionError(
+                    f"Question {question_id} pending package idempotency identity does not match."
+                )
         quality_status = result.quality_status
         human_gate_status = result.human_gate_status
         if quality_status == "failed":
@@ -403,17 +491,29 @@ class CatalogExecutionState:
         return summary
 
     def to_checkpoint(self) -> dict[str, Any]:
+        records = list(self._records.values())
+        legacy_result_present = any(
+            record.result is not None and not record.result.is_package_backed
+            for record in records
+        )
+        for record in records:
+            _validate_record_semantics(record, is_v2=not legacy_result_present)
         body = {
-            "schema_version": CATALOG_EXECUTION_CHECKPOINT_SCHEMA_VERSION,
             "plan": {
                 "plan_id": self._plan.plan_id,
                 "gate_id": self._plan.gate_id,
                 "question_ids": list(self._plan.question_ids),
             },
             "scope": self._scope.to_dict(),
-            "records": [record.to_checkpoint() for record in self._records.values()],
+            "records": [record.to_checkpoint() for record in records],
         }
-        return {**body, "checkpoint_sha256": _canonical_sha256(body)}
+        if legacy_result_present:
+            return body
+        v2_body = {
+            "schema_version": CATALOG_EXECUTION_CHECKPOINT_SCHEMA_VERSION,
+            **body,
+        }
+        return {**v2_body, "checkpoint_sha256": _canonical_sha256(v2_body)}
 
     @classmethod
     def from_checkpoint(
@@ -463,22 +563,7 @@ class CatalogExecutionState:
                     raise CatalogExecutionError(
                         "Checkpoint result question id does not match its record."
                     )
-                if record.result.is_package_backed:
-                    if record.result.quality_status == "failed":
-                        expected_status = QuestionStatus.FAILED
-                    elif (
-                        record.result.quality_status == "blocked"
-                        or record.result.human_gate_status == "blocked"
-                    ):
-                        expected_status = QuestionStatus.BLOCKED
-                    elif record.result.human_gate_status == "approved":
-                        expected_status = QuestionStatus.SUCCEEDED
-                    else:
-                        expected_status = QuestionStatus.RUNNING
-                    if record.status is not expected_status:
-                        raise CatalogExecutionError(
-                            "Checkpoint package quality and human gate state do not match its record status."
-                        )
+            _validate_record_semantics(record, is_v2=is_v2)
             state._records[record.question_id] = record
         if is_v2 and seen_question_ids != set(state._records):
             raise CatalogExecutionError(

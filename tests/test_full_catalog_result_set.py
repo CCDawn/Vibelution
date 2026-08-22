@@ -264,6 +264,35 @@ def test_submission_requires_package_backed_quality_and_human_gate_evidence() ->
     ]
 
 
+def test_manifest_receipt_locator_projects_only_stable_identity_fields() -> None:
+    scope = _scope()
+    package = _package(
+        scope,
+        "SCI-001",
+        evidence_locator_extras={
+            "evidenceId": "evidence-001",
+            "outputRef": "artifact://generation-output",
+            "outputSha256": "b" * 64,
+            "fullContent": "must never enter the identity manifest",
+            "freeForm": {"nested": "must also stay out"},
+        },
+    )
+    result_set = FullCatalogResultSet(scope=scope)
+    result_set.add_result(QuestionResult.from_package(package))
+
+    receipt = result_set.manifest()["entries"][0]["receipts"]["generation"]
+    assert receipt["evidence_locator"] == {
+        "kind": "workflow-ledger",
+        "evidenceId": "evidence-001",
+        "outputRef": "artifact://generation-output",
+        "outputSha256": "b" * 64,
+        "ref": "receipt://generation",
+    }
+    assert len(receipt["evidence_locator_sha256"]) == 64
+    assert "fullContent" not in json.dumps(receipt, ensure_ascii=False)
+    assert "freeForm" not in json.dumps(receipt, ensure_ascii=False)
+
+
 def test_legacy_or_pending_gate_results_cannot_be_submission_ready() -> None:
     scope = _scope()
     legacy = FullCatalogResultSet(scope=scope)

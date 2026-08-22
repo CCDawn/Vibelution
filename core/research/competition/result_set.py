@@ -25,6 +25,13 @@ DEFAULT_TEMPLATE_VERSION = "challenge-question-v2"
 RESULT_SET_CHECKPOINT_SCHEMA_VERSION = 2
 RESULT_MANIFEST_SCHEMA_VERSION = 1
 REQUIRED_PACKAGE_RECEIPT_STAGES = ("generation", "review", "revision")
+MANIFEST_EVIDENCE_LOCATOR_FIELDS = (
+    "kind",
+    "evidenceId",
+    "outputRef",
+    "outputSha256",
+    "ref",
+)
 
 if TYPE_CHECKING:
     from .question_result_package import QuestionResultPackage
@@ -73,6 +80,17 @@ def _validate_checkpoint_envelope(payload: Mapping[str, Any], *, label: str) -> 
     if supplied_hash != _canonical_sha256(_checkpoint_body(payload)):
         raise ResultSetContractError(f"{label} checkpoint hash does not match its content.")
     return True
+
+
+def _manifest_evidence_locator(payload: Mapping[str, Any]) -> dict[str, str]:
+    """Project only stable receipt identity fields, never free-form content."""
+
+    identity: dict[str, str] = {}
+    for field in MANIFEST_EVIDENCE_LOCATOR_FIELDS:
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            identity[field] = value.strip()
+    return identity
 
 
 def compute_scope_hash(
@@ -344,12 +362,15 @@ class QuestionResult:
                 raise ResultSetContractError(
                     f"Question result {self.question_id} is missing package receipt {stage}."
                 )
+            evidence_locator = receipt.get("evidenceLocator")
+            normalized_locator = _manifest_evidence_locator(
+                evidence_locator if isinstance(evidence_locator, dict) else {}
+            )
             receipt_identities[stage] = {
                 "receipt_id": str(receipt.get("receiptId") or ""),
                 "node_run_id": str(receipt.get("nodeRunId") or ""),
-                "evidence_locator": receipt.get("evidenceLocator")
-                if isinstance(receipt.get("evidenceLocator"), dict)
-                else {},
+                "evidence_locator": normalized_locator,
+                "evidence_locator_sha256": _canonical_sha256(normalized_locator),
             }
         gate_decisions = self.human_gate_decisions
         return {
