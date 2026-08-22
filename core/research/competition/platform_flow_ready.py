@@ -7,6 +7,8 @@ exercised with fixtures. It is not competition completion.
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -109,6 +111,111 @@ def _now() -> str:
 
 def _gate(gate_id: str, status: str, detail: str) -> dict[str, str]:
     return {"gateId": gate_id, "status": status, "detail": detail}
+
+
+def _validate_progress_panel_contract(
+    panel: Path,
+    contract_path: Path,
+) -> str | None:
+    """Validate the shared panel contract and prove the panel consumes it.
+
+    The readiness gate must inspect a typed/structured contract rather than
+    accepting marker words that can survive after the panel logic is removed.
+    The panel import and required property references are intentionally checked
+    as module structure; the focused frontend tests then exercise the behavior.
+    """
+
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"progress panel contract is invalid: {exc}"
+    if not isinstance(contract, dict) or contract.get("schemaVersion") != 1:
+        return "progress panel contract has unsupported schemaVersion"
+
+    program = contract.get("programProjection")
+    dev_controls = contract.get("devControls")
+    if not isinstance(program, dict) or not isinstance(dev_controls, dict):
+        return "progress panel contract is missing programProjection/devControls"
+    if program.get("property") != "competitionProgramProjection":
+        return "progress panel contract has the wrong program projection property"
+    if program.get("requiredDeepExperimentsProperty") != "requiredDeepExperiments":
+        return "progress panel contract has the wrong deep-experiment property"
+
+    snapshot_query_key = dev_controls.get("snapshotQueryKey")
+    repair_prefix = dev_controls.get("repairActionPrefix")
+    plans = dev_controls.get("plans")
+    actions = dev_controls.get("actions")
+    markers = dev_controls.get("markers")
+    if not isinstance(snapshot_query_key, str) or not snapshot_query_key:
+        return "progress panel contract is missing the DEV snapshot query key"
+    if not isinstance(repair_prefix, str) or not repair_prefix:
+        return "progress panel contract is missing the repair action prefix"
+    if not isinstance(plans, dict) or set(plans) != {"dev1", "dev5"}:
+        return "progress panel contract must declare dev1 and dev5 plans"
+    if not all(isinstance(value, str) and value for value in plans.values()):
+        return "progress panel contract contains an invalid plan id"
+    if len(set(plans.values())) != len(plans):
+        return "progress panel contract contains duplicate plan ids"
+    required_actions = {
+        "runReadiness",
+        "repairReadiness",
+        "runDev1",
+        "repairDev1",
+        "runDev5",
+        "resumeDev5",
+        "repairDev5",
+        "researchAuthorizationRequired",
+    }
+    if not isinstance(actions, dict) or set(actions) != required_actions:
+        return "progress panel contract does not declare every legal DEV action"
+    if not all(isinstance(value, str) and value for value in actions.values()):
+        return "progress panel contract contains an invalid legal DEV action"
+    if len(set(actions.values())) != len(actions):
+        return "progress panel contract contains duplicate legal DEV actions"
+    required_markers = {
+        "snapshotError",
+        "snapshotRetry",
+        "snapshotReadinessRepair",
+        "readiness",
+        "actions",
+        "mutationError",
+        "collapsedSummary",
+        "cliLocator",
+    }
+    if not isinstance(markers, dict) or set(markers) != required_markers:
+        return "progress panel contract does not declare every DEV product marker"
+    if not all(isinstance(value, str) and value for value in markers.values()):
+        return "progress panel contract contains an invalid DEV product marker"
+    if len(set(markers.values())) != len(markers):
+        return "progress panel contract contains duplicate DEV product markers"
+
+    panel_text = panel.read_text(encoding="utf-8")
+    if not re.search(
+        r'import\s+challengeMvpProgressPanelContract\s+from\s+"./ChallengeMvpProgressPanel.contract.json"',
+        panel_text,
+    ):
+        return "progress panel does not import the shared structural contract"
+    if "const panelContract = challengeMvpProgressPanelContract;" not in panel_text:
+        return "progress panel does not bind the shared structural contract"
+    if not re.search(
+        r"export\s+function\s+ChallengeMvpProgressPanel\s*\(",
+        panel_text,
+    ):
+        return "progress panel does not export its executable component"
+    required_contract_references = (
+        "panelContract.programProjection.property",
+        "panelContract.programProjection.requiredDeepExperimentsProperty",
+        "panelContract.devControls.snapshotQueryKey",
+        "panelContract.devControls.actions",
+        "panelContract.devControls.plans",
+        "panelContract.devControls.markers",
+    )
+    missing_references = [
+        reference for reference in required_contract_references if reference not in panel_text
+    ]
+    if missing_references:
+        return f"progress panel does not consume contract fields {missing_references}"
+    return None
 
 
 def _scope(payload: dict[str, str]) -> ResearchScopeEnvelope:
@@ -440,6 +547,15 @@ def gate_product_projection(
     run_frontend_checks: bool = True,
 ) -> dict[str, str]:
     panel = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.tsx"
+    panel_contract = (
+        repo
+        / "web"
+        / "src"
+        / "routes"
+        / "teams"
+        / "research-workflow"
+        / "ChallengeMvpProgressPanel.contract.json"
+    )
     styles = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.styles.ts"
     panel_test = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.test.tsx"
     inspector = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ResearchProcessInspectorPane.tsx"
@@ -447,17 +563,17 @@ def gate_product_projection(
     api = repo / "web" / "src" / "api" / "teamExperiment.ts"
     api_test = repo / "web" / "src" / "api" / "teamExperiment.test.ts"
     query_keys = repo / "web" / "src" / "api" / "queryKeys.ts"
-    product_files = (panel, styles, panel_test, inspector, types, api, api_test, query_keys)
+    product_files = (panel, panel_contract, styles, panel_test, inspector, types, api, api_test, query_keys)
     missing = [str(path.relative_to(repo)) for path in product_files if not path.is_file()]
     if missing:
         return _gate("product_projection", "FAIL", f"missing {missing}")
-    panel_text = panel.read_text(encoding="utf-8")
     inspector_text = inspector.read_text(encoding="utf-8")
     types_text = types.read_text(encoding="utf-8")
     api_text = api.read_text(encoding="utf-8")
     query_keys_text = query_keys.read_text(encoding="utf-8")
-    if "competitionProgramProjection" not in panel_text or "requiredDeepExperiments" not in panel_text:
-        return _gate("product_projection", "FAIL", "progress panel does not project Program v2")
+    contract_failure = _validate_progress_panel_contract(panel, panel_contract)
+    if contract_failure is not None:
+        return _gate("product_projection", "FAIL", contract_failure)
     if "CompetitionProgramProjection" not in types_text:
         return _gate("product_projection", "FAIL", "challenge cup API types are missing")
     for marker in (
@@ -477,10 +593,6 @@ def gate_product_projection(
     ):
         if marker not in types_text:
             return _gate("product_projection", "FAIL", f"typed DEV projection is missing {marker!r}")
-    if "useQuery" not in panel_text or "challengeCupDevControlsSnapshot" not in panel_text:
-        return _gate("product_projection", "FAIL", "panel does not load the DEV snapshot through React Query")
-    if "ChallengeMvpProgressPanel.styles" not in panel_text:
-        return _gate("product_projection", "FAIL", "DEV panel styles are not mounted")
     if "challengeCupDevControlsSnapshot" not in query_keys_text:
         return _gate("product_projection", "FAIL", "DEV snapshot query key is missing")
     if (
@@ -488,16 +600,6 @@ def gate_product_projection(
         or "<ChallengeMvpProgressPanel" not in inspector_text
     ):
         return _gate("product_projection", "FAIL", "DEV panel is not mounted in the inspector")
-    for marker in (
-        "nextLegalAction",
-        "run_dev_1_fixture_batch",
-        "run_dev_5_fixture_batch",
-        "RESEARCH_AUTHORIZATION_REQUIRED",
-    ):
-        if marker not in panel_text:
-            return _gate("product_projection", "FAIL", f"DEV nextLegalAction marker is missing {marker!r}")
-    if "data-dev-controls" not in panel_text:
-        return _gate("product_projection", "FAIL", "DEV controls product markers are missing")
     if run_frontend_checks:
         frontend_failure = _run_frontend_product_checks(repo)
         if frontend_failure is not None:

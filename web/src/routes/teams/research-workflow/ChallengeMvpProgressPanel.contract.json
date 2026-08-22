@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "programProjection": {
+    "property": "competitionProgramProjection",
+    "requiredDeepExperimentsProperty": "requiredDeepExperiments"
+  },
+  "devControls": {
+    "snapshotQueryKey": "challengeCupDevControlsSnapshot",
+    "plans": {
+      "dev1": "dev-1",
+      "dev5": "dev-5"
+    },
+    "actions": {
+      "runReadiness": "run_dev_readiness",
+      "repairReadiness": "repair_failed_platform_gates",
+      "runDev1": "run_dev_1_fixture_batch",
+      "repairDev1": "repair_dev_1_fixture_batch",
+      "runDev5": "run_dev_5_fixture_batch",
+      "resumeDev5": "resume_dev_5_fixture_batch",
+      "repairDev5": "repair_dev_5_fixture_batch",
+      "researchAuthorizationRequired": "RESEARCH_AUTHORIZATION_REQUIRED"
+    },
+    "repairActionPrefix": "repair_",
+    "markers": {
+      "snapshotError": "snapshot-error",
+      "snapshotRetry": "snapshot-retry",
+      "snapshotReadinessRepair": "snapshot-readiness-repair",
+      "readiness": "readiness",
+      "actions": "actions",
+      "mutationError": "mutation-error",
+      "collapsedSummary": "collapsed-summary",
+      "cliLocator": "cli-locator"
+    }
+  }
+}

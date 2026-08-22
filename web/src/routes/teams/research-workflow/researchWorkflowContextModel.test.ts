@@ -5,6 +5,7 @@ import { resolveHypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 import {
   buildResearchWorkflowContext,
   buildResearchWorkflowScopeKey,
+  researchWorkflowDispatchStatus,
   researchWorkflowScopeMismatch,
 } from "./researchWorkflowContextModel";
 
@@ -66,6 +67,71 @@ describe("researchWorkflowContextModel", () => {
     });
     expect(context.loadState).toBe("scope_mismatch");
     expect(context.currentTask).toBeNull();
+  });
+
+  it("distinguishes a created run with only pending placeholders from an ordinary task", () => {
+    expect(researchWorkflowDispatchStatus({
+      runStatus: "created",
+      nodeRuns: {
+        source_finding: { status: "pending", attempt: 0 },
+      },
+    })).toBe("never_started");
+
+    const context = buildResearchWorkflowContext({
+      ...base,
+      nextAction: {
+        stage: "generation_missing",
+        targetNodeId: "hf_generation",
+        navigationLabel: "前往候选生成",
+        command: "open_generation",
+        commandLabel: "生成候选假说",
+      },
+      runStatus: "created",
+      nodeRuns: {
+        source_finding: { status: "pending", attempt: 0 },
+      },
+    });
+
+    expect(context.currentTask).toMatchObject({
+      status: "never_started",
+      title: "运行从未启动",
+      targetNodeId: "hf_generation",
+      commandAction: null,
+      retryAction: { label: "重试启动" },
+      blocker: { code: "never_started", retryable: true },
+    });
+  });
+
+  it("projects dispatch_never_started as failed_to_dispatch and keeps started runs normal", () => {
+    expect(researchWorkflowDispatchStatus({
+      runStatus: "failed",
+      runTerminalReason: "dispatch_never_started",
+      nodeRuns: {},
+    })).toBe("failed_to_dispatch");
+    expect(researchWorkflowDispatchStatus({
+      runStatus: "created",
+      nodeRuns: {
+        source_finding: { status: "starting", attempt: 1, nodeRunId: "node-run-1" },
+      },
+    })).toBeNull();
+
+    const context = buildResearchWorkflowContext({
+      ...base,
+      nextAction: {
+        stage: "generation_missing",
+        targetNodeId: "hf_generation",
+        navigationLabel: "前往候选生成",
+        command: "open_generation",
+        commandLabel: "生成候选假说",
+      },
+      runStatus: "failed",
+      runTerminalReason: "dispatch_never_started",
+    });
+    expect(context.currentTask).toMatchObject({
+      status: "failed_to_dispatch",
+      title: "运行启动失败",
+      retryAction: { label: "重试启动" },
+    });
   });
 
   it("keeps the review gate authoritative even when the chain is already converged", () => {

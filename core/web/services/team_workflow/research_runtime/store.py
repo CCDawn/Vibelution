@@ -12,7 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vibelution_storage import resolve_project_data_home
+
 from .atomic_fs import CorruptWorkflowStoreError, atomic_write_text
+from .paths import PROJECT_ROOT
 
 
 def _utc_now() -> str:
@@ -23,8 +26,7 @@ def default_run_store_dir() -> Path:
     override = os.environ.get("VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE", "").strip()
     if override:
         return Path(override)
-    home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or ".")
-    return home / "Documents" / "Vibelution" / "data" / "research_workflows" / "runs"
+    return resolve_project_data_home(PROJECT_ROOT) / "research_workflows" / "runs"
 
 
 class WorkflowRunStore:

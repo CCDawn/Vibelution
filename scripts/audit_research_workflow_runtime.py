@@ -25,6 +25,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_project_data_home
+
 HARD_CATEGORIES = ("corrupt", "identity", "scope", "reconciliation")
 
 REQUIRED_RUN_FIELDS = (
@@ -104,9 +110,8 @@ LEGACY_SURFACE_PATTERNS = {
 LEGACY_SURFACE_ROOTS = ("core", "tests", "web/src")
 
 
-def default_data_root() -> Path:
-    home = Path.home()
-    return home / "Documents" / "Vibelution" / "data" / "research_workflows"
+def default_data_root(project_root: Path | None = None) -> Path:
+    return resolve_project_data_home(project_root or PROJECT_ROOT) / "research_workflows"
 
 
 def _finding(code: str, detail: str, category: str) -> dict[str, str]:
@@ -660,15 +665,16 @@ def _utc_now_ms() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="挑战杯科研工作流 T0 基线审计（只读）")
-    parser.add_argument("--data-root", type=Path, default=default_data_root(), help="research_workflows 数据根")
-    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1], help="仓库根（旧代码面清单）")
+    parser.add_argument("--data-root", type=Path, default=None, help="research_workflows 数据根")
+    parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT, help="仓库根（旧代码面清单）")
     parser.add_argument("--workspace-root", type=Path, default=None, help="workspace 根（领域 read-back，默认 data-root/../workspace）")
     parser.add_argument("--output", type=Path, default=None, help="审计报告 JSON 输出路径")
     args = parser.parse_args(argv)
+    data_root = args.data_root or default_data_root(args.project_root)
 
     try:
-        workspace_root = args.workspace_root or (args.data_root.parent / "workspace")
-        report = run_audit(args.data_root, project_root=args.project_root, workspace_root=workspace_root)
+        workspace_root = args.workspace_root or (data_root.parent / "workspace")
+        report = run_audit(data_root, project_root=args.project_root, workspace_root=workspace_root)
     except FileNotFoundError as exc:
         print(f"audit failed: {exc}", file=sys.stderr)
         return 2

@@ -27,6 +27,8 @@ import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
+import { buildResearchRunInput } from "./researchRunLaunchContract";
+import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import {
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -55,6 +57,13 @@ export type ResearchProcessWorkspaceProps = {
 // Stable identity so the memoized canvas pane does not re-render when no run
 // projection is loaded yet.
 const EMPTY_RUNTIME_NODE_IDS: string[] = [];
+
+function freshRetryIdempotencyKey(baseKey: string): string {
+  const random = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${baseKey}:fresh:${random}`;
+}
 
 export function ResearchProcessWorkspace({
   teamId,
@@ -261,6 +270,9 @@ export function ResearchProcessWorkspace({
     dataRunId: runState.run?.runId ?? null,
     dataRunVersion: runState.run?.runVersion ?? null,
     dataScopeReady: hypothesisFirstReady && Boolean(runState.projection),
+    runStatus: runState.run?.status ?? runState.projection?.run.status ?? null,
+    runTerminalReason: runState.run?.terminalReason ?? null,
+    nodeRuns: runState.projection?.run.nodeRuns ?? null,
     scopeMismatch: hypothesisFirstChain.scopeMismatch,
     loading: !hypothesisFirstReady || (!runState.projection && !displayError),
     error: displayError,
@@ -288,6 +300,23 @@ export function ResearchProcessWorkspace({
     safeNextAction,
     teamId,
   ]);
+  const retryDispatch = useCallback(() => {
+    if (
+      workflowContext.currentTask?.status !== "never_started"
+      && workflowContext.currentTask?.status !== "failed_to_dispatch"
+    ) return;
+    const questionId = chainQuestionId.trim();
+    if (!questionId) return;
+    const input = buildResearchRunInput({
+      teamId,
+      questionId,
+      safetyBudget: createResearchRunSafetyBudget(),
+    });
+    void commands.submitRun({
+      ...input,
+      idempotencyKey: freshRetryIdempotencyKey(input.idempotencyKey),
+    }).catch(() => undefined);
+  }, [chainQuestionId, commands.submitRun, teamId, workflowContext.currentTask?.status]);
   useResearchProcessAutofocus({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
@@ -415,6 +444,8 @@ export function ResearchProcessWorkspace({
           location.panel === "node" ? (
             <ResearchCurrentTaskInspector
               context={workflowContext}
+              onRetryDispatch={retryDispatch}
+              retryPending={commandBusy}
               onReturnCurrentTask={
                 workflowContext.currentTask?.targetNodeId
                   ? () => location.replaceParams({ node: workflowContext.currentTask?.targetNodeId, panel: "node" })

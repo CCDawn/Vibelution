@@ -192,4 +192,74 @@ def test_gate_product_projection_fails_when_dev_markers_missing(tmp_path: Path) 
 
     gate = gate_product_projection(tmp_path)
     assert gate["status"] == "FAIL"
-    assert "typed DEV API" in gate["detail"]
+    assert "missing" in gate["detail"]
+
+
+def test_gate_product_projection_rejects_marker_only_panel(tmp_path: Path) -> None:
+    """Legacy marker words must not satisfy the product projection gate."""
+
+    panel = (
+        tmp_path
+        / "web"
+        / "src"
+        / "routes"
+        / "teams"
+        / "research-workflow"
+        / "ChallengeMvpProgressPanel.tsx"
+    )
+    panel.parent.mkdir(parents=True)
+    panel.write_text(
+        "competitionProgramProjection requiredDeepExperiments nextLegalAction "
+        "run_dev_1_fixture_batch run_dev_5_fixture_batch "
+        "RESEARCH_AUTHORIZATION_REQUIRED data-dev-controls",
+        encoding="utf-8",
+    )
+    panel.with_name("ChallengeMvpProgressPanel.contract.json").write_text(
+        (
+            ROOT
+            / "web"
+            / "src"
+            / "routes"
+            / "teams"
+            / "research-workflow"
+            / "ChallengeMvpProgressPanel.contract.json"
+        ).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    panel.with_name("ChallengeMvpProgressPanel.styles.ts").write_text(
+        "export default {}", encoding="utf-8"
+    )
+    panel.with_name("ChallengeMvpProgressPanel.test.tsx").write_text(
+        "test('DEV mouse controls', () => {})", encoding="utf-8"
+    )
+    panel.with_name("ResearchProcessInspectorPane.tsx").write_text(
+        "import { ChallengeMvpProgressPanel } from './ChallengeMvpProgressPanel'; "
+        "export const Pane = () => <ChallengeMvpProgressPanel />;",
+        encoding="utf-8",
+    )
+    types = tmp_path / "web" / "src" / "api" / "types" / "challengeCup.ts"
+    types.parent.mkdir(parents=True, exist_ok=True)
+    types.write_text(
+        "CompetitionProgramProjection ChallengeCupDevControlSnapshot "
+        "ChallengeCupDevNextLegalAction ChallengeCupDevBatchProjection "
+        "ChallengeCupDevReadinessProjection",
+        encoding="utf-8",
+    )
+    api = tmp_path / "web" / "src" / "api" / "teamExperiment.ts"
+    api.parent.mkdir(parents=True, exist_ok=True)
+    api.write_text(
+        "fetchChallengeCupDevControlSnapshot runChallengeCupDevReadiness "
+        "runChallengeCupDevBatch ChallengeCupDevControlSnapshot /dev-controls",
+        encoding="utf-8",
+    )
+    api.with_name("teamExperiment.test.ts").write_text(
+        "test('DEV API', () => {})", encoding="utf-8"
+    )
+    api.with_name("queryKeys.ts").write_text(
+        "challengeCupDevControlsSnapshot", encoding="utf-8"
+    )
+
+    gate = gate_product_projection(tmp_path, run_frontend_checks=False)
+
+    assert gate["status"] == "FAIL"
+    assert "shared structural contract" in gate["detail"]

@@ -5,7 +5,6 @@ HumanTasks, session bindings, handoffs, and idempotency keys are durable on disk
 
 from __future__ import annotations
 
-import os
 import threading
 import uuid
 from collections.abc import Mapping
@@ -18,6 +17,7 @@ from core.research.workflow.bindings import (
     build_run_binding_snapshots,
     resolve_effective_agent_id,
 )
+from core.research.workflow.checkpoint_store import default_checkpoint_path
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
@@ -178,17 +178,7 @@ class ResearchWorkflowRuntimeService:
         binding_config_store: WorkflowBindingConfigStore | None = None,
     ):
         self._store = run_store or WorkflowRunStore()
-        self._checkpoint_path = checkpoint_path or os.environ.get(
-            "VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH",
-            str(
-                Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or ".")
-                / "Documents"
-                / "Vibelution"
-                / "data"
-                / "research_workflows"
-                / "checkpoints.sqlite"
-            ),
-        )
+        self._checkpoint_path = str(checkpoint_path) if checkpoint_path else str(default_checkpoint_path())
         index_root = Path(self._store.root) / "_index"
         self._index = durable_index or DurableWorkflowIndex(index_root)
         self._lock = threading.RLock()

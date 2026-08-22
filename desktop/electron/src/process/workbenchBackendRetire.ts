@@ -317,7 +317,7 @@ export async function retireRegisteredHandles(input: {
   }
   const port = Number(input.port);
   if (Number.isFinite(port) && port > 0) {
-    await waitForPortRelease({
+    const released = await waitForPortRelease({
       port,
       host: input.host,
       signal: input.signal,
@@ -325,6 +325,9 @@ export async function retireRegisteredHandles(input: {
       delay: input.delay,
       connect: input.connect
     });
+    if (!released) {
+      throw new Error(`Failed to release workbench port ${port}`);
+    }
   }
   return unique;
 }

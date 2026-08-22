@@ -339,6 +339,21 @@ describe("workbenchBackendRetire", () => {
     await expect(waitForPortRelease({ port: 8000, connect: async () => false })).resolves.toBe(true);
   });
 
+  it("fails retirement when the workbench port remains bound", async () => {
+    let now = 0;
+    await expect(
+      retireRegisteredHandles({
+        pids: [],
+        port: 8000,
+        connect: async () => true,
+        now: () => now,
+        delay: async (ms) => {
+          now += ms;
+        }
+      })
+    ).rejects.toThrow("Failed to release workbench port 8000");
+  });
+
   it("refuses to kill a live registered browser handle without ownership evidence", async () => {
     const killPid = vi.fn();
     await expect(

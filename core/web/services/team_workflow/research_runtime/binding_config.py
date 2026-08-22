@@ -20,6 +20,7 @@ from core.research.workflow.definition import build_challenge_cup_workflow_defin
 from core.research.workflow.models import ActorKind, AgentBindingLayers
 
 from .atomic_fs import atomic_write_text
+from .store import default_run_store_dir
 
 
 def _utc_now() -> str:
@@ -39,23 +40,7 @@ class WorkflowBindingConfigStore:
     """
 
     def __init__(self, root: Path | None = None):
-        self.root = Path(root) if root else Path(
-            __import__("os").environ.get(
-                "VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE",
-                str(
-                    Path(
-                        __import__("os").environ.get("USERPROFILE")
-                        or __import__("os").environ.get("HOME")
-                        or "."
-                    )
-                    / "Documents"
-                    / "Vibelution"
-                    / "data"
-                    / "research_workflows"
-                    / "runs"
-                ),
-            )
-        ) / "binding_config"
+        self.root = (Path(root) if root else default_run_store_dir()) / "binding_config"
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 

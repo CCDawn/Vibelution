@@ -288,6 +288,38 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
     )
 
 
+# LangGraph represents these edges with ``add_edge``.  The two decision nodes
+# below are represented with conditional branches instead, so their outgoing
+# edge specs are consumed by ``graph_conditional_targets``.  Keeping the
+# filtering here makes this definition the only source of the graph topology;
+# the executable graph must not maintain a second hand-written edge list.
+_CONDITIONAL_GRAPH_SOURCES = frozenset({"iteration_decision", "version_governance"})
+
+
+def graph_static_edge_pairs() -> tuple[tuple[str, str], ...]:
+    """Return definition edges installed as ordinary LangGraph edges."""
+
+    return tuple(
+        (edge.fromNodeId, edge.toNodeId)
+        for edge in _edges()
+        if edge.fromNodeId not in _CONDITIONAL_GRAPH_SOURCES
+    )
+
+
+def graph_conditional_targets(source_node_id: str) -> tuple[str, ...]:
+    """Return unique conditional destinations for one graph decision node."""
+
+    if source_node_id not in _CONDITIONAL_GRAPH_SOURCES:
+        raise ValueError(f"{source_node_id!r} is not a conditional graph source")
+    return tuple(
+        dict.fromkeys(
+            edge.toNodeId
+            for edge in _edges()
+            if edge.fromNodeId == source_node_id
+        )
+    )
+
+
 def _canonical_payload(definition: WorkflowDefinition) -> dict[str, Any]:
     """Stable JSON shape for hashing — excludes structureHash itself."""
     return {

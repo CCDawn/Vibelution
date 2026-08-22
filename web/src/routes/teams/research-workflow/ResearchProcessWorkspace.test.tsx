@@ -238,6 +238,8 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.questionId = "";
     harness.location.panel = "";
     harness.runState.error = null;
+    harness.runState.run = null;
+    harness.runState.projection = null;
     harness.commands.error = null;
     harness.formalCommand.commandError = null;
     harness.chain.chainState = null;
@@ -324,6 +326,48 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.textContent).not.toContain("选择题目开始研究");
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
+  });
+
+  it("shows a created run that never dispatched and retries through submitRun", async () => {
+    harness.location.panel = "node";
+    harness.location.runId = "run-created";
+    harness.location.questionId = "SCI-004";
+    harness.chain.questionId = "SCI-004";
+    harness.runState.run = {
+      ...currentRun,
+      runId: "run-created",
+      questionId: "SCI-004",
+      status: "created",
+    } as WorkflowRunRecord;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        runVersion: 1,
+        status: "created",
+        runtimeCurrentNodeIds: [],
+        nodeRuns: {
+          source_finding: { nodeId: "source_finding", status: "pending", attempt: 0 },
+        },
+      },
+    } as never;
+    harness.commands.submitRun.mockResolvedValue(undefined);
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(rendered.container.querySelector('[data-task-status="never_started"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[aria-live="assertive"]')?.textContent).toContain("运行已创建");
+    const retry = Array.from(rendered.container.querySelectorAll("button")).find((button) => (
+      button.textContent?.includes("重试启动")
+    ));
+    expect(retry).not.toBeUndefined();
+    await act(async () => retry?.click());
+    expect(harness.commands.submitRun).toHaveBeenCalledWith(expect.objectContaining({
+      teamId: "research-team",
+      questionId: "SCI-004",
+      idempotencyKey: expect.stringContaining(":fresh:"),
+    }));
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {

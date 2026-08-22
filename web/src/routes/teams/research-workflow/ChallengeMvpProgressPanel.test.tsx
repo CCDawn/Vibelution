@@ -841,9 +841,10 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(panelSource).not.toContain("import.meta.env.DEV");
     expect(panelSource).toContain("fetchChallengeCupDevControlSnapshot(teamId)");
     expect(panelSource).toContain('<section className={styles.devControls}');
-    expect(panelSource).toContain('data-dev-controls="readiness"');
+    expect(panelSource).toContain('import challengeMvpProgressPanelContract from "./ChallengeMvpProgressPanel.contract.json"');
+    expect(panelSource).toContain("data-dev-controls={devMarkers.readiness}");
     expect(panelSource).toContain("data-dev-controls={planId}");
-    expect(panelSource).toContain('(["dev-1", "dev-5"] as const)');
+    expect(panelSource).toContain("([devPlanIds.dev1, devPlanIds.dev5] as const)");
   });
 
   it("clicks the full readiness → dev-1 → dev-5(maxItems=2) → resume(null) loop", async () => {

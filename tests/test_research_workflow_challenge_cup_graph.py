@@ -6,9 +6,16 @@ from pathlib import Path
 
 from langgraph.types import Command
 
-from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+from core.research.workflow.challenge_cup_graph import (
+    build_challenge_cup_graph,
+    compile_challenge_cup_graph,
+)
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition import (
+    build_challenge_cup_workflow_definition,
+    graph_conditional_targets,
+    graph_static_edge_pairs,
+)
 from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
     advance_checkpoint,
     prepare_initial_checkpoint,
@@ -20,6 +27,40 @@ def test_graph_contains_all_definition_nodes() -> None:
     # compile to ensure graph builds
     path = Path(__file__).resolve()  # noqa: F841
     assert len(definition.nodes) == 16
+
+
+def test_graph_static_edges_are_definition_owned() -> None:
+    expected_static = (
+        ("source_finding", "source_extraction"),
+        ("source_extraction", "evidence_relations"),
+        ("evidence_relations", "knowledge_ingestion"),
+        ("knowledge_ingestion", "knowledge_handoff"),
+        ("knowledge_handoff", "hypothesis_design"),
+        ("hypothesis_design", "protocol_design"),
+        ("protocol_design", "protocol_review"),
+        ("protocol_review", "protocol_freeze"),
+        ("protocol_freeze", "smoke_gate"),
+        ("smoke_gate", "controlled_run"),
+        ("controlled_run", "result_evaluation"),
+        ("result_evaluation", "iteration_decision"),
+        ("candidate_promotion", "result_package"),
+    )
+    assert graph_static_edge_pairs() == expected_static
+    assert graph_conditional_targets("iteration_decision") == (
+        "controlled_run",
+        "version_governance",
+    )
+    assert graph_conditional_targets("version_governance") == (
+        "candidate_promotion",
+        "result_package",
+    )
+
+    graph = build_challenge_cup_graph()
+    assert graph.edges == {
+        *expected_static,
+        ("__start__", "source_finding"),
+        ("result_package", "__end__"),
+    }
 
 
 def test_direct_graph_requires_durable_adapter_execution(tmp_path: Path) -> None:
