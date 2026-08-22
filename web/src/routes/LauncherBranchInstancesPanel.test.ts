@@ -210,6 +210,17 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("waitingCleanupConfirmMetadata");
   });
 
+  it("bounds expanded maintenance cleanup without collapsing the primary branch table", () => {
+    expect(panelStyles.maintenanceFold).toContain("max-h-[min(42%,22rem)]");
+    expect(panelStyles.maintenanceFold).toContain("[&[open]]:flex");
+    expect(panelStyles.maintenanceFold).toContain("[&[open]]:flex-col");
+    expect(panelStyles.maintenanceBody).toContain("min-h-0");
+    expect(panelStyles.maintenanceBody).toContain("flex-1");
+    expect(panelStyles.maintenanceBody).toContain("overflow-y-auto");
+    expect(panelStyles.maintenanceBody).toContain("overscroll-contain");
+    expect(panelStyles.maintenanceBody).toContain("[scrollbar-gutter:stable]");
+  });
+
   it("overlays cleanup metadata onto fast list rows by id", () => {
     const base = instance({ id: "worktree:task" });
     const [row] = overlayCleanupMetadata(
