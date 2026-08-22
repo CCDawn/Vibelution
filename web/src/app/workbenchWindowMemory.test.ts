@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { resetControlTokenForTests, seedControlTokenForTests } from "../api/client";
 
 import {
   isPersistableWorkbenchWindowPosition,
@@ -6,6 +8,8 @@ import {
   observeWorkbenchWindowMode,
   observeWorkbenchWindowPosition,
   observeWorkbenchWindowSize,
+  resetWorkbenchWindowMemoryForTests,
+  startWorkbenchWindowMemory,
 } from "./workbenchWindowMemory";
 
 function fakeWindow(options: {
@@ -25,6 +29,13 @@ function fakeWindow(options: {
 }
 
 describe("workbenchWindowMemory", () => {
+  afterEach(() => {
+    resetWorkbenchWindowMemoryForTests();
+    resetControlTokenForTests();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("treats near full-screen outer bounds as fullscreen (F11 / start-fullscreen)", () => {
     expect(
       observeWorkbenchWindowMode(
@@ -119,5 +130,100 @@ describe("workbenchWindowMemory", () => {
     expect(isPersistableWorkbenchWindowPosition(
       observeWorkbenchWindowPosition({ screenX: -20000, screenY: -20000 }),
     )).toBe(false);
+  });
+
+  it("reads the startup config hash before persisting the remembered window", async () => {
+    vi.useFakeTimers();
+    seedControlTokenForTests();
+    vi.stubGlobal("window", {
+      outerWidth: 1280,
+      outerHeight: 720,
+      screenX: 112,
+      screenY: 88,
+      screen: {
+        width: 1920,
+        height: 1080,
+        availWidth: 1920,
+        availHeight: 1080,
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      setTimeout,
+      setInterval,
+    });
+    vi.stubGlobal("document", {
+      visibilityState: "visible",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ configHash: "hash-current" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const dispose = startWorkbenchWindowMemory();
+    await vi.advanceTimersByTimeAsync(700);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/settings/startup");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("GET");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/settings/startup");
+    const putInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(putInit.method).toBe("PUT");
+    expect(JSON.parse(String(putInit.body))).toEqual({
+      workbench: {
+        windowMode: "windowed",
+        windowSize: "1280x720",
+        windowPosition: "112,88",
+      },
+      baseHash: "hash-current",
+    });
+
+    dispose();
+  });
+
+  it("does not issue a soft write when the startup hash is unavailable", async () => {
+    vi.useFakeTimers();
+    seedControlTokenForTests();
+    vi.stubGlobal("window", {
+      outerWidth: 1280,
+      outerHeight: 720,
+      screenX: 112,
+      screenY: 88,
+      screen: {
+        width: 1920,
+        height: 1080,
+        availWidth: 1920,
+        availHeight: 1080,
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      setTimeout,
+      setInterval,
+    });
+    vi.stubGlobal("document", {
+      visibilityState: "visible",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({}),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const dispose = startWorkbenchWindowMemory();
+    await vi.advanceTimersByTimeAsync(700);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("GET");
+
+    dispose();
   });
 });

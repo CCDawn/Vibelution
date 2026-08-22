@@ -143,11 +143,21 @@ async function persistObservedWindow(
     workbench.windowPosition = position;
   }
   try {
-    // Startup settings accept empty baseHash (soft write). Only patch workbench.
+    // Startup settings use the config hash as a CAS token. Read it immediately
+    // before each write so a concurrent settings editor is rejected safely.
+    const startup = await fetchJson<{ configHash?: unknown }>(
+      `${LAUNCHER_ENDPOINT}/settings/startup`,
+      { method: "GET" },
+    );
+    const baseHash = String(startup?.configHash ?? "").trim();
+    if (!baseHash) {
+      // Never fall back to the retired empty-hash soft write.
+      return;
+    }
     await fetchJson(`${LAUNCHER_ENDPOINT}/settings/startup`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workbench }),
+      body: JSON.stringify({ workbench, baseHash }),
     });
     lastSavedMode = mode;
     if (mode === "windowed") {
