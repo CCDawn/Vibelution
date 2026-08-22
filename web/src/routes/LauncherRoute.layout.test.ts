@@ -211,6 +211,36 @@ describe("LauncherRoute layout contract", () => {
     expect(branchInstancesPanelSource).toContain("isDisabled={stopBusy}");
   });
 
+  it("keeps recovery actions available for a non-current instance with stale health", () => {
+    const destructiveActionSlice = sourceSlice(
+      routeSource,
+      "const destructiveActionDisabled =",
+      "const destructiveActionDisabledReason =",
+    );
+    const stopSlice = sourceSlice(routeSource, "const stopDisabled =", "const stopDisabledReason =");
+    const forceStopSlice = sourceSlice(routeSource, "const forceStopDisabled =", "const forceStopDisabledReason =");
+
+    expect(destructiveActionSlice).toContain(": controlMutation.isPending;");
+    expect(stopSlice).toContain(": controlMutation.isPending;");
+    expect(forceStopSlice).toContain(": controlMutation.isPending;");
+    expect(destructiveActionSlice).not.toContain("!selectedAlive");
+    expect(stopSlice).not.toContain("!selectedAlive");
+    expect(forceStopSlice).not.toContain("!selectedAlive");
+  });
+
+  it("routes non-current force-stop through the branch lifecycle action", () => {
+    expect(routeSource).toContain('Extract<LauncherOperation, "start" | "stop" | "restart" | "force-stop">');
+    expect(routeSource).toContain('onLifecycle={(instanceId, operation) => requestInstanceLifecycle(instanceId, operation)}');
+    expect(branchInstancesPanelSource).toContain("canForceStopInstance");
+    expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "force-stop")');
+    expect(branchInstancesPanelSource).toContain("isDisabled={lifecyclePending}");
+    const forceStopStart = branchInstancesPanelSource.indexOf("{showForceStop ? (");
+    expect(forceStopStart).toBeGreaterThanOrEqual(0);
+    const forceStopEnd = branchInstancesPanelSource.indexOf("</VActionGroup>", forceStopStart);
+    expect(forceStopEnd).toBeGreaterThan(forceStopStart);
+    expect(branchInstancesPanelSource.slice(forceStopStart, forceStopEnd)).not.toContain("stopBusy");
+  });
+
   it("renders a dense lifecycle console rather than a landing page", () => {
     expect(routeSource).toContain("LauncherProcessMonitorPanel");
     expect(routeSource).toContain("advancedFold");

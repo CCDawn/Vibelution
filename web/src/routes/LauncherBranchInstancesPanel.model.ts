@@ -659,6 +659,11 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
     && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial" || startingOrRestarting);
 }
 
+/** Force-stop is a recovery action for any non-current registry row. */
+export function canForceStopInstance(item: LauncherBranchInstance): boolean {
+  return !item.current;
+}
+
 export function paginateItems<T>(items: readonly T[], page: number, pageSize = BRANCH_INSTANCE_PAGE_SIZE) {
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(Math.max(1, page), pageCount);

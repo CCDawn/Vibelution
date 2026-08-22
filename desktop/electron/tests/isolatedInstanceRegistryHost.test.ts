@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { AdmissionDeniedError } from "../src/lifecycle/instanceAdmissionControl.
 import { admitLifecycleCommand, resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
 import {
   claimIsolatedStart,
+  claimIsolatedStop,
   collectExtraUsedPorts,
   resolveIsolatedClaimTarget
 } from "../src/lifecycle/isolatedInstanceRegistryHost.js";
@@ -71,5 +72,34 @@ describe("isolatedInstanceRegistryHost", () => {
         admissionStorePath
       })
     ).rejects.toBeInstanceOf(AdmissionDeniedError);
+  });
+
+  it("persists the stop command id through the registry claim", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-stop-command-"));
+    const registryPath = join(dir, "instances.json");
+    await writeFile(registryPath, JSON.stringify({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          projectRoot: "C:/wt/task",
+          port: 8003,
+          controlPort: 8768,
+          status: "running",
+          desiredState: "open",
+          generation: 4,
+          commandId: "start-cmd",
+          spawnPid: 4242
+        }
+      }
+    }), "utf8");
+
+    const claimed = await claimIsolatedStop({
+      instanceId: "worktree:task",
+      branchInstances: payload,
+      commandId: "stop-cmd",
+      registryPath
+    });
+    expect(claimed.entry.commandId).toBe("stop-cmd");
+    expect(claimed.entry.status).toBe("stopping");
   });
 });

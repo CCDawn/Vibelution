@@ -13,7 +13,12 @@ import {
 import { dirname, join } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
-import { resolveLauncherRuntimeDir, resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
+import {
+  resolveCanonicalRuntimeHome,
+  resolveCheckoutRuntimeHome,
+  resolveLauncherRuntimeDir,
+  resolveRuntimeManagerDir
+} from "../lifecycle/projectStoragePaths.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
@@ -396,6 +401,47 @@ export const STALE_BACKEND_PORT_RELEASE_WAIT_MS = 15_000;
 const OCCUPANT_HEALTH_PROBE_ATTEMPTS = 3;
 const OCCUPANT_HEALTH_PROBE_RETRY_MS = 250;
 
+export type WorkbenchRuntimeStateCleanupResult = {
+  cleared: boolean;
+  removedCount: number;
+  failedCount: number;
+};
+
+/**
+ * Remove only the per-worktree Launcher descriptors after the backend is known
+ * to be gone. Keeping a stale state/ports file makes the branch projection
+ * report a dead backend as alive and leases its old port on the next start.
+ */
+export function clearWorkbenchLauncherRuntimeState(workspaceRoot: string): WorkbenchRuntimeStateCleanupResult {
+  const canonicalRuntimeHome = resolveCanonicalRuntimeHome(workspaceRoot);
+  const runtimeDirs = new Set<string>([
+    join(resolveCheckoutRuntimeHome(workspaceRoot), "launcher"),
+    ...(canonicalRuntimeHome ? [join(canonicalRuntimeHome, "launcher")] : []),
+    resolveLauncherRuntimeDir(workspaceRoot)
+  ]);
+  const paths = [...runtimeDirs].flatMap((runtimeDir) => [
+    join(runtimeDir, "state.json"),
+    join(runtimeDir, "ports.json")
+  ]);
+  let removedCount = 0;
+  let failedCount = 0;
+  for (const path of paths) {
+    try {
+      unlinkSync(path);
+      removedCount += 1;
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        failedCount += 1;
+      }
+    }
+  }
+  return {
+    cleared: failedCount === 0,
+    removedCount,
+    failedCount
+  };
+}
+
 export async function classifyWorkbenchPortOccupant(input: {
   port: number;
   host?: string;
@@ -464,14 +510,37 @@ export async function reclaimStaleWorkbenchBackend(input: {
   fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
   pidAlive?: (pid: number) => boolean;
   killPid?: (pid: number) => void;
+  registeredPids?: number[];
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
-}): Promise<{ reclaimed: boolean; reason: string }> {
+}): Promise<{ reclaimed: boolean; reason: string; verifiedPid?: number }> {
+  const port = Math.trunc(input.port);
+  if (!Number.isFinite(port) || port <= 0) {
+    return {
+      reclaimed: false,
+      reason: "workbench backend port is unavailable; registered pids were left untouched"
+    };
+  }
+  const pidAlive = input.pidAlive ?? knownPidIsAlive;
   const occupant = await classifyWorkbenchPortOccupant(input);
+  if (occupant.kind === "free") {
+    const registeredAlive = (input.registeredPids ?? [])
+      .map((pid) => Math.trunc(Number(pid)))
+      .filter((pid) => Number.isFinite(pid) && pid > 0 && pidAlive(pid));
+    if (registeredAlive.length > 0) {
+      return {
+        reclaimed: false,
+        reason: `port ${port} is released but registered backend pid ${registeredAlive.join(",")} is still alive`
+      };
+    }
+    return {
+      reclaimed: true,
+      reason: `port ${port} is already released`
+    };
+  }
   if (occupant.kind !== "same-project-backend") {
     return { reclaimed: false, reason: `port ${Math.trunc(input.port)} occupant is ${occupant.kind}` };
   }
-  const pidAlive = input.pidAlive ?? knownPidIsAlive;
   const killPid = input.killPid ?? terminatePid;
   if (pidAlive(occupant.pid)) {
     killPid(occupant.pid);
@@ -488,12 +557,21 @@ export async function reclaimStaleWorkbenchBackend(input: {
   if (!released) {
     return {
       reclaimed: false,
-      reason: `stale backend pid ${occupant.pid} still holds port ${Math.trunc(input.port)}`
+      reason: `stale backend pid ${occupant.pid} still holds port ${Math.trunc(input.port)}`,
+      verifiedPid: occupant.pid
+    };
+  }
+  if (pidAlive(occupant.pid)) {
+    return {
+      reclaimed: false,
+      reason: `stale backend pid ${occupant.pid} remains alive after port ${port} was released`,
+      verifiedPid: occupant.pid
     };
   }
   return {
     reclaimed: true,
-    reason: `reclaimed stale backend pid ${occupant.pid} on port ${Math.trunc(input.port)}`
+    reason: `reclaimed stale backend pid ${occupant.pid} on port ${Math.trunc(input.port)}`,
+    verifiedPid: occupant.pid
   };
 }
 

@@ -94,11 +94,20 @@ import {
   runWorkbenchLifecycle,
   type WorkbenchLifecycleOperation
 } from "./process/workbenchLifecycle.js";
-import { spawnWorkbenchBackend, mainLineBackendIsReusable } from "./process/workbenchBackend.js";
+import {
+  clearWorkbenchLauncherRuntimeState,
+  mainLineBackendIsReusable,
+  reclaimStaleWorkbenchBackend,
+  spawnWorkbenchBackend
+} from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
-import { retireRegisteredHandles } from "./process/workbenchBackendRetire.js";
+import { knownPidIsAlive } from "./lifecycle/mainLine/observation.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
-import { instancesRegistryPath, recordSpawnPid } from "./lifecycle/instanceRegistryStore.js";
+import {
+  instancesRegistryPath,
+  reclaimStaleInFlightStops,
+  recordSpawnPid
+} from "./lifecycle/instanceRegistryStore.js";
 import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
@@ -529,7 +538,13 @@ function updateLauncherWindowTruth(): void {
 
 const reconcileDeadlineScheduler = createReconcileDeadlineScheduler({
   onDue: () => {
-    void launcherStateStore.refresh("reconcile_deadline");
+    void reclaimExpiredIsolatedStops()
+      .catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        void launcherStateStore.refresh("reconcile_deadline");
+      });
   }
 });
 
@@ -2922,17 +2937,20 @@ function resolveOrchestratedWorkbenchUrl(port?: number): string {
   }
 }
 
-function closeOrchestratedWorkbenchWindow(instanceId: string): void {
+async function closeOrchestratedWorkbenchWindow(instanceId: string): Promise<void> {
   const provider = windowProvider;
   if (provider === null) {
     return;
   }
-  const closed = isCurrentCheckoutInstance(instanceId)
-    ? provider.approveWorkbenchCloseOnce()
-    : provider.closeInstanceWorkbench(instanceId);
-  void closed.catch((error: unknown) => {
+  try {
+    if (isCurrentCheckoutInstance(instanceId)) {
+      await provider.approveWorkbenchCloseOnce();
+    } else {
+      await provider.closeInstanceWorkbench(instanceId);
+    }
+  } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
-  });
+  }
 }
 
 async function closeWindowIfSupersededByClosedIntent(instanceId: string): Promise<void> {
@@ -3068,6 +3086,7 @@ async function runIsolatedRegistryMutation(input: {
         accepted: true,
         operation: input.operation,
         instanceId: input.instanceId,
+        commandId: randomUUID(),
         port: target.preferredBackend,
         controlPort: target.preferredControl,
         message: "已打开该分支工作台窗口。"
@@ -3165,15 +3184,39 @@ async function runIsolatedRegistryMutation(input: {
   }
 
   if (input.operation === "stop" || input.operation === "force-stop") {
+    const stopCommandId = randomUUID();
     const claimed = await claimIsolatedStop({
       instanceId: input.instanceId,
-      branchInstances: payload
+      branchInstances: payload,
+      commandId: stopCommandId
     });
-    await retireRegisteredHandles({
-      pids: [Number(claimed.entry.spawnPid || 0)],
-      port: Number(claimed.entry.port || target?.preferredBackend || 0),
-      signal: input.signal
-    });
+    const stopWorkspaceRoot = String(
+      target?.projectRoot
+      || claimed.entry.projectRoot
+    ).trim();
+    const stopPort = Number(claimed.entry.port || target?.preferredBackend || 0);
+    const staleReclaim = stopWorkspaceRoot
+      ? await reclaimStaleWorkbenchBackend({
+          port: stopPort,
+          host: String(claimed.entry.host || "127.0.0.1"),
+          workspaceRoot: stopWorkspaceRoot,
+          registeredPids: [Number(claimed.entry.spawnPid || 0)],
+          signal: input.signal
+        })
+      : {
+          reclaimed: false,
+          reason: "isolated stop target has no verified project root"
+        };
+    const registeredSpawnPid = Number(claimed.entry.spawnPid || 0);
+    const registeredSpawnPidAlive = registeredSpawnPid > 0 && knownPidIsAlive(registeredSpawnPid);
+    const backendConfirmedClosed = staleReclaim.reclaimed && (
+      staleReclaim.verifiedPid !== undefined
+      || registeredSpawnPid <= 0
+      || !registeredSpawnPidAlive
+    );
+    const runtimeCleanup = backendConfirmedClosed
+      ? clearWorkbenchLauncherRuntimeState(stopWorkspaceRoot)
+      : null;
     const completed = await completeIsolatedStop({
       instanceId: input.instanceId,
       expectedGeneration: Number(claimed.entry.generation || 0)
@@ -3181,12 +3224,29 @@ async function runIsolatedRegistryMutation(input: {
     if (!completed.applied) {
       throw new Error(`isolated instance stop completion lost its generation for ${input.instanceId}`);
     }
+    const commandId = String(claimed.entry.commandId || stopCommandId);
     return {
       schemaVersion: 1,
       accepted: true,
       operation: input.operation,
       instanceId: input.instanceId,
-      generation: Number(claimed.entry.generation || 0)
+      generation: Number(claimed.entry.generation || 0),
+      commandId,
+      ...(
+        !backendConfirmedClosed || runtimeCleanup?.failedCount
+          ? {
+              code: "backend_retire_incomplete",
+              message: [
+                !staleReclaim.reclaimed
+                  ? staleReclaim.reason
+                  : registeredSpawnPidAlive
+                    ? `port ${stopPort} is released but registered spawn pid ${registeredSpawnPid} is still alive and was not health-verified`
+                    : "",
+                runtimeCleanup?.failedCount ? "workbench launcher runtime state could not be fully cleared" : ""
+              ].filter(Boolean).join("; ")
+            }
+          : {}
+      )
     };
   }
 
@@ -3334,7 +3394,7 @@ async function orchestrateBranchInstanceLifecycle(
     && result.commandId
     && launcherLifecycleSupervisor.isCurrent(lease)
   ) {
-    closeOrchestratedWorkbenchWindow(instanceId);
+    await closeOrchestratedWorkbenchWindow(instanceId);
   }
   return {
     ...result,
@@ -3420,11 +3480,21 @@ async function orchestrateLauncherApi(
   return parsed.payload;
 }
 
+async function reclaimExpiredIsolatedStops(): Promise<void> {
+  await reclaimStaleInFlightStops(instancesRegistryPath());
+}
+
 function scheduleLauncherStatusCliRefresh(): void {
   if (launcherBootstrap === null) {
     return;
   }
-  void launcherStateStore.refresh("launcher_status_refresh");
+  void reclaimExpiredIsolatedStops()
+    .catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    })
+    .finally(() => {
+      void launcherStateStore.refresh("launcher_status_refresh");
+    });
 }
 
 function launcherStateStatSignature(path: string): string {
@@ -3567,6 +3637,7 @@ ipcMain.handle(IPC_CHANNELS.getLauncherState, (event) => {
 
 ipcMain.handle(IPC_CHANNELS.refreshLauncherState, async (event) => {
   assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  await reclaimExpiredIsolatedStops();
   return await launcherStateStore.refresh("user_recheck");
 });
 

@@ -45,6 +45,8 @@ def _snapshot(entry: dict) -> dict:
         "port": int(entry.get("port") or 0),
         "controlPort": int(entry.get("controlPort") or 0),
         "spawnPid": int(entry.get("spawnPid") or 0),
+        "windowPid": int(entry.get("windowPid") or 0),
+        "portLeaseStatus": str(entry.get("portLeaseStatus") or ""),
         "commandId": str(entry.get("commandId") or ""),
         "failureMessage": str(entry.get("failureMessage") or ""),
         "ownerPid": int(entry.get("ownerPid") or 0),
@@ -100,6 +102,8 @@ def _run_op(payload: dict, op: str, raw_input: dict, monkeypatch) -> dict:
             payload,
             instance_id=str(raw_input.get("instanceId") or ""),
             project_root=str(raw_input.get("projectRoot") or ""),
+            command_id=str(raw_input.get("commandId") or ""),
+            now=_now_from_ms(raw_input),
         )
         return {"ok": True, **_snapshot(entry)}
     if op in {"observeReady", "observeError"}:
@@ -123,6 +127,7 @@ def _run_op(payload: dict, op: str, raw_input: dict, monkeypatch) -> dict:
         applied, entry = registry.apply_reclaim_stale_in_flight_start(
             payload,
             instance_id=str(raw_input.get("instanceId") or ""),
+            expected_generation=int(raw_input.get("expectedGeneration") or 0),
             now=_now_from_ms(raw_input),
         )
         return {"applied": applied, **_snapshot(entry)}

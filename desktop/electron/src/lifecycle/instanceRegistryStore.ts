@@ -218,6 +218,20 @@ export function isStaleInFlightStart(
   return deadlineExpired(entry, nowMs) && ownerLeaseExpired(entry, nowMs);
 }
 
+export function isStaleInFlightStop(
+  entry: RegistryEntry | undefined,
+  input: { nowMs?: number } = {}
+): boolean {
+  if (!entry || statusOf(entry) !== "stopping") {
+    return false;
+  }
+  if (String(entry.desiredState || "").trim().toLowerCase() !== "closed") {
+    return false;
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  return deadlineExpired(entry, nowMs) && ownerLeaseExpired(entry, nowMs);
+}
+
 export function buildOwnerLease(input: { ownerId?: string; ownerPid?: number; nowMs?: number }): OwnerLease {
   const ownerId =
     String(input.ownerId || "").trim() ||
@@ -477,7 +491,7 @@ export async function applyClaimStart(
 
 export function applyClaimStop(
   payload: RegistryPayload,
-  input: { instanceId: string; projectRoot?: string }
+  input: { instanceId: string; projectRoot?: string; nowMs?: number; commandId?: string }
 ): { ok: true; entry: RegistryEntry } {
   const instanceId = String(input.instanceId || "").trim();
   if (!instanceId) {
@@ -485,10 +499,22 @@ export function applyClaimStop(
   }
   const entry = ensureEntry(payload, instanceId);
   const generation = positiveInt(entry.generation) + 1;
+  // A stop claim must not inherit an already elapsed start deadline. Without
+  // a fresh deadline, the stale-stop reconciler would release a live stop as
+  // soon as the next start request acquired the lock.
+  const stopDeadlineAt = toIsoUtc(
+    (input.nowMs ?? Date.now()) + ISOLATED_START_TIMEOUT_SECONDS * 1000
+  );
   entry.status = "stopping";
   entry.phase = "stopping";
   entry.desiredState = "closed";
   entry.generation = generation;
+  entry.deadlineAt = stopDeadlineAt;
+  entry.inFlightDeadlineAt = stopDeadlineAt;
+  const commandId = String(input.commandId || "").trim();
+  if (commandId) {
+    entry.commandId = commandId;
+  }
   entry.failureMessage = "";
   delete entry.ownerLease;
   const projectRoot = String(input.projectRoot || "").trim();
@@ -611,6 +637,7 @@ export function applyReclaimStaleInFlightStart(
   input: {
     instanceId: string;
     nowMs?: number;
+    expectedGeneration?: number;
     backendAlive?: boolean;
     backendListening?: boolean;
     windowOpen?: boolean;
@@ -620,6 +647,16 @@ export function applyReclaimStaleInFlightStart(
   const entry = payload.instances[instanceId];
   if (!entry) {
     return { applied: false, entry: {} };
+  }
+  const expected = positiveInt(input.expectedGeneration);
+  if (expected > 0 && positiveInt(entry.generation) !== expected) {
+    return { applied: false, entry: { ...entry } };
+  }
+  if (isStaleInFlightStop(entry, { nowMs: input.nowMs })) {
+    return applyCompleteStop(payload, {
+      instanceId,
+      expectedGeneration: expected || undefined
+    });
   }
   if (
     !isStaleInFlightStart(entry, {
@@ -738,7 +775,7 @@ export async function claimStart(
 
 export async function claimStop(
   registryPath: string,
-  input: { instanceId: string; projectRoot?: string },
+  input: { instanceId: string; projectRoot?: string; nowMs?: number; commandId?: string },
   options: RegistryStoreOptions = {}
 ): Promise<{ ok: true; entry: RegistryEntry }> {
   return mutateRegistry(registryPath, (payload) => applyClaimStop(payload, input), options);
@@ -789,6 +826,7 @@ export async function reclaimStaleInFlightStart(
   input: {
     instanceId: string;
     nowMs?: number;
+    expectedGeneration?: number;
     backendAlive?: boolean;
     backendListening?: boolean;
     windowOpen?: boolean;
@@ -796,6 +834,42 @@ export async function reclaimStaleInFlightStart(
   options: RegistryStoreOptions = {}
 ): Promise<ObserveResult> {
   return mutateRegistry(registryPath, (payload) => applyReclaimStaleInFlightStart(payload, input), options);
+}
+
+export type ReclaimStaleInFlightStopsResult = {
+  applied: boolean;
+  instanceIds: string[];
+};
+
+/**
+ * Reconcile every expired stop claim in one registry-lock transaction.
+ * Callers can use this before projecting the registry so a dead Electron
+ * supervisor cannot leave a stopping row busy until the next start attempt.
+ */
+export async function reclaimStaleInFlightStops(
+  registryPath: string,
+  input: { nowMs?: number } | number = {},
+  options: RegistryStoreOptions = {}
+): Promise<ReclaimStaleInFlightStopsResult> {
+  return mutateRegistry(
+    registryPath,
+    (payload) => {
+      const instanceIds: string[] = [];
+      const nowMs = typeof input === "number" ? input : input.nowMs;
+      for (const instanceId of Object.keys(payload.instances)) {
+        const entry = payload.instances[instanceId];
+        if (!isStaleInFlightStop(entry, { nowMs })) {
+          continue;
+        }
+        const result = applyCompleteStop(payload, { instanceId });
+        if (result.applied) {
+          instanceIds.push(instanceId);
+        }
+      }
+      return { applied: instanceIds.length > 0, instanceIds };
+    },
+    options
+  );
 }
 
 export async function upsert(

@@ -16,6 +16,7 @@ import {
   claimStart,
   claimStop,
   ownerLeaseOf,
+  reclaimStaleInFlightStops,
   recordSpawnPid,
   type RegistryPayload
 } from "../src/lifecycle/instanceRegistryStore.js";
@@ -52,6 +53,8 @@ type CaseExpected = {
   port?: number;
   controlPort?: number;
   spawnPid?: number;
+  windowPid?: number;
+  portLeaseStatus?: string;
   commandId?: string;
   failureMessage?: string;
   ownerPid?: number;
@@ -108,6 +111,8 @@ function snapshot(entry: Record<string, unknown>): CaseExpected {
     port: Number(entry.port || 0),
     controlPort: Number(entry.controlPort || 0),
     spawnPid: Number(entry.spawnPid || 0),
+    windowPid: Number(entry.windowPid || 0),
+    portLeaseStatus: String(entry.portLeaseStatus || ""),
     commandId: String(entry.commandId || ""),
     failureMessage: String(entry.failureMessage || ""),
     ownerPid: Number(entry.ownerPid || 0),
@@ -160,7 +165,8 @@ async function runOp(
   if (op === "claimStop") {
     const result = applyClaimStop(payload, {
       instanceId: String(input.instanceId || ""),
-      projectRoot: input.projectRoot
+      projectRoot: input.projectRoot,
+      commandId: input.commandId
     });
     return { ok: true, ...snapshot(result.entry) };
   }
@@ -184,7 +190,8 @@ async function runOp(
   if (op === "reclaimStale") {
     const result = applyReclaimStaleInFlightStart(payload, {
       instanceId: String(input.instanceId || ""),
-      nowMs: input.nowMs
+      nowMs: input.nowMs,
+      expectedGeneration: input.expectedGeneration
     });
     return { applied: result.applied, ...snapshot(result.entry) };
   }
@@ -272,7 +279,11 @@ describe("instanceRegistryStore shared fixture", () => {
         }
       }
     });
-    const claimed = applyClaimStop(payload, { instanceId: "worktree:task" });
+    const claimed = applyClaimStop(payload, {
+      instanceId: "worktree:task",
+      commandId: "stop-cmd-1"
+    });
+    expect(claimed.entry.commandId).toBe("stop-cmd-1");
     const completed = applyCompleteStop(payload, {
       instanceId: "worktree:task",
       expectedGeneration: claimed.entry.generation
@@ -301,6 +312,171 @@ describe("instanceRegistryStore shared fixture", () => {
     });
     expect(result.applied).toBe(false);
     expect(result.entry.status).toBe("stopping");
+  });
+
+  it("reclaims a stale stopping row with the same closed-stop cleanup as completion", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "stopping",
+          phase: "stopping",
+          desiredState: "closed",
+          generation: 9,
+          spawnPid: 4242,
+          windowPid: 4343,
+          port: 8010,
+          controlPort: 8770,
+          portLeaseStatus: "held",
+          deadlineAt: "2026-08-20T11:59:00Z"
+        }
+      }
+    });
+
+    const result = applyReclaimStaleInFlightStart(payload, {
+      instanceId: "worktree:task",
+      expectedGeneration: 9,
+      nowMs: Date.parse("2026-08-20T12:00:00Z")
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.entry).toMatchObject({
+      status: "closed",
+      phase: "steady",
+      desiredState: "closed",
+      spawnPid: 0,
+      windowPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+  });
+
+  it("keeps a stopping row busy while its owner lease is still valid", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "stopping",
+          phase: "stopping",
+          desiredState: "closed",
+          generation: 9,
+          spawnPid: 4242,
+          deadlineAt: "2026-08-20T11:59:00Z",
+          ownerLease: { ownerId: "pid:111", expiresAt: "2026-08-20T12:01:00Z" }
+        }
+      }
+    });
+
+    const result = applyReclaimStaleInFlightStart(payload, {
+      instanceId: "worktree:task",
+      nowMs: Date.parse("2026-08-20T12:00:00Z")
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.entry.status).toBe("stopping");
+    expect(result.entry.spawnPid).toBe(4242);
+  });
+
+  it("discards stale-stop reclaim when the generation no longer matches", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "stopping",
+          phase: "stopping",
+          desiredState: "closed",
+          generation: 9,
+          spawnPid: 4242,
+          deadlineAt: "2026-08-20T11:59:00Z"
+        }
+      }
+    });
+
+    const result = applyReclaimStaleInFlightStart(payload, {
+      instanceId: "worktree:task",
+      expectedGeneration: 8,
+      nowMs: Date.parse("2026-08-20T12:00:00Z")
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.entry).toMatchObject({ status: "stopping", generation: 9, spawnPid: 4242 });
+  });
+
+  it("refreshes the stop deadline so an old start deadline cannot release a live stop", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "steady",
+          phase: "steady",
+          desiredState: "open",
+          generation: 4,
+          deadlineAt: "2026-08-20T11:59:00Z",
+          inFlightDeadlineAt: "2026-08-20T11:59:00Z"
+        }
+      }
+    });
+    const nowMs = Date.parse("2026-08-20T12:00:00Z");
+
+    const claimed = applyClaimStop(payload, { instanceId: "worktree:task", nowMs });
+    const reclaimed = applyReclaimStaleInFlightStart(payload, {
+      instanceId: "worktree:task",
+      nowMs: nowMs + 1_000
+    });
+
+    expect(claimed.entry.status).toBe("stopping");
+    expect(claimed.entry.deadlineAt).toBe("2026-08-20T12:03:00Z");
+    expect(reclaimed.applied).toBe(false);
+    expect(reclaimed.entry.status).toBe("stopping");
+  });
+
+  it("reclaims all stale stops in one registry-lock transaction", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-stale-stops-"));
+    tempDirs.push(dir);
+    const registryPath = join(dir, "instances.json");
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(registryPath, `${JSON.stringify(cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:stale": {
+          status: "stopping",
+          phase: "stopping",
+          desiredState: "closed",
+          generation: 2,
+          spawnPid: 2002,
+          windowPid: 3002,
+          portLeaseStatus: "held",
+          deadlineAt: "2026-08-20T11:59:00Z"
+        },
+        "worktree:busy": {
+          status: "stopping",
+          phase: "stopping",
+          desiredState: "closed",
+          generation: 3,
+          spawnPid: 2003,
+          deadlineAt: "2026-08-20T11:59:00Z",
+          ownerLease: { ownerId: "pid:303", expiresAt: "2026-08-20T12:01:00Z" }
+        }
+      }
+    }), null, 2)}\n`, "utf8");
+
+    const result = await reclaimStaleInFlightStops(registryPath, {
+      nowMs: Date.parse("2026-08-20T12:00:00Z")
+    });
+
+    expect(result).toEqual({ applied: true, instanceIds: ["worktree:stale"] });
+    const persisted = JSON.parse(readFileSync(registryPath, "utf8")) as RegistryPayload;
+    expect(persisted.instances["worktree:stale"]).toMatchObject({
+      status: "closed",
+      generation: 2,
+      spawnPid: 0,
+      windowPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+    expect(persisted.instances["worktree:busy"]).toMatchObject({
+      status: "stopping",
+      generation: 3,
+      spawnPid: 2003
+    });
   });
 
   it("rejects a persisted start claim while cleanup holds the registry fence", async () => {

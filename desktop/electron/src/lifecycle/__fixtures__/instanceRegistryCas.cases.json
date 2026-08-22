@@ -305,7 +305,8 @@
       },
       "input": {
         "instanceId": "worktree:task",
-        "projectRoot": "C:/wt/task"
+        "projectRoot": "C:/wt/task",
+        "commandId": "stop-cmd-1"
       },
       "expected": {
         "ok": true,
@@ -652,6 +653,71 @@
         "applied": false,
         "generation": 3,
         "status": "starting",
+        "ownerId": "pid:111"
+      }
+    },
+    {
+      "id": "reclaim-stale-stopping-releases-handles-and-port-lease",
+      "op": "reclaimStale",
+      "registry": {
+        "schemaVersion": 3,
+        "instances": {
+          "worktree:task": {
+            "status": "stopping",
+            "phase": "stopping",
+            "desiredState": "closed",
+            "generation": 9,
+            "spawnPid": 4242,
+            "windowPid": 4343,
+            "port": 8010,
+            "controlPort": 8770,
+            "portLeaseStatus": "held",
+            "deadlineAt": "2026-08-18T04:52:41Z",
+            "inFlightDeadlineAt": "2026-08-18T04:52:41Z"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "expectedGeneration": 9,
+        "nowMs": 1787227200000
+      },
+      "expected": {
+        "applied": true,
+        "generation": 9,
+        "status": "closed",
+        "phase": "steady",
+        "desiredState": "closed",
+        "spawnPid": 0,
+        "ownerId": ""
+      }
+    },
+    {
+      "id": "reclaim-stopping-skips-when-owner-lease-valid",
+      "op": "reclaimStale",
+      "registry": {
+        "schemaVersion": 3,
+        "instances": {
+          "worktree:task": {
+            "status": "stopping",
+            "phase": "stopping",
+            "desiredState": "closed",
+            "generation": 9,
+            "spawnPid": 4242,
+            "deadlineAt": "2026-08-18T04:52:41Z",
+            "ownerLease": { "ownerId": "pid:111", "expiresAt": "2999-01-01T00:00:00Z" }
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "nowMs": 1787227200000
+      },
+      "expected": {
+        "applied": false,
+        "generation": 9,
+        "status": "stopping",
+        "spawnPid": 4242,
         "ownerId": "pid:111"
       }
     },

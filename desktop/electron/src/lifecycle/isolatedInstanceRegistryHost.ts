@@ -145,6 +145,7 @@ export async function claimIsolatedStop(input: {
   instanceId: string;
   branchInstances?: unknown;
   projectRoot?: string;
+  commandId?: string;
   registryPath?: string;
   storeOptions?: RegistryStoreOptions;
 }): Promise<{ ok: true; entry: RegistryEntry }> {
@@ -155,7 +156,8 @@ export async function claimIsolatedStop(input: {
     input.registryPath || instancesRegistryPath(),
     {
       instanceId: input.instanceId,
-      projectRoot: input.projectRoot || target?.projectRoot || ""
+      projectRoot: input.projectRoot || target?.projectRoot || "",
+      commandId: input.commandId
     },
     input.storeOptions
   );

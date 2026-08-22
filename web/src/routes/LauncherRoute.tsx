@@ -1676,15 +1676,23 @@ export function LauncherRoute() {
   });
   const requestInstanceLifecycle = (
     instanceId: string,
-    operation: Extract<LauncherOperation, "start" | "stop" | "restart">,
+    operation: Extract<LauncherOperation, "start" | "stop" | "restart" | "force-stop">,
   ): LifecycleRequestOutcome => {
     const item = branchItems.find((candidate) => candidate.id === instanceId);
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `lifecycle-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const accepted = acceptLifecycleIntent(lifecycleIntentsRef.current, {
+    const intentOperation = operation === "force-stop" ? "stop" : operation;
+    const intentTable = operation === "force-stop"
+      ? Object.fromEntries(Object.entries(lifecycleIntentsRef.current).filter(([id]) => id !== instanceId))
+      : lifecycleIntentsRef.current;
+    if (intentTable !== lifecycleIntentsRef.current) {
+      lifecycleIntentsRef.current = intentTable;
+      setLifecycleIntents(intentTable);
+    }
+    const accepted = acceptLifecycleIntent(intentTable, {
       instanceId,
-      operation,
+      operation: intentOperation,
       requestId,
       baselineLifecycleState: item?.runtime.lifecycleState,
     });
@@ -1696,7 +1704,7 @@ export function LauncherRoute() {
       });
       setNotice({
         tone: "warning",
-        text: lifecycleIntentRejectMessage(reason, lang === "zh", operation),
+        text: lifecycleIntentRejectMessage(reason, lang === "zh", intentOperation),
         source: "lifecycle-control",
       });
       return { accepted: false, reason };
@@ -1976,7 +1984,7 @@ export function LauncherRoute() {
     || controlPlaneHasCommandType(evidence, ["close_workbench", "force_close_workbench"]);
   const destructiveActionDisabled = selectedIsCurrent
     ? busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed
-    : controlMutation.isPending || !selectedAlive;
+    : controlMutation.isPending;
   const destructiveActionDisabledReason = selectedIsCurrent
     ? activeWorkCount > 0
       ? copy.lifecycleActionDisabledActiveWork
@@ -1985,33 +1993,33 @@ export function LauncherRoute() {
         : projectIsChanging
           ? copy.startDisabledChanging
           : copy.startDisabledBusy
-    : selectedAlive
+    : controlMutation.isPending
       ? copy.startDisabledBusy
-      : copy.stopDisabledClosed;
+      : "";
   const stopDisabled = selectedIsCurrent
     ? destructiveActionDisabled || closeCommandInFlight
-    : controlMutation.isPending || !selectedAlive;
+    : controlMutation.isPending;
   const stopDisabledReason = selectedIsCurrent
     ? projectIsClosed
       ? copy.stopDisabledClosed
       : closeCommandInFlight
         ? copy.stopDisabledInFlight
         : destructiveActionDisabledReason
-    : selectedAlive
-      ? copy.startDisabledBusy
-      : copy.stopDisabledClosed;
+    : controlMutation.isPending
+      ? copy.stopDisabledInFlight
+      : "";
   const forceStopDisabled = selectedIsCurrent
     ? busy || projectIsClosed || closeCommandInFlight
-    : controlMutation.isPending || !selectedAlive;
+    : controlMutation.isPending;
   const forceStopDisabledReason = selectedIsCurrent
     ? projectIsClosed
       ? copy.forceStopDisabledClosed
       : closeCommandInFlight
         ? copy.forceStopDisabledInFlight
         : copy.startDisabledBusy
-    : selectedAlive
-      ? copy.startDisabledBusy
-      : copy.forceStopDisabledClosed;
+    : controlMutation.isPending
+      ? copy.forceStopDisabledInFlight
+      : "";
   const activeWorkDetail = activeWorkCount > 0
     ? `${copy.activeTasks}: ${activeWorkCount}${activeWorkKinds.length ? ` · ${activeWorkKinds.join(", ")}` : ""}${restartQueue?.statusLine ? ` · ${restartQueue.statusLine}` : ""}`
     : restartQueue?.statusLine
