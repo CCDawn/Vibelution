@@ -16,7 +16,9 @@ def _write_skill(root: Path, dirname: str, *, name: str, description: str = "Dem
     return path
 
 
-def test_skill_library_lists_safe_summaries(tmp_path, monkeypatch):
+def test_skill_library_lists_legacy_ccdawn_alias_as_compatible_skill(tmp_path, monkeypatch):
+    """Expose the old skill id for compatibility without making it the default route."""
+
     _write_skill(tmp_path, "ccdawn-brt", name="ccdawn-brt", body="Stop before implementation.")
     events: list[dict] = []
     monkeypatch.setattr(

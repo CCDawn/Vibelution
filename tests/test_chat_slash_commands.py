@@ -15,7 +15,9 @@ def _write_skill(root: Path, dirname: str, *, name: str, body: str = "Use this w
     return path
 
 
-def test_parse_skill_slash_command_resolves_named_skill(tmp_path):
+def test_parse_skill_slash_command_keeps_legacy_ccdawn_alias_compatible(tmp_path):
+    """Keep the historical /ccdawn-brt command parseable for existing clients."""
+
     _write_skill(tmp_path, "ccdawn-brt", name="ccdawn-brt", body="Stop before implementation.")
 
     command = parse_skill_slash_command("/ccdawn-brt 设计权限流", skill_roots=[tmp_path])

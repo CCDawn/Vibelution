@@ -36,7 +36,9 @@ def test_initializes_external_skill_library_structure(tmp_path):
     assert (tmp_path / "skills" / "indexes").is_dir()
 
 
-def test_imports_managed_skill_and_searches_external_index(tmp_path):
+def test_imports_legacy_ccdawn_skill_id_without_relabeling(tmp_path):
+    """Preserve historical managed ids while the active route uses briefbound-router."""
+
     source = _write_skill(
         tmp_path / "source" / "brt",
         "ccdawn-brt",

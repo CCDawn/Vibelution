@@ -13,8 +13,8 @@
       }
     }
   },
-  // BRT 路由技能默认加载：AGENTS.md §3.0 要求每任务先走 ccdawn-brt 路由门。
-  // 指向本机技能目录，opencode 启动时自动扫描并作为可用 skill 注入。
+  // OpenCode 兼容入口：让该客户端扫描本机 ~/.grok/skills；其中 ccdawn-brt 仅保留给历史 skill/slash 调用。
+  // Vibelution 当前默认路由是 Codex 的 briefbound-router（~/.codex/skills），不要把旧别名当作默认规范。
   "skills": {
     "paths": ["~/.grok/skills"]
   },
