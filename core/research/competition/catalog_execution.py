@@ -523,6 +523,15 @@ class CatalogExecutionState:
     def invalidate(self, question_id: str, reason: str) -> None:
         self._require_in_plan(question_id)
         record = self._records[question_id]
+        if (
+            record.status is QuestionStatus.SUCCEEDED
+            and record.result is not None
+            and record.result.is_package_backed
+        ):
+            raise CatalogExecutionError(
+                f"Question {question_id} succeeded package cannot be invalidated; "
+                "only exact canonical replay is allowed."
+            )
         record.invalidated = True
         record.last_error = str(reason)
 

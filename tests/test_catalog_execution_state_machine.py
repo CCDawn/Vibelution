@@ -217,7 +217,7 @@ def test_rerunning_batch_after_partial_progress_is_idempotent() -> None:
     assert state.outcome_summary()["succeeded"] == 5
 
 
-def test_invalidate_then_rerun_increments_attempts() -> None:
+def test_legacy_success_invalidate_then_rerun_increments_attempts() -> None:
     scope = _scope()
     plan = dev_plan("dev-1")
     state = CatalogExecutionState(plan=plan, scope=scope)
@@ -236,7 +236,6 @@ def test_invalidate_then_rerun_increments_attempts() -> None:
     [
         ("approved", "failed", QuestionStatus.FAILED),
         ("rejected", "approved", QuestionStatus.BLOCKED),
-        ("approved", "approved", QuestionStatus.SUCCEEDED),
     ],
 )
 def test_invalidated_package_batch_retry_enters_execute_and_counts_one_attempt(
@@ -278,6 +277,34 @@ def test_invalidated_package_batch_retry_enters_execute_and_counts_one_attempt(
     assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
     assert state.attempts("SCI-091") == 2
     assert state.result_for("SCI-091").package_snapshot == replacement.to_dict()
+
+
+def test_succeeded_package_rejects_invalidation_without_reentering_batch() -> None:
+    scope = _scope()
+    package = _package(scope, "SCI-091")
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    state.record_package(package)
+    executed: list[str] = []
+
+    with pytest.raises(CatalogExecutionError, match="succeeded package.*invalidated"):
+        state.invalidate("SCI-091", "do not replace an approved result")
+
+    summary = run_pending_batch(
+        state,
+        lambda question_id: executed.append(question_id) or _result(scope, question_id),
+    )
+
+    assert executed == []
+    assert summary["attempted"] == []
+    assert summary["outcomes"] == []
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert state.attempts("SCI-091") == 1
+    restored = CatalogExecutionState.from_checkpoint(
+        state.to_checkpoint(),
+        expected_model_policy_sha256=package.model_policy["policySha256"],
+    )
+    assert restored.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert restored.attempts("SCI-091") == 1
 
 
 def test_run_pending_batch_legacy_pending_counts_one_attempt() -> None:
@@ -664,12 +691,14 @@ def test_v2_checkpoint_rejects_invalidated_non_retry_statuses() -> None:
                 expected_model_policy_sha256=policy_sha256,
             )
 
-    succeeded.invalidate("SCI-091", "invalid package success retry")
-    with pytest.raises(
-        CatalogExecutionError,
-        match="invalidated.*record semantics",
-    ):
-        succeeded.to_checkpoint()
+    with pytest.raises(CatalogExecutionError, match="succeeded package.*invalidated"):
+        succeeded.invalidate("SCI-091", "invalid package success retry")
+    restored = CatalogExecutionState.from_checkpoint(
+        succeeded.to_checkpoint(),
+        expected_model_policy_sha256=approved.model_policy["policySha256"],
+    )
+    assert restored.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert restored.attempts("SCI-091") == 1
 
 
 @pytest.mark.parametrize(
