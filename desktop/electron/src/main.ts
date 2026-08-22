@@ -131,7 +131,8 @@ import {
   PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
-  runPythonJsonBridge
+  runPythonJsonBridge,
+  capturePythonProcessIdentity
 } from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
@@ -3257,6 +3258,7 @@ async function retireIsolatedBackendAfterStartFailure(input: {
   isCurrent?: () => boolean;
   beforeRetire?: () => void;
   signal?: AbortSignal;
+  pythonPath: string;
 }): Promise<void> {
   const registryPath = instancesRegistryPath();
   const registry = await readRegistry(registryPath);
@@ -3296,6 +3298,7 @@ async function retireIsolatedBackendAfterStartFailure(input: {
     entry: claimed.entry,
     registryPath,
     signal: input.signal,
+    pythonPath: input.pythonPath,
     isCurrent: input.isCurrent,
     desiredStateOnFailure: "open",
     successFailureMessage: input.message
@@ -3350,6 +3353,7 @@ async function runIsolatedRegistryMutation(input: {
         branchInstances: payload,
         operation: input.operation,
         commandId: randomUUID(),
+        pythonPath: input.pythonPath,
         signal: input.signal,
         isCurrent: input.isCurrent
       });
@@ -3380,11 +3384,32 @@ async function runIsolatedRegistryMutation(input: {
       });
       const spawnPid = Number(spawned.child.pid || 0);
       const generation = Number(claimed.entry.generation || 0);
+      const spawnIdentity = spawnPid > 0
+        ? await capturePythonProcessIdentity({
+            pythonPath: spawned.pythonPath,
+            workspaceRoot: target.projectRoot,
+            pid: spawnPid
+          })
+        : null;
+      if (spawnPid > 0 && !spawnIdentity) {
+        try {
+          spawned.child.kill();
+        } catch {
+          // Preserve the lifecycle claim; the missing identity is fail-closed.
+        }
+        throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}`);
+      }
       if (spawnPid > 0 && generation > 0) {
         const recorded = await recordSpawnPid(instancesRegistryPath(), {
           instanceId: input.instanceId,
           spawnPid,
-          expectedGeneration: generation
+          expectedGeneration: generation,
+          ...(spawnIdentity
+            ? {
+                spawnCreateTime: spawnIdentity.createTime,
+                spawnExecutable: spawnIdentity.executable
+              }
+            : {})
         });
         if (!recorded.applied) {
           spawned.child.kill();
@@ -3422,6 +3447,7 @@ async function runIsolatedRegistryMutation(input: {
             message,
             isCurrent: input.isCurrent,
             signal: input.signal,
+            pythonPath: input.pythonPath,
             beforeRetire: () => {
               spawned.child.kill();
             }
@@ -3470,6 +3496,7 @@ async function runIsolatedRegistryMutation(input: {
       instanceId: input.instanceId,
       workspaceRoot: stopWorkspaceRoot,
       entry: claimed.entry,
+      pythonPath: input.pythonPath,
       signal: input.signal,
       isCurrent: input.isCurrent,
       desiredStateOnFailure: "closed"
@@ -3614,6 +3641,7 @@ async function orchestrateBranchInstanceLifecycle(
             generation: lease.generation,
             commandId: lease.commandId,
             message,
+            pythonPath,
             isCurrent: () => launcherLifecycleSupervisor.isCurrent(lease),
             signal: lease.signal
           });
@@ -3771,7 +3799,8 @@ async function orchestrateLauncherApi(
 
 async function reclaimExpiredIsolatedStops(): Promise<void> {
   const result = await reconcileOrphanedInstanceRegistry({
-    registryPath: instancesRegistryPath()
+    registryPath: instancesRegistryPath(),
+    pythonPath: desktopPythonPath()
   });
   if (result.retained.length > 0) {
     console.warn(

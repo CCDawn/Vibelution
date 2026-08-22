@@ -41,6 +41,8 @@ export type RegistryEntry = {
   inFlightDeadlineAt?: string;
   failureMessage?: string;
   spawnPid?: number;
+  spawnCreateTime?: number;
+  spawnExecutable?: string;
   windowPid?: number;
   ownerPid?: number;
   ownerLease?: OwnerLease | Record<string, unknown>;
@@ -486,6 +488,8 @@ export async function applyClaimStart(
     ownerLease: buildOwnerLease({ ownerId: input.ownerId, ownerPid: input.ownerPid, nowMs }),
     startedAt: input.startedAt || input.deadlineAt
   });
+  delete entry.spawnCreateTime;
+  delete entry.spawnExecutable;
   return { ok: true, entry: { ...entry } };
 }
 
@@ -591,6 +595,8 @@ export function applyCompleteStop(
   entry.desiredState = "closed";
   entry.failureMessage = "";
   entry.spawnPid = 0;
+  delete entry.spawnCreateTime;
+  delete entry.spawnExecutable;
   entry.windowPid = 0;
   entry.portLeaseStatus = "reclaimable";
   delete entry.ownerLease;
@@ -743,12 +749,25 @@ export function applyUpsert(
 
 export function applyRecordSpawnPid(
   payload: RegistryPayload,
-  input: { instanceId: string; spawnPid: number; expectedGeneration: number }
+  input: {
+    instanceId: string;
+    spawnPid: number;
+    expectedGeneration: number;
+    spawnCreateTime?: number;
+    spawnExecutable?: string;
+  }
 ): UpsertResult {
+  const fields: Record<string, unknown> = { spawnPid: Math.trunc(input.spawnPid) };
+  const createTime = Number(input.spawnCreateTime || 0);
+  const executable = String(input.spawnExecutable || "").trim();
+  if (Number.isFinite(createTime) && createTime > 0 && executable) {
+    fields.spawnCreateTime = createTime;
+    fields.spawnExecutable = executable;
+  }
   return applyUpsert(
     payload,
     input.instanceId,
-    { spawnPid: Math.trunc(input.spawnPid) },
+    fields,
     input.expectedGeneration
   );
 }
@@ -961,7 +980,13 @@ export async function upsert(
 
 export async function recordSpawnPid(
   registryPath: string,
-  input: { instanceId: string; spawnPid: number; expectedGeneration: number },
+  input: {
+    instanceId: string;
+    spawnPid: number;
+    expectedGeneration: number;
+    spawnCreateTime?: number;
+    spawnExecutable?: string;
+  },
   options: RegistryStoreOptions = {}
 ): Promise<UpsertResult> {
   return mutateRegistry(registryPath, (payload) => applyRecordSpawnPid(payload, input), options);

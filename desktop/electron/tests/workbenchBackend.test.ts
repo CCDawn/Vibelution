@@ -248,6 +248,21 @@ describe("workbenchBackendRetire", () => {
     ).rejects.toThrow("unverified registered process handles: 9911");
     expect(killPid).not.toHaveBeenCalled();
   });
+
+  it("propagates a failed owned-tree result instead of accepting root-pid death", async () => {
+    const reported: number[] = [];
+    await expect(
+      retireRegisteredHandles({
+        pids: [11, 9911],
+        pidAlive: () => true,
+        treePids: [11],
+        terminateProcessTree: async () => false,
+        reportUnverified: (pids) => reported.push(...pids),
+        connect: async () => false
+      })
+    ).rejects.toThrow("process tree 11");
+    expect(reported).toEqual([9911]);
+  });
 });
 
 describe("classifyWorkbenchPortOccupant", () => {
@@ -439,6 +454,23 @@ describe("reclaimStaleWorkbenchBackend", () => {
       reclaimed: false,
       reason: expect.stringContaining("remains alive after port")
     });
+  });
+
+  it("does not confirm stale reclaim when the owned tree helper reports failure", async () => {
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => true,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: () => true,
+      terminateProcessTree: async () => false,
+      gracefulShutdown: async () => ({ requested: false, completed: false, reason: "refused" })
+    });
+    expect(result).toMatchObject({ reclaimed: false, verifiedPid: 4242 });
+    expect(result.reason).toContain("not verified");
   });
 });
 
@@ -675,6 +707,29 @@ describe("frontend build supervision", () => {
     expect(harness.child.kill).toHaveBeenCalledOnce();
   });
 
+  it("uses the verified frontend process tree when a build is interrupted", async () => {
+    const harness = frontendBuildChild();
+    Object.assign(harness.child, { pid: 5151 });
+    const terminateProcessTree = vi.fn(async () => false);
+    await expect(
+      runWaitable("node", ["C:/repo/web/node_modules/vite/bin/vite.js", "build"], "C:/repo/web", {
+        phase: "vite",
+        workspaceRoot: "C:/repo",
+        pythonPath: "C:/repo/.venv/Scripts/python.exe",
+        timeoutMs: 10,
+        spawnImpl: () => harness.child,
+        captureProcessIdentity: async () => ({
+          pid: 5151,
+          createTime: 1,
+          executable: "C:/Program Files/nodejs/node.exe"
+        }),
+        terminateProcessTree
+      })
+    ).rejects.toMatchObject({ code: "frontend_build_failed", phase: "vite" });
+    expect(terminateProcessTree).toHaveBeenCalledWith(5151, expect.objectContaining({ pid: 5151 }));
+    expect(harness.child.kill).not.toHaveBeenCalled();
+  });
+
   it("surfaces child spawn errors with the build phase", async () => {
     const failure = new Error("spawn ENOENT");
     await expect(
@@ -894,23 +949,25 @@ describe("runWorkbenchLifecycle", () => {
     expect(killed).toEqual([77, 51]);
   });
 
-  it("does not kill a registered browser handle when Electron has no ownership proof", async () => {
+  it("retains an unverified browser handle while allowing stop cleanup to finish", async () => {
     const killPid = vi.fn();
-    await expect(
-      executeMainLineWorkbench({
-        workspaceRoot: "C:/repo",
-        pythonPath: "C:/repo/.venv/Scripts/python.exe",
-        operation: "force-stop",
-        command: { commandId: "cmd_force_stop", type: "close", operation: "force-stop", noBrowser: true },
-        readState: () => ({ browserWindowPid: 9911, backendPort: 8000 }),
-        writeState: () => undefined,
-        pidAlive: () => true,
-        killPid,
-        connect: async () => false,
-        readDaemonPid: () => 0
-      })
-    ).rejects.toThrow("unverified registered process handles: 9911");
+    let written: Record<string, unknown> = {};
+    await expect(executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "force-stop",
+      command: { commandId: "cmd_force_stop", type: "close", operation: "force-stop", noBrowser: true },
+      readState: () => ({ browserWindowPid: 9911, backendPort: 8000 }),
+      writeState: (state) => {
+        written = state;
+      },
+      pidAlive: () => true,
+      killPid,
+      connect: async () => false,
+      readDaemonPid: () => 0
+    })).resolves.toMatchObject({ accepted: true, message: expect.stringContaining("9911") });
     expect(killPid).not.toHaveBeenCalled();
+    expect(written).toMatchObject({ browserWindowPid: 9911, backendPid: 0 });
   });
 
   it("rejects with the bounded-helper abort classification before spawning", async () => {

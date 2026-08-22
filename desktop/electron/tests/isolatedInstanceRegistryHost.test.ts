@@ -221,6 +221,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const result = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       registryPath: "C:/tmp/instances.json",
       dependencies: {
         readRegistry: async () => ({ schemaVersion: 3, instances: { "worktree:task": existing } }),
@@ -262,6 +263,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const result = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       registryPath: "C:/tmp/instances.json",
       dependencies: {
         readRegistry: async () => ({
@@ -327,6 +329,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const result = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       registryPath: "C:/tmp/instances.json",
       dependencies: {
         readRegistry: async () => ({
@@ -375,6 +378,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const active = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       nowMs: Date.parse("2026-08-20T12:00:00Z"),
       dependencies: {
         readRegistry: async () => ({
@@ -397,6 +401,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const stale = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       nowMs: Date.parse("2026-08-20T12:00:00Z"),
       dependencies: {
         readRegistry: async () => ({
@@ -431,6 +436,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const result = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       isCurrent,
       dependencies: {
         readRegistry: async () => ({
@@ -479,6 +485,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const result = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       isCurrent: () => current,
       dependencies: {
         readRegistry: async () => ({
@@ -553,6 +560,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const incomplete = await retireClaimedIsolatedRuntime({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       entry: claimed.entry,
       registryPath,
       desiredStateOnFailure: "closed",
@@ -573,6 +581,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const retired = await retireIsolatedRuntimeBeforeStart({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       registryPath,
       dependencies: {
         reclaimBackend: async () => ({ reclaimed: true, reason: "reclaimed", verifiedPid: 4242 }),
@@ -633,6 +642,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const cleaned = await retireClaimedIsolatedRuntime({
       instanceId: "worktree:task",
       workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
       entry: claimed.entry,
       registryPath,
       desiredStateOnFailure: "open",

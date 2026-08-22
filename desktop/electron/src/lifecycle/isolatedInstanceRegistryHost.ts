@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { assertLifecycleAdmitted, recordAdmissionOutcome } from "./instanceAdmissionStore.js";
 import {
   clearWorkbenchLauncherRuntimeState,
+  readDaemonIdentity,
   readDaemonPid,
   reclaimStaleWorkbenchBackend,
   type WorkbenchRuntimeStateCleanupResult
@@ -10,7 +11,7 @@ import {
 import {
   requestGracefulWorkbenchShutdown
 } from "../process/workbenchBackendRetire.js";
-import { createPythonOwnedProcessTreeTerminator } from "../process/pythonJsonBridge.js";
+import { createPythonOwnedProcessTreeTerminator, type PythonProcessIdentity } from "../process/pythonJsonBridge.js";
 import { knownPidIsAlive } from "./mainLine/observation.js";
 
 /** Isolated-instance lifecycle operations Electron main owns end to end. */
@@ -244,6 +245,7 @@ export async function prepareIsolatedStart(input: {
   storeOptions?: RegistryStoreOptions;
   admissionStorePath?: string;
   signal?: AbortSignal;
+  pythonPath?: string;
   isCurrent?: () => boolean;
   retireDependencies?: Partial<IsolatedStartRetireDependencies>;
 }): Promise<IsolatedStartPreparationResult> {
@@ -264,6 +266,7 @@ export async function prepareIsolatedStart(input: {
     registryPath: input.registryPath,
     nowMs,
     signal: input.signal,
+    pythonPath: input.pythonPath,
     isCurrent: input.isCurrent,
     dependencies: input.retireDependencies
   });
@@ -350,6 +353,7 @@ export async function retireIsolatedRuntimeBeforeStart(input: {
   registryPath?: string;
   nowMs?: number;
   signal?: AbortSignal;
+  pythonPath?: string;
   isCurrent?: () => boolean;
   dependencies?: Partial<IsolatedStartRetireDependencies>;
 }): Promise<IsolatedStartRetireResult> {
@@ -415,6 +419,7 @@ export async function retireIsolatedRuntimeBeforeStart(input: {
     entry: claimed.entry,
     registryPath,
     signal: input.signal,
+    pythonPath: input.pythonPath,
     isCurrent: input.isCurrent,
     desiredStateOnFailure: "open",
     dependencies
@@ -441,6 +446,7 @@ export async function retireClaimedIsolatedRuntime(input: {
   entry: RegistryEntry;
   registryPath?: string;
   signal?: AbortSignal;
+  pythonPath?: string;
   isCurrent?: () => boolean;
   desiredStateOnFailure: "open" | "closed";
   successFailureMessage?: string;
@@ -484,14 +490,30 @@ export async function retireClaimedIsolatedRuntime(input: {
   let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
   try {
     const daemonPid = readDaemonPid(workspaceRoot);
-    const pythonPath = String(process.env.VIBELUTION_PYTHON_PATH || process.env.PYTHON || "").trim();
-    const terminateProcessTree = pythonPath
-      ? createPythonOwnedProcessTreeTerminator({
-          pythonPath,
-          workspaceRoot,
-          allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
-        })
-      : async (): Promise<boolean> => false;
+    const pythonPath = String(input.pythonPath || "").trim();
+    if (!pythonPath) {
+      return settleFailed("isolated backend retirement cannot verify process ownership: python path missing; registered handles retained");
+    }
+    const expectedIdentities: Record<string, PythonProcessIdentity> = {};
+    const spawnCreateTime = Number(entry.spawnCreateTime || 0);
+    const spawnExecutable = String(entry.spawnExecutable || "").trim();
+    if (registeredSpawnPid > 0 && spawnCreateTime > 0 && spawnExecutable) {
+      expectedIdentities[String(registeredSpawnPid)] = {
+        pid: registeredSpawnPid,
+        createTime: spawnCreateTime,
+        executable: spawnExecutable
+      };
+    }
+    const daemonIdentity = readDaemonIdentity(workspaceRoot);
+    if (daemonIdentity && daemonIdentity.pid === daemonPid) {
+      expectedIdentities[String(daemonPid)] = daemonIdentity;
+    }
+    const terminateProcessTree = createPythonOwnedProcessTreeTerminator({
+      pythonPath,
+      workspaceRoot,
+      allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"],
+      expectedIdentities
+    });
     staleReclaim = workspaceRoot && port > 0
       ? await dependencies.reclaimBackend({
           port,
@@ -499,6 +521,7 @@ export async function retireClaimedIsolatedRuntime(input: {
           workspaceRoot,
           registeredPids: [registeredSpawnPid],
           extraPids: [daemonPid],
+          expectedIdentities,
           terminateProcessTree,
           gracefulShutdown: requestGracefulWorkbenchShutdown,
           signal: input.signal

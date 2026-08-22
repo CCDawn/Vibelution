@@ -13,8 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .constants import DEFAULT_URL, PID_PATH, STATE_PATH, ensure_runtime_manager_dirs
-
+from .constants import (
+    DAEMON_IDENTITY_PATH,
+    DEFAULT_URL,
+    PID_PATH,
+    STATE_PATH,
+    ensure_runtime_manager_dirs,
+)
+from .process_identity import capture_process_identity
 
 WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 WRITE_FALLBACK_TIMEOUT_SECONDS = 5.0
@@ -86,12 +92,12 @@ def _retry_in_place_write(path: Path, text: str, *, timeout_seconds: float) -> N
         try:
             _write_text_in_place(path, text)
             return
-        except OSError as exc:
+        except OSError:
             attempt += 1
             if deadline is None:
                 deadline = time.monotonic() + timeout_seconds
             if time.monotonic() >= deadline:
-                raise exc
+                raise
             time.sleep(_write_retry_delay(attempt))
 
 
@@ -197,7 +203,20 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def save_pid(pid: int) -> None:
     ensure_runtime_manager_dirs()
-    _atomic_write_text(PID_PATH, str(int(pid)), suppress_write_failure=True)
+    normalized_pid = int(pid)
+    _atomic_write_text(PID_PATH, str(normalized_pid), suppress_write_failure=True)
+    identity = capture_process_identity(normalized_pid)
+    if identity:
+        _atomic_write_text(
+            DAEMON_IDENTITY_PATH,
+            json.dumps(identity, ensure_ascii=False, separators=(",", ":")),
+            suppress_write_failure=True,
+        )
+    else:
+        try:
+            DAEMON_IDENTITY_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def load_pid() -> int:
@@ -209,10 +228,24 @@ def load_pid() -> int:
         return 0
 
 
+def load_pid_identity() -> dict[str, Any]:
+    if not DAEMON_IDENTITY_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(_read_text_with_retry(DAEMON_IDENTITY_PATH, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def clear_pid(expected_pid: int | None = None) -> None:
     if expected_pid is not None and load_pid() != int(expected_pid):
         return
     try:
         PID_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        DAEMON_IDENTITY_PATH.unlink(missing_ok=True)
     except OSError:
         pass

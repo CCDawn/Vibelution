@@ -41,6 +41,12 @@ export type PythonJsonBridgeChild = Pick<
   ReturnType<typeof spawn>,
   "kill" | "once" | "stdout" | "stderr" | "pid"
 >;
+
+export type PythonProcessIdentity = {
+  pid: number;
+  createTime: number;
+  executable: string;
+};
 export type PythonJsonBridgeSpawn = (
   command: string,
   args: string[],
@@ -54,6 +60,14 @@ export type PythonJsonBridgeSpawn = (
 
 export type PythonJsonBridgeOwnedTreeTerminator = (child: PythonJsonBridgeChild) => void | Promise<void>;
 
+const CHILD_PROCESS_IDENTITIES = new WeakMap<object, Promise<PythonProcessIdentity | null>>();
+
+export function pythonJsonBridgeChildIdentity(
+  child: PythonJsonBridgeChild
+): Promise<PythonProcessIdentity | null> {
+  return CHILD_PROCESS_IDENTITIES.get(child as object) ?? Promise.resolve(null);
+}
+
 /**
  * A process-tree root must be classified by the project-owned Python process
  * inventory before Electron asks the helper to terminate it.  The helper is
@@ -63,7 +77,8 @@ export type PythonJsonBridgeOwnedTreeTerminator = (child: PythonJsonBridgeChild)
 export type PythonOwnedProcessTreeKind =
   | "managed_workbench_backend"
   | "runtime_manager_daemon"
-  | "frontend_build_bridge";
+  | "frontend_build_bridge"
+  | "frontend_build_process";
 
 export type PythonOwnedProcessTreeResult = {
   status: "terminated" | "already_dead" | "not_owned" | "still_alive";
@@ -73,7 +88,23 @@ export type PythonOwnedProcessTreeResult = {
   remainingPids?: number[];
 };
 
-export type PythonOwnedProcessTreeTerminator = (pid: number) => Promise<boolean>;
+export type PythonOwnedProcessTreeTerminator = (
+  pid: number,
+  expectedIdentity?: PythonProcessIdentity
+) => Promise<boolean>;
+
+const PYTHON_PROCESS_IDENTITY_SCRIPT = String.raw`
+import json
+import sys
+
+pid = int(sys.argv[1] or 0)
+try:
+    from core.runtime_manager.process_identity import capture_process_identity
+    identity = capture_process_identity(pid)
+except Exception:
+    identity = {}
+print(json.dumps(identity or {}, separators=(",", ":")))
+`;
 
 const PYTHON_OWNED_PROCESS_TREE_SCRIPT = String.raw`
 import json
@@ -83,6 +114,7 @@ import sys
 pid = int(sys.argv[1] or 0)
 workspace = os.path.abspath(sys.argv[2] or os.getcwd())
 allowed = set(json.loads(sys.argv[3] or "[]"))
+expected = json.loads(sys.argv[4] or "{}")
 
 def emit(status, kind="", reason="", remaining=None):
     print(json.dumps({
@@ -118,11 +150,44 @@ def build_bridge_owned(process):
         and "ensure-frontend-build" in command
     )
 
+def build_process_owned(process):
+    try:
+        cwd = normalized(process.cwd()).replace("\\", "/").rstrip("/")
+        command = " ".join(str(item or "") for item in process.cmdline()).replace("\\", "/").lower()
+        web_root = normalized(os.path.join(workspace, "web")).replace("\\", "/").rstrip("/")
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return False
+    if cwd != web_root:
+        return False
+    return (
+        "typescript/bin/tsc" in command
+        or "vite/bin/vite.js" in command
+    )
+
+def identity_matches(process):
+    try:
+        expected_pid = int(expected.get("pid") or 0)
+        expected_create_time = float(expected.get("createTime") or 0)
+        expected_executable = os.path.normcase(os.path.normpath(str(expected.get("executable") or "")))
+        actual_create_time = float(process.create_time())
+        actual_executable = os.path.normcase(os.path.normpath(str(process.exe() or "")))
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError, TypeError, ValueError):
+        return False
+    return (
+        expected_pid == pid
+        and expected_create_time > 0
+        and bool(expected_executable)
+        and abs(actual_create_time - expected_create_time) <= 0.001
+        and actual_executable == expected_executable
+    )
+
 try:
     root = psutil.Process(pid)
     kind = ""
     if "frontend_build_bridge" in allowed and build_bridge_owned(root):
         kind = "frontend_build_bridge"
+    elif "frontend_build_process" in allowed and build_process_owned(root):
+        kind = "frontend_build_process"
     else:
         try:
             from core.runtime_manager.process_inventory import repo_runtime_process_for_pid
@@ -132,6 +197,9 @@ try:
             kind = ""
     if kind not in allowed:
         emit("not_owned", kind=kind, reason="process_identity_unconfirmed")
+        raise SystemExit(0)
+    if not identity_matches(root):
+        emit("not_owned", kind=kind, reason="process_identity_mismatch")
         raise SystemExit(0)
 
     processes = list(root.children(recursive=True))
@@ -163,7 +231,9 @@ try:
             pass
     emit("still_alive" if remaining else "terminated", kind=kind, remaining=remaining)
 except (psutil.NoSuchProcess, psutil.ZombieProcess):
-    emit("already_dead")
+    # A missing root does not prove that descendants are gone. The caller
+    # must retain the handle and reconcile it through a later verified pass.
+    emit("not_owned", reason="root_not_found")
 except (psutil.AccessDenied, OSError) as error:
     emit("not_owned", reason=type(error).__name__)
 `;
@@ -181,6 +251,7 @@ export function createPythonOwnedProcessTreeTerminator(input: {
   workspaceRoot: string;
   allowedKinds: readonly PythonOwnedProcessTreeKind[];
   spawnImpl?: PythonJsonBridgeSpawn;
+  expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   timeoutMs?: number;
   terminationGraceMs?: number;
 }): PythonOwnedProcessTreeTerminator {
@@ -195,9 +266,13 @@ export function createPythonOwnedProcessTreeTerminator(input: {
     throw new TypeError("python owned-tree terminator requires at least one allowed process kind");
   }
 
-  return async (pid: number): Promise<boolean> => {
+  return async (pid: number, expectedIdentity?: PythonProcessIdentity): Promise<boolean> => {
     const normalizedPid = Math.trunc(Number(pid));
     if (!Number.isFinite(normalizedPid) || normalizedPid <= 0) {
+      return false;
+    }
+    const identity = expectedIdentity ?? input.expectedIdentities?.[String(normalizedPid)];
+    if (!identity || identity.pid !== normalizedPid || identity.createTime <= 0 || !identity.executable) {
       return false;
     }
 
@@ -210,7 +285,8 @@ export function createPythonOwnedProcessTreeTerminator(input: {
           PYTHON_OWNED_PROCESS_TREE_SCRIPT,
           String(normalizedPid),
           input.workspaceRoot,
-          JSON.stringify(allowedKinds)
+          JSON.stringify(allowedKinds),
+          JSON.stringify(identity)
         ],
         cwd: input.workspaceRoot,
         spawnImpl: input.spawnImpl,
@@ -240,8 +316,47 @@ export function createPythonOwnedProcessTreeTerminator(input: {
     if (result.pid !== normalizedPid) {
       return false;
     }
-    return result.status === "terminated" || result.status === "already_dead";
+    // "already_dead" is not proof that descendants are gone.  Only the
+    // helper's explicit post-termination verification can close the handle.
+    return result.status === "terminated";
   };
+}
+
+export async function capturePythonProcessIdentity(input: {
+  pythonPath: string;
+  workspaceRoot: string;
+  pid: number;
+  timeoutMs?: number;
+  spawnImpl?: PythonJsonBridgeSpawn;
+}): Promise<PythonProcessIdentity | null> {
+  const pid = Math.trunc(Number(input.pid));
+  if (!input.pythonPath.trim() || !input.workspaceRoot.trim() || !Number.isFinite(pid) || pid <= 0) {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = await runPythonJsonBridge({
+      pythonPath: input.pythonPath,
+      args: ["-c", PYTHON_PROCESS_IDENTITY_SCRIPT, String(pid)],
+      cwd: input.workspaceRoot,
+      spawnImpl: input.spawnImpl,
+      failureLabel: `process identity capture for pid ${pid}`,
+      timeoutMs: input.timeoutMs ?? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+      killPolicy: "child"
+    });
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = parsePythonJsonBridgePayload<Partial<PythonProcessIdentity>>(raw, `process identity capture for pid ${pid}`);
+    const createTime = Number(parsed.createTime);
+    const executable = String(parsed.executable || "").trim();
+    return Number(parsed.pid) === pid && Number.isFinite(createTime) && createTime > 0 && executable
+      ? { pid, createTime, executable }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function invalidPythonJsonBridgePayload(
@@ -287,6 +402,7 @@ export async function runPythonJsonBridge(input: {
   killPolicy: PythonJsonBridgeKillPolicy;
   mutation?: boolean;
   terminateOwnedTree?: PythonJsonBridgeOwnedTreeTerminator;
+  captureChildIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   terminationGraceMs?: number;
 }): Promise<string> {
   if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
@@ -311,6 +427,10 @@ export async function runPythonJsonBridge(input: {
     stdio: ["ignore", "pipe", "pipe"],
     env: pythonBridgeEnv()
   });
+  if (input.killPolicy === "owned-tree" && input.captureChildIdentity && Number(child.pid) > 0) {
+    const identityPromise = Promise.resolve(input.captureChildIdentity(Math.trunc(Number(child.pid)))).catch(() => null);
+    CHILD_PROCESS_IDENTITIES.set(child as object, identityPromise);
+  }
 
   return await new Promise((resolveOutput, reject) => {
     const chunks: Buffer[] = [];

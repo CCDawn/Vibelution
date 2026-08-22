@@ -2,6 +2,7 @@ import json
 
 from core.runtime_manager import state_store
 
+
 def test_save_state_suppresses_persistent_windows_lock(tmp_path, monkeypatch, capsys):
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({"stateVersion": 7}), encoding="utf-8")
@@ -53,3 +54,26 @@ def test_save_pid_uses_best_effort_write(tmp_path, monkeypatch):
     state_store.save_pid(321)
 
     assert calls == [(pid_path, "321", True)]
+
+
+def test_save_pid_persists_identity_and_clear_pid_removes_it(tmp_path, monkeypatch):
+    pid_path = tmp_path / "daemon.pid"
+    identity_path = tmp_path / "daemon.identity.json"
+    monkeypatch.setattr(state_store, "PID_PATH", pid_path)
+    monkeypatch.setattr(state_store, "DAEMON_IDENTITY_PATH", identity_path)
+    monkeypatch.setattr(
+        state_store,
+        "capture_process_identity",
+        lambda pid: {"pid": pid, "createTime": 12.5, "executable": "C:/Python/python.exe"},
+    )
+
+    state_store.save_pid(321)
+
+    assert json.loads(identity_path.read_text(encoding="utf-8")) == {
+        "pid": 321,
+        "createTime": 12.5,
+        "executable": "C:/Python/python.exe",
+    }
+    assert state_store.load_pid_identity()["pid"] == 321
+    state_store.clear_pid(321)
+    assert not identity_path.exists()

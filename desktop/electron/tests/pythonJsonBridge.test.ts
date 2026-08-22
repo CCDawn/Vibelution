@@ -62,13 +62,14 @@ describe("runPythonJsonBridge", () => {
       spawnImpl,
     });
 
-    await expect(terminateOwnedTree(42)).resolves.toBe(true);
+    const expectedIdentity = { pid: 42, createTime: 123.456, executable: "C:/Python/python.exe" };
+    await expect(terminateOwnedTree(42, expectedIdentity)).resolves.toBe(true);
     expect(spawnImpl).toHaveBeenCalledWith(
       "python",
       ["-c", expect.stringContaining("repo_runtime_process_for_pid"), "42", "C:/repo", JSON.stringify([
         "managed_workbench_backend",
         "runtime_manager_daemon",
-      ])],
+      ]), JSON.stringify(expectedIdentity)],
       expect.objectContaining({ cwd: "C:/repo", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
     );
   });
@@ -86,7 +87,31 @@ describe("runPythonJsonBridge", () => {
       spawnImpl,
     });
 
-    await expect(terminateOwnedTree(42)).resolves.toBe(false);
+    await expect(terminateOwnedTree(42, {
+      pid: 42,
+      createTime: 123.456,
+      executable: "C:/Python/python.exe"
+    })).resolves.toBe(false);
+  });
+
+  it("does not treat a still-alive tree result as successful retirement", async () => {
+    const { spawnImpl } = fakeSpawnWithOutput(JSON.stringify({
+      status: "still_alive",
+      pid: 42,
+      remainingPids: [43]
+    }));
+    const terminateOwnedTree = createPythonOwnedProcessTreeTerminator({
+      pythonPath: "python",
+      workspaceRoot: "C:/repo",
+      allowedKinds: ["managed_workbench_backend"],
+      spawnImpl
+    });
+
+    await expect(terminateOwnedTree(42, {
+      pid: 42,
+      createTime: 123.456,
+      executable: "C:/Python/python.exe"
+    })).resolves.toBe(false);
   });
 
   it("accepts launcher-api sized payloads that exceed the default 64KB cap", async () => {

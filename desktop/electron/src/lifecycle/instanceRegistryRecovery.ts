@@ -90,6 +90,7 @@ function recoveryFailureMessage(status: string): string | undefined {
 export async function reconcileOrphanedInstanceRegistry(input: {
   registryPath?: string;
   nowMs?: number;
+  pythonPath?: string;
   dependencies?: Partial<RecoveryDependencies>;
 } = {}): Promise<InstanceRegistryRecoveryResult> {
   const registryPath = input.registryPath || instancesRegistryPath();
@@ -133,6 +134,7 @@ export async function reconcileOrphanedInstanceRegistry(input: {
         workspaceRoot: String(claimed.entry.projectRoot || observed.projectRoot || "").trim(),
         entry: claimed.entry,
         registryPath,
+        pythonPath: input.pythonPath,
         desiredStateOnFailure: status === "stopping" ? "closed" : "open",
         successFailureMessage: recoveryFailureMessage(status)
       });

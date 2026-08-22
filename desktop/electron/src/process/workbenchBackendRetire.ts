@@ -1,4 +1,5 @@
 import { knownPidIsAlive, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
+import type { PythonProcessIdentity } from "./pythonJsonBridge.js";
 
 export const PORT_RELEASE_WAIT_MS = 8_000;
 export const PORT_RELEASE_POLL_MS = 100;
@@ -201,14 +202,21 @@ export async function retireRegisteredHandles(input: {
   delay?: (ms: number) => Promise<void>;
   pidAlive?: (pid: number) => boolean;
   killPid?: (pid: number) => void | Promise<void>;
-  terminateProcessTree?: (pid: number) => boolean | Promise<boolean>;
+  terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   treePids?: readonly number[];
+  expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   /**
    * PIDs independently proven to be direct children owned by the current
    * Electron lifecycle owner. Registered browser/window handles are not
    * included unless their provider supplied this evidence explicitly.
    */
   ownedDirectPids?: readonly number[];
+  /**
+   * Report live handles for which this lifecycle owner has no kill authority.
+   * Supplying this callback keeps those handles visible while allowing
+   * independently verified backend/daemon trees to finish retiring.
+   */
+  reportUnverified?: (pids: number[]) => void;
   connect?: (port: number, host: string) => Promise<boolean>;
 }): Promise<number[]> {
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
@@ -230,14 +238,22 @@ export async function retireRegisteredHandles(input: {
     }
     return true;
   });
-  if (unowned.length > 0) {
+  if (unowned.length > 0 && !input.reportUnverified) {
     throw new Error(`Refusing to retire unverified registered process handles: ${unowned.join(",")}`);
   }
-  for (const pid of unique.sort((left, right) => right - left)) {
+  input.reportUnverified?.(unowned);
+  const actionable = unique.filter((pid) => !unowned.includes(pid));
+  for (const pid of actionable.sort((left, right) => right - left)) {
     input.signal?.throwIfAborted();
     if (pidAlive(pid)) {
       if (input.terminateProcessTree && treePids.has(pid)) {
-        await input.terminateProcessTree(pid);
+        const expectedIdentity = input.expectedIdentities?.[String(pid)];
+        const terminated = expectedIdentity
+          ? await input.terminateProcessTree(pid, expectedIdentity)
+          : await input.terminateProcessTree(pid);
+        if (!terminated) {
+          throw new Error(`Failed to verify retirement of owned process tree ${pid}`);
+        }
       } else {
         await killPid(pid);
       }
@@ -248,12 +264,12 @@ export async function retireRegisteredHandles(input: {
   const startedAt = now();
   while (now() - startedAt < PID_TERMINATE_WAIT_MS) {
     input.signal?.throwIfAborted();
-    if (unique.every((pid) => !pidAlive(pid))) {
+    if (actionable.every((pid) => !pidAlive(pid))) {
       break;
     }
     await delay(PORT_RELEASE_POLL_MS);
   }
-  const stillAlive = unique.filter((pid) => pidAlive(pid));
+  const stillAlive = actionable.filter((pid) => pidAlive(pid));
   if (stillAlive.length > 0) {
     throw new Error(`Failed to retire workbench handles still alive: ${stillAlive.join(",")}`);
   }
