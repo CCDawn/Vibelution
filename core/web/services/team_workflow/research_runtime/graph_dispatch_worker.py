@@ -195,6 +195,8 @@ class GraphDispatchWorker:
                         ) from exc
                     if (
                         existing_event.run_id != run_id
+                        or existing_event.sequence != run.last_event_sequence
+                        or existing_event.run_version != run.run_version
                         or existing_event.event_type != "run_failed"
                         or not isinstance(existing_payload, Mapping)
                         or existing_payload.get("terminalReason")
@@ -204,23 +206,37 @@ class GraphDispatchWorker:
                             "created-run reconciliation event ID conflict for "
                             f"{event_id}: conflicts with dispatch_never_started"
                         )
-                    expected_event = _event_record_for(
-                        run_id=run_id,
-                        sequence=run.last_event_sequence,
-                        run_version=run.run_version,
-                        event_id=event_id,
-                        event_type="run_failed",
-                        correlation_id=run_id,
-                        payload=event_payload,
-                        now_ms=now_ms,
-                    )
-                    if _event_replay_identity(
-                        existing_event
-                    ) != _event_replay_identity(expected_event):
-                        raise RuntimeError(
-                            "created-run reconciliation event ID conflict for "
-                            f"{event_id}: conflicts with dispatch_never_started"
+                    # Keep accepting the narrow legacy repair payload written
+                    # before deterministic replay metadata was introduced.
+                    # It still has to be the exact terminal marker, the fixed
+                    # sequence/version, and an absent causation identity;
+                    # richer events use the full semantic identity below.
+                    if existing_payload == {
+                        "terminalReason": "dispatch_never_started"
+                    }:
+                        if existing_event.causation_id is not None:
+                            raise RuntimeError(
+                                "created-run reconciliation event ID conflict for "
+                                f"{event_id}: conflicts with dispatch_never_started"
+                            )
+                    else:
+                        expected_event = _event_record_for(
+                            run_id=run_id,
+                            sequence=run.last_event_sequence,
+                            run_version=run.run_version,
+                            event_id=event_id,
+                            event_type="run_failed",
+                            correlation_id=run_id,
+                            payload=event_payload,
+                            now_ms=now_ms,
                         )
+                        if _event_replay_identity(
+                            existing_event
+                        ) != _event_replay_identity(expected_event):
+                            raise RuntimeError(
+                                "created-run reconciliation event ID conflict for "
+                                f"{event_id}: conflicts with dispatch_never_started"
+                            )
                     if not uow.repository.update_run_status(
                         run_id,
                         team_id,
