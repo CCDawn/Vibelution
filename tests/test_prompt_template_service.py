@@ -376,7 +376,7 @@ def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path
     assert "PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION" in supervised_baseline["content"]
 
 
-def test_source_collection_prompt_templates_only_expose_four_stage_roles(tmp_path, monkeypatch):
+def test_prompt_template_catalog_keeps_legacy_source_stages_and_known_challenge_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     payload = prompt_template_service.list_prompt_templates()
@@ -399,6 +399,12 @@ def test_source_collection_prompt_templates_only_expose_four_stage_roles(tmp_pat
     }
     assert challenge_cup_role_keys <= {
         "challenge_cup_coordinator",
+        "challenge_cup_search",
+        "challenge_cup_extractor",
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_execution_steward",
+        "challenge_cup_experiment_revision",
+        "challenge_cup_evaluator",
         "challenge_cup_experiment_planner",
         "challenge_cup_experiment_ledger",
         "challenge_cup_iteration_planner",
@@ -549,6 +555,90 @@ def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_rol
 
     assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_experiment_planner.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_versioning.md").exists()
+
+
+def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_prompts(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    cases = {
+        "prompt-challenge-cup-search": (
+            "challenge_cup_search",
+            "搜索 Agent",
+            (
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+                "batch_web_search_tool",
+            ),
+            ("不写正式知识", "不运行 Shell"),
+        ),
+        "prompt-challenge-cup-extractor": (
+            "challenge_cup_extractor",
+            "提炼 Agent",
+            (
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+                "search_summarize_sources_tool",
+            ),
+            ("搜索 Agent 已登记、下载或缓存", "不得自行补取网页", "不写正式知识"),
+        ),
+        "prompt-challenge-cup-knowledge-manager": (
+            "challenge_cup_knowledge_manager",
+            "知识管理 Agent",
+            (
+                "source_collection_context_tool",
+                "knowledge_proposal_tool",
+                "knowledge_ingestion_tool",
+            ),
+            ("不联网搜索", "不运行 Shell"),
+        ),
+        "prompt-challenge-cup-execution-steward": (
+            "challenge_cup_execution_steward",
+            "执行 Agent",
+            (
+                "challenge_cup_experiment_context_tool",
+                "challenge_cup_experiment_writeback_tool",
+            ),
+            ("不调用 formal runner", "不运行 Shell"),
+        ),
+        "prompt-challenge-cup-experiment-revision": (
+            "challenge_cup_experiment_revision",
+            "实验修订 Agent",
+            (
+                "challenge_cup_experiment_context_tool",
+                "challenge_cup_iteration_writeback_tool",
+                "research_knowledge_request_tool",
+            ),
+            ("不执行训练", "不写正式知识"),
+        ),
+        "prompt-challenge-cup-evaluator": (
+            "challenge_cup_evaluator",
+            "评估 Agent",
+            (
+                "challenge_cup_experiment_context_tool",
+                "challenge_cup_iteration_writeback_tool",
+            ),
+            ("不联网搜索", "不改写候选版本"),
+        ),
+    }
+
+    for template_id, (role_key, responsibility, allowed_tools, denied_behaviors) in cases.items():
+        detail = prompt_template_service.get_prompt_template(template_id)
+        assert detail is not None, template_id
+        assert detail["status"] == "active"
+        assert detail["category"] == "research"
+        assert detail["metadata"]["builtin"] is True
+        assert detail["metadata"]["roleKey"] == role_key
+        assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+        assert responsibility in detail["content"]
+        for tool_name in allowed_tools:
+            assert _contains_tool_name(detail["content"], tool_name), (template_id, tool_name)
+        for denied_behavior in denied_behaviors:
+            assert denied_behavior in detail["content"], (template_id, denied_behavior)
+        assert "prompt-chat-default" not in detail["content"]
+
+        source_path = tmp_path / "workspace" / "prompts" / "research" / f"{role_key}.md"
+        assert source_path.exists(), source_path
 
 
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
