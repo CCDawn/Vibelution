@@ -5,7 +5,10 @@ import type { SetURLSearchParams } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { Team } from "../../api/types";
 import { createTeamsResearchNavigation } from "./createTeamsResearchNavigation";
-import { canonicalChallengeCupWorkspaceRoute } from "./researchWorkspaceModel";
+import {
+  canonicalChallengeCupWorkspaceRoute,
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
+} from "./researchWorkspaceModel";
 import type { TeamShellMode } from "./teamShellModel";
 
 const source = readFileSync(resolve(import.meta.dirname, "createTeamsResearchNavigation.ts"), "utf8");
@@ -57,7 +60,7 @@ describe("createTeamsResearchNavigation", () => {
     expect(source).toContain("setTeamShellMode(\"board\")");
     expect(source).toContain("canonicalChallengeCupWorkspaceRoute(team.teamId, searchParams)");
     expect(source).toContain("if (researchWorkflowTeamSelected)");
-    expect(source).toContain("canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams)");
+    expect(source).toContain("canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams)");
     expect(source).not.toContain("params.set(\"teamMode\", \"board\")");
     expect(source).toMatch(/setTeamShellMode\(\"canvas\"\)[\s\S]*nextParams\.set\(\"teamMode\", \"canvas\"\)/);
   });
@@ -112,5 +115,40 @@ describe("createTeamsResearchNavigation", () => {
     expect(conflictingParams.has("node")).toBe(false);
     expect(conflictingParams.has("panel")).toBe(false);
     expect(conflictingAliases.setSearchParamsSpy.mock.calls[0]?.[1]).toEqual({ replace: false });
+  });
+
+  it.each([
+    ["selectResearchWorkspaceView", (navigation: ReturnType<typeof navigationFor>["navigation"]) => {
+      navigation.selectResearchWorkspaceView("overview");
+    }],
+    ["selectTeamShellMode", (navigation: ReturnType<typeof navigationFor>["navigation"]) => {
+      navigation.selectTeamShellMode("canvas");
+    }],
+  ])("drops cross-team focus in %s and preserves same-team focus", (_path, invoke) => {
+    const focus = "questionId=SCI-096&runId=run-a&node=hypothesis_design&panel=question";
+    const resolveParams = (search: string) => {
+      const state = navigationFor(search);
+      invoke(state.navigation);
+      return state.setSearchParamsSpy.mock.calls[0]?.[0] as URLSearchParams;
+    };
+
+    for (const search of [
+      `researchView=overview&${focus}`,
+      `teamId=research-team-a&team=research-team-b&researchView=overview&${focus}`,
+    ]) {
+      const params = resolveParams(search);
+      expect(params.get("teamId")).toBe("research-team-a");
+      expect(params.get("researchView")).toBe("workflow");
+      expect(params.has("questionId")).toBe(false);
+      expect(params.has("runId")).toBe(false);
+      expect(params.has("node")).toBe(false);
+      expect(params.has("panel")).toBe(false);
+    }
+
+    const sameTeamParams = resolveParams(`team=research-team-a&researchView=overview&${focus}`);
+    expect(sameTeamParams.get("questionId")).toBe("SCI-096");
+    expect(sameTeamParams.get("runId")).toBe("run-a");
+    expect(sameTeamParams.get("node")).toBe("hypothesis_design");
+    expect(sameTeamParams.get("panel")).toBe("question");
   });
 });

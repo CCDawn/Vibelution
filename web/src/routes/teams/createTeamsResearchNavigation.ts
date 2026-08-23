@@ -8,6 +8,7 @@ import type { SetURLSearchParams } from "react-router-dom";
 import type { Team } from "../../api/types";
 import {
   canonicalChallengeCupWorkspaceRoute,
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   isSameChallengeCupWorkspaceTeam,
   teamWorkspaceRoute,
   type ResearchWorkspaceView,
@@ -56,7 +57,7 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
         setResearchWorkspaceView("workflow");
         setTeamShellMode("board");
         const params = new URLSearchParams(
-          canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams).split("?")[1] || "",
+          canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams).split("?")[1] || "",
         );
         setSearchParams(params, { replace: true });
         return;
@@ -107,7 +108,7 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
         setResearchWorkspaceView("workflow");
         setTeamShellMode("board");
         const params = new URLSearchParams(
-          canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams).split("?")[1] || "",
+          canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams).split("?")[1] || "",
         );
         setSearchParams(params, { replace: true });
         return;
