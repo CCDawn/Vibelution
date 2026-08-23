@@ -50,6 +50,8 @@ type MutationMock = {
   reset: () => void;
 };
 
+const activateExperimentMock = vi.hoisted(() => vi.fn());
+
 const queryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
@@ -85,10 +87,18 @@ const mutationState = vi.hoisted(() => {
 
 const queryClientMock = vi.hoisted(() => ({ invalidateQueries: vi.fn() }));
 
+vi.mock("../../../api/researchWorkflow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../api/researchWorkflow")>();
+  return {
+    ...actual,
+    activateResearchWorkflowExperiment: activateExperimentMock,
+  };
+});
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => queryState.current,
   useMutation: (options?: {
-    mutationFn?: { name?: string };
+    mutationFn?: ((variables?: unknown) => unknown) & { name?: string };
     onSuccess?: (...args: unknown[]) => unknown;
     onError?: (...args: unknown[]) => unknown;
   }) => {
@@ -101,7 +111,8 @@ vi.mock("@tanstack/react-query", () => ({
           Object.assign(mock, { isPending: true, isIdle: false, isError: false, isSuccess: false });
           mock.mutate(variables);
           try {
-            const onSuccessResult = options?.onSuccess?.({}, variables, undefined);
+            const result = await options?.mutationFn?.(variables);
+            const onSuccessResult = options?.onSuccess?.(result ?? {}, variables, undefined);
             await onSuccessResult;
             Object.assign(mock, { isPending: false, isIdle: false, isSuccess: true });
           } catch (reason) {
@@ -141,6 +152,21 @@ function launchOptions(overrides: { questions?: unknown[]; experiments?: unknown
     teamId: "team-1",
     questions: overrides.questions ?? [],
     experiments: overrides.experiments ?? [experimentOption()],
+  };
+}
+
+function launchQuestion(questionId = "SCI-091") {
+  return {
+    questionId,
+    title: `${questionId} question`,
+    scope: "information_science",
+    domain: "information_science",
+    catalogId: "science-125-questions-2021",
+    reviewRunId: "",
+    artifactSha256: "",
+    source: "catalog",
+    launchable: false,
+    checkpoint: null,
   };
 }
 
@@ -185,6 +211,8 @@ describe("ResearchRunLaunchPanel", () => {
     });
     mutationState.reset();
     queryClientMock.invalidateQueries.mockReset();
+    activateExperimentMock.mockReset();
+    activateExperimentMock.mockResolvedValue({ activationRef: "activation-1" });
   });
 
   it("waits for the catalog instead of exposing manual contract fields", () => {
@@ -484,6 +512,72 @@ describe("ResearchRunLaunchPanel", () => {
     expect(markup).toContain("question result is not formally approved");
   });
 
+  it("requires confirmation before activating and then refreshes launch options", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    Object.assign(queryState.current, {
+      data: launchOptions({ questions: [launchQuestion()], experiments: [experimentOption()] }),
+      refetch,
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-091"
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    ));
+
+    const activate = findButton(container, "激活正式 Campaign");
+    expect(activate).toBeTruthy();
+    expect(findButton(container, "开始实验")).toBeUndefined();
+    await act(async () => activate!.click());
+    expect(activateExperimentMock).not.toHaveBeenCalled();
+
+    const confirm = findButton(document.body, "确认激活");
+    expect(confirm).toBeTruthy();
+    await act(async () => {
+      confirm!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(activateExperimentMock).toHaveBeenCalledTimes(1);
+    expect(activateExperimentMock).toHaveBeenCalledWith(
+      "challenge-cup-research",
+      "EXP-GPU-OPERATOR-001",
+      { teamId: "team-1", confirmed: true },
+    );
+    expect(refetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("disables activation while the confirmed request is pending", () => {
+    mutationState.set("activateSelectedExperiment", { isPending: true });
+    Object.assign(queryState.current, {
+      data: launchOptions({ questions: [launchQuestion()], experiments: [experimentOption()] }),
+    });
+    const markup = renderToStaticMarkup(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-091"
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("激活正式 Campaign");
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain(">开始实验<");
+  });
+
   it("explains the DEV blocker and hides the activation CTA before DEV completion", () => {
     const experiment = experimentOption({
       activationAllowed: false,
@@ -632,6 +726,7 @@ describe("ResearchRunLaunchPanel", () => {
     const deep = experimentOption();
     expect(isLaunchBlockedByExperiment([deep], "SCI-042")).toBe(false);
     expect(isLaunchBlockedByExperiment([], "SCI-042")).toBe(false);
+    expect(isLaunchBlockedByExperiment([deep, { ...deep, experimentId: "EXP-DUPLICATE" }], "SCI-091")).toBe(true);
   });
 
   it("blocks a mismatched ordinary question while a deep experiment is selected", () => {

@@ -38,6 +38,8 @@ export type ChallengeCatalogOverviewProps = {
   lang?: "zh" | "en";
   onOpenQuestion: (questionId: string) => void;
   onRegisterQuestion?: () => void;
+  /** DEV-only capability for fixture batch retry/continue mutations. */
+  devBatchControlsEnabled?: boolean;
 };
 
 function statusTone(status: CatalogOverviewStatus): VStatusTone {
@@ -53,6 +55,15 @@ function isCatalogOverview(value: unknown): value is CatalogOverview {
   return Array.isArray(record.questions) && typeof record.questionCount === "number";
 }
 
+export function isDevBatchCatalogAction(
+  row: CatalogOverviewQuestion,
+  devBatchControlsEnabled: boolean,
+): boolean {
+  return devBatchControlsEnabled
+    && Boolean(row.planId)
+    && (row.action === "retry" || row.action === "continue");
+}
+
 export function ChallengeCatalogOverviewView({
   overview,
   lang = "zh",
@@ -63,6 +74,7 @@ export function ChallengeCatalogOverviewView({
   onSelect,
   onFilterChange,
   onAction,
+  devBatchControlsEnabled = false,
 }: {
   overview: CatalogOverview;
   lang?: "zh" | "en";
@@ -73,6 +85,7 @@ export function ChallengeCatalogOverviewView({
   onSelect: (questionId: string) => void;
   onFilterChange: (filter: CatalogOverviewFilter) => void;
   onAction: (row: CatalogOverviewQuestion) => void;
+  devBatchControlsEnabled?: boolean;
 }) {
   const zh = lang === "zh";
   const visible = useMemo(
@@ -208,12 +221,15 @@ export function ChallengeCatalogOverviewView({
           ) : null}
           <VButton
             type="button"
-            variant={selected.action === "view" ? "secondary" : "primary"}
+            variant="secondary"
             isPending={actionPending}
             isDisabled={actionPending}
+            data-dev-batch-action={devBatchControlsEnabled ? selected.action : "view"}
             onClick={() => onAction(selected)}
           >
-            {catalogOverviewActionLabel(selected.action, zh)}
+            {devBatchControlsEnabled
+              ? catalogOverviewActionLabel(selected.action, zh)
+              : (zh ? "查看详情" : "View details")}
           </VButton>
         </div>
       ) : (
@@ -228,6 +244,7 @@ export function ChallengeCatalogOverview({
   lang = "zh",
   onOpenQuestion,
   onRegisterQuestion,
+  devBatchControlsEnabled = import.meta.env.DEV,
 }: ChallengeCatalogOverviewProps) {
   const zh = lang === "zh";
   const pageVisible = usePageVisibility();
@@ -271,11 +288,11 @@ export function ChallengeCatalogOverview({
 
   const handleAction = (row: CatalogOverviewQuestion) => {
     const action: CatalogOverviewAction = row.action;
-    if (action === "retry" && row.planId) {
+    if (isDevBatchCatalogAction(row, devBatchControlsEnabled) && action === "retry") {
       batchMutation.mutate({ planId: row.planId, retryFailed: true });
       return;
     }
-    if (action === "continue" && row.planId) {
+    if (isDevBatchCatalogAction(row, devBatchControlsEnabled) && action === "continue") {
       batchMutation.mutate({ planId: row.planId, retryFailed: false });
       return;
     }
@@ -320,11 +337,12 @@ export function ChallengeCatalogOverview({
       lang={lang}
       selectedId={selectedId}
       filter={filter}
-      actionPending={batchMutation.isPending}
-      actionError={batchErrorText}
+      actionPending={devBatchControlsEnabled && batchMutation.isPending}
+      actionError={devBatchControlsEnabled ? batchErrorText : ""}
       onSelect={setSelectedId}
       onFilterChange={setFilter}
       onAction={handleAction}
+      devBatchControlsEnabled={devBatchControlsEnabled}
     />
   );
 }

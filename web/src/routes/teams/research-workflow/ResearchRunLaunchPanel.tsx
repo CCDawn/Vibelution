@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import {
+  activateResearchWorkflowExperiment,
   fetchResearchWorkflowLaunchOptions,
   type CreateResearchWorkflowRunInput,
   type ResearchWorkflowExperimentOption,
@@ -12,6 +13,7 @@ import { queryKeys } from "../../../api/queryKeys";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   VButton,
+  VConfirmDialog,
   VFieldRow,
   VInput,
   VPanelHeader,
@@ -110,8 +112,8 @@ export function isLaunchBlockedByExperiment(
       || selectedExperiment.questionId !== questionId,
     );
   }
-  const experiment = experiments.find((item) => item.questionId === questionId);
-  return Boolean(experiment && !experiment.launchable);
+  const matches = experiments.filter((item) => item.questionId === questionId);
+  return matches.length > 1 || Boolean(matches[0] && !matches[0].launchable);
 }
 
 export function ExperimentLaunchStatus(props: {
@@ -166,11 +168,12 @@ export function ExperimentLaunchStatus(props: {
           {navigationCtaLabel}
         </VButton>
       ) : null}
-      {experiment.activationAllowed ? (
+      {!experiment.activated && experiment.activationAllowed ? (
         <VButton
           type="button"
           variant="primary"
           isDisabled={busy || activationPending}
+          isPending={activationPending}
           onClick={() => {
             onActivate();
           }}
@@ -279,6 +282,7 @@ export function ResearchRunLaunchPanel(props: {
   const [query, setQuery] = useState(draft?.query ?? "");
   const [safetyBudget, setSafetyBudget] = useState(() => draft?.safetyBudget ?? createResearchRunSafetyBudget());
   const [error, setError] = useState<string | null>(null);
+  const [activationDialogOpen, setActivationDialogOpen] = useState(false);
   useEffect(() => {
     writeResearchRunLaunchDraft(teamId, { questionId, query, safetyBudget });
   }, [teamId, questionId, query, safetyBudget]);
@@ -293,7 +297,11 @@ export function ResearchRunLaunchPanel(props: {
     staleTime: 60_000,
   });
   const questions = launchOptions.data?.questions ?? [];
+  const experiments = launchOptions.data?.experiments ?? [];
   const selectedQuestion = questions.find((question) => question.questionId === questionId) ?? null;
+  const matchingExperiments = experiments.filter((experiment) => experiment.questionId === questionId);
+  const selectedExperiment = matchingExperiments.length === 1 ? matchingExperiments[0] : null;
+  const experimentMatchAmbiguous = matchingExperiments.length > 1;
   const checkpoint = selectedQuestion?.checkpoint ?? null;
   const restartableCheckpoint = isRestartableCheckpoint(checkpoint);
   const filteredQuestions = useMemo(
@@ -303,6 +311,23 @@ export function ResearchRunLaunchPanel(props: {
   const visibleQuestions = selectedQuestion && !filteredQuestions.some((item) => item.questionId === questionId)
     ? [selectedQuestion, ...filteredQuestions]
     : filteredQuestions;
+  async function activateSelectedExperiment(experimentId: string) {
+    return activateResearchWorkflowExperiment(CHALLENGE_CUP_WORKFLOW_ID, experimentId, {
+      teamId,
+      confirmed: true,
+    });
+  }
+  const activationMutation = useMutation({
+    mutationFn: activateSelectedExperiment,
+    onSuccess: async () => {
+      setActivationDialogOpen(false);
+      setError(null);
+      await launchOptions.refetch();
+    },
+    onError: (reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    },
+  });
 
   if (launchOptions.isPending) {
     return <VStateSurface tone="loading" title={isZh ? "加载 125 题目录" : "Loading 125-question catalog"} fill className={styles.state} />;
@@ -426,6 +451,26 @@ export function ResearchRunLaunchPanel(props: {
           )}
         </VSurface>
       ) : null}
+      {selectedExperiment ? (
+        <ExperimentLaunchStatus
+          lang={lang}
+          experiment={selectedExperiment}
+          busy={busy}
+          activationPending={activationMutation.isPending}
+          onActivate={() => {
+            if (!selectedExperiment.activationAllowed || activationMutation.isPending) return;
+            setError(null);
+            setActivationDialogOpen(true);
+          }}
+        />
+      ) : null}
+      {experimentMatchAmbiguous ? (
+        <div role="alert" className={styles.error}>
+          {isZh
+            ? "所选题目匹配到多个正式实验，已停止创建运行。"
+            : "The selected question matches multiple formal experiments; run creation is blocked."}
+        </div>
+      ) : null}
       <ResearchRunSafetyLimitPanel
         budget={safetyBudget}
         isDisabled={busy}
@@ -448,9 +493,9 @@ export function ResearchRunLaunchPanel(props: {
             {isZh ? "查看失败运行" : "View failed run"}
           </VButton>
         ) : null}
-        <VButton
+        {(!selectedExperiment || selectedExperiment.launchable) && !experimentMatchAmbiguous ? <VButton
           isPending={busy}
-          isDisabled={!selectedQuestion}
+          isDisabled={!selectedQuestion || isLaunchBlockedByExperiment(experiments, questionId)}
           onClick={() => {
             setError(null);
             if (checkpoint?.resumable && onContinueRun) {
@@ -473,8 +518,28 @@ export function ResearchRunLaunchPanel(props: {
           }}
         >
           {primaryLabel}
-        </VButton>
+        </VButton> : null}
       </div>
+      <VConfirmDialog
+        open={activationDialogOpen}
+        onOpenChange={(open) => {
+          if (!activationMutation.isPending) setActivationDialogOpen(open);
+        }}
+        title={isZh ? "激活正式 Campaign？" : "Activate formal campaign?"}
+        description={selectedExperiment
+          ? (isZh
+            ? `将激活 ${selectedExperiment.name} 的 Campaign ${selectedExperiment.campaignId}。此操作不会直接启动运行。`
+            : `Activate Campaign ${selectedExperiment.campaignId} for ${selectedExperiment.name}. This does not start a run.`)
+          : undefined}
+        confirmLabel={isZh ? "确认激活" : "Confirm activation"}
+        cancelLabel={isZh ? "取消" : "Cancel"}
+        confirmPending={activationMutation.isPending}
+        confirmDisabled={!selectedExperiment?.activationAllowed}
+        onConfirm={() => {
+          if (!selectedExperiment?.activationAllowed || activationMutation.isPending) return;
+          activationMutation.mutate(selectedExperiment.experimentId);
+        }}
+      />
     </VSurface>
   );
 }
