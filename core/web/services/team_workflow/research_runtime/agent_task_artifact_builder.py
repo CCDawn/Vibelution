@@ -122,6 +122,96 @@ def _evidence_relations_payload(task: dict[str, Any]) -> dict[str, Any]:
     return build_evidence_relation_artifact(result)
 
 
+def load_canonical_problem_understanding_payload(
+    *,
+    record: dict[str, Any],
+    node_run: dict[str, Any],
+) -> dict[str, Any]:
+    """Read the immutable problem-understanding artifact for this NodeRun.
+
+    ``problem_understanding`` is written by the governed task writeback path.
+    A terminal task result, summary, score, or receipt is not an authority for
+    this artifact and must never be synthesized here.
+    """
+
+    team_id = str(record.get("teamId") or "").strip()
+    workflow_run_id = str(record.get("runId") or "").strip()
+    node_run_id = str(node_run.get("nodeRunId") or "").strip()
+    if not team_id or not workflow_run_id or not node_run_id:
+        raise ValueError(
+            "problem_understanding canonical readback requires teamId, runId and nodeRunId"
+        )
+
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    scoped = list_workflow_artifacts(
+        team_id,
+        kind="problem_understanding",
+        workflow_run_id=workflow_run_id,
+    )
+    matches = [
+        item
+        for item in scoped
+        if str(item.get("recordId") or "").strip() == node_run_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "problem_understanding canonical artifact is missing for current NodeRun"
+        )
+    artifact = matches[0]
+    authority_run_id = str(artifact.get("sourceCollectionRunId") or "").strip()
+    payload = artifact.get("payload")
+    if (
+        str(artifact.get("kind") or "").strip() != "problem_understanding"
+        or str(artifact.get("workflowRunId") or "").strip() != workflow_run_id
+        or not authority_run_id
+        or not isinstance(payload, dict)
+        or not payload
+    ):
+        raise ValueError(
+            "problem_understanding canonical artifact scope or payload is invalid"
+        )
+
+    envelope = {
+        "teamId": team_id,
+        "kind": "problem_understanding",
+        "workflowRunId": workflow_run_id,
+        "sourceCollectionRunId": authority_run_id,
+        "payload": payload,
+    }
+    content_hash = canonical_sha256(envelope)
+    canonical = load_scoped_artifact_payload(
+        "problem_understanding",
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=workflow_run_id,
+        content_hash=content_hash,
+    )
+    if not isinstance(canonical, dict):
+        raise TypeError(
+            "problem_understanding canonical readback is unavailable or hash-mismatched"
+        )
+    if any(
+        str(canonical.get(field) or "").strip() != expected
+        for field, expected in (
+            ("teamId", team_id),
+            ("kind", "problem_understanding"),
+            ("workflowRunId", workflow_run_id),
+            ("sourceCollectionRunId", authority_run_id),
+        )
+    ):
+        raise ValueError("problem_understanding canonical readback scope is invalid")
+    canonical_payload = canonical.get("payload")
+    if (
+        not isinstance(canonical_payload, dict)
+        or canonical_sha256(canonical_payload) != canonical_sha256(payload)
+    ):
+        raise ValueError(
+            "problem_understanding canonical readback payload is invalid"
+        )
+    return dict(canonical_payload)
+
+
 def _hypothesis_set_payload(
     record: dict[str, Any],
     node_run: dict[str, Any],
@@ -301,6 +391,14 @@ def _payload_for_kind(
             else _protocol_design_artifact_payloads(record, node_run, task)
         )
         return payloads[artifact_kind]
+
+    if node_spec.nodeId == "problem_understanding" and artifact_kind == (
+        "problem_understanding"
+    ):
+        return load_canonical_problem_understanding_payload(
+            record=record,
+            node_run=node_run,
+        )
 
     result = dict(task.get("result") or {})
     explicit_payloads = result.get("artifactPayloads")
