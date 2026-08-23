@@ -149,6 +149,11 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
         "receiptRunAuthority": "question_run",
         "receiptRunId": "question-run-1",
         "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-plus",
+        },
         "outputRef": "artifact://output-1",
     }
 
@@ -212,6 +217,11 @@ def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
         "receiptRunAuthority": "workflow_run",
         "receiptRunId": "workflow-run-1",
         "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-plus",
+        },
         "questionInvocationBinding": {
             "questionId": "SCI-001",
             "questionRunId": "workflow-run-1",
@@ -268,6 +278,11 @@ def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
     }
     assert receipt["receiptId"] == "model-receipt-invocation-1-0-attempt-1"
     assert receipt["evidenceLocator"]["attempt"] == 1
+    assert receipt["provider"] == "default"
+    assert receipt["model"] == "qwen-plus"
+    assert receipt["evidenceLocator"]["outputRef"] == (
+        "turn-journal://session-1/workflow-run-1/task-1/turn-1"
+    )
 
 
 def test_receipt_identity_changes_for_provider_attempts() -> None:
@@ -275,6 +290,11 @@ def test_receipt_identity_changes_for_provider_attempts() -> None:
         "receiptRunAuthority": "workflow_run",
         "receiptRunId": "workflow-run-1",
         "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-plus",
+        },
         "questionInvocationBinding": {
             "questionId": "SCI-001",
             "questionRunId": "workflow-run-1",
@@ -307,7 +327,7 @@ def test_receipt_identity_changes_for_provider_attempts() -> None:
             outcome,
             metadata=None,
             invocation_scope=outcome.identity,
-            request_content={"attempt": 1},
+            request_content={"attempt": 1, "model": "qwen-plus"},
             response_content={"attempt": 1},
             started_at_ms=100,
             finished_at_ms=120,
@@ -318,7 +338,7 @@ def test_receipt_identity_changes_for_provider_attempts() -> None:
             outcome,
             metadata=None,
             invocation_scope=outcome.identity,
-            request_content={"attempt": 2},
+            request_content={"attempt": 2, "model": "qwen-plus"},
             response_content={"attempt": 2},
             started_at_ms=100,
             finished_at_ms=120,

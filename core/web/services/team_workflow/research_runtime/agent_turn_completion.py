@@ -97,7 +97,7 @@ def _formal_receipt_writeback_context(
         "source": "canonical_turn_outcome",
         "provider": receipt.provider,
         "model": receipt.model,
-        "llmModelId": receipt.requested_model,
+        "llmModelId": "",
     }
     for source_key, target_key in (
         ("inputTokens", "inputTokens"),

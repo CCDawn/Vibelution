@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, SystemMessage, ToolMessage
 
@@ -2607,8 +2607,6 @@ class LLMClient:
                 return None
             binding["outcomeKinds"] = list(outcome_kinds)
             binding.setdefault("questionRunId", binding["workflowRunId"])
-            binding.setdefault("workflowId", "challenge-cup-research")
-            binding.setdefault("workflowVersionId", "")
             binding.setdefault("formalNodeAttempt", 1)
             binding.setdefault("mappingPolicyId", "challenge-question-invocation-binding-v1")
         if (
@@ -2632,6 +2630,20 @@ class LLMClient:
         if not receipt_run_id or receipt_run_id != expected_run_id:
             return None
 
+        expected_route = raw.get("expectedModelRoute")
+        if not isinstance(expected_route, Mapping):
+            return None
+        expected_provider = str(expected_route.get("providerId") or "").strip()
+        expected_model = str(expected_route.get("modelId") or "").strip()
+        expected_model_ref = str(expected_route.get("modelRef") or "").strip()
+        if (
+            not expected_provider
+            or not expected_model
+            or expected_model_ref.partition("/")[0].lower()
+            != expected_provider.lower()
+        ):
+            return None
+
         policy_sha256 = str(raw.get("modelPolicySha256") or "").strip().lower()
         if (
             len(policy_sha256) != 64
@@ -2643,6 +2655,9 @@ class LLMClient:
             "binding": binding,
             "receiptRunId": receipt_run_id,
             "modelPolicySha256": policy_sha256,
+            "expectedProviderId": expected_provider,
+            "expectedModelId": expected_model,
+            "expectedModelRef": expected_model_ref,
         }
 
     def _attach_model_invocation_receipt(
@@ -2666,8 +2681,25 @@ class LLMClient:
             return outcome
         binding = context["binding"]
         raw = context["raw"]
-        actual_model = str(self.profile.model or "").strip()
-        requested_model = str(raw.get("requestedModel") or actual_model).strip()
+        actual_model = (
+            str(request_content.get("model") or "").strip()
+            if isinstance(request_content, Mapping)
+            else ""
+        )
+        expected_provider = context["expectedProviderId"]
+        expected_model = context["expectedModelId"]
+        expected_model_ref = context["expectedModelRef"]
+        actual_provider = str(self.provider.provider_id or "").strip()
+        if (
+            not actual_model
+            or
+            actual_provider.casefold() != expected_provider.casefold()
+            or actual_model.casefold() != expected_model.casefold()
+            or expected_model_ref.partition("/")[0].casefold()
+            != expected_provider.casefold()
+        ):
+            return outcome
+        requested_model = expected_model
         from core.research.workflow.contracts.model_invocation_receipt import (
             ModelInvocationReceipt,
             ModelInvocationStatus,
@@ -2708,10 +2740,11 @@ class LLMClient:
             evidence_locator.update(
                 {
                     "kind": str(evidence_locator.get("kind") or "turn_journal"),
-                    "outputRef": str(
-                        evidence_locator.get("outputRef")
-                        or f"session:{binding['sessionId']}/turn:{binding['turnId']}"
-                        f"/invocation:{getattr(invocation_scope, 'invocation_id', '')}"
+                    "outputRef": (
+                        f"turn-journal://{quote(binding['sessionId'], safe='')}"
+                        f"/{quote(context['receiptRunId'], safe='')}"
+                        f"/{quote(binding['taskId'], safe='')}"
+                        f"/{quote(binding['turnId'], safe='')}"
                     ),
                     "outputSha256": str(
                         evidence_locator.get("outputSha256")
@@ -2769,7 +2802,7 @@ class LLMClient:
                     "sessionId": binding["sessionId"],
                     "attempt": str(provider_attempt),
                 },
-                provider=str(self.provider.kind or "").strip(),
+                provider=actual_provider,
                 model=actual_model,
                 requested_model=requested_model,
                 status=status,

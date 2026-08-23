@@ -81,6 +81,21 @@ def test_receipt_context_accepts_binding_without_research_project_id(
             "modelPolicySha256": "a" * 64,
             "outcomeKinds": ["candidate"],
         },
+        "challengeTaskContract": {
+            "questionId": "SCI-096",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-run-1",
+            "nodeAttempt": 1,
+            "modelPolicySha256": "a" * 64,
+            "effectiveRoute": {
+                "modelRef": "default/qwen-alias",
+                "providerId": "default",
+                "modelId": "qwen-plus",
+            },
+        },
     }
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
@@ -102,6 +117,7 @@ def test_receipt_context_accepts_binding_without_research_project_id(
     assert context is not None
     assert context["questionStageBinding"]["formalNodeRunId"] == "node-run-1"
     assert context["modelPolicySha256"] == "a" * 64
+    assert context["expectedModelRoute"]["modelRef"] == "default/qwen-plus"
 
 
 def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:

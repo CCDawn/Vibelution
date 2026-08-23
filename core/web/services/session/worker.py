@@ -97,6 +97,36 @@ def _model_invocation_receipt_context(
         }
     else:
         return None
+    contract = task.get("challengeTaskContract") if isinstance(task.get("challengeTaskContract"), dict) else {}
+    contract_fields = {
+        "questionId": ("questionId", "questionId"),
+        "workflowRunId": ("workflowRunId", "workflowRunId"),
+        "workflowId": ("workflowId", "workflowId"),
+        "workflowVersionId": ("workflowVersionId", "workflowVersionId"),
+        "formalNodeId": ("workflowNodeId", "formalNodeId"),
+        "formalNodeRunId": ("nodeRunId", "formalNodeRunId"),
+        "formalNodeAttempt": ("nodeAttempt", "formalNodeAttempt"),
+        "modelPolicySha256": ("modelPolicySha256", "modelPolicySha256"),
+    }
+    if not contract or any(
+        not str(contract.get(contract_key) or "").strip()
+        or str(binding.get(binding_key) or "").strip()
+        != str(contract.get(contract_key) or "").strip()
+        for contract_key, binding_key in contract_fields.values()
+    ):
+        return None
+    effective_route = contract.get("effectiveRoute") if isinstance(contract.get("effectiveRoute"), dict) else {}
+    expected_route = {
+        "modelRef": str(effective_route.get("modelRef") or "").strip(),
+        "providerId": str(effective_route.get("providerId") or "").strip(),
+        "modelId": str(effective_route.get("modelId") or "").strip(),
+    }
+    if (
+        not all(expected_route.values())
+        or expected_route["modelRef"].partition("/")[0].lower()
+        != expected_route["providerId"].lower()
+    ):
+        return None
     binding.update(
         {
             "sessionId": str(session_id or "").strip(),
@@ -137,6 +167,7 @@ def _model_invocation_receipt_context(
         "modelPolicySha256": policy_sha256,
         "questionStageBinding": stage_binding,
         "outcomeKinds": list(binding.get("outcomeKinds") or []),
+        "expectedModelRoute": expected_route,
     }
 
 
