@@ -17,6 +17,10 @@ from time import monotonic
 from typing import Any
 
 from core.logging import debug as _debug_logger
+from core.logging.trace_context import current_trace_fields, merge_current_trace_fields
+
+_TOOL_ARGUMENT_TELEMETRY_KEYS = frozenset({"tool_args", "toolargs", "arguments"})
+_TRUNCATED_TELEMETRY_VALUE = "[truncated]"
 
 
 def _service():
@@ -414,7 +418,12 @@ def _is_structured_telemetry_key(key: str) -> bool:
     s = _service()
     normalized = str(key or "").strip().lower().replace("-", "_")
     compact = normalized.replace("_", "")
-    return normalized in s.STRUCTURED_TELEMETRY_KEYS or compact in s.STRUCTURED_TELEMETRY_KEYS
+    return (
+        normalized in s.STRUCTURED_TELEMETRY_KEYS
+        or compact in s.STRUCTURED_TELEMETRY_KEYS
+        or normalized in _TOOL_ARGUMENT_TELEMETRY_KEYS
+        or compact in _TOOL_ARGUMENT_TELEMETRY_KEYS
+    )
 
 
 def _is_test_client_client_error(*, client: str, status_code: int) -> bool:
@@ -748,7 +757,7 @@ def _normalize_structured_telemetry_value(value: object, *, depth: int = 0) -> A
     if isinstance(value, str):
         return s._truncate_text(value, s.MAX_TELEMETRY_FIELD_TEXT_CHARS)
     if depth >= 5:
-        return s._truncate_text(str(value), s.MAX_TELEMETRY_FIELD_TEXT_CHARS)
+        return _TRUNCATED_TELEMETRY_VALUE
     if isinstance(value, dict):
         normalized: dict[str, Any] = {}
         for index, (key, item) in enumerate(value.items()):
@@ -798,7 +807,7 @@ def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
     if isinstance(value, str):
         return s._truncate_text(value, s.MAX_TELEMETRY_FIELD_TEXT_CHARS)
     if depth >= 2:
-        return s._truncate_text(str(value), s.MAX_TELEMETRY_FIELD_TEXT_CHARS)
+        return _TRUNCATED_TELEMETRY_VALUE
     if isinstance(value, dict):
         normalized: dict[str, Any] = {}
         for index, (key, item) in enumerate(value.items()):
@@ -1520,7 +1529,10 @@ def _runtime_scene_research_summary_payload(events: list[dict[str, Any]]) -> dic
 
 def _runtime_scene_root() -> Path:
     s = _service()
-    from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
+    from vibelution_storage import (
+        ProjectIdentityError,
+        resolve_active_project_storage_paths,
+    )
 
     try:
         logs_root = resolve_active_project_storage_paths(s.PROJECT_ROOT).logs
@@ -2298,6 +2310,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
         str(payload.get("message") or f"{method or 'API'} {path_template or path} -> {status_code or '?'}"),
         320,
     )
+    correlation_fields = merge_current_trace_fields(payload.get("fields"))
     fields = s.developer_sandbox.enrich_debug_fields(s._normalize_telemetry_fields(
         {
             "method": method,
@@ -2323,6 +2336,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "diagnosticProbe": is_diagnostic_probe,
             "testClientProbe": is_test_client_probe,
             "clientOperationId": s._truncate_text(str(payload.get("client_operation_id") or ""), 120),
+            **correlation_fields,
         }
     ), project_root=s.PROJECT_ROOT)
 
@@ -2387,7 +2401,10 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
     event_code = s._sanitize_token(payload.get("eventCode"), default="browser.telemetry")
     level = s._sanitize_token(payload.get("level"), default="info")
     message = s._truncate_text(str(payload.get("message") or event_code), 320)
-    fields = s.developer_sandbox.enrich_debug_fields(s._normalize_telemetry_fields(payload.get("fields")), project_root=s.PROJECT_ROOT)
+    fields = s.developer_sandbox.enrich_debug_fields(
+        s._normalize_telemetry_fields(merge_current_trace_fields(payload.get("fields"))),
+        project_root=s.PROJECT_ROOT,
+    )
 
     raw_line = f"[{timestamp}] {event_code} [{level}] {message}"
     if fields:
@@ -2498,7 +2515,10 @@ def record_research_scene_event(
     phase_name = s._sanitize_token(phase, default="theme_discovery")
     level_name = s._sanitize_token(level, default="info")
     outcome_name = s._sanitize_token(outcome, default="observed")
-    normalized_fields = s.developer_sandbox.enrich_debug_fields(s._normalize_telemetry_fields(fields), project_root=s.PROJECT_ROOT)
+    normalized_fields = s.developer_sandbox.enrich_debug_fields(
+        s._normalize_telemetry_fields(merge_current_trace_fields(fields)),
+        project_root=s.PROJECT_ROOT,
+    )
     normalized_session_id = str(session_id or normalized_fields.get("sessionId") or "").strip()
     normalized_agent_key = str(agent_key or normalized_fields.get("agentKey") or "").strip()
     if normalized_session_id:
@@ -2591,6 +2611,7 @@ def record_runtime_scene_conversation_event(
     content_length = len(str(content or ""))
     content_redacted = content_length > 0
     correlation_ids = s._runtime_scene_conversation_correlation_ids(session_id, message)
+    trace_fields = current_trace_fields()
     payload = {
         "schema_version": 1,
         "runtime_scene_id": scene_id,
@@ -2605,6 +2626,7 @@ def record_runtime_scene_conversation_event(
         "message": s._runtime_scene_conversation_message_summary(message, correlation_ids),
         "tool_calls": s._runtime_scene_safe_tool_calls(tool_calls),
         "active_task": active_task if isinstance(active_task, dict) else {},
+        **trace_fields,
     }
     with s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
         s._append_scene_jsonl(scene_dir, relative_path, payload)
@@ -2624,6 +2646,7 @@ def record_runtime_scene_conversation_event(
                 "outcome": str(status or "observed").strip() or "observed",
                 "message": f"{role_label} conversation message recorded ({content_length} chars).",
                 "fields": {
+                    **trace_fields,
                     "sessionId": correlation_ids["session_id"],
                     "turnId": correlation_ids["turn_id"],
                     "clientSubmissionId": correlation_ids["client_submission_id"],
@@ -2684,7 +2707,7 @@ def record_runtime_scene_event(
             message=message,
             level=level,
             outcome=outcome,
-            fields=fields,
+            fields=merge_current_trace_fields(fields),
             raw_refs=raw_refs,
             child_log_path=child_log_path,
             child_log_payload=child_log_payload,

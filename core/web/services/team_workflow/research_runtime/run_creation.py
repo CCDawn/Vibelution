@@ -97,6 +97,13 @@ def create_question_run(
         )
     except QuestionLaunchError as exc:
         raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+    if not isinstance(run_input.get("researchScopeEnvelope"), Mapping) or not isinstance(
+        run_input.get("catalogScope"), Mapping
+    ):
+        raise ResearchWorkflowError(
+            "new Challenge runs require server-derived researchScopeEnvelope and catalogScope",
+            code="invalid_run_input",
+        )
     created = create_run(
         workflow_id,
         run_input=run_input,
