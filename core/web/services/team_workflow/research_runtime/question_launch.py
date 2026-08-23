@@ -33,6 +33,7 @@ from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.challenge_question_runs import (
     REQUIRED_HUMAN_GATE_KEYS,
+    _package_bound_model_invocation_receipt_refs,
     challenge_question_run_summary,
     get_challenge_question_run_detail,
 )
@@ -85,6 +86,19 @@ def _output_result_classification(output: Mapping[str, Any]) -> dict[str, Any]:
     return _mapping(output.get("result_classification"))
 
 
+def _formal_record_receipts_ready(record: Mapping[str, Any]) -> bool:
+    """Require the stored receipt projection to remain bound to its package."""
+
+    validation = _mapping(record.get("validation"))
+    if validation.get("modelInvocationReceipts") != "passed":
+        return False
+    try:
+        receipt_refs = _package_bound_model_invocation_receipt_refs(dict(record))
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return bool(receipt_refs)
+
+
 def _formal_record_eligible(record: Mapping[str, Any]) -> bool:
     gates = _mapping(record.get("humanGates"))
     validation = _mapping(record.get("validation"))
@@ -100,6 +114,8 @@ def _formal_record_eligible(record: Mapping[str, Any]) -> bool:
         and validation.get("schemaValidation") == "passed"
         and validation.get("citationValidation") == "passed"
         and validation.get("officialModelCall") is True
+        and isinstance(record.get("resultPackage"), Mapping)
+        and _formal_record_receipts_ready(record)
     )
 
 

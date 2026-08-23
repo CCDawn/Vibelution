@@ -471,6 +471,8 @@ class ChallengeQuestionOutputPayload(BaseModel):
     registeredBy: str = Field("", max_length=160)
     parentRunId: str = Field("", max_length=160)
     lineageRefs: list[str] = Field(default_factory=list, max_length=64)
+    resultPackage: dict[str, Any] | None = None
+    authorizedModelPolicySha256: str = Field("", max_length=64)
 
 
 class ChallengeQuestionPublishPayload(ChallengeQuestionOutputPayload):
@@ -493,6 +495,13 @@ class ChallengeQuestionArtifactResponse(BaseModel):
     immutable: bool
 
 
+class ChallengeQuestionResultPackageArtifactResponse(BaseModel):
+    path: str
+    canonicalHash: str
+    idempotencyKey: str
+    immutable: bool
+
+
 class ChallengeQuestionRunDetailResponse(BaseModel):
     teamId: str
     questionId: str
@@ -501,6 +510,8 @@ class ChallengeQuestionRunDetailResponse(BaseModel):
     output: dict[str, Any]
     runs: list[dict[str, Any]]
     artifact: ChallengeQuestionArtifactResponse
+    resultPackage: dict[str, Any] | None = None
+    resultPackageArtifact: ChallengeQuestionResultPackageArtifactResponse | None = None
 
 
 class CandidateGraphBuildPayload(BaseModel):

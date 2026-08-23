@@ -26,6 +26,7 @@ from core.research.competition.catalog_execution import (
     CatalogExecutionError,
     CatalogExecutionState,
     QuestionStatus,
+    build_result_set,
     dev_plan,
 )
 from core.research.competition.question_result_package import (
@@ -145,11 +146,28 @@ class _Harness:
         assert run_id in self.runs
         self.runs[run_id]["status"] = status
 
-    def approve(self, question_id: str) -> None:
+    def approve(
+        self,
+        question_id: str,
+        plan_id: str,
+        *,
+        package: QuestionResultPackage | dict | None = None,
+    ) -> None:
+        state = svc._state_of(svc._load_envelope(TEAM_ID, plan_id))
+        resolved_package = package or _approved_package(
+            state,
+            question_id,
+            run_id=f"run-{question_id.lower()}",
+        )
         self.approved[question_id] = {
-            "reviewRunId": f"review-{question_id.lower()}",
+            "reviewRunId": f"run-{question_id.lower()}",
             "catalogId": "science-125-questions-2021",
             "artifactSha256": "f" * 64,
+            "resultPackage": (
+                resolved_package.to_dict()
+                if isinstance(resolved_package, QuestionResultPackage)
+                else deepcopy(resolved_package)
+            ),
         }
 
 
@@ -190,15 +208,16 @@ def _approved_package(
     question_id: str,
     *,
     package_id: str | None = None,
+    run_id: str | None = None,
 ) -> QuestionResultPackage:
     payload = deepcopy(_valid_payload())
-    run_id = f"run-{question_id.lower()}-seed"
+    resolved_run_id = run_id or f"run-{question_id.lower()}-seed"
     payload.update(
         {
             "package_id": package_id or f"pkg-{question_id.lower()}-seed",
             "scope": state.scope.to_dict(),
             "question_id": question_id,
-            "run_id": run_id,
+            "run_id": resolved_run_id,
             "input_snapshot_sha256": "a" * 64,
         }
     )
@@ -216,11 +235,11 @@ def _approved_package(
     for stage, receipt in payload["model_invocation_receipts"].items():
         receipt["receiptId"] = f"receipt-{question_id.lower()}-{stage}"
         receipt["nodeRunId"] = f"node-{question_id.lower()}-{stage}"
-        receipt["runId"] = run_id
+        receipt["runId"] = resolved_run_id
         receipt["scope"].update(
             {
                 "questionId": question_id,
-                "runId": run_id,
+                "runId": resolved_run_id,
                 "catalogId": state.scope.catalog_id,
                 "catalogVersion": state.scope.catalog_version,
                 "catalogSha256": state.scope.catalog_sha256,
@@ -562,6 +581,29 @@ def test_cross_gate_seed_preserves_canonical_package_and_is_idempotent(
         seeded.package_snapshot["model_invocation_receipts"]
         == package.to_dict()["model_invocation_receipts"]
     )
+
+
+def test_cross_gate_seed_rejects_legacy_result(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = new_real_batch_state("real-5")
+    legacy = QuestionResult.create(
+        scope=target.scope,
+        question_id="SCI-091",
+        model_receipt_locator="legacy://receipt",
+        knowledge_locator="legacy://knowledge",
+    )
+    _seed_state(monkeypatch, legacy)
+
+    with pytest.raises(CatalogExecutionError, match="canonical package"):
+        svc._seed_from_previous_gates(
+            TEAM_ID,
+            target,
+            expected_model_policy_sha256=harness.model_policy["policySha256"],
+        )
+
+    assert target.result_for("SCI-091") is None
 
 
 def test_cross_gate_seed_validates_every_package_before_mutating_target(
@@ -1163,7 +1205,7 @@ def _open_gate(harness: _Harness, plan_id: str) -> None:
     state = svc._state_of(svc._load_envelope(TEAM_ID, plan_id))
     for question_id in state.plan.question_ids:
         harness.set_run_status(question_id, "succeeded")
-        harness.approve(question_id)
+        harness.approve(question_id, plan_id)
     result = _poll(harness, plan_id)
     assert result["gateComplete"] is True
 
@@ -1194,7 +1236,7 @@ def test_poll_harvests_success_awaiting_and_failure(harness: _Harness) -> None:
     _open_gate(harness, "real-1")
     _start(harness, "real-5")
     harness.set_run_status("SCI-096", "succeeded")
-    harness.approve("SCI-096")
+    harness.approve("SCI-096", "real-5")
     harness.set_run_status("SCI-002", "succeeded")
 
     polled = _poll(harness, "real-5")
@@ -1209,9 +1251,99 @@ def test_poll_harvests_success_awaiting_and_failure(harness: _Harness) -> None:
     result = svc._state_of(svc._load_envelope(TEAM_ID, "real-5"))
     approved = result.result_for("SCI-096")
     assert approved is not None
+    assert approved.is_package_backed is True
+    assert approved.receipt_complete is True
     assert approved.submission_eligible is True
-    assert approved.knowledge_locator.startswith("challenge-question-artifact://science-125-questions-2021/SCI-096/")
-    assert approved.model_receipt_locator == "challenge-model-evidence://SCI-096/review-sci-096"
+    assert approved.knowledge_locator.startswith("question-result-package://")
+    assert approved.model_receipt_locator.endswith("#model-invocation-receipts")
+    manifest = build_result_set(result).manifest()
+    entry = next(item for item in manifest["entries"] if item["question_id"] == "SCI-096")
+    assert set(entry["receipts"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+
+
+def test_poll_rejects_approved_output_without_canonical_package(
+    harness: _Harness,
+) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    harness.approved["SCI-091"] = {
+        "reviewRunId": "run-sci-091",
+        "catalogId": "science-125-questions-2021",
+        "artifactSha256": "f" * 64,
+    }
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
+    envelope = svc._load_envelope(TEAM_ID, "real-1")
+    assert envelope["runRefs"]["SCI-091"]["runId"] == "run-sci-091"
+    state = svc._state_of(envelope)
+    assert state.status("SCI-091") is QuestionStatus.RUNNING
+    assert state.result_for("SCI-091") is None
+
+
+def test_poll_rejects_package_missing_required_receipt_stage(
+    harness: _Harness,
+) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    package = _approved_package(
+        state,
+        "SCI-091",
+        run_id="run-sci-091",
+    ).to_dict()
+    package["model_invocation_receipts"].pop("revision")
+    harness.approve("SCI-091", "real-1", package=package)
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
+
+
+def test_poll_rejects_package_bound_to_another_run(harness: _Harness) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    harness.approve(
+        "SCI-091",
+        "real-1",
+        package=_approved_package(
+            state,
+            "SCI-091",
+            run_id="run-other",
+        ),
+    )
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
+    assert "run" in str(exc_info.value)
+
+
+def test_poll_rejects_canonical_package_tamper(harness: _Harness) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    package = _approved_package(
+        state,
+        "SCI-091",
+        run_id="run-sci-091",
+    ).to_dict()
+    package["result_classification"]["summary"] = "tampered after approval"
+    harness.approve("SCI-091", "real-1", package=package)
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
 
 
 def test_awaiting_approval_promotes_after_human_gate(harness: _Harness) -> None:
@@ -1220,11 +1352,14 @@ def test_awaiting_approval_promotes_after_human_gate(harness: _Harness) -> None:
     first = _poll(harness, "real-1")
     assert first["awaitingApprovalQuestionIds"] == ["SCI-091"]
 
-    harness.approve("SCI-091")
+    harness.approve("SCI-091", "real-1")
     second = _poll(harness, "real-1")
     assert second["awaitingApprovalQuestionIds"] == []
     assert second["statusSummary"]["succeeded"] == 1
     assert second["gateComplete"] is True
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert state.attempts("SCI-091") == 2
 
 
 def test_failure_counts_toward_circuit_breaker_and_stops_refill(harness: _Harness) -> None:
