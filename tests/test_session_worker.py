@@ -117,7 +117,7 @@ def test_receipt_context_accepts_binding_without_research_project_id(
     assert context is not None
     assert context["questionStageBinding"]["formalNodeRunId"] == "node-run-1"
     assert context["modelPolicySha256"] == "a" * 64
-    assert context["expectedModelRoute"]["modelRef"] == "default/qwen-plus"
+    assert context["expectedModelRoute"]["modelRef"] == "default/qwen-alias"
 
 
 def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:
