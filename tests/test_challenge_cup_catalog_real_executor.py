@@ -10,6 +10,7 @@ fakes; no real run, Qwen call, network or formal submission is ever invoked.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from dataclasses import replace
@@ -1002,6 +1003,87 @@ def test_policy_snapshot_is_record_hashed_and_old_policy_fails_closed(
     )
     with pytest.raises(svc.ChallengeCupRealBatchError, match="durable CatalogRunAuthorization"):
         svc._current_catalog_run_authorization(TEAM_ID, "real-1")
+
+
+def test_catalog_state_missing_envelope_is_none_but_team_boundary_is_enforced(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert svc.get_real_batch_catalog_state(TEAM_ID) is None
+
+    def missing(_team_id: str) -> dict:
+        raise svc.team_service.TeamNotFoundError("Team not found.")
+
+    monkeypatch.setattr(svc.team_service, "get_team", missing)
+    with pytest.raises(svc.team_service.TeamNotFoundError, match="Team not found"):
+        svc.get_real_batch_catalog_state("missing-team")
+
+
+def test_catalog_state_loads_persisted_real_125_envelope_and_policy_hash(
+    harness: _Harness,
+) -> None:
+    harness.authorize("real-125")
+    authorization = svc._current_catalog_run_authorization(TEAM_ID, "real-125")
+    envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-125",
+        concurrency=1,
+        failure_budget=3,
+        authorization=authorization,
+    )
+    svc._save_envelope(TEAM_ID, envelope)
+
+    loaded = svc.get_real_batch_catalog_state(TEAM_ID)
+
+    assert loaded is not None
+    state, policy_sha256 = loaded
+    assert isinstance(state, CatalogExecutionState)
+    assert state.plan.plan_id == "real-125"
+    assert len(state.plan.question_ids) == 125
+    assert policy_sha256 == authorization["batchScope"]["modelPolicy"]["policySha256"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("plan", "canonical formal catalog plan"),
+        ("authorization", "checkpoint is malformed"),
+    ),
+)
+def test_catalog_state_rejects_noncanonical_plan_or_durable_authorization(
+    harness: _Harness,
+    mutation: str,
+    message: str,
+) -> None:
+    harness.authorize("real-125")
+    authorization = svc._current_catalog_run_authorization(TEAM_ID, "real-125")
+    envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-125",
+        concurrency=1,
+        failure_budget=3,
+        authorization=authorization,
+    )
+    if mutation == "plan":
+        envelope["checkpoint"]["plan"]["plan_id"] = "real-1"
+        checkpoint_body = {
+            key: value
+            for key, value in envelope["checkpoint"].items()
+            if key != "checkpoint_sha256"
+        }
+        encoded = json.dumps(
+            checkpoint_body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        envelope["checkpoint"]["checkpoint_sha256"] = hashlib.sha256(encoded).hexdigest().upper()
+    else:
+        envelope["catalogRunAuthorization"]["recordHash"] = "0" * 64
+    svc._save_envelope(TEAM_ID, envelope)
+
+    with pytest.raises(svc.RealBatchStorageError, match=message):
+        svc.get_real_batch_catalog_state(TEAM_ID)
 
 
 # ---------------------------------------------------------------------------
