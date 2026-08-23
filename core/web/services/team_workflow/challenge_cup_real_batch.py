@@ -61,8 +61,7 @@ from core.web.services.team_workflow.research_runtime.catalog_run_authorization 
     authorization_to_dict,
     authorized_model_policy_sha256,
     find_catalog_run_authorization,
-    readiness_report_sha256,
-    require_readiness_report_sha256,
+    readiness_hash_from_snapshot,
     resolve_catalog_model_policy,
 )
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
@@ -652,37 +651,15 @@ def _platform_snapshot_allows_real_batch(snapshot: Mapping[str, Any]) -> bool:
     below remains mandatory in every case.
     """
 
-    action = str(snapshot.get("nextLegalAction") or "").strip().upper()
-    if action.endswith("AUTHORIZATION_REQUIRED"):
-        return True
-    report = snapshot.get("report")
-    if not isinstance(report, Mapping):
-        report = snapshot.get("readinessReport")
     return (
-        isinstance(report, Mapping)
-        and str(report.get("status") or "").strip().upper() == "READY"
-        and report.get("researchAuthorizationRequired") is True
+        str(snapshot.get("nextLegalAction") or "").strip()
+        == "RESEARCH_AUTHORIZATION_REQUIRED"
     )
 
 
 def _readiness_evidence_from_snapshot(snapshot: Mapping[str, Any]) -> str:
     """Resolve the exact current readiness hash used by authorization lookup."""
-
-    for key in (
-        "readinessReportSha256",
-        "readinessReportHash",
-        "catalogReadinessReportSha256",
-    ):
-        value = str(snapshot.get(key) or "").strip()
-        if value:
-            return require_readiness_report_sha256(value)
-    for key in ("readinessReport", "report"):
-        value = snapshot.get(key)
-        if isinstance(value, (Mapping, list)):
-            return readiness_report_sha256(value)
-    raise CatalogRunAuthorizationError(
-        "The readiness snapshot has no canonical report/hash."
-    )
+    return readiness_hash_from_snapshot(snapshot)
 
 
 def _batch_scope(team_id: str, plan_id: str) -> dict[str, Any]:
@@ -711,6 +688,12 @@ def _require_authorization(team_id: str) -> dict[str, Any]:
             "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED or another explicit research-authorization boundary; real batches stay closed.",
             code="platform_not_authorized",
         )
+    snapshot_team = str(snapshot.get("teamId") or "").strip()
+    if snapshot_team and snapshot_team != str(team_id or "").strip():
+        raise ChallengeCupRealBatchError(
+            "The DEV control snapshot belongs to another team; real batches stay closed.",
+            code="platform_not_authorized",
+        )
     return dict(snapshot)
 
 
@@ -721,7 +704,10 @@ def _require_catalog_run_authorization(
 ):
     try:
         scope = _batch_scope(team_id, plan_id)
-        report_hash = _readiness_evidence_from_snapshot(snapshot)
+        report_hash = readiness_hash_from_snapshot(
+            snapshot,
+            expected_team_id=team_id,
+        )
         authorization = find_catalog_run_authorization(
             team_id,
             plan_id=plan_id,
@@ -811,8 +797,12 @@ def record_catalog_run_authorization(
         and readiness_report_sha256_value is None
         and readiness_report_hash is None
     ):
-        snapshot = _require_authorization(_resolve_team_id(team_id))
-        readiness_evidence = snapshot.get("readinessReport") or snapshot.get("report")
+        normalized_team = _resolve_team_id(team_id)
+        snapshot = _require_authorization(normalized_team)
+        readiness_report_sha256_value = readiness_hash_from_snapshot(
+            snapshot,
+            expected_team_id=normalized_team,
+        )
     try:
         return _record_catalog_run_authorization(
             _resolve_team_id(team_id),
