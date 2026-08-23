@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.services import team_service
 from core.web.services.team_workflow import research_projects
 from core.web.services.team_workflow.research_runtime import question_launch
 from core.web.services.team_workflow.research_runtime import (
@@ -157,9 +158,18 @@ def _patch_team_exists(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _create_research_team(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    team = team_service.create_team(name="research-team")
+    assert team["teamId"] == "research-team"
+
+
 def test_launch_options_and_frozen_input_derive_from_one_approved_question(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
 
     options = question_launch.list_question_launch_options("research-team")
@@ -203,8 +213,10 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
 
 
 def test_question_launch_rejects_unknown_questions_and_invalid_limits(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
 
     catalog_seed = question_launch.build_question_run_input(
@@ -451,6 +463,7 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> None:
+    _create_research_team(tmp_path, monkeypatch)
     reset_research_workflow_runtime_service_for_tests(
         run_store=WorkflowRunStore(tmp_path / "runs"),
         checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
@@ -624,8 +637,10 @@ def test_experiment_activation_succeeds_and_is_idempotent(
 
 
 def test_deep_experiment_run_requires_activated_campaign(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
     approved_keys = [
         "H1_problem_understanding",
@@ -672,8 +687,10 @@ def test_deep_experiment_run_requires_activated_campaign(
 
 
 def test_ordinary_approved_question_needs_no_campaign_activation(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
     approved_keys = [
         "H1_problem_understanding",
