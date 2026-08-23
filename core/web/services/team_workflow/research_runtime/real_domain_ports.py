@@ -3165,6 +3165,12 @@ def _ledger_result_package(
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Ledger path for result_package — UI projection, else bounded STOP package."""
     from .result_package import ResultPackageError, build_result_package
+    from .result_package_v2 import (
+        ResultPackageV2Error,
+        build_challenge_result_package_v2,
+        build_proposal_result_package_base,
+        is_proposal_only_challenge_run,
+    )
 
     team_id = str(snapshot.get("teamId") or "").strip()
     if not team_id:
@@ -3182,12 +3188,32 @@ def _ledger_result_package(
         research_ledger = {}
 
     if isinstance(record, dict):
+        proposal_only = is_proposal_only_challenge_run(record)
         try:
-            package = build_result_package(record, research_ledger=research_ledger)
-        except ResultPackageError as exc:
-            bounded = _ledger_bounded_result_package(action, snapshot)
-            if bounded is not None:
-                return bounded
+            package = (
+                build_proposal_result_package_base(record)
+                if proposal_only
+                else build_result_package(record, research_ledger=research_ledger)
+            )
+            if proposal_only:
+                package = build_challenge_result_package_v2(
+                    generic_package=package,
+                    record=record,
+                    team_id=team_id,
+                    workflow_run_id=action.run_id,
+                    source_collection_run_id=str(
+                        snapshot.get("sourceCollectionRunId")
+                        or (record.get("inputSnapshot") or {}).get(
+                            "sourceCollectionRunId"
+                        )
+                        or action.run_id
+                    ),
+                )
+        except (ResultPackageError, ResultPackageV2Error) as exc:
+            if not proposal_only:
+                bounded = _ledger_bounded_result_package(action, snapshot)
+                if bounded is not None:
+                    return bounded
             raise RuntimeError(str(exc)) from exc
         if not isinstance(package, dict) or not str(package.get("packageId") or "").strip():
             raise RuntimeError("result_package builder returned an incomplete package")

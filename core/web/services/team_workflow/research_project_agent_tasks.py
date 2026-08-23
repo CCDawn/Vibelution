@@ -82,6 +82,8 @@ TASK_KIND_CONTRACTS: dict[str, dict[str, Any]] = {
             "以 protocolInput 中正式 workflow hypothesis_set 为假设事实源，不以旧候选计数替代",
             "核对研究问题、dataset、baseline、变量、metric 与成功/失败门禁",
             "dataset、baseline、metric、seed、budget、stop condition 与 smoke plan 不得使用占位文本",
+            "显式提交 schema-v2-shaped finalSummary（7 个必需字段），不得由摘要或分数补齐",
+            "显式提交 schema-v2-shaped competitionResultView（含 datasets.source/target），不得使用占位文本",
             "保持训练与执行为人工触发边界",
             "通过 challenge_cup_experiment_writeback_tool 登记计划或修订",
         ],
@@ -492,7 +494,7 @@ def _task_message(
     if task.get("candidateId"):
         checklist_items = [
             "只研究 candidateContext 指定的当前假说，不读取或推断兄弟假说对话",
-            "输出 statement、mechanism、predictions、falsificationCriteria 与五维 scores",
+            "输出 statement、mechanism、novelty_basis、predictions、falsificationCriteria、boundary_conditions 与五维 scores",
             "反证引用只能来自当前 hypothesisInput.allowedEvidenceRefs",
             "通过 challenge_cup_experiment_writeback_tool 的 record_hypothesis_fragment 写回",
         ]

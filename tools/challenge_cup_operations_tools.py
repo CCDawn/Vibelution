@@ -296,6 +296,15 @@ def challenge_cup_experiment_writeback_tool(
                 team_id=team_id,
                 task_context=protocol_task_context,
                 research_plan=payload.get("researchPlan"),
+                final_summary=_payload_alias(
+                    payload, "finalSummary", "final_summary", field="finalSummary"
+                ),
+                competition_result_view=_payload_alias(
+                    payload,
+                    "competitionResultView",
+                    "competition_result_view",
+                    field="competitionResultView",
+                ),
             )
         if normalized_operation == "record_problem_understanding":
             if not isinstance(task_binding, dict) or not isinstance(task, dict):
@@ -1754,6 +1763,23 @@ def _json_object(raw: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Expected JSON object.")
     return payload
+
+
+def _payload_alias(
+    payload: dict[str, Any],
+    *keys: str,
+    field: str,
+) -> Any:
+    present = [(key, payload[key]) for key in keys if key in payload]
+    if not present:
+        return None
+    _first_key, first_value = present[0]
+    if any(value != first_value for _key, value in present[1:]):
+        raise ValueError(
+            f"{field} contains conflicting aliases: "
+            + ", ".join(key for key, _value in present)
+        )
+    return first_value
 
 
 def _json_list(raw: str) -> list[Any]:

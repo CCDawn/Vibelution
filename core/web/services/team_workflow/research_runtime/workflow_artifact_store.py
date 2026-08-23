@@ -37,6 +37,8 @@ _SUPPORTED_KINDS = frozenset(
         "version_governance_record",
         "delivery_orchestration_result",
         "problem_understanding",
+        "dimension_reviews",
+        "feedback_iterations",
     }
 )
 

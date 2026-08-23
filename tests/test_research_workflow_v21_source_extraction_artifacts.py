@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.research_runtime.agent_task_artifact_builder import (
     build_agent_task_artifacts,
@@ -14,6 +16,19 @@ from core.web.services.team_workflow.research_runtime.source_extraction_evidence
 )
 
 
+def _source_fields(**overrides: object) -> dict[str, object]:
+    return {
+        "title": "Dynamic threshold study",
+        "source_type": "peer_reviewed_paper",
+        "source_url": "https://example.test/a",
+        "retrieved_at": "2026-08-10T00:00:00Z",
+        "fact": "Dynamic thresholds reduce redundant updates.",
+        "relation": "supports",
+        "verification_status": "full_text_checked",
+        **overrides,
+    }
+
+
 def test_nested_key_findings_become_traceable_evidence_cards() -> None:
     result = {
         "candidateExtractions": [
@@ -22,15 +37,17 @@ def test_nested_key_findings_become_traceable_evidence_cards() -> None:
                 "decision": "keep",
                 "evidenceStatus": "missing_evidence_anchor",
                 "relevance": "high",
+                **_source_fields(),
                 "keyFindings": [
                     {
                         "evidenceRef": "record-a",
-                        "finding": "Dynamic thresholds reduce redundant updates.",
+                        "fact": "Dynamic thresholds reduce redundant updates.",
                         "sourceRef": "https://example.test/a",
                     },
                     {
                         "citationLocator": {"page": "12"},
-                        "finding": "The effect remains under a frozen baseline.",
+                        "fact": "The effect remains under a frozen baseline.",
+                        "relation": "boundary",
                     },
                 ],
             }
@@ -42,6 +59,14 @@ def test_nested_key_findings_become_traceable_evidence_cards() -> None:
     assert cards == [
         {
             "sourceId": "candidate-a",
+            "candidateId": "candidate-a",
+            "title": "Dynamic threshold study",
+            "source_type": "peer_reviewed_paper",
+            "source_url": "https://example.test/a",
+            "retrieved_at": "2026-08-10T00:00:00Z",
+            "fact": "Dynamic thresholds reduce redundant updates.",
+            "relation": "supports",
+            "verification_status": "full_text_checked",
             "claim": "Dynamic thresholds reduce redundant updates.",
             "citationLocator": {
                 "evidenceRef": "record-a",
@@ -53,6 +78,14 @@ def test_nested_key_findings_become_traceable_evidence_cards() -> None:
         },
         {
             "sourceId": "candidate-a",
+            "candidateId": "candidate-a",
+            "title": "Dynamic threshold study",
+            "source_type": "peer_reviewed_paper",
+            "source_url": "https://example.test/a",
+            "retrieved_at": "2026-08-10T00:00:00Z",
+            "fact": "The effect remains under a frozen baseline.",
+            "relation": "boundary",
+            "verification_status": "full_text_checked",
             "claim": "The effect remains under a frozen baseline.",
             "citationLocator": {"page": "12"},
             "decision": "keep",
@@ -67,7 +100,11 @@ def test_flat_extraction_contract_remains_canonical() -> None:
         "recordExtractions": [
             {
                 "recordId": "record-b",
-                "conclusion": "Ablation B improves the primary metric.",
+                **_source_fields(
+                    title="Ablation B study",
+                    source_url="https://example.test/b",
+                    fact="Ablation B improves the primary metric.",
+                ),
                 "evidenceRef": "fixture://record-b#table-2",
                 "confidence": 0.91,
             }
@@ -78,11 +115,15 @@ def test_flat_extraction_contract_remains_canonical() -> None:
 
     assert cards == [
         {
-            "recordId": "record-b",
-            "conclusion": "Ablation B improves the primary metric.",
-            "evidenceRef": "fixture://record-b#table-2",
-            "confidence": 0.91,
             "sourceId": "record-b",
+            "recordId": "record-b",
+            "title": "Ablation B study",
+            "source_type": "peer_reviewed_paper",
+            "source_url": "https://example.test/b",
+            "retrieved_at": "2026-08-10T00:00:00Z",
+            "fact": "Ablation B improves the primary metric.",
+            "relation": "supports",
+            "verification_status": "full_text_checked",
             "claim": "Ablation B improves the primary metric.",
             "citationLocator": {
                 "evidenceRef": "fixture://record-b#table-2"
@@ -108,16 +149,17 @@ def test_nested_agent_result_passes_the_source_extraction_quality_contract() -> 
         "taskId": "task-extraction",
         "sessionId": "session-extraction",
         "result": {
-            "candidateExtractions": [
-                {
-                    "candidateId": "candidate-a",
-                    "keyFindings": [
-                        {
-                            "evidenceRef": "record-a",
-                            "finding": "Dynamic thresholds reduce redundant updates.",
-                            "sourceRef": "https://example.test/a",
-                        }
-                    ],
+                "candidateExtractions": [
+                    {
+                        "candidateId": "candidate-a",
+                        **_source_fields(),
+                        "keyFindings": [
+                            {
+                                "evidenceRef": "record-a",
+                                "fact": "Dynamic thresholds reduce redundant updates.",
+                                "sourceRef": "https://example.test/a",
+                            }
+                        ],
                 }
             ]
         },
@@ -166,17 +208,24 @@ def test_real_agent_writeback_claim_anchor_passes_the_quality_contract() -> None
         "taskId": "task-extraction",
         "sessionId": "session-extraction",
         "result": {
-            "candidateExtractions": [
-                {
-                    "candidateId": "candidate-a",
-                    "valueSummary": "Controlled thresholding reduces redundant updates.",
-                    "sourceRefs": ["https://example.test/a"],
-                    "claims": [
-                        {
-                            "claim": "Controlled thresholding reduces redundant updates.",
-                            "sourceRef": "https://example.test/a",
-                            "evidenceRef": "record-anchor-a",
-                        }
+                "candidateExtractions": [
+                    {
+                        "candidateId": "candidate-a",
+                        **_source_fields(),
+                        "valueSummary": "Controlled thresholding reduces redundant updates.",
+                        "sourceRefs": ["https://example.test/a"],
+                        "claims": [
+                            {
+                                "fact": "Controlled thresholding reduces redundant updates.",
+                                "title": "Controlled threshold study",
+                                "source_type": "peer_reviewed_paper",
+                                "source_url": "https://example.test/a",
+                                "retrieved_at": "2026-08-10T00:00:00Z",
+                                "relation": "supports",
+                                "verification_status": "metadata_checked",
+                                "sourceRef": "https://example.test/a",
+                                "evidenceRef": "record-anchor-a",
+                            }
                     ],
                 }
             ]
@@ -215,3 +264,61 @@ def test_real_agent_writeback_claim_anchor_passes_the_quality_contract() -> None
     assert quality is not None
     assert quality["status"] == "passed"
     assert records == {}
+
+
+def test_formal_cards_fail_closed_without_explicit_facts_or_source_type() -> None:
+    with pytest.raises(ValueError, match=r"missing explicit (source_type|fact)"):
+        build_source_extraction_evidence_cards(
+            {
+                "candidateExtractions": [
+                    {
+                        "candidateId": "candidate-a",
+                        "title": "A source",
+                        "source_url": "https://example.test/a",
+                        "retrieved_at": "2026-08-10T00:00:00Z",
+                        "summary": "A summary must not become a fact.",
+                        "sourceKind": "paper",
+                        "keyFindings": [
+                            {
+                                "finding": "Legacy summary",
+                                "evidenceRef": "record-a",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+
+def test_formal_cards_reject_url_as_source_identity_and_legacy_mode_is_explicit() -> None:
+    with pytest.raises(ValueError, match="sourceId must equal"):
+        build_source_extraction_evidence_cards(
+            {
+                "candidateExtractions": [
+                    {
+                        **_source_fields(),
+                        "candidateId": "candidate-a",
+                        "sourceId": "https://example.test/a",
+                        "evidenceRef": "record-a",
+                    }
+                ]
+            }
+        )
+
+    legacy = build_source_extraction_evidence_cards(
+        {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-a",
+                    "keyFindings": [
+                        {
+                            "finding": "Legacy projection",
+                            "sourceRef": "https://example.test/a",
+                        }
+                    ],
+                }
+            ]
+        },
+        mode="legacy",
+    )
+    assert legacy[0]["claim"] == "Legacy projection"

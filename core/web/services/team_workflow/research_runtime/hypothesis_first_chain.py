@@ -1848,11 +1848,77 @@ def _generate_hypothesis_round(
             metareview_runner=metareview_runner,
         )
         round_record = result.get("round") if isinstance(result.get("round"), Mapping) else {}
+        # The HypothesisRound is a review projection.  Promote only explicit
+        # seven-dimension rows to the independent v2 authority; the current
+        # executor emits scores, so the normal result is a structured blocked
+        # authority until a real review producer supplies dimensionReviews and
+        # a server-owned node binding/snapshot hash.
+        dimension_reviews_authority: dict[str, Any]
+        try:
+            from core.web.services.team_workflow.research_runtime.dimension_reviews_artifact_writer import (
+                materialize_dimension_reviews_authority,
+            )
+
+            receipt_authority = (
+                dict(meeting_round.get("modelInvocationReceiptAuthority"))
+                if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+                else None
+            )
+            workflow_run_id = str(
+                (receipt_authority or {}).get("workflowRunId")
+                or meeting_round.get("workflowRunId")
+                or ""
+            ).strip()
+            node_run_id = str(
+                meeting_round.get("nodeRunId")
+                or (receipt_authority or {}).get("nodeRunId")
+                or ""
+            ).strip()
+            input_refs = [
+                *_normalized_str_list(meeting_round.get("inputArtifactRefs")),
+                *_normalized_str_list(meeting_round.get("discussionItemRefs")),
+            ]
+            input_snapshot_hash = str(
+                meeting_round.get("inputSnapshotHash")
+                or round_record.get("inputSnapshotHash")
+                or (receipt_authority or {}).get("inputSnapshotHash")
+                or ""
+            ).strip()
+            dimension_reviews_authority = materialize_dimension_reviews_authority(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                node_run_id=node_run_id,
+                question_id=str(meeting_round.get("question") or ""),
+                selection_id=selection_id,
+                review_round_id=str(round_record.get("roundId") or ""),
+                input_refs=input_refs,
+                input_snapshot_hash=input_snapshot_hash,
+                candidates=candidates,
+                review=round_record,
+                workflow_authority=receipt_authority,
+                source_collection_run_id=str(
+                    (receipt_authority or {}).get("sourceCollectionRunId")
+                    or meeting_round.get("sourceCollectionRunId")
+                    or workflow_run_id
+                ).strip(),
+            )
+        except Exception as exc:
+            # A closed meeting/round is append-only and remains valid.  A
+            # persistence or binding failure must be visible to readiness and
+            # never be converted into a fake successful authority.
+            dimension_reviews_authority = {
+                "status": "blocked",
+                "reason": "NEEDS_CONTEXT",
+                "blockerCodes": ["dimension_reviews_authority_persistence_failed"],
+                "missingAuthorities": ["dimension_reviews"],
+                "error": str(exc) or type(exc).__name__,
+            }
         return {
             "status": str(result.get("status") or ""),
             "roundId": str(round_record.get("roundId") or ""),
             "round": dict(round_record),
             "closed": True,
+            "dimensionReviewsAuthority": dimension_reviews_authority,
         }
     except Exception as exc:  # closure fact stays; report the side effect
         return {

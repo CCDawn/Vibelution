@@ -35,6 +35,8 @@ class ArtifactAuthoritySpec:
 
 ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
     "problem_understanding": ArtifactAuthoritySpec("problem_understanding", "workflow_system"),
+    "dimension_reviews": ArtifactAuthoritySpec("dimension_reviews", "experiment"),
+    "feedback_iterations": ArtifactAuthoritySpec("feedback_iterations", "workflow_system"),
     "source_candidate_batch": ArtifactAuthoritySpec("source_candidate_batch", "source_collection"),
     "evidence_card_batch": ArtifactAuthoritySpec("evidence_card_batch", "source_collection"),
     "evidence_relation_graph": ArtifactAuthoritySpec("evidence_relation_graph", "evidence"),
@@ -494,6 +496,8 @@ def load_scoped_artifact_payload(
         "version_governance_record",
         "delivery_orchestration_result",
         "problem_understanding",
+        "dimension_reviews",
+        "feedback_iterations",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 

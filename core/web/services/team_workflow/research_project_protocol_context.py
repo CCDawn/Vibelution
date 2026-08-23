@@ -29,6 +29,28 @@ _RESEARCH_PLAN_REQUIRED_FIELDS = (
     "risks",
     "human_gate",
 )
+_FINAL_SUMMARY_REQUIRED_FIELDS = (
+    "answer_boundary",
+    "selected_hypothesis",
+    "research_plan_summary",
+    "key_evidence_refs",
+    "counterevidence_refs",
+    "limitations",
+    "next_validation_step",
+)
+_COMPETITION_RESULT_VIEW_REQUIRED_FIELDS = (
+    "problem_statement",
+    "rationale",
+    "technical_details",
+    "datasets.source",
+    "datasets.target",
+    "paper_title",
+    "paper_abstract",
+    "methods",
+    "experiments",
+    "results",
+    "references",
+)
 
 
 def _text(value: Any, *, limit: int = 4000) -> str:
@@ -214,6 +236,20 @@ def build_protocol_input_context(
             "fieldName": "payload_json.researchPlan",
             "normalizer": "QuestionResultPackage.v2",
             "requiredFields": list(_RESEARCH_PLAN_REQUIRED_FIELDS),
+        },
+        "finalSummaryContract": {
+            "required": True,
+            "fieldName": "payload_json.finalSummary",
+            "aliases": ["finalSummary", "final_summary"],
+            "normalizer": "challenge_question_output.v2.finalSummary",
+            "requiredFields": list(_FINAL_SUMMARY_REQUIRED_FIELDS),
+        },
+        "competitionResultViewContract": {
+            "required": True,
+            "fieldName": "payload_json.competitionResultView",
+            "aliases": ["competitionResultView", "competition_result_view"],
+            "normalizer": "challenge_question_output.v2.competitionResultView",
+            "requiredFields": list(_COMPETITION_RESULT_VIEW_REQUIRED_FIELDS),
         },
         "frozenBinding": {
             "teamId": _text(team_id, limit=160),

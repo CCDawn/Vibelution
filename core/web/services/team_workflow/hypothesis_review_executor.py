@@ -30,6 +30,7 @@ import hashlib
 import json
 import random
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 from core.research.workflow.contracts import (
@@ -121,6 +122,8 @@ def _reflection_step(
     for candidate in candidates:
         candidate_id = str(candidate["candidateId"])
         merged = dict(candidate)
+        explicit_dimension_reviews: Any = None
+        has_explicit_dimension_reviews = False
         if runner is not None:
             produced = runner(dict(candidate), dict(context))
             if not isinstance(produced, Mapping):
@@ -128,6 +131,21 @@ def _reflection_step(
                     f"reflection runner must return a mapping for candidate {candidate_id}"
                 )
             merged.update(dict(produced))
+            # The v2 dimension rows are an independent output of the real
+            # reflection runner.  Preserve them verbatim for the canonical
+            # artifact writer; never manufacture rows from scores.
+            if "dimensionReviews" in produced:
+                explicit_dimension_reviews = produced["dimensionReviews"]
+                has_explicit_dimension_reviews = True
+            elif "dimension_reviews" in produced:
+                explicit_dimension_reviews = produced["dimension_reviews"]
+                has_explicit_dimension_reviews = True
+            if has_explicit_dimension_reviews and not isinstance(
+                explicit_dimension_reviews, (list, tuple)
+            ):
+                raise ContractValidationError(
+                    f"reflection dimensionReviews for {candidate_id} must be a list"
+                )
         else:
             merged["scores"] = {
                 dimension: _fixture_score(context_id, candidate_id, dimension)
@@ -152,22 +170,23 @@ def _reflection_step(
                 f"reflection result for {candidate_id} is missing review dimensions: "
                 + ", ".join(missing)
             )
-        reviewed.append(
-            {
-                "candidateId": candidate_id,
-                "claim": str(merged.get("claim") or "").strip(),
-                "rationale": str(merged.get("rationale") or "").strip(),
-                "differenceFromAlternatives": str(
-                    merged.get("differenceFromAlternatives") or ""
-                ).strip(),
-                "lineageRefs": [
-                    str(item) for item in list(merged.get("lineageRefs") or [])
-                ],
-                "scores": {dimension: scores[dimension] for dimension in SCORE_DIMENSIONS},
-                "reviewedBy": str(merged.get("reviewedBy") or "").strip() or agent_id,
-                "status": str(merged.get("status") or "").strip() or "reviewed",
-            }
-        )
+        reviewed_item = {
+            "candidateId": candidate_id,
+            "claim": str(merged.get("claim") or "").strip(),
+            "rationale": str(merged.get("rationale") or "").strip(),
+            "differenceFromAlternatives": str(
+                merged.get("differenceFromAlternatives") or ""
+            ).strip(),
+            "lineageRefs": [
+                str(item) for item in list(merged.get("lineageRefs") or [])
+            ],
+            "scores": {dimension: scores[dimension] for dimension in SCORE_DIMENSIONS},
+            "reviewedBy": str(merged.get("reviewedBy") or "").strip() or agent_id,
+            "status": str(merged.get("status") or "").strip() or "reviewed",
+        }
+        if has_explicit_dimension_reviews:
+            reviewed_item["dimensionReviews"] = deepcopy(list(explicit_dimension_reviews))
+        reviewed.append(reviewed_item)
     return reviewed
 
 
