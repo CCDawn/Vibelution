@@ -16,6 +16,7 @@ import pytest
 from core.web.services.team_workflow import challenge_question_runs
 from core.web.services.team_workflow.research_runtime import (
     delivery_orchestration,
+    program_candidate_handoff,
     workflow_artifact_store,
 )
 from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
@@ -24,6 +25,8 @@ from core.web.services.team_workflow.research_runtime.artifact_readback_registry
 from core.web.services.team_workflow.research_runtime.delivery_orchestration import (
     DELIVERY_ARTIFACT_KIND,
     DELIVERY_OUTBOX_KIND,
+    PROGRAM_CANDIDATE_HANDOFF_BLOCKED_CODE,
+    PROGRAM_CANDIDATE_HANDOFF_BLOCKED_DETAIL,
     delivery_idempotency_key,
 )
 from core.web.services.team_workflow.research_runtime.delivery_worker import (
@@ -146,7 +149,9 @@ def _outbox_row(graph: GraphHarness, run_id: str) -> dict | None:
     }
 
 
-def test_run_close_enqueues_and_completes_delivery(harness) -> None:
+def test_run_close_blocks_delivery_when_program_candidate_context_is_missing(
+    harness,
+) -> None:
     graph, worker, _clock = harness
     run_id = "run-delivery-ok"
     _close_run(graph, run_id)
@@ -162,9 +167,12 @@ def test_run_close_enqueues_and_completes_delivery(harness) -> None:
     assert run is not None and run.status == "succeeded"
 
     events = _delivery_events(graph, run_id)
-    assert [item["type"] for item in events] == ["delivery_orchestration_completed"]
+    assert [item["type"] for item in events] == ["delivery_orchestration_blocked"]
     payload = events[0]["payload"]
-    assert payload["deliveryStatus"] == "succeeded"
+    assert payload["deliveryStatus"] == "blocked"
+    assert payload["code"] == PROGRAM_CANDIDATE_HANDOFF_BLOCKED_CODE
+    assert payload["detail"] == PROGRAM_CANDIDATE_HANDOFF_BLOCKED_DETAIL
+    assert "闭环" not in payload["reason"]
     assert payload["nodeId"] == "result_package"
     assert payload["previewPackStatus"] == "preview"
     assert payload["approvedQuestionCount"] == 3
@@ -188,7 +196,7 @@ def test_run_close_enqueues_and_completes_delivery(harness) -> None:
     )
     assert envelope is not None
     body = envelope["payload"]
-    assert body["deliveryStatus"] == "succeeded"
+    assert body["deliveryStatus"] == "blocked"
     assert body["steps"]["previewPack"]["status"] == "preview"
     assert body["steps"]["formalPack"]["status"] == "refused"
     assert body["steps"]["submissionProjection"]["allowedPackMode"] == "preview"
@@ -206,8 +214,8 @@ def test_run_close_enqueues_and_completes_delivery(harness) -> None:
         team_id="research-team", run_id=run_id
     )
     replayed = [item for item in page.to_dict()["events"] if item["type"].startswith("delivery_")]
-    assert [item["type"] for item in replayed] == ["delivery_orchestration_completed"]
-    assert replayed[0]["payload"]["deliveryStatus"] == "succeeded"
+    assert [item["type"] for item in replayed] == ["delivery_orchestration_blocked"]
+    assert replayed[0]["payload"]["deliveryStatus"] == "blocked"
 
     # Re-driving both workers is a no-op: run already terminal, action acked.
     assert graph.worker.run_once() >= 0
@@ -239,7 +247,8 @@ def test_delivery_blocked_when_pdf_over_limit(harness) -> None:
     assert [item["type"] for item in events] == ["delivery_orchestration_blocked"]
     payload = events[0]["payload"]
     assert payload["deliveryStatus"] == "blocked"
-    assert payload["code"] == "pdf_limit_exceeded"
+    assert payload["code"] == PROGRAM_CANDIDATE_HANDOFF_BLOCKED_CODE
+    assert payload["detail"] == PROGRAM_CANDIDATE_HANDOFF_BLOCKED_DETAIL
     assert payload["pdfCheck"]["withinLimit"] is False
     assert payload["pdfCheck"]["sizeBytes"] == PDF_LIMIT + 1
     # Preview still exported: the chain closes with a diagnosable block.
@@ -288,6 +297,35 @@ def test_delivery_failed_on_unsafe_evidence_path(harness) -> None:
     assert worker.run_once() == 0
 
 
+def test_permanent_program_candidate_contract_error_is_not_retried(harness, monkeypatch) -> None:
+    graph, worker, _clock = harness
+    run_id = "run-delivery-program-contract"
+    _close_run(graph, run_id)
+
+    def _contract_error(*args, **kwargs):
+        raise program_candidate_handoff.ProgramCandidateHandoffContractError(
+            "immutable source result package binding changed"
+        )
+
+    monkeypatch.setattr(
+        program_candidate_handoff,
+        "handoff_result_package_to_challenge_program",
+        _contract_error,
+    )
+
+    assert worker.run_once() == 1
+    run = graph.commands.store.get_run(run_id)
+    assert run is not None and run.status == "succeeded"
+    events = _delivery_events(graph, run_id)
+    assert [item["type"] for item in events] == ["delivery_orchestration_failed"]
+    assert events[0]["payload"]["code"] == "program_candidate_handoff_contract"
+    assert events[0]["payload"]["failedStep"] == "program_candidate_handoff"
+    assert "immutable source result package binding changed" in events[0]["payload"]["detail"]
+    row = _outbox_row(graph, run_id)
+    assert row is not None and row["status"] == "failed" and row["attempts"] == 1
+    assert worker.run_once() == 0
+
+
 def test_delivery_fail_closed_when_program_state_unreadable(
     harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,8 +343,9 @@ def test_delivery_fail_closed_when_program_state_unreadable(
     assert worker.run_once() == 1
 
     events = _delivery_events(graph, run_id)
-    assert [item["type"] for item in events] == ["delivery_orchestration_completed"]
+    assert [item["type"] for item in events] == ["delivery_orchestration_blocked"]
     payload = events[0]["payload"]
+    assert payload["code"] == PROGRAM_CANDIDATE_HANDOFF_BLOCKED_CODE
     # Unknown program state never counts toward formal completion.
     assert payload["approvedQuestionCount"] == 0
     assert "catalog_incomplete" in payload["formalBlockers"]

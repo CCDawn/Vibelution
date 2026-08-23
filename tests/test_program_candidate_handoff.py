@@ -110,7 +110,10 @@ def test_complete_v2_authority_registers_review_required_and_replays_idempotentl
             "payload": changed,
         },
     )
-    with pytest.raises(ValueError, match="source result package binding"):
+    with pytest.raises(
+        program_candidate_handoff.ProgramCandidateHandoffContractError,
+        match="source result package binding",
+    ):
         program_candidate_handoff.handoff_result_package_to_challenge_program(
             team_id="research-team",
             workflow_run_id="workflow-sci-096",

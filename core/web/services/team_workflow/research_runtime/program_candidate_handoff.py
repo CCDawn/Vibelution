@@ -31,6 +31,17 @@ HANDOFF_STATUS_IDEMPOTENT = "idempotent"
 HANDOFF_STATUS_NEEDS_CONTEXT = "NEEDS_CONTEXT"
 NEEDS_CONTEXT = HANDOFF_STATUS_NEEDS_CONTEXT
 
+
+class ProgramCandidateHandoffContractError(ValueError):
+    """A permanent handoff contract or immutable-binding violation.
+
+    Missing upstream context is represented by the normal ``NEEDS_CONTEXT``
+    response.  This exception is reserved for a source that claimed to be
+    complete but failed the Challenge Program registration contract, such as a
+    changed package binding on an existing immutable record.  Delivery maps it
+    to a permanent orchestration error instead of retrying it as I/O.
+    """
+
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _OUTPUT_KEYS = (
     "challengeQuestionOutput",
@@ -357,16 +368,19 @@ def handoff_result_package_to_challenge_program(
             source_result_package_hash=package_hash,
         )
 
-    registered = challenge_question_runs.register_challenge_question_output(
-        team,
-        {
-            "output": output,
-            "citationChecks": deepcopy(citation_checks),
-            "registeredBy": str(registered_by or "").strip()
-            or "research_result_package_bridge",
-            "sourceResultPackageHash": package_hash,
-        },
-    )
+    try:
+        registered = challenge_question_runs.register_challenge_question_output(
+            team,
+            {
+                "output": output,
+                "citationChecks": deepcopy(citation_checks),
+                "registeredBy": str(registered_by or "").strip()
+                or "research_result_package_bridge",
+                "sourceResultPackageHash": package_hash,
+            },
+        )
+    except ValueError as exc:
+        raise ProgramCandidateHandoffContractError(str(exc)) from exc
     record = registered.get("record") if isinstance(registered, dict) else {}
     response = {
         "status": HANDOFF_STATUS_IDEMPOTENT
@@ -392,11 +406,12 @@ register_result_package_candidate = handoff_result_package_to_challenge_program
 
 
 __all__ = [
-    "HANDOFF_STATUS_REGISTERED",
     "HANDOFF_STATUS_IDEMPOTENT",
     "HANDOFF_STATUS_NEEDS_CONTEXT",
+    "HANDOFF_STATUS_REGISTERED",
     "NEEDS_CONTEXT",
-    "handoff_result_package_to_challenge_program",
+    "ProgramCandidateHandoffContractError",
     "bridge_result_package_to_challenge_question",
+    "handoff_result_package_to_challenge_program",
     "register_result_package_candidate",
 ]
