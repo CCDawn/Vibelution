@@ -349,7 +349,7 @@ def assert_canonical_project_data_path(
             f"{label} must be inside the current project canonical data root."
         ) from exc
 
-    if resolved.exists() and not resolved.is_dir():
+    if create and resolved.exists() and not resolved.is_dir():
         raise FormalRunnerError(
             f"{label} must be inside the current project canonical data root."
         )

@@ -96,6 +96,36 @@ def test_assert_canonical_project_data_path_accepts_current_instance_data_root(t
     assert not resolved.exists()
 
 
+def test_assert_canonical_project_data_path_accepts_existing_file_inside_current_instance_data_root(tmp_path):
+    project_root = tmp_path / "project"
+    execution_config = _execution_config(tmp_path, project_root)
+    result_path = Path(execution_config["outputRoot"]) / "formal-run-result.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text("{}", encoding="utf-8")
+
+    resolved = formal_runner.assert_canonical_project_data_path(
+        result_path,
+        project_root=project_root,
+    )
+
+    assert resolved == result_path.resolve()
+
+
+def test_assert_canonical_project_data_path_create_rejects_existing_file(tmp_path):
+    project_root = tmp_path / "project"
+    execution_config = _execution_config(tmp_path, project_root)
+    result_path = Path(execution_config["outputRoot"]) / "formal-run-result.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(formal_runner.FormalRunnerError, match="current project canonical data root"):
+        formal_runner.assert_canonical_project_data_path(
+            result_path,
+            project_root=project_root,
+            create=True,
+        )
+
+
 def test_prepare_full_run_rejects_unknown_candidate_loss_mask_mode(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"

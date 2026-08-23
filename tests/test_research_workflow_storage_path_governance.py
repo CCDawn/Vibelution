@@ -265,6 +265,8 @@ def test_formal_receipt_locators_use_the_same_canonical_root_guard(
     monkeypatch.setattr(experiment_kernel, "_service", lambda: fake_service)
 
     accepted = canonical_data / "challenge-cup" / "formal-runs" / "result.json"
+    accepted.parent.mkdir(parents=True)
+    accepted.write_text("{}", encoding="utf-8")
     assert experiment_kernel._canonical_formal_path(accepted, label="resultPath") == str(
         accepted.resolve()
     )
