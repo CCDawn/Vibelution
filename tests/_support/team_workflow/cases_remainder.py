@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from tests._support.team_workflow.helpers import *  # noqa: F403
 
-def test_challenge_cup_team_agents_purge_unregistered_source_role_agents(tmp_path, monkeypatch):
+def test_challenge_cup_team_agents_preserve_unregistered_source_role_agents_as_legacy(
+    tmp_path, monkeypatch
+):
     _use_tmp_project_root(tmp_path, monkeypatch)
     legacy_agent = agent_directory_service.create_agent_instance(
         display_name="旧资料发现",
@@ -19,9 +21,17 @@ def test_challenge_cup_team_agents_purge_unregistered_source_role_agents(tmp_pat
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     roles = {member["role"] for member in result["team"]["members"]}
 
-    assert legacy_agent["agentId"] in result["purgedAgentIds"]
-    assert agent_directory_service.get_agent(legacy_agent["agentId"], include_archived=True) is None
-    assert {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"} <= roles
+    assert result["purgedAgentIds"] == []
+    assert legacy_agent["agentId"] in result["legacyAgentIds"]
+    preserved = agent_directory_service.get_agent(
+        legacy_agent["agentId"], include_archived=True
+    )
+    assert preserved is not None
+    assert preserved["metadata"]["challengeCupTeamActiveBinding"] is False
+    assert preserved["metadata"]["challengeCupTeamBindingStatus"] == "legacy"
+    assert roles == {
+        role["role"] for role in team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+    }
     assert "unsupported_source_role" not in roles
 
 def test_source_relation_task_keeps_extraction_evidence_when_model_requests_minimal_context(tmp_path, monkeypatch):
