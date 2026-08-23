@@ -93,6 +93,32 @@ export function parseResearchWorkspaceView(value: string | null): ResearchWorksp
   return value === "workflow" || value === "overview" ? value : null;
 }
 
+const RETIRED_RESEARCH_WORKSPACE_VIEWS = new Set<ResearchWorkspaceView>([
+  "knowledge_collection",
+  "experiment",
+  "iteration",
+  "source_collection",
+  "coordination",
+  "ingestion",
+  "graph",
+  "candidates",
+  "discussion",
+  "canvas",
+]);
+
+/**
+ * Canonicalization must absorb retired child URLs so refresh/deep links cannot
+ * revive an independent surface. The parser still only restores workflow and
+ * overview as live top-level state.
+ */
+export function isChallengeCupWorkspaceCanonicalizationEligible(view: string | null): boolean {
+  const normalized = view?.trim() ?? "";
+  return normalized === ""
+    || normalized === "overview"
+    || normalized === "workflow"
+    || RETIRED_RESEARCH_WORKSPACE_VIEWS.has(normalized as ResearchWorkspaceView);
+}
+
 /** Map stage workspace views onto fixed workflow node ids (ADR 0006). */
 export function researchStageViewToNodeId(view: ResearchStageWorkspaceView): string {
   if (view === "experiment") return "hypothesis_design";
@@ -136,13 +162,27 @@ export function challengeQuestionDetailRoute(
   return `/teams?${params.toString()}`;
 }
 
+export type TeamWorkspaceRouteLocation = {
+  runId?: string;
+  nodeId?: string;
+  panel?: string;
+  questionId?: string;
+};
+
+function setOptionalRouteParam(params: URLSearchParams, key: string, value: string | undefined) {
+  const normalized = value?.trim();
+  if (normalized) {
+    params.set(key, normalized);
+  }
+}
+
 /**
  * Canonical research / team home for end users: single-canvas workflow workspace.
  * All "返回团队页面" / overview back links use this teamId-scoped URL.
  */
 export function teamWorkspaceRoute(
   teamId: string,
-  location: { runId?: string; nodeId?: string; panel?: string } = {},
+  location: TeamWorkspaceRouteLocation = {},
 ) {
   if (!teamId.trim()) throw new Error("teamId 不能为空");
   const params = new URLSearchParams({
@@ -150,10 +190,77 @@ export function teamWorkspaceRoute(
     researchView: "workflow",
     workflowId: "challenge-cup-research",
   });
-  if (location.runId) params.set("runId", location.runId);
-  if (location.nodeId) params.set("node", location.nodeId);
-  if (location.panel) params.set("panel", location.panel);
+  setOptionalRouteParam(params, "questionId", location.questionId);
+  setOptionalRouteParam(params, "runId", location.runId);
+  setOptionalRouteParam(params, "node", location.nodeId);
+  setOptionalRouteParam(params, "panel", location.panel);
   return `/teams?${params.toString()}`;
+}
+
+/**
+ * Convert legacy/overview challenge URLs into the one process-workspace URL.
+ * Only process focus is carried forward; retired team aliases and workflow
+ * values are deliberately removed so browser history converges on one shell.
+ */
+export function canonicalChallengeCupWorkspaceRoute(
+  teamId: string,
+  current: URLSearchParams,
+) {
+  return teamWorkspaceRoute(teamId, {
+    questionId: current.get("questionId") || current.get("challengeQuestion") || undefined,
+    runId: current.get("runId") || current.get("challengeRun") || undefined,
+    nodeId: current.get("node") || current.get("nodeId") || undefined,
+    panel: current.get("panel") || undefined,
+  });
+}
+
+/**
+ * Canonicalize after the selected team has resolved. URL focus is team-owned:
+ * any missing or conflicting team alias drops question/run/node/panel state.
+ */
+export function canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+  effectiveTeamId: string,
+  current: URLSearchParams,
+) {
+  if (!isSameChallengeCupWorkspaceTeam(effectiveTeamId, current)) {
+    return teamWorkspaceRoute(effectiveTeamId);
+  }
+
+  const view = current.get("researchView")?.trim() ?? "";
+  const route = canonicalChallengeCupWorkspaceRoute(effectiveTeamId, current);
+  const params = new URLSearchParams(route.split("?")[1] || "");
+
+  if (view === "experiment") {
+    params.set("node", "hypothesis_design");
+  } else if (view === "iteration") {
+    params.set("node", "controlled_run");
+  } else if (view === "knowledge_collection" || view === "source_collection") {
+    params.set("node", "source_finding");
+  } else if (view === "canvas") {
+    params.set("panel", "agents");
+  } else if (view !== "overview" && view !== "workflow" && view !== "") {
+    params.delete("node");
+    params.delete("panel");
+  }
+
+  return `/teams?${params.toString()}`;
+}
+
+/** Preserve process focus only when the current URL names the selected team. */
+export function isSameChallengeCupWorkspaceTeam(
+  teamId: string,
+  current: URLSearchParams,
+): boolean {
+  const normalizedTeamId = teamId.trim();
+  if (!normalizedTeamId) {
+    return false;
+  }
+  const teamIdentifiers = ["teamId", "team", "team_id"];
+  const currentTeamIds = teamIdentifiers
+    .flatMap((key) => current.getAll(key))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return currentTeamIds.length > 0 && currentTeamIds.every((value) => value === normalizedTeamId);
 }
 
 /**

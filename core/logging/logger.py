@@ -32,7 +32,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
+from core.logging.safe_payload import summarize_tool_arguments
+from core.logging.trace_context import current_trace_fields
+from vibelution_storage import (
+    ProjectIdentityError,
+    resolve_active_project_storage_paths,
+)
 
 # ============================================================================
 # 落盘路径常量（统一到项目 logs/ 下，与 runtime_scenes 同根）
@@ -629,6 +634,8 @@ class ConversationLogger:
                 record.setdefault("parent_turn", self._parent_turn)
             if self._delegation_depth:
                 record.setdefault("delegation_depth", self._delegation_depth)
+            for key, value in current_trace_fields().items():
+                record.setdefault(key, value)
             with open(self._get_session_file(), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
@@ -780,7 +787,7 @@ class ConversationLogger:
             "turn": self._turn_count,
             "timestamp": self._timestamp(),
             "tool_name": tool_name,
-            "tool_args": tool_args,
+            "tool_args_summary": summarize_tool_arguments(tool_args),
             "tool_call_id": tool_call_id,
             "status": status,
         }

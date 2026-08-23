@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from core.logging.logger import ConversationLogger
+from core.logging.trace_context import bind_trace_context, new_trace_context
 from core.logging.transcript_logger import TranscriptLogger
 
 
@@ -174,6 +175,78 @@ def test_tool_result_keeps_main_log_compact_and_spills_raw_payload(tmp_path):
     assert "result-head" in record["tool_result_preview"]
     assert "result-tail" in record["tool_result_preview"]
     assert (tmp_path / record["tool_result_ref"]).exists()
+
+
+def test_tool_args_persist_only_shape_length_and_stable_hash(tmp_path):
+    logger = _fresh_logger(tmp_path)
+    secret = "conversation-api-secret"
+    command = "python -c print-private-content"
+    tool_args = {
+        "api_key": secret,
+        "command": command,
+        "nested": {"password": "nested-secret"},
+        "targets": ["a.py", {"cookie": "cookie-secret"}],
+    }
+
+    logger.log_tool_call("shell_tool", tool_args)
+    logger.log_tool_call("shell_tool", tool_args)
+
+    session_file = tmp_path / "conversation_test_session.jsonl"
+    serialized = session_file.read_text(encoding="utf-8")
+    records = [json.loads(line) for line in serialized.splitlines() if '"type": "tool_call"' in line]
+    first, second = records
+
+    assert secret not in serialized
+    assert command not in serialized
+    assert "nested-secret" not in serialized
+    assert "cookie-secret" not in serialized
+    assert "tool_args" not in first
+    summary = first["tool_args_summary"]
+    assert summary["argKeys"] == ["api_key", "command", "nested", "targets"]
+    assert summary["argCount"] == 4
+    assert summary["argShape"]["command"] == {"type": "string", "length": len(command)}
+    assert summary["argShape"]["nested"] == {
+        "type": "object",
+        "count": 1,
+        "keys": ["password"],
+    }
+    assert len(summary["argSha256"]) == 64
+    assert second["tool_args_summary"]["argSha256"] == summary["argSha256"]
+
+
+def test_conversation_records_inherit_current_trace_context(tmp_path):
+    logger = _fresh_logger(tmp_path)
+    context = new_trace_context(request_id="conversation-request")
+
+    with bind_trace_context(context):
+        logger.log_debug("INFO", "correlated record")
+
+    record = json.loads(
+        (tmp_path / "conversation_test_session.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert record["traceId"] == context.trace_id
+    assert record["spanId"] == context.span_id
+    assert record["requestId"] == "conversation-request"
+
+
+def test_transcript_tool_args_persist_only_safe_summary(tmp_path):
+    TranscriptLogger._instance = None
+    logger = TranscriptLogger()
+    logger._logs_dir = tmp_path
+    logger.start_session()
+    secret = "transcript-api-secret"
+
+    logger.write_tool_call(
+        "http_tool",
+        {"authorization": secret, "payload": {"password": "nested-secret"}},
+    )
+    logger._flush_pending_writes()
+
+    transcript = logger._get_transcript_file().read_text(encoding="utf-8")
+    assert secret not in transcript
+    assert "nested-secret" not in transcript
+    assert "authorization" in transcript
+    assert "argSha256" in transcript
 
 
 def test_llm_response_raw_length_falls_back_to_content_when_raw_missing(tmp_path):

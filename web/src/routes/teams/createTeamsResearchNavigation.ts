@@ -7,6 +7,9 @@ import type { SetURLSearchParams } from "react-router-dom";
 
 import type { Team } from "../../api/types";
 import {
+  canonicalChallengeCupWorkspaceRoute,
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
+  isSameChallengeCupWorkspaceTeam,
   teamWorkspaceRoute,
   type ResearchWorkspaceView,
 } from "./researchWorkspaceModel";
@@ -53,8 +56,9 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
       if (researchWorkflowTeamSelected) {
         setResearchWorkspaceView("workflow");
         setTeamShellMode("board");
-        const params = new URLSearchParams(teamWorkspaceRoute(effectiveTeamId).split("?")[1] || "");
-        params.set("teamMode", "board");
+        const params = new URLSearchParams(
+          canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams).split("?")[1] || "",
+        );
         setSearchParams(params, { replace: true });
         return;
       }
@@ -79,9 +83,14 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
     if (isResearchWorkflowTeam(team)) {
       setResearchWorkspaceView("workflow");
       setTeamShellMode("board");
-      const params = new URLSearchParams(teamWorkspaceRoute(team.teamId).split("?")[1] || "");
-      params.set("teamMode", "board");
-      setSearchParams(params);
+      const sameChallengeCupWorkspaceTeam = isSameChallengeCupWorkspaceTeam(team.teamId, searchParams);
+      const route = sameChallengeCupWorkspaceTeam
+        ? canonicalChallengeCupWorkspaceRoute(team.teamId, searchParams)
+        : teamWorkspaceRoute(team.teamId);
+      const params = new URLSearchParams(
+        route.split("?")[1] || "",
+      );
+      setSearchParams(params, { replace: sameChallengeCupWorkspaceTeam });
       return;
     }
     setResearchWorkspaceView("overview");
@@ -98,8 +107,9 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
       if (researchWorkflowTeamSelected) {
         setResearchWorkspaceView("workflow");
         setTeamShellMode("board");
-        const params = new URLSearchParams(teamWorkspaceRoute(effectiveTeamId).split("?")[1] || "");
-        params.set("teamMode", "board");
+        const params = new URLSearchParams(
+          canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams).split("?")[1] || "",
+        );
         setSearchParams(params, { replace: true });
         return;
       }

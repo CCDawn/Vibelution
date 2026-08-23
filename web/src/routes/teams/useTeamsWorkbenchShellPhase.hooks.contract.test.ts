@@ -25,8 +25,9 @@ describe("useTeamsWorkbenchShellPhase hook order", () => {
   });
 
   it("suppresses only the outer team shell chrome for the Challenge Cup workflow", () => {
-    expect(shellSource).toContain(
-      'challengeCupResearchTeamSelected && researchWorkspaceView === "workflow"',
+    expect(shellSource).toContain("isChallengeCupWorkspaceCanonicalizationEligible(searchParams.get(\"researchView\"))");
+    expect(shellSource).toMatch(
+      /challengeCupResearchTeamSelected\s*&&\s*\(researchWorkspaceView === "workflow" \|\| researchWorkspaceView === "overview"\)/,
     );
     expect(shellSource).toContain("suppressOuterShellChrome: suppressOuterTeamShellChrome");
   });

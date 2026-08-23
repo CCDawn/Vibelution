@@ -45,6 +45,10 @@ import {
 } from "./teamShellStatusModel";
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
+import {
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
+  isChallengeCupWorkspaceCanonicalizationEligible,
+} from "./researchWorkspaceModel";
 
 // Foundation bag boundary: the 328-field workbench bag stays any until Phase 9+ foundation typing.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -246,6 +250,20 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     TEAMS_LAYOUT_ID
   } = d;
 
+  useEffect(() => {
+    if (!challengeCupResearchTeamSelected || !effectiveTeamId) {
+      return;
+    }
+    if (!isChallengeCupWorkspaceCanonicalizationEligible(searchParams.get("researchView"))) {
+      return;
+    }
+    const canonicalHref = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams);
+    const currentHref = `/teams?${searchParams.toString()}`;
+    if (canonicalHref !== currentHref) {
+      navigate(canonicalHref, { replace: true });
+    }
+  }, [challengeCupResearchTeamSelected, effectiveTeamId, navigate, searchParams]);
+
   const resolvedSourceCollectionDisplayState =
     sourceCollectionDisplayState ?? EMPTY_SOURCE_COLLECTION_DISPLAY_STATE;
 
@@ -255,7 +273,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   // The Challenge Cup workflow owns its process rail and split geometry inside
   // ResearchProcessWorkspace; the generic team shell must not mount a second rail.
   const suppressOuterTeamShellChrome =
-    challengeCupResearchTeamSelected && researchWorkspaceView === "workflow";
+    challengeCupResearchTeamSelected
+    && (researchWorkspaceView === "workflow" || researchWorkspaceView === "overview");
   // Board/Canvas page recipes own split geometry; rail + inspector widths persist via layoutId.
   const teamsRailResize = useMemo(
     () => ({
