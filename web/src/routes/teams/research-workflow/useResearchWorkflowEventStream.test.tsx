@@ -80,7 +80,7 @@ describe("useResearchWorkflowEventStream", () => {
     root = createRoot(container);
   });
 
-  it("advances unknown event cursors without publishing them", async () => {
+  it("keeps the accepted cursor when an unknown frame reconnects", async () => {
     let callCount = 0;
     api.consumeResearchWorkflowEventStream.mockImplementation(async (options) => {
       callCount += 1;
@@ -107,7 +107,7 @@ describe("useResearchWorkflowEventStream", () => {
 
     expect(onEvent).not.toHaveBeenCalled();
     expect(api.consumeResearchWorkflowEventStream.mock.calls[1][0]).toEqual(
-      expect.objectContaining({ afterSequence: 6, lastEventId: "run-a:6" }),
+      expect.objectContaining({ afterSequence: 3, lastEventId: "run-a:3" }),
     );
     vi.useRealTimers();
   });

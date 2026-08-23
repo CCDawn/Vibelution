@@ -223,7 +223,7 @@ describe("useResearchWorkflowRun behavior", () => {
     );
 
     await renderWith("run-a");
-    expect(latest?.lastSequence).toBe(3);
+    expect(latest?.lastSequence).toBe(100);
 
     await renderWith("run-b");
     expect(latest?.run?.runId).toBe("run-b");
