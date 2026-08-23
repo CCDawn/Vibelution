@@ -12,6 +12,7 @@ import {
 export type UseResearchWorkflowSnapshotResult = {
   snapshot: ResearchWorkflowSnapshot | null;
   lastSequence: number;
+  resyncRequired: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -121,8 +122,9 @@ export function useResearchWorkflowSnapshot(
   return {
     snapshot: state.snapshot,
     lastSequence: state.lastSequence,
+    resyncRequired: state.resyncRequired,
     loading: state.pendingRequestId !== null,
-    error,
+    error: error || state.commandError,
     refresh,
     generation: state.generation,
   };

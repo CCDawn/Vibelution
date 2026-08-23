@@ -41,6 +41,49 @@ class TraceContext:
     def to_traceparent(self) -> str:
         return f"00-{self.trace_id}-{self.span_id}-{self.trace_flags}"
 
+    def to_carrier(self) -> dict[str, str]:
+        """Serialize only the bounded fields needed across a worker boundary."""
+        carrier = {
+            "traceparent": self.to_traceparent(),
+            "requestId": self.request_id,
+        }
+        if self.parent_span_id:
+            carrier["parentSpanId"] = self.parent_span_id
+        return carrier
+
+    @classmethod
+    def from_carrier(cls, carrier: object) -> TraceContext | None:
+        """Restore a context previously produced by :meth:`to_carrier`."""
+        if not isinstance(carrier, Mapping):
+            return None
+        parsed = parse_traceparent(carrier.get("traceparent"))
+        if parsed is None:
+            return None
+        parent_span_id = str(carrier.get("parentSpanId") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{16}", parent_span_id) or parent_span_id == "0" * 16:
+            parent_span_id = ""
+        return cls(
+            trace_id=parsed.trace_id,
+            span_id=parsed.parent_span_id,
+            request_id=_request_id_or_new(carrier.get("requestId")),
+            parent_span_id=parent_span_id or None,
+            trace_flags=parsed.trace_flags,
+        )
+
+    def child_span(self, *, request_id: object = None) -> TraceContext:
+        """Create a same-trace child span without mutating this context."""
+        return TraceContext(
+            trace_id=self.trace_id,
+            span_id=_new_nonzero_hex(8),
+            request_id=(
+                self.request_id
+                if request_id is None
+                else _request_id_or_new(request_id)
+            ),
+            parent_span_id=self.span_id,
+            trace_flags=self.trace_flags,
+        )
+
     def to_fields(self) -> dict[str, str]:
         fields = {
             "traceId": self.trace_id,

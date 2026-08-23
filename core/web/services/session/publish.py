@@ -12,13 +12,67 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import time
 from typing import Any
+from uuid import uuid4
 
 
 def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+def _record_session_stream_lifecycle_event(
+    *,
+    session_id: str,
+    stream_connection_id: str,
+    transport: str,
+    initial_mode: str,
+    phase: str,
+    event_count: int = 0,
+    heartbeat_count: int = 0,
+    duration_ms: int = 0,
+    close_reason: str = "",
+    error_type: str = "",
+) -> None:
+    s = _service()
+    fields: dict[str, Any] = {
+        "sessionId": str(session_id or "").strip(),
+        "streamConnectionId": str(stream_connection_id or "").strip(),
+        "transport": str(transport or "").strip(),
+        "initialMode": str(initial_mode or "").strip(),
+    }
+    fields.update(
+        {
+            "eventCount": max(0, int(event_count or 0)),
+            "heartbeatCount": max(0, int(heartbeat_count or 0)),
+            "durationMs": max(0, int(duration_ms or 0)),
+        }
+    )
+    normalized_close_reason = str(close_reason or "").strip()
+    if normalized_close_reason:
+        fields["closeReason"] = normalized_close_reason
+    normalized_error_type = str(error_type or "").strip()
+    if normalized_error_type:
+        fields["errorType"] = normalized_error_type
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "session_stream",
+            f"session.stream.{phase}",
+            level="error" if phase == "failed" else "info",
+            outcome="failed" if phase == "failed" else "observed",
+            message=f"Session SSE stream {phase}.",
+            fields=fields,
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _stream_duration_ms(started_at: float) -> int:
+    return max(0, round((time.perf_counter() - started_at) * 1000))
 
 
 class _AsyncSessionStreamSubscriber(queue.Queue[dict[str, Any]]):
@@ -118,28 +172,75 @@ def stream_session_events(
 ):
     """Yield SSE events for one persisted chat session."""
     s = _service()
-    conversation_id, initial_mode, detail, state = _resolve_session_stream_bootstrap(
-        session_id,
-        initial_detail,
-        initial=initial,
-        initial_state=initial_state,
-    )
-
-    subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=s._SESSION_STREAM_QUEUE_SIZE)
-    s._register_session_stream_subscriber(conversation_id, subscriber)
+    stream_connection_id = uuid4().hex
+    stream_started_at = time.perf_counter()
+    event_count = 0
+    heartbeat_count = 0
+    opened = False
+    failed = False
+    conversation_id = ""
+    initial_mode = ""
     try:
+        conversation_id, initial_mode, detail, state = _resolve_session_stream_bootstrap(
+            session_id,
+            initial_detail,
+            initial=initial,
+            initial_state=initial_state,
+        )
+        subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=s._SESSION_STREAM_QUEUE_SIZE)
+        s._register_session_stream_subscriber(conversation_id, subscriber)
+        opened = True
+        _record_session_stream_lifecycle_event(
+            session_id=conversation_id,
+            stream_connection_id=stream_connection_id,
+            transport="sse_sync",
+            initial_mode=initial_mode,
+            phase="opened",
+        )
         initial_event = _initial_session_stream_event(conversation_id, initial_mode, detail, state)
         if initial_event is not None:
+            event_count += 1
             yield initial_event
         while True:
             try:
                 event = subscriber.get(timeout=s._SESSION_STREAM_HEARTBEAT_SECONDS)
             except queue.Empty:
+                heartbeat_count += 1
                 yield ": keep-alive\n\n"
                 continue
+            event_count += 1
             yield s._encode_sse_event(str(event.get("type") or "message"), event)
+    except Exception as exc:
+        if opened:
+            failed = True
+            _record_session_stream_lifecycle_event(
+                session_id=conversation_id,
+                stream_connection_id=stream_connection_id,
+                transport="sse_sync",
+                initial_mode=initial_mode,
+                phase="failed",
+                event_count=event_count,
+                heartbeat_count=heartbeat_count,
+                duration_ms=_stream_duration_ms(stream_started_at),
+                error_type=type(exc).__name__,
+            )
+        raise
     finally:
-        s._unregister_session_stream_subscriber(conversation_id, subscriber)
+        if opened:
+            try:
+                _record_session_stream_lifecycle_event(
+                    session_id=conversation_id,
+                    stream_connection_id=stream_connection_id,
+                    transport="sse_sync",
+                    initial_mode=initial_mode,
+                    phase="closed",
+                    event_count=event_count,
+                    heartbeat_count=heartbeat_count,
+                    duration_ms=_stream_duration_ms(stream_started_at),
+                    close_reason="error" if failed else "client_disconnect",
+                )
+            finally:
+                s._unregister_session_stream_subscriber(conversation_id, subscriber)
 
 
 async def stream_session_events_async(
@@ -151,30 +252,78 @@ async def stream_session_events_async(
 ):
     """Yield SSE events without occupying a worker while the stream is idle."""
     s = _service()
-    conversation_id, initial_mode, detail, state = _resolve_session_stream_bootstrap(
-        session_id,
-        initial_detail,
-        initial=initial,
-        initial_state=initial_state,
-    )
-    subscriber = _AsyncSessionStreamSubscriber(
-        maxsize=s._SESSION_STREAM_QUEUE_SIZE,
-        loop=asyncio.get_running_loop(),
-    )
-    s._register_session_stream_subscriber(conversation_id, subscriber)
+    stream_connection_id = uuid4().hex
+    stream_started_at = time.perf_counter()
+    event_count = 0
+    heartbeat_count = 0
+    opened = False
+    failed = False
+    conversation_id = ""
+    initial_mode = ""
     try:
+        conversation_id, initial_mode, detail, state = _resolve_session_stream_bootstrap(
+            session_id,
+            initial_detail,
+            initial=initial,
+            initial_state=initial_state,
+        )
+        subscriber = _AsyncSessionStreamSubscriber(
+            maxsize=s._SESSION_STREAM_QUEUE_SIZE,
+            loop=asyncio.get_running_loop(),
+        )
+        s._register_session_stream_subscriber(conversation_id, subscriber)
+        opened = True
+        _record_session_stream_lifecycle_event(
+            session_id=conversation_id,
+            stream_connection_id=stream_connection_id,
+            transport="sse_async",
+            initial_mode=initial_mode,
+            phase="opened",
+        )
         initial_event = _initial_session_stream_event(conversation_id, initial_mode, detail, state)
         if initial_event is not None:
+            event_count += 1
             yield initial_event
         while True:
             try:
                 event = await subscriber.get_async(timeout=s._SESSION_STREAM_HEARTBEAT_SECONDS)
             except TimeoutError:
+                heartbeat_count += 1
                 yield ": keep-alive\n\n"
                 continue
+            event_count += 1
             yield s._encode_sse_event(str(event.get("type") or "message"), event)
+    except Exception as exc:
+        if opened:
+            failed = True
+            _record_session_stream_lifecycle_event(
+                session_id=conversation_id,
+                stream_connection_id=stream_connection_id,
+                transport="sse_async",
+                initial_mode=initial_mode,
+                phase="failed",
+                event_count=event_count,
+                heartbeat_count=heartbeat_count,
+                duration_ms=_stream_duration_ms(stream_started_at),
+                error_type=type(exc).__name__,
+            )
+        raise
     finally:
-        s._unregister_session_stream_subscriber(conversation_id, subscriber)
+        if opened:
+            try:
+                _record_session_stream_lifecycle_event(
+                    session_id=conversation_id,
+                    stream_connection_id=stream_connection_id,
+                    transport="sse_async",
+                    initial_mode=initial_mode,
+                    phase="closed",
+                    event_count=event_count,
+                    heartbeat_count=heartbeat_count,
+                    duration_ms=_stream_duration_ms(stream_started_at),
+                    close_reason="error" if failed else "client_disconnect",
+                )
+            finally:
+                s._unregister_session_stream_subscriber(conversation_id, subscriber)
 
 
 def get_session_stream_initial_state(session_id: str) -> dict | None:

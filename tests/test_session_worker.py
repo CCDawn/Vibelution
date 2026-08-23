@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from core.logging.trace_context import (
+    bind_trace_context,
+    get_current_trace_context,
+    new_trace_context,
+)
 from core.web.services import session_service
 from core.web.services.session import worker
 
@@ -50,6 +55,30 @@ def test_ordinary_agent_inbox_does_not_gain_internal_continuation() -> None:
         worker._session_context_internal_auto_continue_max_turns(context)
         == session_service.INTERNAL_AUTO_CONTINUE_MAX_TURNS
     )
+
+
+def test_run_session_turn_binds_child_trace_span_and_restores_context(monkeypatch) -> None:
+    root = new_trace_context(request_id="worker-request")
+    observed: list[tuple[dict, object]] = []
+
+    def fake_impl(context: dict) -> None:
+        observed.append((dict(context), get_current_trace_context()))
+
+    monkeypatch.setattr(worker, "_run_session_turn_impl", fake_impl)
+
+    outer = new_trace_context(request_id="outer-request")
+    with bind_trace_context(outer):
+        worker._run_session_turn({"trace_context_carrier": root.to_carrier()})
+        assert get_current_trace_context() is outer
+
+    assert observed
+    child_context, bound = observed[0]
+    assert bound is not None
+    assert bound.trace_id == root.trace_id
+    assert bound.parent_span_id == root.span_id
+    assert bound.span_id != root.span_id
+    assert child_context["trace_context_carrier"] == bound.to_carrier()
+    assert get_current_trace_context() is None
 
 
 def test_run_session_turn_skips_stale_turn(monkeypatch) -> None:
