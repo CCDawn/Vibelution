@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from core.research.workflow.contracts import SCORE_DIMENSIONS
+from core.web.services.team_workflow import hypothesis_review_executor
 from core.web.services.team_workflow.research_runtime import (
     dimension_reviews_artifact_writer as writer,
 )
-from core.web.services.team_workflow import hypothesis_review_executor
 
 
 _EVIDENCE_REF = "evidence_card_batch://team-1/source-1/0123456789abcdef0123456789abcdef"
@@ -160,7 +161,7 @@ def test_complete_explicit_rows_write_deterministically(monkeypatch):
 def test_executor_preserves_only_runner_dimension_rows():
     def reflection_runner(candidate, _context):
         return {
-            "scores": {dimension: 0.8 for dimension in writer.REQUIRED_REVIEW_DIMENSIONS},
+            "scores": {dimension: 0.8 for dimension in SCORE_DIMENSIONS},
             "dimensionReviews": [
                 {
                     "hypothesis_id": candidate["candidateId"],

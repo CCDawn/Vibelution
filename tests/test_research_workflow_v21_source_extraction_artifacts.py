@@ -267,7 +267,7 @@ def test_real_agent_writeback_claim_anchor_passes_the_quality_contract() -> None
 
 
 def test_formal_cards_fail_closed_without_explicit_facts_or_source_type() -> None:
-    with pytest.raises(ValueError, match="missing explicit fact"):
+    with pytest.raises(ValueError, match=r"missing explicit (source_type|fact)"):
         build_source_extraction_evidence_cards(
             {
                 "candidateExtractions": [

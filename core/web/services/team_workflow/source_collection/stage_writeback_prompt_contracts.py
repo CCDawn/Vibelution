@@ -26,7 +26,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 正式 Challenge v2 的每个 extraction/finding 必须显式回写 `title`、`source_type`、`source_url`、`retrieved_at`、`fact`、`relation`、`verification_status`；共享元数据可以放在 extraction 父项，但最终每张 evidence card 必须完整展开。",
             "- `source_type` 必须是 `peer_reviewed_paper/preprint/dataset/standard/official_document/book/other` 之一，`relation` 必须是 `supports/challenges/context/method/boundary` 之一，`verification_status` 必须是 `unverified/metadata_checked/full_text_checked/human_verified` 之一；不要把 `sourceKind` 当作推断依据。",
             "- `source_url` 只能写真实的 `https://` 定位符，`retrieved_at` 必须是带时区的 RFC3339 时间；不得从 DOI、URL、摘要、标题或 `valueSummary` 猜造 `fact`、`relation` 或验证状态。",
-            "- 每条 evidence card 必须同时保留 `sourceId` 与 `candidateId`（或 `recordId`）的正式来源联结；`sourceId` 必须等于该 candidate/record ID，禁止用 URL 充当来源身份。可选字段为 `doi`、`date`、`limitations`。",
+            "- 每条 evidence card 必须同时保留 `sourceId` 与 `candidateId`（或 `recordId`）的正式来源联结；`sourceId` 必须等于该 candidate/record ID，不能用 URL 充当来源身份。可选字段为 `doi`、`date`、`limitations`。",
             "- 若正式字段缺失、来源联结不一致或没有真实 citation anchor，必须结构化回写 `needs_review`/`blocked` 及原因；不能用旧版宽松卡片冒充 Challenge v2 证据。",
         ]
     if stage_id == "relations":

@@ -216,7 +216,11 @@ def normalize_challenge_evidence_fields(
         ),
         path=path,
     )
-    fact = _required_text(item, parent_mapping, "fact", path=path)
+    # A nested finding is its own evidence card.  Source metadata may be
+    # shared by the extraction parent, but the factual claim must be explicit
+    # on the finding itself so sibling cards cannot silently inherit one
+    # generic parent fact.  Flat cards pass the same mapping as item/parent.
+    fact = _required_text(item, {}, "fact", path=path)
     relation = _required_text(item, parent_mapping, "relation", path=path).lower()
     if relation not in _RELATIONS:
         raise SourceExtractionEvidenceContractError(
