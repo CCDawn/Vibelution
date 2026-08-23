@@ -1097,6 +1097,44 @@ def _ui_tool_status_from_journal(status: str) -> str:
     return normalized or "completed"
 
 
+def read_model_invocation_receipt_from_events(
+    events: Iterable[TurnJournalEvent],
+    *,
+    turn_id: str = "",
+) -> dict[str, Any] | None:
+    """Read an audit receipt from the canonical final-answer journal item.
+
+    Receipts are deliberately not part of the model-visible projection.  This
+    readback is the dedicated audit path for restart-safe consumers and only
+    accepts the immutable ``canonical_turn_outcome`` final-answer item.
+    """
+
+    normalized_turn_id = str(turn_id or "").strip()
+    event_list = sorted(
+        list(events or []),
+        key=lambda item: (item.sequence, item.timestamp, item.event_id),
+        reverse=True,
+    )
+    for event in event_list:
+        if event.event_type != EVENT_ASSISTANT_ITEM_COMMITTED:
+            continue
+        if str(event.source or "").strip() != "canonical_turn_outcome":
+            continue
+        if normalized_turn_id and str(event.turn_id or "").strip() != normalized_turn_id:
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if (
+            str(payload.get("kind") or "") != "assistant_message"
+            or str(payload.get("channel") or "") != "answer"
+            or str(payload.get("phase") or "") != "final_answer"
+        ):
+            continue
+        receipt = payload.get("modelInvocationReceipt")
+        if isinstance(receipt, Mapping):
+            return dict(receipt)
+    return None
+
+
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     event_list = list(events or [])
     messages: list[dict[str, Any]] = []
@@ -1180,9 +1218,6 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                             },
                         }
                     )
-                    receipt = payload.get("modelInvocationReceipt")
-                    if isinstance(receipt, Mapping):
-                        messages[-1]["metadata"]["modelInvocationReceipt"] = dict(receipt)
                     final_turn_ids.add(turn_id)
                     assistant_message_index_by_turn[turn_id] = len(messages) - 1
         elif event.event_type in {EVENT_ASSISTANT_PARTIAL, EVENT_ASSISTANT_DELTA_COMMITTED}:
@@ -2095,6 +2130,7 @@ __all__ = [
     "rewrite_turn_events",
     "model_visible_messages_from_events",
     "model_messages_from_events",
+    "read_model_invocation_receipt_from_events",
     "session_turn_items_from_events",
     "turn_journal_path",
 ]

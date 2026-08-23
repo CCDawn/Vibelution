@@ -198,6 +198,16 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
                 "activeTurnId": active_turn_id,
                 "turnCurrent": turn_current,
             }
+        try:
+            from core.chat.turn_journal import read_model_invocation_receipt_from_events
+
+            model_invocation_receipt = read_model_invocation_receipt_from_events(
+                s._load_session_conversation_events_cached(normalized_session_id),
+                turn_id=normalized_turn_id,
+            )
+        except Exception:
+            # Receipt audit readback must never break ordinary chat diagnostics.
+            model_invocation_receipt = None
         last_turn_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
         messages = s._session_ledger_visible_messages(session_id)
 
@@ -210,15 +220,6 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
 
         assistant_text = _turn_items_visible_text(assistant_message).strip()
     assistant_turn_id = s._message_turn_id(assistant_message)
-    assistant_metadata = (
-        assistant_message.get("metadata")
-        if isinstance(assistant_message, dict)
-        and isinstance(assistant_message.get("metadata"), dict)
-        else {}
-    )
-    model_invocation_receipt = assistant_metadata.get("modelInvocationReceipt")
-    if not isinstance(model_invocation_receipt, dict):
-        model_invocation_receipt = None
     marker_present = s._supervised_completion_marker_present(assistant_text)
     terminal_statuses = {
         "ready",

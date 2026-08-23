@@ -23,6 +23,7 @@ from core.chat.turn_journal import (
     latest_open_turn_id,
     load_turn_events,
     model_visible_messages_from_events,
+    read_model_invocation_receipt_from_events,
     rewrite_turn_events,
     session_turn_items_from_events,
     turn_journal_path,
@@ -148,6 +149,35 @@ def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_pa
     }
     assert "replay" not in str(items).lower()
     assert "opaque" not in str(items).lower()
+
+
+def test_canonical_receipt_is_audit_only_and_readable_from_final_answer_item(tmp_path):
+    identity = CanonicalItemIdentity("session-a", "turn-receipt", "inv-1", 0, "answer-1")
+    receipt = {
+        "receiptId": "receipt-1",
+        "runId": "question-run-1",
+        "responseExcerpt": "provider-secret-must-not-enter-model-context",
+    }
+    append_turn_event(tmp_path, "session-a", "turn-receipt", EVENT_TURN_STARTED, status="running")
+    append_canonical_turn_outcome(
+        tmp_path,
+        "session-a",
+        "turn-receipt",
+        TurnOutcome(
+            kind="final_answer",
+            identity=identity,
+            final_text="canonical answer",
+            terminal_event_seen=True,
+            model_invocation_receipt=receipt,
+        ),
+    )
+
+    events = load_turn_events(tmp_path, "session-a")
+    visible = model_visible_messages_from_events(events)
+    assistant = next(message for message in visible if message.get("role") == "assistant")
+    assert "modelInvocationReceipt" not in assistant.get("metadata", {})
+    assert read_model_invocation_receipt_from_events(events, turn_id="turn-receipt") == receipt
+    assert read_model_invocation_receipt_from_events(events, turn_id="other-turn") is None
 
 
 def test_turn_journal_rejects_model_visible_events_after_terminal_turn(tmp_path):

@@ -1,10 +1,12 @@
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
-import pytest
-from types import SimpleNamespace
+import inspect
 import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+
+import pytest
 
 from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
@@ -121,6 +123,66 @@ def test_responses_continuation_summary_classifies_stateless_replay() -> None:
     assert summary["continuationMode"] == "stateless_replay"
     assert summary["responseInputItemCount"] == 2
     assert summary["functionCallOutputCount"] == 0
+
+
+def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture():
+    source = inspect.getsource(LLMClient._stream_attempt)
+    assert "provider_response_capture" not in source
+    assert "Callable[[TurnOutcome], TurnOutcome]" in source
+
+    metadata = {
+        "sessionId": "session-1",
+        "turnId": "turn-2",
+        "invocationId": "invocation-3",
+        "iteration": 0,
+        "modelInvocationReceiptContext": {
+            "questionStageBinding": {
+                "questionStage": "generation",
+                "questionId": "SCI-001",
+                "questionRunId": "question-run-1",
+                "workflowRunId": "workflow-run-1",
+                "workflowId": "workflow-1",
+                "workflowVersionId": "version-1",
+                "formalNodeId": "node-1",
+                "formalNodeRunId": "node-run-1",
+                "formalNodeAttempt": 1,
+                "sessionId": "session-1",
+                "taskId": "task-1",
+                "turnId": "turn-2",
+            },
+            "receiptRunAuthority": "question_run",
+            "receiptRunId": "question-run-1",
+            "modelPolicySha256": "a" * 64,
+            "outputRef": "artifact://output-1",
+        },
+    }
+
+    def backend(_payload):
+        for index in range(1024):
+            yield {
+                "id": f"chat-{index}",
+                "providerSecret": "provider-secret-must-not-be-captured",
+                "choices": [{"delta": {"content": "answer "}}],
+            }
+        yield {
+            "id": "chat-final",
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+        }
+
+    client = LLMClient(config=make_config(), backend=backend)
+    streamed = list(client.stream([{"role": "user", "content": "ping"}], metadata=metadata))
+    outcome = next(
+        chunk.additional_kwargs["turn_outcome"]
+        for chunk in reversed(streamed)
+        if "turn_outcome" in chunk.additional_kwargs
+    )
+
+    receipt = outcome.model_invocation_receipt
+    assert isinstance(receipt, dict)
+    assert "providerEvents" not in receipt["responseExcerpt"]
+    assert "provider-secret" not in receipt["responseExcerpt"]
+    assert "finalText" in receipt["responseExcerpt"]
+    assert len(receipt["responseExcerpt"]) <= 259
 
 
 def test_prompt_cache_payload_summary_fingerprints_messages_and_tool_schema_without_content() -> None:

@@ -123,6 +123,27 @@ def _receipt_output_hash(outcome: TurnOutcome) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
+def _canonical_receipt_response_summary(outcome: TurnOutcome) -> dict[str, Any]:
+    """Return a bounded response summary from the canonical turn outcome.
+
+    Streaming provider events are transport details and may contain sensitive or
+    very large payloads.  The canonical outcome already owns the durable answer
+    facts, so receipt construction only needs a bounded text excerpt and safe
+    outcome counts.  The full canonical answer remains addressable by the
+    separately recorded output digest/evidence locator.
+    """
+
+    return {
+        "kind": str(getattr(outcome, "kind", "") or "").strip(),
+        "finalText": str(getattr(outcome, "final_text", "") or "")[:1024],
+        "toolCallCount": len(tuple(getattr(outcome, "tool_calls", ()) or ())),
+        "pendingToolCallCount": len(
+            tuple(getattr(outcome, "pending_tool_call_ids", ()) or ())
+        ),
+        "terminalEventSeen": bool(getattr(outcome, "terminal_event_seen", False)),
+    }
+
+
 def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = False) -> bool:
     if outcome.kind != "incomplete":
         return False
@@ -3150,7 +3171,7 @@ class LLMClient:
         invocation_scope: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
         scene_identity: Optional[Dict[str, Any]] = None,
-        receipt_builder: Optional[Callable[[TurnOutcome, Any], TurnOutcome]] = None,
+        receipt_builder: Optional[Callable[[TurnOutcome], TurnOutcome]] = None,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
         _raise_if_llm_cancelled()
         emitted = False
@@ -3161,7 +3182,6 @@ class LLMClient:
             iterator: Any = None
             normalized_iterator: Any = None
             pending_reasoning: list[StreamChunk] = []
-            provider_response_capture: list[Any] = []
 
             def flush_pending_reasoning() -> Iterator[StreamChunk]:
                 nonlocal emitted
@@ -3185,7 +3205,6 @@ class LLMClient:
                         nonlocal provider_usage
                         for raw_event in iterator:
                             raw_dict = self._provider_object_to_dict(raw_event) or {}
-                            provider_response_capture.append(raw_dict)
                             http_timings = current_stream_http_timings()
                             if http_timings is not None and http_timings.first_raw_event_ms is None:
                                 event_kind = classify_raw_stream_event(raw_dict)
@@ -3270,10 +3289,7 @@ class LLMClient:
                             _raise_if_llm_cancelled()
                         turn_outcome = normalized_iterator.outcome
                         if receipt_builder is not None:
-                            turn_outcome = receipt_builder(
-                                turn_outcome,
-                                provider_response_capture,
-                            )
+                            turn_outcome = receipt_builder(turn_outcome)
                         if turn_outcome.tool_calls:
                             yield from flush_pending_reasoning()
                             emitted = True
@@ -3503,12 +3519,12 @@ class LLMClient:
                             "invocationId": event_metadata.get("invocationId", ""),
                             "attempt": attempt,
                         },
-                        receipt_builder=lambda outcome, provider_events: self._attach_model_invocation_receipt(
+                        receipt_builder=lambda outcome: self._attach_model_invocation_receipt(
                             outcome,
                             metadata=metadata,
                             invocation_scope=invocation_scope,
                             request_content=payload,
-                            response_content={"providerEvents": provider_events},
+                            response_content=_canonical_receipt_response_summary(outcome),
                             started_at_ms=int(start * 1000),
                             finished_at_ms=int(time.time() * 1000),
                             attempt=attempt,

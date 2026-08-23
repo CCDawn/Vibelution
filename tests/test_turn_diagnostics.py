@@ -1,6 +1,7 @@
 """Focused tests for turn diagnostics that agent.py currently stubs away."""
 
 from types import SimpleNamespace
+import threading
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -269,3 +270,86 @@ def test_diagnostics_unwrap_message_envelopes_and_json_response_without_true_att
     assert llm_usage["promptCachePartition"] == "part-json"
     assert metadata["context_composition"]["segments"]
     assert metadata["context_composition"]["turnId"] == "7"
+
+
+def test_completion_snapshot_reads_receipt_from_canonical_journal_after_restart_style_projection(
+    tmp_path,
+    monkeypatch,
+):
+    from core.chat.turn_journal import (
+        EVENT_TURN_STARTED,
+        append_canonical_turn_outcome,
+        append_turn_event,
+        load_turn_events,
+    )
+    from core.llm.types import CanonicalItemIdentity, TurnOutcome
+    from core.web.services.session import turn_diagnostics as session_turn_diagnostics
+
+    receipt = {
+        "receiptId": "receipt-1",
+        "runId": "question-run-1",
+        "responseExcerpt": "audit-only-receipt",
+    }
+    identity = CanonicalItemIdentity("session-1", "turn-1", "inv-1", 0, "answer-1")
+    append_turn_event(tmp_path, "session-1", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_canonical_turn_outcome(
+        tmp_path,
+        "session-1",
+        "turn-1",
+        TurnOutcome(
+            kind="final_answer",
+            identity=identity,
+            final_text="canonical answer",
+            terminal_event_seen=True,
+            model_invocation_receipt=receipt,
+        ),
+    )
+
+    class _RestartedSessionService:
+        PROJECT_ROOT = tmp_path
+        _RUNNING_SESSIONS_LOCK = threading.Lock()
+        _RUNNING_SESSION_IDS = set()
+        _SESSION_ACTIVE_TURN_IDS = {}
+        _CHAT_STATE_LOCK = threading.Lock()
+
+        def reconcile_stale_chat_turn_work_runs(self):
+            return None
+
+        def load_session_chat_state(self, _project_root, _session_id):
+            return {"last_turn_status": "completed"}
+
+        def _repair_stale_running_conversation(self, _conversation):
+            return False
+
+        def _load_session_conversation_events_cached(self, session_id):
+            return load_turn_events(self.PROJECT_ROOT, session_id)
+
+        def _session_ledger_visible_messages(self, _session_id):
+            # Simulate a restarted process whose model-visible projection has no
+            # receipt metadata; the canonical journal remains available.
+            return [
+                {
+                    "role": "assistant",
+                    "content": "canonical answer",
+                    "metadata": {"kind": "journal_assistant_message", "turnId": "turn-1"},
+                }
+            ]
+
+        @staticmethod
+        def _find_turn_scoped_assistant_message(messages, _turn_id):
+            return messages[0] if messages else None
+
+        @staticmethod
+        def _message_turn_id(message):
+            return str((message.get("metadata") or {}).get("turnId") or "")
+
+        @staticmethod
+        def _supervised_completion_marker_present(_text):
+            return False
+
+    monkeypatch.setattr(session_turn_diagnostics, "_service", lambda: _RestartedSessionService())
+
+    snapshot = session_turn_diagnostics.get_session_turn_completion_snapshot("session-1", "turn-1")
+
+    assert snapshot["terminal"] is True
+    assert snapshot["modelInvocationReceipt"] == receipt
