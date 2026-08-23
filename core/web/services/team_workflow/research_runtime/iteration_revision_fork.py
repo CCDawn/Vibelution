@@ -10,6 +10,7 @@ from core.research.workflow.definition import build_challenge_cup_workflow_defin
 
 from .budget_lifecycle import build_initial_budget_ledgers, remaining_budget_policy
 from .checkpoint_lifecycle import fork_checkpoint_at_node
+from .feedback_iterations_artifact_writer import record_feedback_iteration_from_fork
 from .human_gate_artifacts import canonical_sha256
 from .node_execution_support import build_event, iso, utc_now
 from .store import WorkflowRunStore
@@ -230,4 +231,16 @@ def fork_iteration_revision(
         }
 
     store.mutate_run(parent_run_id, mutation)
-    return child
+    # A fork alone is not a feedback iteration: the authority writer requires
+    # explicit human feedback plus completed revision output refs/hashes.  The
+    # blocked result is returned for diagnostics, but no placeholder artifact
+    # is created when a normal decision carries neither evidence.
+    feedback_authority = record_feedback_iteration_from_fork(
+        parent=parent,
+        decision=decision,
+        child=child,
+    )
+    return {
+        **child,
+        "feedbackIterationAuthority": feedback_authority,
+    }
