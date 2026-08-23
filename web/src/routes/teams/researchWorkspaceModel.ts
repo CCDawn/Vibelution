@@ -136,13 +136,27 @@ export function challengeQuestionDetailRoute(
   return `/teams?${params.toString()}`;
 }
 
+export type TeamWorkspaceRouteLocation = {
+  runId?: string;
+  nodeId?: string;
+  panel?: string;
+  questionId?: string;
+};
+
+function setOptionalRouteParam(params: URLSearchParams, key: string, value: string | undefined) {
+  const normalized = value?.trim();
+  if (normalized) {
+    params.set(key, normalized);
+  }
+}
+
 /**
  * Canonical research / team home for end users: single-canvas workflow workspace.
  * All "返回团队页面" / overview back links use this teamId-scoped URL.
  */
 export function teamWorkspaceRoute(
   teamId: string,
-  location: { runId?: string; nodeId?: string; panel?: string } = {},
+  location: TeamWorkspaceRouteLocation = {},
 ) {
   if (!teamId.trim()) throw new Error("teamId 不能为空");
   const params = new URLSearchParams({
@@ -150,10 +164,28 @@ export function teamWorkspaceRoute(
     researchView: "workflow",
     workflowId: "challenge-cup-research",
   });
-  if (location.runId) params.set("runId", location.runId);
-  if (location.nodeId) params.set("node", location.nodeId);
-  if (location.panel) params.set("panel", location.panel);
+  setOptionalRouteParam(params, "questionId", location.questionId);
+  setOptionalRouteParam(params, "runId", location.runId);
+  setOptionalRouteParam(params, "node", location.nodeId);
+  setOptionalRouteParam(params, "panel", location.panel);
   return `/teams?${params.toString()}`;
+}
+
+/**
+ * Convert legacy/overview challenge URLs into the one process-workspace URL.
+ * Only process focus is carried forward; retired team aliases and workflow
+ * values are deliberately removed so browser history converges on one shell.
+ */
+export function canonicalChallengeCupWorkspaceRoute(
+  teamId: string,
+  current: URLSearchParams,
+) {
+  return teamWorkspaceRoute(teamId, {
+    questionId: current.get("questionId") || current.get("challengeQuestion") || undefined,
+    runId: current.get("runId") || current.get("challengeRun") || undefined,
+    nodeId: current.get("node") || current.get("nodeId") || undefined,
+    panel: current.get("panel") || undefined,
+  });
 }
 
 /**

@@ -7,6 +7,7 @@ import type { SetURLSearchParams } from "react-router-dom";
 
 import type { Team } from "../../api/types";
 import {
+  canonicalChallengeCupWorkspaceRoute,
   teamWorkspaceRoute,
   type ResearchWorkspaceView,
 } from "./researchWorkspaceModel";
@@ -53,8 +54,9 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
       if (researchWorkflowTeamSelected) {
         setResearchWorkspaceView("workflow");
         setTeamShellMode("board");
-        const params = new URLSearchParams(teamWorkspaceRoute(effectiveTeamId).split("?")[1] || "");
-        params.set("teamMode", "board");
+        const params = new URLSearchParams(
+          canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams).split("?")[1] || "",
+        );
         setSearchParams(params, { replace: true });
         return;
       }
@@ -79,8 +81,9 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
     if (isResearchWorkflowTeam(team)) {
       setResearchWorkspaceView("workflow");
       setTeamShellMode("board");
-      const params = new URLSearchParams(teamWorkspaceRoute(team.teamId).split("?")[1] || "");
-      params.set("teamMode", "board");
+      const params = new URLSearchParams(
+        canonicalChallengeCupWorkspaceRoute(team.teamId, searchParams).split("?")[1] || "",
+      );
       setSearchParams(params);
       return;
     }
@@ -98,8 +101,9 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
       if (researchWorkflowTeamSelected) {
         setResearchWorkspaceView("workflow");
         setTeamShellMode("board");
-        const params = new URLSearchParams(teamWorkspaceRoute(effectiveTeamId).split("?")[1] || "");
-        params.set("teamMode", "board");
+        const params = new URLSearchParams(
+          canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams).split("?")[1] || "",
+        );
         setSearchParams(params, { replace: true });
         return;
       }
