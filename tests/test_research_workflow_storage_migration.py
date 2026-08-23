@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import apsw
@@ -146,6 +147,36 @@ def _create_checkpoint(path: Path, *, include_rows: bool = True) -> None:
         connection.close()
 
 
+def _open_wal_checkpoint(path: Path) -> apsw.Connection:
+    """Create a valid checkpoint bundle while retaining WAL/SHM sidecars."""
+
+    connection = apsw.Connection(str(path))
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute(
+        "CREATE TABLE checkpoints ("
+        "thread_id TEXT NOT NULL, checkpoint_ns TEXT NOT NULL DEFAULT '', "
+        "checkpoint_id TEXT NOT NULL, parent_checkpoint_id TEXT, type TEXT, "
+        "checkpoint BLOB, metadata BLOB, "
+        "PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id))"
+    )
+    connection.execute(
+        "CREATE TABLE writes ("
+        "thread_id TEXT NOT NULL, checkpoint_ns TEXT NOT NULL DEFAULT '', "
+        "checkpoint_id TEXT NOT NULL, task_id TEXT NOT NULL, idx INTEGER NOT NULL, "
+        "channel TEXT NOT NULL, type TEXT, value BLOB, "
+        "PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx))"
+    )
+    connection.execute(
+        "INSERT INTO checkpoints(thread_id, checkpoint_ns, checkpoint_id, checkpoint) "
+        "VALUES ('thread-wal', '', 'checkpoint-wal', 'snapshot')"
+    )
+    connection.execute(
+        "INSERT INTO writes(thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, value) "
+        "VALUES ('thread-wal', '', 'checkpoint-wal', 'task-wal', 0, 'state', 'value')"
+    )
+    return connection
+
+
 def _table_values(path: Path, statement: str) -> list[tuple[object, ...]]:
     connection = apsw.Connection(str(path))
     try:
@@ -190,6 +221,40 @@ def test_preview_uses_only_research_workflows_scope(tmp_path: Path, monkeypatch)
     assert result.target_root == target.resolve()
     assert result.allowed_assets == ("checkpoints.sqlite", "runs", "workflow-ledger.sqlite")
     assert "challenge_cup_real_batch/real-1.json" in result.excluded_assets
+
+
+def test_preview_rejects_unknown_workflow_sqlite_asset(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    unknown = source / "workflow-checkpoints.sqlite"
+    unknown.write_bytes(b"not an allowlisted asset")
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert {
+        (str(item["code"]), str(item.get("relativePath") or ""))
+        for item in result.blockers
+    } >= {("unknown_asset", "workflow-checkpoints.sqlite")}
+
+
+def test_preview_rejects_target_ledger_sidecar(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_current_ledger(source / "workflow-ledger.sqlite")
+    target.mkdir(parents=True)
+    (target / "workflow-ledger.sqlite-shm").write_bytes(b"")
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert any(
+        item["code"] == "orphan_or_active_target_sqlite_sidecar"
+        and str(item["path"]).endswith("workflow-ledger.sqlite")
+        for item in result.blockers
+    )
 
 
 def test_apply_backup_integrity_verify_and_source_preservation(tmp_path: Path, monkeypatch) -> None:
@@ -662,3 +727,171 @@ def test_checkpoint_column_schema_drift_is_fail_closed(tmp_path: Path, monkeypat
         quiescence_probe=lambda _project: {"ok": True, "blockers": []},
     )
     assert any(item["code"] == "checkpoint_schema_unknown" for item in result.blockers)
+
+
+def test_preview_preserves_real_sqlite_bundle_metadata(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    checkpoint = source / "checkpoints.sqlite"
+    connection = _open_wal_checkpoint(checkpoint)
+    try:
+        sidecars = tuple(
+            path
+            for path in (
+                checkpoint.with_name(checkpoint.name + "-wal"),
+                checkpoint.with_name(checkpoint.name + "-shm"),
+            )
+            if path.is_file()
+        )
+        assert sidecars, "fixture must retain a WAL/SHM sidecar"
+        before = {
+            path: (path.stat().st_mtime_ns, path.read_bytes())
+            for path in sidecars
+        }
+        result = preview_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+        assert result.ready
+        assert {
+            path: (path.stat().st_mtime_ns, path.read_bytes())
+            for path in sidecars
+        } == before
+    finally:
+        connection.close()
+
+
+def test_default_manifest_selection_uses_latest_committed_timestamp(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "research_workflows"
+    migration = target / "migration"
+    migration.mkdir(parents=True)
+    (migration / "rwm-z-old.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "committed",
+                "migrationId": "rwm-z-old",
+                "statusTransitions": [
+                    {"status": "committed", "at": "2026-08-23T10:00:00Z"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (migration / "rwm-a-new.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "committed",
+                "migrationId": "rwm-a-new",
+                "statusTransitions": [
+                    {"status": "committed", "at": "2026-08-23T11:00:00Z"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    selected = storage_migration._find_manifest(target)
+    assert selected.name == "rwm-a-new.json"
+
+
+def test_rollback_reads_archive_path_from_legacy_v1_manifest(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, _source, target, apply = _apply_with_target_before_state(tmp_path, monkeypatch)
+    manifest = Path(str(apply["manifestPath"]))
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    migration_id = str(payload["migrationId"])
+    legacy_root = target.parent / "research_workflow_migration_backups" / migration_id / "target-before"
+    for item in payload["assets"]:
+        before = item["targetBefore"]
+        if not before["existed"]:
+            continue
+        legacy_archive = legacy_root / Path(item["relativePath"])
+        legacy_archive.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(Path(before["archive_path"]), legacy_archive)
+        before["archive_path"] = str(legacy_archive)
+    payload["targetBeforeArchive"] = str(legacy_root)
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = rollback_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        manifest_path=manifest,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert result["ok"] is True
+    assert result["status"] == "rolled_back"
+
+
+def test_rollback_blocks_legacy_manifest_without_archive_root_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, _source, _target, apply = _apply_with_target_before_state(tmp_path, monkeypatch)
+    manifest = Path(str(apply["manifestPath"]))
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload.pop("targetBeforeArchive", None)
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ResearchWorkflowMigrationError, match="archive"):
+        rollback_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            manifest_path=manifest,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+
+@pytest.mark.parametrize("with_sidecars", (False, True))
+def test_empty_sqlite_main_is_fail_closed(
+    tmp_path: Path,
+    monkeypatch,
+    with_sidecars: bool,
+) -> None:
+    project, projects_home, source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    checkpoint = source / "checkpoints.sqlite"
+    checkpoint.write_bytes(b"")
+    if with_sidecars:
+        checkpoint.with_name(checkpoint.name + "-wal").write_bytes(b"wal")
+        checkpoint.with_name(checkpoint.name + "-shm").write_bytes(b"shm")
+
+    preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert any(
+        item["code"] == "sqlite_empty_main" and item["relativePath"] == "checkpoints.sqlite"
+        for item in preview.blockers
+    )
+    with pytest.raises(ResearchWorkflowMigrationError):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+
+def test_target_empty_sqlite_main_is_fail_closed(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    (target / "checkpoints.sqlite").write_bytes(b"")
+
+    preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert any(
+        item["code"] == "target_empty_sqlite_main" and str(item["path"]).endswith("checkpoints.sqlite")
+        for item in preview.blockers
+    )

@@ -15,10 +15,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
+import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterable
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +45,8 @@ KEY_RUN_ID = "run-882610596ddb"
 CURRENT_LEDGER_SCHEMA_VERSION = int(LEDGER_SCHEMA_VERSION)
 MANIFEST_DIRNAME = "migration"
 MANIFEST_PREFIX = "rwm-"
+_BACKUP_DIRNAME = ".rwm-b"
+_BACKUP_BEFORE_DIRNAME = "b"
 
 _SQLITE_SUFFIXES = frozenset({".sqlite", ".sqlite3", ".db"})
 _ALLOWED_ASSETS = (CHECKPOINT_FILENAME, "runs", LEDGER_FILENAME)
@@ -79,6 +84,16 @@ _CHECKPOINT_SCHEMA_CONTRACT = {
 
 class ResearchWorkflowMigrationError(RuntimeError):
     """Raised when a migration cannot prove a safe, exact cutover."""
+
+
+class _SQLiteBundleSnapshotError(ResearchWorkflowMigrationError):
+    """Raised when a task-owned SQLite bundle snapshot cannot be proven exact."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        self.code = code
+        self.detail = detail
+        message = code if not detail else f"{code}: {detail}"
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -291,6 +306,77 @@ def _sqlite_bundle_snapshot(main: Path) -> tuple[str, tuple[dict[str, object], .
     return digest.hexdigest(), tuple(members)
 
 
+def _remove_task_temp_tree(root: Path) -> None:
+    """Remove one task-owned snapshot tree and prove that it is gone."""
+
+    try:
+        if root.exists():
+            shutil.rmtree(root)
+        if root.exists():
+            raise OSError("snapshot directory still exists after cleanup")
+    except Exception as exc:
+        raise _SQLiteBundleSnapshotError(
+            "sqlite_bundle_snapshot_cleanup_failed", type(exc).__name__
+        ) from exc
+
+
+def _copy_sqlite_bundle_to_temp(path: Path) -> tuple[Path, Path]:
+    """Copy one stable SQLite main/WAL/SHM bundle into system temp.
+
+    APSW is intentionally never opened against ``path`` when a sidecar is
+    present.  The source is sampled before and after the byte copies; a
+    mismatch means the operator root was not quiescent and the caller must
+    fail closed.  Snapshot names are deliberately short because this helper
+    also protects Windows callers from long project/data roots.
+    """
+
+    source = Path(path)
+    before_fingerprint, before_members = _sqlite_bundle_snapshot(source)
+    try:
+        snapshot_root = Path(tempfile.mkdtemp(prefix="rwm-s-"))
+    except Exception as exc:
+        raise _SQLiteBundleSnapshotError(
+            "sqlite_bundle_snapshot_copy_failed", type(exc).__name__
+        ) from exc
+    snapshot_main = snapshot_root / "db.sqlite"
+    try:
+        for suffix, source_member in zip(("", "-wal", "-shm"), _sqlite_bundle_paths(source), strict=True):
+            if not source_member.is_file():
+                continue
+            shutil.copyfile(source_member, snapshot_root / f"db.sqlite{suffix}")
+
+        after_fingerprint, after_members = _sqlite_bundle_snapshot(source)
+        if before_fingerprint != after_fingerprint or before_members != after_members:
+            raise _SQLiteBundleSnapshotError(
+                "sqlite_bundle_changed_during_snapshot", source.name
+            )
+        snapshot_fingerprint, snapshot_members = _sqlite_bundle_snapshot(snapshot_main)
+        if snapshot_fingerprint != before_fingerprint or snapshot_members != before_members:
+            raise _SQLiteBundleSnapshotError(
+                "sqlite_bundle_snapshot_mismatch", source.name
+            )
+        return snapshot_root, snapshot_main
+    except _SQLiteBundleSnapshotError:
+        _remove_task_temp_tree(snapshot_root)
+        raise
+    except Exception as exc:
+        _remove_task_temp_tree(snapshot_root)
+        raise _SQLiteBundleSnapshotError(
+            "sqlite_bundle_snapshot_copy_failed", type(exc).__name__
+        ) from exc
+
+
+@contextmanager
+def _sqlite_bundle_snapshot_context(path: Path):
+    """Yield a short-lived exact SQLite bundle image and always clean it."""
+
+    snapshot_root, snapshot_main = _copy_sqlite_bundle_to_temp(path)
+    try:
+        yield snapshot_main
+    finally:
+        _remove_task_temp_tree(snapshot_root)
+
+
 def _source_tree_fingerprint(root: Path) -> str:
     digest = hashlib.sha256()
     if not root.exists():
@@ -458,7 +544,7 @@ def _allowed_v5_checksums() -> frozenset[str] | None:
     return frozenset((current, V5_LEGACY_CHECKSUM))
 
 
-def _validate_v5_ledger(path: Path) -> tuple[bool, str]:
+def _validate_v5_ledger_open_path(path: Path) -> tuple[bool, str]:
     """Delegate v5 checksum and catalog-shape validation, or fail closed."""
 
     validator = _v5_validator(path)
@@ -482,7 +568,17 @@ def _validate_v5_ledger(path: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def _sqlite_evidence(path: Path, *, kind: str) -> SQLiteEvidence:
+def _validate_v5_ledger(path: Path) -> tuple[bool, str]:
+    """Validate a ledger image without opening a real source in place."""
+
+    source = Path(path)
+    if source.stat().st_size > 0:
+        with _sqlite_bundle_snapshot_context(source) as snapshot:
+            return _validate_v5_ledger_open_path(snapshot)
+    return _validate_v5_ledger_open_path(source)
+
+
+def _sqlite_evidence_open_path(path: Path, *, kind: str) -> SQLiteEvidence:
     bundle_fingerprint, bundle_members = _sqlite_bundle_snapshot(path)
     if path.stat().st_size == 0:
         return SQLiteEvidence(
@@ -491,10 +587,10 @@ def _sqlite_evidence(path: Path, *, kind: str) -> SQLiteEvidence:
             row_counts={},
             business_rows=0,
             key_runs={},
-            quick_check="placeholder",
-            integrity_check="placeholder",
+            quick_check="empty",
+            integrity_check="empty",
             foreign_key_errors=(),
-            known_schema=True,
+            known_schema=False,
             bundle_fingerprint=bundle_fingerprint,
             bundle_members=bundle_members,
         )
@@ -543,6 +639,16 @@ def _sqlite_evidence(path: Path, *, kind: str) -> SQLiteEvidence:
     finally:
         if connection is not None:
             connection.close()
+
+
+def _sqlite_evidence(path: Path, *, kind: str) -> SQLiteEvidence:
+    """Inspect SQLite using only a task-owned bundle snapshot."""
+
+    source = Path(path)
+    if source.stat().st_size > 0:
+        with _sqlite_bundle_snapshot_context(source) as snapshot:
+            return _sqlite_evidence_open_path(snapshot, kind=kind)
+    return _sqlite_evidence_open_path(source, kind=kind)
 
 
 def _make_asset(source_root: Path, target_root: Path, relative: str, kind: str) -> ResearchWorkflowAsset:
@@ -664,6 +770,14 @@ def _enumerate_source(
             continue
         try:
             assets.append(_make_asset(roots.source, roots.target, relative, kind))
+        except _SQLiteBundleSnapshotError as exc:
+            blockers.append(
+                {
+                    "code": exc.code,
+                    "relativePath": relative,
+                    "detail": exc.detail,
+                }
+            )
         except (OSError, apsw.Error) as exc:
             blockers.append({"code": "source_asset_unreadable", "relativePath": relative, "detail": type(exc).__name__})
     return assets, sorted(set(excluded)), blockers
@@ -672,6 +786,11 @@ def _enumerate_source(
 def _target_asset_state(asset: ResearchWorkflowAsset) -> tuple[str, dict[str, object]]:
     target = asset.target_path
     sidecars = _sqlite_bundle_paths(target)[1:] if asset.kind == "sqlite" else ()
+    if asset.kind == "sqlite" and target.is_file() and target.stat().st_size == 0:
+        return "conflict", {
+            "code": "target_empty_sqlite_main",
+            "path": str(target),
+        }
     if any(path.exists() for path in sidecars):
         return "conflict", {"code": "orphan_or_active_target_sqlite_sidecar", "path": str(target)}
     if _is_reparse(target):
@@ -684,8 +803,6 @@ def _target_asset_state(asset: ResearchWorkflowAsset) -> tuple[str, dict[str, ob
     if target_sha == asset.sha256 and asset.kind != "sqlite":
         return "same", {"sha256": target_sha}
     if asset.kind == "sqlite":
-        if target.stat().st_size == 0:
-            return "empty", {"sha256": target_sha}
         kind = "ledger" if target.name == LEDGER_FILENAME else "checkpoint"
         evidence = _sqlite_evidence(target, kind=kind)
         if target_sha == asset.sha256:
@@ -710,16 +827,35 @@ def _target_asset_state(asset: ResearchWorkflowAsset) -> tuple[str, dict[str, ob
 
 
 def _source_asset_blockers(asset: ResearchWorkflowAsset) -> list[dict[str, object]]:
-    if asset.kind != "sqlite" or asset.sqlite is None or asset.size == 0:
+    if asset.kind != "sqlite" or asset.sqlite is None:
         return []
     evidence = asset.sqlite
     blockers: list[dict[str, object]] = []
+    if asset.size == 0:
+        blockers.append(
+            {
+                "code": "sqlite_empty_main",
+                "relativePath": asset.relative_path,
+                "bundle": evidence.to_dict(),
+            }
+        )
+        return blockers
     if not evidence.valid:
         blockers.append({"code": "sqlite_integrity_failed", "relativePath": asset.relative_path, "sqlite": evidence.to_dict()})
     if asset.relative_path == LEDGER_FILENAME:
         if evidence.schema_version == 5:
-            accepted, detail = _validate_v5_ledger(asset.source_path)
-            if not accepted:
+            try:
+                accepted, detail = _validate_v5_ledger(asset.source_path)
+            except _SQLiteBundleSnapshotError as exc:
+                blockers.append(
+                    {
+                        "code": exc.code,
+                        "relativePath": asset.relative_path,
+                        "detail": exc.detail,
+                    }
+                )
+                accepted, detail = False, ""
+            if not accepted and detail:
                 blockers.append({"code": detail, "relativePath": asset.relative_path})
         if evidence.schema_version != CURRENT_LEDGER_SCHEMA_VERSION:
             blockers.append(
@@ -795,10 +931,19 @@ def _build_preview(
     assets, excluded, source_blockers = _enumerate_source(roots)
     blockers.extend(source_blockers)
     for asset in assets:
-        blockers.extend(_source_asset_blockers(asset))
-        state, detail = _target_asset_state(asset)
-        if state == "conflict":
-            blockers.append(detail)
+        try:
+            blockers.extend(_source_asset_blockers(asset))
+            state, detail = _target_asset_state(asset)
+            if state == "conflict":
+                blockers.append(detail)
+        except _SQLiteBundleSnapshotError as exc:
+            blockers.append(
+                {
+                    "code": exc.code,
+                    "relativePath": asset.relative_path,
+                    "detail": exc.detail,
+                }
+            )
     before, after, stable = _observe_source_stability(roots, delay_seconds=sample_delay_seconds)
     if not stable:
         blockers.append({"code": "source_changed_during_sampling", "before": before, "after": after})
@@ -889,8 +1034,8 @@ def _atomic_json(path: Path, payload: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
-def _copy_sqlite_with_backup(source: Path, destination: Path) -> None:
-    """Copy one SQLite main database with APSW's Backup API.
+def _copy_sqlite_with_backup_open_path(source: Path, destination: Path) -> None:
+    """Copy one already-isolated SQLite image with APSW's Backup API.
 
     ``destination`` must not exist.  The call creates a private staging or
     backup database and never copies ``-wal``/``-shm`` as ordinary files.
@@ -924,10 +1069,28 @@ def _copy_sqlite_with_backup(source: Path, destination: Path) -> None:
             destination_connection.close()
 
 
+def _copy_sqlite_with_backup(source: Path, destination: Path) -> None:
+    """Copy one SQLite bundle without opening a real source in place."""
+
+    if source.stat().st_size == 0:
+        raise ResearchWorkflowMigrationError(
+            f"empty SQLite main is not migratable: {source}"
+        )
+    if source.stat().st_size > 0:
+        with _sqlite_bundle_snapshot_context(source) as snapshot:
+            _copy_sqlite_with_backup_open_path(snapshot, destination)
+        return
+    _copy_sqlite_with_backup_open_path(source, destination)
+
+
 def _copy_asset(source: Path, destination: Path, *, kind: str) -> None:
     if destination.exists():
         raise ResearchWorkflowMigrationError(f"staging destination already exists: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "sqlite" and source.stat().st_size == 0:
+        raise ResearchWorkflowMigrationError(
+            f"empty SQLite main is not migratable: {source}"
+        )
     if kind == "sqlite" and source.stat().st_size > 0:
         _copy_sqlite_with_backup(source, destination)
     else:
@@ -942,12 +1105,26 @@ def _assert_under(path: Path, root: Path, *, label: str) -> None:
 
 
 def _stage_path(path: Path, migration_id: str) -> Path:
-    return path.with_name(f".{path.name}.{migration_id}.staging")
+    short_id = migration_id.rsplit("-", 1)[-1][:12]
+    asset_id = hashlib.sha256(path.name.encode("utf-8")).hexdigest()[:6]
+    return path.with_name(f".s-{short_id}-{asset_id}.staging")
+
+
+def _archive_member_path(archive_root: Path, relative_path: str) -> Path:
+    """Flatten one governed relative path into a short, collision-safe name."""
+
+    relative = Path(relative_path)
+    digest = hashlib.sha256(relative.as_posix().encode("utf-8")).hexdigest()[:12]
+    basename = relative.name or "asset"
+    suffix = relative.suffix
+    if len(basename) > 32:
+        basename = f"{basename[:24]}{suffix}"
+    return archive_root / f"{digest}-{basename}"
 
 
 def _archive_existing_target(asset: ResearchWorkflowAsset, archive_root: Path) -> _BeforeRecord:
     target = asset.target_path
-    archive = archive_root / Path(asset.relative_path)
+    archive = _archive_member_path(archive_root, asset.relative_path)
     _assert_under(archive, archive_root, label="target-before archive")
     if not target.exists():
         return _BeforeRecord(
@@ -993,7 +1170,7 @@ def _validate_staged_source_asset(asset: ResearchWorkflowAsset, stage: Path) -> 
             raise ResearchWorkflowMigrationError(f"staged asset hash mismatch: {asset.relative_path}")
         return
     if stage.stat().st_size == 0:
-        return
+        raise ResearchWorkflowMigrationError(f"staged SQLite main is empty: {asset.relative_path}")
     kind = "ledger" if asset.relative_path == LEDGER_FILENAME else "checkpoint"
     evidence = _sqlite_evidence(stage, kind=kind)
     if not evidence.valid or not evidence.known_schema:
@@ -1006,9 +1183,15 @@ def _validate_staged_source_asset(asset: ResearchWorkflowAsset, stage: Path) -> 
         raise ResearchWorkflowMigrationError(f"staged SQLite evidence mismatch: {asset.relative_path}")
 
 
-def _archive_path_for_before(before: _BeforeRecord, backup_root: Path) -> Path:
-    archive = Path(before.archive_path).expanduser().resolve()
-    _assert_under(archive, backup_root, label="rollback archive")
+def _archive_path_for_before(before: _BeforeRecord, archive_root: Path) -> Path:
+    raw_archive = str(before.archive_path or "")
+    archive_candidate = Path(raw_archive).expanduser()
+    if not raw_archive or not archive_candidate.is_absolute():
+        raise ResearchWorkflowMigrationError(
+            f"rollback archive evidence is not an absolute path: {before.relative_path}"
+        )
+    archive = archive_candidate.resolve()
+    _assert_under(archive, archive_root, label="rollback archive")
     if not archive.is_file() or _is_reparse(archive):
         raise ResearchWorkflowMigrationError(f"rollback archive missing or unsafe: {archive}")
     if not before.archive_sha256:
@@ -1016,6 +1199,10 @@ def _archive_path_for_before(before: _BeforeRecord, backup_root: Path) -> Path:
     if _sha256_file(archive) != before.archive_sha256:
         raise ResearchWorkflowMigrationError(f"rollback archive hash mismatch: {before.relative_path}")
     if before.kind == "sqlite":
+        if archive.stat().st_size == 0:
+            raise ResearchWorkflowMigrationError(
+                f"rollback archive SQLite main is empty: {before.relative_path}"
+            )
         bundle, _ = _sqlite_bundle_snapshot(archive)
         if not before.archive_bundle_fingerprint or bundle != before.archive_bundle_fingerprint:
             raise ResearchWorkflowMigrationError(f"rollback archive bundle mismatch: {before.relative_path}")
@@ -1034,7 +1221,7 @@ def _validate_staged_archive(archive: Path, stage: Path, *, kind: str, relative_
             raise ResearchWorkflowMigrationError(f"rollback stage hash mismatch: {relative_path}")
         return
     if stage.stat().st_size == 0:
-        return
+        raise ResearchWorkflowMigrationError(f"rollback staged SQLite main is empty: {relative_path}")
     sqlite_kind = "ledger" if relative_path == LEDGER_FILENAME else "checkpoint"
     expected = _sqlite_evidence(archive, kind=sqlite_kind)
     observed = _sqlite_evidence(stage, kind=sqlite_kind)
@@ -1098,7 +1285,13 @@ def _restore_promoted_targets(
     return errors
 
 
-def _stage_rollback_plans(plans: Iterable[_RollbackPlan], *, stage_id: str, backup_root: Path) -> dict[str, Path]:
+def _stage_rollback_plans(
+    plans: Iterable[_RollbackPlan],
+    *,
+    stage_id: str,
+    backup_root: Path,
+    before_archive_root: Path | None = None,
+) -> dict[str, Path]:
     """Archive post-cutover targets and stage every before-image without writing targets."""
 
     plans = list(plans)
@@ -1115,7 +1308,10 @@ def _stage_rollback_plans(plans: Iterable[_RollbackPlan], *, stage_id: str, back
         for plan in plans:
             if not plan.before.existed:
                 continue
-            archive = _archive_path_for_before(plan.before, backup_root)
+            archive = _archive_path_for_before(
+                plan.before,
+                before_archive_root if before_archive_root is not None else backup_root,
+            )
             stage = _stage_path(plan.target, stage_id)
             _copy_asset(archive, stage, kind=str(plan.entry["kind"]))
             _validate_staged_archive(
@@ -1192,13 +1388,95 @@ def _find_manifest(target_root: Path, manifest_path: Path | None = None) -> Path
         if not path.is_file():
             raise ResearchWorkflowMigrationError(f"manifest not found: {path}")
         return path
-    candidates = sorted(
-        (path for path in (target_root / MANIFEST_DIRNAME).glob(f"{MANIFEST_PREFIX}*.json") if path.is_file()),
-        key=lambda item: item.name.lower(),
-    )
+    candidates = [
+        path
+        for path in (target_root / MANIFEST_DIRNAME).glob(f"{MANIFEST_PREFIX}*.json")
+        if path.is_file()
+    ]
     if not candidates:
         raise ResearchWorkflowMigrationError("research workflow migration manifest not found")
-    return candidates[-1]
+    ranked: list[tuple[tuple[float, int, str, str], Path]] = []
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ResearchWorkflowMigrationError(
+                f"migration manifest candidate unreadable: {path}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ResearchWorkflowMigrationError(
+                f"migration manifest candidate is not an object: {path}"
+            )
+        status = str(payload.get("status") or "")
+        if status not in {"committed", "completed"}:
+            continue
+        if int(payload.get("schemaVersion") or 0) != 1:
+            raise ResearchWorkflowMigrationError(
+                f"migration manifest candidate schema unsupported: {path}"
+            )
+        timestamp = _manifest_order_timestamp(payload)
+        if timestamp is None:
+            raise ResearchWorkflowMigrationError(
+                f"migration manifest ordering evidence missing: {path}"
+            )
+        migration_id = str(payload.get("migrationId") or "")
+        ranked.append(
+            (
+                (
+                    timestamp.timestamp(),
+                    1 if status == "completed" else 0,
+                    migration_id,
+                    path.name.lower(),
+                ),
+                path,
+            )
+        )
+    if not ranked:
+        raise ResearchWorkflowMigrationError(
+            "research workflow migration committed manifest not found"
+        )
+    ranked.sort(key=lambda item: item[0])
+    return ranked[-1][1]
+
+
+def _manifest_order_timestamp(payload: dict[str, object]) -> datetime | None:
+    values: list[object] = []
+    for field in ("completedAt", "committedAt", "updatedAt", "createdAt", "timestamp"):
+        values.append(payload.get(field))
+    transitions = payload.get("statusTransitions")
+    if isinstance(transitions, list):
+        for item in transitions:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "") in {"committed", "completed"}:
+                values.append(item.get("at"))
+    parsed: list[datetime] = []
+    for value in values:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            parsed.append(datetime.fromtimestamp(float(value), tz=UTC))
+            continue
+        text = str(value or "").strip()
+        if not text:
+            continue
+        try:
+            parsed_value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        parsed.append(
+            parsed_value.replace(tzinfo=UTC)
+            if parsed_value.tzinfo is None
+            else parsed_value.astimezone(UTC)
+        )
+    if parsed:
+        return max(parsed)
+    migration_id = str(payload.get("migrationId") or "")
+    match = re.search(r"(\d{8}T\d{6}Z)", migration_id)
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 def _read_manifest(path: Path) -> dict[str, object]:
@@ -1283,7 +1561,7 @@ def _manifest_entries(payload: dict[str, object], target_root: Path) -> list[dic
 def _before_record_from_manifest(
     item: dict[str, object],
     *,
-    backup_root: Path,
+    archive_root: Path,
 ) -> _BeforeRecord:
     relative = str(item.get("relativePath") or "")
     kind = str(item.get("kind") or "")
@@ -1306,10 +1584,24 @@ def _before_record_from_manifest(
         archive_bundle_fingerprint=str(raw.get("archive_bundle_fingerprint") or ""),
     )
     if record.existed:
-        _archive_path_for_before(record, backup_root)
+        _archive_path_for_before(record, archive_root)
     elif record.sha256 or record.bundle_fingerprint or record.archive_sha256 or record.archive_bundle_fingerprint:
         raise ResearchWorkflowMigrationError(f"rollback missing-target record is inconsistent: {relative}")
     return record
+
+
+def _manifest_archive_root(payload: dict[str, object], roots: _ResolvedRoots) -> Path:
+    """Resolve the v1 recorded archive root without guessing a new layout."""
+
+    raw_root = str(payload.get("targetBeforeArchive") or "")
+    candidate = Path(raw_root).expanduser()
+    if not raw_root or not candidate.is_absolute():
+        raise ResearchWorkflowMigrationError(
+            "migration manifest archive root evidence is missing or not absolute"
+        )
+    archive_root = candidate.resolve()
+    _assert_under(archive_root, roots.target.parent, label="manifest archive root")
+    return archive_root
 
 
 def _validate_post_cutover_target(item: dict[str, object], target: Path) -> None:
@@ -1325,6 +1617,8 @@ def _validate_post_cutover_target(item: dict[str, object], target: Path) -> None
     if _sha256_file(target) != expected_sha:
         raise ResearchWorkflowMigrationError(f"rollback blocked by post-cutover delta: {relative}")
     if str(item.get("kind") or "") == "sqlite":
+        if target.stat().st_size == 0:
+            raise ResearchWorkflowMigrationError(f"rollback blocked by empty SQLite main: {relative}")
         if any(sidecar.exists() for sidecar in _sqlite_bundle_paths(target)[1:]):
             raise ResearchWorkflowMigrationError(f"rollback blocked by SQLite sidecar delta: {relative}")
         expected_bundle = str(expected.get("bundleFingerprint") or "")
@@ -1392,8 +1686,12 @@ def apply_research_workflow_migration(
         codes = ", ".join(str(item.get("code") or "blocked") for item in preview.blockers[:8])
         raise ResearchWorkflowMigrationError(f"research workflow migration readiness blocked: {codes}")
     _guard_or_raise(roots.project.project_root, quiescence_probe=quiescence_probe)
-    migration_id = f"rwm-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
-    archive_root = roots.target.parent / "research_workflow_migration_backups" / migration_id / "target-before"
+    # Keep generated path components short: the canonical project data root is
+    # already deep on Windows, while the manifest retains the complete
+    # relative-path and checksum evidence needed for rollback.
+    migration_id = f"rwm-{uuid.uuid4().hex[:12]}"
+    backup_base = roots.target.parent / _BACKUP_DIRNAME
+    archive_root = backup_base / migration_id / _BACKUP_BEFORE_DIRNAME
     staged: dict[str, Path] = {}
     before_records: list[_BeforeRecord] = []
     before_by_relative: dict[str, _BeforeRecord] = {}
@@ -1472,8 +1770,8 @@ def apply_research_workflow_migration(
             promoted,
             before_by_relative,
             target_root=roots.target,
-            backup_root=roots.target.parent / "research_workflow_migration_backups",
-            restore_id=f"restore-{migration_id}-{uuid.uuid4().hex[:6]}",
+            backup_root=backup_base,
+            restore_id=f"rr-{uuid.uuid4().hex[:12]}",
         )
         _cleanup_stages(staged.values())
         if recovery_errors:
@@ -1504,8 +1802,10 @@ def verify_research_workflow_migration(
     )
     manifest = _find_manifest(roots.target, Path(manifest_path) if manifest_path else None)
     payload = _read_manifest(manifest)
-    if str(payload.get("status") or "") != "committed":
-        raise ResearchWorkflowMigrationError("verification requires a committed migration manifest")
+    if str(payload.get("status") or "") not in {"committed", "completed"}:
+        raise ResearchWorkflowMigrationError(
+            "verification requires a committed or completed migration manifest"
+        )
     _assert_manifest_root_binding(payload, roots)
     entries = _manifest_entries(payload, roots.target)
     _guard_or_raise(roots.project.project_root, quiescence_probe=quiescence_probe)
@@ -1589,6 +1889,8 @@ def _copy_current_for_rollback(
 
     if not target.is_file() or _is_reparse(target):
         raise ResearchWorkflowMigrationError(f"rollback target is missing or unsafe: {relative_path}")
+    if kind == "sqlite" and target.stat().st_size == 0:
+        raise ResearchWorkflowMigrationError(f"rollback target SQLite main is empty: {relative_path}")
     if kind == "sqlite" and any(sidecar.exists() for sidecar in _sqlite_bundle_paths(target)[1:]):
         raise ResearchWorkflowMigrationError(f"rollback blocked by SQLite sidecar delta: {relative_path}")
     if destination.exists():
@@ -1626,37 +1928,41 @@ def rollback_research_workflow_migration(
         )
     manifest = _find_manifest(roots.target, Path(manifest_path) if manifest_path else None)
     payload = _read_manifest(manifest)
-    if str(payload.get("status") or "") != "committed":
-        raise ResearchWorkflowMigrationError("rollback requires a committed migration manifest")
+    if str(payload.get("status") or "") not in {"committed", "completed"}:
+        raise ResearchWorkflowMigrationError(
+            "rollback requires a committed or completed migration manifest"
+        )
     _assert_manifest_root_binding(payload, roots)
     _guard_or_raise(roots.project.project_root, quiescence_probe=quiescence_probe)
     entries = _manifest_entries(payload, roots.target)
+    before_archive_root = _manifest_archive_root(payload, roots)
     migration_id = str(payload.get("migrationId") or "")
     if not migration_id or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for ch in migration_id):
         raise ResearchWorkflowMigrationError("rollback manifest migration id is invalid")
-    backup_root = roots.target.parent / "research_workflow_migration_backups"
+    backup_root = roots.target.parent / _BACKUP_DIRNAME
     rollback_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    after_archive = backup_root / migration_id / f"after-{rollback_stamp}"
+    after_archive = backup_root / migration_id / f"a-{rollback_stamp}"
     plans: list[_RollbackPlan] = []
     # Validate all manifest identities, archive checksums, post-cutover hashes,
     # and governed paths before creating a single rollback stage.
     for item in entries:
         relative = str(item["relativePath"])
         target = roots.target / Path(relative)
-        before = _before_record_from_manifest(item, backup_root=backup_root)
+        before = _before_record_from_manifest(item, archive_root=before_archive_root)
         _validate_post_cutover_target(item, target)
         plans.append(
             _RollbackPlan(
                 entry=item,
                 before=before,
                 target=target,
-                after_archive=after_archive / Path(relative),
+                after_archive=_archive_member_path(after_archive, relative),
             )
         )
     rollback_stages = _stage_rollback_plans(
         plans,
-        stage_id=f"rb-{migration_id}-{uuid.uuid4().hex[:6]}",
+        stage_id=f"rb-{uuid.uuid4().hex[:12]}",
         backup_root=backup_root,
+        before_archive_root=before_archive_root,
     )
     promoted: list[_RollbackPlan] = []
     try:
