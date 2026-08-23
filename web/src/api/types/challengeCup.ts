@@ -150,6 +150,62 @@ export type ChallengeSubmissionReadiness = {
   };
 };
 
+export type ChallengeCatalogReadinessEvidenceStatus =
+  | "PASS"
+  | "FAIL"
+  | "BLOCKED"
+  | "MISSING"
+  | string;
+
+export type ChallengeCatalogReadinessEvidence = {
+  status: ChallengeCatalogReadinessEvidenceStatus;
+  locator: string;
+};
+
+export type ChallengeCatalogReadinessCounts = {
+  present_count: number;
+  missing_count: number;
+  duplicate_count: number;
+  submission_eligible_count: number;
+  package_backed_count: number;
+  quality_approved_count: number;
+  human_gate_approved_count: number;
+  receipt_complete_count: number;
+  required_question_count: number;
+  submission_ready?: boolean;
+};
+
+export type ChallengeCatalogReadinessResultSet = {
+  catalogId: string;
+  catalogVersion: string;
+  scopeHash: string;
+  counts: ChallengeCatalogReadinessCounts;
+  selectionApprovedCount: number;
+  researchPlanApprovedCount: number;
+  receiptCompleteCount: number;
+  modelPolicyMatchedCount: number;
+  resultManifest: Record<string, unknown>;
+};
+
+/** Server-owned formal 125-question readiness; separate from submission readiness. */
+export type ChallengeCatalogReadiness = {
+  schemaVersion: number;
+  reportKind: string;
+  status: "READY" | "NOT_READY" | string;
+  researchAuthorizationRequired: boolean;
+  realCampaignAllowed: boolean;
+  nextLegalAction: string;
+  sourceCommit: string;
+  programContract: Record<string, unknown>;
+  catalogPolicy: Record<string, unknown>;
+  modelPolicySha256: string;
+  catalogResultSet: ChallengeCatalogReadinessResultSet;
+  evidence: Record<"r0" | "r1" | "api" | "frontend" | "browser", ChallengeCatalogReadinessEvidence>;
+  blockers: string[];
+  readinessReportSha256: string;
+  generatedAt: string;
+};
+
 /** Known legal next actions of the DEV-only Challenge Cup control surface. */
 export type ChallengeCupDevNextLegalAction =
   | "run_dev_readiness"

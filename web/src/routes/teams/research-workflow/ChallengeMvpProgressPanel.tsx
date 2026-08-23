@@ -48,6 +48,7 @@ import { ChallengeCatalogOverview } from "../challenge-cup/ChallengeCatalogOverv
 import { ChallengeTokenUsageStrip } from "../challenge-cup/ChallengeTokenUsageStrip";
 import { isTokenUsageOverview } from "../challenge-cup/challengeTokenUsageModel";
 import { ChallengeSubmissionReadinessPanel } from "./ChallengeSubmissionReadinessPanel";
+import { ChallengeCatalogReadinessPanel } from "./ChallengeCatalogReadinessPanel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ChallengeMvpProgressPanel.styles";
 import challengeMvpProgressPanelContract from "./ChallengeMvpProgressPanel.contract.json";
@@ -354,6 +355,7 @@ export function ChallengeMvpProgressPanel({
       )}
 
       <ChallengeSubmissionReadinessPanel teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
+      <ChallengeCatalogReadinessPanel teamId={teamId} lang={lang} />
       {isTokenUsageOverview(tokenUsageQuery.data) ? (
         <ChallengeTokenUsageStrip
           lang={lang}

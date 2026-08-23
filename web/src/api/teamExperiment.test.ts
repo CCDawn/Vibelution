@@ -2,6 +2,7 @@ import { describe, beforeEach, expect, it, vi } from "vitest";
 
 import { resetControlTokenForTests } from "./client";
 import {
+  fetchChallengeCatalogReadiness,
   fetchChallengeCupCatalogOverview,
   fetchChallengeCupDevControlSnapshot,
   runChallengeCupDevBatch,
@@ -82,6 +83,8 @@ describe("team experiment API", () => {
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/batches/");
     expect(apiSource).toContain("dev-controls/batches/${encodeURIComponent(planId)}");
     expect(apiSource).toContain("encodeURIComponent(teamId)");
+    expect(apiSource).toContain("export function fetchChallengeCatalogReadiness");
+    expect(apiSource).toContain("workflow-orchestration/challenge-program/catalog-readiness");
   });
 
   it("requires an explicit retryFailed flag on every batch run request", () => {
@@ -125,6 +128,35 @@ describe("team experiment API", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/teams/team%20a%2Fb/workflow-orchestration/challenge-program/catalog-overview",
+      expect.objectContaining({ signal: undefined }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches formal catalog readiness independently from submission readiness", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ header: "X-Vibelution-Control-Token", controlToken: "t" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValue(new Response(JSON.stringify({
+        schemaVersion: 1,
+        reportKind: "CatalogHypothesisFlowReadinessReport",
+        status: "NOT_READY",
+        realCampaignAllowed: false,
+        evidence: {},
+        blockers: ["real_batch_missing"],
+        catalogResultSet: { counts: {} },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchChallengeCatalogReadiness("team a/b");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/teams/team%20a%2Fb/workflow-orchestration/challenge-program/catalog-readiness",
       expect.objectContaining({ signal: undefined }),
     );
     vi.unstubAllGlobals();
