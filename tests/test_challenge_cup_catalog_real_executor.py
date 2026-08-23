@@ -393,6 +393,58 @@ def test_start_requires_durable_authorization_and_platform_authorization(
         )
 
 
+@pytest.mark.parametrize(
+    ("snapshot_kind", "expected_code"),
+    [
+        ("lookalike_action", "platform_not_authorized"),
+        ("mismatched_report_hash", "catalog_run_authorization_required"),
+        ("foreign_team", "platform_not_authorized"),
+    ],
+)
+def test_start_rejects_untrusted_readiness_snapshot(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_kind: str,
+    expected_code: str,
+) -> None:
+    harness.authorize("real-1")
+    snapshot: dict[str, object] = {
+        "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+        "readinessReport": dict(harness.readiness_report),
+    }
+    if snapshot_kind == "lookalike_action":
+        snapshot["nextLegalAction"] = "BOGUS_AUTHORIZATION_REQUIRED"
+    elif snapshot_kind == "mismatched_report_hash":
+        snapshot["readinessReport"] = {
+            **harness.readiness_report,
+            "reportId": "changed-under-old-hash",
+        }
+        snapshot["readinessReportSha256"] = catalog_run_authorization.readiness_report_sha256(
+            harness.readiness_report
+        )
+    elif snapshot_kind == "foreign_team":
+        snapshot["teamId"] = "another-research-team"
+    else:  # pragma: no cover - keeps the parametrized fixture exhaustive.
+        raise AssertionError(snapshot_kind)
+    monkeypatch.setattr(
+        svc,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda _team_id: dict(snapshot),
+    )
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as rejected:
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-1",
+            confirmed=True,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
+    assert rejected.value.code == expected_code
+    assert harness.launch_log == []
+    assert harness.start_log == []
+
+
 @pytest.mark.parametrize("operation", ["start", "poll"])
 def test_old_envelope_cannot_cross_readiness_authorization_change(
     harness: _Harness,
@@ -829,14 +881,15 @@ def test_question_launch_authorization_lookup_includes_server_model_policy(
     from core.web.services.team_workflow import challenge_cup_dev_controls
     from core.web.services.team_workflow.research_runtime import question_launch
 
+    snapshot = {
+        "teamId": TEAM_ID,
+        "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+        "readinessReport": dict(harness.readiness_report),
+    }
     monkeypatch.setattr(
         challenge_cup_dev_controls,
         "get_challenge_cup_dev_control_snapshot",
-        lambda _team_id: {
-            "teamId": TEAM_ID,
-            "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
-            "readinessReport": harness.readiness_report,
-        },
+        lambda _team_id: dict(snapshot),
     )
     monkeypatch.setattr(
         catalog_run_authorization,
@@ -858,6 +911,19 @@ def test_question_launch_authorization_lookup_includes_server_model_policy(
 
     assert question_launch._dev_authorization_ready(TEAM_ID) is True
     assert captured["scope"]["modelPolicy"] == harness.model_policy
+    assert question_launch._dev_authorization_ready("another-research-team") is False
+
+    snapshot["nextLegalAction"] = "BOGUS_AUTHORIZATION_REQUIRED"
+    assert question_launch._dev_authorization_ready(TEAM_ID) is False
+    snapshot["nextLegalAction"] = "RESEARCH_AUTHORIZATION_REQUIRED"
+    snapshot["readinessReport"] = {
+        **harness.readiness_report,
+        "reportId": "changed-under-old-hash",
+    }
+    snapshot["readinessReportSha256"] = catalog_run_authorization.readiness_report_sha256(
+        harness.readiness_report
+    )
+    assert question_launch._dev_authorization_ready(TEAM_ID) is False
 
 
 def test_cross_gate_checkpoint_restore_uses_durable_policy_and_seeds_without_state_mock(
