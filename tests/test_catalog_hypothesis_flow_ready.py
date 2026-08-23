@@ -30,6 +30,7 @@ from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS,
     CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION,
     RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
+    CatalogHypothesisFlowReadinessAuthority,
     CatalogHypothesisFlowReadinessReport,
     catalog_hypothesis_flow_report_hash,
 )
@@ -78,6 +79,18 @@ def _model_policy_sha256(result_set: FullCatalogResultSet) -> str:
     result = result_set.get_result("SCI-001")
     assert result is not None and result.package_snapshot is not None
     return str(result.package_snapshot["model_policy"]["policySha256"])
+
+
+def _authority(
+    result_set: FullCatalogResultSet,
+) -> CatalogHypothesisFlowReadinessAuthority:
+    return CatalogHypothesisFlowReadinessAuthority.from_result_set(
+        result_set,
+        source_commit=SOURCE_COMMIT,
+        program_contract=_program_contract(),
+        catalog_policy=_catalog_policy(),
+        model_policy_sha256=_model_policy_sha256(result_set),
+    )
 
 
 def _build(
@@ -215,7 +228,63 @@ def test_ready_manifest_rejects_rehashed_semantic_tampering(
 
     _rehash_report(report)
     with pytest.raises(ContractValidationError):
-        CatalogHypothesisFlowReadinessReport.from_dict(report)
+        CatalogHypothesisFlowReadinessReport.from_dict(
+            report,
+            trusted_authority=_authority(complete_result_set),
+        )
+
+
+@pytest.mark.parametrize("mutation", ("catalog_id", "catalog_version", "scope_hash"))
+def test_ready_rejects_rehashed_catalog_scope_tampering(
+    complete_result_set: FullCatalogResultSet,
+    mutation: str,
+) -> None:
+    report = deepcopy(_build(complete_result_set))
+    catalog = report["catalogResultSet"]
+    scope = catalog["resultManifest"]["scope"]
+    if mutation == "catalog_id":
+        catalog["catalogId"] = "tampered-catalog"
+        scope["catalog_id"] = "tampered-catalog"
+    elif mutation == "catalog_version":
+        catalog["catalogVersion"] = "tampered-version"
+        scope["catalog_version"] = "tampered-version"
+    elif mutation == "scope_hash":
+        catalog["scopeHash"] = "0" * 64
+        scope["scope_hash"] = "0" * 64
+    else:
+        raise AssertionError(f"Unhandled mutation: {mutation}")
+
+    _rehash_report(report)
+    with pytest.raises(ContractValidationError):
+        CatalogHypothesisFlowReadinessReport.from_dict(
+            report,
+            trusted_authority=_authority(complete_result_set),
+        )
+
+
+@pytest.mark.parametrize("mutation", ("source", "program", "policy", "model"))
+def test_ready_rejects_rehashed_authority_context_tampering(
+    complete_result_set: FullCatalogResultSet,
+    mutation: str,
+) -> None:
+    report = deepcopy(_build(complete_result_set))
+    if mutation == "source":
+        report["sourceCommit"] = "b" * 40
+    elif mutation == "program":
+        report["programContract"]["coreBehaviorHash"] = "1" * 64
+    elif mutation == "policy":
+        report["catalogPolicy"]["corePolicyHash"] = "2" * 64
+    elif mutation == "model":
+        report["modelPolicySha256"] = "3" * 64
+    else:
+        raise AssertionError(f"Unhandled mutation: {mutation}")
+
+    _rehash_report(report)
+    with pytest.raises(ContractValidationError):
+        CatalogHypothesisFlowReadinessReport.from_dict(
+            report,
+            trusted_authority=_authority(complete_result_set),
+        )
 
 
 def test_report_hash_is_stable_for_identical_evidence_and_ignores_generated_at(
@@ -404,7 +473,10 @@ def test_report_round_trip_rejects_manifest_tampering(
     complete_result_set: FullCatalogResultSet,
 ) -> None:
     report = _build(complete_result_set)
-    restored = CatalogHypothesisFlowReadinessReport.from_dict(report)
+    restored = CatalogHypothesisFlowReadinessReport.from_dict(
+        report,
+        trusted_authority=_authority(complete_result_set),
+    )
     assert restored.to_dict() == report
 
     tampered = deepcopy(report)
@@ -412,7 +484,17 @@ def test_report_round_trip_rejects_manifest_tampering(
         "canonical_sha256"
     ] = "0" * 64
     with pytest.raises(ContractValidationError, match="manifest"):
-        CatalogHypothesisFlowReadinessReport.from_dict(tampered)
+        CatalogHypothesisFlowReadinessReport.from_dict(
+            tampered,
+            trusted_authority=_authority(complete_result_set),
+        )
+
+
+def test_ready_requires_trusted_authority_context(
+    complete_result_set: FullCatalogResultSet,
+) -> None:
+    with pytest.raises(ContractValidationError, match="trusted authority"):
+        CatalogHypothesisFlowReadinessReport.from_dict(_build(complete_result_set))
 
 
 def test_catalog_readiness_import_does_not_load_experiment_adapters() -> None:

@@ -18,6 +18,7 @@ from .catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
     CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION,
     RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
+    CatalogHypothesisFlowReadinessAuthority,
     CatalogHypothesisFlowReadinessReport,
     catalog_hypothesis_flow_report_hash,
 )
@@ -290,4 +291,5 @@ __all__ = [
     "scope_identity_seed",
     "sha256_hex",
     "CatalogHypothesisFlowReadinessReport",
+    "CatalogHypothesisFlowReadinessAuthority",
 ]

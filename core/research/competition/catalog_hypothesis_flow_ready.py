@@ -20,6 +20,7 @@ from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
     CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION,
     RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
+    CatalogHypothesisFlowReadinessAuthority,
     CatalogHypothesisFlowReadinessReport,
     catalog_hypothesis_flow_report_hash,
     sha256_hex,
@@ -299,7 +300,19 @@ def build_catalog_hypothesis_flow_readiness_report(
         "generatedAt": str(generated_at or _now()).strip(),
     }
     payload["readinessReportSha256"] = catalog_hypothesis_flow_report_hash(payload)
-    return CatalogHypothesisFlowReadinessReport.from_dict(payload).to_dict()
+    trusted_authority = None
+    if status == CATALOG_HYPOTHESIS_FLOW_READY_STATUS:
+        trusted_authority = CatalogHypothesisFlowReadinessAuthority.from_result_set(
+            result_set,
+            source_commit=normalized_source,
+            program_contract=program,
+            catalog_policy=policy,
+            model_policy_sha256=normalized_model_policy,
+        )
+    return CatalogHypothesisFlowReadinessReport.from_dict(
+        payload,
+        trusted_authority=trusted_authority,
+    ).to_dict()
 
 
 # Keep the shorter module-name spelling available to later service adapters.

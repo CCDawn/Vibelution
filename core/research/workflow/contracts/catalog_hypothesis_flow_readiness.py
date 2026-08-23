@@ -281,6 +281,122 @@ def _projection_count(mapping: Mapping[str, Any], field: str) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogHypothesisFlowReadinessAuthority:
+    """Trusted server-side facts required to accept a READY report.
+
+    A report hash proves only that a payload is self-consistent.  It is not a
+    signature and cannot establish that the payload came from the canonical
+    result set or the current authorization context.  Callers should create
+    this object from a validated ``FullCatalogResultSet`` plus independently
+    authorized source/program/policy facts, then pass it to ``from_dict``.
+    """
+
+    catalogResultSet: dict[str, Any]
+    canonicalResultManifest: dict[str, Any]
+    sourceCommit: str
+    programContract: dict[str, Any]
+    catalogPolicy: dict[str, Any]
+    modelPolicySha256: str
+
+    @classmethod
+    def from_result_set(
+        cls,
+        result_set: Any,
+        *,
+        source_commit: str,
+        program_contract: Mapping[str, Any],
+        catalog_policy: Mapping[str, Any],
+        model_policy_sha256: str,
+    ) -> CatalogHypothesisFlowReadinessAuthority:
+        """Capture canonical facts from a trusted formal result set.
+
+        The import stays local so importing readiness contracts never loads
+        experiment adapters or the platform DEV readiness module.
+        """
+
+        from core.research.competition.result_set import FullCatalogResultSet
+
+        if not isinstance(result_set, FullCatalogResultSet):
+            raise TypeError("result_set must be a trusted FullCatalogResultSet")
+        if not isinstance(program_contract, Mapping):
+            raise TypeError("program_contract must be an object")
+        if not isinstance(catalog_policy, Mapping):
+            raise TypeError("catalog_policy must be an object")
+
+        normalized_source = str(source_commit or "").strip().lower()
+        if not _SOURCE_COMMIT_RE.fullmatch(normalized_source):
+            raise ContractValidationError(
+                "trusted authority source_commit must be a 40-character git hash"
+            )
+        normalized_model_policy = _sha256(
+            model_policy_sha256,
+            "trusted authority modelPolicySha256",
+        )
+        normalized_program = {
+            "version": _required_text(
+                program_contract.get("version"),
+                "trusted authority program version",
+            ),
+            "coreBehaviorHash": _sha256(
+                program_contract.get("coreBehaviorHash"),
+                "trusted authority program coreBehaviorHash",
+            ).upper(),
+        }
+        normalized_policy = {
+            "version": _required_text(
+                catalog_policy.get("version"),
+                "trusted authority policy version",
+            ),
+            "corePolicyHash": _sha256(
+                catalog_policy.get("corePolicyHash"),
+                "trusted authority policy corePolicyHash",
+            ).upper(),
+        }
+        manifest = copy.deepcopy(result_set.manifest())
+        counts = result_set.export_counts()
+        counts["required_question_count"] = counts["official_question_count"]
+        selection_approved = 0
+        research_plan_approved = 0
+        model_policy_matched = 0
+        for result in result_set.results():
+            decisions = result.human_gate_decisions
+            if len(decisions) == 2:
+                selection_approved += decisions[0] == "approved"
+                research_plan_approved += decisions[1] == "approved"
+            snapshot = result.package_snapshot
+            package_policy = (
+                snapshot.get("model_policy") if isinstance(snapshot, dict) else None
+            )
+            if (
+                isinstance(package_policy, Mapping)
+                and str(package_policy.get("policySha256") or "").strip().lower()
+                == normalized_model_policy
+            ):
+                model_policy_matched += 1
+        catalog_result_set = {
+            "catalogId": result_set.catalog_id,
+            "catalogVersion": result_set.catalog_version,
+            "scopeHash": result_set.scope_hash,
+            "counts": counts,
+            "selectionApprovedCount": selection_approved,
+            "researchPlanApprovedCount": research_plan_approved,
+            "receiptCompleteCount": result_set.submission_state()[
+                "receipt_complete_count"
+            ],
+            "modelPolicyMatchedCount": model_policy_matched,
+            "resultManifest": copy.deepcopy(manifest),
+        }
+        return cls(
+            catalogResultSet=catalog_result_set,
+            canonicalResultManifest=manifest,
+            sourceCommit=normalized_source,
+            programContract=normalized_program,
+            catalogPolicy=normalized_policy,
+            modelPolicySha256=normalized_model_policy,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CatalogHypothesisFlowReadinessReport:
     schemaVersion: int
     reportKind: str
@@ -302,6 +418,8 @@ class CatalogHypothesisFlowReadinessReport:
     def from_dict(
         cls,
         payload: Mapping[str, Any],
+        *,
+        trusted_authority: CatalogHypothesisFlowReadinessAuthority | None = None,
     ) -> CatalogHypothesisFlowReadinessReport:
         if not isinstance(payload, Mapping):
             raise ContractValidationError("catalog hypothesis readiness report must be an object")
@@ -420,6 +538,12 @@ class CatalogHypothesisFlowReadinessReport:
                 raise ContractValidationError(
                     "READY requires sourceCommit and modelPolicySha256"
                 )
+            if not isinstance(
+                trusted_authority, CatalogHypothesisFlowReadinessAuthority
+            ):
+                raise ContractValidationError(
+                    "READY requires trusted authority context"
+                )
             required_ready_counts = {
                 "present_count": 125,
                 "missing_count": 0,
@@ -449,6 +573,33 @@ class CatalogHypothesisFlowReadinessReport:
             ):
                 raise ContractValidationError(
                     "READY catalogResultSet approvals, receipts, or model policy are incomplete"
+                )
+            if result_set != trusted_authority.catalogResultSet:
+                raise ContractValidationError(
+                    "READY catalogResultSet does not match the trusted FullCatalogResultSet"
+                )
+            if (
+                result_set["resultManifest"]
+                != trusted_authority.canonicalResultManifest
+            ):
+                raise ContractValidationError(
+                    "READY result manifest does not match the trusted FullCatalogResultSet"
+                )
+            if source_commit != trusted_authority.sourceCommit:
+                raise ContractValidationError(
+                    "READY sourceCommit does not match trusted authority"
+                )
+            if program != trusted_authority.programContract:
+                raise ContractValidationError(
+                    "READY programContract does not match trusted authority"
+                )
+            if policy != trusted_authority.catalogPolicy:
+                raise ContractValidationError(
+                    "READY catalogPolicy does not match trusted authority"
+                )
+            if model_policy != trusted_authority.modelPolicySha256:
+                raise ContractValidationError(
+                    "READY modelPolicySha256 does not match trusted authority"
                 )
 
         evidence_raw = payload.get("evidence")
@@ -552,6 +703,7 @@ __all__ = [
     "CATALOG_HYPOTHESIS_FLOW_REPORT_KIND",
     "CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION",
     "RESEARCH_AUTHORIZATION_REQUIRED_ACTION",
+    "CatalogHypothesisFlowReadinessAuthority",
     "CatalogHypothesisFlowReadinessReport",
     "catalog_hypothesis_flow_report_hash",
 ]
