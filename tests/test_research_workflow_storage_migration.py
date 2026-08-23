@@ -10,6 +10,7 @@ import pytest
 import core.infrastructure.research_workflow_storage_migration as storage_migration
 from core.infrastructure.research_workflow_storage_migration import (
     ResearchWorkflowMigrationError,
+    acknowledge_proven_stale_runtime_quiescence,
     apply_research_workflow_migration,
     preview_research_workflow_migration,
     rollback_research_workflow_migration,
@@ -1690,6 +1691,19 @@ def test_default_guard_does_not_upgrade_stale_raw_writers_to_ready(
     assert not result.ready
     assert any(item["code"] == "quiescence_guard_not_ready" for item in result.blockers)
     assert any(item["code"] == "stale_runtime_manager_lock" for item in result.warnings)
+
+    acknowledged = acknowledge_proven_stale_runtime_quiescence(project)
+    assert acknowledged["ok"] is True
+    assert acknowledged["blockers"] == []
+    assert acknowledged["operatorAcknowledgement"] == {
+        "kind": "proven_stale_runtime_only",
+        "warningCodes": ["stale_runtime_manager_lock", "stale_source_collection_snapshot"],
+        "warningCount": 3,
+    }
+    assert any(
+        item["code"] == "proven_stale_runtime_operator_acknowledged"
+        for item in acknowledged["warnings"]
+    )
 
 
 def test_rollback_rechecks_guard_and_target_delta_after_staging(tmp_path: Path, monkeypatch) -> None:
