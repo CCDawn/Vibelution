@@ -93,6 +93,15 @@ export function parseResearchWorkspaceView(value: string | null): ResearchWorksp
   return value === "workflow" || value === "overview" ? value : null;
 }
 
+/**
+ * Only the process home and its legacy overview alias may be rewritten to the
+ * canonical challenge workflow URL. Explicit child views own their URL state.
+ */
+export function isChallengeCupWorkspaceCanonicalizationEligible(view: string | null): boolean {
+  const normalized = view?.trim() ?? "";
+  return normalized === "" || normalized === "overview" || normalized === "workflow";
+}
+
 /** Map stage workspace views onto fixed workflow node ids (ADR 0006). */
 export function researchStageViewToNodeId(view: ResearchStageWorkspaceView): string {
   if (view === "experiment") return "hypothesis_design";
@@ -186,6 +195,24 @@ export function canonicalChallengeCupWorkspaceRoute(
     nodeId: current.get("node") || current.get("nodeId") || undefined,
     panel: current.get("panel") || undefined,
   });
+}
+
+/** Preserve process focus only when the current URL names the selected team. */
+export function isSameChallengeCupWorkspaceTeam(
+  teamId: string,
+  current: URLSearchParams,
+): boolean {
+  const normalizedTeamId = teamId.trim();
+  if (!normalizedTeamId) {
+    return false;
+  }
+  const currentTeamId = (
+    current.get("teamId")
+    || current.get("team")
+    || current.get("team_id")
+    || ""
+  ).trim();
+  return currentTeamId === normalizedTeamId;
 }
 
 /**

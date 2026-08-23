@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { canonicalChallengeCupWorkspaceRoute } from "../researchWorkspaceModel";
+import {
+  canonicalChallengeCupWorkspaceRoute,
+  isChallengeCupWorkspaceCanonicalizationEligible,
+} from "../researchWorkspaceModel";
 
 const routerSource = readFileSync(resolve(import.meta.dirname, "../../../app/router.tsx"), "utf8");
 const modelSource = readFileSync(
@@ -70,6 +73,13 @@ describe("researchWorkspaceRouteContract", () => {
   it("canonicalizes the challenge URL after the selected team resolves", () => {
     expect(shellSource).toContain("canonicalChallengeCupWorkspaceRoute");
     expect(shellSource).toContain("navigate(canonicalHref, { replace: true })");
+  });
+
+  it("only treats overview/workflow as challenge URL canonicalization inputs", () => {
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("overview")).toBe(true);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("workflow")).toBe(true);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("discussion")).toBe(false);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("coordination")).toBe(false);
   });
 
   it("workspace uses VCanvasWorkbenchPage fill recipe like TeamsCanvasComposer", () => {

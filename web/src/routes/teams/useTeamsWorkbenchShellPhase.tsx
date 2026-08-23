@@ -45,7 +45,10 @@ import {
 } from "./teamShellStatusModel";
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
-import { canonicalChallengeCupWorkspaceRoute } from "./researchWorkspaceModel";
+import {
+  canonicalChallengeCupWorkspaceRoute,
+  isChallengeCupWorkspaceCanonicalizationEligible,
+} from "./researchWorkspaceModel";
 
 // Foundation bag boundary: the 328-field workbench bag stays any until Phase 9+ foundation typing.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -249,6 +252,9 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
 
   useEffect(() => {
     if (!challengeCupResearchTeamSelected || !effectiveTeamId) {
+      return;
+    }
+    if (!isChallengeCupWorkspaceCanonicalizationEligible(searchParams.get("researchView"))) {
       return;
     }
     const canonicalHref = canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams);
