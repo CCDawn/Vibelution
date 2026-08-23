@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.research.competition.question_result_package import (
@@ -25,9 +26,165 @@ _PLACEHOLDER_MARKERS = (
     "TBD",
 )
 
+_FINAL_SUMMARY_FIELDS = {
+    "answer_boundary": ("answer_boundary", "answerBoundary"),
+    "selected_hypothesis": ("selected_hypothesis", "selectedHypothesis"),
+    "research_plan_summary": ("research_plan_summary", "researchPlanSummary"),
+    "key_evidence_refs": ("key_evidence_refs", "keyEvidenceRefs"),
+    "counterevidence_refs": ("counterevidence_refs", "counterevidenceRefs"),
+    "limitations": ("limitations",),
+    "next_validation_step": ("next_validation_step", "nextValidationStep"),
+}
+_COMPETITION_RESULT_VIEW_FIELDS = {
+    "problem_statement": ("problem_statement", "problemStatement"),
+    "rationale": ("rationale",),
+    "technical_details": ("technical_details", "technicalDetails"),
+    "datasets": ("datasets",),
+    "paper_title": ("paper_title", "paperTitle"),
+    "paper_abstract": ("paper_abstract", "paperAbstract"),
+    "methods": ("methods",),
+    "experiments": ("experiments",),
+    "results": ("results",),
+    "references": ("references",),
+}
+_DATASET_FIELDS = {
+    "source": ("source",),
+    "target": ("target",),
+}
+
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _mapping(value: Any, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError(f"Protocol draft {field} must be a non-empty object.")
+    return dict(value)
+
+
+def _section_alias_value(
+    value: Mapping[str, Any],
+    names: tuple[str, ...],
+    field: str,
+) -> Any:
+    present = [(name, value[name]) for name in names if name in value]
+    if not present:
+        raise ValueError(f"Protocol draft {field} is missing.")
+    _first_name, first_value = present[0]
+    if any(candidate != first_value for _name, candidate in present[1:]):
+        raise ValueError(
+            f"Protocol draft {field} contains conflicting aliases: "
+            + ", ".join(name for name, _candidate in present)
+        )
+    return first_value
+
+
+def _normalize_section_mapping(
+    value: Any,
+    *,
+    section: str,
+    fields: Mapping[str, tuple[str, ...]],
+) -> dict[str, Any]:
+    raw = _mapping(value, section)
+    allowed = {alias for names in fields.values() for alias in names}
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise ValueError(
+            f"Protocol draft {section} contains unsupported fields: "
+            + ", ".join(unknown)
+        )
+    normalized: dict[str, Any] = {}
+    for field, aliases in fields.items():
+        normalized[field] = _section_alias_value(raw, aliases, f"{section}.{field}")
+    return normalized
+
+
+def _section_text(value: Any, field: str, *, max_length: int = 4000) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Protocol draft {field} must be a non-empty string.")
+    normalized = value.strip()
+    if len(normalized) > max_length:
+        raise ValueError(
+            f"Protocol draft {field} exceeds {max_length} characters."
+        )
+    return normalized
+
+
+def _section_string_list(
+    value: Any, field: str, *, max_length: int = 4000
+) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"Protocol draft {field} must be a non-empty array.")
+    normalized: list[str] = []
+    for item in value:
+        text = _section_text(item, f"{field}[]", max_length=max_length)
+        if text in normalized:
+            raise ValueError(f"Protocol draft {field} must contain unique values.")
+        normalized.append(text)
+    return normalized
+
+
+def _normalize_final_summary(value: Any) -> dict[str, Any]:
+    normalized = _normalize_section_mapping(
+        value,
+        section="finalSummary",
+        fields=_FINAL_SUMMARY_FIELDS,
+    )
+    for field in (
+        "answer_boundary",
+        "selected_hypothesis",
+        "research_plan_summary",
+        "next_validation_step",
+    ):
+        normalized[field] = _section_text(
+            normalized[field], f"finalSummary.{field}"
+        )
+    for field in ("key_evidence_refs", "counterevidence_refs", "limitations"):
+        normalized[field] = _section_string_list(
+            normalized[field], f"finalSummary.{field}"
+        )
+    if _contains_placeholder(normalized):
+        raise ValueError("Protocol draft finalSummary contains a placeholder.")
+    return normalized
+
+
+def _normalize_competition_result_view(value: Any) -> dict[str, Any]:
+    normalized = _normalize_section_mapping(
+        value,
+        section="competitionResultView",
+        fields=_COMPETITION_RESULT_VIEW_FIELDS,
+    )
+    for field in (
+        "problem_statement",
+        "rationale",
+        "technical_details",
+        "paper_title",
+        "paper_abstract",
+    ):
+        normalized[field] = _section_text(
+            normalized[field], f"competitionResultView.{field}", max_length=500
+        )
+    datasets = _normalize_section_mapping(
+        normalized["datasets"],
+        section="competitionResultView.datasets",
+        fields=_DATASET_FIELDS,
+    )
+    normalized["datasets"] = {
+        field: _section_string_list(
+            datasets[field], f"competitionResultView.datasets.{field}", max_length=500
+        )
+        for field in _DATASET_FIELDS
+    }
+    for field in ("methods", "experiments", "results", "references"):
+        normalized[field] = _section_string_list(
+            normalized[field], f"competitionResultView.{field}", max_length=500
+        )
+    if _contains_placeholder(normalized):
+        raise ValueError(
+            "Protocol draft competitionResultView contains a placeholder."
+        )
+    return normalized
 
 
 def _contains_placeholder(value: Any) -> bool:
@@ -122,6 +279,8 @@ def prepare_research_plan(
     team_id: str,
     task_context: dict[str, Any],
     research_plan: Any,
+    final_summary: Any = None,
+    competition_result_view: Any = None,
 ) -> dict[str, Any]:
     """Validate and bind a v2 research plan before experiment-plan creation."""
 
@@ -141,6 +300,10 @@ def prepare_research_plan(
         raise ValueError(f"researchPlan is invalid: {exc}") from exc
     if _contains_placeholder(normalized):
         raise ValueError("researchPlan contains a placeholder.")
+    normalized_final_summary = _normalize_final_summary(final_summary)
+    normalized_competition_result_view = _normalize_competition_result_view(
+        competition_result_view
+    )
     human_gate = normalized.get("human_gate")
     if not isinstance(human_gate, dict) or human_gate.get("required") is not True:
         raise ValueError("researchPlan.human_gate.required must be true.")
@@ -207,6 +370,8 @@ def prepare_research_plan(
         "task": task,
         "protocolInput": protocol_input,
         "researchPlan": normalized,
+        "finalSummary": normalized_final_summary,
+        "competitionResultView": normalized_competition_result_view,
         "workflowRunId": workflow_run_id,
         "sourceCollectionRunId": source_run_id,
         "snapshot": snapshot,
@@ -230,6 +395,16 @@ def record_research_plan(
         task_context=task_context,
         research_plan=(
             task_context.get("researchPlan")
+            if isinstance(task_context, dict)
+            else None
+        ),
+        final_summary=(
+            task_context.get("finalSummary")
+            if isinstance(task_context, dict)
+            else None
+        ),
+        competition_result_view=(
+            task_context.get("competitionResultView")
             if isinstance(task_context, dict)
             else None
         ),
@@ -268,6 +443,8 @@ def record_research_plan(
         "hypothesisSetRef": binding["hypothesisSetRef"],
         "hypothesisSetHash": binding["hypothesisSetHash"],
         "researchPlan": dict(binding["researchPlan"]),
+        "finalSummary": dict(binding["finalSummary"]),
+        "competitionResultView": dict(binding["competitionResultView"]),
     }
     record = put_workflow_artifact(
         team_id,
@@ -293,6 +470,8 @@ def record_research_plan(
             "inputSnapshotHash": snapshot.snapshotHash,
         },
         "researchPlan": dict(binding["researchPlan"]),
+        "finalSummary": dict(binding["finalSummary"]),
+        "competitionResultView": dict(binding["competitionResultView"]),
     }
 
 
