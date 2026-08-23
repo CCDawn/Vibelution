@@ -22,6 +22,68 @@ class Migration:
 
 SCHEMA_VERSION = 5
 
+# v5 was first deployed with a checksum that is already present in user
+# ledgers.  It is accepted only together with an independent schema-shape
+# check in ``database.py``; this is deliberately not a blanket checksum
+# bypass.
+V5_LEGACY_CHECKSUM = (
+    "efaaa98a2565e4197c5492d13c71205efe913fe79b7bf827a2bc8455a065e074"
+)
+V5_CATALOG_TABLE_NAME = "catalog_run_authorizations"
+V5_CATALOG_LOOKUP_INDEX_NAME = "idx_catalog_run_authorizations_lookup"
+
+# Keep the canonical migration text deterministic and semantically identical
+# to the deployed v5 DDL.  Its compact formatting gives fresh databases a
+# distinct current checksum while normalized sqlite_schema validation accepts
+# the historical formatting without weakening the DDL contract.
+V5_CATALOG_TABLE_STATEMENT = (
+    "CREATE TABLE catalog_run_authorizations ("
+    "authorization_id TEXT PRIMARY KEY, "
+    "team_id TEXT NOT NULL, "
+    "plan_id TEXT NOT NULL, "
+    "batch_scope_json TEXT NOT NULL CHECK (json_valid(batch_scope_json)), "
+    "scope_hash TEXT NOT NULL, "
+    "approved_by TEXT NOT NULL, "
+    "approved_at_ms INTEGER NOT NULL CHECK (approved_at_ms > 0), "
+    "readiness_report_sha256 TEXT NOT NULL, "
+    "record_hash TEXT NOT NULL, "
+    "created_at_ms INTEGER NOT NULL CHECK (created_at_ms > 0), "
+    "UNIQUE (team_id, plan_id, scope_hash, readiness_report_sha256)"
+    ")"
+)
+V5_CATALOG_LOOKUP_INDEX_STATEMENT = (
+    "CREATE INDEX idx_catalog_run_authorizations_lookup "
+    "ON catalog_run_authorizations("
+    "team_id, plan_id, scope_hash, readiness_report_sha256, "
+    "approved_at_ms DESC, authorization_id)"
+)
+V5_CATALOG_COLUMNS = (
+    ("authorization_id", "TEXT", 0, 1),
+    ("team_id", "TEXT", 1, 0),
+    ("plan_id", "TEXT", 1, 0),
+    ("batch_scope_json", "TEXT", 1, 0),
+    ("scope_hash", "TEXT", 1, 0),
+    ("approved_by", "TEXT", 1, 0),
+    ("approved_at_ms", "INTEGER", 1, 0),
+    ("readiness_report_sha256", "TEXT", 1, 0),
+    ("record_hash", "TEXT", 1, 0),
+    ("created_at_ms", "INTEGER", 1, 0),
+)
+V5_CATALOG_UNIQUE_COLUMNS = (
+    "team_id",
+    "plan_id",
+    "scope_hash",
+    "readiness_report_sha256",
+)
+V5_CATALOG_LOOKUP_INDEX_COLUMNS = (
+    ("team_id", False),
+    ("plan_id", False),
+    ("scope_hash", False),
+    ("readiness_report_sha256", False),
+    ("approved_at_ms", True),
+    ("authorization_id", False),
+)
+
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
@@ -423,28 +485,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         version=5,
         statements=(
-            """
-            CREATE TABLE catalog_run_authorizations (
-              authorization_id TEXT PRIMARY KEY,
-              team_id TEXT NOT NULL,
-              plan_id TEXT NOT NULL,
-              batch_scope_json TEXT NOT NULL CHECK (json_valid(batch_scope_json)),
-              scope_hash TEXT NOT NULL,
-              approved_by TEXT NOT NULL,
-              approved_at_ms INTEGER NOT NULL CHECK (approved_at_ms > 0),
-              readiness_report_sha256 TEXT NOT NULL,
-              record_hash TEXT NOT NULL,
-              created_at_ms INTEGER NOT NULL CHECK (created_at_ms > 0),
-              UNIQUE (team_id, plan_id, scope_hash, readiness_report_sha256)
-            )
-            """,
-            """
-            CREATE INDEX idx_catalog_run_authorizations_lookup
-            ON catalog_run_authorizations(
-              team_id, plan_id, scope_hash, readiness_report_sha256,
-              approved_at_ms DESC, authorization_id
-            )
-            """,
+            V5_CATALOG_TABLE_STATEMENT,
+            V5_CATALOG_LOOKUP_INDEX_STATEMENT,
         ),
     ),
 )

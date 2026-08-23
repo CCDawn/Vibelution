@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,18 @@ from .errors import (
     WorkflowLedgerSchemaError,
     WorkflowLedgerUnavailableError,
 )
-from .schema import MIGRATIONS, SCHEMA_VERSION
+from .schema import (
+    MIGRATIONS,
+    SCHEMA_VERSION,
+    V5_CATALOG_COLUMNS,
+    V5_CATALOG_LOOKUP_INDEX_COLUMNS,
+    V5_CATALOG_LOOKUP_INDEX_NAME,
+    V5_CATALOG_LOOKUP_INDEX_STATEMENT,
+    V5_CATALOG_TABLE_NAME,
+    V5_CATALOG_TABLE_STATEMENT,
+    V5_CATALOG_UNIQUE_COLUMNS,
+    V5_LEGACY_CHECKSUM,
+)
 
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 DEFAULT_READ_POOL_CAPACITY = 4
@@ -156,14 +168,22 @@ class WorkflowLedgerDatabase:
                     (migration.version,),
                 ).fetchone()
                 if record is not None:
-                    if str(record[0]) != migration.checksum:
+                    checksum = str(record[0])
+                    is_legacy_v5 = (
+                        migration.version == 5 and checksum == V5_LEGACY_CHECKSUM
+                    )
+                    if checksum != migration.checksum and not is_legacy_v5:
                         raise WorkflowLedgerSchemaError(
                             "Workflow Ledger migration checksum mismatch at "
                             f"version {migration.version}"
                         )
+                    if migration.version == 5:
+                        self._validate_v5_catalog_schema(connection)
                     continue
                 for statement in migration.statements:
                     connection.execute(statement)
+                if migration.version == 5:
+                    self._validate_v5_catalog_schema(connection)
                 connection.execute(
                     "INSERT INTO schema_migrations (version, checksum, applied_at_ms) "
                     "VALUES (?, ?, ?)",
@@ -177,8 +197,101 @@ class WorkflowLedgerDatabase:
             connection.execute("ROLLBACK")
             raise WorkflowLedgerMigrationError(f"ledger migration failed: {exc}") from exc
 
+    def _validate_v5_catalog_schema(self, connection: Any) -> None:
+        """Fail closed unless the v5 authorization DDL is exactly supported.
+
+        The legacy checksum is not enough evidence: a copied or partially
+        rebuilt database may retain ``schema_migrations`` while its table or
+        indexes drift.  Validate both the stored DDL and SQLite's structural
+        introspection before allowing the runtime to open it.
+        """
+
+        table_row = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+            (V5_CATALOG_TABLE_NAME,),
+        ).fetchone()
+        if table_row is None or _normalize_sql(table_row[0]) != _normalize_sql(
+            V5_CATALOG_TABLE_STATEMENT
+        ):
+            raise WorkflowLedgerSchemaError(
+                "Workflow Ledger v5 catalog authorization table DDL mismatch"
+            )
+
+        columns = tuple(
+            (str(row[1]), str(row[2]).upper(), int(row[3]), int(row[5]))
+            for row in connection.execute(
+                f"PRAGMA table_info({_quote_identifier(V5_CATALOG_TABLE_NAME)})"
+            )
+        )
+        if columns != V5_CATALOG_COLUMNS:
+            raise WorkflowLedgerSchemaError(
+                "Workflow Ledger v5 catalog authorization columns mismatch"
+            )
+
+        index_rows = tuple(
+            connection.execute(
+                f"PRAGMA index_list({_quote_identifier(V5_CATALOG_TABLE_NAME)})"
+            )
+        )
+        lookup = next(
+            (row for row in index_rows if str(row[1]) == V5_CATALOG_LOOKUP_INDEX_NAME),
+            None,
+        )
+        if lookup is None or int(lookup[2]) != 0 or str(lookup[3]) != "c":
+            raise WorkflowLedgerSchemaError(
+                "Workflow Ledger v5 catalog authorization lookup index mismatch"
+            )
+        lookup_index_sql = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?",
+            (V5_CATALOG_LOOKUP_INDEX_NAME,),
+        ).fetchone()
+        if lookup_index_sql is None or _normalize_sql(lookup_index_sql[0]) != _normalize_sql(
+            V5_CATALOG_LOOKUP_INDEX_STATEMENT
+        ):
+            raise WorkflowLedgerSchemaError(
+                "Workflow Ledger v5 catalog authorization lookup DDL mismatch"
+            )
+        lookup_columns = tuple(
+            (str(row[2]), bool(int(row[3])))
+            for row in connection.execute(
+                f"PRAGMA index_xinfo({_quote_identifier(V5_CATALOG_LOOKUP_INDEX_NAME)})"
+            )
+            if int(row[5]) == 1
+        )
+        if lookup_columns != V5_CATALOG_LOOKUP_INDEX_COLUMNS:
+            raise WorkflowLedgerSchemaError(
+                "Workflow Ledger v5 catalog authorization lookup columns mismatch"
+            )
+
+        unique_constraint_found = False
+        for row in index_rows:
+            if int(row[2]) != 1 or str(row[3]) != "u":
+                continue
+            index_name = str(row[1])
+            unique_columns = tuple(
+                str(info[2])
+                for info in connection.execute(
+                    f"PRAGMA index_info({_quote_identifier(index_name)})"
+                )
+            )
+            if unique_columns == V5_CATALOG_UNIQUE_COLUMNS:
+                unique_constraint_found = True
+                break
+        if not unique_constraint_found:
+            raise WorkflowLedgerSchemaError(
+                "Workflow Ledger v5 catalog authorization unique constraint mismatch"
+            )
+
 
 def _utc_now_ms() -> int:
     import time
 
     return int(time.time() * 1000)
+
+
+def _normalize_sql(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().rstrip(";").lower()
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
