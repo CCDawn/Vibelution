@@ -1434,7 +1434,7 @@ def start_research_project_agent_task(
                 "candidateId": candidate_id,
                 "subtaskId": subtask_id,
                 "candidateContext": candidate_context,
-            "sourceCollectionRunId": source_collection_run_id,
+                "sourceCollectionRunId": source_collection_run_id,
                 "experimentName": project.get("name"),
                 "targetRef": target_ref,
                 "agentId": agent_id,

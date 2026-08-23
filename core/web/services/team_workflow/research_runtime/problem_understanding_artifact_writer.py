@@ -101,6 +101,44 @@ def _task_attempt(task: Mapping[str, Any], contract: Mapping[str, Any]) -> int:
     return value
 
 
+def _require_source_collection_binding(
+    *,
+    team_id: str,
+    source_collection_run_id: str,
+    workflow_run_id: str,
+    research_project_id: str,
+) -> dict[str, Any]:
+    """Verify the source run that will own the canonical artifact envelope."""
+
+    from core.web.services import data_processing_service
+
+    try:
+        source_run = data_processing_service.get_processing_run(
+            source_collection_run_id
+        )
+    except data_processing_service.DataProcessingError as exc:
+        raise ValueError(
+            "Formal problem-understanding source collection run is unavailable."
+        ) from exc
+    scope = source_run.get("scope") if isinstance(source_run.get("scope"), dict) else {}
+    expected_scope = {
+        "teamId": team_id,
+        "workflowRunId": workflow_run_id,
+        "researchProjectId": research_project_id,
+    }
+    if (
+        str(source_run.get("runId") or "").strip() != source_collection_run_id
+        or any(
+            str(scope.get(field) or "").strip() != expected
+            for field, expected in expected_scope.items()
+        )
+    ):
+        raise ValueError(
+            "Formal problem-understanding source collection scope does not match."
+        )
+    return dict(source_run)
+
+
 def _formal_task_context(task_context: Mapping[str, Any]) -> dict[str, Any]:
     task = task_context.get("task")
     if not isinstance(task, Mapping):
@@ -168,6 +206,13 @@ def _authoritative_problem_understanding_binding(
     if task.get("roleKey") and str(task.get("roleKey")).strip() != "challenge_cup_search":
         raise ValueError("Problem-understanding task has an unexpected Agent role.")
     attempt_number = _task_attempt(task, contract)
+
+    _require_source_collection_binding(
+        team_id=normalized_team,
+        source_collection_run_id=source_run_id,
+        workflow_run_id=workflow_run_id,
+        research_project_id=project_id,
+    )
 
     from .runtime_factory import production_workflow_runtime
 

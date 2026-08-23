@@ -113,3 +113,28 @@ def test_problem_writer_uses_server_task_scope_not_payload_identity(monkeypatch)
 def test_problem_payload_keeps_exact_shape() -> None:
     with pytest.raises(ValueError, match="unsupported fields"):
         writer.validate_problem_understanding({**_payload(), "summary": "noise"})
+
+
+def test_source_collection_binding_requires_exact_workflow_scope(monkeypatch) -> None:
+    from core.web.services import data_processing_service
+
+    monkeypatch.setattr(
+        data_processing_service,
+        "get_processing_run",
+        lambda _run_id: {
+            "runId": "source-run-1",
+            "scope": {
+                "teamId": "research-team",
+                "workflowRunId": "another-run",
+                "researchProjectId": "project-1",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="scope does not match"):
+        writer._require_source_collection_binding(
+            team_id="research-team",
+            source_collection_run_id="source-run-1",
+            workflow_run_id="run-1",
+            research_project_id="project-1",
+        )
