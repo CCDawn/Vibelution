@@ -224,6 +224,27 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _CANONICAL_OUTPUT_REF_SCHEME = "turn-journal"
 
 
+def _source_result_package_hash(payload: dict[str, Any]) -> str:
+    """Return the optional immutable result-package binding for a registration.
+
+    The bridge that moves a canonical workflow result into the Challenge
+    Program store supplies this value.  It is deliberately kept outside the
+    v2 output hash: the output remains the producer's immutable artifact while
+    the index records which workflow package authorized its registration.
+    """
+
+    value = str(
+        payload.get("sourceResultPackageHash")
+        or payload.get("source_result_package_hash")
+        or ""
+    ).strip().lower()
+    if value and not _SHA256_RE.fullmatch(value):
+        raise ValueError(
+            "sourceResultPackageHash must be a 64-character SHA-256 value."
+        )
+    return value
+
+
 def _canonical_output_ref(
     session_id: str,
     source_run_id: str,
@@ -1602,6 +1623,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     run_id = str(run.get("run_id") or "").strip()
     if not question_id or not run_id:
         raise ValueError("output.identity.question_id and output.run.run_id are required.")
+    source_result_package_hash = _source_result_package_hash(payload)
     parent_run_id = str(payload.get("parentRunId") or "").strip()
     if parent_run_id == run_id:
         raise ValueError("parentRunId must reference an earlier run.")
@@ -1722,6 +1744,8 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     }
     if package_metadata is not None:
         record["resultPackage"] = package_metadata
+    if source_result_package_hash:
+        record["sourceResultPackageHash"] = source_result_package_hash
     if parent_run_id or lineage_refs:
         record["lineage"] = {
             "relation": "revises" if parent_run_id else "derived_from_evidence",
@@ -1745,6 +1769,17 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     "Existing challenge question run artifact does not match its immutable index record."
                 )
             existing_package_metadata = existing_record.get("resultPackage")
+            existing_source_result_package_hash = str(
+                existing_record.get("sourceResultPackageHash") or ""
+            ).strip().lower()
+            if source_result_package_hash and (
+                not existing_source_result_package_hash
+                or existing_source_result_package_hash != source_result_package_hash
+            ):
+                raise ValueError(
+                    "Existing challenge question run does not match the immutable "
+                    "source result package binding."
+                )
             if package_metadata is not None:
                 if not isinstance(existing_package_metadata, dict):
                     raise ValueError(
@@ -1792,6 +1827,10 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     package_metadata is None
                     or existing_package_metadata == package_metadata
                 )
+                and (
+                    not source_result_package_hash
+                    or existing_source_result_package_hash == source_result_package_hash
+                )
             ):
                 return {
                     "record": deepcopy(existing_record),
@@ -1832,6 +1871,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             "questionId": question_id,
             "runId": run_id,
             "parentRunId": parent_run_id,
+            "sourceResultPackageHash": source_result_package_hash,
             "schemaValidation": record["validation"]["schemaValidation"],
             "citationValidation": record["validation"]["citationValidation"],
             "officialModelCall": official_call,

@@ -243,6 +243,22 @@ def run_delivery_orchestration(
     request = _delivery_request(snapshot)
     authority_run_id = str(snapshot.get("sourceCollectionRunId") or run.run_id).strip()
 
+    # The generic result package and the Challenge Program v2 output are
+    # separate contracts.  Handoff is deliberately best-effort at this
+    # delivery boundary: an incomplete upstream v2 authority is reported as
+    # NEEDS_CONTEXT in the immutable delivery artifact and must not turn a
+    # successfully closed workflow run into a failed delivery.
+    from .program_candidate_handoff import (
+        handoff_result_package_to_challenge_program,
+    )
+
+    program_candidate_handoff = handoff_result_package_to_challenge_program(
+        store,
+        team_id=team_id,
+        workflow_run_id=run.run_id,
+        source_collection_run_id=authority_run_id,
+    )
+
     entries = _receipt_evidence_entries(store, run.run_id)
     entries.extend(_request_evidence_entries(request))
     try:
@@ -322,6 +338,7 @@ def run_delivery_orchestration(
             "pdfLimit": pdf_report,
         },
         "formalBlockers": list(formal_pack.get("blockers") or []),
+        "programCandidateHandoff": program_candidate_handoff,
         "diagnostics": diagnostics,
     }
     put_workflow_artifact(
@@ -359,6 +376,7 @@ def run_delivery_orchestration(
         "submissionProjection": projection_report,
         "pdfCheck": pdf_report,
         "diagnostics": diagnostics,
+        "programCandidateHandoff": program_candidate_handoff,
     }
 
 
@@ -388,6 +406,7 @@ def delivery_event_payload(outcome: dict[str, Any]) -> dict[str, Any]:
         "artifactKind": DELIVERY_ARTIFACT_KIND,
         "artifactRef": str(outcome.get("artifactRef") or ""),
         "diagnostics": [str(item) for item in outcome.get("diagnostics") or []],
+        "programCandidateHandoff": dict(outcome.get("programCandidateHandoff") or {}),
     }
 
 

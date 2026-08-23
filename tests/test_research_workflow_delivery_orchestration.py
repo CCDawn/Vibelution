@@ -172,6 +172,10 @@ def test_run_close_enqueues_and_completes_delivery(harness) -> None:
     assert "catalog_incomplete" in payload["formalBlockers"]
     assert "r0_not_pass" in payload["formalBlockers"]
     assert payload["pdfCheck"]["withinLimit"] is True
+    assert payload["programCandidateHandoff"]["status"] == "NEEDS_CONTEXT"
+    assert payload["programCandidateHandoff"]["missingAuthorities"] == [
+        "research_result_package"
+    ]
     assert payload["artifactRef"].startswith(
         f"{DELIVERY_ARTIFACT_KIND}://research-team/"
     )
@@ -188,6 +192,7 @@ def test_run_close_enqueues_and_completes_delivery(harness) -> None:
     assert body["steps"]["previewPack"]["status"] == "preview"
     assert body["steps"]["formalPack"]["status"] == "refused"
     assert body["steps"]["submissionProjection"]["allowedPackMode"] == "preview"
+    assert body["programCandidateHandoff"]["status"] == "NEEDS_CONTEXT"
 
     row = _outbox_row(graph, run_id)
     assert row is not None and row["status"] == "succeeded"
