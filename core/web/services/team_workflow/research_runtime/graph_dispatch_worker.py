@@ -46,8 +46,8 @@ from .iteration_route import branch_decision_from_run, routed_successors
 
 # A run is created before START_NODE is accepted so the request can be made
 # idempotent.  That window must nevertheless be bounded: after this deadline
-# a run with no attempt and no accepted dispatch is a failed dispatch, not an
-# indefinitely pending job.
+# a run with no durable node attempt is a failed dispatch, not an indefinitely
+# pending job.  Command/outbox rows alone do not prove that dispatch started.
 DEFAULT_START_DEADLINE_MS = 60_000
 
 
@@ -105,6 +105,10 @@ class GraphDispatchWorker:
         return self._store.submit(wrapped, force_flush=force_flush)
 
     def run_once(self, limit: int = 8) -> int:
+        # Terminalize stale created runs before leasing their dispatch actions.
+        # Otherwise this worker could lease an action for a run that the same
+        # reconciliation pass is supposed to dead-letter.
+        repaired = self._repair_created_without_start()
         leased = outbox_api.lease_ready_actions(
             self._store,
             owner=self._owner,
@@ -115,9 +119,8 @@ class GraphDispatchWorker:
         )
         for action in leased:
             self._handle(action)
-        repaired = self._repair_dispatching_without_adapter()
+        repaired += self._repair_dispatching_without_adapter()
         repaired += self._repair_starting_without_progress()
-        repaired += self._repair_created_without_start()
         repaired += self._repair_stranded_iteration_route()
         repaired += self._repair_stranded_terminal_package()
         return len(leased) + repaired
@@ -127,15 +130,45 @@ class GraphDispatchWorker:
 
         ``run_created`` is intentionally committed before command acceptance,
         so a process crash can leave a perfectly valid ``created`` row.  The
-        reconciliation is conservative: an attempt, an accepted START_NODE,
-        or a live graph-dispatch outbox action means that the run is still
-        claimable and must not be failed.  Everything else past the deadline
-        is closed atomically with a deterministic ``run_failed`` event.
+        only evidence that a run actually started is a durable node attempt;
+        command rows and graph-dispatch outbox rows can be stale, partially
+        committed, or replayable and therefore do not extend the deadline.
+        Everything else past the deadline is closed atomically with a
+        deterministic ``run_failed`` event and any still-live graph dispatch
+        is cancelled in the same transaction.
         """
         now_ms = self._now()
         cutoff_ms = now_ms - self._start_deadline_ms
 
         def mutate(uow):
+            def cancel_live_dispatch(run_id: str, reason: str) -> None:
+                uow.repository.execute(
+                    """
+                    UPDATE outbox_actions
+                    SET status = 'cancelled',
+                        lease_owner = NULL,
+                        lease_expires_at_ms = NULL,
+                        last_problem_json = ?,
+                        updated_at_ms = ?
+                    WHERE run_id = ?
+                      AND action_kind = 'graph_dispatch'
+                      AND status IN ('pending', 'leased')
+                    """,
+                    (
+                        json.dumps(
+                            {
+                                "code": "dispatch_never_started",
+                                "reason": reason,
+                                "reconciliation": "created_without_start",
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        now_ms,
+                        run_id,
+                    ),
+                )
+
             rows = uow.repository.execute(
                 """
                 SELECT run_id, team_id, run_version
@@ -151,38 +184,14 @@ class GraphDispatchWorker:
                 team_id = str(row[1] or "")
                 if not run_id or not team_id:
                     continue
-                # A START_NODE command and its attempt are normally created in
-                # one writer transaction.  Check both facts because this
-                # reconciler must remain safe for older/partially restored DBs.
+                # A node attempt is the durable proof that dispatch started.
+                # Do not treat command acceptance or an outbox row as proof:
+                # either can survive a crash before the worker begins work.
                 attempt = uow.repository.execute(
                     "SELECT 1 FROM node_attempts WHERE run_id = ? LIMIT 1",
                     (run_id,),
                 ).fetchone()
                 if attempt is not None:
-                    continue
-                command = uow.repository.execute(
-                    """
-                    SELECT 1 FROM workflow_commands
-                    WHERE run_id = ?
-                      AND command_kind = 'start_node'
-                      AND status IN ('accepted', 'completed')
-                    LIMIT 1
-                    """,
-                    (run_id,),
-                ).fetchone()
-                if command is not None:
-                    continue
-                live_dispatch = uow.repository.execute(
-                    """
-                    SELECT 1 FROM outbox_actions
-                    WHERE run_id = ?
-                      AND action_kind = 'graph_dispatch'
-                      AND status IN ('pending', 'leased')
-                    LIMIT 1
-                    """,
-                    (run_id,),
-                ).fetchone()
-                if live_dispatch is not None:
                     continue
                 run = uow.repository.get_run(run_id)
                 if run is None or run.status != "created":
@@ -244,6 +253,7 @@ class GraphDispatchWorker:
                         blocked_problem_json=None,
                     ):
                         continue
+                    cancel_live_dispatch(run_id, event_payload["reason"])
                     repaired += 1
                     continue
                 expected_sequence = run.last_event_sequence + 1
@@ -258,6 +268,7 @@ class GraphDispatchWorker:
                     blocked_problem_json=None,
                 ):
                     continue
+                cancel_live_dispatch(run_id, event_payload["reason"])
                 sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
                 if sequence is None:
                     raise RuntimeError(

@@ -84,8 +84,17 @@ def test_created_run_without_start_is_failed_once(tmp_path: Path) -> None:
         store.close()
 
 
-@pytest.mark.parametrize("start_evidence", ["node_attempt", "accepted_command", "live_outbox"])
-def test_created_run_with_start_evidence_is_not_reaped(
+@pytest.mark.parametrize(
+    "start_evidence",
+    [
+        "node_attempt",
+        "accepted_command",
+        "completed_command",
+        "live_outbox",
+        "leased_outbox",
+    ],
+)
+def test_created_run_reconciliation_only_respects_node_attempt(
     tmp_path: Path, start_evidence: str
 ) -> None:
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
@@ -106,12 +115,21 @@ def test_created_run_with_start_evidence_is_not_reaped(
                     event_id=f"evt-created-{start_evidence}",
                 )
             )
-            if start_evidence in {"accepted_command", "live_outbox"}:
+            if start_evidence in {
+                "accepted_command",
+                "completed_command",
+                "live_outbox",
+                "leased_outbox",
+            }:
                 uow.repository.insert_command(
                     build_command_record(
                         command_id=f"cmd-{start_evidence}",
                         run_id=run.run_id,
-                        status="accepted",
+                        status=(
+                            "completed"
+                            if start_evidence == "completed_command"
+                            else "accepted"
+                        ),
                     )
                 )
             if start_evidence == "node_attempt":
@@ -129,15 +147,31 @@ def test_created_run_with_start_evidence_is_not_reaped(
                         command_id="cmd-node-attempt",
                     )
                 )
-            if start_evidence == "live_outbox":
+            if start_evidence in {"live_outbox", "leased_outbox"}:
                 uow.repository.insert_outbox(
                     build_outbox_record(
                         action_id=f"act-{start_evidence}",
                         run_id=run.run_id,
                         command_id=f"cmd-{start_evidence}",
                         available_at_ms=FIXED_NOW_MS + 100_000,
+                        status=(
+                            "leased" if start_evidence == "leased_outbox" else "pending"
+                        ),
                     )
                 )
+                if start_evidence == "leased_outbox":
+                    uow.repository.execute(
+                        """
+                        UPDATE outbox_actions
+                        SET lease_owner = ?, lease_expires_at_ms = ?
+                        WHERE action_id = ?
+                        """,
+                        (
+                            "other-worker",
+                            FIXED_NOW_MS + 20_000,
+                            f"act-{start_evidence}",
+                        ),
+                    )
 
         store.submit(seed, force_flush=True).result(timeout=10)
         worker = GraphDispatchWorker(
@@ -147,10 +181,39 @@ def test_created_run_with_start_evidence_is_not_reaped(
             start_deadline_ms=1_000,
         )
 
-        worker.run_once()
+        if start_evidence == "node_attempt":
+            worker.run_once()
+        else:
+            assert worker.run_once() == 1
         current = store.get_run(run.run_id)
-        assert current is not None and current.status == "created"
-        assert len(store.list_events(run.run_id)) == 1
+        assert current is not None
+        if start_evidence == "node_attempt":
+            assert current.status == "created"
+            assert len(store.list_events(run.run_id)) == 1
+        else:
+            assert current.status == "failed"
+            assert current.terminal_reason == "dispatch_never_started"
+            events = store.list_events(run.run_id)
+            assert [event.event_type for event in events] == [
+                "run_created",
+                "run_failed",
+            ]
+            assert json.loads(events[-1].payload_json)["terminalReason"] == (
+                "dispatch_never_started"
+            )
+            if start_evidence in {"live_outbox", "leased_outbox"}:
+                outbox = store.read(
+                    lambda repo: repo.get_outbox(f"act-{start_evidence}")
+                )
+                assert outbox is not None
+                assert outbox.status == "cancelled"
+                assert outbox.lease_owner is None
+                assert outbox.lease_expires_at_ms is None
+                assert json.loads(outbox.last_problem_json or "{}")["code"] == (
+                    "dispatch_never_started"
+                )
+            assert worker.run_once() == 0
+            assert len(store.list_events(run.run_id)) == 2
     finally:
         store.close()
 
