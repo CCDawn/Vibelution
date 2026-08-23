@@ -53,6 +53,7 @@ REQUIRED_HUMAN_GATE_KEYS = {
     "H3_research_plan",
     "H4_external_output",
 }
+MODEL_INVOCATION_RECEIPT_STAGES = ("generation", "review", "revision")
 _STORE_LOCK = RLock()
 
 
@@ -1379,6 +1380,186 @@ def _load_store(team_id: str) -> dict[str, Any]:
     }
 
 
+def _receipt_locator_sha256(locator: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        locator,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest().upper()
+
+
+def _model_invocation_receipt_refs_from_package(package: Any) -> dict[str, dict[str, Any]]:
+    """Project bounded receipt identities from the validated package authority."""
+
+    from core.research.competition.result_set import QuestionResult
+
+    return deepcopy(QuestionResult.from_package(package).manifest_entry()["receipts"])
+
+
+def _validated_model_invocation_receipt_refs(value: Any) -> dict[str, dict[str, Any]]:
+    """Return canonical stored refs only when all stages and locator hashes verify."""
+
+    if not isinstance(value, dict) or set(value) != set(MODEL_INVOCATION_RECEIPT_STAGES):
+        return {}
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for stage_id in MODEL_INVOCATION_RECEIPT_STAGES:
+        item = value.get(stage_id)
+        if not isinstance(item, dict):
+            return {}
+        receipt_id = str(item.get("receipt_id") or "").strip()
+        node_run_id = str(item.get("node_run_id") or "").strip()
+        locator = item.get("evidence_locator")
+        locator_sha256 = str(item.get("evidence_locator_sha256") or "").strip().upper()
+        if (
+            not receipt_id
+            or not node_run_id
+            or not isinstance(locator, dict)
+            or not locator
+            or not re.fullmatch(r"[0-9A-F]{64}", locator_sha256)
+        ):
+            return {}
+        try:
+            expected_locator_sha256 = _receipt_locator_sha256(locator)
+        except (TypeError, ValueError):
+            return {}
+        if locator_sha256 != expected_locator_sha256:
+            return {}
+        normalized[stage_id] = {
+            "receipt_id": receipt_id,
+            "node_run_id": node_run_id,
+            "evidence_locator": deepcopy(locator),
+            "evidence_locator_sha256": locator_sha256,
+        }
+    return normalized
+
+
+def _apply_model_invocation_receipt_projection(
+    record: dict[str, Any],
+    expected_refs: dict[str, dict[str, Any]],
+) -> bool:
+    """Apply the derived projection and reject any conflicting persisted copy."""
+
+    refs_field_present = "modelInvocationReceiptRefs" in record
+    stored_refs = record.get("modelInvocationReceiptRefs")
+    if refs_field_present:
+        if expected_refs and (
+            _validated_model_invocation_receipt_refs(stored_refs) != expected_refs
+        ):
+            raise ValueError(
+                "challenge_question_run_receipt_mismatch: canonical package receipts "
+                "do not match the index record."
+            )
+        if not expected_refs and stored_refs:
+            raise ValueError(
+                "challenge_question_run_receipt_mismatch: receipt refs exist without "
+                "a canonical result package."
+            )
+
+    validation = (
+        dict(record.get("validation"))
+        if isinstance(record.get("validation"), dict)
+        else {}
+    )
+    expected_status = "passed" if expected_refs else "failed"
+    changed = (
+        not refs_field_present
+        or stored_refs != expected_refs
+        or validation.get("modelInvocationReceipts") != expected_status
+        or (
+            bool(expected_refs)
+            and "modelInvocationReceiptIssue" in validation
+        )
+        or (
+            not expected_refs
+            and validation.get("modelInvocationReceiptIssue")
+            != "canonical_result_package_missing"
+        )
+    )
+    record["modelInvocationReceiptRefs"] = deepcopy(expected_refs)
+    validation["modelInvocationReceipts"] = expected_status
+    if expected_refs:
+        validation.pop("modelInvocationReceiptIssue", None)
+    else:
+        validation["modelInvocationReceiptIssue"] = (
+            "canonical_result_package_missing"
+        )
+    record["validation"] = validation
+    return changed
+
+
+def _package_bound_model_invocation_receipt_refs(
+    record: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Verify a stored projection against its immutable package before summary use."""
+
+    package_metadata = record.get("resultPackage")
+    if not isinstance(package_metadata, dict):
+        return {}
+    locator = str(package_metadata.get("locator") or "").strip()
+    if not locator:
+        return {}
+    package_path = Path(locator)
+    package_payload = _read_json(package_path)
+    if not package_payload or not package_path.is_file():
+        return {}
+    try:
+        from core.research.competition.question_result_package import (
+            QuestionResultPackage,
+        )
+
+        restored_package = QuestionResultPackage.from_dict(
+            package_payload,
+            expected_model_policy_sha256=str(
+                package_metadata.get("modelPolicySha256") or ""
+            ),
+        )
+    except (TypeError, ValueError, KeyError):
+        return {}
+    if (
+        restored_package.canonical_hash
+        != str(package_metadata.get("canonicalHash") or "")
+        or restored_package.idempotency_key
+        != str(package_metadata.get("idempotencyKey") or "")
+    ):
+        return {}
+    expected_refs = _model_invocation_receipt_refs_from_package(restored_package)
+    if (
+        _validated_model_invocation_receipt_refs(
+            record.get("modelInvocationReceiptRefs")
+        )
+        != expected_refs
+    ):
+        return {}
+    return expected_refs
+
+
+def _summary_receipt_validation(
+    record: dict[str, Any],
+    receipt_refs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    validation = deepcopy(record.get("validation") or {})
+    if isinstance(record.get("resultPackage"), dict):
+        validation["modelInvocationReceipts"] = (
+            "passed" if receipt_refs else "failed"
+        )
+        if receipt_refs:
+            validation.pop("modelInvocationReceiptIssue", None)
+        else:
+            validation["modelInvocationReceiptIssue"] = (
+                "canonical_result_package_receipt_mismatch"
+            )
+    else:
+        validation["modelInvocationReceipts"] = "failed"
+        validation["modelInvocationReceiptIssue"] = (
+            "canonical_result_package_missing"
+        )
+    return validation
+
+
 def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     records = _load_store(team_id).get("records")
     records = records if isinstance(records, list) else []
@@ -1396,12 +1577,21 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         for record in valid_candidates
         if (record.get("validation") or {}).get("semanticValidation") == "passed"
     ]
+    receipt_refs_by_record_id: dict[str, dict[str, dict[str, Any]]] = {}
+    receipt_ready_candidates: list[dict[str, Any]] = []
+    for record in validated_candidates:
+        receipt_refs = _package_bound_model_invocation_receipt_refs(record)
+        if receipt_refs:
+            record_id = str(record.get("recordId") or "")
+            receipt_refs_by_record_id[record_id] = receipt_refs
+            receipt_ready_candidates.append(record)
     completed = [
         record
         for record in valid_candidates
         if record.get("submissionEligible") is True
         and _all_human_gates_approved(record.get("humanGates"))
         and str(record.get("status") or "") == "approved"
+        and str(record.get("recordId") or "") in receipt_refs_by_record_id
     ]
     completed_question_ids = sorted({str(record.get("questionId") or "") for record in completed})
     completed_question_results = [
@@ -1411,10 +1601,16 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             "schemaVersion": record.get("schemaVersion"),
             "submissionEligible": record.get("submissionEligible") is True,
             "status": str(record.get("status") or ""),
-            "validation": deepcopy(record.get("validation") or {}),
+            "validation": _summary_receipt_validation(
+                record,
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {}),
+            ),
             "humanGates": deepcopy(record.get("humanGates") or {}),
             "outputSha256": str(record.get("outputSha256") or ""),
             "artifactPath": str(record.get("artifactPath") or ""),
+            "modelInvocationReceiptRefs": deepcopy(
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
             "resultPackage": deepcopy(record.get("resultPackage"))
             if isinstance(record.get("resultPackage"), dict)
             else None,
@@ -1436,10 +1632,16 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             "questionId": question_id,
             "runId": str(record.get("runId") or ""),
             "status": str(record.get("status") or ""),
-            "validation": deepcopy(record.get("validation") or {}),
+            "validation": _summary_receipt_validation(
+                record,
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {}),
+            ),
             "humanGates": deepcopy(record.get("humanGates") or {}),
             "outputSha256": str(record.get("outputSha256") or ""),
             "artifactPath": str(record.get("artifactPath") or ""),
+            "modelInvocationReceiptRefs": deepcopy(
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
             "resultPackage": deepcopy(record.get("resultPackage"))
             if isinstance(record.get("resultPackage"), dict)
             else None,
@@ -1450,6 +1652,24 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     approved_deep_experiment_question_ids = [
         question_id for question_id in completed_question_ids if question_id in deep_question_ids
     ]
+    receipt_ready_question_ids = sorted(
+        {
+            str(record.get("questionId") or "")
+            for record in receipt_ready_candidates
+            if str(record.get("questionId") or "")
+        }
+    )
+    latest_candidate = deepcopy(valid_candidates[-1]) if valid_candidates else None
+    if latest_candidate is not None:
+        latest_receipt_refs = receipt_refs_by_record_id.get(
+            str(latest_candidate.get("recordId") or ""), {}
+        )
+        latest_candidate["modelInvocationReceiptRefs"] = deepcopy(
+            latest_receipt_refs
+        )
+        latest_candidate["validation"] = _summary_receipt_validation(
+            latest_candidate, latest_receipt_refs
+        )
     return {
         "recordCount": len(records),
         "validCandidateCount": len(valid_candidates),
@@ -1457,13 +1677,15 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         "validatedQuestionIds": validated_question_ids,
         "validatedOutcomeCounts": dict(sorted(validated_outcome_counts.items())),
         "validatedQuestionResults": validated_question_results,
+        "receiptReadyQuestionCount": len(receipt_ready_question_ids),
+        "receiptReadyQuestionIds": receipt_ready_question_ids,
         "completedCount": len(completed_question_ids),
         "completedQuestionIds": completed_question_ids,
         "completedQuestionResults": completed_question_results,
         # Deep experiments share the per-question submission gate; the explicit
         # list exists so the program projection can confirm them independently.
         "approvedDeepExperimentQuestionIds": approved_deep_experiment_question_ids,
-        "latestCandidate": deepcopy(valid_candidates[-1]) if valid_candidates else None,
+        "latestCandidate": latest_candidate,
     }
 
 
@@ -1556,12 +1778,20 @@ def get_challenge_question_run_detail(
                 "challenge_question_run_package_mismatch: canonical package does not match its index record."
             )
         result_package = package_payload
+        expected_receipt_refs = _model_invocation_receipt_refs_from_package(
+            restored_package
+        )
+        _apply_model_invocation_receipt_projection(
+            selected_record, expected_receipt_refs
+        )
         result_package_artifact = {
             "path": str(package_path),
             "canonicalHash": restored_package.canonical_hash,
             "idempotencyKey": restored_package.idempotency_key,
             "immutable": True,
         }
+    else:
+        _apply_model_invocation_receipt_projection(selected_record, {})
 
     return {
         "teamId": team_id,
@@ -1715,6 +1945,24 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             "modelPolicySha256": canonical_package.model_policy["policySha256"],
             "locator": str(package_path),
         }
+    model_invocation_receipt_refs = (
+        _model_invocation_receipt_refs_from_package(canonical_package)
+        if canonical_package is not None
+        else {}
+    )
+    if model_invocation_receipt_refs:
+        receipt_evidence_refs = {
+            str(item["evidence_locator"].get("evidenceId") or "").strip()
+            for item in model_invocation_receipt_refs.values()
+            if isinstance(item.get("evidence_locator"), dict)
+        }
+        matched_evidence_refs = sorted(
+            set(matched_evidence_refs)
+            | {item for item in receipt_evidence_refs if item}
+        )
+        official_call = model_provider in OFFICIAL_PROVIDERS and bool(
+            matched_evidence_refs
+        )
 
     record = {
         "recordId": f"{question_id}:{run_id}",
@@ -1742,6 +1990,9 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         "registeredAt": _utc_now(),
         "registeredBy": str(payload.get("registeredBy") or ""),
     }
+    _apply_model_invocation_receipt_projection(
+        record, model_invocation_receipt_refs
+    )
     if package_metadata is not None:
         record["resultPackage"] = package_metadata
     if source_result_package_hash:
@@ -1769,6 +2020,11 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     "Existing challenge question run artifact does not match its immutable index record."
                 )
             existing_package_metadata = existing_record.get("resultPackage")
+            if existing_package_metadata is not None and package_metadata is None:
+                raise ValueError(
+                    "Existing challenge question run is bound to a canonical result "
+                    "package; idempotent replay must include the same package."
+                )
             existing_source_result_package_hash = str(
                 existing_record.get("sourceResultPackageHash") or ""
             ).strip().lower()
@@ -1832,6 +2088,12 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     or existing_source_result_package_hash == source_result_package_hash
                 )
             ):
+                projection_changed = _apply_model_invocation_receipt_projection(
+                    existing_record, model_invocation_receipt_refs
+                )
+                if projection_changed:
+                    store["updatedAt"] = _utc_now()
+                    _write_json(_store_path(team_id), store)
                 return {
                     "record": deepcopy(existing_record),
                     "output": existing_output,
