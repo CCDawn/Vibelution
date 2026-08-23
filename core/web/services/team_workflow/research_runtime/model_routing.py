@@ -13,6 +13,7 @@ from core.research.competition.question_result_package import (
 )
 
 NODE_MODEL_PURPOSE: dict[str, str] = {
+    "problem_understanding": "source_discovery",
     "source_finding": "source_discovery",
     "source_extraction": "extraction",
     "evidence_relations": "extraction",
@@ -30,6 +31,7 @@ NODE_MODEL_PURPOSE: dict[str, str] = {
 # a shared purpose (for example ``extraction``) cannot silently route through
 # the wrong Agent.
 NODE_MODEL_PRODUCT_ROLE: dict[str, str] = {
+    "problem_understanding": "challenge_cup_search",
     "source_finding": "challenge_cup_search",
     "source_extraction": "challenge_cup_extractor",
     "evidence_relations": "challenge_cup_knowledge_manager",

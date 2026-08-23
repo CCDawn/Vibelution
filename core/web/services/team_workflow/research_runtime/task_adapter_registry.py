@@ -30,6 +30,10 @@ SOURCE_NODE_TASKS: dict[str, tuple[str, str]] = {
 }
 
 PROJECT_NODE_TASKS: dict[str, str] = {
+    # Problem understanding is a research-project task.  ``source_discovery``
+    # is its model purpose (see model_routing), not a source-collection stage
+    # id; keeping it here avoids inventing an unsupported stage-session kind.
+    "problem_understanding": "problem_understanding",
     "hypothesis_design": "hypothesis_design",
     "protocol_design": "experiment_design",
     "protocol_review": "protocol_review",
