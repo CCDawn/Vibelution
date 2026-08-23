@@ -645,10 +645,8 @@ def _platform_snapshot_allows_real_batch(snapshot: Mapping[str, Any]) -> bool:
     """Recognize the current readiness boundary without owning its schema.
 
     The legacy DEV control surface projects ``RESEARCH_AUTHORIZATION_REQUIRED``.
-    Catalog readiness will expose its own report/action later, so the real-batch
-    service accepts any explicit authorization-required action or a READY report
-    that says research authorization is required.  The durable approval record
-    below remains mandatory in every case.
+    The real-batch service accepts only that exact action.  The durable approval
+    record below remains mandatory as a separate authorization proof.
     """
 
     return (
@@ -685,7 +683,7 @@ def _require_authorization(team_id: str) -> dict[str, Any]:
         snapshot
     ):
         raise ChallengeCupRealBatchError(
-            "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED or another explicit research-authorization boundary; real batches stay closed.",
+            "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED; real batches stay closed.",
             code="platform_not_authorized",
         )
     snapshot_team = str(snapshot.get("teamId") or "").strip()

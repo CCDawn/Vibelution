@@ -27,13 +27,13 @@ from core.research.competition.question_result_package import (
     is_qwen_model_id,
 )
 from core.research.competition.real_control_batch import RealBatchError, real_plan
+from core.research.workflow.contracts._validation import ContractValidationError
 from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
-    CatalogHypothesisFlowReadinessReport,
     RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
+    CatalogHypothesisFlowReadinessReport,
     catalog_hypothesis_flow_report_hash,
 )
-from core.research.workflow.contracts._validation import ContractValidationError
 from core.research.workflow.contracts.research_team_role_contract import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
 )
@@ -676,8 +676,8 @@ __all__ = [
     "canonical_sha256",
     "expected_record_hash",
     "find_catalog_run_authorization",
-    "readiness_report_sha256",
     "readiness_hash_from_snapshot",
+    "readiness_report_sha256",
     "record_catalog_run_authorization",
     "require_readiness_report_sha256",
     "resolve_catalog_model_policy",
