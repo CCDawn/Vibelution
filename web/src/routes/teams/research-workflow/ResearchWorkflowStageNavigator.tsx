@@ -146,6 +146,18 @@ export function buildResearchWorkflowStageNavigatorModel(
   input: BuildResearchWorkflowStageNavigatorModelInput,
 ): ResearchWorkflowStageNavigatorModel {
   const formal = input.progress;
+  const zeroSummary: ResearchWorkflowStageNavigatorModel["summary"] = {
+    currentStage: 0,
+    totalStages: 0,
+    completedNodes: 0,
+    totalNodes: 0,
+    blockedNodes: 0,
+    percent: 0,
+    authority: "graph",
+  };
+  if (input.scopeMismatch || input.loadState === "scope_mismatch") {
+    return { state: "unknown", detail: "题目或运行范围正在切换，等待权威快照。", stages: [], summary: zeroSummary };
+  }
   const formalCurrentIndex = formal?.stages.findIndex((stage) => stage.id === formal.currentStageId) ?? -1;
   const formalCompletedStageCount = formal?.stages.filter((stage) => stage.state === "completed").length ?? 0;
   const emptySummary: ResearchWorkflowStageNavigatorModel["summary"] = formal
@@ -160,18 +172,7 @@ export function buildResearchWorkflowStageNavigatorModel(
         percent: clampCount(formal.percent, 100),
         authority: "formal",
       }
-    : {
-        currentStage: 0,
-        totalStages: 0,
-        completedNodes: 0,
-        totalNodes: 0,
-        blockedNodes: 0,
-        percent: 0,
-        authority: "graph",
-      };
-  if (input.scopeMismatch || input.loadState === "scope_mismatch") {
-    return { state: "unknown", detail: "题目或运行范围正在切换，等待权威快照。", stages: [], summary: emptySummary };
-  }
+    : zeroSummary;
   if (input.error || input.loadState === "error") {
     return { state: "error", detail: input.error || "暂时无法读取流程进度。", stages: [], summary: emptySummary };
   }
@@ -208,15 +209,16 @@ export function buildResearchWorkflowStageNavigatorModel(
   });
 
   if (formal) {
+    const displayedCurrentIndex = stages.findIndex((stage) => stage.id === formal.currentStageId);
     return {
       state: stages.length ? "ready" : "empty",
       detail: stages.length ? null : "当前流程没有可显示的阶段。",
       stages,
       summary: {
-        currentStage: formalCurrentIndex >= 0
-          ? formalCurrentIndex + 1
-          : Math.min(formal.stages.length, formalCompletedStageCount + 1),
-        totalStages: formal.stages.length,
+        currentStage: displayedCurrentIndex >= 0
+          ? displayedCurrentIndex + 1
+          : currentStageNumber(stages),
+        totalStages: stages.length,
         completedNodes: clampCount(formal.completedNodes),
         totalNodes: Math.max(clampCount(formal.completedNodes), clampCount(formal.totalNodes)),
         blockedNodes: clampCount(formal.blockedNodes),

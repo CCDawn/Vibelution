@@ -70,11 +70,24 @@ describe("buildResearchWorkflowStageNavigatorModel", () => {
       ["source_review", "current"],
     ]);
     expect(model.stages[2]).toMatchObject({ id: "experiment", completed: 1, total: 1, blocked: 1, status: "blocked" });
-    expect(model.summary).toEqual({ currentStage: 1, totalStages: 2, completedNodes: 1, totalNodes: 3, blockedNodes: 1, percent: 33, authority: "formal" });
+    expect(model.summary).toEqual({ currentStage: 2, totalStages: 4, completedNodes: 1, totalNodes: 3, blockedNodes: 1, percent: 33, authority: "formal" });
   });
 
-  it("keeps unknown and loading states mounted without inventing progress", () => {
-    expect(buildResearchWorkflowStageNavigatorModel({ graph, progress: null, scopeMismatch: true })).toMatchObject({ state: "unknown", stages: [] });
+  it("keeps unknown and loading states mounted without leaking stale formal progress", () => {
+    expect(buildResearchWorkflowStageNavigatorModel({ graph, progress: formalProgress(), scopeMismatch: true })).toEqual({
+      state: "unknown",
+      detail: "题目或运行范围正在切换，等待权威快照。",
+      stages: [],
+      summary: {
+        currentStage: 0,
+        totalStages: 0,
+        completedNodes: 0,
+        totalNodes: 0,
+        blockedNodes: 0,
+        percent: 0,
+        authority: "graph",
+      },
+    });
     expect(buildResearchWorkflowStageNavigatorModel({ graph: null, progress: null, loadState: "loading" })).toMatchObject({ state: "loading", stages: [] });
   });
 });
@@ -95,7 +108,7 @@ describe("ResearchWorkflowStageNavigator", () => {
     const model = buildResearchWorkflowStageNavigatorModel({ graph, progress: formalProgress() });
     await act(async () => root?.render(<ResearchWorkflowStageNavigator lang="zh" model={model} onNavigateNode={onNavigateNode} />));
 
-    expect(container.querySelector('[data-testid="stage-navigator-summary"]')?.textContent).toContain("阶段1/2节点1/3阻塞1整体33%");
+    expect(container.querySelector('[data-testid="stage-navigator-summary"]')?.textContent).toContain("阶段2/4节点1/3阻塞1整体33%");
     expect(container.textContent).toContain("已阻塞");
     expect(container.querySelector('li[data-stage-status="blocked"] svg')).not.toBeNull();
     const knowledgeStage = Array.from(container.querySelectorAll("button"))
