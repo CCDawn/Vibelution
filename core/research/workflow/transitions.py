@@ -82,6 +82,7 @@ RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
             RunStatus.WAITING_HUMAN,
             RunStatus.BLOCKED,
             RunStatus.RECONCILIATION_REQUIRED,
+            RunStatus.FAILED,
             RunStatus.CANCELLED,
         }
     ),

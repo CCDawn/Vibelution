@@ -121,7 +121,6 @@ def heal_agent_binding_from_sibling_freeze(
     if node is None or node.actorKind != ActorKind.AGENT:
         return None
     preferred = normalize_role_key(node.primaryRoleKey)
-    fallback: dict[str, str] | None = None
     for binding in (snapshot or {}).get("agentBindingSnapshot") or []:
         if not isinstance(binding, Mapping):
             continue
@@ -137,9 +136,7 @@ def heal_agent_binding_from_sibling_freeze(
         }
         if normalize_role_key(str(binding.get("roleKey") or "")) == preferred:
             return item
-        if fallback is None:
-            fallback = item
-    return fallback
+    return None
 
 
 def effective_binding_layers(

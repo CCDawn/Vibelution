@@ -44,6 +44,8 @@ from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
 
+DEFAULT_START_DEADLINE_MS = 60_000
+
 
 def _log_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
     debug.warning(
@@ -63,6 +65,7 @@ class GraphDispatchWorker:
         coordinator: ChallengeCupGraphCoordinator,
         owner_id: str = "graph-worker",
         lease_ms: int = 30_000,
+        start_deadline_ms: int = DEFAULT_START_DEADLINE_MS,
         now_provider: Callable[[], int] | None = None,
         readiness_service: Any | None = None,
         readiness_context: Callable[[], Any] | None = None,
@@ -72,6 +75,7 @@ class GraphDispatchWorker:
         self._coordinator = coordinator
         self._owner = owner_id
         self._lease_ms = lease_ms
+        self._start_deadline_ms = max(0, int(start_deadline_ms))
         self._now = now_provider or (lambda: int(time.time() * 1000))
         self._readiness = readiness_service
         self._readiness_context = readiness_context
@@ -100,9 +104,126 @@ class GraphDispatchWorker:
             self._handle(action)
         repaired = self._repair_dispatching_without_adapter()
         repaired += self._repair_starting_without_progress()
+        repaired += self._repair_created_without_start()
         repaired += self._repair_stranded_iteration_route()
         repaired += self._repair_stranded_terminal_package()
         return len(leased) + repaired
+
+    def _repair_created_without_start(self) -> int:
+        """Fail expired ``created`` runs that have no node attempt.
+
+        Run creation is committed before the first START_NODE command so the
+        request can remain idempotent.  A process crash in that window must
+        not leave a run pending forever.  The status transition and
+        ``run_failed`` event are committed in one writer transaction, and the
+        deterministic event identity makes a partial replay idempotent.
+        """
+        now_ms = self._now()
+        cutoff_ms = now_ms - self._start_deadline_ms
+
+        def mutate(uow):
+            rows = uow.repository.execute(
+                """
+                SELECT run_id, team_id
+                FROM workflow_runs
+                WHERE status = 'created' AND created_at_ms <= ?
+                ORDER BY created_at_ms ASC, run_id ASC
+                """,
+                (cutoff_ms,),
+            ).fetchall()
+            repaired = 0
+            for row in rows:
+                run_id = str(row[0] or "")
+                team_id = str(row[1] or "")
+                if not run_id or not team_id:
+                    continue
+                attempt = uow.repository.execute(
+                    "SELECT 1 FROM node_attempts WHERE run_id = ? LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+                if attempt is not None:
+                    continue
+                run = uow.repository.get_run(run_id)
+                if run is None or run.status != "created":
+                    continue
+
+                event_id = f"evt-dispatch-never-started-{run_id}"
+                event_payload = {
+                    "terminalReason": "dispatch_never_started",
+                    "reason": "created run exceeded START_NODE deadline without an attempt",
+                    "reconciliation": "created_without_start",
+                }
+                existing_event = uow.repository.get_event_by_id(event_id)
+                if existing_event is not None:
+                    try:
+                        existing_actor = json.loads(existing_event.actor_json)
+                        existing_payload = json.loads(existing_event.payload_json)
+                    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                        raise RuntimeError(
+                            f"created-run reconciliation event {event_id} is corrupt"
+                        ) from exc
+                    if (
+                        existing_event.run_id != run_id
+                        or existing_event.event_type != "run_failed"
+                        or existing_event.sequence != run.last_event_sequence
+                        or existing_event.run_version != run.run_version
+                        or existing_actor != {
+                            "actorType": "system",
+                            "actorId": "graph-worker",
+                        }
+                        or existing_event.correlation_id != run_id
+                        or existing_event.causation_id is not None
+                        or existing_payload != event_payload
+                    ):
+                        raise RuntimeError(
+                            f"created-run reconciliation event {event_id} conflicts with dispatch_never_started"
+                        )
+                    if not uow.repository.update_run_status(
+                        run_id,
+                        team_id,
+                        "failed",
+                        now_ms,
+                        active_node_id="",
+                        completion_kind=None,
+                        terminal_reason="dispatch_never_started",
+                        blocked_problem_json=None,
+                    ):
+                        continue
+                    repaired += 1
+                    continue
+
+                if not uow.repository.update_run_status(
+                    run_id,
+                    team_id,
+                    "failed",
+                    now_ms,
+                    active_node_id="",
+                    completion_kind=None,
+                    terminal_reason="dispatch_never_started",
+                    blocked_problem_json=None,
+                ):
+                    continue
+                sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
+                if sequence is None:
+                    raise RuntimeError(
+                        f"created-run reconciliation lost run {run_id} while advancing the event sequence"
+                    )
+                uow.repository.insert_event(
+                    _event_record_for(
+                        run_id=run_id,
+                        sequence=sequence,
+                        run_version=run.run_version,
+                        event_id=event_id,
+                        event_type="run_failed",
+                        correlation_id=run_id,
+                        payload=event_payload,
+                        now_ms=now_ms,
+                    )
+                )
+                repaired += 1
+            return repaired
+
+        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
 
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)
