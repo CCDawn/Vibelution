@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -290,7 +289,53 @@ def _utc_now_ms() -> int:
 
 
 def _normalize_sql(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip().rstrip(";").lower()
+    raw_sql = str(value or "")
+    normalized: list[str] = []
+    pending_space = False
+    index = 0
+
+    while index < len(raw_sql):
+        char = raw_sql[index]
+        quote_closer = {"'": "'", '"': '"', "`": "`", "[": "]"}.get(char)
+        if quote_closer is not None:
+            if pending_space and normalized and normalized[-1] not in "(),":
+                normalized.append(" ")
+            pending_space = False
+            quote_end = _quoted_sql_end(raw_sql, index, quote_closer)
+            normalized.append(raw_sql[index:quote_end])
+            index = quote_end
+            continue
+        if char.isspace():
+            pending_space = True
+            index += 1
+            continue
+        if char in "(),":
+            if normalized and normalized[-1] == " ":
+                normalized.pop()
+            normalized.append(char)
+            pending_space = False
+            index += 1
+            continue
+        if pending_space and normalized and normalized[-1] not in "(),":
+            normalized.append(" ")
+        pending_space = False
+        normalized.append(char.lower())
+        index += 1
+
+    return "".join(normalized).strip().rstrip(";").strip()
+
+
+def _quoted_sql_end(value: str, start: int, closer: str) -> int:
+    index = start + 1
+    while index < len(value):
+        if value[index] != closer:
+            index += 1
+            continue
+        if index + 1 < len(value) and value[index + 1] == closer:
+            index += 2
+            continue
+        return index + 1
+    return len(value)
 
 
 def _quote_identifier(value: str) -> str:
