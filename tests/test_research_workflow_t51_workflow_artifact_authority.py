@@ -420,6 +420,62 @@ def test_workflow_store_accepts_iteration_decision_and_governance_kinds(
         assert body["recordKind"] == kind
 
 
+def test_dimension_reviews_kind_has_canonical_readback_and_conflict_guard(
+    monkeypatch, tmp_path
+) -> None:
+    _use_artifact_root(monkeypatch, tmp_path)
+    payload = {
+        "schemaVersion": 1,
+        "artifactKind": "dimension_reviews",
+        "teamId": "research-team",
+        "runId": "run-dimension-reviews",
+        "sourceCollectionRunId": "sc-dimension-reviews",
+        "questionId": "SCI-096",
+        "roundId": "hround-dimension-reviews",
+        "selectionId": "selection-dimension-reviews",
+        "inputScopeHash": "a" * 64,
+        "dimensionReviews": [
+            {
+                "hypothesis_id": "H1",
+                "dimension": "novelty",
+                "rating": "adequate",
+                "rationale": "explicit rationale",
+                "evidence_refs": [],
+                "reviewer": "agent-evaluator",
+            }
+        ],
+    }
+    kwargs = {
+        "kind": "dimension_reviews",
+        "workflow_run_id": "run-dimension-reviews",
+        "source_collection_run_id": "sc-dimension-reviews",
+        "artifact_identity": "dimension_reviews:identity-1",
+    }
+    first = put_workflow_artifact("research-team", payload=payload, **kwargs)
+    replay = put_workflow_artifact("research-team", payload=payload, **kwargs)
+    assert replay == first
+    envelope = {
+        "teamId": "research-team",
+        "kind": "dimension_reviews",
+        "workflowRunId": "run-dimension-reviews",
+        "sourceCollectionRunId": "sc-dimension-reviews",
+        "payload": payload,
+    }
+    ref = build_canonical_ref(
+        kind="dimension_reviews",
+        team_id="research-team",
+        authority_run_id="sc-dimension-reviews",
+        content_hash=canonical_sha256(envelope),
+    )
+    assert read_domain_artifact(ref) is not None
+    with pytest.raises(WorkflowArtifactConflictError):
+        put_workflow_artifact(
+            "research-team",
+            payload={**payload, "roundId": "different-round"},
+            **kwargs,
+        )
+
+
 def test_persist_workflow_artifact_keeps_first_write_on_identity_retry(
     monkeypatch, tmp_path
 ) -> None:

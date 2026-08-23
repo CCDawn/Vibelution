@@ -35,6 +35,7 @@ _SUPPORTED_KINDS = frozenset(
         "iteration_decision",
         "version_governance_record",
         "delivery_orchestration_result",
+        "dimension_reviews",
     }
 )
 

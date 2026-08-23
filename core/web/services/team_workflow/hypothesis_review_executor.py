@@ -166,6 +166,59 @@ def _reflection_step(
                 "scores": {dimension: scores[dimension] for dimension in SCORE_DIMENSIONS},
                 "reviewedBy": str(merged.get("reviewedBy") or "").strip() or agent_id,
                 "status": str(merged.get("status") or "").strip() or "reviewed",
+                # These are explicit authority inputs when a real reviewer
+                # supplies them.  Never derive them from scores, the meeting
+                # transcript, or a fallback ref.
+                **(
+                    {
+                        "dimensionReviews": [
+                            dict(item)
+                            for item in list(
+                                merged.get("dimensionReviews")
+                                or merged.get("dimension_reviews")
+                                or []
+                            )
+                            if isinstance(item, Mapping)
+                        ]
+                    }
+                    if isinstance(
+                        merged.get("dimensionReviews") or merged.get("dimension_reviews"),
+                        (list, tuple),
+                    )
+                    else {}
+                ),
+                **(
+                    {
+                        "evidenceRefs": [
+                            str(item)
+                            for item in list(
+                                merged.get("evidenceRefs")
+                                or merged.get("evidence_refs")
+                                or []
+                            )
+                            if str(item).strip()
+                        ]
+                    }
+                    if isinstance(
+                        merged.get("evidenceRefs") or merged.get("evidence_refs"),
+                        (list, tuple),
+                    )
+                    else {}
+                ),
+                **(
+                    {
+                        "supportingEvidenceRefs": [str(item) for item in list(merged.get("supportingEvidenceRefs") or []) if str(item).strip()]
+                    }
+                    if isinstance(merged.get("supportingEvidenceRefs"), (list, tuple))
+                    else {}
+                ),
+                **(
+                    {
+                        "challengingEvidenceRefs": [str(item) for item in list(merged.get("challengingEvidenceRefs") or []) if str(item).strip()]
+                    }
+                    if isinstance(merged.get("challengingEvidenceRefs"), (list, tuple))
+                    else {}
+                ),
             }
         )
     return reviewed

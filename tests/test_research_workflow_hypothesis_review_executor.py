@@ -39,6 +39,16 @@ from core.web.services.team_workflow import (
     meeting_runtime,
     research_memory_context,
 )
+from core.web.services.team_workflow.research_runtime import (
+    hypothesis_review_artifact_writer,
+    workflow_artifact_store,
+)
+from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+    build_canonical_ref,
+)
+from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+    canonical_sha256,
+)
 from core.web.services.team_workflow import meeting_rounds as meetings
 from core.web.services.team_workflow import personal_memory_candidates as memories
 from tests._support.team_workflow.helpers import _use_tmp_project_root
@@ -55,6 +65,7 @@ def _team_with_room(tmp_path, monkeypatch):
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(hypothesis_rounds, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     agents: dict[str, str] = {}
     for role in _TEAM_ROLES:
         agent = agent_directory_service.create_agent_instance(display_name=f"HF3 {role}")
@@ -515,6 +526,216 @@ def test_generation_is_idempotent_for_the_same_meeting(tmp_path, monkeypatch):
     assert repeated["round"]["roundId"] == first["round"]["roundId"]
     assert repeated["round"]["metaReview"] == first["round"]["metaReview"]
     assert hypothesis_rounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
+
+
+def _dimension_review_rows(
+    candidate_id: str,
+    reviewer: str = "reviewer-real",
+    evidence_ref: str = "evidence:unreadable",
+):
+    dimensions = (
+        "evidence_support",
+        "factual_accuracy",
+        "novelty",
+        "falsifiability",
+        "plan_feasibility",
+        "risk_and_ethics",
+        "counterexample_coverage",
+    )
+    return [
+        {
+            "hypothesis_id": candidate_id,
+            "dimension": dimension,
+            "rating": "adequate",
+            "rationale": f"真实评审依据：{candidate_id} 的 {dimension}。",
+            "evidence_refs": [evidence_ref],
+            "reviewer": reviewer,
+        }
+        for dimension in dimensions
+    ]
+
+
+def _seed_evidence_ref(team_id: str, workflow_run_id: str) -> str:
+    source_run_id = f"{workflow_run_id}-evidence"
+    payload = {
+        "evidenceId": f"evidence-{workflow_run_id}",
+        "questionId": "SCI-096",
+        "recordKind": "review_evidence",
+        "status": "canonical_success",
+    }
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="run_artifacts",
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        artifact_identity=payload["evidenceId"],
+        payload=payload,
+    )
+    envelope = {
+        "teamId": team_id,
+        "kind": "run_artifacts",
+        "workflowRunId": workflow_run_id,
+        "sourceCollectionRunId": source_run_id,
+        "payload": payload,
+    }
+    return build_canonical_ref(
+        kind="run_artifacts",
+        team_id=team_id,
+        authority_run_id=source_run_id,
+        content_hash=canonical_sha256(envelope),
+    )
+
+
+def test_review_authority_does_not_infer_dimension_reviews_or_feedback(
+    tmp_path, monkeypatch
+):
+    """The old score-only round must remain blocked for v2 authority output."""
+
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    result = _generate(
+        team_id,
+        approved["meetingRound"]["meetingRoundId"],
+        payload={"workflowRunId": "workflow-hf3-blocked"},
+    )
+
+    authority = result["reviewAuthority"]
+    assert authority["status"] == "blocked"
+    assert authority["reason"] == "NEEDS_CONTEXT"
+    assert "dimension_reviews" in authority["missingAuthorities"]
+    assert "feedback_iterations" in authority["missingAuthorities"]
+    assert authority["artifacts"] == {}
+
+
+def test_review_authority_keeps_feedback_blocked_and_hash_binds_dimensions(
+    tmp_path, monkeypatch
+):
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    meeting_round_id = approved["meetingRound"]["meetingRoundId"]
+    trusted_run_id = "workflow-hf3-trusted"
+    evidence_ref = _seed_evidence_ref(team_id, trusted_run_id)
+
+    def real_reflection(candidate, context):
+        return {
+            "scores": {dimension: 0.7 for dimension in SCORE_DIMENSIONS},
+            "dimensionReviews": _dimension_review_rows(
+                candidate["candidateId"], evidence_ref=evidence_ref
+            ),
+            "evidenceRefs": [f"candidate-evidence:{candidate['candidateId']}"],
+        }
+
+    revision_receipt = {
+        "receiptId": "revision-receipt-hf3-1",
+        "ref": "receipt:revision-receipt-hf3-1",
+        "status": "succeeded",
+        "runId": "workflow-hf3-ready",
+        "round": 1,
+        "trigger": "human_feedback",
+        "input_refs": ["decision:review-1"],
+        "changes": ["补充候选的可证伪边界"],
+        "unresolved_issues": ["跨数据集外部有效性仍待实验"],
+        "human_feedback": "保留限制条件并进入下一轮验证。",
+    }
+    result = _generate(
+        team_id,
+        meeting_round_id,
+        payload={
+            "workflowRunId": "workflow-hf3-ready",
+            "revisionReceipt": revision_receipt,
+        },
+        reflection_runner=real_reflection,
+    )
+
+    # The request's workflowRunId and revisionReceipt are untrusted. The
+    # production round path must not write an artifact for them.
+    untrusted_authority = result["reviewAuthority"]
+    assert untrusted_authority["status"] == "blocked"
+    assert untrusted_authority["artifacts"] == {}
+    assert set(untrusted_authority["missingAuthorities"]) == {
+        "dimension_reviews",
+        "feedback_iterations",
+    }
+
+    round_record = result["round"]
+    trusted_authority = hypothesis_review_artifact_writer.materialize_hypothesis_review_authority(
+        team_id=team_id,
+        workflow_run_id=trusted_run_id,
+        source_collection_run_id=f"{trusted_run_id}-source",
+        question_id=round_record["question"],
+        round_id=round_record["roundId"],
+        selection_id="sel-hf3-1",
+        candidates=_candidate_inputs(*_SELECTED_IDS),
+        review={"candidates": round_record["candidates"]},
+        meeting=approved["meetingRound"],
+    )
+    assert trusted_authority["status"] == "blocked"
+    assert set(trusted_authority["artifacts"]) == {"dimension_reviews"}
+    assert trusted_authority["missingAuthorities"] == ["feedback_iterations"]
+    assert len(trusted_authority["dimensionReviews"]) == len(_SELECTED_IDS) * 7
+    assert trusted_authority["feedbackIterations"] == []
+    assert trusted_authority["binding"]["runId"] == trusted_run_id
+    assert trusted_authority["binding"]["roundId"] == round_record["roundId"]
+    assert trusted_authority["binding"]["inputScopeHash"]
+    assert trusted_authority["authorityHash"]
+    assert all(
+        row["reviewer"] == _agents["challenge_cup_evaluator"]
+        for row in trusted_authority["dimensionReviews"]
+    )
+
+    replay = hypothesis_review_artifact_writer.materialize_hypothesis_review_authority(
+        team_id=team_id,
+        workflow_run_id=trusted_run_id,
+        source_collection_run_id=f"{trusted_run_id}-source",
+        question_id=round_record["question"],
+        round_id=round_record["roundId"],
+        selection_id="sel-hf3-1",
+        candidates=_candidate_inputs(*_SELECTED_IDS),
+        review={"candidates": round_record["candidates"]},
+        meeting=approved["meetingRound"],
+    )
+    assert replay == trusted_authority
+
+
+def test_review_authority_rejects_untrusted_revision_receipt(
+    tmp_path, monkeypatch
+):
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    workflow_run_id = "workflow-hf3-scope-mismatch"
+
+    def real_reflection(candidate, context):
+        return {
+            "scores": {dimension: 0.7 for dimension in SCORE_DIMENSIONS},
+            "dimensionReviews": _dimension_review_rows(candidate["candidateId"]),
+        }
+
+    result = _generate(
+        team_id,
+        approved["meetingRound"]["meetingRoundId"],
+        payload={
+            "workflowRunId": workflow_run_id,
+            "revisionReceipt": {
+                "receiptId": "revision-receipt-wrong-run",
+                "ref": "receipt:revision-receipt-wrong-run",
+                "status": "succeeded",
+                "runId": "another-workflow",
+                "round": 1,
+                "trigger": "human_feedback",
+                "input_refs": ["decision:review-1"],
+                "changes": ["改动"],
+                "unresolved_issues": ["未解决"],
+                "human_feedback": "继续核验。",
+            },
+        },
+        reflection_runner=real_reflection,
+    )
+
+    authority = result["reviewAuthority"]
+    assert authority["status"] == "blocked"
+    assert set(authority["missingAuthorities"]) == {
+        "dimension_reviews",
+        "feedback_iterations",
+    }
+    assert authority["artifacts"] == {}
+    assert authority["feedbackIterations"] == []
 
 
 def test_pairwise_order_is_randomized_seeded_and_recorded(tmp_path, monkeypatch):

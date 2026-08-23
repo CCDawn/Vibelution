@@ -1739,6 +1739,17 @@ def _build_round_candidates(
                 "statement": str(item.get("statement") or item.get("claim") or "").strip(),
                 "mechanism": str(item.get("rationale") or "").strip(),
                 "novelty_basis": str(item.get("differenceFromAlternatives") or "").strip(),
+                "evidenceRefs": item.get("evidenceRefs") or item.get("evidence_refs") or [],
+                "supportingEvidenceRefs": (
+                    item.get("supportingEvidenceRefs")
+                    or item.get("supporting_evidence_refs")
+                    or []
+                ),
+                "challengingEvidenceRefs": (
+                    item.get("challengingEvidenceRefs")
+                    or item.get("challenging_evidence_refs")
+                    or []
+                ),
             }
             for item in ledger_candidates
             if isinstance(item, Mapping)
@@ -1764,6 +1775,16 @@ def _build_round_candidates(
         difference = str(artifact.get("novelty_basis") or "").strip()
         if difference:
             candidate["differenceFromAlternatives"] = difference
+        for output_key, input_keys in (
+            ("evidenceRefs", ("evidenceRefs", "evidence_refs")),
+            ("supportingEvidenceRefs", ("supportingEvidenceRefs", "supporting_evidence_refs")),
+            ("challengingEvidenceRefs", ("challengingEvidenceRefs", "challenging_evidence_refs")),
+        ):
+            refs = artifact.get(input_keys[0]) or artifact.get(input_keys[1])
+            if isinstance(refs, (list, tuple)):
+                normalized_refs = _normalized_str_list(refs)
+                if normalized_refs:
+                    candidate[output_key] = normalized_refs
         candidates.append(candidate)
     return candidates
 

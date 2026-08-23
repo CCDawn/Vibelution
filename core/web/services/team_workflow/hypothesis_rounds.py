@@ -534,6 +534,17 @@ def generate_hypothesis_round_from_meeting(
         reviewer_assignments={"metareview": coordinator_agent},
         position_seed=str(request.get("positionSeed") or "").strip(),
     )
+    selection_id = ""
+    for ref in _normalized_str_list(meeting.get("inputArtifactRefs")):
+        if ref.startswith("hypothesis_selection:"):
+            selection_id = ref.split(":", 1)[1].strip()
+            break
+    # A caller payload is not an authority for workflow scope.  Only a
+    # server-bound meeting record may carry these ids; the formal runtime
+    # integration must populate them from its own run snapshot before this
+    # writer can materialize an artifact.
+    workflow_run_id = str(meeting.get("workflowRunId") or "").strip()
+    source_collection_run_id = str(meeting.get("sourceCollectionRunId") or "").strip()
     meeting_refs = [
         {"kind": "meeting_round", "id": meeting_id},
         {"kind": "meeting_digest", "id": digest_id},
@@ -561,6 +572,40 @@ def generate_hypothesis_round_from_meeting(
         "positionSeed": review["positionSeed"],
         "roles": review["roles"],
     }
+    # HypothesisRound remains the append-only review projection.  The v2
+    # dimension/feedback authorities are materialized after it so an
+    # authority blocker cannot roll back an already closed round.
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_review_artifact_writer,
+        )
+
+        result["reviewAuthority"] = (
+            hypothesis_review_artifact_writer.materialize_hypothesis_review_authority(
+                team_id=normalized_team_id,
+                workflow_run_id=workflow_run_id,
+                source_collection_run_id=source_collection_run_id,
+                question_id=scope["question"],
+                round_id=round_id,
+                selection_id=selection_id,
+                candidates=candidates,
+                review=review,
+                context=context,
+                meeting=meeting,
+                revision_receipt_ref=request.get("revisionReceiptRef")
+                or (request.get("revisionReceipt") if isinstance(request.get("revisionReceipt"), str) else ""),
+                revision_receipt=request.get("revisionReceipt"),
+            )
+        )
+    except Exception as exc:  # the closed round remains authoritative
+        result["reviewAuthority"] = {
+            "status": "blocked",
+            "reason": "NEEDS_CONTEXT",
+            "blockerCodes": ["authority_materialization_error"],
+            "missingAuthorities": ["dimension_reviews", "feedback_iterations"],
+            "artifacts": {},
+            "errorType": type(exc).__name__,
+        }
     return result
 
 
