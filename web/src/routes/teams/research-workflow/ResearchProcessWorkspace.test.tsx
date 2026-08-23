@@ -110,6 +110,7 @@ vi.mock("../../../components/vui", async () => {
     }) => (
       <div data-testid={props.shellTestId ?? "research-process-workspace-shell"}>
         {props.toolbar}
+        <div data-vui="canvas-workbench-rail">{props.rail}</div>
         <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
         <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
       </div>
@@ -266,13 +267,63 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-vui-region="current-task-body"]')).not.toBeNull();
   });
 
-  it("leaves overall progress to the parent rail and keeps this workspace focused on canvas details", async () => {
+  it("mounts the unified stage navigator beside the fixed canvas and inspector", async () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.querySelector('[data-testid="research-process-rail"]')).toBeNull();
-    expect(rendered.container.querySelector('[data-vui="canvas-workbench-rail"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-testid="research-workflow-stage-navigator"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-rail"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
+  });
+
+  it("navigates from the stage rail through URL view state only", async () => {
+    harness.runState.projection = {
+      definition: {
+        nodes: [{
+          nodeId: "source_finding",
+          stageId: "knowledge_collection",
+          label: "资料发现",
+          actorKind: "agent",
+          description: "发现资料",
+          primaryRoleKey: "researcher",
+          collaboratorRoleKeys: [],
+          producesArtifactKinds: [],
+          acceptsGateKinds: [],
+        }],
+        edges: [],
+        stages: [{
+          stageId: "knowledge_collection",
+          label: "知识搜集",
+          nodeIds: ["source_finding"],
+          index: 0,
+        }],
+      },
+      run: {
+        teamId: "research-team",
+        status: "not_started",
+        runtimeCurrentNodeIds: [],
+        nodeRuns: {},
+      },
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const nodeButton = Array.from(rendered.container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("资料发现"));
+    expect(nodeButton).toBeTruthy();
+    await act(async () => nodeButton?.click());
+
+    expect(harness.location.replaceParams).toHaveBeenCalledTimes(1);
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      node: "source_finding",
+      panel: "node",
+    });
+    expect(harness.location.selectNode).not.toHaveBeenCalled();
+    expect(harness.commands.submitOffer).not.toHaveBeenCalled();
+    expect(harness.commands.submitRun).not.toHaveBeenCalled();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
   });
 
   it("surfaces run-state errors on the canvas host", async () => {
