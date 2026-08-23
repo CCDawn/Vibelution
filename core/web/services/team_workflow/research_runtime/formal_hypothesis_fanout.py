@@ -346,12 +346,14 @@ def _require_formal_task_authority(
         raise RuntimeError("formal candidate task authority is incomplete")
     if (
         not _text(contract.get("questionId"))
+        or not _text(contract.get("workflowId"))
+        or not _text(contract.get("workflowVersionId"))
         or _text(contract.get("workflowRunId")) != run_id
         or _text(contract.get("workflowNodeId")) != node_id
         or _text(contract.get("nodeRunId")) != node_run_id
         or _text(contract.get("agentId")) != agent
         or int(contract.get("nodeAttempt") or 0) != attempt
-        or not _text(contract.get("modelPolicySha256"))
+        or len(_text(contract.get("modelPolicySha256"))) != 64
         or not isinstance(contract.get("requiredModelPolicy"), Mapping)
     ):
         raise RuntimeError("formal candidate task contract scope is invalid")
@@ -372,6 +374,9 @@ def _require_formal_task_authority(
     )
     if (
         not _text(receipt.get("questionId"))
+        or _text(receipt.get("workflowId")) != _text(contract.get("workflowId"))
+        or _text(receipt.get("workflowVersionId"))
+        != _text(contract.get("workflowVersionId"))
         or _text(receipt.get("questionId")).upper()
         != _text(contract.get("questionId")).upper()
         or _text(receipt.get("questionRunId")) != run_id
@@ -406,13 +411,6 @@ def resolve_formal_candidate_task(
 ) -> dict[str, Any]:
     """Reuse active/successful sibling; formal-retry only a failed child."""
 
-    contract, receipt_binding = _require_formal_task_authority(
-        action=action,
-        agent_id=agent_id,
-        challenge_task_contract=challenge_task_contract,
-        model_invocation_receipt_binding=model_invocation_receipt_binding,
-    )
-
     existing = _task_from_status(
         team_id=team_id,
         project_id=project_id,
@@ -441,6 +439,13 @@ def resolve_formal_candidate_task(
         started = _started_from_anchor(previous)
         if started is not None:
             return started
+
+    contract, receipt_binding = _require_formal_task_authority(
+        action=action,
+        agent_id=agent_id,
+        challenge_task_contract=challenge_task_contract,
+        model_invocation_receipt_binding=model_invocation_receipt_binding,
+    )
 
     # Failed prior work receives a formal retry. Successful siblings return
     # their canonical Session/Task/Turn and replay only their structured
