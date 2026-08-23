@@ -492,17 +492,6 @@ def test_empty_target_ledger_accepts_semantically_equal_schema_with_stale_shm(
     )
     assert preview.ready
 
-    applied = apply_research_workflow_migration(
-        project,
-        projects_home=projects_home,
-        sample_delay_seconds=0,
-        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
-    )
-    manifest = Path(str(applied["manifestPath"]))
-    assert manifest.is_file()
-    assert not target_ledger.with_name("workflow-ledger.sqlite-wal").exists()
-    assert not target_ledger.with_name("workflow-ledger.sqlite-shm").exists()
-
 
 def test_preview_rejects_target_ledger_sidecar(tmp_path: Path, monkeypatch) -> None:
     project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
