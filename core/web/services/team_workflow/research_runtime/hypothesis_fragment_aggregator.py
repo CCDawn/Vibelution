@@ -268,10 +268,12 @@ def aggregate_hypothesis_fragments(
         item.candidateId: {
             "statement": item.statement,
             "mechanism": item.mechanism,
+            "novelty_basis": item.novelty_basis,
             "predictions": list(item.predictions),
             "falsificationCriteria": list(item.falsificationCriteria),
             "evidenceRefs": list(item.evidenceRefs),
             "counterEvidenceRefs": list(item.counterEvidenceRefs),
+            "boundary_conditions": list(item.boundary_conditions),
             "contentHash": item.contentHash,
         }
         for item in fragment_list

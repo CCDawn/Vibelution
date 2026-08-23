@@ -3,9 +3,11 @@
 The writer deliberately does not inspect or summarize session messages.  It
 binds the structured child output to the task context, applies the accepted
 knowledge-package allowlist, and returns an immutable hash-bound fragment
-envelope.  Persistence can be supplied by the workflow owner once the
-artifact-store kind is registered; keeping the sink injectable also makes the
-contract safe to use during migration/shadow mode.
+envelope.  The structured output must explicitly include the v2
+``novelty_basis`` and ``boundary_conditions`` facts; neither is derived from
+scores, summaries, or candidate context.  Persistence can be supplied by the
+workflow owner once the artifact-store kind is registered; keeping the sink
+injectable also makes the contract safe to use during migration/shadow mode.
 """
 
 from __future__ import annotations
