@@ -15,6 +15,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .source_extraction_evidence_cards import normalize_challenge_evidence_fields
+
 
 class EvidenceMaterializationError(RuntimeError):
     """Raised when a formal task cannot be materialized within its frozen scope."""
@@ -42,7 +44,7 @@ def _claim_locator(claim: dict[str, Any]) -> dict[str, Any] | None:
         if any(locator.get(key) not in (None, "") for key in ("page", "section", "anchor", "url")):
             return locator
 
-    source_ref = _text(claim.get("sourceRef"))
+    source_ref = _text(claim.get("sourceRef") or claim.get("source_url"))
     page = claim.get("page")
     if isinstance(page, int) and not isinstance(page, bool) and page > 0:
         return {"kind": "pdf_page", "page": page, **({"url": source_ref} if source_ref else {})}
@@ -110,11 +112,21 @@ def materialize_claim_evidence_from_task(
     normalized_model_ref = _text(model_ref)
     store = ClaimEvidenceStore(project_root)
     materialized: list[dict[str, Any]] = []
-    for extraction, claim in _materializable_claims(task):
-        candidate_id = _text(extraction.get("candidateId") or extraction.get("recordId"))
-        claim_text = _text(claim.get("claim") or claim.get("finding"))
+    for index, (extraction, claim) in enumerate(_materializable_claims(task)):
+        challenge_evidence = normalize_challenge_evidence_fields(
+            claim,
+            extraction,
+            path=f"extraction[{index}]",
+        )
+        candidate_id = _text(
+            challenge_evidence.get("candidateId")
+            or challenge_evidence.get("recordId")
+        )
+        claim_text = _text(challenge_evidence.get("fact"))
         quote = _text(claim.get("quote"))
-        source_ref = _text(claim.get("sourceRef"))
+        source_ref = _text(
+            claim.get("sourceRef") or challenge_evidence.get("source_url")
+        )
         locator = _claim_locator(claim)
         if not all((candidate_id, claim_text, quote, source_ref, locator)):
             continue
@@ -123,7 +135,20 @@ def materialize_claim_evidence_from_task(
                 "anchored model evidence requires extractorAgentId and modelRef"
             )
         source_revision = "sha256:" + _sha256(
-            {"sourceRef": source_ref, "locator": locator, "quote": quote}
+            {
+                "sourceRef": source_ref,
+                "locator": locator,
+                "quote": quote,
+                "title": challenge_evidence["title"],
+                "source_type": challenge_evidence["source_type"],
+                "source_url": challenge_evidence["source_url"],
+                "retrieved_at": challenge_evidence["retrieved_at"],
+                "fact": challenge_evidence["fact"],
+                "relation": challenge_evidence["relation"],
+                "verification_status": challenge_evidence[
+                    "verification_status"
+                ],
+            }
         )
         claim_id = "workflow-claim-" + _sha256(
             {
@@ -132,26 +157,39 @@ def materialize_claim_evidence_from_task(
                 "claim": claim_text,
             }
         )[:24]
+        relation_support_level = {
+            "supports": "supports",
+            "challenges": "contradicts",
+        }.get(challenge_evidence["relation"], "insufficient")
+        stored = store.register(
+            normalized_team,
+            {
+                "claimId": claim_id,
+                "candidateId": candidate_id,
+                "sourceId": source_ref,
+                "sourceRevision": source_revision,
+                "locator": locator,
+                "quote": quote,
+                "evidenceKind": "primary_result",
+                "reasoningRole": "fact",
+                "supportLevel": relation_support_level,
+                "extractionMethod": "model",
+                "extractorAgentId": extractor_agent_id,
+                "modelRef": normalized_model_ref,
+                "sourceCollectionRunId": normalized_source_run,
+                "workflowRunId": normalized_workflow_run,
+            },
+        )
+        # ClaimEvidenceStore intentionally owns its compact legacy record
+        # shape.  Keep the explicit v2 envelope on the materialization result
+        # so callers can carry the fields without teaching that core store to
+        # infer or discard them; canonical v2 readback remains fail-closed if
+        # the authority does not expose this envelope.
         materialized.append(
-            store.register(
-                normalized_team,
-                {
-                    "claimId": claim_id,
-                    "candidateId": candidate_id,
-                    "sourceId": source_ref,
-                    "sourceRevision": source_revision,
-                    "locator": locator,
-                    "quote": quote,
-                    "evidenceKind": "primary_result",
-                    "reasoningRole": "fact",
-                    "supportLevel": "unverified",
-                    "extractionMethod": "model",
-                    "extractorAgentId": extractor_agent_id,
-                    "modelRef": normalized_model_ref,
-                    "sourceCollectionRunId": normalized_source_run,
-                    "workflowRunId": normalized_workflow_run,
-                },
-            )
+            {
+                **stored,
+                "challengeEvidence": challenge_evidence,
+            }
         )
     return materialized
 

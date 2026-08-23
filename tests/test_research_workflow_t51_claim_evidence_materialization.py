@@ -18,6 +18,19 @@ from core.web.services.team_workflow.research_runtime.domain_ports import (
 )
 
 
+def _v2_source_fields(**overrides: object) -> dict[str, object]:
+    return {
+        "title": "A bounded source",
+        "source_type": "peer_reviewed_paper",
+        "source_url": "https://example.org/paper-a",
+        "retrieved_at": "2026-08-10T00:00:00Z",
+        "fact": "The abstract reports a bounded result.",
+        "relation": "supports",
+        "verification_status": "metadata_checked",
+        **overrides,
+    }
+
+
 def _verified_task() -> dict:
     return {
         "taskId": "task-extract-1",
@@ -31,9 +44,10 @@ def _verified_task() -> dict:
                     "candidateId": "candidate-a",
                     "decision": "keep",
                     "evidenceStatus": "verified_abstract",
+                    **_v2_source_fields(),
                     "claims": [
                         {
-                            "claim": "The abstract reports a bounded result.",
+                            "fact": "The abstract reports a bounded result.",
                             "quote": "A bounded verbatim excerpt from the abstract.",
                             "sourceRef": "https://example.org/paper-a",
                             "evidenceRef": "Abstract, sentences 2-3",
@@ -44,9 +58,13 @@ def _verified_task() -> dict:
                     "candidateId": "candidate-gap",
                     "decision": "keep",
                     "evidenceStatus": "missing_evidence_anchor",
+                    **_v2_source_fields(
+                        source_url="https://example.org/paper-gap",
+                        fact="This is only a model summary.",
+                    ),
                     "claims": [
                         {
-                            "claim": "This is only a model summary.",
+                            "fact": "This is only a model summary.",
                             "sourceRef": "https://example.org/paper-gap",
                             "evidenceRef": "record-anchor-gap",
                         }
@@ -78,6 +96,17 @@ def test_materializes_only_exactly_anchored_claims_into_canonical_store(
     assert records[0]["sourceCollectionRunId"] == "sc-run-a"
     assert records[0]["reviewStatus"] == "pending"
     assert records[0]["formalKnowledgeWriteAllowed"] is False
+    assert created[0]["challengeEvidence"] == {
+        "sourceId": "candidate-a",
+        "candidateId": "candidate-a",
+        "title": "A bounded source",
+        "source_type": "peer_reviewed_paper",
+        "source_url": "https://example.org/paper-a",
+        "retrieved_at": "2026-08-10T00:00:00Z",
+        "fact": "The abstract reports a bounded result.",
+        "relation": "supports",
+        "verification_status": "metadata_checked",
+    }
 
     duplicate = materialize_claim_evidence_from_task(
         project_root=tmp_path,
@@ -106,9 +135,15 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
                     "candidateId": "candidate-key-finding",
                     "decision": "keep",
                     "evidenceStatus": "anchored",
+                    **_v2_source_fields(
+                        title="Temporal coding study",
+                        source_url="https://example.org/paper-key-finding",
+                        fact="Temporal and rate codes can be multiplexed.",
+                        verification_status="full_text_checked",
+                    ),
                     "keyFindings": [
                         {
-                            "finding": "Temporal and rate codes can be multiplexed.",
+                            "fact": "Temporal and rate codes can be multiplexed.",
                             "quote": "Synchronous and asynchronous spiking can multiplex temporal and rate coding.",
                             "sourceRef": "https://example.org/paper-key-finding",
                             "evidenceRef": "Abstract",
@@ -119,9 +154,14 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
                     "candidateId": "candidate-unanchored",
                     "decision": "keep",
                     "evidenceStatus": "missing_evidence_anchor",
+                    **_v2_source_fields(
+                        title="Unanchored study",
+                        source_url="https://example.org/paper-unanchored",
+                        fact="This summary has no acceptable anchor.",
+                    ),
                     "keyFindings": [
                         {
-                            "finding": "This summary has no acceptable anchor.",
+                            "fact": "This summary has no acceptable anchor.",
                             "sourceRef": "https://example.org/paper-unanchored",
                         }
                     ],
@@ -147,6 +187,25 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
         "anchor": "Abstract",
         "url": "https://example.org/paper-key-finding",
     }
+
+
+def test_verified_materialization_fails_closed_when_v2_fields_are_missing(
+    tmp_path: Path,
+) -> None:
+    task = _verified_task()
+    claim = task["result"]["candidateExtractions"][0]["claims"][0]
+    del claim["fact"]
+    claim["claim"] = "A summary must not substitute for fact."
+
+    with pytest.raises(ValueError, match="missing explicit fact"):
+        materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id="team-a",
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=task,
+            model_ref="provider/model-a",
+        )
 
 
 def test_rejects_cross_run_task_materialization(tmp_path: Path) -> None:
@@ -314,3 +373,15 @@ def test_extraction_prompt_requires_verbatim_quote_for_claim_evidence() -> None:
     prompt = "\n".join(stage_writeback_prompt_lines("extraction"))
     assert "quote" in prompt
     assert "不得为通过门禁" in prompt
+    for field in (
+        "title",
+        "source_type",
+        "source_url",
+        "retrieved_at",
+        "fact",
+        "relation",
+        "verification_status",
+    ):
+        assert field in prompt
+    assert "sourceId" in prompt
+    assert "不能用 URL" in prompt

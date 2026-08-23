@@ -3,6 +3,9 @@
 from core.web.services.team_workflow.source_collection.stage_writeback_prompt_contracts import (
     stage_writeback_prompt_lines,
 )
+from core.web.services.team_workflow.source_collection_stage_tasks import (
+    source_collection_stage_task_writeback_contract,
+)
 from core.web.services.team_workflow.source_collection.writeback_materialize import (
     _merge_source_collection_stage_writeback_agent_graph,
     _source_collection_stage_writeback_agent_graph_payload,
@@ -24,6 +27,34 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
 
 def test_unknown_stage_has_no_extra_writeback_contract() -> None:
     assert stage_writeback_prompt_lines("unknown") == []
+
+
+def test_extraction_contract_exposes_explicit_challenge_v2_evidence_fields() -> None:
+    contract = source_collection_stage_task_writeback_contract(
+        "team-a",
+        "run-a",
+        "task-a",
+        stage_id="extraction",
+        agent_id="agent-a",
+        agent_role="source_extractor",
+        schema_version=1,
+    )
+    challenge = contract["resultContract"]["challengeV2Evidence"]
+    assert challenge["mode"] == "challenge_v2_fail_closed"
+    assert challenge["requiredFields"] == [
+        "title",
+        "source_type",
+        "source_url",
+        "retrieved_at",
+        "fact",
+        "relation",
+        "verification_status",
+    ]
+    assert challenge["linkage"] == {
+        "requiredOneOf": ["candidateId", "recordId"],
+        "sourceIdMustEqual": "candidateId_or_recordId",
+        "urlCannotBeIdentity": True,
+    }
 
 
 def test_relation_prompt_candidate_relations_materialize_as_candidate_graph_edges() -> None:

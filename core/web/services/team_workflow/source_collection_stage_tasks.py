@@ -76,6 +76,58 @@ def _source_collection_extraction_result_contract() -> dict[str, Any]:
             "status",
             "toolName",
         ],
+        "challengeV2Evidence": {
+            "mode": "challenge_v2_fail_closed",
+            "requiredFields": [
+                "title",
+                "source_type",
+                "source_url",
+                "retrieved_at",
+                "fact",
+                "relation",
+                "verification_status",
+            ],
+            "optionalFields": ["doi", "date", "limitations"],
+            "acceptedSourceTypes": [
+                "peer_reviewed_paper",
+                "preprint",
+                "dataset",
+                "standard",
+                "official_document",
+                "book",
+                "other",
+            ],
+            "acceptedRelations": [
+                "supports",
+                "challenges",
+                "context",
+                "method",
+                "boundary",
+            ],
+            "acceptedVerificationStatuses": [
+                "unverified",
+                "metadata_checked",
+                "full_text_checked",
+                "human_verified",
+            ],
+            "linkage": {
+                "requiredOneOf": ["candidateId", "recordId"],
+                "sourceIdMustEqual": "candidateId_or_recordId",
+                "urlCannotBeIdentity": True,
+            },
+            "noInferenceFrom": [
+                "sourceKind",
+                "source_url",
+                "doi",
+                "summary",
+                "valueSummary",
+            ],
+            "legacyCompatibility": {
+                "available": True,
+                "mode": "legacy",
+                "mustBeExplicit": True,
+            },
+        },
     }
 
 
