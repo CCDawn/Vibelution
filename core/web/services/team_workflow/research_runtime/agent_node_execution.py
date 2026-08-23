@@ -48,6 +48,7 @@ _MODEL_INVOCATION_OUTCOME_KINDS: dict[str, tuple[str, ...]] = {
     # Source collection calls are auditable model invocations too.  They use
     # an additional outcome kind so source evidence does not satisfy the
     # five formal candidate/plan/review/revision/final-output categories.
+    "problem_understanding": ("source_evidence",),
     "source_finding": ("source_evidence",),
     "source_extraction": ("source_evidence",),
     "evidence_relations": ("source_evidence",),
@@ -60,6 +61,7 @@ _MODEL_INVOCATION_OUTCOME_KINDS: dict[str, tuple[str, ...]] = {
     "version_governance": ("final_output",),
 }
 _MODEL_INVOCATION_STAGES: dict[str, str] = {
+    "problem_understanding": "generation",
     "source_finding": "generation",
     "source_extraction": "generation",
     "evidence_relations": "generation",
