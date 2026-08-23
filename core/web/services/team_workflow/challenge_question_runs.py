@@ -1348,15 +1348,26 @@ def publish_research_project_challenge_question_output(
         if promoted is not None and receipts_changed:
             program_store["updatedAt"] = _utc_now()
             _write_json(program_evidence_path, program_store)
+        registration_payload = {
+            "output": output,
+            "citationChecks": citation_checks,
+            "registeredBy": str(payload.get("registeredBy") or ""),
+            "parentRunId": str(payload.get("parentRunId") or ""),
+            "lineageRefs": lineage_refs,
+        }
+        result_package = payload.get("resultPackage")
+        if isinstance(result_package, dict):
+            registration_payload["resultPackage"] = deepcopy(result_package)
+        authorized_model_policy_sha256 = str(
+            payload.get("authorizedModelPolicySha256") or ""
+        ).strip()
+        if authorized_model_policy_sha256:
+            registration_payload["authorizedModelPolicySha256"] = (
+                authorized_model_policy_sha256
+            )
         registered = register_challenge_question_output(
             team_id,
-            {
-                "output": output,
-                "citationChecks": citation_checks,
-                "registeredBy": str(payload.get("registeredBy") or ""),
-                "parentRunId": str(payload.get("parentRunId") or ""),
-                "lineageRefs": lineage_refs,
-            },
+            registration_payload,
         )
     return {
         **registered,
@@ -1507,9 +1518,8 @@ def _package_bound_model_invocation_receipt_refs(
     if not package_payload or not package_path.is_file():
         return {}
     try:
-        from core.research.competition.question_result_package import (
-            QuestionResultPackage,
-        )
+        from core.research.competition.question_result_package import QuestionResultPackage
+        from core.research.competition.result_set import CatalogScope
 
         restored_package = QuestionResultPackage.from_dict(
             package_payload,
@@ -1520,10 +1530,16 @@ def _package_bound_model_invocation_receipt_refs(
     except (TypeError, ValueError, KeyError):
         return {}
     if (
-        restored_package.canonical_hash
+        package_metadata.get("schemaVersion") != restored_package.schema_version
+        or str(package_metadata.get("packageId") or "") != restored_package.package_id
+        or restored_package.canonical_hash
         != str(package_metadata.get("canonicalHash") or "")
         or restored_package.idempotency_key
         != str(package_metadata.get("idempotencyKey") or "")
+        or restored_package.question_id
+        != str(record.get("questionId") or "").strip().upper()
+        or restored_package.run_id != str(record.get("runId") or "").strip()
+        or restored_package.scope != CatalogScope.from_tracked_resources()
     ):
         return {}
     expected_refs = _model_invocation_receipt_refs_from_package(restored_package)
