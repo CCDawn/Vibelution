@@ -10,6 +10,14 @@ import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
+function commandErrorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
+function isRunVersionConflict(reason: unknown): boolean {
+  return commandErrorMessage(reason).includes("run_version_conflict");
+}
+
 export function useResearchWorkflowCommands(options: {
   teamId: string;
   runId: string;
@@ -76,11 +84,25 @@ export function useResearchWorkflowCommands(options: {
       setBusy(true);
       setError(null);
       try {
-        await submitFormalOffer(offer);
-        await refresh();
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : String(reason));
-        throw reason;
+        try {
+          await submitFormalOffer(offer);
+        } catch (reason) {
+          setError(commandErrorMessage(reason));
+          if (isRunVersionConflict(reason)) {
+            try {
+              await refresh();
+            } catch {
+              // The signed offer conflict remains authoritative even if resync also fails.
+            }
+          }
+          throw reason;
+        }
+        try {
+          await refresh();
+        } catch (reason) {
+          setError(commandErrorMessage(reason));
+          throw reason;
+        }
       } finally {
         setBusy(false);
       }

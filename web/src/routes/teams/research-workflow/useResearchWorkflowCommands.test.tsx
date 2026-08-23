@@ -113,6 +113,46 @@ describe("useResearchWorkflowCommands", () => {
     expect(latest!.error).toBeNull();
   });
 
+  it("refreshes once after a run-version conflict and preserves the original error", async () => {
+    const conflict = new Error("command_http_409: run_version_conflict");
+    const refresh = vi.fn().mockRejectedValue(new Error("snapshot_refresh_failed"));
+    const submitFormalOffer = vi.fn().mockRejectedValue(conflict);
+    await render(refresh, submitFormalOffer);
+
+    let captured: unknown;
+    await act(async () => {
+      try {
+        await latest!.submitOffer(offer);
+      } catch (reason) {
+        captured = reason;
+      }
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(captured).toBe(conflict);
+    expect(latest!.error).toBe(conflict.message);
+  });
+
+  it("does not refresh after a non-version formal command error", async () => {
+    const rejection = new Error("command_http_409: command_not_allowed");
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const submitFormalOffer = vi.fn().mockRejectedValue(rejection);
+    await render(refresh, submitFormalOffer);
+
+    let captured: unknown;
+    await act(async () => {
+      try {
+        await latest!.submitOffer(offer);
+      } catch (reason) {
+        captured = reason;
+      }
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(captured).toBe(rejection);
+    expect(latest!.error).toBe(rejection.message);
+  });
+
   it("fails visibly when the formal command channel is missing", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     await render(refresh);
