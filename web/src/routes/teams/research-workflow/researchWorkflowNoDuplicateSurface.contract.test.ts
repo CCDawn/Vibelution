@@ -6,6 +6,7 @@ const workspaceSource = readFileSync(
   resolve(import.meta.dirname, "ResearchProcessWorkspace.tsx"),
   "utf8",
 );
+const toolbarSource = readFileSync(resolve(import.meta.dirname, "ResearchWorkflowToolbar.tsx"), "utf8");
 const canvasSource = readFileSync(resolve(import.meta.dirname, "ResearchWorkflowCanvasPane.tsx"), "utf8");
 const inspectorSource = readFileSync(resolve(import.meta.dirname, "ResearchProcessInspectorPane.tsx"), "utf8");
 const commandSource = readFileSync(resolve(import.meta.dirname, "useResearchWorkflowCommands.ts"), "utf8");
@@ -53,7 +54,18 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(primarySource).toContain("renderResearchProcessWorkflowSurface");
     expect(primarySource).toContain("toolbarLeading");
     expect(workspaceSource).toContain("leading={toolbarLeading}");
-    expect(workspaceSource).toContain("toolbarClassName=\"!flex-nowrap overflow-hidden\"");
+    expect(workspaceSource).toContain("toolbarClassName={styles.toolbar}");
+  });
+
+  it("keeps workflow mutations out of the toolbar", () => {
+    expect(toolbarSource).not.toContain("选择题目开始研究");
+    expect(toolbarSource).not.toContain("Choose a question to start research");
+    expect(toolbarSource).not.toContain("新建运行");
+    expect(toolbarSource).not.toContain("New run");
+    expect(toolbarSource).not.toContain('variant="primary"');
+    expect(toolbarSource).not.toContain('onOpenPanel("launch")');
+    expect(toolbarSource).toContain('variant="secondary"');
+    expect(toolbarSource).toContain('"定位当前任务"');
   });
 
   it("research teams never land on org canvas or challenge launcher", () => {

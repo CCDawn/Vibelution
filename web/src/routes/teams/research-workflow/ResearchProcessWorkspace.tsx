@@ -25,6 +25,10 @@ import {
 import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
+import {
+  buildResearchWorkflowStageNavigatorModel,
+  ResearchWorkflowStageNavigator,
+} from "./ResearchWorkflowStageNavigator";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
 import { buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
@@ -295,6 +299,18 @@ export function ResearchProcessWorkspace({
   const workspaceNextAction = workspaceModel.source === "formal_runtime"
     ? undefined
     : workspaceModel.legacyNextAction || safeNextAction;
+  const stageNavigatorModel = useMemo(() => buildResearchWorkflowStageNavigatorModel({
+    graph,
+    progress: workspaceModel.progress,
+    currentTaskNodeId: workspaceModel.currentTask?.source === "formal_runtime"
+      ? workspaceModel.currentTask.nodeId
+      : workspaceModel.currentTask?.source === "hypothesis_first"
+        ? workspaceModel.currentTask.targetNodeId
+        : null,
+    loadState: workspaceModel.loadState,
+    scopeMismatch: workspaceModel.scopeMismatch,
+    error: workspaceModel.error,
+  }), [graph, workspaceModel]);
   const formalWritesPaused = workspaceModel.source === "formal_runtime" && (
     workspaceModel.resyncRequired
     || workspaceModel.loadState === "loading"
@@ -443,7 +459,7 @@ export function ResearchProcessWorkspace({
         ariaLabel={isZh ? "科研流程工作区" : "Research workflow workspace"}
         title={isZh ? "科研流程" : "Research workflow"}
         hideHeader
-        toolbarClassName="!flex-nowrap overflow-hidden"
+        toolbarClassName={styles.toolbar}
         toolbar={(
           <ResearchWorkflowToolbar
             leading={toolbarLeading}
@@ -453,7 +469,6 @@ export function ResearchProcessWorkspace({
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
             experimentOptions={experimentOptions}
             panel={location.panel}
-            createDisabled={runState.busy}
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
@@ -481,6 +496,7 @@ export function ResearchProcessWorkspace({
         )}
         layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
         resize={{
+          sidebar: { id: "stages", defaultWidth: 220, minWidth: 180, maxWidth: 300 },
           aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
         }}
         responsive={{
@@ -488,6 +504,15 @@ export function ResearchProcessWorkspace({
           rail: { label: "研究阶段" },
           inspector: { label: "当前任务" },
         }}
+        rail={(
+          <div className={styles.stageNavigator}>
+            <ResearchWorkflowStageNavigator
+              lang={lang}
+              model={stageNavigatorModel}
+              onNavigateNode={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
+            />
+          </div>
+        )}
         canvas={
           <ResearchWorkflowCanvasPane
             graph={graph}

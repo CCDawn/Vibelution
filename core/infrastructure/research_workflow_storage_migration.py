@@ -483,6 +483,45 @@ def _schema_digest(connection: apsw.Connection) -> str:
     return digest.hexdigest()
 
 
+def _ledger_schema_contract_digest(path: Path) -> str:
+    """Hash the ledger schema contract after authority-owned SQL normalization."""
+
+    try:
+        from core.research.workflow.ledger.database import _normalize_sql
+    except Exception as exc:
+        raise _SQLiteBundleSnapshotError(
+            "ledger_schema_contract_unavailable", type(exc).__name__
+        ) from exc
+    try:
+        with _sqlite_bundle_snapshot_context(path) as snapshot:
+            connection = _open_readonly(snapshot)
+            try:
+                rows = connection.execute(
+                    "SELECT type, name, tbl_name, COALESCE(sql, '') "
+                    "FROM sqlite_master "
+                    "WHERE type IN ('table','index','trigger','view') "
+                    "ORDER BY type, name"
+                )
+                digest = hashlib.sha256()
+                for row in rows:
+                    object_type, name, table_name, raw_sql = (str(value) for value in row)
+                    digest.update(
+                        "\x1f".join(
+                            (object_type, name, table_name, _normalize_sql(raw_sql))
+                        ).encode("utf-8")
+                    )
+                    digest.update(b"\n")
+                return digest.hexdigest()
+            finally:
+                connection.close()
+    except _SQLiteBundleSnapshotError:
+        raise
+    except Exception as exc:
+        raise _SQLiteBundleSnapshotError(
+            "ledger_schema_contract_unreadable", type(exc).__name__
+        ) from exc
+
+
 def _row_counts(connection: apsw.Connection) -> dict[str, int]:
     tables = [
         str(row[0])
@@ -1299,13 +1338,17 @@ def _target_asset_state(
             wal_size = int(wal_path.stat().st_size) if wal_path.is_file() else 0
             if unsafe_sidecar is None and wal_size == 0:
                 evidence = _sqlite_evidence(target, kind="ledger")
+                target_ledger_valid, _target_ledger_detail = _validate_v5_ledger(target)
+                source_schema_contract = _ledger_schema_contract_digest(asset.source_path)
+                target_schema_contract = _ledger_schema_contract_digest(target)
                 if (
                     evidence.valid
                     and evidence.known_schema
                     and evidence.business_rows == 0
                     and asset.sqlite is not None
                     and evidence.schema_version == asset.sqlite.schema_version
-                    and evidence.schema_digest == asset.sqlite.schema_digest
+                    and target_ledger_valid
+                    and target_schema_contract == source_schema_contract
                 ):
                     return "empty-schema", {
                         "code": "replaceable_empty_target_bundle",
