@@ -10,6 +10,10 @@ from core.research.workflow.contracts import (
     ContractValidationError,
     WorkflowRunInputSnapshot,
 )
+from core.research.workflow.contracts.research_scope import (
+    scope_hash_for,
+    scope_locators_for,
+)
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -283,6 +287,34 @@ def test_typed_scope_snapshot_rejects_tampering_and_partial_authority(
     }
     with pytest.raises(ContractValidationError, match="researchScopeEnvelope"):
         WorkflowRunInputSnapshot.from_dict(tampered_scope)
+
+    case_tampered_scope = dict(base["researchScopeEnvelope"])
+    case_tampered_scope["question"] = "sci-096"
+    case_tampered_scope["scopeHash"] = scope_hash_for(
+        program=case_tampered_scope["program"],
+        theme=case_tampered_scope["theme"],
+        campaign=case_tampered_scope["campaign"],
+        question=case_tampered_scope["question"],
+        branch=case_tampered_scope["branch"],
+        workflow=case_tampered_scope["workflow"],
+        agent_id=case_tampered_scope["agentId"],
+        mode=case_tampered_scope["mode"],
+    )
+    case_tampered_scope.update(
+        scope_locators_for(
+            program=case_tampered_scope["program"],
+            theme=case_tampered_scope["theme"],
+            campaign=case_tampered_scope["campaign"],
+            question=case_tampered_scope["question"],
+            branch=case_tampered_scope["branch"],
+            agent_id=case_tampered_scope["agentId"],
+            scope_hash=case_tampered_scope["scopeHash"],
+        )
+    )
+    with pytest.raises(ContractValidationError, match="question must match"):
+        WorkflowRunInputSnapshot.from_dict(
+            {**base, "researchScopeEnvelope": case_tampered_scope}
+        )
 
     tampered_catalog = {
         **base,

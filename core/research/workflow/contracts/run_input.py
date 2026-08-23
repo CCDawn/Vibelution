@@ -58,7 +58,7 @@ def _normalize_research_scope(
         raise ContractValidationError(
             f"researchScopeEnvelope is malformed: {exc}"
         ) from exc
-    if parsed.question.upper() != question_id.upper():
+    if parsed.question != question_id:
         raise ContractValidationError(
             "researchScopeEnvelope.question must match questionId"
         )
