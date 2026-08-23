@@ -223,6 +223,55 @@ def test_run_close_blocks_delivery_when_program_candidate_context_is_missing(
     assert len(_delivery_events(graph, run_id)) == 1
 
 
+def test_registered_program_candidate_closes_delivery_once(harness, monkeypatch) -> None:
+    graph, worker, _clock = harness
+    run_id = "run-delivery-registered"
+    _close_run(graph, run_id)
+    handoff = {
+        "status": "registered",
+        "teamId": "research-team",
+        "workflowRunId": run_id,
+        "sourceCollectionRunId": run_id,
+        "questionId": "SCI-096",
+        "runId": run_id,
+        "sourceResultPackageHash": "a" * 64,
+        "outputSha256": "b" * 64,
+        "recordId": f"SCI-096:{run_id}",
+        "reviewStatus": "review_required",
+    }
+    monkeypatch.setattr(
+        program_candidate_handoff,
+        "handoff_result_package_to_challenge_program",
+        lambda *args, **kwargs: dict(handoff),
+    )
+
+    assert worker.run_once() == 1
+
+    run = graph.commands.store.get_run(run_id)
+    assert run is not None and run.status == "succeeded"
+    events = _delivery_events(graph, run_id)
+    assert [item["type"] for item in events] == ["delivery_orchestration_completed"]
+    payload = events[0]["payload"]
+    assert payload["deliveryStatus"] == "succeeded"
+    assert payload["programCandidateHandoff"] == handoff
+
+    envelope = load_scoped_artifact_payload(
+        DELIVERY_ARTIFACT_KIND,
+        team_id="research-team",
+        authority_run_id=run_id,
+        workflow_run_id=run_id,
+    )
+    assert envelope is not None
+    body = envelope["payload"]
+    assert body["deliveryStatus"] == "succeeded"
+    assert body["programCandidateHandoff"] == handoff
+
+    row = _outbox_row(graph, run_id)
+    assert row is not None and row["status"] == "succeeded" and row["attempts"] == 1
+    assert worker.run_once() == 0
+    assert len(_delivery_events(graph, run_id)) == 1
+
+
 def test_delivery_blocked_when_pdf_over_limit(harness) -> None:
     graph, worker, _clock = harness
     run_id = "run-delivery-pdf"
