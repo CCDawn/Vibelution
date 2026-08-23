@@ -459,7 +459,7 @@ export function ResearchProcessWorkspace({
         ariaLabel={isZh ? "科研流程工作区" : "Research workflow workspace"}
         title={isZh ? "科研流程" : "Research workflow"}
         hideHeader
-        toolbarClassName="!flex-nowrap overflow-hidden"
+        toolbarClassName={styles.toolbar}
         toolbar={(
           <ResearchWorkflowToolbar
             leading={toolbarLeading}
@@ -469,7 +469,6 @@ export function ResearchProcessWorkspace({
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
             experimentOptions={experimentOptions}
             panel={location.panel}
-            createDisabled={runState.busy}
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}

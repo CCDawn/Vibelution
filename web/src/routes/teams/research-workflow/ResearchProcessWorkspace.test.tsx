@@ -107,8 +107,22 @@ vi.mock("../../../components/vui", async () => {
       canvas?: React.ReactNode;
       inspector?: React.ReactNode;
       shellTestId?: string;
+      toolbarClassName?: string;
+      layoutId?: string;
+      responsive?: {
+        enabled?: boolean;
+        rail?: { label?: string };
+        inspector?: { label?: string };
+      };
     }) => (
-      <div data-testid={props.shellTestId ?? "research-process-workspace-shell"}>
+      <div
+        data-testid={props.shellTestId ?? "research-process-workspace-shell"}
+        data-toolbar-class={props.toolbarClassName}
+        data-layout-id={props.layoutId}
+        data-responsive-enabled={String(props.responsive?.enabled)}
+        data-responsive-rail={props.responsive?.rail?.label}
+        data-responsive-inspector={props.responsive?.inspector?.label}
+      >
         {props.toolbar}
         <div data-vui="canvas-workbench-rail">{props.rail}</div>
         <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
@@ -271,10 +285,16 @@ describe("ResearchProcessWorkspace", () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
+    const shell = rendered.container.querySelector('[data-testid="research-process-workspace-shell"]');
     expect(rendered.container.querySelector('[data-testid="research-workflow-stage-navigator"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-rail"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
+    expect(shell?.getAttribute("data-layout-id")).toBe("research-flow");
+    expect(shell?.getAttribute("data-toolbar-class")).toContain("overflow-hidden");
+    expect(shell?.getAttribute("data-responsive-enabled")).toBe("true");
+    expect(shell?.getAttribute("data-responsive-rail")).toBe("研究阶段");
+    expect(shell?.getAttribute("data-responsive-inspector")).toBe("当前任务");
   });
 
   it("navigates from the stage rail through URL view state only", async () => {
