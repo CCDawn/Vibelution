@@ -41,7 +41,11 @@ from .iteration import (
     evaluate_version_governance,
 )
 from .knowledge import evaluate_knowledge_handoff, evaluate_knowledge_ingestion
-from .source_collection import evaluate_source_extraction, evaluate_source_finding
+from .source_collection import (
+    evaluate_problem_understanding,
+    evaluate_source_extraction,
+    evaluate_source_finding,
+)
 
 EvaluatorFn = Callable[
     [RunSnapshot, WorkflowNodeSpec, CommonReadinessResult, DomainReadinessContext],
@@ -214,6 +218,7 @@ def _cache_key(
 
 def _build_registry() -> dict[str, EvaluatorFn]:
     return {
+        "problem_understanding": evaluate_problem_understanding,
         "source_finding": evaluate_source_finding,
         "source_extraction": evaluate_source_extraction,
         "evidence_relations": evaluate_evidence_relations,
