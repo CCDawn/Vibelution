@@ -27,6 +27,13 @@ from core.research.competition.question_result_package import (
     is_qwen_model_id,
 )
 from core.research.competition.real_control_batch import RealBatchError, real_plan
+from core.research.workflow.contracts._validation import ContractValidationError
+from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
+    CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
+    RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
+    CatalogHypothesisFlowReadinessReport,
+    catalog_hypothesis_flow_report_hash,
+)
 from core.research.workflow.contracts.research_team_role_contract import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
 )
@@ -72,11 +79,29 @@ def _require_sha256(value: str, *, label: str) -> str:
 
 def readiness_report_sha256(
     evidence: Mapping[str, Any] | list[Any] | str,
+    *,
+    trusted_authority: Any | None = None,
 ) -> str:
-    """Return the canonical hash of a readiness report/evidence object."""
+    """Return the canonical hash of a readiness report/evidence object.
+
+    Formal catalog reports are validated before hashing.  Their hash excludes
+    the self-reference and generated timestamp according to the formal
+    contract; ordinary DEV evidence keeps the generic canonical JSON hash.
+    """
 
     if isinstance(evidence, str) and _SHA256_RE.fullmatch(evidence.strip().lower()):
         return evidence.strip().lower()
+    if isinstance(evidence, Mapping) and evidence.get("reportKind") == CATALOG_HYPOTHESIS_FLOW_REPORT_KIND:
+        try:
+            report = CatalogHypothesisFlowReadinessReport.from_dict(
+                evidence,
+                trusted_authority=trusted_authority,
+            )
+        except (ContractValidationError, TypeError, ValueError, KeyError) as exc:
+            raise CatalogRunAuthorizationError(
+                "formal catalog readiness report is invalid"
+            ) from exc
+        return catalog_hypothesis_flow_report_hash(report.to_dict())
     return canonical_sha256(evidence)
 
 
@@ -266,9 +291,89 @@ def _canonical_batch_scope(
         raise CatalogRunAuthorizationError(
             "catalog authorization scope does not match the canonical plan"
         )
-    normalized = dict(batch_scope)
-    _model_policy_from_scope(normalized, required=require_model_policy)
+    allowed_fields = {"planId", "gateId", "questionIds"}
+    if "modelPolicy" in batch_scope:
+        allowed_fields.add("modelPolicy")
+    unknown = sorted(set(batch_scope) - allowed_fields)
+    if unknown:
+        raise CatalogRunAuthorizationError(
+            "catalog authorization scope contains unsupported fields: "
+            + ", ".join(str(field) for field in unknown)
+        )
+    normalized = {
+        "planId": normalized_plan,
+        "gateId": str(plan.gate_id),
+        "questionIds": expected_question_ids,
+    }
+    model_policy = _model_policy_from_scope(batch_scope, required=require_model_policy)
+    if model_policy is not None:
+        normalized["modelPolicy"] = model_policy
     return normalized
+
+
+def readiness_hash_from_snapshot(
+    snapshot: Mapping[str, Any],
+    *,
+    expected_team_id: str | None = None,
+) -> str:
+    """Resolve one fail-closed readiness hash from a server snapshot.
+
+    A snapshot may carry a top-level digest, a report body, or both.  When both
+    are present they must agree; a stale top-level digest never overrides a
+    changed report body.  The platform action and optional team projection are
+    checked here so every launch surface shares the same trust boundary.
+    """
+
+    if not isinstance(snapshot, Mapping):
+        raise CatalogRunAuthorizationError("readiness snapshot must be an object")
+    expected_team = str(expected_team_id or "").strip()
+    snapshot_team = str(snapshot.get("teamId") or "").strip()
+    if expected_team and snapshot_team and snapshot_team != expected_team:
+        raise CatalogRunAuthorizationError("readiness snapshot teamId does not match request")
+    if str(snapshot.get("nextLegalAction") or "").strip() != RESEARCH_AUTHORIZATION_REQUIRED_ACTION:
+        raise CatalogRunAuthorizationError(
+            "readiness snapshot is not at RESEARCH_AUTHORIZATION_REQUIRED"
+        )
+
+    report_values = [
+        snapshot.get(key)
+        for key in ("readinessReport", "report")
+        if isinstance(snapshot.get(key), (Mapping, list))
+    ]
+    body_hashes = [readiness_report_sha256(value) for value in report_values]
+    if body_hashes and any(value != body_hashes[0] for value in body_hashes[1:]):
+        raise CatalogRunAuthorizationError(
+            "readiness snapshot contains conflicting report bodies"
+        )
+
+    supplied_hashes: list[str] = []
+    for key in (
+        "readinessReportSha256",
+        "readinessReportHash",
+        "catalogReadinessReportSha256",
+    ):
+        if key in snapshot:
+            value = str(snapshot.get(key) or "").strip()
+            if not value:
+                raise CatalogRunAuthorizationError(
+                    f"{key} must be a sha256 hex digest"
+                )
+            supplied_hashes.append(_require_sha256(value, label=key))
+    if supplied_hashes and any(value != supplied_hashes[0] for value in supplied_hashes[1:]):
+        raise CatalogRunAuthorizationError(
+            "readiness snapshot contains conflicting report hashes"
+        )
+    if supplied_hashes and body_hashes and supplied_hashes[0] != body_hashes[0]:
+        raise CatalogRunAuthorizationError(
+            "readiness snapshot report hash does not match report body"
+        )
+    if supplied_hashes:
+        return supplied_hashes[0]
+    if body_hashes:
+        return body_hashes[0]
+    raise CatalogRunAuthorizationError(
+        "readiness snapshot has no canonical report/hash"
+    )
 
 
 def _record_hash_payload(record: CatalogRunAuthorization) -> dict[str, Any]:
@@ -354,7 +459,15 @@ def find_catalog_run_authorization(
     normalized_plan = str(plan_id or "").strip()
     if not normalized_team or not normalized_plan:
         return None
-    scope_hash = batch_scope_sha256(batch_scope)
+    try:
+        canonical_scope = _canonical_batch_scope(
+            normalized_plan,
+            batch_scope,
+            require_model_policy=require_model_policy,
+        )
+    except CatalogRunAuthorizationError:
+        return None
+    scope_hash = batch_scope_sha256(canonical_scope)
     raw_report_hash = readiness_report_sha256_value or readiness_report_hash
     if not raw_report_hash:
         return None
@@ -563,6 +676,7 @@ __all__ = [
     "canonical_sha256",
     "expected_record_hash",
     "find_catalog_run_authorization",
+    "readiness_hash_from_snapshot",
     "readiness_report_sha256",
     "record_catalog_run_authorization",
     "require_readiness_report_sha256",

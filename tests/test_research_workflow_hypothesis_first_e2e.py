@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.contracts import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
     ActorRef,
     CommandRequest,
     WorkflowCommandKind,
@@ -92,7 +93,10 @@ from tests._support.workflow_ledger_helpers import (
     build_run_record,
 )
 
-_ROLES = ("coordinator", "researcher")
+_ROLES = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.participant_policy(
+    chain.HYPOTHESIS_REVIEW_MEETING_TYPE
+).required_product_role_ids
+_TEAM_ROLES = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_role_ids
 _QUESTION_ID = "SCI-096"
 _CANDIDATE_IDS = ("hyp-a", "hyp-b", "hyp-c")
 _RUN_ID = "run-hf7-e2e"
@@ -127,7 +131,7 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _InlineExecutor())
     agents: dict[str, str] = {}
-    for role in (*_ROLES, "experiment_planner"):
+    for role in (*_TEAM_ROLES, "experiment_planner"):
         agent = agent_directory_service.create_agent_instance(
             display_name=f"HF7 {role}",
             role_key=role,
@@ -140,7 +144,7 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     team_id = team_service.create_team(
         name="HF-7 假说先行验收团队",
         purpose="challenge-workflow-hf7-e2e",
-        members=[{"agentId": agents[role], "role": role} for role in _ROLES],
+        members=[{"agentId": agents[role], "role": role} for role in _TEAM_ROLES],
     )["teamId"]
     return team_id, agents
 
@@ -232,13 +236,13 @@ def _marker_runner(participant, prompt, context):
     if "批评与修订" in str(prompt):
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
     role = str(participant.get("teamRole") or "participant")
-    if role == "coordinator":
+    if role == "challenge_cup_search":
         content = "AGREE: hyp-a 的机制证据最完整，进入有界验证"
     else:
         content = (
             "DISAGREE: hyp-b 的泛化证据不足\n"
             "RISK: 数据集偏差尚未评估\n"
-            "ACTION: researcher | 补充 hyp-b 的消融实验证据\n"
+            "ACTION: challenge_cup_experiment_revision | 补充 hyp-b 的消融实验证据\n"
             "KNOWLEDGE: 预测编码层级最新综述"
         )
     return {"status": "completed", "raw_output": content, "summary": "ok"}
@@ -1205,7 +1209,7 @@ def test_participant_role_tool_snapshot_and_single_collection_facade(
             )
             assert len(closed["collection"]["requests"]) == 1
 
-            # 讨论参与角色（coordinator/researcher）的工具快照：可解析且
+            # 讨论参与角色的工具快照：可解析且
             # 不包含 stage-1 搜集 facade 工具——讨论角色无搜集能力。
             participant_roles = list(meeting.get("participantRoleIds") or [])
             assert set(participant_roles) == set(_ROLES)

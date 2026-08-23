@@ -208,8 +208,7 @@ def _dev_authorization_ready(team_id: str) -> bool:
 
         from .catalog_run_authorization import (
             find_catalog_run_authorization,
-            readiness_report_sha256,
-            require_readiness_report_sha256,
+            readiness_hash_from_snapshot,
             resolve_catalog_model_policy,
         )
 
@@ -218,42 +217,29 @@ def _dev_authorization_ready(team_id: str) -> bool:
         return False
     if not isinstance(snapshot, Mapping):
         return False
-    action = _text(snapshot.get("nextLegalAction")).upper()
-    report = snapshot.get("report")
-    if not isinstance(report, Mapping):
-        report = snapshot.get("readinessReport")
-    platform_ready = action.endswith("AUTHORIZATION_REQUIRED") or (
-        isinstance(report, Mapping)
-        and _text(report.get("status")).upper() == "READY"
-        and report.get("researchAuthorizationRequired") is True
-    )
-    if not platform_ready:
+    action = _text(snapshot.get("nextLegalAction"))
+    if action != "RESEARCH_AUTHORIZATION_REQUIRED":
         return False
-    report_hash = ""
-    for key in (
-        "readinessReportSha256",
-        "readinessReportHash",
-        "catalogReadinessReportSha256",
-    ):
-        if _text(snapshot.get(key)):
-            report_hash = require_readiness_report_sha256(_text(snapshot.get(key)))
-            break
-    if not report_hash and isinstance(report, (Mapping, list)):
-        report_hash = readiness_report_sha256(report)
-    if not report_hash:
+    snapshot_team = _text(snapshot.get("teamId"))
+    requested_team = _text(team_id)
+    if snapshot_team and snapshot_team != requested_team:
         return False
     try:
+        report_hash = readiness_hash_from_snapshot(
+            snapshot,
+            expected_team_id=requested_team,
+        )
         scope_plan = real_plan("real-1")
         scope = {
             "planId": "real-1",
             "gateId": str(scope_plan.gate_id),
             "questionIds": [str(question_id) for question_id in scope_plan.question_ids],
             "modelPolicy": resolve_catalog_model_policy(
-                _text(snapshot.get("teamId")) or _text(team_id)
+                requested_team
             ),
         }
         authorization = find_catalog_run_authorization(
-            _text(snapshot.get("teamId")) or _text(team_id),
+            requested_team,
             plan_id="real-1",
             batch_scope=scope,
             readiness_report_sha256_value=report_hash,
