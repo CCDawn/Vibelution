@@ -20,6 +20,7 @@ from typing import ClassVar
 import pytest
 from fastapi.testclient import TestClient
 
+from config.models import ProviderConfig
 from core.research.competition.catalog_execution import (
     CatalogExecutionError,
     CatalogExecutionState,
@@ -712,7 +713,41 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
     with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="official provider"):
         catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
+    legal_default_provider = ProviderConfig(
+        provider_id="default-dashscope",
+        kind="aliyun",
+        service_class="official_api",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    assert legal_default_provider.vendor == "custom"
+    monkeypatch.setattr(
+        _FakeLlm,
+        "get_provider",
+        staticmethod(lambda _provider_id: legal_default_provider),
+    )
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_agent_llm",
+        lambda agent, slot, config: SimpleNamespace(
+            config=config,
+            model_ref="qwen-plus",
+            model_id="qwen-plus",
+            model="qwen-plus",
+            provider_id="default-dashscope",
+        ),
+    )
+    default_policy = catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+    assert default_policy["providerIds"] == ["default-dashscope"]
+
     forged_providers = (
+        SimpleNamespace(
+            provider_id="forged",
+            service_class="official_api",
+            kind="custom",
+            vendor="custom",
+            label="DashScope",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
         SimpleNamespace(
             provider_id="forged",
             service_class="official_api",

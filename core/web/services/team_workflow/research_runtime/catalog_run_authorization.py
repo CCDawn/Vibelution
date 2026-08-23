@@ -122,6 +122,7 @@ def _model_policy_from_scope(
 def _official_provider(provider: Any) -> bool:
     service_class = str(getattr(provider, "service_class", "") or "").strip().lower()
     vendor = str(getattr(provider, "vendor", "") or "").strip().lower()
+    provider_kind = str(getattr(provider, "kind", "") or "").strip().lower()
     try:
         endpoint_host = (
             urlparse(str(getattr(provider, "base_url", "") or "").strip())
@@ -136,7 +137,7 @@ def _official_provider(provider: Any) -> bool:
         return False
     return (
         service_class == "official_api"
-        and vendor == "aliyun"
+        and (vendor == "aliyun" or provider_kind == "aliyun")
         and endpoint_host == _OFFICIAL_DASHSCOPE_HOST
     )
 
