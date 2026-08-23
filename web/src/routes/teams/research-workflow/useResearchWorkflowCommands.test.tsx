@@ -133,6 +133,28 @@ describe("useResearchWorkflowCommands", () => {
     expect(latest!.error).toBe(conflict.message);
   });
 
+  it("ignores a duplicate formal offer while the first submission is pending", async () => {
+    let resolveSubmit!: (value: unknown) => void;
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const submitFormalOffer = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      resolveSubmit = resolve;
+    }));
+    await render(refresh, submitFormalOffer);
+
+    let firstSubmission!: Promise<void>;
+    await act(async () => {
+      firstSubmission = latest!.submitOffer(offer);
+      await latest!.submitOffer(offer);
+    });
+
+    expect(submitFormalOffer).toHaveBeenCalledTimes(1);
+    resolveSubmit({ commandId: "cmd-1" });
+    await act(async () => {
+      await firstSubmission;
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("does not refresh after a non-version formal command error", async () => {
     const rejection = new Error("command_http_409: command_not_allowed");
     const refresh = vi.fn().mockResolvedValue(undefined);

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type {
@@ -41,6 +41,7 @@ export function useResearchWorkflowCommands(options: {
   } = options;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const offerPendingRef = useRef(false);
 
   const pendingTaskId = useCallback(
     (nodeId: string): string | null => {
@@ -81,6 +82,8 @@ export function useResearchWorkflowCommands(options: {
         setError(reason.message);
         throw reason;
       }
+      if (offerPendingRef.current) return;
+      offerPendingRef.current = true;
       setBusy(true);
       setError(null);
       try {
@@ -104,6 +107,7 @@ export function useResearchWorkflowCommands(options: {
           throw reason;
         }
       } finally {
+        offerPendingRef.current = false;
         setBusy(false);
       }
     },

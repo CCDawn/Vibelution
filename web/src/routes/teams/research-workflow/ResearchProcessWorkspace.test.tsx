@@ -30,6 +30,7 @@ const harness = vi.hoisted(() => ({
   runState: {
     run: null as unknown,
     projection: null as unknown,
+    snapshot: null as unknown,
     error: null as string | null,
     busy: false,
     commandOffers: [] as unknown[],
@@ -240,7 +241,10 @@ describe("ResearchProcessWorkspace", () => {
     harness.runState.error = null;
     harness.runState.run = null;
     harness.runState.projection = null;
+    harness.runState.snapshot = null;
+    harness.runState.commandOffers = [];
     harness.commands.error = null;
+    harness.commands.busy = false;
     harness.formalCommand.commandError = null;
     harness.chain.chainState = null;
     harness.chain.questionId = "";
@@ -327,20 +331,32 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
     expect(rendered.container.textContent).not.toContain("选择题目开始研究");
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
-    expect(rendered.container.querySelector('[data-load-state="scope_mismatch"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-task-status="blocked"]')).not.toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
-  it("shows a created run that never dispatched and retries through submitRun", async () => {
+  it("submits the authoritative formal offer once from the fixed footer", async () => {
+    const formalOffer = {
+      command: "resolve_human_task",
+      nodeId: "knowledge_handoff",
+      available: true,
+      label: "确认知识包交接",
+      reasonCode: "ready",
+      blockerIds: [],
+      idempotencyKey: "offer:run-created:knowledge_handoff:resolve_human_task:v1",
+      expectedRunVersion: 1,
+      payload: { taskId: "human-1", decision: "accept" },
+    };
     harness.location.panel = "node";
     harness.location.runId = "run-created";
     harness.location.questionId = "SCI-004";
+    harness.location.selectedNodeId = "knowledge_handoff";
     harness.chain.questionId = "SCI-004";
     harness.runState.run = {
       ...currentRun,
       runId: "run-created",
       questionId: "SCI-004",
-      status: "created",
+      status: "waiting_human",
     } as WorkflowRunRecord;
     harness.runState.projection = {
       definition: { nodes: [], edges: [], stages: [] },
@@ -348,29 +364,56 @@ describe("ResearchProcessWorkspace", () => {
         runId: "run-created",
         teamId: "research-team",
         runVersion: 1,
-        status: "created",
-        runtimeCurrentNodeIds: [],
-        nodeRuns: {
-          source_finding: { nodeId: "source_finding", status: "pending", attempt: 0 },
-        },
+        status: "waiting_human",
+        runtimeCurrentNodeIds: ["knowledge_handoff"],
+        nodeRuns: {},
       },
     } as never;
-    harness.commands.submitRun.mockResolvedValue(undefined);
+    harness.runState.snapshot = {
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        workflowId: "challenge-cup-research",
+        workflowVersionId: "v1",
+        runVersion: 1,
+        questionId: "SCI-004",
+        status: "waiting_human",
+      },
+      currentTask: {
+        key: "human-1",
+        nodeId: "knowledge_handoff",
+        stageId: "knowledge_collection",
+        nodeRunId: "node-run-1",
+        attempt: 1,
+        actorKind: "human",
+        taskId: "human-1",
+        state: "waiting_user",
+        kind: "human_task",
+        label: "确认知识包交接",
+        detail: "确认后自动继续实验设计。",
+        responsibility: "user",
+        automaticNextStep: { kind: "auto_continue", label: "提交后自动继续" },
+        blockedReason: null,
+        recovery: { retryable: false, scope: "none", resumeFromNodeId: null },
+      },
+      commandOffers: [formalOffer],
+      progress: null,
+      latestEventSequence: 1,
+    } as never;
+    harness.runState.commandOffers = [formalOffer];
+    harness.commands.submitOffer.mockResolvedValue(undefined);
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.querySelector('[data-task-status="never_started"]')).not.toBeNull();
-    expect(rendered.container.querySelector('[aria-live="assertive"]')?.textContent).toContain("运行已创建");
-    const retry = Array.from(rendered.container.querySelectorAll("button")).find((button) => (
-      button.textContent?.includes("重试启动")
+    expect(rendered.container.querySelector('[data-task-status="waiting_user"]')).not.toBeNull();
+    const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
+    const submit = Array.from(footer?.querySelectorAll("button") ?? []).find((button) => (
+      button.textContent?.includes("确认知识包交接")
     ));
-    expect(retry).not.toBeUndefined();
-    await act(async () => retry?.click());
-    expect(harness.commands.submitRun).toHaveBeenCalledWith(expect.objectContaining({
-      teamId: "research-team",
-      questionId: "SCI-004",
-      idempotencyKey: expect.stringContaining(":fresh:"),
-    }));
+    expect(footer?.querySelectorAll("button")).toHaveLength(1);
+    await act(async () => submit?.click());
+    expect(harness.commands.submitOffer).toHaveBeenCalledTimes(1);
+    expect(harness.commands.submitOffer).toHaveBeenCalledWith(formalOffer);
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {
