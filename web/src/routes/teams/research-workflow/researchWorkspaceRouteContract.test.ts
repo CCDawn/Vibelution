@@ -3,7 +3,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   canonicalChallengeCupWorkspaceRoute,
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   isChallengeCupWorkspaceCanonicalizationEligible,
+  teamWorkspaceRoute,
 } from "../researchWorkspaceModel";
 
 const routerSource = readFileSync(resolve(import.meta.dirname, "../../../app/router.tsx"), "utf8");
@@ -71,15 +73,78 @@ describe("researchWorkspaceRouteContract", () => {
   });
 
   it("canonicalizes the challenge URL after the selected team resolves", () => {
-    expect(shellSource).toContain("canonicalChallengeCupWorkspaceRoute");
+    expect(shellSource).toContain("canonicalChallengeCupWorkspaceRouteForEffectiveTeam");
     expect(shellSource).toContain("navigate(canonicalHref, { replace: true })");
   });
 
-  it("only treats overview/workflow as challenge URL canonicalization inputs", () => {
+  it("preserves focus only when the URL explicitly names the effective team", () => {
+    const focus = "questionId=SCI-096&runId=run-a&node=hypothesis_design&panel=question";
+    const sameTeam = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      "research-team-a",
+      new URLSearchParams(`team=research-team-a&researchView=overview&${focus}`),
+    );
+    const otherTeam = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      "research-team-b",
+      new URLSearchParams(`teamId=research-team-a&researchView=workflow&${focus}`),
+    );
+    const missingTeam = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      "research-team-b",
+      new URLSearchParams(`researchView=overview&${focus}`),
+    );
+
+    expect(sameTeam).toBe(canonicalChallengeCupWorkspaceRoute(
+      "research-team-a",
+      new URLSearchParams(`team=research-team-a&researchView=overview&${focus}`),
+    ));
+    expect(otherTeam).toBe(teamWorkspaceRoute("research-team-b"));
+    expect(missingTeam).toBe(teamWorkspaceRoute("research-team-b"));
+  });
+
+  it.each([
+    ["experiment", "node", "hypothesis_design"],
+    ["iteration", "node", "controlled_run"],
+    ["knowledge_collection", "node", "source_finding"],
+    ["source_collection", "node", "source_finding"],
+    ["canvas", "panel", "agents"],
+  ])("maps retired %s links onto the single workflow workspace", (view, key, value) => {
+    const route = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      "research-team-a",
+      new URLSearchParams(`teamId=research-team-a&researchView=${view}`),
+    );
+    const params = new URLSearchParams(route.split("?")[1]);
+
+    expect(params.get("researchView")).toBe("workflow");
+    expect(params.get(key)).toBe(value);
+  });
+
+  it.each(["coordination", "ingestion", "graph", "candidates", "discussion"])(
+    "retires %s without reviving an independent surface",
+    (view) => {
+      const route = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+        "research-team-a",
+        new URLSearchParams(`teamId=research-team-a&researchView=${view}`),
+      );
+      expect(new URLSearchParams(route.split("?")[1]).get("researchView")).toBe("workflow");
+    },
+  );
+
+  it("does not carry a retired view mapping or focus across teams", () => {
+    const route = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      "research-team-b",
+      new URLSearchParams(
+        "teamId=research-team-a&researchView=experiment&questionId=SCI-096&runId=run-a&node=source_finding&panel=question",
+      ),
+    );
+
+    expect(route).toBe(teamWorkspaceRoute("research-team-b"));
+  });
+
+  it("treats canonical and retired challenge views as canonicalization inputs", () => {
     expect(isChallengeCupWorkspaceCanonicalizationEligible("overview")).toBe(true);
     expect(isChallengeCupWorkspaceCanonicalizationEligible("workflow")).toBe(true);
-    expect(isChallengeCupWorkspaceCanonicalizationEligible("discussion")).toBe(false);
-    expect(isChallengeCupWorkspaceCanonicalizationEligible("coordination")).toBe(false);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("discussion")).toBe(true);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("coordination")).toBe(true);
+    expect(isChallengeCupWorkspaceCanonicalizationEligible("not-a-view")).toBe(false);
   });
 
   it("workspace uses VCanvasWorkbenchPage fill recipe like TeamsCanvasComposer", () => {

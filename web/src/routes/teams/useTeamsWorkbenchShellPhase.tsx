@@ -46,7 +46,7 @@ import {
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
 import {
-  canonicalChallengeCupWorkspaceRoute,
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   isChallengeCupWorkspaceCanonicalizationEligible,
 } from "./researchWorkspaceModel";
 
@@ -257,7 +257,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     if (!isChallengeCupWorkspaceCanonicalizationEligible(searchParams.get("researchView"))) {
       return;
     }
-    const canonicalHref = canonicalChallengeCupWorkspaceRoute(effectiveTeamId, searchParams);
+    const canonicalHref = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams);
     const currentHref = `/teams?${searchParams.toString()}`;
     if (canonicalHref !== currentHref) {
       navigate(canonicalHref, { replace: true });

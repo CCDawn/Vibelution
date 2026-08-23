@@ -93,13 +93,30 @@ export function parseResearchWorkspaceView(value: string | null): ResearchWorksp
   return value === "workflow" || value === "overview" ? value : null;
 }
 
+const RETIRED_RESEARCH_WORKSPACE_VIEWS = new Set<ResearchWorkspaceView>([
+  "knowledge_collection",
+  "experiment",
+  "iteration",
+  "source_collection",
+  "coordination",
+  "ingestion",
+  "graph",
+  "candidates",
+  "discussion",
+  "canvas",
+]);
+
 /**
- * Only the process home and its legacy overview alias may be rewritten to the
- * canonical challenge workflow URL. Explicit child views own their URL state.
+ * Canonicalization must absorb retired child URLs so refresh/deep links cannot
+ * revive an independent surface. The parser still only restores workflow and
+ * overview as live top-level state.
  */
 export function isChallengeCupWorkspaceCanonicalizationEligible(view: string | null): boolean {
   const normalized = view?.trim() ?? "";
-  return normalized === "" || normalized === "overview" || normalized === "workflow";
+  return normalized === ""
+    || normalized === "overview"
+    || normalized === "workflow"
+    || RETIRED_RESEARCH_WORKSPACE_VIEWS.has(normalized as ResearchWorkspaceView);
 }
 
 /** Map stage workspace views onto fixed workflow node ids (ADR 0006). */
@@ -195,6 +212,38 @@ export function canonicalChallengeCupWorkspaceRoute(
     nodeId: current.get("node") || current.get("nodeId") || undefined,
     panel: current.get("panel") || undefined,
   });
+}
+
+/**
+ * Canonicalize after the selected team has resolved. URL focus is team-owned:
+ * any missing or conflicting team alias drops question/run/node/panel state.
+ */
+export function canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+  effectiveTeamId: string,
+  current: URLSearchParams,
+) {
+  if (!isSameChallengeCupWorkspaceTeam(effectiveTeamId, current)) {
+    return teamWorkspaceRoute(effectiveTeamId);
+  }
+
+  const view = current.get("researchView")?.trim() ?? "";
+  const route = canonicalChallengeCupWorkspaceRoute(effectiveTeamId, current);
+  const params = new URLSearchParams(route.split("?")[1] || "");
+
+  if (view === "experiment") {
+    params.set("node", "hypothesis_design");
+  } else if (view === "iteration") {
+    params.set("node", "controlled_run");
+  } else if (view === "knowledge_collection" || view === "source_collection") {
+    params.set("node", "source_finding");
+  } else if (view === "canvas") {
+    params.set("panel", "agents");
+  } else if (view !== "overview" && view !== "workflow" && view !== "") {
+    params.delete("node");
+    params.delete("panel");
+  }
+
+  return `/teams?${params.toString()}`;
 }
 
 /** Preserve process focus only when the current URL names the selected team. */
