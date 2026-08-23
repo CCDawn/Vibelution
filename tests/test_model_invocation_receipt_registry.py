@@ -105,7 +105,7 @@ def test_full_trace_is_idempotent_and_immutable_projection_detects_tamper(
         )
     )
     assert verified_refs == []
-    assert coverage["status"] == "observed"
+    assert coverage["status"] == "missing"
     assert coverage["integrityIssue"] == "stored_projection_mismatch"
 
 
