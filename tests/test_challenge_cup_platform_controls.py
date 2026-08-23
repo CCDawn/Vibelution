@@ -1197,7 +1197,7 @@ def test_succeeded_checkpoint_without_result_fails_closed(
     _persist_batch_checkpoint(controls_root, "team-1", "dev-1", checkpoint)
     with pytest.raises(
         dev_controls_service.DevControlsStorageError,
-        match="succeeded record is inconsistent",
+        match="record semantics are invalid",
     ):
         dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
 
