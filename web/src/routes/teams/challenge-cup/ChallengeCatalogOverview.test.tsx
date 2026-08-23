@@ -4,7 +4,10 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { ChallengeCatalogOverviewView } from "./ChallengeCatalogOverview";
+import {
+  ChallengeCatalogOverviewView,
+  isDevBatchCatalogAction,
+} from "./ChallengeCatalogOverview";
 import {
   catalogOverviewCountLabel,
   visibleCatalogOverviewRows,
@@ -122,7 +125,8 @@ describe("ChallengeCatalogOverviewView", () => {
     expect(markup).toContain("fixture rejected");
     expect(markup).toContain("单行重试已有 DEV fixture 命令");
     expect(markup).not.toContain("question_failed");
-    expect(markup).toContain("重试");
+    expect(markup).toContain("查看详情");
+    expect(markup).toContain('data-dev-batch-action="view"');
     expect(markup).not.toContain("SCI-007");
   });
 
@@ -155,6 +159,7 @@ describe("ChallengeCatalogOverviewView", () => {
           onSelect={() => {}}
           onFilterChange={() => {}}
           onAction={onAction}
+          devBatchControlsEnabled
         />,
       );
     });
@@ -172,5 +177,15 @@ describe("ChallengeCatalogOverviewView", () => {
       root.unmount();
     });
     container.remove();
+  });
+
+  it("keeps retry and continue rows read-only without the DEV capability", () => {
+    const failed = question({ questionId: "SCI-003", status: "failed" });
+    const running = question({ questionId: "SCI-007", status: "running" });
+
+    expect(isDevBatchCatalogAction(failed, false)).toBe(false);
+    expect(isDevBatchCatalogAction(running, false)).toBe(false);
+    expect(isDevBatchCatalogAction(failed, true)).toBe(true);
+    expect(isDevBatchCatalogAction(running, true)).toBe(true);
   });
 });
