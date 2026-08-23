@@ -15,7 +15,8 @@ from .result_package import (
 from .result_package_v2 import (
     ResultPackageV2Error,
     build_challenge_result_package_v2,
-    is_official_challenge_run,
+    build_proposal_result_package_base,
+    is_proposal_only_challenge_run,
 )
 from .store import WorkflowRunStore
 from .system_action_records import (
@@ -61,9 +62,14 @@ def execute_result_package_action(
             code="invalid_node_state",
         )
     candidate = terminal_package_candidate(record)
+    proposal_only = is_proposal_only_challenge_run(candidate)
     try:
-        package = build_result_package(candidate, research_ledger=research_ledger)
-        if is_official_challenge_run(candidate):
+        package = (
+            build_proposal_result_package_base(candidate)
+            if proposal_only
+            else build_result_package(candidate, research_ledger=research_ledger)
+        )
+        if proposal_only:
             package = build_challenge_result_package_v2(
                 generic_package=package,
                 record=candidate,
@@ -88,7 +94,9 @@ def execute_result_package_action(
         idempotency_key=idempotency_key,
         input_summary={
             "factChainHash": package["factChainHash"],
-            "officialVersionId": package["officialVersion"]["versionId"],
+            "officialVersionId": str(
+                (package.get("officialVersion") or {}).get("versionId") or ""
+            ),
         },
     )
     if not created:

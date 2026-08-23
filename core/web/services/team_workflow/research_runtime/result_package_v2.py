@@ -136,11 +136,15 @@ def _scope(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     constraint = _mapping(snapshot.get("constraintSnapshot"))
     scope = {
         "theme_id": _text(
-            snapshot.get("themeId") or frozen.get("themeId") or constraint.get("themeId")
+            snapshot.get("themeId")
+            or frozen.get("themeId")
+            or frozen.get("theme")
+            or constraint.get("themeId")
         ),
         "campaign_id": _text(
             snapshot.get("campaignId")
             or frozen.get("campaignId")
+            or frozen.get("campaign")
             or constraint.get("campaignId")
         ),
         "research_project_id": _text(
@@ -150,14 +154,19 @@ def _scope(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "memory_scope": _text(
             snapshot.get("memoryScope") or frozen.get("memoryScope")
-        ),
+        )
+        or "same_theme",
     }
     missing = [key for key, value in scope.items() if not value]
     if missing:
         raise ResultPackageV2Error(
             "frozen run scope is missing: " + ", ".join(missing)
         )
-    branch = _text(snapshot.get("hypothesisBranchId") or frozen.get("hypothesisBranchId"))
+    branch = _text(
+        snapshot.get("hypothesisBranchId")
+        or frozen.get("hypothesisBranchId")
+        or frozen.get("branch")
+    )
     if branch:
         scope["hypothesis_branch_id"] = branch
     return scope
@@ -169,12 +178,54 @@ def _model_run(
     team_id: str,
     question_id: str,
     workflow_run_id: str,
+    authority_run_id: str,
 ) -> dict[str, Any]:
-    refs = question_model_invocation_receipt_refs(
-        team_id,
-        question_id=question_id,
-        workflow_run_id=workflow_run_id,
-    )
+    lineage = [workflow_run_id]
+    cursor = workflow_run_id
+    feedback_artifacts = [
+        dict(item)
+        for item in list_workflow_artifacts(team_id, kind="feedback_iterations")
+        if _text(item.get("sourceCollectionRunId")) == authority_run_id
+        and isinstance(item.get("payload"), Mapping)
+    ]
+    while True:
+        parents = {
+            _text(_mapping(item.get("payload")).get("parentRunId"))
+            for item in feedback_artifacts
+            if _text(_mapping(item.get("payload")).get("childRunId")) == cursor
+        }
+        parents.discard("")
+        if not parents:
+            break
+        if len(parents) != 1:
+            raise ResultPackageV2Error(
+                "model receipt run lineage is ambiguous",
+                code="challenge_v2_receipts_incomplete",
+            )
+        cursor = parents.pop()
+        if cursor in lineage:
+            raise ResultPackageV2Error(
+                "model receipt run lineage contains a cycle",
+                code="challenge_v2_receipts_incomplete",
+            )
+        lineage.append(cursor)
+    refs: list[dict[str, Any]] = []
+    current_refs: list[dict[str, Any]] = []
+    for run_id in reversed(lineage):
+        run_refs = question_model_invocation_receipt_refs(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=run_id,
+        )
+        refs.extend(run_refs)
+        if run_id == workflow_run_id:
+            current_refs = run_refs
+    receipt_ids = [_text(ref.get("receiptId")) for ref in refs]
+    if any(not item for item in receipt_ids) or len(set(receipt_ids)) != len(receipt_ids):
+        raise ResultPackageV2Error(
+            "model invocation receipt lineage contains an invalid or duplicate receipt",
+            code="challenge_v2_receipts_incomplete",
+        )
     coverage = model_invocation_receipt_coverage(refs)
     if coverage.get("status") != "passed":
         raise ResultPackageV2Error(
@@ -183,7 +234,7 @@ def _model_run(
         )
     final_node_ids = {
         _text(ref.get("nodeRunId"))
-        for ref in refs
+        for ref in current_refs
         if "final_output" in list(ref.get("outcomeKinds") or [])
     }
     routes = [
@@ -356,16 +407,47 @@ def _hypotheses(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _feedback_iterations(
     *, team_id: str, workflow_run_id: str, authority_run_id: str
 ) -> list[dict[str, Any]]:
+    artifacts = [
+        dict(item)
+        for item in list_workflow_artifacts(team_id, kind="feedback_iterations")
+        if _text(item.get("sourceCollectionRunId")) == authority_run_id
+        and isinstance(item.get("payload"), Mapping)
+    ]
     rows: list[dict[str, Any]] = []
-    for artifact in list_workflow_artifacts(
-        team_id, kind="feedback_iterations", workflow_run_id=workflow_run_id
-    ):
-        if _text(artifact.get("sourceCollectionRunId")) != authority_run_id:
-            continue
-        payload = _mapping(artifact.get("payload"))
+    cursor = workflow_run_id
+    seen_runs: set[str] = set()
+    while cursor:
+        if cursor in seen_runs:
+            raise ResultPackageV2Error(
+                "canonical feedback lineage contains a cycle",
+                code="challenge_v2_feedback_conflict",
+            )
+        seen_runs.add(cursor)
+        matches = [
+            item
+            for item in artifacts
+            if _text(_mapping(item.get("payload")).get("childRunId")) == cursor
+            or (
+                _text(item.get("workflowRunId")) == cursor
+                and not _text(_mapping(item.get("payload")).get("childRunId"))
+            )
+        ]
+        if not matches:
+            break
+        if len(matches) != 1:
+            raise ResultPackageV2Error(
+                "canonical feedback lineage is ambiguous",
+                code="challenge_v2_feedback_conflict",
+            )
+        payload = _mapping(matches[0].get("payload"))
         item = payload.get("feedbackIteration")
-        if isinstance(item, Mapping):
-            rows.append(deepcopy(dict(item)))
+        if not isinstance(item, Mapping):
+            raise ResultPackageV2Error(
+                "canonical feedback lineage contains an invalid iteration",
+                code="challenge_v2_feedback_conflict",
+            )
+        rows.append(deepcopy(dict(item)))
+        cursor = _text(payload.get("parentRunId"))
     rows.sort(key=lambda item: int(item.get("round") or 0))
     if not rows:
         raise ResultPackageV2Error("canonical feedback_iterations contains no actual revision")
@@ -482,6 +564,7 @@ def build_challenge_result_package_v2(
             team_id=team_id,
             question_id=question_id,
             workflow_run_id=workflow_run_id,
+            authority_run_id=authority,
         ),
         "problem_understanding": problem,
         "evidence": evidence,
@@ -526,6 +609,13 @@ def build_challenge_result_package_v2(
     from core.web.services.team_workflow import challenge_question_runs
 
     issues = challenge_question_runs._schema_issues(output)
+    semantic = challenge_question_runs._semantic_validation(output)
+    if semantic.get("status") != "passed":
+        issues.extend(
+            item
+            for item in list(semantic.get("issues") or [])
+            if isinstance(item, Mapping)
+        )
     if issues:
         summary = "; ".join(
             f"{item.get('path')}: {item.get('message')}" for item in issues[:8]
@@ -560,8 +650,103 @@ def is_official_challenge_run(record: Mapping[str, Any]) -> bool:
     return question_id.startswith("SCI-")
 
 
+def is_proposal_only_challenge_run(record: Mapping[str, Any]) -> bool:
+    """Return true only for the frozen non-execution 125-question path."""
+
+    if not is_official_challenge_run(record):
+        return False
+    snapshot = _mapping(record.get("inputSnapshot"))
+    constraint = _mapping(snapshot.get("constraintSnapshot"))
+    return constraint.get("formalWrites") is False
+
+
+def build_proposal_result_package_base(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a deterministic generic envelope without claiming an experiment.
+
+    The existing generic package requires controlled-run/evaluation facts.  A
+    catalog hypothesis proposal intentionally has none, so its generic half is
+    a lineage envelope only; the v2 half carries the actual research content.
+    """
+
+    run_id = _require_text(record.get("runId"), "package.runId")
+    team_id = _require_text(record.get("teamId"), "package.teamId")
+    project_id = _require_text(record.get("projectId"), "package.projectId")
+    workflow_id = _require_text(record.get("workflowId"), "package.workflowId")
+    workflow_version = _require_text(
+        record.get("workflowVersionId"), "package.workflowVersionId"
+    )
+    terminal_reason = _require_text(
+        record.get("terminalReason"), "package.terminalReason"
+    )
+    snapshot = _mapping(record.get("inputSnapshot"))
+    snapshot_hash = _require_text(
+        snapshot.get("snapshotHash")
+        or record.get("inputSnapshotHash")
+        or record.get("researchBriefHash"),
+        "package.inputSnapshotHash",
+    )
+    artifact_refs = sorted(
+        {
+            _text(item.get("artifactId"))
+            for item in list(record.get("artifactManifests") or [])
+            if isinstance(item, Mapping) and _text(item.get("artifactId"))
+        }
+        | {
+            _text(item)
+            for item in list(record.get("inheritedArtifactRefs") or [])
+            if _text(item)
+        }
+    )
+    fact_chain = {
+        "runId": run_id,
+        "workflowVersionId": workflow_version,
+        "questionId": _require_text(snapshot.get("questionId"), "package.questionId"),
+        "inputSnapshotHash": snapshot_hash,
+        "terminalReason": terminal_reason,
+        "artifactRefs": artifact_refs,
+        "classification": "proposal_only",
+        "actualExecution": False,
+    }
+    fact_chain_hash = canonical_sha256(fact_chain)
+    core: dict[str, Any] = {
+        "runId": run_id,
+        "workflowId": workflow_id,
+        "workflowVersionId": workflow_version,
+        "teamId": team_id,
+        "projectId": project_id,
+        "factChainHash": fact_chain_hash,
+        "terminalReason": terminal_reason,
+        "builtAt": _require_text(
+            record.get("completedAt")
+            or record.get("updatedAt")
+            or record.get("createdAt"),
+            "package.builtAt",
+        ),
+        "resultClassification": {
+            "classification": "proposal_only",
+            "actualExecution": False,
+        },
+        "traceability": {
+            "artifactCount": len(artifact_refs),
+            "artifactRefs": artifact_refs,
+        },
+    }
+    official_version = record.get("officialVersion")
+    if isinstance(official_version, Mapping) and official_version:
+        core["officialVersion"] = deepcopy(dict(official_version))
+    content_hash = canonical_sha256(core)
+    return {
+        **core,
+        "packageId": f"rrp-proposal:{run_id}:{content_hash[:16]}",
+        "packageRef": f"research-result-package:{content_hash}",
+        "contentHash": content_hash,
+    }
+
+
 __all__ = [
     "ResultPackageV2Error",
     "build_challenge_result_package_v2",
+    "build_proposal_result_package_base",
     "is_official_challenge_run",
+    "is_proposal_only_challenge_run",
 ]

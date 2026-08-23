@@ -140,3 +140,157 @@ def test_shared_registry_reads_new_canonical_kinds(monkeypatch) -> None:
             workflow_run_id="run-sci-096",
         ) == {"kind": kind}
     assert calls == ["dimension_reviews", "feedback_iterations"]
+
+
+def test_proposal_base_does_not_claim_actual_execution() -> None:
+    record = {
+        **_record(),
+        "workflowId": "challenge-cup-research",
+        "projectId": "project-sci-096",
+        "terminalReason": "proposal_ready_for_review",
+        "artifactManifests": [
+            {"artifactId": "hypothesis_set:formal-hash"},
+        ],
+    }
+    record["inputSnapshot"].update(
+        {
+            "snapshotHash": "a" * 64,
+            "constraintSnapshot": {"formalWrites": False},
+        }
+    )
+
+    assert result_package_v2.is_proposal_only_challenge_run(record) is True
+    package = result_package_v2.build_proposal_result_package_base(record)
+    assert package["resultClassification"] == {
+        "classification": "proposal_only",
+        "actualExecution": False,
+    }
+    assert "officialVersion" not in package
+
+
+def test_scope_accepts_the_real_frozen_research_scope_shape() -> None:
+    scope = result_package_v2._scope(
+        {
+            "projectId": "project-sci-096",
+            "researchScopeEnvelope": {
+                "theme": "theme-sci-096",
+                "campaign": "campaign-sci-096",
+                "branch": "branch-sci-096",
+            },
+        }
+    )
+    assert scope == {
+        "theme_id": "theme-sci-096",
+        "campaign_id": "campaign-sci-096",
+        "research_project_id": "project-sci-096",
+        "memory_scope": "same_theme",
+        "hypothesis_branch_id": "branch-sci-096",
+    }
+
+
+def test_feedback_iterations_follow_revision_parent_lineage(monkeypatch) -> None:
+    monkeypatch.setattr(
+        result_package_v2,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [
+            {
+                "workflowRunId": "run-root",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "parentRunId": "run-root",
+                    "childRunId": "run-child-1",
+                    "feedbackIteration": {"round": 1},
+                },
+            },
+            {
+                "workflowRunId": "run-child-1",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "parentRunId": "run-child-1",
+                    "childRunId": "run-child-2",
+                    "feedbackIteration": {"round": 2},
+                },
+            },
+        ],
+    )
+    assert result_package_v2._feedback_iterations(
+        team_id="research-team",
+        workflow_run_id="run-child-2",
+        authority_run_id="source-sci-096",
+    ) == [{"round": 1}, {"round": 2}]
+
+
+def test_feedback_iterations_reject_parent_cycle(monkeypatch) -> None:
+    monkeypatch.setattr(
+        result_package_v2,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [
+            {
+                "workflowRunId": "run-root",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "parentRunId": "run-child",
+                    "childRunId": "run-root",
+                    "feedbackIteration": {"round": 1},
+                },
+            },
+            {
+                "workflowRunId": "run-child",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "parentRunId": "run-root",
+                    "childRunId": "run-child",
+                    "feedbackIteration": {"round": 2},
+                },
+            },
+        ],
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="feedback lineage contains a cycle",
+    ) as exc_info:
+        result_package_v2._feedback_iterations(
+            team_id="research-team",
+            workflow_run_id="run-child",
+            authority_run_id="source-sci-096",
+        )
+
+    assert exc_info.value.code == "challenge_v2_feedback_conflict"
+
+
+def test_model_run_uses_real_receipt_ids_and_final_route(monkeypatch) -> None:
+    receipt = {
+        "receiptId": "receipt-final",
+        "nodeRunId": "node-final",
+        "outcomeKinds": ["candidate", "review", "revision", "plan", "final_output"],
+        "evidenceLocator": {"kind": "turn_journal"},
+    }
+    monkeypatch.setattr(result_package_v2, "list_workflow_artifacts", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipt_refs",
+        lambda *_a, **_k: [deepcopy(receipt)],
+    )
+    record = {
+        "createdAt": "2026-07-23T00:00:00Z",
+        "modelRoutingDecisions": [
+            {
+                "nodeRunId": "node-final",
+                "providerId": "dashscope_main",
+                "modelId": "qwen3.6-plus",
+                "modelRef": "dashscope_main/qwen3.6-plus",
+            }
+        ],
+    }
+    run = result_package_v2._model_run(
+        record,
+        team_id="research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+    )
+    assert run["platform"] == "aliyun_bailian"
+    assert run["invocation_evidence_refs"] == [
+        "model-invocation-receipt:receipt-final"
+    ]

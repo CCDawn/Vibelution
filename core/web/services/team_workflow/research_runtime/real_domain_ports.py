@@ -3168,7 +3168,8 @@ def _ledger_result_package(
     from .result_package_v2 import (
         ResultPackageV2Error,
         build_challenge_result_package_v2,
-        is_official_challenge_run,
+        build_proposal_result_package_base,
+        is_proposal_only_challenge_run,
     )
 
     team_id = str(snapshot.get("teamId") or "").strip()
@@ -3187,9 +3188,14 @@ def _ledger_result_package(
         research_ledger = {}
 
     if isinstance(record, dict):
+        proposal_only = is_proposal_only_challenge_run(record)
         try:
-            package = build_result_package(record, research_ledger=research_ledger)
-            if is_official_challenge_run(record):
+            package = (
+                build_proposal_result_package_base(record)
+                if proposal_only
+                else build_result_package(record, research_ledger=research_ledger)
+            )
+            if proposal_only:
                 package = build_challenge_result_package_v2(
                     generic_package=package,
                     record=record,
@@ -3204,9 +3210,10 @@ def _ledger_result_package(
                     ),
                 )
         except (ResultPackageError, ResultPackageV2Error) as exc:
-            bounded = _ledger_bounded_result_package(action, snapshot)
-            if bounded is not None:
-                return bounded
+            if not proposal_only:
+                bounded = _ledger_bounded_result_package(action, snapshot)
+                if bounded is not None:
+                    return bounded
             raise RuntimeError(str(exc)) from exc
         if not isinstance(package, dict) or not str(package.get("packageId") or "").strip():
             raise RuntimeError("result_package builder returned an incomplete package")
