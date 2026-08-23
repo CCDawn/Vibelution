@@ -35,20 +35,20 @@ const BASE_PROPS = {
   runStatus: "",
   experimentOptions: [] as ExperimentSwitchOption[],
   panel: "node",
-  createDisabled: false,
   onSelectExperiment: () => {},
   onOpenPanel: () => {},
 } satisfies Partial<React.ComponentProps<typeof ResearchWorkflowToolbar>>;
 
 describe("ResearchWorkflowToolbar", () => {
-  it("keeps create-run available and puts hypothesis plus number in the switcher", () => {
+  it("keeps the toolbar read-only before a workflow starts and puts hypothesis plus number in the switcher", () => {
     const empty = renderToolbar({
       ...BASE_PROPS,
       runId: "",
       onSelectExperiment: vi.fn(),
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
-    expect(empty).toContain("选择题目开始研究");
+    expect(empty).not.toContain("选择题目开始研究");
+    expect(empty).not.toContain('data-variant="primary"');
     expect(empty).toContain("SCI-096 · 假说待生成");
     expect(empty).toContain("题目进度");
     expect(empty).not.toContain("状态");
@@ -87,7 +87,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).not.toContain("当前节点");
   });
 
-  it("moves new-run into the details selector while keeping one primary task action", () => {
+  it("keeps details and secondary current-task navigation without a run mutation", () => {
     const running = renderToolbar({
       ...BASE_PROPS,
       runId: "run-5e4fbe6e18f2",
@@ -97,11 +97,15 @@ describe("ResearchWorkflowToolbar", () => {
       navigationLabel: "前往假说选择",
       onSelectExperiment: vi.fn(),
       onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
-    expect(running).toContain("新建运行");
+    expect(running).not.toContain("新建运行");
     expect(running).toContain("切换实验");
     expect(running).toContain("运行记录");
-    expect(running).toContain("前往假说选择");
+    expect(running).toContain("定位当前任务");
+    expect(running).not.toContain("前往假说选择");
+    expect(running).toContain('data-variant="secondary"');
+    expect(running).not.toContain('data-variant="primary"');
     expect(running).toContain("假说准备 · 2/5");
   });
 
@@ -115,6 +119,7 @@ describe("ResearchWorkflowToolbar", () => {
       navigationLabel: "前往评审讨论",
       onSelectExperiment: vi.fn(),
       onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>, "en");
     expect(running).toContain("History");
     expect(running).toContain("Progress");
@@ -124,9 +129,10 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain("Switch experiment");
     expect(running).not.toContain("Switch hypothesis");
     expect(running).not.toContain("Reconnecting");
+    expect(running).toContain("Locate current task");
   });
 
-  it("uses navigation copy as the primary action when a run exists", () => {
+  it("uses fixed navigation copy as a secondary action when a run exists", () => {
     const running = renderToolbar({
       ...BASE_PROPS,
       runId: "run-5e4fbe6e18f2",
@@ -137,7 +143,10 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
       onNavigateCurrent: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
-    expect(running).toContain("前往确认候选");
+    expect(running).toContain("定位当前任务");
+    expect(running).not.toContain("前往确认候选");
+    expect(running).toContain('data-variant="secondary"');
+    expect(running).not.toContain('data-variant="primary"');
     expect(running).toContain("题目进度");
     expect(running).toContain("运行记录");
     expect(running).not.toContain("生成纪要");
@@ -155,7 +164,8 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
 
-    expect(active).toContain("查看评审讨论");
+    expect(active).toContain("定位当前任务");
+    expect(active).not.toContain("查看评审讨论");
     expect(active).toContain('data-vui="research-workflow-phase"');
     expect(active).not.toContain("选择题目开始研究");
   });
@@ -171,7 +181,8 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
 
-    expect(blocked).toContain("前往团队评审");
+    expect(blocked).toContain("定位当前任务");
+    expect(blocked).not.toContain("前往团队评审");
     expect(blocked).toContain("disabled");
     expect(blocked).toContain("aria-disabled=\"true\"");
     expect(blocked).toContain("当前任务导航尚未准备好，请稍后重试");
@@ -205,7 +216,8 @@ describe("ResearchWorkflowToolbar", () => {
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(running).toContain("实验设计 · 协议设计");
     expect(running).not.toContain("假说准备");
-    expect(running).toContain("前往协议设计");
+    expect(running).toContain("定位当前任务");
+    expect(running).not.toContain("前往协议设计");
   });
 
   it("keeps hypothesis preparation ahead of convergence even when runtime starts at source finding", () => {
@@ -309,7 +321,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(researchWorkflowPhase("前往假说收敛")).toMatchObject({ step: 5, zh: "假说收敛" });
   });
 
-  it("keeps the toolbar compact with a capped switcher and retains details plus primary action", () => {
+  it("uses a two-row compact layout below 1280 while retaining details and navigation", () => {
     const markup = renderToolbar({
       ...BASE_PROPS,
       runId: "run-5e4fbe6e18f2",
@@ -322,12 +334,18 @@ describe("ResearchWorkflowToolbar", () => {
       onNavigateCurrent: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
 
-    expect(markup).toContain("max-w-[24rem]");
+    expect(markup).toContain("xl:max-w-[24rem]");
     expect(markup).toContain("ms-auto");
     expect(markup).toContain("flex-nowrap");
     expect(markup).toContain("overflow-hidden");
+    expect(markup).toContain("flex-col");
+    expect(markup).toContain("xl:flex-row");
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup.match(/overflow-x-auto/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(markup).toContain("data-vui=\"tabs\"");
-    expect(markup).toContain("前往确认候选");
+    expect(markup).toContain("定位当前任务");
+    expect(markup).not.toContain("前往确认候选");
+    expect(markup).not.toContain('data-variant="primary"');
     expect(markup).toContain("data-vui=\"research-workflow-phase\"");
     expect(markup).not.toContain("grid-cols-[minmax(10rem,1fr)");
     expect(markup).not.toContain("grid-cols-[minmax(12rem,1fr)");
@@ -336,7 +354,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(rootClass).not.toContain("flex-wrap");
   });
 
-  it("keeps the details and create-run action on narrow layouts when no run exists", () => {
+  it("keeps details reachable on narrow layouts without exposing a launch action", () => {
     const empty = renderToolbar({
       ...BASE_PROPS,
       runId: "",
@@ -344,15 +362,16 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
 
-    expect(empty).toContain("选择题目开始研究");
+    expect(empty).not.toContain("选择题目开始研究");
     expect(empty).toContain("题目进度");
     expect(empty).toContain("成员与讨论");
     expect(empty).toContain("假说待生成");
     expect(empty).toContain("flex-nowrap");
     const emptyRootClass = empty.match(/data-vui="toolbar"[^>]*class="([^"]*)"/)?.[1] ?? "";
     expect(emptyRootClass).not.toContain("flex-wrap");
-    expect(empty).toContain("max-w-[24rem]");
+    expect(empty).toContain("xl:max-w-[24rem]");
     expect(empty).toContain("overflow-hidden");
+    expect(empty).toContain("overflow-x-auto");
   });
 
   it("exposes team communication and evidence graph entry points", () => {
@@ -370,7 +389,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(markup).toContain('data-testid="research-open-team-communication"');
   });
 
-  it("keeps a leading team switcher on the same row", () => {
+  it("keeps a leading team switcher in the context row", () => {
     const markup = renderToolbar({
       ...BASE_PROPS,
       runId: "",
@@ -379,7 +398,7 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(markup).toContain("挑战杯ai科研团队");
-    expect(markup).toContain("选择题目开始研究");
+    expect(markup).not.toContain("选择题目开始研究");
     expect(markup).toContain("flex-nowrap");
   });
 });
