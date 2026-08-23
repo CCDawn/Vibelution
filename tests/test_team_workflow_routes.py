@@ -386,11 +386,12 @@ def test_challenge_program_projection_stays_team_scoped_across_active_projects(t
     ).json()["challengeProgramProjection"]
 
     assert project_evidence.status_code == 201, project_evidence.text
-    assert before_questions["summary"]["completedQuestionIds"] == ["SCI-096"]
+    assert before_questions["summary"]["receiptReadyQuestionIds"] == []
+    assert before_questions["summary"]["completedQuestionIds"] == []
     assert after_questions["summary"] == before_questions["summary"]
     assert after_questions["storePath"] == str(question_path)
-    assert before_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 1
-    assert after_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 1
+    assert before_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 0
+    assert after_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 0
     assert before_projection["stage1ComplianceReadiness"]["officialModelCallEvidence"]["count"] == 1
     assert after_projection["stage1ComplianceReadiness"]["officialModelCallEvidence"]["count"] == 1
     assert before_active_projection["schemaVersion"] == 2
