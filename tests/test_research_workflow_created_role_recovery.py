@@ -176,6 +176,39 @@ def test_created_repair_accepts_exact_failed_event_replay(tmp_path: Path) -> Non
         store.close()
 
 
+def test_created_repair_rejects_run_event_sequence_mismatch(tmp_path: Path) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        run = build_run_record(
+            run_id="run-created-sequence-mismatch",
+            status="created",
+            last_event_sequence=2,
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(run)
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run.run_id,
+                    event_id=f"evt-created-{run.run_id}",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        worker = _worker(store, tmp_path)
+
+        with pytest.raises(RuntimeError, match="sequence conflict"):
+            worker.run_once()
+        current = store.get_run(run.run_id)
+        assert current is not None and current.status == "created"
+        assert current.last_event_sequence == 2
+        assert len(store.list_events(run.run_id)) == 1
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize("conflict", ["run_version", "actor", "correlation", "causation", "payload"])
 def test_created_repair_rejects_conflicting_failed_event_replay(
     tmp_path: Path, conflict: str

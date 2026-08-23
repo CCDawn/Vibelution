@@ -153,6 +153,13 @@ class GraphDispatchWorker:
                     "reason": "created run exceeded START_NODE deadline without an attempt",
                     "reconciliation": "created_without_start",
                 }
+                latest_sequence = uow.repository.latest_event_sequence(run_id)
+                if latest_sequence != run.last_event_sequence:
+                    raise RuntimeError(
+                        "created-run reconciliation sequence conflict for "
+                        f"{run_id}: run expects {run.last_event_sequence}, "
+                        f"ledger has {latest_sequence}"
+                    )
                 existing_event = uow.repository.get_event_by_id(event_id)
                 if existing_event is not None:
                     try:
@@ -207,6 +214,12 @@ class GraphDispatchWorker:
                 if sequence is None:
                     raise RuntimeError(
                         f"created-run reconciliation lost run {run_id} while advancing the event sequence"
+                    )
+                expected_sequence = run.last_event_sequence + 1
+                if sequence != expected_sequence:
+                    raise RuntimeError(
+                        "created-run reconciliation sequence conflict for "
+                        f"{run_id}: expected {expected_sequence}, got {sequence}"
                     )
                 uow.repository.insert_event(
                     _event_record_for(
