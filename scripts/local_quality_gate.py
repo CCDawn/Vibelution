@@ -186,7 +186,16 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
         "--pretty",
         "false",
     ]:
-        return CommandSpec("web-typecheck", argv, root)
+        # ``npm --prefix web`` is an allowlisted manifest spelling.  Once the
+        # command is bound to the frontend project root, retaining that prefix
+        # would resolve ``web/web``.  Normalize it exactly like the Vitest
+        # branch below: run the local npm executable from ``root/web`` while
+        # preserving the allowlisted validation intent.
+        return CommandSpec(
+            "web-typecheck",
+            [argv[0], "exec", "--", *argv[5:]],
+            root / "web",
+        )
     if normalized and normalized[0] in python_tokens:
         canonical = [str(PROJECT_PYTHON_NAME), *argv[1:]]
         if argv[1:3] == ["-m", "pytest"]:
