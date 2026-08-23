@@ -31,6 +31,7 @@ from .workflow_artifact_store import put_workflow_artifact
 
 SCHEMA_VERSION = 1
 ARTIFACT_KIND = "dimension_reviews"
+SELECTION_COMPARISON_METHOD = "multi_dimension_pareto_plus_human_decision"
 _ALLOWED_RATINGS = frozenset({"insufficient", "weak", "mixed", "adequate", "strong"})
 
 
@@ -155,12 +156,17 @@ def _validate_rows(
     review: Mapping[str, Any] | Sequence[Any] | None,
     candidates: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    candidate_ids = {
+    candidate_id_list = [
         _candidate_id(item)
         for item in candidates
         if isinstance(item, Mapping) and _candidate_id(item)
+    ]
+    candidate_ids = {
+        candidate_id for candidate_id in candidate_id_list if candidate_id
     }
     blockers: list[str] = []
+    if len(candidate_id_list) != len(candidate_ids):
+        blockers.append("hypotheses_duplicate")
     if len(candidate_ids) < 2:
         blockers.append("hypotheses_missing_or_not_unique")
 
@@ -231,6 +237,101 @@ def _validate_rows(
     if len(rows) != len(seen):
         blockers.append("dimension_review_duplicate")
     return rows, list(dict.fromkeys(blockers))
+
+
+def _selection_from_review(
+    review: Mapping[str, Any] | Sequence[Any] | None,
+    candidate_ids: Sequence[str],
+) -> tuple[dict[str, Any] | None, list[str], dict[str, Any], dict[str, Any]]:
+    """Build a pending selection from explicit Pareto and MetaReview facts.
+
+    The selection is a proposal, not a human decision: the MetaReview
+    recommendation supplies the proposed candidate while ``human_gate`` stays
+    pending.  No score, score ordering, or generated rationale is consulted.
+    """
+
+    source = _mapping(review)
+    if isinstance(source.get("round"), Mapping):
+        nested = dict(source["round"])
+        nested.update({key: value for key, value in source.items() if key != "round"})
+        source = nested
+    pareto = _mapping(source.get("pareto"))
+    meta_review = _mapping(source.get("metaReview") or source.get("meta_review"))
+    blockers: list[str] = []
+    candidate_set = set(candidate_ids)
+    front = _string_list(
+        pareto.get("paretoFrontCandidateIds")
+        or pareto.get("pareto_front_candidate_ids")
+    )
+    dominated = _string_list(
+        pareto.get("dominatedCandidateIds")
+        or pareto.get("dominated_candidate_ids")
+    )
+    if not front and not dominated:
+        blockers.append("selection_pareto_missing")
+    if len(front) != len(set(front)) or len(dominated) != len(set(dominated)):
+        blockers.append("selection_pareto_duplicate_candidates")
+    if set(front) & set(dominated):
+        blockers.append("selection_pareto_overlap")
+    if (set(front) | set(dominated)) - candidate_set:
+        blockers.append("selection_pareto_unknown_candidate")
+    if candidate_set - (set(front) | set(dominated)):
+        blockers.append("selection_pareto_incomplete")
+
+    recommendation = _text(
+        meta_review.get("recommendationCandidateId")
+        or meta_review.get("recommendation_candidate_id")
+    )
+    if not recommendation:
+        blockers.append("selection_meta_review_recommendation_missing")
+    elif recommendation not in candidate_set:
+        blockers.append("selection_meta_review_unknown_candidate")
+    elif recommendation not in set(front):
+        blockers.append("selection_meta_review_recommendation_not_pareto_front")
+    if not meta_review:
+        blockers.append("selection_meta_review_missing")
+    if meta_review and meta_review.get("accepted") is not True:
+        blockers.append("selection_meta_review_not_accepted")
+    meta_rationale = _text(meta_review.get("rationale"))
+    risk_notes = _text(meta_review.get("riskNotes") or meta_review.get("risk_notes"))
+    pareto_notes = _text(pareto.get("notes"))
+    tradeoffs: list[str] = []
+    if meta_rationale:
+        tradeoffs.append(f"MetaReview rationale: {meta_rationale}")
+    if risk_notes:
+        tradeoffs.append(f"MetaReview risk notes: {risk_notes}")
+    if pareto_notes:
+        tradeoffs.append(f"Pareto notes: {pareto_notes}")
+    if not tradeoffs:
+        blockers.append("selection_basis_rationale_missing")
+
+    if blockers:
+        return None, list(dict.fromkeys(blockers)), pareto, meta_review
+
+    rejected = []
+    for candidate_id in candidate_ids:
+        if candidate_id == recommendation:
+            continue
+        if candidate_id in set(dominated):
+            reason = "Pareto classified this candidate as dominated; human selection remains pending."
+        else:
+            reason = (
+                f"Pareto-front alternative to the explicit MetaReview recommendation {recommendation}; "
+                "human selection remains pending."
+            )
+        rejected.append({"hypothesis_id": candidate_id, "reason": reason})
+    selection = {
+        "selected_hypothesis_id": recommendation,
+        "comparison_method": SELECTION_COMPARISON_METHOD,
+        "tradeoffs": tradeoffs,
+        "rejected_hypotheses": rejected,
+        "human_gate": {
+            "required": True,
+            "decision": "pending",
+            "rationale": "The explicit MetaReview recommendation is awaiting human confirmation.",
+        },
+    }
+    return selection, [], pareto, meta_review
 
 
 def _binding_blockers(
@@ -382,6 +483,16 @@ def materialize_dimension_reviews_authority(
     )
     rows, row_blockers = _validate_rows(review, candidate_rows)
     blockers.extend(row_blockers)
+    candidate_ids = [
+        _candidate_id(item)
+        for item in candidate_rows
+        if isinstance(item, Mapping) and _candidate_id(item)
+    ]
+    selection, selection_blockers, pareto, meta_review = _selection_from_review(
+        review,
+        candidate_ids,
+    )
+    blockers.extend(selection_blockers)
     blockers = list(dict.fromkeys(blockers))
     result: dict[str, Any] = {
         "status": "blocked",
@@ -391,6 +502,7 @@ def materialize_dimension_reviews_authority(
         "binding": binding,
         "inputHash": input_hash,
         "dimensionReviews": rows,
+        "selection": selection,
         "artifact": None,
     }
     if not blockers:
@@ -400,6 +512,9 @@ def materialize_dimension_reviews_authority(
             **binding,
             "inputHash": input_hash,
             "dimensionReviews": deepcopy(rows),
+            "selection": deepcopy(selection),
+            "pareto": deepcopy(pareto),
+            "metaReview": deepcopy(meta_review),
         }
         record = put_workflow_artifact(
             team,
@@ -427,6 +542,9 @@ def materialize_dimension_reviews_authority(
             "binding": binding,
             "inputHash": input_hash,
             "dimensionReviews": rows,
+            "selection": selection,
+            "pareto": pareto,
+            "metaReview": meta_review,
             "artifact": result["artifact"],
         }
     )
@@ -439,6 +557,7 @@ write_dimension_reviews_artifact = materialize_dimension_reviews_authority
 
 __all__ = [
     "ARTIFACT_KIND",
+    "SELECTION_COMPARISON_METHOD",
     "SCHEMA_VERSION",
     "compute_input_hash",
     "materialize_dimension_reviews_authority",
