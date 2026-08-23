@@ -115,6 +115,28 @@ class ChallengeSubmissionReadinessResponse(BaseModel):
     programSummary: SubmissionReadinessProgramSummary = Field(default_factory=SubmissionReadinessProgramSummary)
 
 
+class CatalogHypothesisFlowReadinessResponse(BaseModel):
+    """Typed wire contract for the independent formal catalog readiness API."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    schemaVersion: int = 0
+    reportKind: str = ""
+    status: str = ""
+    researchAuthorizationRequired: bool = True
+    realCampaignAllowed: bool = False
+    nextLegalAction: str = ""
+    sourceCommit: str = ""
+    programContract: dict[str, Any] = Field(default_factory=dict)
+    catalogPolicy: dict[str, Any] = Field(default_factory=dict)
+    modelPolicySha256: str = ""
+    catalogResultSet: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, dict[str, str]] = Field(default_factory=dict)
+    blockers: list[str] = Field(default_factory=list)
+    readinessReportSha256: str = ""
+    generatedAt: str = ""
+
+
 class CandidateStoreListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

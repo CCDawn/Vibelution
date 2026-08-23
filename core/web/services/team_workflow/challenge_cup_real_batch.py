@@ -49,7 +49,7 @@ from core.research.competition.real_control_batch import (
     validate_real_concurrency,
     validate_real_failure_budget,
 )
-from core.research.competition.result_set import QuestionResult
+from core.research.competition.result_set import CatalogScope, QuestionResult
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services import team_service
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
@@ -594,6 +594,52 @@ def _state_of(envelope: dict[str, Any]) -> CatalogExecutionState:
         raise RealBatchStorageError(
             f"The real batch checkpoint is malformed: {exc}"
         ) from exc
+
+
+def get_real_batch_catalog_state(
+    team_id: str,
+    *,
+    plan_id: str = "real-125",
+) -> tuple[CatalogExecutionState, str] | None:
+    """Load one durable real-batch state and its authorized model policy hash.
+
+    This is the read-only bridge for catalog projections.  It deliberately
+    reuses the same envelope loader and ``_state_of`` validation as the real
+    batch lifecycle, so a checkpoint is never projected without revalidating
+    its durable authorization and canonical model-policy snapshot.  A missing
+    envelope is represented as ``None``; malformed storage/authentication
+    raises ``RealBatchStorageError`` so callers can fail closed.
+    """
+
+    normalized_team = _resolve_team_id(team_id)
+    normalized_plan = validate_real_batch_plan(plan_id)
+    with _store_lock:
+        envelope = _load_envelope(normalized_team, normalized_plan)
+        if envelope is None:
+            return None
+        state = _state_of(envelope)
+        canonical_plan = real_plan(normalized_plan)
+        if (
+            state.plan.plan_id != canonical_plan.plan_id
+            or state.plan.gate_id != canonical_plan.gate_id
+            or state.plan.question_ids != canonical_plan.question_ids
+            or state.scope != CatalogScope.from_tracked_resources()
+        ):
+            raise RealBatchStorageError(
+                "The real batch checkpoint is not the canonical formal catalog plan."
+            )
+        try:
+            authorization = _durable_authorization_record(
+                envelope.get("catalogRunAuthorization"),
+                team_id=normalized_team,
+                plan_id=normalized_plan,
+            )
+            policy_sha256 = authorized_model_policy_sha256(authorization)
+        except CatalogRunAuthorizationError as exc:
+            raise RealBatchStorageError(
+                f"The real batch durable authorization is invalid: {exc}"
+            ) from exc
+    return state, policy_sha256
 
 
 def _platform_snapshot_allows_real_batch(snapshot: Mapping[str, Any]) -> bool:
