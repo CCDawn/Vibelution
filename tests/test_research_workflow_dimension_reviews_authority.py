@@ -99,6 +99,19 @@ def test_score_only_review_is_not_promoted(monkeypatch):
     assert writes == []
 
 
+def test_duplicate_pareto_candidate_blocks_selection(monkeypatch):
+    writes = []
+    monkeypatch.setattr(writer, "put_workflow_artifact", lambda *args, **kwargs: writes.append(1))
+    payload = _review_payload()
+    payload["pareto"]["paretoFrontCandidateIds"] = ["H1", "H1"]
+
+    result = writer.materialize_dimension_reviews_authority(**_BASE, review=payload)
+
+    assert result["status"] == "blocked"
+    assert "selection_pareto_duplicate_candidates" in result["blockerCodes"]
+    assert writes == []
+
+
 def test_missing_or_duplicate_dimension_blocks(monkeypatch):
     writes = []
     monkeypatch.setattr(writer, "put_workflow_artifact", lambda *args, **kwargs: writes.append(1))

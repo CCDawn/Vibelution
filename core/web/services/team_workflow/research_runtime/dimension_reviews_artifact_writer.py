@@ -259,6 +259,24 @@ def _selection_from_review(
     meta_review = _mapping(source.get("metaReview") or source.get("meta_review"))
     blockers: list[str] = []
     candidate_set = set(candidate_ids)
+    raw_front = [
+        _text(item)
+        for item in list(
+            pareto.get("paretoFrontCandidateIds")
+            or pareto.get("pareto_front_candidate_ids")
+            or []
+        )
+        if _text(item)
+    ]
+    raw_dominated = [
+        _text(item)
+        for item in list(
+            pareto.get("dominatedCandidateIds")
+            or pareto.get("dominated_candidate_ids")
+            or []
+        )
+        if _text(item)
+    ]
     front = _string_list(
         pareto.get("paretoFrontCandidateIds")
         or pareto.get("pareto_front_candidate_ids")
@@ -269,7 +287,7 @@ def _selection_from_review(
     )
     if not front and not dominated:
         blockers.append("selection_pareto_missing")
-    if len(front) != len(set(front)) or len(dominated) != len(set(dominated)):
+    if len(raw_front) != len(front) or len(raw_dominated) != len(dominated):
         blockers.append("selection_pareto_duplicate_candidates")
     if set(front) & set(dominated):
         blockers.append("selection_pareto_overlap")
