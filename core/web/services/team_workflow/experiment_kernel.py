@@ -80,6 +80,36 @@ def _normalized_artifact_digest(value: Any) -> str:
     return f"sha256:{digest.lower()}"
 
 
+def _canonical_formal_path(
+    value: Any,
+    *,
+    label: str,
+    required: bool = True,
+) -> str:
+    """Validate a formal receipt locator against the active project data root."""
+
+    s = _service()
+    text = s._trim_text(value, max_length=500)
+    if not text:
+        if required:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Canonical formal runner receipt requires {label}."
+            )
+        return ""
+    try:
+        return str(
+            s.formal_runner.assert_canonical_project_data_path(
+                text,
+                project_root=s.PROJECT_ROOT,
+                label=label,
+            )
+        )
+    except s.formal_runner.FormalRunnerError as exc:
+        raise s.TeamWorkflowOrchestrationError(
+            f"Canonical formal runner receipt {label} must be inside the current project canonical data root."
+        ) from exc
+
+
 def _formal_runner_artifact_digests(
     plan: dict[str, Any],
     preparation: dict[str, Any],
@@ -127,8 +157,8 @@ def _formal_runner_artifact_digests(
         except (TypeError, ValueError):
             raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt contains an invalid run seed.")
         digest = _normalized_artifact_digest(run.get("artifactHash"))
-        result_path = str(run.get("resultPath") or "").strip()
-        if not result_path or not digest:
+        result_path = _canonical_formal_path(run.get("resultPath"), label="resultPath")
+        if not digest:
             raise s.TeamWorkflowOrchestrationError(
                 "Canonical formal runner receipt requires a result path and valid artifact digest for every seed."
             )
@@ -175,12 +205,14 @@ def _build_formal_runner_receipt(
     """
 
     s = _service()
-    result_path = s._trim_text(result.get("resultPath"), max_length=500)
-    log_ref = s._trim_text(result.get("logRef"), max_length=500)
+    result_path = _canonical_formal_path(result.get("resultPath"), label="resultPath")
+    log_ref = _canonical_formal_path(result.get("logRef"), label="logRef")
+    _canonical_formal_path(result.get("configPath"), label="configPath", required=False)
+    _canonical_formal_path(execution_config.get("configPath"), label="configPath", required=False)
     artifact_digests = _formal_runner_artifact_digests(plan, preparation, result)
     if str(result.get("status") or "").strip().lower() != "completed":
         raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt requires a completed runner result.")
-    if not result_path or not log_ref or not artifact_digests:
+    if not artifact_digests:
         raise s.TeamWorkflowOrchestrationError(
             "Canonical formal runner receipt requires result path, log reference, and artifact digests."
         )

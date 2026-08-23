@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from core.research.workflow.checkpoint_store import default_checkpoint_path
+from core.research import formal_runner
+from core.infrastructure import developer_sandbox
+from core.web.services.team_workflow import research_projects
+from core.web.services.team_workflow.experiment_api import full_run as full_run_api
+from core.web.services.team_workflow import experiment_kernel
 from core.web.services.team_workflow.research_runtime import paths, store
 from core.web.services.team_workflow.research_runtime.binding_config import (
     WorkflowBindingConfigStore,
@@ -135,3 +143,139 @@ def test_audit_default_data_root_follows_custom_project_root_after_parse(monkeyp
     assert audit.main(["--project-root", str(project_root), "--output", str(output)]) == 0
     report = json.loads(output.read_text(encoding="utf-8"))
     assert Path(report["dataRoot"]) == canonical_data / "research_workflows"
+
+
+def test_formal_product_execution_config_binds_output_to_current_canonical_root(
+    monkeypatch, tmp_path
+):
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    _write_project_identity(project_root, "canonical-writer-test")
+    canonical_data = tmp_path / "canonical-data"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(canonical_data))
+    fake_service = SimpleNamespace(
+        formal_runner=formal_runner,
+        TeamWorkflowOrchestrationError=RuntimeError,
+    )
+    monkeypatch.setattr(full_run_api, "_service", lambda: fake_service)
+
+    output_root = canonical_data / "challenge-cup" / "formal-runs"
+    bound = full_run_api._bind_formal_execution_config(
+        {"outputRoot": str(output_root), "timeoutSeconds": 120},
+        project_root=project_root,
+    )
+
+    assert Path(bound["outputRoot"]) == output_root.resolve()
+    assert bound["timeoutSeconds"] == 120
+    assert not output_root.exists()
+
+
+@pytest.mark.parametrize(
+    "output_root",
+    [
+        "checkout/artifacts",
+        "other-instance/data/formal-runs",
+        ".runtime/developer-mode/sandboxes/sandbox-1/workspace/teams/team-a",
+    ],
+)
+def test_formal_product_execution_config_rejects_noncanonical_output_roots(
+    monkeypatch, tmp_path, output_root
+):
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    _write_project_identity(project_root, "canonical-writer-test")
+    canonical_data = tmp_path / "canonical-data"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(canonical_data))
+    fake_service = SimpleNamespace(
+        formal_runner=formal_runner,
+        TeamWorkflowOrchestrationError=RuntimeError,
+    )
+    monkeypatch.setattr(full_run_api, "_service", lambda: fake_service)
+
+    candidate = tmp_path / output_root
+    with pytest.raises(RuntimeError, match="current project canonical data root"):
+        full_run_api._bind_formal_execution_config(
+            {"outputRoot": str(candidate)},
+            project_root=project_root,
+        )
+
+    assert not candidate.exists()
+
+
+def test_formal_product_execution_config_rejects_relative_output_root(
+    monkeypatch, tmp_path
+):
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    _write_project_identity(project_root, "canonical-writer-test")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "canonical-data"))
+    fake_service = SimpleNamespace(
+        formal_runner=formal_runner,
+        TeamWorkflowOrchestrationError=RuntimeError,
+    )
+    monkeypatch.setattr(full_run_api, "_service", lambda: fake_service)
+
+    with pytest.raises(RuntimeError, match="absolute path"):
+        full_run_api._bind_formal_execution_config(
+            {"outputRoot": "canonical-data/formal-runs"},
+            project_root=project_root,
+        )
+
+
+def test_formal_team_workspace_root_does_not_follow_developer_sandbox(
+    monkeypatch, tmp_path
+):
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    _write_project_identity(project_root, "canonical-writer-test")
+    canonical_data = tmp_path / "canonical-data"
+    sandbox_root = tmp_path / "sandbox" / "workspace"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(canonical_data))
+    monkeypatch.setattr(research_projects, "_project_root", lambda: project_root)
+    monkeypatch.setattr(
+        developer_sandbox,
+        "seeded_sandbox_workspace_path",
+        lambda _root, *parts: sandbox_root.joinpath(*parts),
+    )
+
+    formal_root = research_projects.formal_team_workspace_root("team-alpha")
+
+    assert formal_root == canonical_data / "workspace" / "teams" / "team-alpha"
+    assert not formal_root.is_relative_to(sandbox_root)
+
+
+def test_formal_receipt_locators_use_the_same_canonical_root_guard(
+    monkeypatch, tmp_path
+):
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    _write_project_identity(project_root, "canonical-writer-test")
+    canonical_data = tmp_path / "canonical-data"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(canonical_data))
+
+    def trim(value, *, max_length):
+        return str(value or "").strip()[:max_length]
+
+    fake_service = SimpleNamespace(
+        _trim_text=trim,
+        formal_runner=formal_runner,
+        PROJECT_ROOT=project_root,
+        TeamWorkflowOrchestrationError=RuntimeError,
+    )
+    monkeypatch.setattr(experiment_kernel, "_service", lambda: fake_service)
+
+    accepted = canonical_data / "challenge-cup" / "formal-runs" / "result.json"
+    assert experiment_kernel._canonical_formal_path(accepted, label="resultPath") == str(
+        accepted.resolve()
+    )
+    assert experiment_kernel._canonical_formal_path(
+        "", label="configPath", required=False
+    ) == ""
+
+    for rejected in (
+        project_root / "artifacts" / "result.json",
+        tmp_path / "other-instance" / "data" / "result.json",
+        tmp_path / ".runtime" / "developer-mode" / "sandboxes" / "result.json",
+    ):
+        with pytest.raises(RuntimeError, match="current project canonical data root"):
+            experiment_kernel._canonical_formal_path(rejected, label="resultPath")

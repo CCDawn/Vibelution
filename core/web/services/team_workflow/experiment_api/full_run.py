@@ -7,6 +7,7 @@ Late-bound facade keeps route imports and monkeypatches on
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from core.web.services.team_workflow import experiment_kernel as _experiment_kernel
@@ -101,6 +102,34 @@ def _execution_config_from_env() -> dict[str, Any]:
     return mapped
 
 
+def _bind_formal_execution_config(
+    config: dict[str, Any] | None,
+    *,
+    project_root: Path | str,
+) -> dict[str, Any]:
+    """Bind a product full-run config to the current instance data root.
+
+    Request payloads, stored preparation records, and environment fallbacks
+    are all untrusted input at this boundary.  Keep their other options intact
+    for the runner, but resolve ``outputRoot`` through the formal runner's
+    canonical-path helper immediately before any prepare/run call.
+    """
+
+    s = _service()
+    bound = dict(config) if isinstance(config, dict) else {}
+    try:
+        bound["outputRoot"] = str(
+            s.formal_runner.assert_canonical_project_data_path(
+                bound.get("outputRoot"),
+                project_root=project_root,
+                label="outputRoot",
+            )
+        )
+    except s.formal_runner.FormalRunnerError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    return bound
+
+
 def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate a user-selected formal runner without starting model training.
 
@@ -124,6 +153,10 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
     execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
     try:
+        execution_config = _bind_formal_execution_config(
+            execution_config,
+            project_root=s.PROJECT_ROOT,
+        )
         preparation = s.formal_runner.prepare_full_run(
             adapter_id,
             method_config=method_config,
@@ -208,6 +241,10 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
 
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
     execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
+    execution_config = _bind_formal_execution_config(
+        execution_config,
+        project_root=s.PROJECT_ROOT,
+    )
     preparation_snapshot = (
         s.deepcopy(plan_snapshot.get("activeFullRunPreparation"))
         if isinstance(plan_snapshot.get("activeFullRunPreparation"), dict)

@@ -84,7 +84,7 @@ class _Harness:
         self.launch_failures: set[str] = set()
         monkeypatch.setattr(
             svc,
-            "team_workspace_root",
+            "formal_team_workspace_root",
             lambda team_id: tmp_path / "teams" / team_id,
         )
         monkeypatch.setattr(
