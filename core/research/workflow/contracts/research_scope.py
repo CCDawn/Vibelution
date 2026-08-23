@@ -88,6 +88,45 @@ def scope_hash_for(
     )
 
 
+def scope_locators_for(
+    *,
+    program: str,
+    theme: str,
+    campaign: str,
+    question: str,
+    branch: str,
+    agent_id: str,
+    scope_hash: str,
+) -> dict[str, str]:
+    """Derive the stable artifact, ledger, and cache locators for a scope.
+
+    Keeping these paths beside the scope identity contract prevents callers
+    from independently rebuilding locator strings during snapshot validation.
+    """
+
+    identity = {
+        "program": str(program or "").strip(),
+        "theme": str(theme or "").strip(),
+        "campaign": str(campaign or "").strip(),
+        "question": str(question or "").strip(),
+        "branch": str(branch or "").strip(),
+    }
+    normalized_hash = str(scope_hash or "").strip()
+    normalized_agent = str(agent_id or "").strip()
+    return {
+        "artifactLocator": (
+            f"research-artifact://{identity['program']}/{identity['theme']}/"
+            f"{identity['campaign']}/{identity['branch']}/{identity['question']}/"
+            f"{normalized_hash}"
+        ),
+        "ledgerRoot": (
+            f"research-ledger://{identity['program']}/{identity['theme']}/"
+            f"{identity['campaign']}/{normalized_hash}"
+        ),
+        "cacheKey": f"scope:{normalized_hash}:{identity['branch']}:{normalized_agent}",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ResearchScopeEnvelope:
     """Immutable scope envelope with a full-scope hash for read verification."""
