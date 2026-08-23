@@ -132,6 +132,7 @@ def test_valid_but_unapproved_candidate_does_not_complete_golden_sample():
             "validCandidateCount": 1,
             "validatedQuestionCount": 1,
             "validatedQuestionIds": ["SCI-096"],
+            "receiptReadyQuestionIds": ["SCI-096"],
             "completedCount": 0,
             "completedQuestionIds": [],
             "latestCandidate": {"questionId": "SCI-096", "status": "review_required"},
@@ -146,6 +147,95 @@ def test_valid_but_unapproved_candidate_does_not_complete_golden_sample():
     assert stage1["singleQuestionSample"]["candidateCount"] == 1
     assert stage1["singleQuestionSample"]["completed"] == 0
     assert stage1["singleQuestionSample"]["latestCandidate"]["questionId"] == "SCI-096"
+
+
+def test_validated_only_question_cannot_enter_mvp_candidate_projection():
+    projection = build_challenge_program_projection(
+        legacy_lifecycle={"stage2": {}, "stage3": {}},
+        public_config={"llm": {"providers": {}}},
+        official_model_evidence=[],
+        question_run_summary={
+            "validatedQuestionIds": ["SCI-096"],
+            "validatedQuestionResults": [
+                {"questionId": "SCI-096", "status": "approved"}
+            ],
+            "completedQuestionIds": ["SCI-096"],
+            "latestCandidate": {"questionId": "SCI-096", "status": "approved"},
+        },
+    )
+
+    stage1 = projection["stage1ComplianceReadiness"]
+    assert stage1["singleQuestionSample"]["candidateCount"] == 0
+    assert stage1["singleQuestionSample"]["completed"] == 0
+    assert stage1["singleQuestionSample"]["latestCandidate"] is None
+    assert stage1["trialRun"]["completed"] == 0
+    assert stage1["mvpManifest"]["trialQuestionIds"] == []
+    assert stage1["receiptMissingQuestionIds"] == ["SCI-096"]
+    assert "mvp_model_invocation_receipts_missing" in stage1["blockers"]
+    assert stage1["humanReview"]["approvedQuestionIds"] == ["SCI-096"]
+
+
+def test_missing_receipts_do_not_erase_revision_or_rejection_facts():
+    question_ids = ["SCI-031", "SCI-096", "SCI-097", "SCI-118"]
+    projection = build_challenge_program_projection(
+        legacy_lifecycle={"stage2": {}, "stage3": {}},
+        public_config={
+            "llm": {
+                "providers": {
+                    "dashscope_main": {
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "credential_ref": "env:DASHSCOPE_API_KEY",
+                        "models": {
+                            "qwen3.6-plus": {"upstream_id": "qwen3.6-plus"}
+                        },
+                    }
+                }
+            }
+        },
+        official_model_evidence=[
+            {
+                "evidenceId": "model-evidence-real-1",
+                "modelProvider": "dashscope",
+                "status": "registered",
+            }
+        ],
+        question_run_summary={
+            "validatedQuestionIds": question_ids,
+            "receiptReadyQuestionIds": ["SCI-031", "SCI-096"],
+            "validatedOutcomeCounts": {
+                "approved": 2,
+                "needs_revision": 1,
+                "rejected": 1,
+            },
+            "validatedQuestionResults": [
+                {"questionId": "SCI-096", "status": "approved"},
+                {"questionId": "SCI-031", "status": "approved"},
+                {"questionId": "SCI-097", "status": "needs_revision"},
+                {"questionId": "SCI-118", "status": "rejected"},
+            ],
+            "completedQuestionIds": ["SCI-031", "SCI-096"],
+        },
+    )
+
+    stage1 = projection["stage1ComplianceReadiness"]
+    assert stage1["receiptMissingQuestionIds"] == ["SCI-097", "SCI-118"]
+    assert stage1["blockers"] == [
+        "mvp_model_invocation_receipts_missing",
+        "mvp_three_trial_questions_missing",
+        "mvp_human_review_revision_required",
+    ]
+    assert stage1["trialRun"]["completedQuestionIds"] == ["SCI-031"]
+    assert stage1["trialRun"]["outcomeCounts"] == {
+        "approved": 2,
+        "needs_revision": 1,
+        "rejected": 1,
+    }
+    assert stage1["humanReview"]["approvedQuestionIds"] == [
+        "SCI-096",
+        "SCI-031",
+    ]
+    assert stage1["humanReview"]["revisionRequiredQuestionIds"] == ["SCI-097"]
+    assert stage1["humanReview"]["rejectedQuestionIds"] == ["SCI-118"]
 
 
 def test_machine_validated_trials_keep_mvp_blocked_when_human_review_requests_revision():
@@ -173,6 +263,7 @@ def test_machine_validated_trials_keep_mvp_blocked_when_human_review_requests_re
             "validCandidateCount": 4,
             "validatedQuestionCount": 4,
             "validatedQuestionIds": ["SCI-031", "SCI-096", "SCI-097", "SCI-118"],
+            "receiptReadyQuestionIds": ["SCI-031", "SCI-096", "SCI-097", "SCI-118"],
             "validatedOutcomeCounts": {"approved": 1, "needs_revision": 3},
             "validatedQuestionResults": [
                 {
@@ -288,6 +379,7 @@ def test_all_four_human_approved_questions_complete_mvp_readiness():
         ],
         question_run_summary={
             "validatedQuestionIds": question_ids,
+            "receiptReadyQuestionIds": question_ids,
             "validatedOutcomeCounts": {"approved": 4},
             "validatedQuestionResults": [
                 {

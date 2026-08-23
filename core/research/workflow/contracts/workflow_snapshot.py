@@ -6,7 +6,7 @@ UI-only state (selected node, panel, viewport, hover, dialog, URL) is forbidden.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .workflow_command import CommandOffer
@@ -304,6 +304,17 @@ class ResearchWorkflowSnapshot:
     budget_summary: BudgetSummary
     latest_event_sequence: int
     generated_at: str
+    # v2 fields are additive.  They are deliberately optional at the Python
+    # construction boundary so old readers/fixtures can still materialize the
+    # v1 projection while the server emits the formal semantic fields.
+    schema_version: int = 2
+    current_task: Mapping[str, Any] | None = None
+    progress: Mapping[str, Any] = field(default_factory=dict)
+    retry: Mapping[str, Any] = field(default_factory=dict)
+    recovery: Mapping[str, Any] = field(default_factory=dict)
+    artifact_summary: Mapping[str, Any] = field(default_factory=dict)
+    delivery_status: str | None = None
+    launch_context: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -321,4 +332,14 @@ class ResearchWorkflowSnapshot:
             "budgetSummary": self.budget_summary.to_dict(),
             "latestEventSequence": int(self.latest_event_sequence),
             "generatedAt": self.generated_at,
+            "schemaVersion": int(self.schema_version),
+            "currentTask": (
+                dict(self.current_task) if self.current_task is not None else None
+            ),
+            "progress": dict(self.progress),
+            "retry": dict(self.retry),
+            "recovery": dict(self.recovery),
+            "artifactSummary": dict(self.artifact_summary),
+            "deliveryStatus": self.delivery_status,
+            "launchContext": dict(self.launch_context),
         }

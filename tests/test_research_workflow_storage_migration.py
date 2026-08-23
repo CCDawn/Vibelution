@@ -239,6 +239,199 @@ def test_preview_rejects_unknown_workflow_sqlite_asset(tmp_path: Path, monkeypat
     } >= {("unknown_asset", "workflow-checkpoints.sqlite")}
 
 
+def test_zero_byte_legacy_workflow_checkpoint_is_recorded_as_excluded_placeholder(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    (source / "workflow-checkpoints.sqlite").write_bytes(b"")
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+
+    assert result.ready
+    assert "workflow-checkpoints.sqlite" in result.excluded_assets
+    assert not any(item.relative_path == "workflow-checkpoints.sqlite" for item in result.entries)
+    assert any(
+        item["code"] == "legacy_placeholder_excluded"
+        and item["relativePath"] == "workflow-checkpoints.sqlite"
+        for item in result.warnings
+    )
+
+
+def test_stale_runtime_lock_and_source_collection_snapshot_are_warnings_when_idle(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, _source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    stale_guard = {
+        "ok": True,
+        "blockers": [],
+        "activeWork": {"blocking": False, "uncertain": False, "claims": []},
+        "runtimeWriters": {
+            "blocking": True,
+            "uncertain": False,
+            "writers": [
+                {
+                    "kind": "runtime_manager_lock",
+                    "path": "runtime-manager/daemon.lock",
+                    "pid": 38628,
+                },
+            ],
+        },
+        "runtimeManager": {
+            "daemonRunning": False,
+            "managerPid": 38628,
+            "runtimeState": "idle",
+            "workbench": {"observedState": "closed"},
+        },
+        "launcher": {"blocking": False, "uncertain": False, "alive": False, "observedState": "idle"},
+        "sourceCollectionSnapshots": [
+            {
+                "runId": "dprun-stale",
+                "status": "running",
+                "currentPhase": "searching",
+                "processId": 38628,
+            }
+        ],
+    }
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: stale_guard,
+    )
+
+    assert result.ready
+    warning_codes = {str(item["code"]) for item in result.warnings}
+    assert "stale_runtime_manager_lock" in warning_codes
+    assert "stale_source_collection_snapshot" in warning_codes
+
+
+def test_active_claims_remain_blockers_even_with_stale_runtime_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, _source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    guard = {
+        "ok": False,
+        "blockers": [{"code": "active_work_present", "claims": [{"claimId": "claim-live"}]}],
+        "activeWork": {
+            "blocking": True,
+            "uncertain": False,
+            "claims": [{"claimId": "claim-live"}],
+        },
+        "runtimeWriters": {
+            "blocking": True,
+            "uncertain": False,
+            "writers": [{"kind": "runtime_manager_lock", "pid": 38628}],
+        },
+        "runtimeManager": {"daemonRunning": False, "managerPid": 38628, "runtimeState": "idle"},
+        "launcher": {"blocking": False, "uncertain": False, "alive": False, "observedState": "idle"},
+        "sourceCollectionSnapshots": [{"runId": "dprun-stale", "status": "running"}],
+    }
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: guard,
+    )
+
+    assert not result.ready
+    assert any(item["code"] == "active_work_present" for item in result.blockers)
+
+
+def test_empty_target_checkpoint_placeholder_is_archived_replaced_and_restorable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+
+    preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert preview.ready
+
+    applied = apply_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    manifest = Path(str(applied["manifestPath"]))
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    entry = next(item for item in payload["assets"] if item["relativePath"] == "checkpoints.sqlite")
+    before_archive = Path(str(entry["targetBefore"]["archive_path"]))
+    assert before_archive.read_bytes() == b""
+    assert _table_values(target_checkpoint, "SELECT thread_id FROM checkpoints") == [("thread-1",)]
+
+    rolled_back = rollback_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        manifest_path=manifest,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert rolled_back["ok"] is True
+    assert target_checkpoint.read_bytes() == b""
+    assert not target_checkpoint.with_name("checkpoints.sqlite-wal").exists()
+    assert not target_checkpoint.with_name("checkpoints.sqlite-shm").exists()
+
+
+def test_empty_target_ledger_with_zero_wal_and_stale_shm_replaces_whole_bundle(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_current_ledger(source / "workflow-ledger.sqlite", include_blocked_run=True)
+    target.mkdir(parents=True)
+    target_ledger = target / "workflow-ledger.sqlite"
+    _create_current_ledger(target_ledger)
+    target_ledger.with_name("workflow-ledger.sqlite-shm").write_bytes(b"stale-shm")
+
+    preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert preview.ready
+
+    applied = apply_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    manifest = Path(str(applied["manifestPath"]))
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    entry = next(item for item in payload["assets"] if item["relativePath"] == "workflow-ledger.sqlite")
+    before_archive = Path(str(entry["targetBefore"]["archive_path"]))
+    assert before_archive.with_name(before_archive.name + "-shm").read_bytes() == b"stale-shm"
+    assert not target_ledger.with_name("workflow-ledger.sqlite-shm").exists()
+
+    rolled_back = rollback_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        manifest_path=manifest,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert rolled_back["ok"] is True
+    assert target_ledger.with_name("workflow-ledger.sqlite-shm").read_bytes() == b"stale-shm"
+
+
 def test_preview_rejects_target_ledger_sidecar(tmp_path: Path, monkeypatch) -> None:
     project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
     _create_current_ledger(source / "workflow-ledger.sqlite")
@@ -544,9 +737,16 @@ def test_apply_promotion_failure_restores_previously_promoted_targets(tmp_path: 
     _create_current_ledger(target_ledger)
     _create_checkpoint(target_checkpoint, include_rows=False)
     real_replace = storage_migration.os.replace
+    failed_once = False
 
     def fail_ledger_promotion(source_path, destination):
-        if Path(destination) == target_ledger and Path(source_path).name.endswith(".staging"):
+        nonlocal failed_once
+        if (
+            not failed_once
+            and Path(destination) == target_ledger
+            and Path(source_path).name.endswith(".staging")
+        ):
+            failed_once = True
             raise OSError("simulated promotion failure")
         return real_replace(source_path, destination)
 
@@ -599,14 +799,19 @@ def test_rollback_stages_all_targets_before_any_promotion(tmp_path: Path, monkey
     payload = json.loads(Path(str(apply["manifestPath"])).read_text(encoding="utf-8"))
     ledger_entry = next(item for item in payload["assets"] if item["relativePath"] == "workflow-ledger.sqlite")
     ledger_archive = Path(str(ledger_entry["targetBefore"]["archive_path"]))
-    real_copy = storage_migration._copy_asset
+    real_copy = storage_migration._copy_sqlite_bundle_archive
 
-    def fail_ledger_restore_stage(source_path: Path, destination: Path, *, kind: str) -> None:
+    def fail_ledger_restore_stage(
+        source_path: Path,
+        destination: Path,
+        *,
+        allow_empty_main: bool = False,
+    ) -> None:
         if Path(source_path) == ledger_archive:
             raise OSError("simulated rollback staging failure")
-        real_copy(source_path, destination, kind=kind)
+        real_copy(source_path, destination, allow_empty_main=allow_empty_main)
 
-    monkeypatch.setattr(storage_migration, "_copy_asset", fail_ledger_restore_stage)
+    monkeypatch.setattr(storage_migration, "_copy_sqlite_bundle_archive", fail_ledger_restore_stage)
     with pytest.raises(OSError, match="simulated rollback staging failure"):
         rollback_research_workflow_migration(
             project,
@@ -879,7 +1084,7 @@ def test_empty_sqlite_main_is_fail_closed(
         )
 
 
-def test_target_empty_sqlite_main_is_fail_closed(tmp_path: Path, monkeypatch) -> None:
+def test_target_empty_checkpoint_main_is_replaceable_placeholder(tmp_path: Path, monkeypatch) -> None:
     project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
     _create_checkpoint(source / "checkpoints.sqlite")
     target.mkdir(parents=True)
@@ -891,7 +1096,661 @@ def test_target_empty_sqlite_main_is_fail_closed(tmp_path: Path, monkeypatch) ->
         sample_delay_seconds=0,
         quiescence_probe=lambda _project: {"ok": True, "blockers": []},
     )
-    assert any(
+    assert preview.ready
+    assert not any(
         item["code"] == "target_empty_sqlite_main" and str(item["path"]).endswith("checkpoints.sqlite")
         for item in preview.blockers
     )
+
+
+class _SimulatedProcessCrash(BaseException):
+    pass
+
+
+def test_raw_not_ready_guard_cannot_be_normalized_to_ready(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, _source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": False, "blockers": []},
+    )
+
+    assert not result.ready
+    assert any(item["code"] == "quiescence_guard_not_ready" for item in result.blockers)
+
+
+def test_ready_claim_is_recovered_as_active_work_blocker(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, _source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {
+            "ok": True,
+            "blockers": [],
+            "activeWork": {
+                "blocking": False,
+                "uncertain": False,
+                "claims": [{"claimId": "claim-ready", "status": "ready"}],
+            },
+        },
+    )
+
+    assert not result.ready
+    assert any(item["code"] == "active_work_present" for item in result.blockers)
+
+
+@pytest.mark.parametrize(
+    "runtime_evidence",
+    (
+        {"workbench": {"backendPortListening": True}},
+        {"workbench": {"backendPortOwnerPid": 43210, "backendPortOwnerResidual": True}},
+        {"residualProcesses": {"count": 1, "items": [{"pid": 43210}]}},
+    ),
+)
+def test_runtime_residual_evidence_keeps_stale_lock_blocking(
+    tmp_path: Path,
+    monkeypatch,
+    runtime_evidence: dict[str, object],
+) -> None:
+    project, projects_home, _source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    guard = {
+        "ok": True,
+        "blockers": [{"code": "runtime_writers_active"}],
+        "activeWork": {"blocking": False, "uncertain": False, "claims": []},
+        "runtimeWriters": {
+            "blocking": True,
+            "uncertain": False,
+            "writers": [{"kind": "runtime_manager_lock", "pid": 43210}],
+        },
+        "runtimeManager": {"daemonRunning": False, **runtime_evidence},
+        "launcher": {"blocking": False, "uncertain": False, "alive": False},
+    }
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: guard,
+    )
+
+    assert not result.ready
+    assert any(item["code"] == "runtime_writers_active" for item in result.blockers)
+    assert not any(item["code"] == "stale_runtime_manager_lock" for item in result.warnings)
+
+
+def test_placeholder_rejects_directory_sidecar_members(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    legacy = source / "workflow-checkpoints.sqlite"
+    legacy.write_bytes(b"")
+    legacy.with_name(legacy.name + "-wal").mkdir()
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+    target_checkpoint.with_name(target_checkpoint.name + "-shm").mkdir()
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+
+    assert "workflow-checkpoints.sqlite" not in result.excluded_assets
+    assert any(item["code"] == "unknown_asset" for item in result.blockers)
+    assert any(item["code"] == "target_sqlite_bundle_member_unsafe" for item in result.blockers)
+
+
+def test_apply_recovers_persistent_journal_after_main_replace_crash(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+    journal = target.parent / ".rwm-j.json"
+    real_replace = storage_migration.os.replace
+    crashed = False
+
+    def crash_after_main_replace(source_path, destination_path):
+        nonlocal crashed
+        if not crashed and Path(destination_path) == target_checkpoint and Path(source_path).name.endswith(".staging"):
+            real_replace(source_path, destination_path)
+            crashed = True
+            raise _SimulatedProcessCrash("crash after main")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(storage_migration.os, "replace", crash_after_main_replace)
+    with pytest.raises(_SimulatedProcessCrash, match="crash after main"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    assert journal.is_file()
+    blocked_preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert any(item["code"] == "unfinished_promotion_journal" for item in blocked_preview.blockers)
+    assert journal.is_file(), "preview must never recover or remove a journal"
+
+    monkeypatch.setattr(storage_migration.os, "replace", real_replace)
+    result = apply_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert result["ok"] is True
+    assert not journal.exists()
+    assert _table_values(target_checkpoint, "SELECT thread_id FROM checkpoints") == [("thread-1",)]
+
+
+def test_apply_recovers_persistent_journal_after_sidecar_finalize_crash(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_current_ledger(source / "workflow-ledger.sqlite", include_blocked_run=True)
+    target.mkdir(parents=True)
+    target_ledger = target / "workflow-ledger.sqlite"
+    _create_current_ledger(target_ledger)
+    target_shm = target_ledger.with_name(target_ledger.name + "-shm")
+    target_shm.write_bytes(b"stale-shm")
+    journal = target.parent / ".rwm-j.json"
+    real_finish = storage_migration._finish_sqlite_bundle_promotion
+    crashed = False
+
+    def crash_after_sidecar_finalize(stage: Path, destination: Path) -> None:
+        nonlocal crashed
+        real_finish(stage, destination)
+        if not crashed and destination == target_ledger:
+            crashed = True
+            raise _SimulatedProcessCrash("crash after sidecar")
+
+    monkeypatch.setattr(storage_migration, "_finish_sqlite_bundle_promotion", crash_after_sidecar_finalize)
+    with pytest.raises(_SimulatedProcessCrash, match="crash after sidecar"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    assert journal.is_file()
+    assert not target_shm.exists()
+
+    monkeypatch.setattr(storage_migration, "_finish_sqlite_bundle_promotion", real_finish)
+    result = apply_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert result["ok"] is True
+    assert not journal.exists()
+    assert not target_shm.exists()
+
+
+def test_completed_manifest_wins_over_stale_journal_after_manifest_crash(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    source_ledger = source / "workflow-ledger.sqlite"
+    _create_current_ledger(source_ledger, include_blocked_run=True)
+    journal = target.parent / ".rwm-j.json"
+    real_atomic_json = storage_migration._atomic_json
+    crashed = False
+
+    def crash_after_completed_manifest(path: Path, payload: dict[str, object]) -> None:
+        nonlocal crashed
+        real_atomic_json(path, payload)
+        if not crashed and path.parent.name == "migration" and payload.get("status") == "completed":
+            crashed = True
+            raise _SimulatedProcessCrash("crash after manifest")
+
+    monkeypatch.setattr(storage_migration, "_atomic_json", crash_after_completed_manifest)
+    with pytest.raises(_SimulatedProcessCrash, match="crash after manifest"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    assert journal.is_file()
+    assert _table_values(target / "workflow-ledger.sqlite", "SELECT status FROM workflow_runs") == [("blocked",)]
+
+    connection = apsw.Connection(str(source_ledger))
+    try:
+        connection.execute("UPDATE workflow_runs SET status = 'succeeded'")
+    finally:
+        connection.close()
+    monkeypatch.setattr(storage_migration, "_atomic_json", real_atomic_json)
+    with pytest.raises(ResearchWorkflowMigrationError, match="target_sqlite_conflict"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    assert not journal.exists()
+    assert _table_values(target / "workflow-ledger.sqlite", "SELECT status FROM workflow_runs") == [("blocked",)]
+
+
+def test_apply_journal_recovery_refuses_concurrent_sqlite_bundle_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+    target_wal = target_checkpoint.with_name(target_checkpoint.name + "-wal")
+    journal = target.parent / ".rwm-j.json"
+    real_replace = storage_migration.os.replace
+    crashed = False
+
+    def crash_after_main_replace(source_path, destination_path):
+        nonlocal crashed
+        if not crashed and Path(destination_path) == target_checkpoint and Path(source_path).name.endswith(".staging"):
+            real_replace(source_path, destination_path)
+            crashed = True
+            raise _SimulatedProcessCrash("crash before journal recovery")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(storage_migration.os, "replace", crash_after_main_replace)
+    with pytest.raises(_SimulatedProcessCrash, match="crash before journal recovery"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    promoted_sha = storage_migration._sha256_file(target_checkpoint)
+    target_wal.write_bytes(b"foreign-wal")
+
+    monkeypatch.setattr(storage_migration.os, "replace", real_replace)
+    with pytest.raises(ResearchWorkflowMigrationError, match="journal recovery target delta"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+    assert journal.is_file()
+    assert storage_migration._sha256_file(target_checkpoint) == promoted_sha
+    assert target_wal.read_bytes() == b"foreign-wal"
+
+
+def test_apply_journal_recovery_refuses_concurrent_sqlite_main_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+    journal = target.parent / ".rwm-j.json"
+    real_replace = storage_migration.os.replace
+    crashed = False
+
+    def crash_after_main_replace(source_path, destination_path):
+        nonlocal crashed
+        if not crashed and Path(destination_path) == target_checkpoint and Path(source_path).name.endswith(".staging"):
+            real_replace(source_path, destination_path)
+            crashed = True
+            raise _SimulatedProcessCrash("crash before main delta")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(storage_migration.os, "replace", crash_after_main_replace)
+    with pytest.raises(_SimulatedProcessCrash, match="crash before main delta"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    target_checkpoint.write_bytes(b"foreign-main")
+
+    monkeypatch.setattr(storage_migration.os, "replace", real_replace)
+    with pytest.raises(ResearchWorkflowMigrationError, match="journal recovery target delta"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+    assert journal.is_file()
+    assert target_checkpoint.read_bytes() == b"foreign-main"
+
+
+def test_apply_journal_recovery_refuses_concurrent_sqlite_shm_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+    target_shm = target_checkpoint.with_name(target_checkpoint.name + "-shm")
+    journal = target.parent / ".rwm-j.json"
+    real_replace = storage_migration.os.replace
+    crashed = False
+
+    def crash_after_main_replace(source_path, destination_path):
+        nonlocal crashed
+        if not crashed and Path(destination_path) == target_checkpoint and Path(source_path).name.endswith(".staging"):
+            real_replace(source_path, destination_path)
+            crashed = True
+            raise _SimulatedProcessCrash("crash before shm delta")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(storage_migration.os, "replace", crash_after_main_replace)
+    with pytest.raises(_SimulatedProcessCrash, match="crash before shm delta"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    promoted_sha = storage_migration._sha256_file(target_checkpoint)
+    target_shm.write_bytes(b"foreign-shm")
+
+    monkeypatch.setattr(storage_migration.os, "replace", real_replace)
+    with pytest.raises(ResearchWorkflowMigrationError, match="journal recovery target delta"):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+    assert journal.is_file()
+    assert storage_migration._sha256_file(target_checkpoint) == promoted_sha
+    assert target_shm.read_bytes() == b"foreign-shm"
+
+
+@pytest.mark.parametrize("sidecar_kind", ("regular", "directory", "reparse"))
+def test_apply_observation_refuses_sidecar_when_sqlite_main_disappears_after_staging(
+    tmp_path: Path,
+    monkeypatch,
+    sidecar_kind: str,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_checkpoint(source / "checkpoints.sqlite")
+    target.mkdir(parents=True)
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_checkpoint.write_bytes(b"")
+    target_sidecar = target_checkpoint.with_name(target_checkpoint.name + "-shm")
+    journal = target.parent / ".rwm-j.json"
+    real_finish = storage_migration._finish_sqlite_bundle_promotion
+    real_is_reparse = storage_migration._is_reparse
+    injected = False
+
+    def finish_then_inject_sidecar(stage: Path, destination: Path) -> None:
+        nonlocal injected
+        real_finish(stage, destination)
+        if injected or destination != target_checkpoint:
+            return
+        injected = True
+        destination.unlink()
+        if sidecar_kind == "directory":
+            target_sidecar.mkdir()
+        else:
+            target_sidecar.write_bytes(b"foreign-sidecar")
+        if sidecar_kind == "reparse":
+            monkeypatch.setattr(
+                storage_migration,
+                "_is_reparse",
+                lambda path: Path(path) == target_sidecar or real_is_reparse(path),
+            )
+
+    monkeypatch.setattr(storage_migration, "_finish_sqlite_bundle_promotion", finish_then_inject_sidecar)
+    with pytest.raises(
+        ResearchWorkflowMigrationError,
+        match="migration failed and persistent journal recovery was incomplete",
+    ):
+        apply_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            sample_delay_seconds=0,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+    assert journal.is_file()
+    assert not target_checkpoint.exists()
+    assert target_sidecar.exists()
+    if sidecar_kind != "directory":
+        assert target_sidecar.read_bytes() == b"foreign-sidecar"
+
+
+@pytest.mark.parametrize("foreign_role", ("main", "wal", "shm"))
+def test_rollback_journal_recovery_refuses_concurrent_sqlite_bundle_delta(
+    tmp_path: Path,
+    monkeypatch,
+    foreign_role: str,
+) -> None:
+    project, projects_home, _source, target, applied = _apply_with_target_before_state(tmp_path, monkeypatch)
+    manifest = Path(str(applied["manifestPath"]))
+    target_checkpoint = target / "checkpoints.sqlite"
+    journal = target.parent / ".rwm-j.json"
+    real_replace = storage_migration.os.replace
+    crashed = False
+
+    def crash_after_rollback_main_replace(source_path, destination_path):
+        nonlocal crashed
+        if not crashed and Path(destination_path) == target_checkpoint and Path(source_path).name.endswith(".staging"):
+            real_replace(source_path, destination_path)
+            crashed = True
+            raise _SimulatedProcessCrash("crash during rollback")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(storage_migration.os, "replace", crash_after_rollback_main_replace)
+    with pytest.raises(_SimulatedProcessCrash, match="crash during rollback"):
+        rollback_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            manifest_path=manifest,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    rollback_main_sha = storage_migration._sha256_file(target_checkpoint)
+    assert _table_values(target_checkpoint, "SELECT thread_id FROM checkpoints") == []
+    foreign_path = (
+        target_checkpoint
+        if foreign_role == "main"
+        else target_checkpoint.with_name(target_checkpoint.name + f"-{foreign_role}")
+    )
+    foreign_payload = f"foreign-{foreign_role}".encode()
+    foreign_path.write_bytes(foreign_payload)
+
+    monkeypatch.setattr(storage_migration.os, "replace", real_replace)
+    with pytest.raises(ResearchWorkflowMigrationError, match="journal recovery target delta"):
+        rollback_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            manifest_path=manifest,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+    assert journal.is_file()
+    assert foreign_path.read_bytes() == foreign_payload
+    if foreign_role != "main":
+        assert storage_migration._sha256_file(target_checkpoint) == rollback_main_sha
+
+
+@pytest.mark.parametrize("foreign_role", ("main", "wal", "shm"))
+def test_rollback_refuses_foreign_bundle_delta_after_journal_persisted(
+    tmp_path: Path,
+    monkeypatch,
+    foreign_role: str,
+) -> None:
+    project, projects_home, _source, target, applied = _apply_with_target_before_state(tmp_path, monkeypatch)
+    manifest = Path(str(applied["manifestPath"]))
+    target_checkpoint = target / "checkpoints.sqlite"
+    target_ledger = target / "workflow-ledger.sqlite"
+    ledger_main_sha = storage_migration._sha256_file(target_ledger)
+    journal = target.parent / ".rwm-j.json"
+    real_write_journal = storage_migration._write_promotion_journal
+    injected = False
+
+    def write_journal_then_inject_delta(*args, **kwargs):
+        nonlocal injected
+        payload = real_write_journal(*args, **kwargs)
+        if not injected and kwargs.get("operation") == "rollback":
+            injected = True
+            foreign_path = (
+                target_ledger
+                if foreign_role == "main"
+                else target_ledger.with_name(target_ledger.name + f"-{foreign_role}")
+            )
+            foreign_path.write_bytes(f"foreign-{foreign_role}".encode())
+        return payload
+
+    monkeypatch.setattr(
+        storage_migration,
+        "_write_promotion_journal",
+        write_journal_then_inject_delta,
+    )
+    with pytest.raises(
+        ResearchWorkflowMigrationError,
+        match="rollback failed and persistent journal recovery was incomplete",
+    ):
+        rollback_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            manifest_path=manifest,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+
+    foreign_path = (
+        target_ledger
+        if foreign_role == "main"
+        else target_ledger.with_name(target_ledger.name + f"-{foreign_role}")
+    )
+    assert journal.is_file()
+    assert foreign_path.read_bytes() == f"foreign-{foreign_role}".encode()
+    assert _table_values(target_checkpoint, "SELECT thread_id FROM checkpoints") == [("thread-1",)]
+    if foreign_role != "main":
+        assert storage_migration._sha256_file(target_ledger) == ledger_main_sha
+    assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "completed"
+
+
+def test_default_guard_does_not_upgrade_stale_raw_writers_to_ready(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import core.infrastructure.storage_migration as shared_storage_migration
+
+    project, projects_home, _source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        shared_storage_migration,
+        "_probe_active_work",
+        lambda _project: {"blocking": False, "uncertain": False, "claims": []},
+    )
+    monkeypatch.setattr(
+        shared_storage_migration,
+        "_probe_runtime_writers",
+        lambda _project: {
+            "blocking": True,
+            "uncertain": False,
+            "writers": [
+                {"kind": "runtime_manager_lock", "path": "runtime-manager/daemon.lock"},
+                {"kind": "work_run", "runKind": "source_collection_run", "runId": "dprun-stale"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        shared_storage_migration,
+        "_probe_launcher_state",
+        lambda _project: {"blocking": False, "uncertain": False, "alive": False},
+    )
+    monkeypatch.setattr(
+        storage_migration,
+        "_probe_source_collection_snapshots",
+        lambda _project: {
+            "blocking": False,
+            "uncertain": False,
+            "snapshots": [{"runId": "dprun-stale", "status": "running"}],
+        },
+    )
+    monkeypatch.setattr(storage_migration, "_runtime_manager_live", lambda _project, _guard: (False, {}))
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+    )
+
+    assert not result.ready
+    assert any(item["code"] == "quiescence_guard_not_ready" for item in result.blockers)
+    assert any(item["code"] == "stale_runtime_manager_lock" for item in result.warnings)
+
+
+def test_rollback_rechecks_guard_and_target_delta_after_staging(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, _source, target, apply = _apply_with_target_before_state(tmp_path, monkeypatch)
+    manifest = Path(str(apply["manifestPath"]))
+    real_stage = storage_migration._stage_rollback_plans
+
+    def stage_then_change_target(*args, **kwargs):
+        stages = real_stage(*args, **kwargs)
+        (target / "runs" / "run-1.json").write_text('{"runId":"foreign"}\n', encoding="utf-8")
+        return stages
+
+    monkeypatch.setattr(storage_migration, "_stage_rollback_plans", stage_then_change_target)
+    with pytest.raises(ResearchWorkflowMigrationError, match="target changed during rollback staging"):
+        rollback_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            manifest_path=manifest,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )
+    assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "completed"
+    assert (target / "runs" / "run-1.json").read_text(encoding="utf-8") == '{"runId":"foreign"}\n'
+
+
+def test_legacy_placeholder_evidence_is_manifested_and_rechecked(tmp_path: Path, monkeypatch) -> None:
+    project, projects_home, source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    _create_current_ledger(source / "workflow-ledger.sqlite", include_blocked_run=True)
+    legacy = source / "workflow-checkpoints.sqlite"
+    legacy.write_bytes(b"")
+
+    applied = apply_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    manifest = Path(str(applied["manifestPath"]))
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    excluded = next(item for item in payload["excludedAssets"] if item["relativePath"] == legacy.name)
+    assert excluded["classification"] == "legacy_placeholder_excluded"
+    assert excluded["sourceEvidence"] == {
+        "exists": True,
+        "noSidecars": True,
+        "sha256": storage_migration._sha256_file(legacy),
+        "size": 0,
+        "sourceFingerprint": payload["sourceFingerprint"],
+    }
+    assert any(item["code"] == "legacy_placeholder_excluded" for item in payload["warnings"])
+
+    legacy.write_bytes(b"changed")
+    verification = verify_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        manifest_path=manifest,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert any(item["code"] == "excluded_legacy_placeholder_changed" for item in verification["failures"])
+    with pytest.raises(ResearchWorkflowMigrationError, match="legacy placeholder evidence changed"):
+        rollback_research_workflow_migration(
+            project,
+            projects_home=projects_home,
+            manifest_path=manifest,
+            quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        )

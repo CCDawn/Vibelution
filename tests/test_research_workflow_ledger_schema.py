@@ -12,9 +12,14 @@ from core.research.workflow.ledger import (
     WorkflowLedgerSchemaError,
     WorkflowLedgerStore,
 )
+from core.research.workflow.ledger.database import _normalize_sql
 from core.research.workflow.ledger.schema import (
     MIGRATIONS,
     SCHEMA_VERSION,
+    V5_CATALOG_LOOKUP_INDEX_NAME,
+    V5_CATALOG_LOOKUP_INDEX_STATEMENT,
+    V5_CATALOG_TABLE_NAME,
+    V5_CATALOG_TABLE_STATEMENT,
     V5_LEGACY_CHECKSUM,
 )
 from tests._support.workflow_ledger_helpers import (
@@ -124,6 +129,82 @@ def test_legacy_v5_checksum_opens_without_rewriting_and_supports_catalog_io(
     connection.close()
 
 
+def test_legacy_v5_accepts_equivalent_catalog_ddl_whitespace(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute(
+        "UPDATE schema_migrations SET checksum = ? WHERE version = 5",
+        (V5_LEGACY_CHECKSUM,),
+    )
+    connection.execute("PRAGMA writable_schema = ON")
+    connection.execute(
+        "UPDATE sqlite_schema SET sql = ? WHERE type = 'table' AND name = ?",
+        (_space_sql_punctuation(V5_CATALOG_TABLE_STATEMENT), V5_CATALOG_TABLE_NAME),
+    )
+    connection.execute(
+        "UPDATE sqlite_schema SET sql = ? WHERE type = 'index' AND name = ?",
+        (
+            _space_sql_punctuation(V5_CATALOG_LOOKUP_INDEX_STATEMENT),
+            V5_CATALOG_LOOKUP_INDEX_NAME,
+        ),
+    )
+    connection.execute("PRAGMA writable_schema = OFF")
+    connection.close()
+
+    store = WorkflowLedgerStore(path)
+    try:
+        assert store.initialize()["schemaVersion"] == SCHEMA_VERSION
+    finally:
+        store.close()
+
+
+def _space_sql_punctuation(statement: str) -> str:
+    for punctuation in "(),":
+        statement = statement.replace(punctuation, f" {punctuation} ")
+    return statement
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    (
+        (
+            "CHECK ( value = 'a,  b (x)' )",
+            "check(value = 'a,  b (x)')",
+        ),
+        (
+            'CREATE TABLE "Mixed (Name)" ( "Value,  (Text)" TEXT )',
+            'create table "Mixed (Name)"("Value,  (Text)" text)',
+        ),
+        (
+            "CHECK ( value = 'It''s,  Fine (X)' )",
+            "check(value = 'It''s,  Fine (X)')",
+        ),
+        (
+            'CREATE TABLE "Mixed ""(Name)""" ( "Value" TEXT )',
+            'create table "Mixed ""(Name)"""("Value" text)',
+        ),
+        (
+            "CREATE TABLE [Mixed (Name),  Value] ( [Column (X)] TEXT )",
+            "create table [Mixed (Name),  Value]([Column (X)] text)",
+        ),
+        (
+            "CREATE TABLE `Mixed ``(Name)``` ( `Value,  (Text)` TEXT )",
+            "create table `Mixed ``(Name)```(`Value,  (Text)` text)",
+        ),
+    ),
+)
+def test_v5_sql_normalization_preserves_quoted_content(
+    sql: str,
+    expected: str,
+) -> None:
+    assert _normalize_sql(sql) == expected
+
+
 def test_fresh_v5_uses_current_checksum(tmp_path: Path) -> None:
     path = tmp_path / "ledger.sqlite3"
     store = open_ledger_store(path)
@@ -157,6 +238,93 @@ def test_legacy_v5_checksum_rejects_lookup_index_drift(tmp_path: Path) -> None:
     store = WorkflowLedgerStore(path)
     with pytest.raises(WorkflowLedgerSchemaError, match="v5"):
         store.initialize()
+
+
+def test_legacy_v5_checksum_rejects_wrong_catalog_columns(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    _prepare_legacy_v5(path)
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute("DROP INDEX idx_catalog_run_authorizations_lookup")
+    connection.execute("DROP TABLE catalog_run_authorizations")
+    connection.execute(
+        V5_CATALOG_TABLE_STATEMENT.replace(
+            "team_id TEXT NOT NULL", "team_code TEXT NOT NULL"
+        ).replace(
+            "UNIQUE (team_id, plan_id, scope_hash, readiness_report_sha256)",
+            "UNIQUE (team_code, plan_id, scope_hash, readiness_report_sha256)",
+        )
+    )
+    connection.execute(
+        V5_CATALOG_LOOKUP_INDEX_STATEMENT.replace(
+            "team_id, plan_id", "team_code, plan_id"
+        )
+    )
+    connection.close()
+
+    with pytest.raises(WorkflowLedgerSchemaError, match="v5"):
+        WorkflowLedgerStore(path).initialize()
+
+
+def test_legacy_v5_checksum_rejects_wrong_unique_constraint(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    _prepare_legacy_v5(path)
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute("DROP INDEX idx_catalog_run_authorizations_lookup")
+    connection.execute("DROP TABLE catalog_run_authorizations")
+    connection.execute(
+        V5_CATALOG_TABLE_STATEMENT.replace(
+            "UNIQUE (team_id, plan_id, scope_hash, readiness_report_sha256)",
+            "UNIQUE (team_id, plan_id, scope_hash, record_hash)",
+        )
+    )
+    connection.execute(V5_CATALOG_LOOKUP_INDEX_STATEMENT)
+    connection.close()
+
+    with pytest.raises(WorkflowLedgerSchemaError, match="v5"):
+        WorkflowLedgerStore(path).initialize()
+
+
+def test_legacy_v5_checksum_rejects_lookup_index_order_drift(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    _prepare_legacy_v5(path)
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute("DROP INDEX idx_catalog_run_authorizations_lookup")
+    connection.execute(
+        V5_CATALOG_LOOKUP_INDEX_STATEMENT.replace(
+            "approved_at_ms DESC, authorization_id",
+            "authorization_id, approved_at_ms DESC",
+        )
+    )
+    connection.close()
+
+    with pytest.raises(WorkflowLedgerSchemaError, match="v5"):
+        WorkflowLedgerStore(path).initialize()
+
+
+def test_legacy_v5_checksum_drift_still_rejects_startup(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute(
+        "UPDATE schema_migrations SET checksum = 'deadbeef' WHERE version = 5"
+    )
+    connection.close()
+
+    with pytest.raises(WorkflowLedgerSchemaError, match="checksum"):
+        WorkflowLedgerStore(path).initialize()
 
 
 def test_foreign_keys_enforced(tmp_path: Path) -> None:
@@ -230,3 +398,17 @@ def test_schema_migration_versions_are_deterministic() -> None:
     checksums = {migration.version: migration.checksum for migration in MIGRATIONS}
     assert len(checksums) == len(MIGRATIONS)
     assert all(len(checksum) == 64 for checksum in checksums.values())
+
+
+def _prepare_legacy_v5(path: Path) -> None:
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute(
+        "UPDATE schema_migrations SET checksum = ? WHERE version = 5",
+        (V5_LEGACY_CHECKSUM,),
+    )
+    connection.close()

@@ -19,7 +19,10 @@ export function useResearchWorkflowEventReplay(options: {
   model: FormalEventReadModel;
   ready: boolean;
   error: string | null;
-  applyStreamEvent: (event: WorkflowEventEnvelope) => void;
+  applyStreamEvent: (event: WorkflowEventEnvelope) => {
+    accepted: boolean;
+    resyncRequired: boolean;
+  };
 } {
   const { teamId, runId, enabled, latestEventSequence } = options;
   const [model, setModel] = useState<FormalEventReadModel>(() =>
@@ -29,6 +32,7 @@ export function useResearchWorkflowEventReplay(options: {
   const [error, setError] = useState<string | null>(null);
   const [resyncNonce, setResyncNonce] = useState(0);
   const mountedRef = useRef(true);
+  const modelRef = useRef(model);
   const latestSequenceRef = useRef(latestEventSequence);
   latestSequenceRef.current = latestEventSequence;
 
@@ -40,7 +44,9 @@ export function useResearchWorkflowEventReplay(options: {
   }, []);
 
   useEffect(() => {
-    setModel(emptyFormalEventReadModel(teamId, runId));
+    const empty = emptyFormalEventReadModel(teamId, runId);
+    modelRef.current = empty;
+    setModel(empty);
     setReady(false);
     setError(null);
   }, [runId, teamId]);
@@ -64,29 +70,34 @@ export function useResearchWorkflowEventReplay(options: {
           emptyFormalEventReadModel(teamId, runId),
           events,
         );
-        if (next.events.length > 0) {
-          setModel(next);
-        } else {
-          setModel(
-            hydrateFormalEventFromSnapshot(next, {
+        const hydrated = next.events.length > 0
+          ? next
+          : hydrateFormalEventFromSnapshot(next, {
               teamId,
               runId,
               latestEventSequence: latestSequenceRef.current,
-            }),
-          );
-        }
-        setError(next.resyncRequired ? "工作流事件序列出现缺口，正在重新同步" : null);
+            });
+        // A snapshot is already authoritative at latestEventSequence. Replay
+        // may therefore contain only the committed prefix; never move the
+        // cursor backwards and replay an already-covered prefix forever.
+        const withSnapshotCursor = !hydrated.resyncRequired
+          && latestSequenceRef.current > hydrated.lastSequence
+          ? { ...hydrated, lastSequence: latestSequenceRef.current }
+          : hydrated;
+        modelRef.current = withSnapshotCursor;
+        setModel(withSnapshotCursor);
+        setError(withSnapshotCursor.resyncRequired ? "工作流事件序列出现缺口，正在重新同步" : null);
         setReady(true);
       } catch (reason) {
         if (controller.signal.aborted || !mountedRef.current) return;
         if (reason instanceof DOMException && reason.name === "AbortError") return;
-        setModel(
-          hydrateFormalEventFromSnapshot(emptyFormalEventReadModel(teamId, runId), {
-            teamId,
-            runId,
-            latestEventSequence: latestSequenceRef.current,
-          }),
-        );
+        const hydrated = hydrateFormalEventFromSnapshot(emptyFormalEventReadModel(teamId, runId), {
+          teamId,
+          runId,
+          latestEventSequence: latestSequenceRef.current,
+        });
+        modelRef.current = hydrated;
+        setModel(hydrated);
         setError(reason instanceof Error ? reason.message : String(reason));
         setReady(true);
       }
@@ -97,13 +108,18 @@ export function useResearchWorkflowEventReplay(options: {
   }, [enabled, resyncNonce, runId, teamId]);
 
   const applyStreamEvent = useCallback((event: WorkflowEventEnvelope) => {
-    setModel((current) => {
-      const next = applyFormalEvent(current, event);
-      if (next.resyncRequired && !current.resyncRequired) {
-        queueMicrotask(() => setResyncNonce((nonce) => nonce + 1));
-      }
-      return next;
-    });
+    const current = modelRef.current;
+    const next = applyFormalEvent(current, event);
+    const sequence = Number(event.sequence) || 0;
+    const accepted = next !== current
+      && !next.resyncRequired
+      && next.lastSequence === sequence;
+    modelRef.current = next;
+    setModel(next);
+    if (next.resyncRequired && !current.resyncRequired) {
+      queueMicrotask(() => setResyncNonce((nonce) => nonce + 1));
+    }
+    return { accepted, resyncRequired: next.resyncRequired };
   }, []);
 
   return {

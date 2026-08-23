@@ -8,6 +8,7 @@ from core.research.workflow.contracts import ArtifactManifest
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import WorkflowNodeSpec
 
+from .artifact_readback_registry import load_scoped_artifact_payload
 from .evidence_relation_artifact import build_evidence_relation_artifact
 from .human_gate_artifacts import canonical_sha256
 from .source_extraction_evidence_cards import (
@@ -171,13 +172,136 @@ def _hypothesis_set_payload(
     return dict(payload)
 
 
+def _protocol_design_artifact_payloads(
+    record: dict[str, Any],
+    node_run: dict[str, Any],
+    task: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Read and validate both canonical protocol-design artifact envelopes."""
+
+    team_id = str(record.get("teamId") or "").strip()
+    workflow_run_id = str(record.get("runId") or "").strip()
+    authority_run_id = str(
+        task.get("sourceCollectionRunId") or workflow_run_id
+    ).strip()
+    if not team_id or not workflow_run_id or not authority_run_id:
+        raise ValueError("protocol_design artifact scope is incomplete")
+
+    envelopes: dict[str, dict[str, Any]] = {}
+    plan_ids: dict[str, str] = {}
+    for kind in ("research_plan", "protocol_draft"):
+        envelope = load_scoped_artifact_payload(
+            kind,
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        if not isinstance(envelope, dict):
+            raise ValueError(f"protocol_design canonical {kind} readback is missing")
+        expected_scope = {
+            "kind": kind,
+            "teamId": team_id,
+            "workflowRunId": workflow_run_id,
+            "sourceCollectionRunId": authority_run_id,
+        }
+        if any(
+            str(envelope.get(field) or "").strip() != expected
+            for field, expected in expected_scope.items()
+        ):
+            raise ValueError(f"protocol_design canonical {kind} scope is invalid")
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError(f"protocol_design canonical {kind} payload is missing")
+        plan_id = str(payload.get("planId") or "").strip()
+        if not plan_id:
+            raise ValueError(f"protocol_design canonical {kind} planId is missing")
+        envelopes[kind] = envelope
+        plan_ids[kind] = plan_id
+
+    if plan_ids["research_plan"] != plan_ids["protocol_draft"]:
+        raise ValueError("protocol_design canonical planId values do not match")
+
+    task_id = str(task.get("taskId") or "").strip()
+    session_id = str(task.get("sessionId") or "").strip()
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    turn_id = str(turn.get("turnId") or "").strip()
+    agent_id = str(task.get("agentId") or "").strip()
+    node_run_id = str(node_run.get("nodeRunId") or "").strip()
+    input_snapshot_hash = str(node_run.get("inputSnapshotHash") or "").strip()
+    attempt = node_run.get("attempt")
+    if (
+        not task_id
+        or not session_id
+        or not turn_id
+        or not agent_id
+        or not node_run_id
+        or not input_snapshot_hash
+        or isinstance(attempt, bool)
+        or not isinstance(attempt, int)
+        or attempt <= 0
+    ):
+        raise ValueError("protocol_design canonical producer binding is incomplete")
+
+    expected_producer = {
+        "nodeRunId": node_run_id,
+        "attempt": attempt,
+        "taskId": task_id,
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "agentId": agent_id,
+    }
+    research_payload = envelopes["research_plan"]["payload"]
+    producer = research_payload.get("producer")
+    if (
+        not isinstance(producer, dict)
+        or isinstance(producer.get("attempt"), bool)
+        or not isinstance(producer.get("attempt"), int)
+        or any(
+            producer.get(field) != expected
+            for field, expected in expected_producer.items()
+        )
+    ):
+        raise ValueError("protocol_design canonical research_plan producer is invalid")
+    if research_payload.get("inputSnapshotHash") != input_snapshot_hash:
+        raise ValueError(
+            "protocol_design canonical research_plan inputSnapshotHash is invalid"
+        )
+
+    protocol_payload = envelopes["protocol_draft"]["payload"]
+    expected_protocol_binding = {
+        "createdFromTaskId": task_id,
+        "createdFromSessionId": session_id,
+        "createdFromTurnId": turn_id,
+    }
+    if any(
+        protocol_payload.get(field) != expected
+        for field, expected in expected_protocol_binding.items()
+    ):
+        raise ValueError("protocol_design canonical protocol_draft producer is invalid")
+
+    return envelopes
+
+
 def _payload_for_kind(
     record: dict[str, Any],
     node_spec: WorkflowNodeSpec,
     node_run: dict[str, Any],
     task: dict[str, Any],
     artifact_kind: str,
+    *,
+    protocol_artifact_payloads: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    if node_spec.nodeId == "protocol_design" and artifact_kind in {
+        "research_plan",
+        "protocol_draft",
+    }:
+        payloads = (
+            protocol_artifact_payloads
+            if protocol_artifact_payloads is not None
+            else _protocol_design_artifact_payloads(record, node_run, task)
+        )
+        return payloads[artifact_kind]
+
     result = dict(task.get("result") or {})
     explicit_payloads = result.get("artifactPayloads")
     if isinstance(explicit_payloads, dict) and isinstance(
@@ -236,6 +360,11 @@ def build_agent_task_artifacts(
     )
     manifests: list[ArtifactManifest] = []
     payloads: dict[str, dict[str, Any]] = {}
+    protocol_artifact_payloads = (
+        _protocol_design_artifact_payloads(record, node_run, task)
+        if node_spec.nodeId == "protocol_design"
+        else None
+    )
     for artifact_kind in node_spec.producesArtifactKinds:
         payload = _payload_for_kind(
             record,
@@ -243,6 +372,7 @@ def build_agent_task_artifacts(
             node_run,
             task,
             artifact_kind,
+            protocol_artifact_payloads=protocol_artifact_payloads,
         )
         content_hash = canonical_sha256(payload)
         artifact_id = f"{artifact_kind}:{content_hash[:16]}"

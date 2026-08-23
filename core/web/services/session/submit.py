@@ -13,8 +13,9 @@ from __future__ import annotations
 import base64
 import binascii
 import threading
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
@@ -28,6 +29,15 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+def _normalize_trace_context_carrier(value: object) -> dict[str, str]:
+    from core.logging.trace_context import TraceContext, get_current_trace_context
+
+    context = TraceContext.from_carrier(value)
+    if context is None:
+        context = get_current_trace_context()
+    return context.to_carrier() if context is not None else {}
 
 
 _SESSION_SUBMIT_ADMIT_LOCKS_GUARD = threading.Lock()
@@ -328,12 +338,14 @@ def submit_session_message(
     message_source: str = "raw",
     include_started_turn_id: bool = False,
     lightweight_response: bool = False,
+    trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict:
     """Persist a user message and start a single web chat turn."""
 
     s = _service()
     submit_started_at = s._perf_counter()
     submit_timing_fields: dict[str, Any] = {}
+    normalized_trace_context_carrier = _normalize_trace_context_carrier(trace_context_carrier)
     deferred_kernel_trace: dict[str, Any] | None = None
     lang = s.get_web_language()
     conversation_id = str(session_id or "").strip()
@@ -693,6 +705,7 @@ def submit_session_message(
         raw_user_message=message,
         user_message_source=normalized_message_source,
         attachments=attachments,
+        trace_context_carrier=normalized_trace_context_carrier,
     )
     submit_timing_fields["turnStartedSceneLogMs"] = s._elapsed_ms(stage_started_at)
     if session_references:
@@ -878,6 +891,7 @@ def submit_session_message(
         "skill_invocation": skill_invocation,
         "active_skill_contract": active_skill_contract,
         "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
+        "trace_context_carrier": dict(normalized_trace_context_carrier),
         "submit_timing_fields": dict(submit_timing_fields),
         "submit_started_at_monotonic": submit_started_at,
     }
@@ -961,6 +975,7 @@ def submit_session_message_lightweight(
     references: list[dict[str, Any]] | None = None,
     turn_mode: str = "",
     write_intent: bool | None = None,
+    trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit a user message and return the smallest accepted-turn payload."""
 
@@ -976,6 +991,7 @@ def submit_session_message_lightweight(
         references=references,
         turn_mode=turn_mode,
         write_intent=write_intent,
+        trace_context_carrier=trace_context_carrier,
         include_started_turn_id=True,
         lightweight_response=True,
     )
@@ -993,12 +1009,14 @@ def edit_and_resubmit_session_message(
     client_submission_id: str = "",
     turn_mode: str = "",
     write_intent: bool | None = None,
+    trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict:
     """Replace the latest user message, truncate later turns, and start a new turn."""
 
     s = _service()
     lang = s.get_web_language()
     conversation_id = str(session_id or "").strip()
+    normalized_trace_context_carrier = _normalize_trace_context_carrier(trace_context_carrier)
     target_message_id = str(message_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
@@ -1185,6 +1203,7 @@ def edit_and_resubmit_session_message(
         user_message=message,
         raw_user_message=message,
         user_message_source="raw",
+        trace_context_carrier=normalized_trace_context_carrier,
     )
     s._publish_session_detail_snapshot(conversation_id)
 
@@ -1219,6 +1238,7 @@ def edit_and_resubmit_session_message(
         "skill_invocation": skill_invocation,
         "active_skill_contract": active_skill_contract,
         "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
+        "trace_context_carrier": dict(normalized_trace_context_carrier),
     }
     s._record_session_turn_scheduled_event(context)
     try:

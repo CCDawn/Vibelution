@@ -96,6 +96,12 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 4. Do not change journal event type strings or SSE event names in mechanical splits.
 5. Prefer re-export from `session_service.py` over updating every importer until a later import-migration stage.
 
+## 链路诊断约定
+
+- 提交阶段将受管的 `trace_context_carrier` 透传到 `scheduled` / `accepted` / `started` 事件；worker 进入线程池后创建 child span，并在整个 turn 生命周期内绑定，生命周期与子包日志因此可用 `traceId`、`spanId`、`parentSpanId`、`requestId` 串联。
+- SSE 连接记录 `session.stream.opened`、`session.stream.failed`、`session.stream.closed`，使用同一个 `streamConnectionId`，并保留 transport、initial mode、持续时间、发送事件数、心跳数和受控 `errorType`；不改变既有 SSE event 名称或 payload。
+- 诊断字段只记录边界元数据，不记录完整 Prompt、响应正文或异常消息；高频健康事件仍由既有采样/节流策略控制。
+
 ## Extraction progress
 
 ### Stage 2 closed (hot path)

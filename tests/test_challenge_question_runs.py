@@ -863,6 +863,33 @@ def test_publish_promotes_only_bound_project_evidence_and_keeps_human_gates_pend
     assert program_store["evidence"][0]["status"] == "published_to_challenge_program"
     assert program_store["evidence"][0]["officialBoundary"]["humanApprovalGranted"] is False
 
+    captured_registration: dict = {}
+
+    def capture_registration(_team_id: str, payload: dict) -> dict:
+        captured_registration.update(deepcopy(payload))
+        return {"record": {"recordId": "captured"}, "summary": {}}
+
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "register_challenge_question_output",
+        capture_registration,
+    )
+    package_payload = {
+        "schema_version": 2,
+        "package_id": "pkg-sci-096-publish-boundary",
+    }
+    challenge_question_runs.publish_research_project_challenge_question_output(
+        "research-team",
+        {
+            **publish_payload,
+            "resultPackage": package_payload,
+            "authorizedModelPolicySha256": "f" * 64,
+        },
+    )
+
+    assert captured_registration["resultPackage"] == package_payload
+    assert captured_registration["authorizedModelPolicySha256"] == "f" * 64
+
 
 def test_publish_rejects_project_evidence_bound_to_another_turn(tmp_path, monkeypatch):
     program_root = tmp_path / "program"

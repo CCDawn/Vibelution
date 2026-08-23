@@ -710,6 +710,17 @@ def _normalize_research_plan(payload: Any) -> dict[str, Any]:
     return normalized
 
 
+def normalize_research_plan(payload: Any) -> dict[str, Any]:
+    """Normalize the canonical v2 research plan outside a full package.
+
+    The formal workflow uses the exact same strict field, list, work-package,
+    and human-gate rules as ``QuestionResultPackage``.  Keep the package path
+    private so the public helper remains a small compatibility surface.
+    """
+
+    return _normalize_research_plan(payload)
+
+
 def _normalize_feedback(payload: Any) -> tuple[dict[str, Any], ...]:
     values = _list(payload, "feedback_iterations", allow_empty=False)
     result: list[dict[str, Any]] = []
@@ -1572,5 +1583,6 @@ __all__ = [
     "canonical_model_policy",
     "compute_question_result_package_hash",
     "is_qwen_model_id",
+    "normalize_research_plan",
     "question_result_package_idempotency_key",
 ]

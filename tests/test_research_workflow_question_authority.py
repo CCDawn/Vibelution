@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from core.research.competition.result_set import CatalogScope
+from core.research.competition.question_result_package import QuestionResultPackage
+from core.research.competition.result_set import (
+    CatalogScope,
+    QuestionResult,
+    compute_scope_hash,
+)
 from core.research.workflow.contracts import (
     ContractValidationError,
     WorkflowRunInputSnapshot,
@@ -30,6 +37,7 @@ from core.web.services.team_workflow.research_runtime.service import (
     reset_research_workflow_runtime_service_for_tests,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+from tests.test_catalog_execution_state_machine import _package
 
 
 def _approved_detail(question_id: str = "SCI-096") -> dict:
@@ -103,7 +111,203 @@ def _safety_limits() -> dict:
     }
 
 
+def _package_bound_record(tmp_path: Path) -> dict:
+    package = _package(CatalogScope.from_tracked_resources(), "SCI-096")
+    package_path = tmp_path / "question-result-package.json"
+    package_path.write_text(
+        json.dumps(package.to_dict(), ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    receipt_refs = QuestionResult.from_package(package).manifest_entry()["receipts"]
+    return {
+        "recordId": "SCI-096:run-sci-096-r1",
+        "questionId": "SCI-096",
+        "runId": "run-sci-096-r1",
+        "schemaVersion": 2,
+        "submissionEligible": True,
+        "status": "approved",
+        "humanGates": {
+            "allApproved": True,
+            "decisions": {
+                "H1_problem_understanding": "approved",
+                "H2_hypothesis_selection": "approved",
+                "H3_research_plan": "approved",
+                "H4_external_output": "approved",
+            },
+        },
+        "validation": {
+            "schemaValidation": "passed",
+            "citationValidation": "passed",
+            "officialModelCall": True,
+            "modelInvocationReceipts": "passed",
+        },
+        "modelInvocationReceiptRefs": receipt_refs,
+        "resultPackage": {
+            "schemaVersion": package.schema_version,
+            "packageId": package.package_id,
+            "canonicalHash": package.canonical_hash,
+            "idempotencyKey": package.idempotency_key,
+            "modelPolicySha256": package.model_policy["policySha256"],
+            "locator": str(package_path),
+        },
+    }
+
+
+def _replace_record_package(
+    record: dict,
+    tmp_path: Path,
+    package: QuestionResultPackage,
+    *,
+    filename: str,
+) -> dict:
+    replaced = deepcopy(record)
+    package_path = tmp_path / filename
+    package_path.write_text(
+        json.dumps(package.to_dict(), ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    replaced["modelInvocationReceiptRefs"] = QuestionResult.from_package(
+        package
+    ).manifest_entry()["receipts"]
+    replaced["resultPackage"] = {
+        "schemaVersion": package.schema_version,
+        "packageId": package.package_id,
+        "canonicalHash": package.canonical_hash,
+        "idempotencyKey": package.idempotency_key,
+        "modelPolicySha256": package.model_policy["policySha256"],
+        "locator": str(package_path),
+    }
+    return replaced
+
+
+def test_formal_record_requires_canonical_package_and_matching_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _package_bound_record(tmp_path)
+
+    assert question_launch._formal_record_eligible(record) is True
+
+    missing_package = deepcopy(record)
+    missing_package.pop("resultPackage")
+    assert question_launch._formal_record_eligible(missing_package) is False
+
+    mismatched_refs = deepcopy(record)
+    mismatched_refs["modelInvocationReceiptRefs"]["generation"]["receipt_id"] = "forged"
+    assert question_launch._formal_record_eligible(mismatched_refs) is False
+
+    failed_receipt_validation = deepcopy(record)
+    failed_receipt_validation["validation"]["modelInvocationReceipts"] = "failed"
+    assert question_launch._formal_record_eligible(failed_receipt_validation) is False
+
+    mismatched_metadata = deepcopy(record)
+    mismatched_metadata["resultPackage"]["schemaVersion"] = 1
+    assert question_launch._formal_record_eligible(mismatched_metadata) is False
+    mismatched_metadata = deepcopy(record)
+    mismatched_metadata["resultPackage"]["packageId"] = "pkg-forged"
+    assert question_launch._formal_record_eligible(mismatched_metadata) is False
+
+    wrong_question_package = _package(
+        CatalogScope.from_tracked_resources(), "SCI-091"
+    )
+    wrong_question_record = _replace_record_package(
+        record,
+        tmp_path,
+        wrong_question_package,
+        filename="wrong-question-result-package.json",
+    )
+    assert question_launch._formal_record_eligible(wrong_question_record) is False
+
+    wrong_run_payload = deepcopy(
+        _package(CatalogScope.from_tracked_resources(), "SCI-096").to_dict()
+    )
+    wrong_run_payload.pop("canonical_sha256")
+    wrong_run_payload.pop("idempotency_key")
+    wrong_run_payload["package_id"] = "pkg-sci-096-r2"
+    wrong_run_payload["run_id"] = "run-sci-096-r2"
+    for receipt in wrong_run_payload["model_invocation_receipts"].values():
+        receipt["runId"] = "run-sci-096-r2"
+        receipt["nodeRunId"] = f"{receipt['nodeRunId']}-r2"
+        receipt["scope"]["runId"] = "run-sci-096-r2"
+    wrong_run_package = QuestionResultPackage.create(wrong_run_payload)
+    wrong_run_record = _replace_record_package(
+        record,
+        tmp_path,
+        wrong_run_package,
+        filename="wrong-run-result-package.json",
+    )
+    assert question_launch._formal_record_eligible(wrong_run_record) is False
+
+    alternate_scope = CatalogScope(
+        catalog_id="science-125-questions-alternate",
+        catalog_version="1",
+        catalog_sha256="e" * 64,
+        scope_hash=compute_scope_hash(
+            "science-125-questions-alternate",
+            "1",
+            "e" * 64,
+        ),
+    )
+    with monkeypatch.context() as scope_patch:
+        scope_patch.setattr(
+            CatalogScope,
+            "from_tracked_resources",
+            classmethod(lambda _cls: alternate_scope),
+        )
+        alternate_scope_package = _package(alternate_scope, "SCI-096")
+    alternate_scope_record = _replace_record_package(
+        record,
+        tmp_path,
+        alternate_scope_package,
+        filename="alternate-scope-result-package.json",
+    )
+    assert question_launch._formal_record_eligible(alternate_scope_record) is False
+
+
 def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_receipt_refs = {
+        stage_id: {
+            "receipt_id": f"fixture-{stage_id}",
+            "node_run_id": f"fixture-node-{stage_id}",
+            "evidence_locator": {
+                "kind": "fixture",
+                "evidenceId": f"fixture-evidence-{stage_id}",
+                "outputRef": f"fixture://{stage_id}",
+                "outputSha256": "a" * 64,
+            },
+            "evidence_locator_sha256": "b" * 64,
+        }
+        for stage_id in ("generation", "review", "revision")
+    }
+    fixture_package = {
+        "schemaVersion": 2,
+        "packageId": "fixture-question-result-package",
+        "canonicalHash": "c" * 64,
+        "idempotencyKey": "fixture-idempotency-key",
+        "modelPolicySha256": "d" * 64,
+        "locator": "fixture://question-result-package",
+    }
+    original_formal_record_eligible = question_launch._formal_record_eligible
+
+    def fixture_formal_record_eligible(record: dict) -> bool:
+        enriched = dict(record)
+        enriched.setdefault("resultPackage", fixture_package)
+        enriched.setdefault("modelInvocationReceiptRefs", fixture_receipt_refs)
+        validation = dict(enriched.get("validation") or {})
+        validation.setdefault("modelInvocationReceipts", "passed")
+        enriched["validation"] = validation
+        return original_formal_record_eligible(enriched)
+
+    monkeypatch.setattr(
+        question_launch,
+        "_package_bound_model_invocation_receipt_refs",
+        lambda _record: fixture_receipt_refs,
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_formal_record_eligible",
+        fixture_formal_record_eligible,
+    )
     monkeypatch.setattr(
         question_launch,
         "challenge_question_run_summary",

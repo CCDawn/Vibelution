@@ -269,6 +269,27 @@ def challenge_cup_experiment_writeback_tool(
             payload["createdFromTurnId"] = _text(
                 (task.get("turn") or {}).get("turnId")
             )
+        protocol_task_context = None
+        prepared_research_plan = None
+        if normalized_operation == "create_plan" and task and _text(
+            task.get("workflowNodeId")
+        ) == "protocol_design":
+            from core.web.services.team_workflow.research_project_protocol_context import (
+                build_protocol_input_context,
+            )
+            from core.web.services.team_workflow.research_runtime.protocol_artifact_writer import (
+                prepare_research_plan,
+            )
+
+            protocol_task_context = {
+                "task": task,
+                "protocolInput": build_protocol_input_context(team_id, task),
+            }
+            prepared_research_plan = prepare_research_plan(
+                team_id=team_id,
+                task_context=protocol_task_context,
+                research_plan=payload.get("researchPlan"),
+            )
         if normalized_operation == "record_hypothesis_fragment":
             if not isinstance(task_binding, dict) or not isinstance(task, dict):
                 raise ValueError(
@@ -327,22 +348,20 @@ def challenge_cup_experiment_writeback_tool(
                         "Created experiment plan was not bound to the requested research project."
                     )
                 if _text(task.get("workflowNodeId")) == "protocol_design":
-                    from core.web.services.team_workflow.research_project_protocol_context import (
-                        build_protocol_input_context,
-                    )
                     from core.web.services.team_workflow.research_runtime.protocol_artifact_writer import (
                         record_protocol_draft,
+                        record_research_plan,
                     )
 
+                    response["researchPlan"] = record_research_plan(
+                        team_id=team_id,
+                        task_context=protocol_task_context or {"task": task},
+                        plan_id=_text(created_plan.get("planId")),
+                        prepared=prepared_research_plan,
+                    )
                     response["protocolDraft"] = record_protocol_draft(
                         team_id=team_id,
-                        task_context={
-                            "task": task,
-                            "protocolInput": build_protocol_input_context(
-                                team_id,
-                                task,
-                            ),
-                        },
+                        task_context=protocol_task_context or {"task": task},
                         plan=created_plan,
                     )
         elif normalized_operation in {
@@ -1379,6 +1398,11 @@ def _experiment_writeback_result_refs(
         (
             response.get("protocolDraft", {}).get("artifact")
             if isinstance(response.get("protocolDraft"), dict)
+            else None
+        ),
+        (
+            response.get("researchPlan", {}).get("artifact")
+            if isinstance(response.get("researchPlan"), dict)
             else None
         ),
     ]

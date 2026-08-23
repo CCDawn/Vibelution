@@ -4,6 +4,7 @@ import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import { parseResearchProcessLocation } from "./research-workflow/researchProcessLocation";
 import {
   challengeQuestionDetailRoute,
+  isSameChallengeCupWorkspaceTeam,
   parseResearchWorkspaceView,
   researchCanvasRoute,
   researchSourceCollectionRoute,
@@ -57,5 +58,28 @@ describe("researchWorkspaceModel", () => {
   it("labels workspace views for zh and en", () => {
     expect(researchWorkspaceViewLabel("overview", "zh")).toContain("总览");
     expect(researchWorkspaceViewLabel("overview", "en").toLowerCase()).toContain("overview");
+  });
+
+  it("preserves focus only when every provided team alias agrees", () => {
+    expect(
+      isSameChallengeCupWorkspaceTeam(
+        RESEARCH_TEAM_ID,
+        new URLSearchParams("teamId=research-team&team=research-team&team_id=research-team"),
+      ),
+    ).toBe(true);
+    expect(isSameChallengeCupWorkspaceTeam(RESEARCH_TEAM_ID, new URLSearchParams("team=research-team"))).toBe(true);
+    expect(isSameChallengeCupWorkspaceTeam(RESEARCH_TEAM_ID, new URLSearchParams("teamId="))).toBe(false);
+    expect(
+      isSameChallengeCupWorkspaceTeam(
+        RESEARCH_TEAM_ID,
+        new URLSearchParams("teamId=research-team&team=other-team"),
+      ),
+    ).toBe(false);
+    expect(
+      isSameChallengeCupWorkspaceTeam(
+        RESEARCH_TEAM_ID,
+        new URLSearchParams("teamId=research-team&teamId=other-team"),
+      ),
+    ).toBe(false);
   });
 });
