@@ -66,9 +66,18 @@ describe("research workflow workspace responsibility contract", () => {
 
   it("opts into the approved tablet and compact drawer contract", () => {
     const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    const workspaceStyles = readFileSync(resolve(root, "ResearchProcessWorkspace.styles.ts"), "utf8");
+    const toolbarStyles = readFileSync(resolve(root, "ResearchWorkflowToolbar.styles.ts"), "utf8");
     expect(source).toContain("responsive={{");
     expect(source).toContain('rail: { label: "研究阶段" }');
     expect(source).toContain('inspector: { label: "当前任务" }');
+    expect(source).toContain("layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}");
+    expect(source).toContain("toolbarClassName={styles.toolbar}");
+    expect(workspaceStyles).toContain('toolbar: "!flex-nowrap overflow-hidden"');
+    expect(workspaceStyles).toContain("max-w-full");
+    expect(toolbarStyles).toContain("flex-col");
+    expect(toolbarStyles).toContain("xl:flex-row");
+    expect(toolbarStyles.match(/overflow-x-auto/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
   it("mounts inspector panel leaves through the research workflow lazy pack", () => {
