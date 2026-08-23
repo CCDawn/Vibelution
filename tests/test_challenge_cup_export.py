@@ -31,6 +31,7 @@ from core.research.competition.result_set import (
 )
 from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS,
+    CatalogHypothesisFlowReadinessAuthority,
     catalog_hypothesis_flow_report_hash,
 )
 from tests.test_catalog_execution_state_machine import _package
@@ -154,6 +155,31 @@ def _catalog_readiness_report(result_set: FullCatalogResultSet) -> dict:
     )
 
 
+def _catalog_readiness_authority(
+    result_set: FullCatalogResultSet,
+) -> CatalogHypothesisFlowReadinessAuthority:
+    first = result_set.get_result("SCI-001")
+    snapshot = first.package_snapshot if first is not None else None
+    model_policy = (
+        str(snapshot["model_policy"]["policySha256"])
+        if isinstance(snapshot, dict)
+        else "f" * 64
+    )
+    return CatalogHypothesisFlowReadinessAuthority.from_result_set(
+        result_set,
+        source_commit="a" * 40,
+        program_contract={
+            "version": PROGRAM_CONTRACT_VERSION,
+            "coreBehaviorHash": CORE_BEHAVIOR_HASH,
+        },
+        catalog_policy={
+            "version": CATALOG_POLICY_VERSION,
+            "corePolicyHash": CORE_POLICY_HASH,
+        },
+        model_policy_sha256=model_policy,
+    )
+
+
 @pytest.fixture(scope="module")
 def complete_catalog_result_set() -> FullCatalogResultSet:
     scope = CatalogScope.from_tracked_resources()
@@ -167,7 +193,12 @@ def test_catalog_result_pack_binds_complete_canonical_manifest(
     complete_catalog_result_set: FullCatalogResultSet,
 ) -> None:
     report = _catalog_readiness_report(complete_catalog_result_set)
-    pack = export_catalog_results(complete_catalog_result_set, report)
+    authority = _catalog_readiness_authority(complete_catalog_result_set)
+    pack = export_catalog_results(
+        complete_catalog_result_set,
+        report,
+        trusted_authority=authority,
+    )
 
     assert pack["schemaVersion"] == 1
     assert pack["packKind"] == "challenge_cup_catalog_result_pack"
@@ -188,6 +219,33 @@ def test_catalog_result_pack_binds_complete_canonical_manifest(
     assert pack["final"] is False
     assert "r2" not in pack
     assert "r3" not in pack
+
+
+def test_catalog_result_pack_requires_authority_for_ready_report(
+    complete_catalog_result_set: FullCatalogResultSet,
+) -> None:
+    report = _catalog_readiness_report(complete_catalog_result_set)
+    with pytest.raises(ValueError, match="trusted authority"):
+        export_catalog_results(complete_catalog_result_set, report)
+
+
+def test_catalog_result_pack_rejects_rehashed_forged_authority_facts(
+    complete_catalog_result_set: FullCatalogResultSet,
+) -> None:
+    report = _catalog_readiness_report(complete_catalog_result_set)
+    authority = _catalog_readiness_authority(complete_catalog_result_set)
+    forged = deepcopy(report)
+    forged["sourceCommit"] = "b" * 40
+    forged["programContract"]["version"] = "9.9.9"
+    forged["catalogPolicy"]["version"] = "9.9.9"
+    forged["readinessReportSha256"] = catalog_hypothesis_flow_report_hash(forged)
+
+    with pytest.raises(ValueError):
+        export_catalog_results(
+            complete_catalog_result_set,
+            forged,
+            trusted_authority=authority,
+        )
 
 
 def test_catalog_result_pack_exports_partial_not_ready_diagnostic() -> None:
@@ -216,11 +274,16 @@ def test_catalog_result_pack_rejects_tampered_report_or_manifest(
     complete_catalog_result_set: FullCatalogResultSet,
 ) -> None:
     report = _catalog_readiness_report(complete_catalog_result_set)
+    authority = _catalog_readiness_authority(complete_catalog_result_set)
 
     tampered_hash = deepcopy(report)
     tampered_hash["readinessReportSha256"] = "0" * 64
     with pytest.raises(ValueError, match="readiness report"):
-        export_catalog_results(complete_catalog_result_set, tampered_hash)
+        export_catalog_results(
+            complete_catalog_result_set,
+            tampered_hash,
+            trusted_authority=authority,
+        )
 
     tampered_manifest = deepcopy(report)
     tampered_manifest["catalogResultSet"]["resultManifest"]["entries"][0][
@@ -233,13 +296,18 @@ def test_catalog_result_pack_rejects_tampered_report_or_manifest(
         tampered_manifest
     )
     with pytest.raises(ValueError):
-        export_catalog_results(complete_catalog_result_set, tampered_manifest)
+        export_catalog_results(
+            complete_catalog_result_set,
+            tampered_manifest,
+            trusted_authority=authority,
+        )
 
 
 def test_catalog_result_pack_rejects_mismatched_result_set_and_scope(
     complete_catalog_result_set: FullCatalogResultSet,
 ) -> None:
     report = _catalog_readiness_report(complete_catalog_result_set)
+    authority = _catalog_readiness_authority(complete_catalog_result_set)
     partial = FullCatalogResultSet(scope=complete_catalog_result_set.scope)
     partial.add_result(
         QuestionResult.create(
@@ -250,7 +318,7 @@ def test_catalog_result_pack_rejects_mismatched_result_set_and_scope(
         )
     )
     with pytest.raises(ValueError):
-        export_catalog_results(partial, report)
+        export_catalog_results(partial, report, trusted_authority=authority)
 
     attacker_scope = CatalogScope(
         catalog_id="attacker-catalog",

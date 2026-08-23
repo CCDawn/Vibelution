@@ -191,25 +191,14 @@ def export_catalog_results(
     manifest = _catalog_result_manifest(result_set)
     raw_report = _coerce_readiness_report(readiness_report)
 
-    # READY reports require an independently bound authority in the contract.
-    # When the caller does not provide one, derive the authority only from the
-    # trusted result set plus the report's declared source/program/policy facts;
-    # the subsequent exact projection comparison still binds the report to the
-    # result set.  Callers with a server-side authority can pass it explicitly
-    # for the stronger source/policy binding as well.
+    # READY reports require an independently constructed server-side authority.
+    # Never derive that authority from the report itself: a self-consistent
+    # payload/hash is not proof that its source, program, policy, or model
+    # facts were authorized by the service.
     report_status = str(raw_report.get("status") or "").strip().upper()
     authority = trusted_authority
-    if authority is None and report_status == "READY":
-        try:
-            authority = CatalogHypothesisFlowReadinessAuthority.from_result_set(
-                result_set,
-                source_commit=raw_report.get("sourceCommit"),
-                program_contract=raw_report.get("programContract"),
-                catalog_policy=raw_report.get("catalogPolicy"),
-                model_policy_sha256=raw_report.get("modelPolicySha256"),
-            )
-        except (TypeError, ValueError, KeyError) as exc:
-            raise ValueError("READY readiness report has no valid trusted authority") from exc
+    if report_status == "READY" and authority is None:
+        raise ValueError("READY catalog export requires trusted authority")
 
     try:
         validated_report = CatalogHypothesisFlowReadinessReport.from_dict(
