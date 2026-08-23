@@ -7,11 +7,16 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.ledger import (
+    CatalogRunAuthorization,
     WorkflowLedgerCorruptionError,
     WorkflowLedgerSchemaError,
     WorkflowLedgerStore,
 )
-from core.research.workflow.ledger.schema import MIGRATIONS, SCHEMA_VERSION
+from core.research.workflow.ledger.schema import (
+    MIGRATIONS,
+    SCHEMA_VERSION,
+    V5_LEGACY_CHECKSUM,
+)
 from tests._support.workflow_ledger_helpers import (
     build_command_record,
     build_run_record,
@@ -50,6 +55,107 @@ def test_migration_checksum_mismatch_fails_startup(tmp_path: Path) -> None:
     connection.close()
     store = WorkflowLedgerStore(path)
     with pytest.raises(WorkflowLedgerSchemaError):
+        store.initialize()
+
+
+def test_legacy_v5_checksum_requires_expected_catalog_schema(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute(
+        "UPDATE schema_migrations SET checksum = ? WHERE version = 5",
+        (V5_LEGACY_CHECKSUM,),
+    )
+    connection.execute("DROP TABLE catalog_run_authorizations")
+    connection.close()
+
+    store = WorkflowLedgerStore(path)
+    with pytest.raises(WorkflowLedgerSchemaError, match="v5"):
+        store.initialize()
+
+
+def test_legacy_v5_checksum_opens_without_rewriting_and_supports_catalog_io(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute(
+        "UPDATE schema_migrations SET checksum = ? WHERE version = 5",
+        (V5_LEGACY_CHECKSUM,),
+    )
+    connection.close()
+
+    store = WorkflowLedgerStore(path)
+    store.open()
+    try:
+        authorization = CatalogRunAuthorization(
+            authorization_id="auth-legacy-v5",
+            team_id="research-team",
+            plan_id="real-1",
+            batch_scope_json='{"questionIds":["SCI-096"]}',
+            scope_hash="s" * 64,
+            approved_by="operator-1",
+            approved_at_ms=1_750_000_000_001,
+            readiness_report_sha256="r" * 64,
+            record_hash="h" * 64,
+            created_at_ms=1_750_000_000_001,
+        )
+        store.submit(
+            lambda uow: uow.repository.insert_catalog_run_authorization(authorization),
+            force_flush=True,
+        ).result(timeout=10)
+        assert store.get_catalog_run_authorization(authorization.authorization_id) == authorization
+    finally:
+        store.close()
+
+    connection = apsw.Connection(str(path), flags=apsw.SQLITE_OPEN_READONLY)
+    assert connection.execute(
+        "SELECT checksum FROM schema_migrations WHERE version = 5"
+    ).fetchone()[0] == V5_LEGACY_CHECKSUM
+    connection.close()
+
+
+def test_fresh_v5_uses_current_checksum(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path), flags=apsw.SQLITE_OPEN_READONLY)
+    assert MIGRATIONS[-1].checksum != V5_LEGACY_CHECKSUM
+    assert connection.execute(
+        "SELECT checksum FROM schema_migrations WHERE version = 5"
+    ).fetchone()[0] == MIGRATIONS[-1].checksum
+    connection.close()
+
+
+def test_legacy_v5_checksum_rejects_lookup_index_drift(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path)
+    store.close()
+
+    import apsw
+
+    connection = apsw.Connection(str(path))
+    connection.execute(
+        "UPDATE schema_migrations SET checksum = ? WHERE version = 5",
+        (V5_LEGACY_CHECKSUM,),
+    )
+    connection.execute("DROP INDEX idx_catalog_run_authorizations_lookup")
+    connection.close()
+
+    store = WorkflowLedgerStore(path)
+    with pytest.raises(WorkflowLedgerSchemaError, match="v5"):
         store.initialize()
 
 
