@@ -9,6 +9,18 @@ from ._validation import ContractValidationError
 from .artifact_manifest import ArtifactManifest
 from .artifact_receipt import ArtifactReceipt, BudgetReceipt
 from .budget import ResearchBudgetLedger
+from .catalog_hypothesis_flow_readiness import (
+    CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS,
+    CATALOG_HYPOTHESIS_FLOW_EVIDENCE_STATUSES,
+    CATALOG_HYPOTHESIS_FLOW_NOT_READY_STATUS,
+    CATALOG_HYPOTHESIS_FLOW_READY_STATUS,
+    CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION,
+    CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
+    CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION,
+    RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
+    CatalogHypothesisFlowReadinessReport,
+    catalog_hypothesis_flow_report_hash,
+)
 from .claim_ledger import (
     ACCEPTED_REVIEW_STATUS,
     CLAIM_SOURCES,
@@ -160,6 +172,13 @@ __all__ = [
     "BudgetReadiness",
     "BudgetReceipt",
     "BudgetSummary",
+    "CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS",
+    "CATALOG_HYPOTHESIS_FLOW_EVIDENCE_STATUSES",
+    "CATALOG_HYPOTHESIS_FLOW_NOT_READY_STATUS",
+    "CATALOG_HYPOTHESIS_FLOW_READY_STATUS",
+    "CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION",
+    "CATALOG_HYPOTHESIS_FLOW_REPORT_KIND",
+    "CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION",
     "CLAIM_SOURCES",
     "CLAIM_STATUSES",
     "COMPARISON_OUTCOMES",
@@ -223,6 +242,7 @@ __all__ = [
     "RESEARCH_TEAM_ROLE_CONTRACT_ID",
     "RESEARCH_TEAM_ROLE_CONTRACT_VERSION",
     "RESEARCH_TEAM_ROLE_SEMANTIC_VERSION",
+    "RESEARCH_AUTHORIZATION_REQUIRED_ACTION",
     "REUSE_POLICIES",
     "ROUND_STATUSES",
     "ReadinessBlocker",
@@ -261,6 +281,7 @@ __all__ = [
     "WorkflowSessionScopeV3",
     "activation_scope_hash",
     "build_campaign_activation_payload",
+    "catalog_hypothesis_flow_report_hash",
     "canonical_fragment_payload",
     "canonical_json",
     "current_research_team_role_contract_snapshot",
@@ -268,4 +289,5 @@ __all__ = [
     "scope_hash_for",
     "scope_identity_seed",
     "sha256_hex",
+    "CatalogHypothesisFlowReadinessReport",
 ]
