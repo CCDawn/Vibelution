@@ -6,6 +6,8 @@ submission projection exist. Preview packs never claim to be final.
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,8 +16,21 @@ from core.research.competition.resources import (
     CORE_BEHAVIOR_HASH,
     CORE_POLICY_HASH,
 )
+from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
+    CatalogHypothesisFlowReadinessAuthority,
+    CatalogHypothesisFlowReadinessReport,
+)
+
+from .catalog_hypothesis_flow_ready import _fallback_manifest
+from .result_set import (
+    CatalogScope,
+    FullCatalogResultSet,
+    ResultSetContractError,
+)
 
 DEFAULT_PDF_LIMIT_BYTES = 20 * 1024 * 1024
+CATALOG_RESULT_PACK_SCHEMA_VERSION = 1
+CATALOG_RESULT_PACK_KIND = "challenge_cup_catalog_result_pack"
 
 
 def _now() -> str:
@@ -67,6 +82,188 @@ def export_results(payload: dict[str, Any], *, mode: str) -> dict[str, Any]:
         "evidenceIndex": list(payload.get("evidenceIndex") or []),
         "generatedAt": _now(),
         "final": status == "final",
+    }
+
+
+def _catalog_result_manifest(result_set: FullCatalogResultSet) -> dict[str, Any]:
+    """Return the result-set-owned manifest, including a partial fallback.
+
+    ``FullCatalogResultSet.manifest`` is the canonical identity projection.  A
+    partial result set with one invalid receipt cannot produce that projection
+    directly; the readiness builder uses the same identity-only fallback for
+    its NOT_READY diagnostic, so reuse it here instead of accepting a caller
+    supplied manifest.
+    """
+
+    try:
+        return copy.deepcopy(result_set.manifest())
+    except (ResultSetContractError, TypeError, ValueError, KeyError):
+        try:
+            return copy.deepcopy(_fallback_manifest(result_set))
+        except (ResultSetContractError, TypeError, ValueError, KeyError) as exc:
+            raise ValueError("catalog result set cannot produce a canonical manifest") from exc
+
+
+def _canonical_catalog_result_set(
+    result_set: FullCatalogResultSet,
+    *,
+    manifest: Mapping[str, Any],
+    model_policy_sha256: str,
+) -> dict[str, Any]:
+    """Project canonical counts and identity for readiness-report binding."""
+
+    try:
+        counts = dict(result_set.export_counts())
+        counts["required_question_count"] = CATALOG_QUESTION_COUNT
+        selection_approved = 0
+        research_plan_approved = 0
+        receipt_complete = 0
+        model_policy_matched = 0
+        normalized_model_policy = str(model_policy_sha256 or "").strip().lower()
+        for result in result_set.results():
+            decisions = result.human_gate_decisions
+            if len(decisions) == 2:
+                selection_approved += decisions[0] == "approved"
+                research_plan_approved += decisions[1] == "approved"
+            if result.receipt_complete:
+                receipt_complete += 1
+            snapshot = result.package_snapshot
+            package_policy = snapshot.get("model_policy") if isinstance(snapshot, Mapping) else None
+            if (
+                normalized_model_policy
+                and isinstance(package_policy, Mapping)
+                and str(package_policy.get("policySha256") or "").strip().lower()
+                == normalized_model_policy
+            ):
+                model_policy_matched += 1
+    except (ResultSetContractError, TypeError, ValueError, KeyError) as exc:
+        raise ValueError("catalog result set contains invalid canonical data") from exc
+    return {
+        "catalogId": result_set.catalog_id,
+        "catalogVersion": result_set.catalog_version,
+        "scopeHash": result_set.scope_hash,
+        "counts": counts,
+        "selectionApprovedCount": selection_approved,
+        "researchPlanApprovedCount": research_plan_approved,
+        "receiptCompleteCount": receipt_complete,
+        "modelPolicyMatchedCount": model_policy_matched,
+        "resultManifest": copy.deepcopy(dict(manifest)),
+    }
+
+
+def _coerce_readiness_report(
+    readiness_report: CatalogHypothesisFlowReadinessReport | Mapping[str, Any],
+) -> dict[str, Any]:
+    if isinstance(readiness_report, CatalogHypothesisFlowReadinessReport):
+        return readiness_report.to_dict()
+    if isinstance(readiness_report, Mapping):
+        return copy.deepcopy(dict(readiness_report))
+    raise TypeError(
+        "readiness_report must be a CatalogHypothesisFlowReadinessReport or mapping"
+    )
+
+
+def export_catalog_results(
+    result_set: FullCatalogResultSet,
+    readiness_report: CatalogHypothesisFlowReadinessReport | Mapping[str, Any],
+    *,
+    trusted_authority: CatalogHypothesisFlowReadinessAuthority | None = None,
+) -> dict[str, Any]:
+    """Export a canonical 125-question catalog diagnostic/result pack.
+
+    This is intentionally separate from :func:`export_results`: it never
+    evaluates R2/R3, PDF, frozen-submission, or official-campaign gates and it
+    can never emit ``final=True``.  The result set and readiness report are
+    both revalidated and cross-bound to the same tracked catalog scope before
+    any fields are copied into the pack.  A NOT_READY or partial result set is
+    exportable for diagnosis, but a forged client projection is not.
+    """
+
+    if not isinstance(result_set, FullCatalogResultSet):
+        raise TypeError("result_set must be a trusted FullCatalogResultSet")
+    if result_set.scope != CatalogScope.from_tracked_resources():
+        raise ValueError("catalog result set scope is not the tracked catalog scope")
+    if trusted_authority is not None and not isinstance(
+        trusted_authority, CatalogHypothesisFlowReadinessAuthority
+    ):
+        raise TypeError("trusted_authority must be a CatalogHypothesisFlowReadinessAuthority")
+
+    manifest = _catalog_result_manifest(result_set)
+    raw_report = _coerce_readiness_report(readiness_report)
+
+    # READY reports require an independently bound authority in the contract.
+    # When the caller does not provide one, derive the authority only from the
+    # trusted result set plus the report's declared source/program/policy facts;
+    # the subsequent exact projection comparison still binds the report to the
+    # result set.  Callers with a server-side authority can pass it explicitly
+    # for the stronger source/policy binding as well.
+    report_status = str(raw_report.get("status") or "").strip().upper()
+    authority = trusted_authority
+    if authority is None and report_status == "READY":
+        try:
+            authority = CatalogHypothesisFlowReadinessAuthority.from_result_set(
+                result_set,
+                source_commit=raw_report.get("sourceCommit"),
+                program_contract=raw_report.get("programContract"),
+                catalog_policy=raw_report.get("catalogPolicy"),
+                model_policy_sha256=raw_report.get("modelPolicySha256"),
+            )
+        except (TypeError, ValueError, KeyError) as exc:
+            raise ValueError("READY readiness report has no valid trusted authority") from exc
+
+    try:
+        validated_report = CatalogHypothesisFlowReadinessReport.from_dict(
+            raw_report,
+            trusted_authority=authority,
+        )
+    except (TypeError, ValueError, KeyError) as exc:
+        raise ValueError("readiness report failed canonical validation") from exc
+
+    canonical_catalog = _canonical_catalog_result_set(
+        result_set,
+        manifest=manifest,
+        model_policy_sha256=validated_report.modelPolicySha256,
+    )
+    if validated_report.catalogResultSet != canonical_catalog:
+        raise ValueError("readiness report does not match the trusted catalog result set")
+    if authority is not None:
+        if authority.canonicalResultManifest != manifest:
+            raise ValueError("trusted readiness authority manifest does not match result set")
+        authority_catalog = _canonical_catalog_result_set(
+            result_set,
+            manifest=manifest,
+            model_policy_sha256=authority.modelPolicySha256,
+        )
+        if authority.catalogResultSet != authority_catalog:
+            raise ValueError("trusted readiness authority does not match result set")
+
+    report_payload = validated_report.to_dict()
+    counts = copy.deepcopy(canonical_catalog["counts"])
+    canonical_manifest = copy.deepcopy(manifest)
+    manifest_sha256 = str(canonical_manifest.get("manifest_sha256") or "").strip().upper()
+    if len(manifest_sha256) != 64:
+        raise ValueError("canonical result manifest hash is invalid")
+    return {
+        "schemaVersion": CATALOG_RESULT_PACK_SCHEMA_VERSION,
+        "packKind": CATALOG_RESULT_PACK_KIND,
+        "status": validated_report.status,
+        "readinessStatus": validated_report.status,
+        "blockers": list(validated_report.blockers),
+        "catalogId": result_set.catalog_id,
+        "catalogVersion": result_set.catalog_version,
+        "scopeHash": result_set.scope_hash,
+        "requiredQuestionCount": CATALOG_QUESTION_COUNT,
+        "counts": counts,
+        "catalogResultSet": copy.deepcopy(canonical_catalog),
+        "canonicalResultManifest": canonical_manifest,
+        "canonicalResultManifestSha256": manifest_sha256,
+        "readinessReport": report_payload,
+        "readinessReportSha256": validated_report.readinessReportSha256,
+        "nextLegalAction": validated_report.nextLegalAction,
+        "researchAuthorizationRequired": True,
+        "realCampaignAllowed": False,
+        "final": False,
+        "generatedAt": _now(),
     }
 
 
