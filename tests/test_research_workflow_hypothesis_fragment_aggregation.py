@@ -7,7 +7,10 @@ import json
 import pytest
 
 from core.research.workflow.contracts._validation import ContractValidationError
-from core.research.workflow.contracts.hypothesis_fragment import HypothesisFragment
+from core.research.workflow.contracts.hypothesis_fragment import (
+    HypothesisFragment,
+    canonical_fragment_payload,
+)
 from core.web.services.team_workflow.research_runtime.hypothesis_fragment_aggregator import (
     aggregate_hypothesis_fragments,
 )
@@ -25,7 +28,7 @@ def _hash(payload: dict) -> str:
 
 def _fragment(candidate_id: str, *, order: int = 0, **overrides) -> dict:
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "kind": "hypothesis_fragment",
         "workflowRunId": "run-1",
         "workflowNodeId": "hypothesis_design",
@@ -37,10 +40,12 @@ def _fragment(candidate_id: str, *, order: int = 0, **overrides) -> dict:
         "taskId": f"task-{candidate_id}",
         "statement": f"statement-{candidate_id}",
         "mechanism": f"mechanism-{candidate_id}",
+        "novelty_basis": f"novelty basis-{candidate_id}",
         "predictions": [f"prediction-{candidate_id}"],
         "falsificationCriteria": [f"falsify-{candidate_id}"],
         "evidenceRefs": [f"evidence-{candidate_id}"],
         "counterEvidenceRefs": ["allowed-counter"],
+        "boundary_conditions": [f"boundary-{candidate_id}"],
         "scores": {
             "novelty": 0.8,
             "competitionFit": 0.7,
@@ -86,12 +91,35 @@ def test_fragment_contract_requires_hash_and_preserves_scope() -> None:
     assert parsed.nodeRunId == "node-run-1"
     assert parsed.selectionId == "selection-1"
     assert parsed.candidateId == "hyp-a"
+    assert parsed.novelty_basis == "novelty basis-hyp-a"
+    assert parsed.boundary_conditions == ("boundary-hyp-a",)
     assert parsed.provenance["source"] == "child_session"
 
     malformed = _fragment("hyp-a")
     malformed["contentHash"] = "0" * 64
     with pytest.raises(ContractValidationError, match="contentHash"):
         HypothesisFragment.from_dict(malformed)
+
+
+@pytest.mark.parametrize("missing", ["novelty_basis", "boundary_conditions"])
+def test_fragment_contract_fails_closed_without_explicit_v2_semantics(
+    missing: str,
+) -> None:
+    malformed = _fragment("hyp-a")
+    malformed.pop(missing)
+    malformed["contentHash"] = _hash(malformed)
+
+    with pytest.raises(ContractValidationError, match=missing):
+        HypothesisFragment.from_dict(malformed)
+
+
+def test_fragment_contract_rejects_conflicting_v2_aliases() -> None:
+    malformed = _fragment("hyp-a")
+    malformed["noveltyBasis"] = "a different novelty basis"
+    malformed["contentHash"] = _hash(malformed)
+
+    with pytest.raises(ContractValidationError, match="aliases"):
+        canonical_fragment_payload(malformed)
 
 
 def test_fragment_writer_fails_closed_on_unapproved_counter_evidence() -> None:
@@ -210,6 +238,12 @@ def test_aggregator_orders_by_selection_and_emits_deterministic_portfolio_payloa
     assert [item["candidateId"] for item in first["candidates"]] == ["hyp-a", "hyp-b"]
     assert first["aggregationMode"] == "all_required_ordered"
     assert first["candidates"][0]["scores"]["falsifiability"] == 0.9
+    assert first["candidateDetails"]["hyp-a"]["novelty_basis"] == (
+        "novelty basis-hyp-a"
+    )
+    assert first["candidateDetails"]["hyp-a"]["boundary_conditions"] == [
+        "boundary-hyp-a"
+    ]
     assert first["provenance"]["fragmentRefs"] == [
         "hypothesis_fragment:selection-1:hyp-a:node-run-1",
         "hypothesis_fragment:selection-1:hyp-b:node-run-1",

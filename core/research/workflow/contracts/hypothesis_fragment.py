@@ -24,7 +24,10 @@ from ._validation import (
     require_text,
 )
 
-HYPOTHESIS_FRAGMENT_SCHEMA_VERSION = 1
+# Adding the v2 hypothesis semantics is a breaking contract change: old
+# fragments do not contain the required novelty/boundary facts and therefore
+# must not be replayed as formal Challenge Cup evidence.
+HYPOTHESIS_FRAGMENT_SCHEMA_VERSION = 2
 HYPOTHESIS_FRAGMENT_KIND = "hypothesis_fragment"
 
 _PORTFOLIO_SCORE_KEYS = (
@@ -46,6 +49,43 @@ def _string_list(
     if len(set(result)) != len(result):
         raise ContractValidationError(f"{key} values must be unique")
     return result
+
+
+def _aliased_value(
+    payload: Mapping[str, Any], canonical: str, *aliases: str
+) -> Any:
+    """Return one canonical field while rejecting conflicting aliases."""
+
+    keys = (canonical, *aliases)
+    present = [(key, payload[key]) for key in keys if key in payload]
+    if not present:
+        raise ContractValidationError(f"missing required hypothesis field: {canonical}")
+    first_key, first_value = present[0]
+    for key, value in present[1:]:
+        if value != first_value:
+            raise ContractValidationError(
+                f"hypothesis field aliases {first_key} and {key} disagree"
+            )
+    return first_value
+
+
+def _aliased_text(
+    payload: Mapping[str, Any], canonical: str, *aliases: str
+) -> str:
+    value = _aliased_value(payload, canonical, *aliases)
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ContractValidationError(f"{canonical} must be a non-empty string")
+    return normalized
+
+
+def _aliased_string_list(
+    payload: Mapping[str, Any], canonical: str, *aliases: str
+) -> tuple[str, ...]:
+    value = _aliased_value(payload, canonical, *aliases)
+    # ``_string_list`` expects a mapping so that its error names stay tied to
+    # the canonical v2 field; aliases are resolved before this point.
+    return _string_list({canonical: value}, canonical, non_empty=True)
 
 
 def _content_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -72,10 +112,12 @@ class HypothesisFragment:
     provenance: dict[str, Any]
     statement: str
     mechanism: str
+    novelty_basis: str
     predictions: tuple[str, ...]
     falsificationCriteria: tuple[str, ...]
     evidenceRefs: tuple[str, ...]
     counterEvidenceRefs: tuple[str, ...]
+    boundary_conditions: tuple[str, ...]
     scores: dict[str, float]
     contentHash: str
 
@@ -118,12 +160,16 @@ class HypothesisFragment:
             provenance=require_mapping(payload, "provenance"),
             statement=require_text(payload, "statement"),
             mechanism=require_text(payload, "mechanism"),
+            novelty_basis=_aliased_text(payload, "novelty_basis", "noveltyBasis"),
             predictions=_string_list(payload, "predictions", non_empty=True),
             falsificationCriteria=_string_list(
                 payload, "falsificationCriteria", non_empty=True
             ),
             evidenceRefs=_string_list(payload, "evidenceRefs"),
             counterEvidenceRefs=_string_list(payload, "counterEvidenceRefs"),
+            boundary_conditions=_aliased_string_list(
+                payload, "boundary_conditions", "boundaryConditions"
+            ),
             scores={
                 key: require_score(raw_scores[key], f"scores.{key}")
                 for key in _PORTFOLIO_SCORE_KEYS
@@ -152,10 +198,12 @@ class HypothesisFragment:
             "provenance": copy.deepcopy(self.provenance),
             "statement": self.statement,
             "mechanism": self.mechanism,
+            "novelty_basis": self.novelty_basis,
             "predictions": list(self.predictions),
             "falsificationCriteria": list(self.falsificationCriteria),
             "evidenceRefs": list(self.evidenceRefs),
             "counterEvidenceRefs": list(self.counterEvidenceRefs),
+            "boundary_conditions": list(self.boundary_conditions),
             "scores": copy.deepcopy(self.scores),
         }
         if include_hash:
@@ -179,10 +227,12 @@ class HypothesisFragment:
             provenance=copy.deepcopy(self.provenance),
             statement=self.statement,
             mechanism=self.mechanism,
+            novelty_basis=self.novelty_basis,
             predictions=self.predictions,
             falsificationCriteria=self.falsificationCriteria,
             evidenceRefs=self.evidenceRefs,
             counterEvidenceRefs=self.counterEvidenceRefs,
+            boundary_conditions=self.boundary_conditions,
             scores=copy.deepcopy(self.scores),
             contentHash=content_hash,
         )
@@ -209,13 +259,26 @@ def canonical_fragment_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         "provenance",
         "statement",
         "mechanism",
+        "novelty_basis",
+        "noveltyBasis",
         "predictions",
         "falsificationCriteria",
         "evidenceRefs",
         "counterEvidenceRefs",
+        "boundary_conditions",
+        "boundaryConditions",
         "scores",
     }
     normalized = {key: value for key, value in raw.items() if key in known}
+    for canonical, aliases in (
+        ("novelty_basis", ("noveltyBasis",)),
+        ("boundary_conditions", ("boundaryConditions",)),
+    ):
+        # Resolve against the raw payload before removing aliases so a caller
+        # cannot submit two conflicting spellings and hash only one of them.
+        normalized[canonical] = _aliased_value(raw, canonical, *aliases)
+        for alias in aliases:
+            normalized.pop(alias, None)
     normalized["contentHash"] = sha256_hex(normalized)
     return HypothesisFragment.from_dict(normalized).to_dict()
 
