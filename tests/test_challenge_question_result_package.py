@@ -595,6 +595,18 @@ def test_server_model_policy_canonicalization_is_order_and_case_stable() -> None
     )["policySha256"]
 
 
+def test_server_model_policy_rejects_non_qwen_model_ids() -> None:
+    with pytest.raises(QuestionResultPackageError, match="Qwen upstream model ids"):
+        canonical_model_policy(
+            {
+                "family": "qwen",
+                "providerIds": ["dashscope"],
+                "modelIds": ["gpt-5"],
+                "requireOfficialProvider": True,
+            }
+        )
+
+
 def test_model_policy_hash_participates_in_idempotency_identity() -> None:
     baseline = _create(_valid_payload())
     payload = _valid_payload()

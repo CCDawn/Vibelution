@@ -293,6 +293,8 @@ def _question_result_from_approved(
 def _validated_seed_package(
     state: CatalogExecutionState,
     result: QuestionResult,
+    *,
+    expected_model_policy_sha256: str,
 ) -> QuestionResultPackage:
     """Restore one already-trusted in-memory package before any target mutation."""
 
@@ -302,7 +304,10 @@ def _validated_seed_package(
             f"Previous gate package result has no snapshot: {result.question_id}."
         )
     try:
-        package = QuestionResultPackage.create(snapshot)
+        package = QuestionResultPackage.from_dict(
+            snapshot,
+            expected_model_policy_sha256=expected_model_policy_sha256,
+        )
     except QuestionResultPackageError as exc:
         raise CatalogExecutionError(
             f"Previous gate package is not canonical: {result.question_id}: {exc}"
@@ -363,7 +368,12 @@ def _same_seed_result(
     )
 
 
-def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int:
+def _seed_from_previous_gates(
+    team_id: str,
+    state: CatalogExecutionState,
+    *,
+    expected_model_policy_sha256: str,
+) -> int:
     """Seed already-approved results from earlier gate batches.
 
     Progressive gates are cumulative (G5 includes G1's questions); an approved
@@ -394,7 +404,11 @@ def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int
                 ) from exc
 
             package = (
-                _validated_seed_package(state, result)
+                _validated_seed_package(
+                    state,
+                    result,
+                    expected_model_policy_sha256=expected_model_policy_sha256,
+                )
                 if result.is_package_backed
                 else None
             )
@@ -442,6 +456,58 @@ def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int
     return seeded
 
 
+def _durable_authorization_record(
+    bound: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    plan_id: str,
+):
+    """Restore and compare the exact durable authorization before trusting it."""
+
+    normalized_team = str(team_id or "").strip()
+    normalized_plan = str(plan_id or "").strip()
+    if not isinstance(bound, Mapping) or not normalized_team or not normalized_plan:
+        raise CatalogRunAuthorizationError(
+            "real batch has no complete durable catalog authorization"
+        )
+    scope = bound.get("batchScope")
+    readiness_hash = str(bound.get("readinessReportSha256") or "").strip()
+    if (
+        str(bound.get("teamId") or "").strip() != normalized_team
+        or str(bound.get("planId") or "").strip() != normalized_plan
+        or not isinstance(scope, Mapping)
+        or not readiness_hash
+    ):
+        raise CatalogRunAuthorizationError(
+            "real batch has an incomplete durable catalog authorization"
+        )
+    authorization = find_catalog_run_authorization(
+        normalized_team,
+        plan_id=normalized_plan,
+        batch_scope=scope,
+        readiness_report_sha256_value=readiness_hash,
+        require_model_policy=True,
+    )
+    if authorization is None:
+        raise CatalogRunAuthorizationError(
+            "real batch durable catalog authorization is stale or invalid"
+        )
+    durable = authorization_to_dict(authorization)
+    if any(
+        str(bound.get(field) or "").strip()
+        != str(durable.get(field) or "").strip()
+        for field in _AUTHORIZATION_BINDING_FIELDS
+    ):
+        raise CatalogRunAuthorizationError(
+            "real batch durable catalog authorization binding is tampered"
+        )
+    if bound.get("batchScope") != durable.get("batchScope"):
+        raise CatalogRunAuthorizationError(
+            "real batch durable catalog authorization scope is tampered"
+        )
+    return authorization
+
+
 def _new_envelope(
     team_id: str,
     plan_id: str,
@@ -450,8 +516,19 @@ def _new_envelope(
     failure_budget: int,
     authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    durable_authorization = _durable_authorization_record(
+        authorization,
+        team_id=team_id,
+        plan_id=plan_id,
+    )
+    durable_binding = authorization_to_dict(durable_authorization)
+    expected_policy_sha256 = authorized_model_policy_sha256(durable_authorization)
     state = new_real_batch_state(plan_id)
-    _seed_from_previous_gates(team_id, state)
+    _seed_from_previous_gates(
+        team_id,
+        state,
+        expected_model_policy_sha256=expected_policy_sha256,
+    )
     return {
         "schemaVersion": ENVELOPE_SCHEMA_VERSION,
         "kind": "challenge_cup_real_batch",
@@ -465,7 +542,7 @@ def _new_envelope(
         "failureBudget": failure_budget,
         "consecutiveFailures": 0,
         "cancelled": False,
-        "catalogRunAuthorization": dict(authorization or {}),
+        "catalogRunAuthorization": durable_binding,
         "createdAt": _utc_now(),
         "updatedAt": _utc_now(),
     }
@@ -503,46 +580,11 @@ def _save_envelope(team_id: str, envelope: dict[str, Any]) -> None:
 def _state_of(envelope: dict[str, Any]) -> CatalogExecutionState:
     try:
         bound = envelope.get("catalogRunAuthorization")
-        if not isinstance(bound, Mapping):
-            raise CatalogRunAuthorizationError(
-                "real batch checkpoint has no durable catalog authorization"
-            )
-        team_id = str(bound.get("teamId") or "").strip()
-        plan_id = str(bound.get("planId") or "").strip()
-        scope = bound.get("batchScope")
-        readiness_hash = str(bound.get("readinessReportSha256") or "").strip()
-        if (
-            not team_id
-            or not plan_id
-            or str(envelope.get("teamId") or "").strip() != team_id
-            or str(envelope.get("planId") or "").strip() != plan_id
-            or not isinstance(scope, Mapping)
-            or not readiness_hash
-        ):
-            raise CatalogRunAuthorizationError(
-                "real batch checkpoint has an incomplete durable catalog authorization"
-            )
-        authorization = find_catalog_run_authorization(
-            team_id,
-            plan_id=plan_id,
-            batch_scope=scope,
-            readiness_report_sha256_value=readiness_hash,
-            require_model_policy=True,
+        authorization = _durable_authorization_record(
+            bound,
+            team_id=str(envelope.get("teamId") or "").strip(),
+            plan_id=str(envelope.get("planId") or "").strip(),
         )
-        if authorization is None:
-            raise CatalogRunAuthorizationError(
-                "real batch checkpoint durable catalog authorization is stale or invalid"
-            )
-        durable = authorization_to_dict(authorization)
-        for field in _AUTHORIZATION_BINDING_FIELDS:
-            if str(bound.get(field) or "").strip() != str(durable.get(field) or "").strip():
-                raise CatalogRunAuthorizationError(
-                    "real batch checkpoint durable catalog authorization binding is tampered"
-                )
-        if bound.get("batchScope") != durable.get("batchScope"):
-            raise CatalogRunAuthorizationError(
-                "real batch checkpoint durable catalog authorization scope is tampered"
-            )
         expected_policy_sha256 = authorized_model_policy_sha256(authorization)
         return CatalogExecutionState.from_checkpoint(
             envelope["checkpoint"],

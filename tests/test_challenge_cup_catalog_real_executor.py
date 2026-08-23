@@ -484,7 +484,14 @@ def test_cross_gate_seed_preserves_canonical_package_and_is_idempotent(
     result = QuestionResult.from_package(package)
     _seed_state(monkeypatch, result, result)
 
-    assert svc._seed_from_previous_gates(TEAM_ID, target) == 1
+    assert (
+        svc._seed_from_previous_gates(
+            TEAM_ID,
+            target,
+            expected_model_policy_sha256=package.model_policy["policySha256"],
+        )
+        == 1
+    )
 
     seeded = target.result_for("SCI-091")
     assert seeded is not None
@@ -535,7 +542,11 @@ def test_cross_gate_seed_validates_every_package_before_mutating_target(
     envelope_before = target_envelope.read_bytes()
 
     with pytest.raises(ValueError, match="canonical hash"):
-        svc._seed_from_previous_gates(TEAM_ID, target)
+        svc._seed_from_previous_gates(
+            TEAM_ID,
+            target,
+            expected_model_policy_sha256=harness.model_policy["policySha256"],
+        )
 
     assert target.to_checkpoint() == before
     assert target.attempts("SCI-091") == 0
@@ -560,7 +571,11 @@ def test_cross_gate_seed_rejects_conflicting_package_hashes_before_mutation(
     before = target.to_checkpoint()
 
     with pytest.raises(CatalogExecutionError, match="different canonical packages"):
-        svc._seed_from_previous_gates(TEAM_ID, target)
+        svc._seed_from_previous_gates(
+            TEAM_ID,
+            target,
+            expected_model_policy_sha256=harness.model_policy["policySha256"],
+        )
 
     assert target.to_checkpoint() == before
     assert target.attempts("SCI-091") == 0
@@ -586,7 +601,12 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
     }
 
     class _FakeLlm:
-        model_library: ClassVar[dict[str, object]] = {}
+        model_library: ClassVar[dict[str, object]] = {
+            "qwen-plus": {"upstream_id": "qwen-plus"},
+            "qwen-max": {"upstream_id": "qwen-max"},
+            "gpt-5": {"upstream_id": "gpt-5"},
+            "qwen-alias": {"upstream_id": "gpt-5"},
+        }
 
         @staticmethod
         def resolve_model_ref(value: str) -> str:
@@ -594,13 +614,22 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
         @staticmethod
         def get_provider(provider_id: str) -> SimpleNamespace:
+            if provider_id == "relay":
+                return SimpleNamespace(
+                    provider_id=provider_id,
+                    service_class="relay",
+                    kind="relay",
+                    vendor="custom",
+                    label="relay",
+                    base_url="https://ai-pixel.online/v1",
+                )
             return SimpleNamespace(
                 provider_id=provider_id,
-                service_class="relay" if provider_id == "relay" else "official_api",
-                kind=provider_id,
-                vendor=provider_id,
+                service_class="official_api",
+                kind="aliyun",
+                vendor="aliyun",
                 label=provider_id,
-                base_url=f"https://{provider_id}.aliyuncs.com",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
 
     monkeypatch.setattr(
@@ -660,6 +689,20 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
+            model_ref="qwen-alias",
+            model_id="qwen-alias",
+            model="gpt-5",
+            provider_id="aliyun",
+        ),
+    )
+    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="Qwen"):
+        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_agent_llm",
+        lambda agent, slot, config: SimpleNamespace(
+            config=config,
             model_ref="qwen-plus",
             model_id="qwen-plus",
             model="qwen-plus",
@@ -668,6 +711,47 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
     )
     with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="official provider"):
         catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+
+    forged_providers = (
+        SimpleNamespace(
+            provider_id="forged",
+            service_class="official_api",
+            kind="openai",
+            vendor="openai",
+            label="DashScope",
+            base_url="https://api.openai.com/v1",
+        ),
+        SimpleNamespace(
+            provider_id="forged",
+            service_class="official_api",
+            kind="aliyun",
+            vendor="aliyun",
+            label="DashScope",
+            base_url="https://api.openai.com/v1",
+        ),
+    )
+    for forged_provider in forged_providers:
+        monkeypatch.setattr(
+            _FakeLlm,
+            "get_provider",
+            staticmethod(lambda _provider_id, value=forged_provider: value),
+        )
+        monkeypatch.setattr(
+            catalog_run_authorization,
+            "resolve_agent_llm",
+            lambda agent, slot, config: SimpleNamespace(
+                config=config,
+                model_ref="qwen-plus",
+                model_id="qwen-plus",
+                model="qwen-plus",
+                provider_id="forged",
+            ),
+        )
+        with pytest.raises(
+            catalog_run_authorization.CatalogRunAuthorizationError,
+            match="official provider",
+        ):
+            catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
 
 def test_legacy_catalog_authorization_without_policy_fails_closed(
@@ -687,16 +771,18 @@ def test_legacy_catalog_authorization_without_policy_fails_closed(
         readiness_evidence=harness.readiness_report,
         approved_at_ms=FIXED_NOW_MS,
     )
-    envelope = svc._new_envelope(
-        TEAM_ID,
-        "real-1",
-        concurrency=1,
-        failure_budget=3,
-        authorization=catalog_run_authorization.authorization_to_dict(legacy_record),
-    )
-
-    with pytest.raises(svc.RealBatchStorageError, match="authorization"):
-        svc._state_of(envelope)
+    with pytest.raises(
+        catalog_run_authorization.CatalogRunAuthorizationError,
+        match="authorization",
+    ):
+        svc._new_envelope(
+            TEAM_ID,
+            "real-1",
+            concurrency=1,
+            failure_budget=3,
+            authorization=catalog_run_authorization.authorization_to_dict(legacy_record),
+        )
+    assert not svc._envelope_path(TEAM_ID, "real-1").exists()
 
 
 def test_question_launch_authorization_lookup_includes_server_model_policy(
@@ -779,6 +865,47 @@ def test_cross_gate_checkpoint_restore_uses_durable_policy_and_seeds_without_sta
         seeded.package_snapshot["model_policy"]["policySha256"]
         == package.model_policy["policySha256"]
     )
+
+
+def test_cross_gate_seed_rejects_target_policy_mismatch_before_envelope_write(
+    harness: _Harness,
+) -> None:
+    harness.authorize("real-1")
+    prior_authorization = svc._current_catalog_run_authorization(TEAM_ID, "real-1")
+    prior_envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-1",
+        concurrency=1,
+        failure_budget=3,
+        authorization=prior_authorization,
+    )
+    prior_state = svc._state_of(prior_envelope)
+    prior_state.record_package(_approved_package(prior_state, "SCI-091"))
+    prior_envelope["checkpoint"] = prior_state.to_checkpoint()
+    svc._save_envelope(TEAM_ID, prior_envelope)
+
+    harness.model_policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope"],
+            "modelIds": ["qwen-max"],
+            "requireOfficialProvider": True,
+        }
+    )
+    harness.authorize("real-5")
+    target_path = svc._envelope_path(TEAM_ID, "real-5")
+
+    with pytest.raises(CatalogExecutionError, match="authorized policy"):
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-5",
+            confirmed=True,
+            max_items=0,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
+
+    assert not target_path.exists()
 
 
 def test_policy_snapshot_is_record_hashed_and_old_policy_fails_closed(

@@ -16,12 +16,15 @@ import re
 import time
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlparse
 
+from config.llm_security import validate_llm_provider_target
 from config.settings import get_config
 from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
 from core.research.competition.question_result_package import (
     QuestionResultPackageError,
     canonical_model_policy,
+    is_qwen_model_id,
 )
 from core.research.competition.real_control_batch import RealBatchError, real_plan
 from core.research.workflow.contracts.research_team_role_contract import (
@@ -36,7 +39,7 @@ from core.web.services.team_workflow.research_runtime.team_role_source import (
 from .formal_write_runtime import get_write_store
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_OFFICIAL_PROVIDER_MARKERS = ("aliyun", "dashscope", "bailian")
+_OFFICIAL_DASHSCOPE_HOST = "dashscope.aliyuncs.com"
 
 
 class CatalogRunAuthorizationError(ValueError):
@@ -118,12 +121,23 @@ def _model_policy_from_scope(
 
 def _official_provider(provider: Any) -> bool:
     service_class = str(getattr(provider, "service_class", "") or "").strip().lower()
-    descriptor = " ".join(
-        str(getattr(provider, field, "") or "").strip().lower()
-        for field in ("provider_id", "kind", "vendor", "label")
-    )
-    return service_class == "official_api" and any(
-        marker in descriptor for marker in _OFFICIAL_PROVIDER_MARKERS
+    vendor = str(getattr(provider, "vendor", "") or "").strip().lower()
+    try:
+        endpoint_host = (
+            urlparse(str(getattr(provider, "base_url", "") or "").strip())
+            .hostname
+            or ""
+        ).strip().lower().rstrip(".")
+        validate_llm_provider_target(
+            provider,
+            context="formal_research_dialogue_provider",
+        )
+    except (TypeError, ValueError):
+        return False
+    return (
+        service_class == "official_api"
+        and vendor == "aliyun"
+        and endpoint_host == _OFFICIAL_DASHSCOPE_HOST
     )
 
 
@@ -150,13 +164,16 @@ def _dialogue_model_identity(agent: Mapping[str, Any], config: Any) -> tuple[str
         )
     model_library = getattr(runtime_config.llm, "model_library", {}) or {}
     entry = model_library.get(model_ref) if isinstance(model_library, Mapping) else None
+    if entry is not None and not isinstance(entry, Mapping):
+        raise CatalogRunAuthorizationError(
+            "a formal research Agent dialogue LLM binding has no effective upstream model"
+        )
     model_id = str(
         (entry or {}).get("upstream_id")
         or (entry or {}).get("model")
         or resolved.model
-        or model_ref.rsplit("/", 1)[-1]
     ).strip()
-    if "qwen" not in f"{model_ref} {model_id}".lower():
+    if not is_qwen_model_id(model_id):
         raise CatalogRunAuthorizationError(
             "formal research Agent dialogue LLM must use a Qwen model"
         )

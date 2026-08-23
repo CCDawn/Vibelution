@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ _ALLOWED_RECEIPT_STATUSES = {
 _MODEL_POLICY_FIELDS = frozenset(
     {"family", "providerIds", "modelIds", "requireOfficialProvider", "policySha256"}
 )
+_QWEN_MODEL_ID_RE = re.compile(r"(?:^|[/._:-])qwen(?:$|[0-9/._:-])", re.IGNORECASE)
 _SELECTION_FIELDS = frozenset(
     {
         "selected_hypothesis_id",
@@ -368,6 +370,13 @@ def _normalized_mechanism(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def is_qwen_model_id(value: Any) -> bool:
+    """Return whether an effective upstream model id identifies Qwen."""
+
+    normalized = str(value or "").strip()
+    return bool(normalized and _QWEN_MODEL_ID_RE.search(normalized))
+
+
 def _canonical_model_policy_body(payload: Any) -> dict[str, Any]:
     raw = _mapping(payload, "model_policy")
     allowed_without_hash = _MODEL_POLICY_FIELDS - {"policySha256"}
@@ -395,10 +404,15 @@ def _canonical_model_policy_body(payload: Any) -> dict[str, Any]:
         raise QuestionResultPackageError(
             "model_policy.requireOfficialProvider must be true"
         )
+    model_ids = identifiers("modelIds")
+    if any(not is_qwen_model_id(model_id) for model_id in model_ids):
+        raise QuestionResultPackageError(
+            "model_policy.modelIds must contain only Qwen upstream model ids"
+        )
     body = {
         "family": family,
         "providerIds": identifiers("providerIds"),
-        "modelIds": identifiers("modelIds"),
+        "modelIds": model_ids,
         "requireOfficialProvider": True,
     }
     return body
@@ -1557,5 +1571,6 @@ __all__ = [
     "QuestionResultPackageError",
     "canonical_model_policy",
     "compute_question_result_package_hash",
+    "is_qwen_model_id",
     "question_result_package_idempotency_key",
 ]
