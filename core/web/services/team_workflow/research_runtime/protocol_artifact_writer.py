@@ -71,7 +71,7 @@ def _snapshot_for_formal_task(
         _run, _attempt, snapshot = _authoritative_protocol_binding(team_id, task)
     except (QuestionResultPackageError, TypeError, ValueError, KeyError) as exc:
         raise ValueError(
-            "Formal protocol task Ledger authority is invalid."
+            "Formal protocol task Ledger authority binding is invalid."
         ) from exc
     if snapshot.teamId != str(team_id or "").strip():
         raise ValueError(
