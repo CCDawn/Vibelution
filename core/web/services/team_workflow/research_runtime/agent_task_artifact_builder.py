@@ -288,12 +288,19 @@ def _payload_for_kind(
     node_run: dict[str, Any],
     task: dict[str, Any],
     artifact_kind: str,
+    *,
+    protocol_artifact_payloads: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if node_spec.nodeId == "protocol_design" and artifact_kind in {
         "research_plan",
         "protocol_draft",
     }:
-        return _protocol_design_artifact_payloads(record, node_run, task)[artifact_kind]
+        payloads = (
+            protocol_artifact_payloads
+            if protocol_artifact_payloads is not None
+            else _protocol_design_artifact_payloads(record, node_run, task)
+        )
+        return payloads[artifact_kind]
 
     result = dict(task.get("result") or {})
     explicit_payloads = result.get("artifactPayloads")
@@ -353,6 +360,11 @@ def build_agent_task_artifacts(
     )
     manifests: list[ArtifactManifest] = []
     payloads: dict[str, dict[str, Any]] = {}
+    protocol_artifact_payloads = (
+        _protocol_design_artifact_payloads(record, node_run, task)
+        if node_spec.nodeId == "protocol_design"
+        else None
+    )
     for artifact_kind in node_spec.producesArtifactKinds:
         payload = _payload_for_kind(
             record,
@@ -360,6 +372,7 @@ def build_agent_task_artifacts(
             node_run,
             task,
             artifact_kind,
+            protocol_artifact_payloads=protocol_artifact_payloads,
         )
         content_hash = canonical_sha256(payload)
         artifact_id = f"{artifact_kind}:{content_hash[:16]}"

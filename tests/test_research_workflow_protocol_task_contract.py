@@ -925,9 +925,15 @@ def test_protocol_design_manifests_hash_canonical_envelopes_and_ignore_task_payl
     monkeypatch,
 ) -> None:
     record, node_spec, node_run, task, envelopes = _protocol_builder_fixture()
+    readback_kinds: list[str] = []
+
+    def readback(kind: str, **_kwargs):
+        readback_kinds.append(kind)
+        return envelopes.get(kind)
+
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.agent_task_artifact_builder.load_scoped_artifact_payload",
-        lambda kind, **_kwargs: envelopes.get(kind),
+        readback,
     )
 
     manifests, payloads = build_agent_task_artifacts(
@@ -942,6 +948,7 @@ def test_protocol_design_manifests_hash_canonical_envelopes_and_ignore_task_payl
         "research_plan",
         "protocol_draft",
     ]
+    assert readback_kinds == ["research_plan", "protocol_draft"]
     for kind, envelope in envelopes.items():
         manifest = next(
             item for item in manifests if item.artifactId.startswith(f"{kind}:")
