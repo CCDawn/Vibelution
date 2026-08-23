@@ -64,6 +64,16 @@ class _Harness:
             "get_challenge_cup_dev_control_snapshot",
             lambda team_id: {"nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED"},
         )
+        monkeypatch.setattr(
+            svc,
+            "_current_catalog_run_authorization",
+            lambda team_id, plan_id, **_kwargs: {
+                "authorizationId": f"auth-{plan_id}",
+                "scopeHash": "a" * 64,
+                "readinessReportSha256": "b" * 64,
+                "recordHash": "c" * 64,
+            },
+        )
 
     def launcher(self, team_id: str, question_id: str, idempotency_key: str) -> dict:
         if question_id in self.launch_failures:

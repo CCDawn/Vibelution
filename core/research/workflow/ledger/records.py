@@ -103,3 +103,19 @@ class OutboxRecord:
     last_problem_json: str | None
     created_at_ms: int
     updated_at_ms: int
+
+
+@dataclass(frozen=True)
+class CatalogRunAuthorization:
+    """Immutable approval evidence for one real catalog batch scope."""
+
+    authorization_id: str
+    team_id: str
+    plan_id: str
+    batch_scope_json: str
+    scope_hash: str
+    approved_by: str
+    approved_at_ms: int
+    readiness_report_sha256: str
+    record_hash: str
+    created_at_ms: int

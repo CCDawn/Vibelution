@@ -8,18 +8,18 @@ breaker counters). The pure planning contracts live in
 dispatch, run status reads and approved-output reads are injectable callables
 so tests never touch the formal runtime.
 
-Authorization is fail-closed: the persisted DEV control snapshot must have
-reached ``RESEARCH_AUTHORIZATION_REQUIRED``, the operator must confirm, and
-each progressive gate (G5/G12/G125) requires the previous gate's batch to be
-fully succeeded before it may start.
+Authorization is fail-closed: explicit confirmation remains a user action, but
+the authorization fact is an immutable ``CatalogRunAuthorization`` bound to the
+current readiness report and exact batch scope.
 """
 
 from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,16 @@ from core.web.services.team_workflow.challenge_cup_dev_controls import (
     get_challenge_cup_dev_control_snapshot,
 )
 from core.web.services.team_workflow.research_projects import team_workspace_root
+from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    CatalogRunAuthorizationError,
+    authorization_to_dict,
+    expected_batch_scope,
+    find_catalog_run_authorization,
+    readiness_report_sha256_from_snapshot,
+)
+from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    record_catalog_run_authorization as _record_catalog_run_authorization,
+)
 
 CONTROLS_DIRNAME = "challenge_cup_real_batch"
 BATCHES_DIRNAME = "batches"
@@ -119,6 +129,8 @@ def _default_question_run_launcher(
     team_id: str,
     question_id: str,
     idempotency_key: str,
+    *,
+    catalog_run_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one real question workflow run (ledger only; no dispatch here)."""
     from core.web.services.team_workflow.research_runtime.run_creation import (
@@ -131,6 +143,7 @@ def _default_question_run_launcher(
         question_id=question_id,
         safety_limits=_default_safety_limits(),
         idempotency_key=idempotency_key,
+        catalog_run_authorization=catalog_run_authorization,
     )
 
 
@@ -290,7 +303,14 @@ def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int
     return seeded
 
 
-def _new_envelope(team_id: str, plan_id: str, *, concurrency: int, failure_budget: int) -> dict[str, Any]:
+def _new_envelope(
+    team_id: str,
+    plan_id: str,
+    *,
+    concurrency: int,
+    failure_budget: int,
+    catalog_run_authorization: Mapping[str, Any],
+) -> dict[str, Any]:
     state = new_real_batch_state(plan_id)
     _seed_from_previous_gates(team_id, state)
     return {
@@ -306,6 +326,7 @@ def _new_envelope(team_id: str, plan_id: str, *, concurrency: int, failure_budge
         "failureBudget": failure_budget,
         "consecutiveFailures": 0,
         "cancelled": False,
+        "catalogRunAuthorization": dict(catalog_run_authorization),
         "createdAt": _utc_now(),
         "updatedAt": _utc_now(),
     }
@@ -349,7 +370,7 @@ def _state_of(envelope: dict[str, Any]) -> CatalogExecutionState:
         ) from exc
 
 
-def _require_authorization(team_id: str) -> None:
+def _require_platform_authorization_boundary(team_id: str) -> dict[str, Any]:
     try:
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
     except Exception as exc:
@@ -357,11 +378,84 @@ def _require_authorization(team_id: str) -> None:
             "The DEV control snapshot is unavailable; real batches stay closed.",
             code="platform_not_authorized",
         ) from exc
-    if str(snapshot.get("nextLegalAction") or "") != "RESEARCH_AUTHORIZATION_REQUIRED":
+    if (
+        not isinstance(snapshot, Mapping)
+        or str(snapshot.get("nextLegalAction") or "")
+        != "RESEARCH_AUTHORIZATION_REQUIRED"
+    ):
         raise ChallengeCupRealBatchError(
             "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED; real batches stay closed.",
             code="platform_not_authorized",
         )
+    snapshot_team_id = str(snapshot.get("teamId") or "").strip()
+    if snapshot_team_id and snapshot_team_id != team_id:
+        raise ChallengeCupRealBatchError(
+            "The DEV control snapshot belongs to a different team; real batches stay closed.",
+            code="platform_not_authorized",
+        )
+    return dict(snapshot)
+
+
+def _readiness_hash_from_snapshot(snapshot: Mapping[str, Any]) -> str:
+    return readiness_report_sha256_from_snapshot(snapshot)
+
+
+def _current_catalog_run_authorization(
+    team_id: str,
+    plan_id: str,
+    *,
+    snapshot: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return only the exact current approval needed to dispatch a real run."""
+
+    try:
+        boundary = dict(snapshot) if snapshot is not None else _require_platform_authorization_boundary(team_id)
+        scope = expected_batch_scope(plan_id)
+        report_hash = _readiness_hash_from_snapshot(boundary)
+        record = find_catalog_run_authorization(
+            team_id,
+            plan_id=plan_id,
+            batch_scope=scope,
+            readiness_report_sha256_value=report_hash,
+        )
+        if record is None:
+            raise CatalogRunAuthorizationError("no matching authorization record")
+        return authorization_to_dict(record)
+    except ChallengeCupRealBatchError:
+        raise
+    except Exception as exc:
+        raise ChallengeCupRealBatchError(
+            "A durable CatalogRunAuthorization record is required before dispatch.",
+            code="catalog_run_authorization_required",
+        ) from exc
+
+
+def record_catalog_run_authorization(
+    team_id: str,
+    *,
+    plan_id: str,
+    approved_by: str,
+) -> dict[str, Any]:
+    """Record a server-principal approval for the exact current plan/report."""
+
+    normalized_team = _resolve_team_id(team_id)
+    normalized_plan = validate_real_batch_plan(plan_id)
+    try:
+        snapshot = _require_platform_authorization_boundary(normalized_team)
+        record = _record_catalog_run_authorization(
+            normalized_team,
+            plan_id=normalized_plan,
+            batch_scope=expected_batch_scope(normalized_plan),
+            approved_by=approved_by,
+            readiness_report_sha256_value=_readiness_hash_from_snapshot(snapshot),
+        )
+        return authorization_to_dict(record)
+    except ChallengeCupRealBatchError:
+        raise
+    except CatalogRunAuthorizationError as exc:
+        raise ChallengeCupRealBatchError(
+            str(exc), code="catalog_run_authorization_invalid"
+        ) from exc
 
 
 def _gate_complete(team_id: str, gate_id: str) -> bool:
@@ -411,6 +505,7 @@ def _launch_pending(
     max_items: int | None,
     launcher: QuestionRunLauncher,
     start_dispatcher: StartDispatcher | None,
+    catalog_run_authorization: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     """Launch pending questions up to the concurrency budget.
 
@@ -464,6 +559,7 @@ def _launch_pending(
             "startAttempts": 0,
             "nodeId": str(run.get("activeNodeId") or ""),
             "runVersion": int(run.get("runVersion") or 1),
+            "catalogRunAuthorization": dict(catalog_run_authorization),
             "launchedAt": _utc_now(),
         }
         run_refs[question_id] = entry
@@ -518,6 +614,29 @@ def _dispatch_start(
             envelope["runRefs"].pop(question_id, None)
 
 
+def _authorization_identity(value: Any) -> tuple[str, str, str, str] | None:
+    if not isinstance(value, Mapping):
+        return None
+    identity = tuple(
+        str(value.get(key) or "").strip()
+        for key in (
+            "authorizationId",
+            "scopeHash",
+            "readinessReportSha256",
+            "recordHash",
+        )
+    )
+    return identity if all(identity) else None
+
+
+def _entry_matches_authorization(
+    entry: Mapping[str, Any], authorization: Mapping[str, Any]
+) -> bool:
+    entry_identity = _authorization_identity(entry.get("catalogRunAuthorization"))
+    authorization_identity = _authorization_identity(authorization)
+    return entry_identity is not None and entry_identity == authorization_identity
+
+
 def start_real_batch(
     team_id: str,
     *,
@@ -537,9 +656,14 @@ def start_real_batch(
             "Real batch start requires explicit operator confirmation.",
             code="confirmation_required",
         )
-    _require_authorization(normalized_team)
+    readiness_snapshot = _require_platform_authorization_boundary(normalized_team)
     plan = real_plan(normalized_plan)
     _require_gate_progression(normalized_team, plan.gate_id)
+    catalog_run_authorization = _current_catalog_run_authorization(
+        normalized_team,
+        normalized_plan,
+        snapshot=readiness_snapshot,
+    )
     above_default_allowed = (
         plan.gate_id == "G125"
         and _gate_complete(normalized_team, "G12")
@@ -566,6 +690,7 @@ def start_real_batch(
                 normalized_plan,
                 concurrency=resolved_concurrency,
                 failure_budget=resolved_budget,
+                catalog_run_authorization=catalog_run_authorization,
             )
             _save_envelope(normalized_team, envelope)
         if envelope.get("cancelled"):
@@ -575,14 +700,20 @@ def start_real_batch(
             )
         envelope["concurrency"] = resolved_concurrency
         envelope["failureBudget"] = resolved_budget
+        envelope["catalogRunAuthorization"] = dict(catalog_run_authorization)
         state = _state_of(envelope)
+        resolved_launcher = launcher or partial(
+            _default_question_run_launcher,
+            catalog_run_authorization=catalog_run_authorization,
+        )
         launched = _launch_pending(
             normalized_team,
             envelope,
             state,
             max_items=max_items,
-            launcher=launcher or _default_question_run_launcher,
+            launcher=resolved_launcher,
             start_dispatcher=start_dispatcher or _default_start_dispatcher,
+            catalog_run_authorization=catalog_run_authorization,
         )
         envelope["checkpoint"] = state.to_checkpoint()
         _save_envelope(normalized_team, envelope)
@@ -612,7 +743,6 @@ def poll_real_batch(
     normalized_plan = validate_real_batch_plan(plan_id)
     reader = run_status_reader or _default_run_status_reader
     approved_reader = approved_output_reader or _default_approved_output_reader
-    resolved_launcher = launcher or _default_question_run_launcher
     resolved_dispatcher = start_dispatcher or _default_start_dispatcher
     with _store_lock:
         envelope = _load_envelope(normalized_team, normalized_plan)
@@ -624,6 +754,7 @@ def poll_real_batch(
         state = _state_of(envelope)
         runs = reader(normalized_team)
         harvested: list[dict[str, Any]] = []
+        unstarted_entries: list[tuple[str, dict[str, Any]]] = []
         for question_id in state.plan.question_ids:
             if state.status(question_id) is not QuestionStatus.RUNNING:
                 continue
@@ -638,6 +769,13 @@ def poll_real_batch(
             status = str(run.get("status") or "").strip()
             if status in ("succeeded", "failed", "cancelled"):
                 envelope["runRefs"].pop(question_id, None)
+                if _authorization_identity(entry.get("catalogRunAuthorization")) is None:
+                    state.record_failure(question_id, "catalog_run_authorization_missing")
+                    envelope["consecutiveFailures"] = int(envelope["consecutiveFailures"]) + 1
+                    harvested.append(
+                        {"questionId": question_id, "outcome": "catalog_run_authorization_missing"}
+                    )
+                    continue
                 if status == "succeeded":
                     approved = approved_reader(normalized_team, question_id)
                     if approved is None:
@@ -647,6 +785,9 @@ def poll_real_batch(
                         )
                         envelope["awaitingApproval"][question_id] = {
                             "runId": str(entry["runId"]),
+                            "catalogRunAuthorization": dict(
+                                entry["catalogRunAuthorization"]
+                            ),
                             "since": _utc_now(),
                         }
                         harvested.append(
@@ -664,13 +805,16 @@ def poll_real_batch(
                     envelope["consecutiveFailures"] = int(envelope["consecutiveFailures"]) + 1
                     harvested.append({"questionId": question_id, "outcome": f"run_{status}"})
             elif not entry.get("started"):
-                _dispatch_start(
-                    normalized_team, envelope, state, question_id, entry, resolved_dispatcher
-                )
+                unstarted_entries.append((question_id, entry))
         for question_id in list(envelope["awaitingApproval"]):
             if state.status(question_id) is QuestionStatus.BLOCKED:
                 approved = approved_reader(normalized_team, question_id)
                 if approved is not None:
+                    awaiting = envelope["awaitingApproval"].get(question_id)
+                    if not isinstance(awaiting, Mapping) or _authorization_identity(
+                        awaiting.get("catalogRunAuthorization")
+                    ) is None:
+                        continue
                     state.record_success(
                         question_id,
                         _question_result_from_approved(state, question_id, approved),
@@ -680,14 +824,56 @@ def poll_real_batch(
                     harvested.append({"questionId": question_id, "outcome": "approved"})
         envelope["checkpoint"] = state.to_checkpoint()
         _save_envelope(normalized_team, envelope)
-        refill = _launch_pending(
-            normalized_team,
-            envelope,
-            state,
-            max_items=None,
-            launcher=resolved_launcher,
-            start_dispatcher=resolved_dispatcher,
+        needs_refill = any(
+            state.status(question_id) is QuestionStatus.PENDING
+            for question_id in state.plan.question_ids
         )
+        current_authorization: dict[str, Any] | None = None
+        if unstarted_entries or needs_refill:
+            try:
+                current_authorization = _current_catalog_run_authorization(
+                    normalized_team,
+                    normalized_plan,
+                )
+            except ChallengeCupRealBatchError:
+                # Harvested state is durable, but no dispatch/refill may happen
+                # without a current, matching approval.
+                envelope["checkpoint"] = state.to_checkpoint()
+                _save_envelope(normalized_team, envelope)
+                raise
+            envelope["catalogRunAuthorization"] = dict(current_authorization)
+            for question_id, entry in unstarted_entries:
+                if not _entry_matches_authorization(entry, current_authorization):
+                    state.record_failure(question_id, "catalog_run_authorization_stale")
+                    envelope["consecutiveFailures"] = int(envelope["consecutiveFailures"]) + 1
+                    envelope["runRefs"].pop(question_id, None)
+                    harvested.append(
+                        {"questionId": question_id, "outcome": "catalog_run_authorization_stale"}
+                    )
+                    continue
+                _dispatch_start(
+                    normalized_team,
+                    envelope,
+                    state,
+                    question_id,
+                    entry,
+                    resolved_dispatcher,
+                )
+        refill: list[dict[str, Any]] = []
+        if current_authorization is not None:
+            resolved_launcher = launcher or partial(
+                _default_question_run_launcher,
+                catalog_run_authorization=current_authorization,
+            )
+            refill = _launch_pending(
+                normalized_team,
+                envelope,
+                state,
+                max_items=None,
+                launcher=resolved_launcher,
+                start_dispatcher=resolved_dispatcher,
+                catalog_run_authorization=current_authorization,
+            )
         envelope["checkpoint"] = state.to_checkpoint()
         _save_envelope(normalized_team, envelope)
         projection = project_real_batch_state(

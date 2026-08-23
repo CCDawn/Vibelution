@@ -193,20 +193,40 @@ def _is_campaign_active(team_id: str, record: Mapping[str, Any]) -> bool:
 
 
 def _dev_authorization_ready(team_id: str) -> bool:
-    """DEV fixtures must be complete so the next legal action is authorization.
-
-    A DEV fixture result never counts as formal approval; reaching this marker
-    only unlocks the ability to activate the real campaign.
-    """
+    """Require the current real-G1 approval, not merely a readiness marker."""
     try:
         from core.web.services.team_workflow.challenge_cup_dev_controls import (
             get_challenge_cup_dev_control_snapshot,
         )
 
+        from .catalog_run_authorization import (
+            expected_batch_scope,
+            find_catalog_run_authorization,
+            readiness_report_sha256_from_snapshot,
+        )
+
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
-    except Exception:
+    except Exception:  # noqa: BLE001 - authorization reads must fail closed
         return False
-    return _text(snapshot.get("nextLegalAction")) == "RESEARCH_AUTHORIZATION_REQUIRED"
+    if not isinstance(snapshot, Mapping):
+        return False
+    if _text(snapshot.get("nextLegalAction")) != "RESEARCH_AUTHORIZATION_REQUIRED":
+        return False
+    try:
+        requested_team_id = _text(team_id)
+        snapshot_team_id = _text(snapshot.get("teamId"))
+        if not requested_team_id or (snapshot_team_id and snapshot_team_id != requested_team_id):
+            return False
+        report_hash = readiness_report_sha256_from_snapshot(snapshot)
+        authorization = find_catalog_run_authorization(
+            requested_team_id,
+            plan_id="real-1",
+            batch_scope=expected_batch_scope("real-1"),
+            readiness_report_sha256_value=report_hash,
+        )
+    except Exception:  # noqa: BLE001 - malformed evidence must fail closed
+        return False
+    return authorization is not None
 
 
 def list_experiment_launch_options(team_id: str) -> dict[str, Any]:

@@ -12,6 +12,7 @@ from dataclasses import replace
 from typing import Any
 
 from .records import (
+    CatalogRunAuthorization,
     CommandRecord,
     EventRecord,
     NodeAttemptRecord,
@@ -64,6 +65,23 @@ def _row_event(row: Any) -> EventRecord | None:
         causation_id=row[7],
         payload_json=str(row[8]),
         occurred_at_ms=int(row[9]),
+    )
+
+
+def _row_catalog_run_authorization(row: Any) -> CatalogRunAuthorization | None:
+    if row is None:
+        return None
+    return CatalogRunAuthorization(
+        authorization_id=str(row[0]),
+        team_id=str(row[1]),
+        plan_id=str(row[2]),
+        batch_scope_json=str(row[3]),
+        scope_hash=str(row[4]),
+        approved_by=str(row[5]),
+        approved_at_ms=int(row[6]),
+        readiness_report_sha256=str(row[7]),
+        record_hash=str(row[8]),
+        created_at_ms=int(row[9]),
     )
 
 
@@ -236,6 +254,108 @@ class WorkflowLedgerRepository:
             (team_id, workflow_id),
         ).fetchall()
         return [record for row in rows if (record := _row_run(row)) is not None]
+
+    # --------------------------------------------- catalog authorization
+
+    def insert_catalog_run_authorization(
+        self, authorization: CatalogRunAuthorization
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO catalog_run_authorizations (
+              authorization_id, team_id, plan_id, batch_scope_json, scope_hash,
+              approved_by, approved_at_ms, readiness_report_sha256, record_hash,
+              created_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (team_id, plan_id, scope_hash, readiness_report_sha256)
+            DO NOTHING
+            """,
+            (
+                authorization.authorization_id,
+                authorization.team_id,
+                authorization.plan_id,
+                authorization.batch_scope_json,
+                authorization.scope_hash,
+                authorization.approved_by,
+                authorization.approved_at_ms,
+                authorization.readiness_report_sha256,
+                authorization.record_hash,
+                authorization.created_at_ms,
+            ),
+        )
+
+    def get_catalog_run_authorization(
+        self, authorization_id: str
+    ) -> CatalogRunAuthorization | None:
+        row = self.execute(
+            """
+            SELECT authorization_id, team_id, plan_id, batch_scope_json, scope_hash,
+                   approved_by, approved_at_ms, readiness_report_sha256, record_hash,
+                   created_at_ms
+            FROM catalog_run_authorizations
+            WHERE authorization_id = ?
+            """,
+            (authorization_id,),
+        ).fetchone()
+        return _row_catalog_run_authorization(row)
+
+    def find_catalog_run_authorization(
+        self,
+        *,
+        team_id: str,
+        plan_id: str,
+        scope_hash: str,
+        readiness_report_sha256: str,
+    ) -> CatalogRunAuthorization | None:
+        row = self.execute(
+            """
+            SELECT authorization_id, team_id, plan_id, batch_scope_json, scope_hash,
+                   approved_by, approved_at_ms, readiness_report_sha256, record_hash,
+                   created_at_ms
+            FROM catalog_run_authorizations
+            WHERE team_id = ?
+              AND plan_id = ?
+              AND scope_hash = ?
+              AND readiness_report_sha256 = ?
+            ORDER BY approved_at_ms DESC, authorization_id DESC
+            LIMIT 1
+            """,
+            (team_id, plan_id, scope_hash, readiness_report_sha256),
+        ).fetchone()
+        return _row_catalog_run_authorization(row)
+
+    def list_catalog_run_authorizations(
+        self, team_id: str, plan_id: str | None = None
+    ) -> list[CatalogRunAuthorization]:
+        if plan_id is None:
+            rows = self.execute(
+                """
+                SELECT authorization_id, team_id, plan_id, batch_scope_json, scope_hash,
+                       approved_by, approved_at_ms, readiness_report_sha256, record_hash,
+                       created_at_ms
+                FROM catalog_run_authorizations
+                WHERE team_id = ?
+                ORDER BY approved_at_ms DESC, authorization_id DESC
+                """,
+                (team_id,),
+            ).fetchall()
+        else:
+            rows = self.execute(
+                """
+                SELECT authorization_id, team_id, plan_id, batch_scope_json, scope_hash,
+                       approved_by, approved_at_ms, readiness_report_sha256, record_hash,
+                       created_at_ms
+                FROM catalog_run_authorizations
+                WHERE team_id = ? AND plan_id = ?
+                ORDER BY approved_at_ms DESC, authorization_id DESC
+                """,
+                (team_id, plan_id),
+            ).fetchall()
+        return [
+            record
+            for row in rows
+            if (record := _row_catalog_run_authorization(row)) is not None
+        ]
 
     def update_run_safety_limits(
         self, run_id: str, team_id: str, safety_limits_json: str, now_ms: int

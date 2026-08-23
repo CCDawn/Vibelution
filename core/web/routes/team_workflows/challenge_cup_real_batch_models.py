@@ -7,6 +7,8 @@ never exposes the internal checkpoint or raw run ledger rows.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from core.research.competition.real_control_batch import (
@@ -19,6 +21,25 @@ class ChallengeCupRealBatchStartRequest(BaseModel):
     concurrency: int | None = None
     maxItems: int | None = None
     failureBudget: int | None = None
+
+
+class ChallengeCupRealBatchAuthorizationRequest(BaseModel):
+    """The server derives identity, readiness evidence, and batch scope."""
+
+    model_config = {"extra": "forbid"}
+
+
+class ChallengeCupRealBatchAuthorizationResponse(BaseModel):
+    authorizationId: str = ""
+    teamId: str = ""
+    planId: str = ""
+    batchScope: dict[str, Any] = Field(default_factory=dict)
+    scopeHash: str = ""
+    approvedBy: str = ""
+    approvedAtMs: int = 0
+    readinessReportSha256: str = ""
+    recordHash: str = ""
+    createdAtMs: int = 0
 
 
 class ChallengeCupRealBatchCancelRequest(BaseModel):

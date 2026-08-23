@@ -84,6 +84,7 @@ def create_question_run(
     question_id: str,
     safety_limits: Mapping[str, Any],
     idempotency_key: str,
+    catalog_run_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
@@ -96,7 +97,12 @@ def create_question_run(
         )
     except QuestionLaunchError as exc:
         raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-    created = create_run(workflow_id, run_input=run_input, idempotency_key=idempotency_key)
+    created = create_run(
+        workflow_id,
+        run_input=run_input,
+        idempotency_key=idempotency_key,
+        catalog_run_authorization=catalog_run_authorization,
+    )
     generation = _auto_open_candidate_generation(run_input)
     if generation is not None:
         created = {**created, "candidateGeneration": generation}
@@ -133,12 +139,148 @@ def _ensure_create_fingerprint(run: Any, fingerprints: tuple[str, ...]) -> None:
         )
 
 
+def _ensure_existing_run_identity(run: Any, run_input: Mapping[str, Any]) -> None:
+    expected_team_id = str(run_input.get("teamId") or "").strip()
+    expected_question_id = str(run_input.get("questionId") or "").strip().upper()
+    if (
+        str(run.team_id or "").strip() != expected_team_id
+        or str(run.question_id or "").strip().upper() != expected_question_id
+    ):
+        raise ResearchWorkflowError(
+            "idempotencyKey was already used with different run input",
+            code="idempotency_conflict",
+        )
+
+
+def _catalog_authorization_payload_for_run(
+    store: Any,
+    *,
+    run_input: Mapping[str, Any],
+    supplied: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Load the immutable approval row; never trust a caller's copy of it."""
+
+    if supplied is None:
+        return None
+    if not isinstance(supplied, Mapping):
+        raise ResearchWorkflowError(
+            "catalog run authorization is invalid",
+            code="catalog_run_authorization_invalid",
+        )
+    from .catalog_run_authorization import (
+        authorization_to_dict,
+        validate_catalog_run_authorization,
+    )
+
+    authorization_id = str(supplied.get("authorizationId") or "").strip()
+    record = store.get_catalog_run_authorization(authorization_id)
+    expected_team_id = str(run_input.get("teamId") or "").strip()
+    expected_question_id = str(run_input.get("questionId") or "").strip().upper()
+    expected_plan_id = str(supplied.get("planId") or "").strip()
+    if (
+        record is None
+        or not validate_catalog_run_authorization(
+            record,
+            team_id=expected_team_id,
+            plan_id=expected_plan_id,
+            scope_hash=str(supplied.get("scopeHash") or ""),
+            readiness_sha256=str(supplied.get("readinessReportSha256") or ""),
+        )
+    ):
+        raise ResearchWorkflowError(
+            "catalog run authorization is missing or invalid",
+            code="catalog_run_authorization_invalid",
+        )
+    try:
+        expected_payload = authorization_to_dict(record)
+    except Exception as exc:  # immutable record is corrupt; do not dispatch a real run
+        raise ResearchWorkflowError(
+            "catalog run authorization is invalid",
+            code="catalog_run_authorization_invalid",
+        ) from exc
+    if dict(supplied) != expected_payload:
+        raise ResearchWorkflowError(
+            "catalog run authorization does not match the stored approval",
+            code="catalog_run_authorization_invalid",
+        )
+    scope = expected_payload["batchScope"]
+    question_ids = scope.get("questionIds") if isinstance(scope, Mapping) else None
+    if not isinstance(question_ids, list) or expected_question_id not in question_ids:
+        raise ResearchWorkflowError(
+            "catalog run question is outside the approved batch scope",
+            code="catalog_run_authorization_invalid",
+        )
+    return expected_payload
+
+
+def _existing_catalog_authorization_payload(repository: Any, run_id: str) -> dict[str, Any] | None:
+    events = [
+        event
+        for event in repository.list_events(run_id, after_sequence=0, limit=500)
+        if event.event_type == "catalog_run_authorized"
+    ]
+    if not events:
+        return None
+    if len(events) != 1:
+        raise ResearchWorkflowError(
+            "existing run has ambiguous catalog authorization evidence",
+            code="catalog_run_authorization_replay_mismatch",
+        )
+    event = events[0]
+    if (
+        event.event_id != f"evt-catalog-run-authorized-{run_id}"
+        or event.sequence != 2
+        or event.causation_id != f"evt-created-{run_id}"
+    ):
+        raise ResearchWorkflowError(
+            "existing run has invalid catalog authorization evidence",
+            code="catalog_run_authorization_replay_mismatch",
+        )
+    try:
+        payload = json.loads(event.payload_json)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ResearchWorkflowError(
+            "existing run has invalid catalog authorization evidence",
+            code="catalog_run_authorization_replay_mismatch",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ResearchWorkflowError(
+            "existing run has invalid catalog authorization evidence",
+            code="catalog_run_authorization_replay_mismatch",
+        )
+    return payload
+
+
+def _ensure_existing_catalog_authorization(
+    repository: Any,
+    *,
+    run_id: str,
+    supplied_payload: Mapping[str, Any] | None,
+) -> None:
+    """Keep replay identity closed; legacy runs cannot be approved after creation."""
+
+    existing_payload = _existing_catalog_authorization_payload(repository, run_id)
+    if existing_payload is None and supplied_payload is None:
+        return
+    if existing_payload is None or supplied_payload is None:
+        raise ResearchWorkflowError(
+            "catalog authorization replay does not match the existing run",
+            code="catalog_run_authorization_replay_mismatch",
+        )
+    if existing_payload != dict(supplied_payload):
+        raise ResearchWorkflowError(
+            "catalog authorization replay does not match the existing run",
+            code="catalog_run_authorization_replay_mismatch",
+        )
+
+
 def create_run(
     workflow_id: str,
     *,
     run_input: Mapping[str, Any],
     idempotency_key: str,
     binding_layers: AgentBindingLayers | None = None,
+    catalog_run_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     store = get_write_store()
     definition = build_challenge_cup_workflow_definition()
@@ -146,9 +288,22 @@ def create_run(
     fingerprints = _create_request_fingerprints(run_input)
     fingerprint = fingerprints[0]
     run_id = run_id_for_create(workflow_id, idempotency_key)
+    authorization_payload = _catalog_authorization_payload_for_run(
+        store,
+        run_input=run_input,
+        supplied=catalog_run_authorization,
+    )
     existing = store.get_run(run_id)
     if existing is not None:
         _ensure_create_fingerprint(existing, fingerprints)
+        _ensure_existing_run_identity(existing, run_input)
+        store.read(
+            lambda repository: _ensure_existing_catalog_authorization(
+                repository,
+                run_id=run_id,
+                supplied_payload=authorization_payload,
+            )
+        )
         return catalog_dict_from_run(existing)
 
     team_id = str(run_input.get("teamId") or "").strip()
@@ -202,7 +357,7 @@ def create_run(
         question_id=input_snapshot.questionId,
         status="created",
         run_version=1,
-        last_event_sequence=1,
+        last_event_sequence=2 if authorization_payload is not None else 1,
         input_snapshot_json=json.dumps(snapshot_dict, ensure_ascii=False),
         input_snapshot_hash=input_snapshot.snapshotHash,
         safety_limits_json=json.dumps(dict(run_input.get("safetyLimits") or {}), ensure_ascii=False),
@@ -229,20 +384,56 @@ def create_run(
         payload_json=json.dumps({"inputSnapshotHash": input_snapshot.snapshotHash}),
         occurred_at_ms=now_ms,
     )
+    authorization_event = (
+        EventRecord(
+            run_id=run_id,
+            sequence=2,
+            event_id=f"evt-catalog-run-authorized-{run_id}",
+            run_version=1,
+            event_type="catalog_run_authorized",
+            actor_json=json.dumps(
+                {"actorType": "system", "actorId": "catalog-run-authorization"}
+            ),
+            correlation_id=idempotency_key or run_id,
+            causation_id=event.event_id,
+            payload_json=json.dumps(authorization_payload, ensure_ascii=False, sort_keys=True),
+            occurred_at_ms=now_ms,
+        )
+        if authorization_payload is not None
+        else None
+    )
 
     def mutate(uow) -> None:
         # Concurrent create with the same key: the single writer serializes
         # mutations, so the later request sees the winner's row here and
         # replays idempotently instead of hitting the run_id primary key.
-        if uow.repository.get_run(run_id) is not None:
+        existing_in_transaction = uow.repository.get_run(run_id)
+        if existing_in_transaction is not None:
+            _ensure_create_fingerprint(existing_in_transaction, fingerprints)
+            _ensure_existing_run_identity(existing_in_transaction, run_input)
+            _ensure_existing_catalog_authorization(
+                uow.repository,
+                run_id=run_id,
+                supplied_payload=authorization_payload,
+            )
             return
         uow.repository.insert_run(record)
         uow.repository.insert_event(event)
+        if authorization_event is not None:
+            uow.repository.insert_event(authorization_event)
 
     store.submit(mutate, force_flush=True).result(timeout=15)
     created = store.get_run(run_id)
     if created is not None:
         _ensure_create_fingerprint(created, fingerprints)
+        _ensure_existing_run_identity(created, run_input)
+        store.read(
+            lambda repository: _ensure_existing_catalog_authorization(
+                repository,
+                run_id=run_id,
+                supplied_payload=authorization_payload,
+            )
+        )
     if created is None:
         raise ResearchWorkflowError("created run was not readable", code="workflow_ledger_unavailable")
     return catalog_dict_from_run(created)

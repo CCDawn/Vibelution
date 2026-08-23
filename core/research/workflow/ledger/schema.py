@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -418,6 +418,33 @@ MIGRATIONS: tuple[Migration, ...] = (
                 "ALTER TABLE execution_anchors "
                 "ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
             ),
+        ),
+    ),
+    Migration(
+        version=5,
+        statements=(
+            """
+            CREATE TABLE catalog_run_authorizations (
+              authorization_id TEXT PRIMARY KEY,
+              team_id TEXT NOT NULL,
+              plan_id TEXT NOT NULL,
+              batch_scope_json TEXT NOT NULL CHECK (json_valid(batch_scope_json)),
+              scope_hash TEXT NOT NULL,
+              approved_by TEXT NOT NULL,
+              approved_at_ms INTEGER NOT NULL CHECK (approved_at_ms > 0),
+              readiness_report_sha256 TEXT NOT NULL,
+              record_hash TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL CHECK (created_at_ms > 0),
+              UNIQUE (team_id, plan_id, scope_hash, readiness_report_sha256)
+            )
+            """,
+            """
+            CREATE INDEX idx_catalog_run_authorizations_lookup
+            ON catalog_run_authorizations(
+              team_id, plan_id, scope_hash, readiness_report_sha256,
+              approved_at_ms DESC, authorization_id
+            )
+            """,
         ),
     ),
 )
