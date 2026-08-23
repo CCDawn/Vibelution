@@ -27,6 +27,7 @@ import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
+import { buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import {
@@ -190,7 +191,9 @@ export function ResearchProcessWorkspace({
   }, [experimentOptions, location, teamId]);
 
 
-  const formalRuntimeActive = Boolean(hypothesisFirstChain.chainState?.hypothesisConverged);
+  const formalRuntimeActive = Boolean(
+    runState.snapshot?.run.runId === location.runId && location.runId
+  ) || Boolean(hypothesisFirstChain.chainState?.hypothesisConverged);
   const formalRuntimeCurrentNodeIds = formalRuntimeActive
     ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)
     : EMPTY_RUNTIME_NODE_IDS;
@@ -258,6 +261,59 @@ export function ResearchProcessWorkspace({
     || catalog.error
     || hypothesisFirstChain.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
+  const workspaceModel = useMemo(() => buildResearchWorkflowWorkspaceModel({
+    scope: {
+      teamId,
+      workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+      questionId: chainQuestionId || null,
+      runId: location.runId || null,
+      runVersion: runState.snapshot?.run.runVersion ?? runState.run?.runVersion ?? null,
+    },
+    snapshot: runState.snapshot,
+    commandOffers: runState.commandOffers,
+    legacyNextAction: safeNextAction,
+    selectedNodeId: location.selectedNodeId,
+    panel: location.panel,
+    loading: !hypothesisFirstReady || (!runState.projection && !displayError),
+    error: displayError,
+    resyncRequired: runState.resyncRequired,
+  }), [
+    chainQuestionId,
+    displayError,
+    hypothesisFirstReady,
+    location.panel,
+    location.runId,
+    location.selectedNodeId,
+    runState.commandOffers,
+    runState.projection,
+    runState.run?.runVersion,
+    runState.resyncRequired,
+    runState.snapshot,
+    safeNextAction,
+    teamId,
+  ]);
+  const workspaceNextAction = workspaceModel.source === "formal_runtime"
+    ? undefined
+    : workspaceModel.legacyNextAction || safeNextAction;
+  const formalWritesPaused = workspaceModel.source === "formal_runtime" && (
+    workspaceModel.resyncRequired
+    || workspaceModel.loadState === "loading"
+    || workspaceModel.loadState === "error"
+    || !workspaceModel.currentTask
+  );
+  const workspaceNavigationAction = workspaceModel.source === "formal_runtime"
+    ? {
+        stage: "converged" as const,
+        targetNodeId: !formalWritesPaused && workspaceModel.currentTask?.source === "formal_runtime"
+          ? workspaceModel.currentTask.nodeId
+          : null,
+        navigationLabel: workspaceModel.currentTask?.source === "formal_runtime"
+          ? workspaceModel.currentTask.label
+          : "正在读取正式任务",
+        statusMessage: undefined,
+        recovery: null,
+      }
+    : safeNextAction;
   const workflowContext = useMemo(() => buildResearchWorkflowContext({
     teamId,
     workflowId: CHALLENGE_CUP_WORKFLOW_ID,
@@ -276,7 +332,8 @@ export function ResearchProcessWorkspace({
     scopeMismatch: hypothesisFirstChain.scopeMismatch,
     loading: !hypothesisFirstReady || (!runState.projection && !displayError),
     error: displayError,
-    nextAction: safeNextAction,
+    nextAction: workspaceNextAction,
+    workspaceModel,
     selectedNodeId: location.selectedNodeId,
     panel: location.panel,
     roundProgress: hypothesisFirstChain.chainState
@@ -298,6 +355,8 @@ export function ResearchProcessWorkspace({
     runState.projection,
     runState.run,
     safeNextAction,
+    workspaceModel,
+    workspaceNextAction,
     teamId,
   ]);
   const retryDispatch = useCallback(() => {
@@ -320,16 +379,18 @@ export function ResearchProcessWorkspace({
   useResearchProcessAutofocus({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: hypothesisFirstReady ? safeNextAction.targetNodeId : null,
+    nextTarget: hypothesisFirstReady ? workflowContext.currentTask?.targetNodeId ?? null : null,
     replaceParams: location.replaceParams,
   });
 
   const showInspector = workflowContext.loadState !== "scope_mismatch" && shouldShowResearchProcessInspector({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: safeNextAction.targetNodeId,
+    nextTarget: workflowContext.currentTask?.targetNodeId,
   });
-  const atCurrentTask = Boolean(workflowActive && workflowContext.view.selectedIsCurrentTask);
+  const atCurrentTask = Boolean(
+    workflowActive && (workflowContext.view.selectedIsCurrentTask || formalWritesPaused),
+  );
 
   const inspectorPane = showInspector ? (
     <ResearchProcessInspectorPane
@@ -357,10 +418,10 @@ export function ResearchProcessWorkspace({
         pendingTaskId: commands.pendingTaskId,
         submitOffer: commands.submitOffer,
       }}
-      nextAction={safeNextAction}
-      onRecoverCollection={hypothesisFirstChain.recoverCollection}
-      collectionRecoveryBusy={hypothesisFirstChain.recoveryBusy}
-      collectionRecoveryError={hypothesisFirstChain.recoveryError}
+      nextAction={workspaceNavigationAction}
+      onRecoverCollection={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoverCollection : undefined}
+      collectionRecoveryBusy={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoveryBusy : false}
+      collectionRecoveryError={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoveryError : null}
     />
   ) : null;
   const archiveOpen = location.panel === "question";
@@ -369,7 +430,7 @@ export function ResearchProcessWorkspace({
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
       <ResearchCommandPalette
         questions={catalog.questions}
-        nextAction={safeNextAction}
+        nextAction={workspaceNavigationAction}
         workflowActive={workflowActive && hypothesisFirstReady}
         onSelectExperiment={selectExperiment}
         onOpenPanel={(panel) => location.openPanel(panel)}
@@ -395,9 +456,9 @@ export function ResearchProcessWorkspace({
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
-            navigationLabel={workflowActive && hypothesisFirstReady ? safeNextAction.navigationLabel : undefined}
-            nextActionStage={workflowActive && hypothesisFirstReady ? safeNextAction.stage : undefined}
-            scopeMismatch={hypothesisFirstChain.scopeMismatch}
+            navigationLabel={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.navigationLabel : undefined}
+            nextActionStage={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.stage : undefined}
+            scopeMismatch={hypothesisFirstChain.scopeMismatch || workspaceModel.scopeMismatch}
             statusMessage={hypothesisFirstChain.scopeMismatch ? safeNextAction.statusMessage : undefined}
             chainRound={
               workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
@@ -411,8 +472,8 @@ export function ResearchProcessWorkspace({
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
-              hypothesisFirstReady && safeNextAction.targetNodeId
-                ? () => location.replaceParams({ node: safeNextAction.targetNodeId, panel: "node" })
+              hypothesisFirstReady && workspaceNavigationAction.targetNodeId
+                ? () => location.replaceParams({ node: workspaceNavigationAction.targetNodeId, panel: "node" })
                 : undefined
             }
           />
