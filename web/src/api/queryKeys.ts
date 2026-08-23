@@ -66,6 +66,8 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "submission-readiness"] as const,
   challengeCatalogReadiness: (teamId: string) =>
     ["teams", teamId, "challenge-program", "catalog-readiness"] as const,
+  challengeCupRealBatchStatus: (teamId: string, planId: string) =>
+    ["teams", teamId, "challenge-program", "real-batches", planId, "status"] as const,
   challengeCupDevControlsSnapshot: (teamId: string) =>
     ["teams", teamId, "challenge-program", "dev-controls", "snapshot"] as const,
   challengeCupCatalogOverview: (teamId: string) =>
