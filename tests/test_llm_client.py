@@ -27,7 +27,7 @@ from core.llm.client import (
 from core.llm.errors import classify_exception
 from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
 from core.llm.semantic_messages import InvocationScope
-from core.llm.types import LLMError
+from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
@@ -202,6 +202,9 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
         "totalTokens": 21,
         "cachedInputTokens": 0,
     }
+    assert receipt["receiptId"].endswith("-attempt-1")
+    assert receipt["evidenceLocator"]["attempt"] == 1
+    assert receipt["evidenceLocator"]["modelPolicySha256"] == "a" * 64
 
 
 def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
@@ -263,6 +266,71 @@ def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
         "totalTokens": 10,
         "cachedInputTokens": 0,
     }
+    assert receipt["receiptId"] == "model-receipt-invocation-1-0-attempt-1"
+    assert receipt["evidenceLocator"]["attempt"] == 1
+
+
+def test_receipt_identity_changes_for_provider_attempts() -> None:
+    receipt_context = {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "questionInvocationBinding": {
+            "questionId": "SCI-001",
+            "questionRunId": "workflow-run-1",
+            "workflowRunId": "workflow-run-1",
+            "workflowId": "workflow-1",
+            "workflowVersionId": "version-1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "sessionId": "session-1",
+            "taskId": "task-1",
+            "turnId": "turn-1",
+            "outcomeKinds": ["candidate"],
+        },
+    }
+    client = LLMClient(config=make_config(), backend=lambda _payload: {})
+    outcome = TurnOutcome.final_answer(
+        identity=CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-1",
+            iteration=0,
+            item_id="item-1",
+        ),
+        text="candidate",
+    )
+
+    with model_invocation_receipt_context_scope(receipt_context):
+        first = client._attach_model_invocation_receipt(
+            outcome,
+            metadata=None,
+            invocation_scope=outcome.identity,
+            request_content={"attempt": 1},
+            response_content={"attempt": 1},
+            started_at_ms=100,
+            finished_at_ms=120,
+            attempt=1,
+            retry_count=0,
+        )
+        second = client._attach_model_invocation_receipt(
+            outcome,
+            metadata=None,
+            invocation_scope=outcome.identity,
+            request_content={"attempt": 2},
+            response_content={"attempt": 2},
+            started_at_ms=100,
+            finished_at_ms=120,
+            attempt=2,
+            retry_count=1,
+        )
+
+    first_receipt = first.model_invocation_receipt
+    second_receipt = second.model_invocation_receipt
+    assert first_receipt["receiptId"] != second_receipt["receiptId"]
+    assert first_receipt["evidenceLocator"]["attempt"] == 1
+    assert second_receipt["evidenceLocator"]["attempt"] == 2
 
 
 def test_client_message_metadata_cannot_mint_model_invocation_receipt() -> None:

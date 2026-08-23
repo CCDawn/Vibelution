@@ -42,28 +42,61 @@ def _model_invocation_receipt_context(
     # Metadata is only a locator. The binding itself must be read back from
     # the server-owned project task record; a client-supplied metadata object
     # must never become receipt authority.
+    source_task = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
     try:
-        from core.web.services.team_workflow.research_project_agent_tasks import (
-            _read_research_project_agent_task_record,
-        )
+        if source_task and source_task == task_id:
+            from core.web.services.team_workflow.source_collection.stage_session import (
+                _read_source_collection_stage_session_task_record,
+            )
 
-        task = _read_research_project_agent_task_record(
-            team_id,
-            project_id,
-            task_id,
-        )
+            task = _read_source_collection_stage_session_task_record(
+                team_id,
+                task_id,
+            )
+        else:
+            from core.web.services.team_workflow.research_project_agent_tasks import (
+                _read_research_project_agent_task_record,
+            )
+
+            task = _read_research_project_agent_task_record(
+                team_id,
+                project_id,
+                task_id,
+            )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
     if task is None or str(task.get("sessionId") or "").strip() != str(session_id or "").strip():
+        return None
+    if str(task.get("researchProjectId") or "").strip() != project_id:
         return None
     task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
     stored_turn_id = str(task_turn.get("turnId") or "").strip()
     if stored_turn_id and stored_turn_id != str(turn_id or "").strip():
         return None
     seed = task.get("modelInvocationReceiptBinding")
-    if not isinstance(seed, dict):
+    if isinstance(seed, dict):
+        binding = dict(seed)
+    elif source_task:
+        contract = (
+            task.get("challengeTaskContract")
+            if isinstance(task.get("challengeTaskContract"), dict)
+            else {}
+        )
+        binding = {
+            "questionStage": str(contract.get("stageId") or ""),
+            "questionId": str(contract.get("questionId") or ""),
+            "questionRunId": str(contract.get("workflowRunId") or ""),
+            "workflowRunId": str(contract.get("workflowRunId") or ""),
+            "workflowId": str(contract.get("workflowId") or ""),
+            "workflowVersionId": str(contract.get("workflowVersionId") or ""),
+            "formalNodeId": str(contract.get("workflowNodeId") or ""),
+            "formalNodeRunId": str(contract.get("nodeRunId") or ""),
+            "formalNodeAttempt": int(contract.get("nodeAttempt") or 0),
+            "outcomeKinds": ["source_evidence"],
+            "modelPolicySha256": str(contract.get("modelPolicySha256") or ""),
+        }
+    else:
         return None
-    binding = dict(seed)
     binding.update(
         {
             "sessionId": str(session_id or "").strip(),
@@ -82,6 +115,9 @@ def _model_invocation_receipt_context(
     required = (
         "questionId",
         "workflowRunId",
+        "workflowId",
+        "workflowVersionId",
+        "researchProjectId",
         "formalNodeId",
         "formalNodeRunId",
         "sessionId",

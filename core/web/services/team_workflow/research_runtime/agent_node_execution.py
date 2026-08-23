@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.parse
+from collections.abc import Mapping
 from typing import Any
 
 from core.research.competition.question_result_package import (
@@ -44,6 +45,13 @@ class AgentNodeExecutionError(ValueError):
 
 
 _MODEL_INVOCATION_OUTCOME_KINDS: dict[str, tuple[str, ...]] = {
+    # Source collection calls are auditable model invocations too.  They use
+    # an additional outcome kind so source evidence does not satisfy the
+    # five formal candidate/plan/review/revision/final-output categories.
+    "source_finding": ("source_evidence",),
+    "source_extraction": ("source_evidence",),
+    "evidence_relations": ("source_evidence",),
+    "knowledge_ingestion": ("source_evidence",),
     "hypothesis_design": ("candidate",),
     "protocol_design": ("plan", "revision"),
     "protocol_review": ("review",),
@@ -52,6 +60,10 @@ _MODEL_INVOCATION_OUTCOME_KINDS: dict[str, tuple[str, ...]] = {
     "version_governance": ("final_output",),
 }
 _MODEL_INVOCATION_STAGES: dict[str, str] = {
+    "source_finding": "generation",
+    "source_extraction": "generation",
+    "evidence_relations": "generation",
+    "knowledge_ingestion": "generation",
     "hypothesis_design": "generation",
     "protocol_design": "revision",
     "protocol_review": "review",
@@ -75,6 +87,14 @@ def _model_invocation_receipt_binding(
     snapshot = record.get("inputSnapshot") if isinstance(record.get("inputSnapshot"), dict) else {}
     question_id = str(record.get("questionId") or snapshot.get("questionId") or "").strip().upper()
     workflow_run_id = str(record.get("runId") or "").strip()
+    workflow_id = str(
+        record.get("workflowId")
+        or snapshot.get("workflowId")
+        or "challenge-cup-research"
+    ).strip()
+    workflow_version_id = str(
+        record.get("workflowVersionId") or snapshot.get("workflowVersionId") or ""
+    ).strip()
     node_run = latest_node_run(record, node_id)
     model_policy = dict(snapshot.get("modelRoutingPolicy") or {})
     required_model_policy = model_policy.get("requiredModelPolicy")
@@ -97,6 +117,8 @@ def _model_invocation_receipt_binding(
     if (
         not question_id
         or not workflow_run_id
+        or not workflow_id
+        or not workflow_version_id
         or not node_run_id
         or not outcome_kinds
         or not question_stage
@@ -108,8 +130,8 @@ def _model_invocation_receipt_binding(
         "questionId": question_id,
         "questionRunId": workflow_run_id,
         "workflowRunId": workflow_run_id,
-        "workflowId": str(record.get("workflowId") or "challenge-cup-research"),
-        "workflowVersionId": str(record.get("workflowVersionId") or ""),
+        "workflowId": workflow_id,
+        "workflowVersionId": workflow_version_id,
         "formalNodeId": node_id,
         "formalNodeRunId": node_run_id,
         "formalNodeAttempt": int(node_run.get("attempt") or 1),
@@ -157,6 +179,14 @@ def _challenge_task_contract(
         record.get("questionId") or snapshot.get("questionId") or ""
     ).strip().upper()
     workflow_run_id = str(record.get("runId") or "").strip()
+    workflow_id = str(
+        record.get("workflowId")
+        or snapshot.get("workflowId")
+        or "challenge-cup-research"
+    ).strip()
+    workflow_version_id = str(
+        record.get("workflowVersionId") or snapshot.get("workflowVersionId") or ""
+    ).strip()
     project_id = str(record.get("projectId") or "").strip()
     input_snapshot_hash = str(node_run.get("inputSnapshotHash") or "").strip()
     stage_id = _MODEL_INVOCATION_STAGES.get(node_id, "")
@@ -165,6 +195,8 @@ def _challenge_task_contract(
         or not policy_sha256
         or not question_id
         or not workflow_run_id
+        or not workflow_id
+        or not workflow_version_id
         or not project_id
         or not input_snapshot_hash
         or not stage_id
@@ -180,6 +212,8 @@ def _challenge_task_contract(
         "researchProjectId": project_id,
         "runId": workflow_run_id,
         "workflowRunId": workflow_run_id,
+        "workflowId": workflow_id,
+        "workflowVersionId": workflow_version_id,
         "workflowNodeId": node_id,
         "nodeRunId": str(node_run_id or "").strip(),
         "nodeAttempt": int(node_run.get("attempt") or 1),
@@ -205,6 +239,113 @@ def _challenge_task_contract(
             "officialEvidenceEligible": True,
         },
     }
+
+
+def _formal_task_authorities(
+    *,
+    action: Any,
+    input_snapshot: Mapping[str, Any],
+    agent_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build both server-owned contracts for a Ledger ``PendingAction``.
+
+    ``RealDomainPorts`` is backed by the Ledger rather than the legacy
+    ``WorkflowRunStore``.  Build the smallest record shape understood by the
+    existing authority helpers so their node/model mappings remain the single
+    source of truth.  Incomplete or drifted action/snapshot identity is a hard
+    stop: an empty binding must never be sent to a real Agent task.
+    """
+
+    snapshot = dict(input_snapshot) if isinstance(input_snapshot, Mapping) else {}
+    run_id = str(getattr(action, "run_id", "") or "").strip()
+    node_id = str(getattr(action, "node_id", "") or "").strip()
+    node_run_id = str(getattr(action, "node_run_id", "") or "").strip()
+    question_id = str(snapshot.get("questionId") or "").strip().upper()
+    project_id = str(snapshot.get("projectId") or "").strip()
+    workflow_id = str(snapshot.get("workflowId") or "").strip()
+    workflow_version_id = str(snapshot.get("workflowVersionId") or "").strip()
+    action_snapshot_hash = str(
+        getattr(action, "input_snapshot_hash", "") or ""
+    ).strip()
+    snapshot_hash = str(snapshot.get("snapshotHash") or "").strip()
+    if snapshot_hash and action_snapshot_hash and snapshot_hash != action_snapshot_hash:
+        raise AgentNodeExecutionError(
+            "formal task authority input snapshot hash drifted",
+            code="formal_task_authority_snapshot_mismatch",
+        )
+    input_snapshot_hash = action_snapshot_hash or snapshot_hash
+    try:
+        node_attempt = int(getattr(action, "attempt", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise AgentNodeExecutionError(
+            "formal task authority node attempt is invalid",
+            code="formal_task_authority_incomplete",
+        ) from exc
+    if not all(
+        (
+            run_id,
+            node_id,
+            node_run_id,
+            question_id,
+            project_id,
+            workflow_id,
+            workflow_version_id,
+            str(agent_id or "").strip(),
+            input_snapshot_hash,
+        )
+    ) or node_attempt <= 0:
+        raise AgentNodeExecutionError(
+            "formal task authority is incomplete",
+            code="formal_task_authority_incomplete",
+        )
+    record = {
+        "runId": run_id,
+        "questionId": question_id,
+        "projectId": project_id,
+        "workflowId": workflow_id,
+        "workflowVersionId": workflow_version_id,
+        "inputSnapshot": snapshot,
+        "nodeRuns": [
+            {
+                "nodeId": node_id,
+                "nodeRunId": node_run_id,
+                "attempt": node_attempt,
+                "agentId": str(agent_id).strip(),
+                "inputSnapshotHash": input_snapshot_hash,
+            }
+        ],
+    }
+    contract = _challenge_task_contract(
+        record,
+        node_id=node_id,
+        node_run_id=node_run_id,
+        agent_id=str(agent_id).strip(),
+    )
+    receipt_binding = _model_invocation_receipt_binding(
+        record,
+        node_id=node_id,
+        node_run_id=node_run_id,
+    )
+    if not contract or not receipt_binding:
+        raise AgentNodeExecutionError(
+            "formal task model invocation authority is unavailable",
+            code="formal_task_authority_missing",
+        )
+    if (
+        str(contract.get("workflowRunId") or "") != run_id
+        or str(contract.get("workflowNodeId") or "") != node_id
+        or str(contract.get("nodeRunId") or "") != node_run_id
+        or str(receipt_binding.get("workflowRunId") or "") != run_id
+        or str(receipt_binding.get("formalNodeId") or "") != node_id
+        or str(receipt_binding.get("formalNodeRunId") or "") != node_run_id
+        or int(contract.get("nodeAttempt") or 0) != node_attempt
+        or int(receipt_binding.get("formalNodeAttempt") or 0) != node_attempt
+    ):
+        raise AgentNodeExecutionError(
+            "formal task model invocation authority scope mismatch",
+            code="formal_task_authority_scope_mismatch",
+        )
+    return contract, receipt_binding
 
 
 def _return_to(record: dict[str, Any], node_id: str) -> str:
@@ -373,6 +514,12 @@ def _start_external_task(
     if node_id in SOURCE_NODE_TASKS:
         record, source_run_id = _ensure_source_collection_run(store, record)
         stage_id, role_key = SOURCE_NODE_TASKS[node_id]
+        source_challenge_task_contract = _challenge_task_contract(
+            record,
+            node_id=node_id,
+            node_run_id=node_run_id,
+            agent_id=agent_id,
+        )
         from core.web.services.team_workflow.source_collection.stage_session import (
             start_source_collection_stage_session_task,
         )
@@ -399,6 +546,9 @@ def _start_external_task(
                         record.get("evidenceRemediationContract") or {}
                     ),
                 },
+                # Keyword-only authority cannot be supplied through the
+                # request payload handled by public source-task routes.
+                _challenge_task_contract=source_challenge_task_contract,
             )
         except TeamWorkflowOrchestrationError as exc:
             raise AgentNodeExecutionError(

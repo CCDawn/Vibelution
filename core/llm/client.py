@@ -81,6 +81,9 @@ _LLM_BACKEND_ATTEMPT_CONTEXT: ContextVar[tuple[int, int]] = ContextVar(
 _MODEL_INVOCATION_RECEIPT_CONTEXT: ContextVar[Mapping[str, Any] | None] = (
     ContextVar("vibelution_model_invocation_receipt_context", default=None)
 )
+_MODEL_INVOCATION_RECEIPT_OUTCOME_KINDS = frozenset(
+    {"candidate", "review", "revision", "plan", "final_output", "source_evidence"}
+)
 _NO_PROXY_LOCK = threading.Lock()
 _NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
 _PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
@@ -2557,7 +2560,7 @@ class LLMClient:
                 )
             ) or (stage_binding.question_stage,)
             if any(
-                item not in {"candidate", "review", "revision", "plan", "final_output"}
+                item not in _MODEL_INVOCATION_RECEIPT_OUTCOME_KINDS
                 for item in outcome_kinds
             ):
                 return None
@@ -2598,7 +2601,7 @@ class LLMClient:
                 )
             )
             if not outcome_kinds or any(
-                item not in {"candidate", "review", "revision", "plan", "final_output"}
+                item not in _MODEL_INVOCATION_RECEIPT_OUTCOME_KINDS
                 for item in outcome_kinds
             ):
                 return None
@@ -2676,6 +2679,15 @@ class LLMClient:
             else ModelInvocationStatus.SUCCEEDED
         )
         try:
+            provider_attempt = max(1, int(attempt))
+            invocation_id = str(
+                getattr(invocation_scope, "invocation_id", "") or ""
+            ).strip()
+            if not invocation_id:
+                return outcome
+            iteration = max(
+                0, int(getattr(invocation_scope, "iteration", 0) or 0)
+            )
             usage = token_usage or (
                 raw.get("tokenUsage") if isinstance(raw.get("tokenUsage"), Mapping) else {}
             )
@@ -2711,12 +2723,10 @@ class LLMClient:
                     "turnId": binding["turnId"],
                     "formalNodeId": binding["formalNodeId"],
                     "formalNodeRunId": binding["formalNodeRunId"],
-                    "invocationId": str(
-                        getattr(invocation_scope, "invocation_id", "") or ""
-                    ),
-                    "iteration": int(
-                        getattr(invocation_scope, "iteration", 0) or 0
-                    ),
+                    "modelPolicySha256": context["modelPolicySha256"],
+                    "invocationId": invocation_id,
+                    "iteration": iteration,
+                    "attempt": provider_attempt,
                 }
             )
             safe_metadata = {
@@ -2736,8 +2746,8 @@ class LLMClient:
                     raw.get("receiptId")
                     or (
                         "model-receipt-"
-                        f"{getattr(invocation_scope, 'invocation_id', '')}-"
-                        f"{int(getattr(invocation_scope, 'iteration', 0) or 0)}"
+                        f"{invocation_id}-"
+                        f"{iteration}-attempt-{provider_attempt}"
                     )
                 ).strip(),
                 run_id=context["receiptRunId"],
@@ -2757,6 +2767,7 @@ class LLMClient:
                     "formalNodeRunId": binding["formalNodeRunId"],
                     "formalNodeAttempt": str(binding["formalNodeAttempt"]),
                     "sessionId": binding["sessionId"],
+                    "attempt": str(provider_attempt),
                 },
                 provider=str(self.provider.kind or "").strip(),
                 model=actual_model,
@@ -2766,7 +2777,7 @@ class LLMClient:
                 response_content=response_content,
                 started_at_ms=max(0, int(started_at_ms)),
                 finished_at_ms=max(max(0, int(started_at_ms)), int(finished_at_ms)),
-                attempt=max(1, int(attempt)),
+                attempt=provider_attempt,
                 retry_count=max(0, int(retry_count)),
                 token_usage=normalized_token_usage,
                 cost=(
