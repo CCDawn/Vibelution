@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.research.competition.question_result_package import canonical_model_policy
 from core.web.services.team_workflow.research_runtime import real_domain_ports
 from core.web.services.team_workflow.research_runtime.task_adapter_registry import (
     AgentTaskAdapterSpec,
@@ -63,12 +64,21 @@ def _binding() -> SimpleNamespace:
 
 
 def _snapshot() -> dict[str, object]:
+    required_model_policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
     return {
         "teamId": "research-team",
         "projectId": "research-project-1",
         "questionId": "SCI-096",
         "researchObjectiveContract": {"question": "如何提高记忆提取的可验证性"},
         "datasetRefs": ["dataset://brief"],
+        "modelRoutingPolicy": {"requiredModelPolicy": required_model_policy},
     }
 
 

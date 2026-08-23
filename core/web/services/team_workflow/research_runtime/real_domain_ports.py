@@ -1575,11 +1575,22 @@ def _ensure_problem_understanding_source_collection_run(
     )
 
     objective = input_snapshot.get("researchObjectiveContract") or {}
+    model_routing_policy = (
+        input_snapshot.get("modelRoutingPolicy")
+        if isinstance(input_snapshot.get("modelRoutingPolicy"), dict)
+        else {}
+    )
+    required_model_policy = model_routing_policy.get("requiredModelPolicy")
+    if not isinstance(required_model_policy, dict) or not required_model_policy:
+        raise RuntimeError(
+            "problem_understanding source authority requires the frozen model policy"
+        )
     started_run = start_source_collection_run(
         team_id,
         {
             "researchProjectId": project_id,
             "questionId": str(input_snapshot.get("questionId") or "").strip(),
+            "requiredModelPolicy": dict(required_model_policy),
             "title": "Challenge Cup workflow source collection",
             "goal": str(objective.get("question") or ""),
             "topic": str(objective.get("question") or ""),
@@ -1652,6 +1663,13 @@ def _create_real_agent_task(
     if not team_id:
         raise RuntimeError("input snapshot has no teamId")
     idempotency_key = f"agent-task:{action.node_run_id}"
+    challenge_task_contract, model_invocation_receipt_binding = (
+        _formal_task_authorities(
+            action=action,
+            input_snapshot=input_snapshot,
+            agent_id=binding.agent_id,
+        )
+    )
     source_collection_run_id = ""
     if spec.family != "source_collection" and action.node_id == "problem_understanding":
         if not project_id:
@@ -1666,13 +1684,6 @@ def _create_real_agent_task(
             binding=binding,
             store=store,
         )
-    challenge_task_contract, model_invocation_receipt_binding = (
-        _formal_task_authorities(
-            action=action,
-            input_snapshot=input_snapshot,
-            agent_id=binding.agent_id,
-        )
-    )
     if source_collection_run_id:
         # The formal authority helper owns the rest of this contract.  Bind the
         # source-run scope only after the Ledger read-back above succeeds.
