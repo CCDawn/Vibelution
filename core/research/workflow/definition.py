@@ -23,6 +23,14 @@ SCHEMA_VERSION = "2.1.0"
 # Canonical fixed node order within each stage (ADR 0006 / PRD / ADR 0007).
 _KNOWLEDGE_NODES: tuple[WorkflowNodeSpec, ...] = (
     WorkflowNodeSpec(
+        nodeId="problem_understanding",
+        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
+        label="问题理解",
+        actorKind=ActorKind.AGENT,
+        primaryRoleKey="source_finder",
+        producesArtifactKinds=("problem_understanding",),
+    ),
+    WorkflowNodeSpec(
         nodeId="source_finding",
         stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
         label="资料寻找",
@@ -170,6 +178,14 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
     auto = GateKind.AUTO
     return (
         # Knowledge pipeline
+        WorkflowEdgeSpec(
+            "e_problem_find",
+            "problem_understanding",
+            "source_finding",
+            "问题理解",
+            auto,
+            ("problem_understanding",),
+        ),
         WorkflowEdgeSpec("e_find_extract", "source_finding", "source_extraction", "候选资料", auto, ("source_candidate_batch",)),
         WorkflowEdgeSpec("e_extract_rel", "source_extraction", "evidence_relations", "证据卡", auto, ("evidence_card_batch",)),
         WorkflowEdgeSpec("e_rel_ingest", "evidence_relations", "knowledge_ingestion", "关系图", auto, ("evidence_relation_graph",)),

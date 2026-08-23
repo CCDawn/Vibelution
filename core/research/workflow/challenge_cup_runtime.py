@@ -309,6 +309,7 @@ def successor_map() -> dict[str, tuple[str, ...]]:
 
 
 _LINEAR_EDGES: tuple[tuple[str, str], ...] = (
+    ("problem_understanding", "source_finding"),
     ("source_finding", "source_extraction"),
     ("source_extraction", "evidence_relations"),
     ("evidence_relations", "knowledge_ingestion"),
