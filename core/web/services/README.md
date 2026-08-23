@@ -29,9 +29,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**70**
+- Facade `*_service.py`：**71**
 - 有 pack README：**7**
-- 仅单文件 facade：**64**
+- 仅单文件 facade：**65**
 
 ## Domain 速查
 
@@ -40,7 +40,7 @@
 | Session / Chat hot path (`session`) | 1 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
 | Team registry / canvas (`team`) | 2 |
-| Agent directory / config (`agent`) | 15 |
+| Agent directory / config (`agent`) | 16 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 4 |
 | Memory (`memory`) | 4 |
