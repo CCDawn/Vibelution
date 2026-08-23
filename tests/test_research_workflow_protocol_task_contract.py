@@ -11,6 +11,7 @@ from core.research.workflow.contracts.research_scope import (
     scope_hash_for,
     scope_locators_for,
 )
+from core.research.workflow.contracts import WorkflowRunInputSnapshot
 from core.web.services import team_workflow_orchestration_service
 from core.web.services.team_workflow import research_project_agent_tasks
 from core.web.services.team_workflow.research_project_protocol_context import (
@@ -26,6 +27,9 @@ from core.web.services.team_workflow.research_runtime import (
 from core.web.services.team_workflow.research_runtime.protocol_artifact_writer import (
     record_protocol_draft,
 )
+from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+    canonical_sha256,
+)
 from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
     put_workflow_artifact,
 )
@@ -35,6 +39,7 @@ from tools.challenge_cup_operations_tools import (
 
 
 def _task() -> dict[str, object]:
+    question_id = official_question_ids()[0]
     return {
         "taskId": "task-protocol-1",
         "taskKind": "experiment_design",
@@ -42,6 +47,9 @@ def _task() -> dict[str, object]:
         "researchProjectId": "project-1",
         "workflowRunId": "run-1",
         "workflowNodeId": "protocol_design",
+        "questionId": question_id,
+        "nodeRunId": "nr-run-1-protocol_design-a1",
+        "attempt": 1,
         "sourceCollectionRunId": "source-run-1",
         "agentId": "agent-planner",
         "sessionId": "session-1",
@@ -221,6 +229,53 @@ def _formal_protocol_input() -> dict[str, object]:
         "hypothesisSetHash": "hypothesis-sha",
         "inputSnapshot": snapshot,
     }
+
+
+def _hypothesis_envelope() -> dict[str, object]:
+    return {
+        "teamId": "research-team",
+        "kind": "hypothesis_set",
+        "workflowRunId": "run-1",
+        "sourceCollectionRunId": "source-run-1",
+        "payload": _hypothesis_payload(),
+    }
+
+
+@pytest.fixture(autouse=True)
+def formal_ledger_runtime(monkeypatch):
+    snapshot = WorkflowRunInputSnapshot.from_dict(_frozen_input_snapshot())
+    run = SimpleNamespace(
+        run_id="run-1",
+        team_id="research-team",
+        project_id="project-1",
+        question_id=snapshot.questionId,
+        input_snapshot_json=json.dumps(snapshot.to_dict()),
+        input_snapshot_hash=snapshot.snapshotHash,
+    )
+    attempt = SimpleNamespace(
+        node_run_id="nr-run-1-protocol_design-a1",
+        run_id="run-1",
+        node_id="protocol_design",
+        attempt=1,
+        input_snapshot_hash=snapshot.snapshotHash,
+    )
+    repo = SimpleNamespace(
+        get_run=lambda _run_id: run,
+        get_attempt=lambda _node_run_id: attempt,
+    )
+    runtime = SimpleNamespace(
+        store=SimpleNamespace(read=lambda callback: callback(repo))
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.runtime_factory.production_workflow_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        protocol_artifact_writer,
+        "load_scoped_artifact_payload",
+        lambda *args, **kwargs: _hypothesis_envelope(),
+    )
+    return run, attempt, snapshot
 
 
 def test_protocol_input_context_reads_formal_hypothesis_set(monkeypatch) -> None:
@@ -561,8 +616,11 @@ def test_formal_create_plan_writes_bound_research_plan_and_reads_back(
         "turnId": "turn-1",
         "agentId": "agent-planner",
     }
-    assert payload["hypothesisSetRef"] == "hypothesis_set://research-team/run-1/hypothesis-sha"
-    assert payload["hypothesisSetHash"] == "hypothesis-sha"
+    expected_hypothesis_hash = canonical_sha256(_hypothesis_envelope())
+    assert payload["hypothesisSetRef"] == (
+        f"hypothesis_set://research-team/source-run-1/{expected_hypothesis_hash}"
+    )
+    assert payload["hypothesisSetHash"] == expected_hypothesis_hash
     assert payload["researchPlan"] == plan_payload
 
 
@@ -650,3 +708,130 @@ def test_formal_create_plan_rejects_placeholder_research_plan_before_write(
 
     assert result["status"] == "error"
     assert "placeholder" in result["message"].lower()
+
+
+def test_formal_snapshot_injection_is_ignored(monkeypatch, formal_ledger_runtime) -> None:
+    task = _formal_task()
+    injected = _frozen_input_snapshot()
+    injected["projectId"] = "attacker-project"
+    task["inputSnapshot"] = injected
+    protocol_input = _formal_protocol_input()
+    protocol_input["inputSnapshot"] = injected
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_protocol_context.load_scoped_artifact_payload",
+        lambda *args, **kwargs: _hypothesis_envelope(),
+    )
+
+    context = build_protocol_input_context("research-team", task)
+
+    assert context["status"] == "ready"
+    assert context["inputSnapshot"]["projectId"] == "project-1"
+    prepared = protocol_artifact_writer.prepare_research_plan(
+        team_id="research-team",
+        task_context={"task": task, "protocolInput": protocol_input},
+        research_plan=_research_plan(),
+    )
+    assert prepared["snapshot"].projectId == "project-1"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing",
+        "cross_run",
+        "wrong_node",
+        "wrong_attempt",
+        "hash_mismatch",
+    ],
+)
+def test_formal_attempt_authority_must_match_exactly(
+    formal_ledger_runtime, mutation: str
+) -> None:
+    _run, attempt, _snapshot = formal_ledger_runtime
+    if mutation == "missing":
+        # Replace the repository lookup with a missing attempt without changing
+        # the run authority.
+        runtime_factory = __import__(
+            "core.web.services.team_workflow.research_runtime.runtime_factory",
+            fromlist=["production_workflow_runtime"],
+        )
+        runtime = runtime_factory.production_workflow_runtime()
+        runtime.store.read = lambda callback: callback(
+            SimpleNamespace(get_run=lambda _run_id: _run, get_attempt=lambda _node: None)
+        )
+    elif mutation == "cross_run":
+        attempt.run_id = "run-other"
+    elif mutation == "wrong_node":
+        attempt.node_id = "hypothesis_design"
+    elif mutation == "wrong_attempt":
+        attempt.attempt = 2
+    else:
+        attempt.input_snapshot_hash = "b" * 64
+
+    context = build_protocol_input_context(
+        "research-team", _formal_task()
+    )
+
+    assert context["status"] != "ready"
+
+
+def test_formal_scope_missing_is_blocked(formal_ledger_runtime) -> None:
+    run, attempt, _snapshot = formal_ledger_runtime
+    raw = _frozen_input_snapshot()
+    raw.pop("researchScopeEnvelope")
+    raw.pop("catalogScope")
+    snapshot = WorkflowRunInputSnapshot.from_dict(raw)
+    run.input_snapshot_json = json.dumps(raw)
+    run.input_snapshot_hash = snapshot.snapshotHash
+    attempt.input_snapshot_hash = snapshot.snapshotHash
+
+    context = build_protocol_input_context("research-team", _formal_task())
+
+    assert context["status"] == "blocked_formal_authority"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("decision", "approved"), ("required", False)],
+)
+def test_human_gate_self_approval_is_rejected_before_plan_write(
+    monkeypatch, field: str, value: object
+) -> None:
+    task = _formal_task()
+    service = SimpleNamespace(
+        require_research_project_agent_task=lambda *_args, **_kwargs: task,
+        create_experiment_plan=lambda *_args, **_kwargs: pytest.fail(
+            "human gate violation must reject before create_experiment_plan"
+        ),
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        service.require_research_project_agent_task,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        service.create_experiment_plan,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_protocol_context.build_protocol_input_context",
+        lambda *_args, **_kwargs: _formal_protocol_input(),
+    )
+    plan = _research_plan()
+    plan["human_gate"][field] = value
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-protocol-1",
+            operation="create_plan",
+            payload_json=json.dumps({"researchPlan": plan}),
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert result["status"] == "error"

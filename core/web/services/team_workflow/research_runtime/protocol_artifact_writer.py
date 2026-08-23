@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from core.research.competition.question_result_package import (
@@ -11,6 +10,12 @@ from core.research.competition.question_result_package import (
 )
 from core.research.workflow.contracts import WorkflowRunInputSnapshot
 
+from ..research_project_protocol_context import _authoritative_protocol_binding
+from .artifact_readback_registry import (
+    build_canonical_ref,
+    load_scoped_artifact_payload,
+)
+from .human_gate_artifacts import canonical_sha256
 from .workflow_artifact_store import put_workflow_artifact
 
 _PLACEHOLDER_MARKERS = (
@@ -19,7 +24,6 @@ _PLACEHOLDER_MARKERS = (
     "TODO",
     "TBD",
 )
-_NODE_ATTEMPT_RE = re.compile(r"-a(?P<attempt>[1-9][0-9]*)$")
 
 
 def _text(value: Any) -> str:
@@ -63,16 +67,11 @@ def _snapshot_for_formal_task(
     task: dict[str, Any],
     protocol_input: dict[str, Any],
 ) -> WorkflowRunInputSnapshot:
-    raw = protocol_input.get("inputSnapshot")
-    if not isinstance(raw, dict) or not raw:
-        raw = task.get("inputSnapshot")
-    if not isinstance(raw, dict) or not raw:
-        raise ValueError("Formal protocol task is missing its frozen inputSnapshot.")
     try:
-        snapshot = WorkflowRunInputSnapshot.from_dict(raw)
+        _run, _attempt, snapshot = _authoritative_protocol_binding(team_id, task)
     except (QuestionResultPackageError, TypeError, ValueError, KeyError) as exc:
         raise ValueError(
-            "Formal protocol task frozen inputSnapshot is invalid."
+            "Formal protocol task Ledger authority is invalid."
         ) from exc
     if snapshot.teamId != str(team_id or "").strip():
         raise ValueError(
@@ -83,25 +82,39 @@ def _snapshot_for_formal_task(
             "Formal protocol task inputSnapshot project binding does not match."
         )
     task_question_id = _text(task.get("questionId"))
-    if task_question_id and snapshot.questionId != task_question_id:
+    if not task_question_id or snapshot.questionId != task_question_id:
         raise ValueError("Formal protocol task question binding does not match.")
     if not snapshot.researchScopeEnvelope or not snapshot.catalogScope:
         raise ValueError("Formal protocol task frozen scope is incomplete.")
-    stored_hash = _text(task.get("inputSnapshotHash"))
-    if stored_hash and snapshot.snapshotHash != stored_hash:
-        raise ValueError("Formal protocol task inputSnapshotHash does not match.")
     return snapshot
 
 
-def _producer_attempt(task: dict[str, Any]) -> int:
-    try:
-        attempt = int(task.get("attempt") or 0)
-    except (TypeError, ValueError):
-        attempt = 0
-    if attempt > 0:
-        return attempt
-    match = _NODE_ATTEMPT_RE.search(_text(task.get("nodeRunId")))
-    return int(match.group("attempt")) if match else 0
+def _hypothesis_binding(
+    *, team_id: str, task: dict[str, Any]
+) -> tuple[dict[str, Any], str, str]:
+    workflow_run_id = _text(task.get("workflowRunId"))
+    source_run_id = _text(task.get("sourceCollectionRunId"))
+    envelope = load_scoped_artifact_payload(
+        "hypothesis_set",
+        team_id=_text(team_id),
+        authority_run_id=source_run_id,
+        workflow_run_id=workflow_run_id,
+    )
+    if not isinstance(envelope, dict) or not isinstance(
+        envelope.get("payload"), dict
+    ):
+        raise ValueError("Formal hypothesis_set authority is missing.")
+    content_hash = canonical_sha256(envelope)
+    return (
+        envelope,
+        build_canonical_ref(
+            kind="hypothesis_set",
+            team_id=_text(team_id),
+            authority_run_id=source_run_id,
+            content_hash=content_hash,
+        ),
+        content_hash,
+    )
 
 
 def prepare_research_plan(
@@ -128,6 +141,11 @@ def prepare_research_plan(
         raise ValueError(f"researchPlan is invalid: {exc}") from exc
     if _contains_placeholder(normalized):
         raise ValueError("researchPlan contains a placeholder.")
+    human_gate = normalized.get("human_gate")
+    if not isinstance(human_gate, dict) or human_gate.get("required") is not True:
+        raise ValueError("researchPlan.human_gate.required must be true.")
+    if human_gate.get("decision") != "pending":
+        raise ValueError("researchPlan.human_gate.decision must be pending.")
 
     workflow_run_id = _text(task.get("workflowRunId"))
     source_run_id = _text(task.get("sourceCollectionRunId"))
@@ -142,16 +160,33 @@ def prepare_research_plan(
         raise ValueError(
             "Formal protocol sourceCollectionRunId binding does not match."
         )
-    if not node_run_id.startswith(
-        f"nr-{workflow_run_id}-"
-    ) or "-protocol_design-" not in node_run_id:
-        raise ValueError(
-            "Formal protocol nodeRunId binding does not belong to protocol_design."
-        )
+    # Exact node/run/attempt reconciliation is performed against the Ledger
+    # above; string prefixes are deliberately not an authority check.
     snapshot = _snapshot_for_formal_task(
         team_id=team_id,
         task=task,
         protocol_input=protocol_input,
+    )
+    producer = {
+        "taskId": _text(task.get("taskId")),
+        "sessionId": _text(task.get("sessionId")),
+        "turnId": _text((task.get("turn") or {}).get("turnId")),
+        "agentId": _text(task.get("agentId")),
+        "nodeRunId": node_run_id,
+        "attempt": task.get("attempt"),
+    }
+    if (
+        isinstance(producer["attempt"], bool)
+        or not isinstance(producer["attempt"], int)
+        or producer["attempt"] <= 0
+        or any(
+            not producer[field]
+            for field in ("taskId", "sessionId", "turnId", "agentId", "nodeRunId")
+        )
+    ):
+        raise ValueError("Formal protocol task producer binding is incomplete.")
+    hypothesis_envelope, hypothesis_ref, hypothesis_hash = _hypothesis_binding(
+        team_id=team_id, task=task
     )
     frozen_binding = (
         protocol_input.get("frozenBinding")
@@ -168,12 +203,6 @@ def prepare_research_plan(
         supplied = _text(frozen_binding.get(field))
         if supplied and supplied != expected:
             raise ValueError(f"Formal protocol frozen {field} binding does not match.")
-    hypothesis_ref = _text(protocol_input.get("hypothesisSetRef"))
-    hypothesis_hash = _text(protocol_input.get("hypothesisSetHash"))
-    if not hypothesis_ref or not hypothesis_hash:
-        raise ValueError(
-            "Formal protocol input is missing the frozen hypothesis_set ref/hash."
-        )
     return {
         "task": task,
         "protocolInput": protocol_input,
@@ -183,6 +212,7 @@ def prepare_research_plan(
         "snapshot": snapshot,
         "hypothesisSetRef": hypothesis_ref,
         "hypothesisSetHash": hypothesis_hash,
+        "hypothesisEnvelope": hypothesis_envelope,
     }
 
 
@@ -211,7 +241,7 @@ def record_research_plan(
         raise ValueError("Formal research plan artifact requires planId.")
     producer = {
         "nodeRunId": _text(task.get("nodeRunId")),
-        "attempt": _producer_attempt(task),
+        "attempt": int(task.get("attempt") or 0),
         "taskId": _text(task.get("taskId")),
         "sessionId": _text(task.get("sessionId")),
         "turnId": _text((task.get("turn") or {}).get("turnId")),
@@ -289,6 +319,11 @@ def record_protocol_draft(
         raise ValueError("Protocol draft requires a bound protocol_design task.")
     if protocol_input.get("status") != "ready":
         raise ValueError("Formal hypothesis_set is not ready for protocol design.")
+    _authoritative_protocol_binding(team_id, task)
+    hypothesis_envelope, _hypothesis_ref, _hypothesis_hash = _hypothesis_binding(
+        team_id=team_id, task=task
+    )
+    hypothesis_payload = hypothesis_envelope["payload"]
     workflow_run_id = _text(task.get("workflowRunId"))
     source_run_id = _text(task.get("sourceCollectionRunId"))
     task_id = _text(task.get("taskId"))
@@ -346,7 +381,7 @@ def record_protocol_draft(
     smoke_plan = _required_protocol_value("smoke_plan", method.get("smokePlan"))
     hypothesis_candidates = [
         item
-        for item in list(protocol_input.get("candidates") or [])
+        for item in list(hypothesis_payload.get("candidates") or [])
         if isinstance(item, dict) and _text(item.get("candidateId"))
     ]
     if not hypothesis_candidates:
@@ -362,7 +397,7 @@ def record_protocol_draft(
         "budget": budget,
         "stop_condition": stop_condition,
         "smoke_plan": smoke_plan,
-        "hypothesisPortfolioId": _text(protocol_input.get("portfolioId")),
+        "hypothesisPortfolioId": _text(hypothesis_payload.get("portfolioId")),
         "hypothesisRefs": [
             _text(item.get("candidateId")) for item in hypothesis_candidates
         ],
