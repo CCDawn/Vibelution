@@ -164,6 +164,27 @@ def _canonical_receipt_response_summary(outcome: TurnOutcome) -> dict[str, Any]:
     }
 
 
+def _canonical_receipt_request_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Hash the real conversation while exposing only bounded shape metadata."""
+
+    conversation = _payload_conversation_items(dict(payload)) or []
+    material = json.dumps(
+        conversation,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        default=lambda value: (
+            f"<{type(value).__module__}.{type(value).__qualname__}>"
+        ),
+    ).encode("utf-8")
+    return {
+        "conversationSha256": hashlib.sha256(material).hexdigest(),
+        "messageCount": len(conversation),
+        "payloadShape": _safe_payload_shape_summary(dict(payload)),
+    }
+
+
 def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = False) -> bool:
     if outcome.kind != "incomplete":
         return False
@@ -3002,8 +3023,8 @@ class LLMClient:
             turn_outcome,
             metadata=metadata,
             invocation_scope=invocation_scope,
-            request_content=payload,
-            response_content=response,
+            request_content=_canonical_receipt_request_summary(payload),
+            response_content=_canonical_receipt_response_summary(turn_outcome),
             started_at_ms=backend_started_at_ms,
             finished_at_ms=backend_finished_at_ms,
             attempt=backend_attempt,
@@ -3671,7 +3692,7 @@ class LLMClient:
                             outcome,
                             metadata=metadata,
                             invocation_scope=invocation_scope,
-                            request_content=payload,
+                            request_content=_canonical_receipt_request_summary(payload),
                             response_content=_canonical_receipt_response_summary(outcome),
                             started_at_ms=int(start * 1000),
                             finished_at_ms=int(time.time() * 1000),

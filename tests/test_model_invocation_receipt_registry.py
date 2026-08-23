@@ -78,8 +78,7 @@ def test_full_trace_is_idempotent_and_immutable_projection_detects_tamper(
 
     assert replayed == refs
     assert registry.model_invocation_receipt_coverage(refs) == {
-        "status": "observed",
-        "observedKinds": ["candidate", "final_output", "plan", "review", "revision"],
+        "status": "passed",
         "coveredKinds": ["candidate", "final_output", "plan", "review", "revision"],
         "missingKinds": [],
         "receiptCount": 5,
@@ -92,7 +91,7 @@ def test_full_trace_is_idempotent_and_immutable_projection_detects_tamper(
         "research-team", record
     ) is True
     assert record["modelInvocationReceiptTraceRefs"] == refs
-    assert record["modelInvocationReceiptCoverage"]["status"] == "observed"
+    assert record["modelInvocationReceiptCoverage"]["status"] == "passed"
 
     path = registry._path("research-team", "SCI-096", "run-096")
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -105,7 +104,7 @@ def test_full_trace_is_idempotent_and_immutable_projection_detects_tamper(
         )
     )
     assert verified_refs == []
-    assert coverage["status"] == "missing"
+    assert coverage["status"] == "failed"
     assert coverage["integrityIssue"] == "stored_projection_mismatch"
 
 
@@ -137,7 +136,7 @@ def test_receipt_replay_conflict_and_missing_outcome_fail_closed(
         workflow_run_id="run-096",
     )
     coverage = registry.model_invocation_receipt_coverage(refs)
-    assert coverage["status"] == "observed"
+    assert coverage["status"] == "failed"
     assert coverage["missingKinds"] == ["final_output", "plan", "review", "revision"]
 
 
@@ -154,7 +153,7 @@ def test_source_evidence_is_allowed_but_does_not_satisfy_required_coverage(
     )
 
     assert refs[0]["outcomeKinds"] == ["source_evidence"]
-    assert registry.model_invocation_receipt_coverage(refs)["status"] == "missing"
+    assert registry.model_invocation_receipt_coverage(refs)["status"] == "failed"
     assert "source_evidence" not in registry.model_invocation_receipt_coverage(refs)[
         "coveredKinds"
     ]

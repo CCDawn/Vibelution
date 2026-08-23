@@ -63,6 +63,8 @@ def _safe_team_id(team_id: str) -> str:
 
 
 def team_workspace_root(team_id: str) -> Path:
+    """Return the developer-mode workspace used by DEV-only controls."""
+
     return developer_sandbox.seeded_sandbox_workspace_path(
         _project_root(),
         "teams",
@@ -70,8 +72,18 @@ def team_workspace_root(team_id: str) -> Path:
     )
 
 
+def formal_team_workspace_root(team_id: str) -> Path:
+    """Return the current project's canonical workspace for product state."""
+
+    return developer_sandbox.formal_workspace_path(
+        _project_root(),
+        "teams",
+        _safe_team_id(team_id),
+    )
+
+
 def _store_path(team_id: str) -> Path:
-    return team_workspace_root(team_id) / "research_projects" / "index.json"
+    return formal_team_workspace_root(team_id) / "research_projects" / "index.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -584,7 +596,7 @@ def resolve_research_project_workspace_root(team_id: str, project_id: str) -> Pa
     with _STORE_LOCK:
         store = _load_store(team_id)
         _project_payload(store, normalized_project_id)
-    base_root = team_workspace_root(team_id)
+    base_root = formal_team_workspace_root(team_id)
     if normalized_project_id == LEGACY_PROJECT_ID:
         return base_root
     return base_root / "research_projects" / normalized_project_id / "workspace"
@@ -593,7 +605,7 @@ def resolve_research_project_workspace_root(team_id: str, project_id: str) -> Pa
 def resolve_team_program_root(team_id: str) -> Path:
     """Return the stable team-level root for cross-project program ledgers."""
     team_service.assert_team_exists(team_id)
-    return team_workspace_root(team_id)
+    return formal_team_workspace_root(team_id)
 
 
 def resolve_team_workflow_root(team_id: str) -> Path:

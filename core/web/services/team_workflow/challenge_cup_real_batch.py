@@ -55,7 +55,7 @@ from core.web.services import team_service
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
     get_challenge_cup_dev_control_snapshot,
 )
-from core.web.services.team_workflow.research_projects import team_workspace_root
+from core.web.services.team_workflow.research_projects import formal_team_workspace_root
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     CatalogRunAuthorizationError,
     authorization_to_dict,
@@ -119,7 +119,7 @@ def _resolve_team_id(team_id: str) -> str:
 
 
 def _batches_root(team_id: str) -> Path:
-    return team_workspace_root(team_id) / CONTROLS_DIRNAME / BATCHES_DIRNAME
+    return formal_team_workspace_root(team_id) / CONTROLS_DIRNAME / BATCHES_DIRNAME
 
 
 def _envelope_path(team_id: str, plan_id: str) -> Path:

@@ -134,6 +134,19 @@ def _failed_runner(participant, prompt, context):
     }
 
 
+def _receipt_authority(team_id: str, *, run_id: str = "run-formal") -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": team_id,
+        "questionId": "SCI-096",
+        "workflowRunId": run_id,
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+
+
 def _open_meeting(tmp_path, monkeypatch, *, runner=None, background=False, **overrides):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
     opened = meeting_runtime.open_hypothesis_review_meeting(
@@ -143,6 +156,45 @@ def _open_meeting(tmp_path, monkeypatch, *, runner=None, background=False, **ove
         background=background,
     )
     return team_id, agents, opened
+
+
+def test_candidate_generation_persists_server_receipt_authority_and_refuses_rebind(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    contexts: list[dict[str, object]] = []
+
+    def capture_runner(participant, prompt, context):
+        contexts.append(dict(context))
+        return {
+            "status": "completed",
+            "raw_output": "CANDIDATE: cand-a | 可证伪机制 | 正式运行",
+            "summary": "ok",
+        }
+
+    payload = _selection_payload(list(agents.values()), meetingRoundId="meeting-cand-auth")
+    opened = meeting_runtime.open_candidate_generation_meeting(
+        team_id,
+        payload,
+        agent_runner=capture_runner,
+        background=False,
+        _model_invocation_receipt_authority=_receipt_authority(team_id),
+    )
+
+    assert opened["meetingRound"]["modelInvocationReceiptAuthority"]["workflowRunId"] == "run-formal"
+    assert contexts
+    assert contexts[0]["_modelInvocationReceiptAuthority"]["workflowRunId"] == "run-formal"
+    with pytest.raises(meetings.ResearchMeetingRoundError, match="different content"):
+        meeting_runtime.open_candidate_generation_meeting(
+            team_id,
+            payload,
+            agent_runner=capture_runner,
+            background=False,
+            _model_invocation_receipt_authority=_receipt_authority(
+                team_id,
+                run_id="run-other",
+            ),
+        )
 
 
 def test_candidate_generation_prompt_includes_canonical_question_context(

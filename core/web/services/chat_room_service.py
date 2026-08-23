@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -863,6 +864,7 @@ def start_chat_room_round(
     background: bool = False,
     lightweight_response: bool = False,
     max_topic_lines: int = 6,
+    _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     submit_started_at = _perf_counter()
     submit_timings: dict[str, Any] = {}
@@ -873,6 +875,15 @@ def start_chat_room_round(
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 
     runner = agent_runner or _run_participant_agent
+    if _model_invocation_receipt_authority is not None and not isinstance(
+        _model_invocation_receipt_authority, Mapping
+    ):
+        raise ChatRoomValidationError("model invocation receipt authority must be an object")
+    receipt_authority = (
+        dict(_model_invocation_receipt_authority)
+        if isinstance(_model_invocation_receipt_authority, Mapping)
+        else None
+    )
     if background and not _try_acquire_chat_room_inflight():
         # Reject before any durable round write so the room stays clean.
         raise ChatRoomBusyError(
@@ -1104,6 +1115,7 @@ def start_chat_room_round(
                 speakers,
                 runner,
                 lang,
+                receipt_authority,
             )
             inflight_submitted = True
             submit_timings["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
@@ -1144,6 +1156,7 @@ def start_chat_room_round(
             speakers,
             runner,
             lang,
+            receipt_authority,
         )
 
 
@@ -1186,6 +1199,7 @@ def _submit_chat_room_round_background(
     speakers: list[dict[str, Any]],
     runner: AgentRunner,
     lang: str,
+    receipt_authority: dict[str, Any] | None,
 ) -> None:
     """Submit the worker; the wrapper always releases the inflight slot.
 
@@ -1202,6 +1216,7 @@ def _submit_chat_room_round_background(
         speakers,
         runner,
         lang,
+        receipt_authority,
         _perf_counter(),
     )
 
@@ -1492,6 +1507,7 @@ def _run_chat_room_round_background(
     speakers: list[dict[str, Any]],
     runner: AgentRunner,
     lang: str,
+    receipt_authority: dict[str, Any] | None = None,
     submitted_at_monotonic: float | None = None,
 ) -> None:
     worker_started_at = _perf_counter()
@@ -1508,7 +1524,16 @@ def _run_chat_room_round_background(
         lifecycle=True,
     )
     try:
-        _execute_chat_room_round(room_id, round_id, room, round_payload, speakers, runner, lang)
+        _execute_chat_room_round(
+            room_id,
+            round_id,
+            room,
+            round_payload,
+            speakers,
+            runner,
+            lang,
+            receipt_authority,
+        )
     except Exception as exc:
         _fail_chat_room_round(room_id, round_id, room, round_payload, exc, lang=lang)
 
@@ -1521,6 +1546,7 @@ def _execute_chat_room_round(
     speakers: list[dict[str, Any]],
     runner: AgentRunner,
     lang: str,
+    receipt_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     round_mode = str(round_payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
     round_purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
@@ -1539,6 +1565,11 @@ def _execute_chat_room_round(
             participant=participant,
             prior_messages=messages,
         )
+        round_config = (
+            round_payload.get("config")
+            if isinstance(round_payload.get("config"), dict)
+            else {}
+        )
         context = {
             "roomId": normalized_room_id,
             "roundId": round_id,
@@ -1549,6 +1580,11 @@ def _execute_chat_room_round(
             if isinstance(round_payload.get("caseState"), dict)
             else {},
             "speakerIndex": index,
+            "meetingRoundId": str(round_config.get("meetingRoundId") or "").strip(),
+            "meetingType": str(round_config.get("meetingType") or "").strip().lower(),
+            "teamId": str(round_config.get("teamId") or "").strip(),
+            "questionId": str(round_config.get("question") or "").strip().upper(),
+            "_modelInvocationReceiptAuthority": receipt_authority,
         }
         prompt_build_ms = _elapsed_ms(speaker_started_at)
         context["speakerStartedAtMonotonic"] = speaker_started_at
@@ -2162,6 +2198,13 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     round_id = str(context.get("roundId") or "").strip()
     participant_id = str(participant.get("participantId") or agent_id or session_id).strip()
     turn_identity = f"chat-room:{round_id}:{participant_id}"
+    from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+        build_speaker_receipt_context,
+    )
+
+    receipt_context = build_speaker_receipt_context(
+        participant, context, session_id=session_id, turn_identity=turn_identity
+    )
     stage_started_at = _perf_counter()
     agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     if agent_id and not agent:
@@ -2268,15 +2311,31 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
             stage_started_at = _perf_counter()
-            result = run_existing_agent_single_turn(
-                agent_runtime,
-                initial_prompt=prompt,
-                disable_tools=True,
-                turn_identity=turn_identity,
-                interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
-                chat_history=canonical_chat_history,
-            )
+            from core.llm.client import model_invocation_receipt_context_scope
+
+            with model_invocation_receipt_context_scope(receipt_context):
+                result = run_existing_agent_single_turn(
+                    agent_runtime,
+                    initial_prompt=prompt,
+                    disable_tools=True,
+                    turn_identity=turn_identity,
+                    interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                    chat_history=canonical_chat_history,
+                )
             timings["llmElapsedMs"] = _elapsed_ms(stage_started_at)
+            if receipt_context is not None:
+                from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+                    register_speaker_receipts,
+                )
+
+                register_speaker_receipts(
+                    project_root=PROJECT_ROOT,
+                    team_id=str(context.get("teamId") or "").strip(),
+                    question_id=str(context.get("questionId") or "").strip().upper(),
+                    workflow_run_id=str(receipt_context.get("receiptRunId") or "").strip(),
+                    session_id=session_id,
+                    turn_identity=turn_identity,
+                )
     if agent_context is not None and agent_context.agent_id:
         stage_started_at = _perf_counter()
         record_agent_turn_result(

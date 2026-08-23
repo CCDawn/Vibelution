@@ -154,6 +154,7 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
             "providerId": "default",
             "modelId": "qwen-plus",
         },
+        "outcomeKinds": ["candidate"],
         "outputRef": "artifact://output-1",
     }
 
@@ -269,7 +270,7 @@ def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
 
     receipt = captured[-1].model_invocation_receipt
     assert receipt["scope"]["workflowRunId"] == "workflow-run-1"
-    assert receipt["metadata"]["outcomeKinds"] == ["candidate"]
+    assert list(receipt["metadata"]["outcomeKinds"]) == ["candidate"]
     assert receipt["tokenUsage"] == {
         "inputTokens": 7,
         "outputTokens": 3,

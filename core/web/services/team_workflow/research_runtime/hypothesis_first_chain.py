@@ -680,6 +680,14 @@ def open_review_meeting_for_selection(
     question_id = str(selection_record.get("questionId") or "").strip()
     if not question_id:
         raise ContractValidationError("selection requires a questionId")
+    from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+        resolve_active_question_authority,
+    )
+
+    receipt_authority = resolve_active_question_authority(
+        normalized_team_id,
+        question_id,
+    )
     normalized_round_index = max(1, int(round_index or 1))
     normalized_meeting_round_id = (
         str(meeting_round_id or "").strip()
@@ -700,6 +708,12 @@ def open_review_meeting_for_selection(
         == HYPOTHESIS_REVIEW_MEETING_TYPE
         and _normalized_str_list(existing_round.get("chatRoomRoundIds"))
     ):
+        meeting_runtime._require_matching_model_invocation_receipt_authority(
+            existing_round,
+            receipt_authority,
+            team_id=normalized_team_id,
+            question_id=question_id,
+        )
         link = _record_review_round_link(
             normalized_team_id,
             meeting_round_id=normalized_meeting_round_id,
@@ -765,6 +779,7 @@ def open_review_meeting_for_selection(
         agent_runner=agent_runner,
         background=background,
         candidate_contexts=candidate_contexts,
+        _model_invocation_receipt_authority=receipt_authority,
     )
     link = _record_review_round_link(
         normalized_team_id,
@@ -1070,6 +1085,7 @@ def open_candidate_generation_meeting(
     *,
     agent_runner: Any = None,
     background: bool = True,
+    _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open (or reuse) the round-0 candidate-generation discussion.
 
@@ -1121,6 +1137,12 @@ def open_candidate_generation_meeting(
     if open_meeting is not None and _normalized_str_list(
         open_meeting.get("chatRoomRoundIds")
     ):
+        meeting_runtime._require_matching_model_invocation_receipt_authority(
+            open_meeting,
+            _model_invocation_receipt_authority,
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
+        )
         bound_round_ids = _normalized_str_list(open_meeting.get("chatRoomRoundIds"))
         return {
             "schemaVersion": SCHEMA_VERSION,
@@ -1153,6 +1175,12 @@ def open_candidate_generation_meeting(
         has_candidates = candidate_count >= 2
         if has_candidates:
             existing = meetings[-1]
+            meeting_runtime._require_matching_model_invocation_receipt_authority(
+                existing,
+                _model_invocation_receipt_authority,
+                team_id=normalized_team_id,
+                question_id=normalized_question_id,
+            )
             return {
                 "schemaVersion": SCHEMA_VERSION,
                 "teamId": normalized_team_id,
@@ -1182,6 +1210,7 @@ def open_candidate_generation_meeting(
         payload,
         agent_runner=agent_runner,
         background=background,
+        _model_invocation_receipt_authority=_model_invocation_receipt_authority,
     )
     return {
         **opened,

@@ -84,7 +84,7 @@ class _Harness:
         self.launch_failures: set[str] = set()
         monkeypatch.setattr(
             svc,
-            "team_workspace_root",
+            "formal_team_workspace_root",
             lambda team_id: tmp_path / "teams" / team_id,
         )
         monkeypatch.setattr(
@@ -698,10 +698,14 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
     class _FakeLlm:
         model_library: ClassVar[dict[str, object]] = {
-            "qwen-plus": {"upstream_id": "qwen-plus"},
-            "qwen-max": {"upstream_id": "qwen-max"},
-            "gpt-5": {"upstream_id": "gpt-5"},
-            "qwen-alias": {"upstream_id": "gpt-5"},
+            "dashscope/qwen-plus": {"upstream_id": "qwen-plus"},
+            "aliyun/qwen-plus": {"upstream_id": "qwen-plus"},
+            "aliyun/qwen-max": {"upstream_id": "qwen-max"},
+            "aliyun/gpt-5": {"upstream_id": "gpt-5"},
+            "aliyun/qwen-alias": {"upstream_id": "gpt-5"},
+            "relay/qwen-plus": {"upstream_id": "qwen-plus"},
+            "default-dashscope/qwen-plus": {"upstream_id": "qwen-plus"},
+            "forged/qwen-plus": {"upstream_id": "qwen-plus"},
         }
 
         @staticmethod
@@ -752,7 +756,10 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref=model_by_agent[agent["agentId"]][1],
+            model_ref=(
+                f"{model_by_agent[agent['agentId']][0]}/"
+                f"{model_by_agent[agent['agentId']][1]}"
+            ),
             model_id=model_by_agent[agent["agentId"]][1],
             model=model_by_agent[agent["agentId"]][1],
             provider_id=model_by_agent[agent["agentId"]][0],
@@ -778,7 +785,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="gpt-5",
+            model_ref="aliyun/gpt-5",
             model_id="gpt-5",
             model="gpt-5",
             provider_id="aliyun",
@@ -792,7 +799,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="qwen-alias",
+            model_ref="aliyun/qwen-alias",
             model_id="qwen-alias",
             model="gpt-5",
             provider_id="aliyun",
@@ -806,7 +813,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="qwen-plus",
+            model_ref="relay/qwen-plus",
             model_id="qwen-plus",
             model="qwen-plus",
             provider_id="relay",
@@ -832,7 +839,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="qwen-plus",
+            model_ref="default-dashscope/qwen-plus",
             model_id="qwen-plus",
             model="qwen-plus",
             provider_id="default-dashscope",
@@ -878,7 +885,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
             "resolve_agent_llm",
             lambda agent, slot, config: SimpleNamespace(
                 config=config,
-                model_ref="qwen-plus",
+                model_ref="forged/qwen-plus",
                 model_id="qwen-plus",
                 model="qwen-plus",
                 provider_id="forged",
@@ -1388,7 +1395,7 @@ def test_checkpoint_round_trip_preserves_batch_state(harness: _Harness) -> None:
     _start(harness, "real-5")
     envelope = svc._load_envelope(TEAM_ID, "real-5")
     assert envelope is not None
-    state = CatalogExecutionState.from_checkpoint(envelope["checkpoint"])
+    state = svc._state_of(envelope)
     assert state.outcome_summary()["running"] == 2
     assert state.status("SCI-096") is QuestionStatus.RUNNING
 
