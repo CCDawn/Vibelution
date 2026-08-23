@@ -82,13 +82,14 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
     if (isResearchWorkflowTeam(team)) {
       setResearchWorkspaceView("workflow");
       setTeamShellMode("board");
-      const route = isSameChallengeCupWorkspaceTeam(team.teamId, searchParams)
+      const sameChallengeCupWorkspaceTeam = isSameChallengeCupWorkspaceTeam(team.teamId, searchParams);
+      const route = sameChallengeCupWorkspaceTeam
         ? canonicalChallengeCupWorkspaceRoute(team.teamId, searchParams)
         : teamWorkspaceRoute(team.teamId);
       const params = new URLSearchParams(
         route.split("?")[1] || "",
       );
-      setSearchParams(params);
+      setSearchParams(params, { replace: sameChallengeCupWorkspaceTeam });
       return;
     }
     setResearchWorkspaceView("overview");

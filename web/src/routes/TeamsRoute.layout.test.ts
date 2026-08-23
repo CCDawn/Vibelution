@@ -291,7 +291,9 @@ describe("research project workspace", () => {
   });
 
   it("keeps one overall progress rail outside the challenge research workspace", () => {
-    expect(renderTeamsWorkbenchBoardPageSource).toContain("rail={p.teamShellRail}");
+    expect(renderTeamsWorkbenchBoardPageSource).toContain(
+      "rail={suppressOuterShellChrome ? null : p.teamShellRail}",
+    );
     expect(researchProcessWorkspaceSource).not.toContain("<ResearchProcessRail");
     expect(researchProcessWorkspaceSource).not.toContain('sidebar: { id: "rail"');
     expect(researchProcessWorkspaceSource).toContain('aside: { id: "inspector"');

@@ -206,13 +206,12 @@ export function isSameChallengeCupWorkspaceTeam(
   if (!normalizedTeamId) {
     return false;
   }
-  const currentTeamId = (
-    current.get("teamId")
-    || current.get("team")
-    || current.get("team_id")
-    || ""
-  ).trim();
-  return currentTeamId === normalizedTeamId;
+  const teamIdentifiers = ["teamId", "team", "team_id"];
+  const currentTeamIds = teamIdentifiers
+    .flatMap((key) => current.getAll(key))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return currentTeamIds.length > 0 && currentTeamIds.every((value) => value === normalizedTeamId);
 }
 
 /**

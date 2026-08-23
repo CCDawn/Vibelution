@@ -91,6 +91,7 @@ describe("createTeamsResearchNavigation", () => {
     expect(switchedParams.has("runId")).toBe(false);
     expect(switchedParams.has("node")).toBe(false);
     expect(switchedParams.has("panel")).toBe(false);
+    expect(switchToB.setSearchParamsSpy.mock.calls[0]?.[1]).toEqual({ replace: false });
 
     const sameTeam = navigationFor(`team=research-team-a&${focus}`);
     sameTeam.navigation.selectTeamRecord(researchTeam("research-team-a"));
@@ -101,5 +102,15 @@ describe("createTeamsResearchNavigation", () => {
     expect(sameTeamParams.get("runId")).toBe("run-a");
     expect(sameTeamParams.get("node")).toBe("hypothesis_design");
     expect(sameTeamParams.get("panel")).toBe("question");
+    expect(sameTeam.setSearchParamsSpy.mock.calls[0]?.[1]).toEqual({ replace: true });
+
+    const conflictingAliases = navigationFor(`teamId=research-team-a&team=research-team-b&${focus}`);
+    conflictingAliases.navigation.selectTeamRecord(researchTeam("research-team-a"));
+    const conflictingParams = conflictingAliases.setSearchParamsSpy.mock.calls[0]?.[0] as URLSearchParams;
+    expect(conflictingParams.has("questionId")).toBe(false);
+    expect(conflictingParams.has("runId")).toBe(false);
+    expect(conflictingParams.has("node")).toBe(false);
+    expect(conflictingParams.has("panel")).toBe(false);
+    expect(conflictingAliases.setSearchParamsSpy.mock.calls[0]?.[1]).toEqual({ replace: false });
   });
 });
