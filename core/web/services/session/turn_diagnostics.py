@@ -210,6 +210,15 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
 
         assistant_text = _turn_items_visible_text(assistant_message).strip()
     assistant_turn_id = s._message_turn_id(assistant_message)
+    assistant_metadata = (
+        assistant_message.get("metadata")
+        if isinstance(assistant_message, dict)
+        and isinstance(assistant_message.get("metadata"), dict)
+        else {}
+    )
+    model_invocation_receipt = assistant_metadata.get("modelInvocationReceipt")
+    if not isinstance(model_invocation_receipt, dict):
+        model_invocation_receipt = None
     marker_present = s._supervised_completion_marker_present(assistant_text)
     terminal_statuses = {
         "ready",
@@ -239,7 +248,7 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         terminal_status = "ready"
         completion_source = "assistant_marker"
         completion_recovered = True
-    return {
+    snapshot = {
         "sessionId": normalized_session_id,
         "turnId": normalized_turn_id,
         "terminal": terminal,
@@ -255,6 +264,9 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         "activeTurnId": active_turn_id,
         "turnCurrent": turn_current,
     }
+    if model_invocation_receipt is not None:
+        snapshot["modelInvocationReceipt"] = deepcopy(model_invocation_receipt)
+    return snapshot
 
 
 def create_chat_review_candidate_from_session(session_id: str) -> dict:

@@ -8,8 +8,10 @@ import json
 import os
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -72,6 +74,10 @@ _LLM_CANCEL_CHECKER_CONTEXT: ContextVar[Callable[[], str] | None] = ContextVar(
 _LLM_ROUTE_CONCURRENCY_LIMIT = 2
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
+_LLM_BACKEND_ATTEMPT_CONTEXT: ContextVar[tuple[int, int]] = ContextVar(
+    "vibelution_llm_backend_attempt",
+    default=(1, 0),
+)
 _NO_PROXY_LOCK = threading.Lock()
 _NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
 _PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
@@ -79,6 +85,42 @@ _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
+
+
+def _receipt_output_hash(outcome: TurnOutcome) -> str:
+    """Hash the canonical JSON answer when the model returned one.
+
+    Challenge output registration uses the same ``audit.output_sha256`` zeroing
+    rule. Plain text replies still receive a deterministic content digest; the
+    owning adapter may replace it with its canonical artifact hash before
+    promotion.
+    """
+
+    text = str(getattr(outcome, "final_text", "") or "")
+    candidate = text.strip()
+    if candidate.startswith("```") and candidate.endswith("```"):
+        lines = candidate.splitlines()
+        candidate = "\n".join(lines[1:-1]).strip()
+        if candidate.lower().startswith("json\n"):
+            candidate = candidate[5:].lstrip()
+    try:
+        parsed = json.loads(candidate)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        audit = parsed.setdefault("audit", {})
+        if isinstance(audit, dict):
+            audit["output_sha256"] = "0" * 64
+        material = json.dumps(
+            parsed,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    else:
+        material = text.encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
 
 
 def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = False) -> bool:
@@ -2443,6 +2485,189 @@ class LLMClient:
             lifecycle=False,
         )
 
+    def _receipt_context(
+        self,
+        metadata: Optional[Dict[str, Any]],
+        invocation_scope: Any,
+    ) -> dict[str, Any] | None:
+        """Read an explicit question-stage binding without inferring lineage."""
+
+        raw = metadata.get("modelInvocationReceiptContext") if isinstance(metadata, dict) else None
+        if not isinstance(raw, Mapping):
+            return None
+        binding_payload = raw.get("questionStageBinding") or raw.get("binding")
+        if hasattr(binding_payload, "to_dict"):
+            binding_payload = binding_payload.to_dict()
+        if not isinstance(binding_payload, Mapping):
+            return None
+        try:
+            from core.research.workflow.contracts.question_stage_binding import (
+                QuestionStageBinding,
+            )
+
+            binding = QuestionStageBinding.from_dict(binding_payload)
+        except (TypeError, ValueError, KeyError):
+            return None
+        if (
+            str(getattr(invocation_scope, "session_id", "") or "").strip()
+            != binding.session_id
+            or str(getattr(invocation_scope, "turn_id", "") or "").strip()
+            != binding.turn_id
+        ):
+            return None
+
+        authority = str(raw.get("receiptRunAuthority") or "").strip().lower()
+        receipt_run_id = str(raw.get("receiptRunId") or "").strip()
+        if authority == "question_run":
+            expected_run_id = binding.question_run_id
+        elif authority == "workflow_run":
+            expected_run_id = binding.workflow_run_id
+        elif authority == "source_run":
+            expected_run_id = str(raw.get("sourceRunId") or "").strip()
+        else:
+            return None
+        if not receipt_run_id or receipt_run_id != expected_run_id:
+            return None
+
+        policy_sha256 = str(raw.get("modelPolicySha256") or "").strip().lower()
+        output_ref = str(raw.get("outputRef") or "").strip()
+        if (
+            len(policy_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in policy_sha256)
+            or not output_ref
+        ):
+            return None
+        return {
+            "raw": dict(raw),
+            "binding": binding,
+            "receiptRunId": receipt_run_id,
+            "modelPolicySha256": policy_sha256,
+            "outputRef": output_ref,
+        }
+
+    def _attach_model_invocation_receipt(
+        self,
+        outcome: TurnOutcome,
+        *,
+        metadata: Optional[Dict[str, Any]],
+        invocation_scope: Any,
+        request_content: Any,
+        response_content: Any,
+        started_at_ms: int,
+        finished_at_ms: int,
+        attempt: int,
+        retry_count: int,
+    ) -> TurnOutcome:
+        """Attach a bounded receipt only when the caller supplied full binding."""
+
+        context = self._receipt_context(metadata, invocation_scope)
+        if context is None:
+            return outcome
+        binding = context["binding"]
+        raw = context["raw"]
+        actual_model = str(self.profile.model or "").strip()
+        requested_model = str(raw.get("requestedModel") or actual_model).strip()
+        from core.research.workflow.contracts.model_invocation_receipt import (
+            ModelInvocationReceipt,
+            ModelInvocationStatus,
+        )
+
+        status = (
+            ModelInvocationStatus.RETRIED
+            if retry_count > 0
+            else ModelInvocationStatus.SUCCEEDED
+        )
+        try:
+            usage = raw.get("tokenUsage") if isinstance(raw.get("tokenUsage"), Mapping) else {}
+            token_usage = {
+                key: max(0, int(value or 0))
+                for key, value in {
+                    "inputTokens": usage.get("inputTokens", 0),
+                    "outputTokens": usage.get("outputTokens", 0),
+                    "totalTokens": usage.get("totalTokens", 0),
+                    "cachedInputTokens": usage.get("cachedInputTokens", 0),
+                }.items()
+            }
+            evidence_locator = (
+                dict(raw.get("evidenceLocator"))
+                if isinstance(raw.get("evidenceLocator"), Mapping)
+                else {}
+            )
+            evidence_locator.update(
+                {
+                    "kind": str(evidence_locator.get("kind") or "turn_journal"),
+                    "outputRef": context["outputRef"],
+                    "outputSha256": str(
+                        evidence_locator.get("outputSha256")
+                        or raw.get("outputSha256")
+                        or _receipt_output_hash(outcome)
+                    ).strip().lower(),
+                    "sessionId": binding.session_id,
+                    "taskId": binding.task_id,
+                    "turnId": binding.turn_id,
+                    "formalNodeId": binding.formal_node_id,
+                    "formalNodeRunId": binding.formal_node_run_id,
+                }
+            )
+            safe_metadata = {
+                "captureSource": "llm_provider_boundary",
+                "questionStage": binding.question_stage,
+                "mappingPolicyId": binding.mapping_policy_id,
+                "workflowId": binding.workflow_id,
+                "workflowVersionId": binding.workflow_version_id,
+                "formalNodeAttempt": binding.formal_node_attempt,
+                "llmPayloadTraceId": str(
+                    (metadata or {}).get("llmPayloadTraceId") or ""
+                ).strip(),
+            }
+            receipt = ModelInvocationReceipt.from_invocation(
+                receipt_id=str(
+                    raw.get("receiptId")
+                    or f"model-receipt-{getattr(invocation_scope, 'invocation_id', '')}"
+                ).strip(),
+                run_id=context["receiptRunId"],
+                node_run_id=binding.formal_node_run_id,
+                scope={
+                    "questionId": binding.question_id,
+                    "runId": context["receiptRunId"],
+                    "taskId": binding.task_id,
+                    "turnId": binding.turn_id,
+                    "stageId": binding.question_stage,
+                    "questionStage": binding.question_stage,
+                    "modelPolicySha256": context["modelPolicySha256"],
+                    "workflowRunId": binding.workflow_run_id,
+                    "workflowId": binding.workflow_id,
+                    "workflowVersionId": binding.workflow_version_id,
+                    "formalNodeId": binding.formal_node_id,
+                    "formalNodeRunId": binding.formal_node_run_id,
+                    "formalNodeAttempt": str(binding.formal_node_attempt),
+                    "sessionId": binding.session_id,
+                },
+                provider=str(self.provider.kind or "").strip(),
+                model=actual_model,
+                requested_model=requested_model,
+                status=status,
+                request_content=request_content,
+                response_content=response_content,
+                started_at_ms=max(0, int(started_at_ms)),
+                finished_at_ms=max(max(0, int(started_at_ms)), int(finished_at_ms)),
+                attempt=max(1, int(attempt)),
+                retry_count=max(0, int(retry_count)),
+                token_usage=token_usage,
+                cost=(
+                    {"estimatedCost": float(raw.get("estimatedCost") or 0.0)}
+                    if raw.get("estimatedCost") not in (None, "")
+                    else {}
+                ),
+                metadata=safe_metadata,
+                evidence_locator=evidence_locator,
+            )
+        except (TypeError, ValueError, KeyError, OverflowError):
+            # Receipt capture must never turn a successful provider response
+            # into an unbound or partially persisted official record.
+            return outcome
+        return replace(outcome, model_invocation_receipt=receipt.to_dict())
+
     def invoke_outcome(
         self,
         messages: List[Any],
@@ -2531,6 +2756,7 @@ class LLMClient:
             "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
             "retryRequestMode": "same_wire_payload",
         }
+        backend_started_at_ms = int(time.time() * 1000)
         response = self._invoke_backend_with_retry(
             payload,
             phase="invoke",
@@ -2539,6 +2765,8 @@ class LLMClient:
             tool_count=tool_count,
             metadata=event_metadata,
         )
+        backend_finished_at_ms = int(time.time() * 1000)
+        backend_attempt, backend_retry_count = _LLM_BACKEND_ATTEMPT_CONTEXT.get()
         turn_outcome = self._decode_canonical_response(
             response,
             metadata,
@@ -2611,6 +2839,17 @@ class LLMClient:
                 provider=self.provider.kind,
                 model=self.profile.model,
             )
+        turn_outcome = self._attach_model_invocation_receipt(
+            turn_outcome,
+            metadata=metadata,
+            invocation_scope=invocation_scope,
+            request_content=payload,
+            response_content=response,
+            started_at_ms=backend_started_at_ms,
+            finished_at_ms=backend_finished_at_ms,
+            attempt=backend_attempt,
+            retry_count=backend_retry_count,
+        )
         self._record_canonical_outcome(turn_outcome, phase="invoke")
         return turn_outcome
 
@@ -2761,6 +3000,7 @@ class LLMClient:
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
             try:
+                _LLM_BACKEND_ATTEMPT_CONTEXT.set((attempt, max(0, attempt - 1)))
                 _raise_if_llm_cancelled()
                 with _reserve_llm_route_slot(
                     route_key,
@@ -2774,7 +3014,9 @@ class LLMClient:
                 ):
                     _raise_if_llm_cancelled()
                     with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-                        return self._backend_for_payload(payload)(payload)
+                        response = self._backend_for_payload(payload)(payload)
+                        _LLM_BACKEND_ATTEMPT_CONTEXT.set((attempt, max(0, attempt - 1)))
+                        return response
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
             except Exception as exc:
@@ -2908,6 +3150,7 @@ class LLMClient:
         invocation_scope: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
         scene_identity: Optional[Dict[str, Any]] = None,
+        receipt_builder: Optional[Callable[[TurnOutcome, Any], TurnOutcome]] = None,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
         _raise_if_llm_cancelled()
         emitted = False
@@ -2918,6 +3161,7 @@ class LLMClient:
             iterator: Any = None
             normalized_iterator: Any = None
             pending_reasoning: list[StreamChunk] = []
+            provider_response_capture: list[Any] = []
 
             def flush_pending_reasoning() -> Iterator[StreamChunk]:
                 nonlocal emitted
@@ -2941,6 +3185,7 @@ class LLMClient:
                         nonlocal provider_usage
                         for raw_event in iterator:
                             raw_dict = self._provider_object_to_dict(raw_event) or {}
+                            provider_response_capture.append(raw_dict)
                             http_timings = current_stream_http_timings()
                             if http_timings is not None and http_timings.first_raw_event_ms is None:
                                 event_kind = classify_raw_stream_event(raw_dict)
@@ -3024,6 +3269,11 @@ class LLMClient:
                                 yield projected
                             _raise_if_llm_cancelled()
                         turn_outcome = normalized_iterator.outcome
+                        if receipt_builder is not None:
+                            turn_outcome = receipt_builder(
+                                turn_outcome,
+                                provider_response_capture,
+                            )
                         if turn_outcome.tool_calls:
                             yield from flush_pending_reasoning()
                             emitted = True
@@ -3253,6 +3503,17 @@ class LLMClient:
                             "invocationId": event_metadata.get("invocationId", ""),
                             "attempt": attempt,
                         },
+                        receipt_builder=lambda outcome, provider_events: self._attach_model_invocation_receipt(
+                            outcome,
+                            metadata=metadata,
+                            invocation_scope=invocation_scope,
+                            request_content=payload,
+                            response_content={"providerEvents": provider_events},
+                            started_at_ms=int(start * 1000),
+                            finished_at_ms=int(time.time() * 1000),
+                            attempt=attempt,
+                            retry_count=max(0, attempt - 1),
+                        ),
                     )
                     for event in events:
                         _raise_if_llm_cancelled()

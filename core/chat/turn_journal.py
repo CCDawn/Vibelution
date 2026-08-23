@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -823,7 +824,7 @@ def _canonical_item_payload(protocol_event: Any, *, outcome: Any) -> dict[str, A
         and channel == "answer"
         and phase == "final_answer"
     )
-    return {
+    payload = {
         "schemaVersion": 2,
         "sessionId": str(getattr(protocol_event, "session_id", "") or "").strip(),
         "turnId": str(getattr(protocol_event, "turn_id", "") or "").strip(),
@@ -844,6 +845,18 @@ def _canonical_item_payload(protocol_event: Any, *, outcome: Any) -> dict[str, A
         "toolName": tool_name,
         "diagnosticSummary": diagnostic_summary,
     }
+    # The provider-bound receipt is an audit fact for the canonical final
+    # answer, not model-visible content.  Keep it on the immutable item event
+    # so later projections and writeback can recover it after a process restart.
+    receipt = getattr(outcome, "model_invocation_receipt", None)
+    if (
+        isinstance(receipt, Mapping)
+        and kind == "assistant_message"
+        and channel == "answer"
+        and phase == "final_answer"
+    ):
+        payload["modelInvocationReceipt"] = dict(receipt)
+    return payload
 
 
 def append_canonical_turn_outcome(
@@ -1167,6 +1180,9 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                             },
                         }
                     )
+                    receipt = payload.get("modelInvocationReceipt")
+                    if isinstance(receipt, Mapping):
+                        messages[-1]["metadata"]["modelInvocationReceipt"] = dict(receipt)
                     final_turn_ids.add(turn_id)
                     assistant_message_index_by_turn[turn_id] = len(messages) - 1
         elif event.event_type in {EVENT_ASSISTANT_PARTIAL, EVENT_ASSISTANT_DELTA_COMMITTED}:
