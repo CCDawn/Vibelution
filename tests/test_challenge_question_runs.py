@@ -386,9 +386,29 @@ def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_p
     assert record["validation"]["schemaValidation"] == "passed"
     assert record["validation"]["citationValidation"] == "passed"
     assert record["validation"]["officialModelCall"] is True
+    assert record["validation"]["modelInvocationReceipts"] == "failed"
+    assert record["validation"]["modelInvocationReceiptIssue"] == (
+        "canonical_result_package_missing"
+    )
+    assert record["modelInvocationReceiptRefs"] == {}
     assert record["humanGates"]["approvedCount"] == 0
     assert response["summary"]["validCandidateCount"] == 1
+    assert response["summary"]["receiptReadyQuestionCount"] == 0
     assert response["summary"]["completedCount"] == 0
+
+    store_path = challenge_question_runs._store_path("research-team")
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["records"][0]["validation"]["modelInvocationReceipts"] = "passed"
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    summary = challenge_question_runs.challenge_question_run_summary("research-team")
+    assert summary["receiptReadyQuestionIds"] == []
+    assert summary["latestCandidate"]["validation"][
+        "modelInvocationReceipts"
+    ] == "failed"
+    assert summary["latestCandidate"]["validation"][
+        "modelInvocationReceiptIssue"
+    ] == "canonical_result_package_missing"
 
 
 def test_get_question_detail_returns_latest_immutable_artifact(tmp_path, monkeypatch):
@@ -588,9 +608,9 @@ def test_revised_question_run_requires_existing_parent(tmp_path, monkeypatch):
         )
 
 
-def test_summary_produces_approved_deep_experiment_ids_from_real_records(tmp_path, monkeypatch):
-    """Production summaries must derive approvedDeepExperimentQuestionIds
-    (the program projection reads it; only tests used to inject it)."""
+def test_summary_excludes_approved_runs_without_receipts_from_completion(
+    tmp_path, monkeypatch
+):
     _isolate_store(tmp_path, monkeypatch)
     for question_number in (1, 91, 96):
         output = _output(question_number, approved=True)
@@ -615,11 +635,14 @@ def test_summary_produces_approved_deep_experiment_ids_from_real_records(tmp_pat
         )
 
     summary = challenge_question_runs.challenge_question_run_summary("research-team")
-    assert summary["completedQuestionIds"] == ["SCI-001", "SCI-091", "SCI-096"]
-    assert summary["approvedDeepExperimentQuestionIds"] == ["SCI-091", "SCI-096"]
+    assert summary["receiptReadyQuestionIds"] == []
+    assert summary["completedQuestionIds"] == []
+    assert summary["approvedDeepExperimentQuestionIds"] == []
 
 
-def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypatch):
+def test_five_approved_questions_without_receipts_fail_completion_gate(
+    tmp_path, monkeypatch
+):
     _isolate_store(tmp_path, monkeypatch)
     for question_number in range(96, 101):
         output = _output(question_number, approved=True)
@@ -648,8 +671,9 @@ def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypat
     assert summary["validatedQuestionCount"] == 5
     assert summary["validatedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
     assert summary["validatedOutcomeCounts"] == {"approved": 5}
-    assert summary["completedCount"] == 5
-    assert summary["completedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
+    assert summary["receiptReadyQuestionCount"] == 0
+    assert summary["completedCount"] == 0
+    assert summary["completedQuestionIds"] == []
 
 
 def test_deferred_h4_review_preserves_revision_requested_decision(tmp_path, monkeypatch):
