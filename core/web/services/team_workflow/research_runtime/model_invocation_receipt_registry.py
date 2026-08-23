@@ -78,7 +78,11 @@ def _load(path: Path) -> dict[str, Any] | None:
 
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    # Keep the atomic sibling name short.  The receipt path already contains
+    # two SHA-256 segments, so repeating the target basename plus a full UUID
+    # can exceed the legacy Windows MAX_PATH boundary even when the final file
+    # itself is valid.
+    temporary = path.with_name(f".tmp-{uuid4().hex[:12]}")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
