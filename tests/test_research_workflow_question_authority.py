@@ -5,6 +5,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from core.research.competition.result_set import CatalogScope
+from core.research.workflow.contracts import (
+    ContractValidationError,
+    WorkflowRunInputSnapshot,
+)
+from core.research.workflow.contracts.research_scope import (
+    scope_hash_for,
+    scope_locators_for,
+)
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -14,7 +23,9 @@ from core.web.services.team_workflow.research_runtime import question_launch
 from core.web.services.team_workflow.research_runtime import (
     service as runtime_service_module,
 )
-from core.web.services.team_workflow.research_runtime.runtime_factory import build_workflow_runtime
+from core.web.services.team_workflow.research_runtime.runtime_factory import (
+    build_workflow_runtime,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     reset_research_workflow_runtime_service_for_tests,
 )
@@ -212,6 +223,146 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     assert "projectId" not in options["questions"][0]
 
 
+def test_new_question_input_freezes_typed_research_and_catalog_scopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_research_team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+
+    run_input = question_launch.build_question_run_input(
+        "research-team",
+        question_id="SCI-096",
+        safety_limits=_safety_limits(),
+    )
+
+    scope = run_input["researchScopeEnvelope"]
+    assert scope["question"] == "SCI-096"
+    assert scope["agentId"] == "operator"
+    assert scope["mode"] == "platform"
+    assert len(scope["scopeHash"]) == 64
+    assert scope["scopeHash"] in scope["artifactLocator"]
+    assert scope["scopeHash"] in scope["ledgerRoot"]
+    assert scope["scopeHash"] in scope["cacheKey"]
+    assert run_input["catalogScope"] == CatalogScope.from_tracked_resources().to_dict()
+
+    frozen = WorkflowRunInputSnapshot.from_dict(
+        {
+            **run_input,
+            "workflowVersionId": "wv-test",
+            "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "agent-source"}],
+            "createdAt": "2026-08-23T00:00:00Z",
+        }
+    )
+    assert frozen.researchScopeEnvelope == scope
+    assert frozen.catalogScope == run_input["catalogScope"]
+    assert frozen.to_dict()["researchScopeEnvelope"] == scope
+    assert frozen.to_dict()["catalogScope"] == run_input["catalogScope"]
+
+
+def test_typed_scope_snapshot_rejects_tampering_and_partial_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_research_team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    run_input = question_launch.build_question_run_input(
+        "research-team",
+        question_id="SCI-096",
+        safety_limits=_safety_limits(),
+    )
+    base = {
+        **run_input,
+        "workflowVersionId": "wv-test",
+        "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "agent-source"}],
+        "createdAt": "2026-08-23T00:00:00Z",
+    }
+
+    tampered_scope = {
+        **base,
+        "researchScopeEnvelope": {
+            **base["researchScopeEnvelope"],
+            "scopeHash": "0" * 64,
+        },
+    }
+    with pytest.raises(ContractValidationError, match="researchScopeEnvelope"):
+        WorkflowRunInputSnapshot.from_dict(tampered_scope)
+
+    case_tampered_scope = dict(base["researchScopeEnvelope"])
+    case_tampered_scope["question"] = "sci-096"
+    case_tampered_scope["scopeHash"] = scope_hash_for(
+        program=case_tampered_scope["program"],
+        theme=case_tampered_scope["theme"],
+        campaign=case_tampered_scope["campaign"],
+        question=case_tampered_scope["question"],
+        branch=case_tampered_scope["branch"],
+        workflow=case_tampered_scope["workflow"],
+        agent_id=case_tampered_scope["agentId"],
+        mode=case_tampered_scope["mode"],
+    )
+    case_tampered_scope.update(
+        scope_locators_for(
+            program=case_tampered_scope["program"],
+            theme=case_tampered_scope["theme"],
+            campaign=case_tampered_scope["campaign"],
+            question=case_tampered_scope["question"],
+            branch=case_tampered_scope["branch"],
+            agent_id=case_tampered_scope["agentId"],
+            scope_hash=case_tampered_scope["scopeHash"],
+        )
+    )
+    with pytest.raises(ContractValidationError, match="question must match"):
+        WorkflowRunInputSnapshot.from_dict(
+            {**base, "researchScopeEnvelope": case_tampered_scope}
+        )
+
+    tampered_catalog = {
+        **base,
+        "catalogScope": {
+            **base["catalogScope"],
+            "scope_hash": "0" * 64,
+        },
+    }
+    with pytest.raises(ContractValidationError, match="catalogScope"):
+        WorkflowRunInputSnapshot.from_dict(tampered_catalog)
+
+    partial = dict(base)
+    partial.pop("catalogScope")
+    with pytest.raises(ContractValidationError, match="catalogScope"):
+        WorkflowRunInputSnapshot.from_dict(partial)
+
+
+def test_legacy_run_input_snapshot_without_typed_scopes_remains_readable() -> None:
+    payload = {
+        "teamId": "legacy-team",
+        "projectId": "legacy-project",
+        "questionId": "legacy-question",
+        "workflowVersionId": "legacy-workflow",
+        "researchBriefHash": "a" * 64,
+        "datasetRefs": ["fixture://legacy"],
+        "metricContract": {"primary": "coverage"},
+        "constraintSnapshot": {},
+        "competitionRuleRef": "legacy-rule",
+        "competitionRuleVersion": "1",
+        "trackAndRubricSnapshot": {"track": "legacy"},
+        "researchObjectiveContract": {"question": "legacy"},
+        "sourcePolicy": {"minimumPrimarySources": 1},
+        "budgetPolicy": {"tokens": 1},
+        "stopPolicy": {"stopOnBudgetExhaustion": True},
+        "environmentSnapshotRef": "fixture://legacy-env",
+        "modelRoutingPolicy": {"reasoning": "fixture"},
+        "evaluationContract": {"minimumClaimEvidenceCoverage": 0.0},
+        "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "legacy-agent"}],
+        "createdBy": "legacy",
+        "createdAt": "2026-08-22T00:00:00Z",
+    }
+    snapshot = WorkflowRunInputSnapshot.from_dict(payload)
+    assert snapshot.researchScopeEnvelope == {}
+    assert snapshot.catalogScope == {}
+    assert "researchScopeEnvelope" not in snapshot.to_dict()
+    assert "catalogScope" not in snapshot.to_dict()
+
+
 def test_question_launch_rejects_unknown_questions_and_invalid_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -236,6 +387,8 @@ def test_question_launch_rejects_unknown_questions_and_invalid_limits(
         )
 
     assert catalog_seed["questionId"] == "SCI-097"
+    assert catalog_seed["researchScopeEnvelope"]["question"] == "SCI-097"
+    assert catalog_seed["catalogScope"] == CatalogScope.from_tracked_resources().to_dict()
     assert catalog_seed["constraintSnapshot"]["launchSource"] == "catalog"
     assert catalog_seed["constraintSnapshot"]["formalWrites"] is False
     assert "catalog_seed_not_submission_eligible" in catalog_seed["trackAndRubricSnapshot"]["blockingRules"]

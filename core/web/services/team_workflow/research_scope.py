@@ -32,6 +32,7 @@ from core.research.workflow.contracts import (
     build_campaign_activation_payload,
     scope_hash_for,
 )
+from core.research.workflow.contracts.research_scope import scope_locators_for
 from core.web.services.team_workflow.research_projects import (
     get_theme_activation,
     record_theme_campaign_activation,
@@ -241,21 +242,39 @@ def _derive_mode(
 
 
 def _artifact_locator(identity: dict[str, str], scope_hash: str) -> str:
-    return (
-        f"research-artifact://{identity['program']}/{identity['theme']}/"
-        f"{identity['campaign']}/{identity['branch']}/{identity['question']}/{scope_hash}"
-    )
+    return scope_locators_for(
+        program=identity["program"],
+        theme=identity["theme"],
+        campaign=identity["campaign"],
+        question=identity["question"],
+        branch=identity["branch"],
+        agent_id="",
+        scope_hash=scope_hash,
+    )["artifactLocator"]
 
 
 def _ledger_root(identity: dict[str, str], scope_hash: str) -> str:
-    return (
-        f"research-ledger://{identity['program']}/{identity['theme']}/"
-        f"{identity['campaign']}/{scope_hash}"
-    )
+    return scope_locators_for(
+        program=identity["program"],
+        theme=identity["theme"],
+        campaign=identity["campaign"],
+        question=identity["question"],
+        branch=identity["branch"],
+        agent_id="",
+        scope_hash=scope_hash,
+    )["ledgerRoot"]
 
 
 def _cache_key(identity: dict[str, str], agent_id: str, scope_hash: str) -> str:
-    return f"scope:{scope_hash}:{identity['branch']}:{agent_id}"
+    return scope_locators_for(
+        program=identity["program"],
+        theme=identity["theme"],
+        campaign=identity["campaign"],
+        question=identity["question"],
+        branch=identity["branch"],
+        agent_id=agent_id,
+        scope_hash=scope_hash,
+    )["cacheKey"]
 
 
 def resolve_research_scope(
@@ -292,6 +311,15 @@ def resolve_research_scope(
         agent_id=agent,
         mode=mode.value,
     )
+    locators = scope_locators_for(
+        program=identity["program"],
+        theme=identity["theme"],
+        campaign=identity["campaign"],
+        question=identity["question"],
+        branch=identity["branch"],
+        agent_id=agent,
+        scope_hash=scope_hash,
+    )
     envelope = ResearchScopeEnvelope(
         program=identity["program"],
         theme=identity["theme"],
@@ -302,9 +330,9 @@ def resolve_research_scope(
         agentId=agent,
         mode=mode,
         scopeHash=scope_hash,
-        artifactLocator=_artifact_locator(identity, scope_hash),
-        ledgerRoot=_ledger_root(identity, scope_hash),
-        cacheKey=_cache_key(identity, agent, scope_hash),
+        artifactLocator=locators["artifactLocator"],
+        ledgerRoot=locators["ledgerRoot"],
+        cacheKey=locators["cacheKey"],
     )
     return envelope.to_dict()
 
