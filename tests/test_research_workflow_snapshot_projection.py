@@ -20,8 +20,10 @@ from core.web.services.team_workflow.research_runtime.projection_builder import 
 from core.web.services.team_workflow.research_runtime.query_service import (
     TeamScopeMismatchError,
     WorkflowLedgerUnavailable,
-    WorkflowQueryError,
     WorkflowQueryService,
+    _delivery_projection_from_events,
+    _launch_context_from_run,
+    _read_bounded_events,
 )
 from tests._support.command_helpers import CommandHarness
 from tests._support.readiness_fakes import FakeDomainContext
@@ -31,9 +33,7 @@ from tests._support.workflow_ledger_helpers import (
     build_command_record,
     build_event_record,
     build_run_record,
-    open_ledger_store,
 )
-
 
 FIXED_GENERATED_AT = "2026-08-12T14:00:00.000Z"
 
@@ -373,3 +373,966 @@ def test_snapshot_projects_frozen_agent_bindings(tmp_path: Path) -> None:
         ]
     finally:
         harness.close()
+
+
+def test_snapshot_projects_formal_runtime_semantics_for_waiting_human() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-human"),
+        status="waiting_human",
+        active_node_id="protocol_freeze",
+    )
+    attempt = build_attempt_record(
+        node_run_id="nr-run-v2-human-protocol_freeze-a1",
+        run_id=run.run_id,
+        node_id="protocol_freeze",
+        actor_kind="human",
+        status="waiting_human",
+        command_id="cmd-v2-human",
+    )
+    task = {
+        "taskId": "task-v2-human",
+        "runId": run.run_id,
+        "nodeRunId": attempt.node_run_id,
+        "nodeId": attempt.node_id,
+        "handoffId": "handoff-v2-human",
+        "taskKind": "protocol_freeze",
+        "status": "pending",
+        "createdAtMs": FIXED_NOW_MS,
+    }
+
+    snapshot = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(attempt,),
+            pending_human_tasks=(task,),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    )
+
+    payload = snapshot.to_dict()
+    assert payload["schemaVersion"] == 2
+    assert payload["currentTask"] == {
+        "key": "task-v2-human",
+        "nodeId": "protocol_freeze",
+        "stageId": "experiment_design",
+        "nodeRunId": attempt.node_run_id,
+        "attempt": 1,
+        "actorKind": "human",
+        "taskId": "task-v2-human",
+        "status": "waiting_human",
+        "state": "waiting_user",
+        "kind": "human_gate",
+        "label": "协议冻结",
+        "detail": None,
+        "responsibility": "user",
+        "maxAttempts": None,
+        "automaticNextStep": None,
+        "blockedReason": None,
+        "recovery": {
+            "status": "none",
+            "retryable": False,
+            "code": None,
+            "detail": None,
+            "retryScope": "none",
+            "recoveryPoint": None,
+            "nextRetryAt": None,
+            "requiresOperator": False,
+            "afterSubmit": None,
+        },
+        "authority": "formal_runtime",
+    }
+    assert payload["progress"]["currentNodeId"] == "protocol_freeze"
+    assert payload["progress"]["total"] == len(snapshot.definition["nodes"])
+    assert payload["recovery"]["status"] == "none"
+    assert payload["retry"]["available"] is False
+
+
+@pytest.mark.parametrize(
+    ("status", "active_node_id", "attempt_status", "expected_task_status"),
+    [
+        ("created", None, None, None),
+        ("running", "source_finding", "running", "running"),
+        ("succeeded", None, "succeeded", None),
+    ],
+)
+def test_snapshot_projects_no_active_auto_running_and_completed_states(
+    status: str,
+    active_node_id: str | None,
+    attempt_status: str | None,
+    expected_task_status: str | None,
+) -> None:
+    run = replace(
+        build_run_record(run_id=f"run-v2-{status}"),
+        status=status,
+        active_node_id=active_node_id,
+    )
+    attempts = ()
+    if attempt_status is not None:
+        attempts = (
+            build_attempt_record(
+                node_run_id=f"nr-run-v2-{status}-source_finding-a1",
+                run_id=run.run_id,
+                node_id="source_finding",
+                status=attempt_status,
+                command_id=f"cmd-v2-{status}",
+            ),
+        )
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=attempts,
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    if expected_task_status is None:
+        if status == "succeeded":
+            assert payload["currentTask"]["state"] == "completed"
+        else:
+            assert payload["currentTask"] is None
+    else:
+        assert payload["currentTask"]["status"] == expected_task_status
+        assert payload["currentTask"]["key"] == (
+            f"nr-run-v2-{status}-source_finding-a1"
+        )
+        assert payload["currentTask"]["responsibility"] == "system"
+        assert payload["currentTask"]["automaticNextStep"] is None
+    assert payload["progress"]["status"] == (
+        "not_started" if status == "created" else
+        "auto_running" if status == "running" else
+        "completed"
+    )
+
+
+def test_snapshot_does_not_guess_auto_running_from_history_only() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-history-only"),
+        status="running",
+        active_node_id=None,
+    )
+    historical_attempt = build_attempt_record(
+        node_run_id="nr-v2-history-only-source-finding",
+        run_id=run.run_id,
+        node_id="source_finding",
+        status="succeeded",
+        command_id="cmd-v2-history-only",
+    )
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(historical_attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+
+    assert payload["currentTask"] is None
+    assert payload["progress"]["status"] == "unknown"
+
+
+def test_snapshot_projects_retryable_and_terminal_blocked_semantics() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    retryable_run = replace(
+        build_run_record(run_id="run-v2-retryable"),
+        status="blocked",
+        active_node_id="source_extraction",
+        blocked_problem_json=json.dumps(
+            {
+                "code": "provider_timeout",
+                "detail": "upstream timed out",
+                "failureClass": "provider_transport",
+                "message": "Provider did not answer before the deadline",
+                "blockerIds": ["provider-unavailable"],
+                "retryable": True,
+            }
+        ),
+    )
+    retryable_attempt = build_attempt_record(
+        node_run_id="nr-run-v2-retryable-source_extraction-a1",
+        run_id=retryable_run.run_id,
+        node_id="source_extraction",
+        status="failed",
+        command_id="cmd-v2-retryable",
+        problem_json=json.dumps(
+            {
+                "code": "provider_timeout",
+                "detail": "upstream timed out",
+                "failureClass": "provider_transport",
+                "message": "Provider did not answer before the deadline",
+                "blockerIds": ["attempt-timeout"],
+                "retryable": True,
+            }
+        ),
+    )
+    retry_offer = CommandOffer(
+        command=WorkflowCommandKind.RETRY_NODE,
+        node_id="source_extraction",
+        available=True,
+        label="重试 资料提炼",
+        reason_code="retry_available",
+        blocker_ids=("retry-budget-ready",),
+        idempotency_key="offer:retryable",
+        expected_run_version=retryable_run.run_version,
+        payload={"retryKind": "same_node"},
+    )
+    retryable = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=retryable_run,
+            definition=definition,
+            attempts=(retryable_attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(retry_offer,),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert retryable["currentTask"]["status"] == "blocked"
+    assert retryable["currentTask"]["key"] == retryable_attempt.node_run_id
+    assert retryable["currentTask"]["responsibility"] == "user"
+    assert retryable["currentTask"]["blockedReason"] == {
+        "code": "provider_timeout",
+        "detail": "upstream timed out",
+        "retryable": True,
+        "failureClass": "provider_transport",
+        "message": "Provider did not answer before the deadline",
+        "blockerIds": ["attempt-timeout", "retry-budget-ready"],
+    }
+    assert retryable["retry"] == {
+        "available": True,
+        "command": "retry_node",
+        "nodeId": "source_extraction",
+        "reasonCode": "retry_available",
+        "idempotencyKey": "offer:retryable",
+        "expectedRunVersion": retryable_run.run_version,
+    }
+    assert retryable["recovery"] == {
+        "status": "retryable",
+        "retryable": True,
+        "code": "provider_timeout",
+        "detail": "upstream timed out",
+        "retryScope": "task",
+        "recoveryPoint": "source_extraction",
+        "nextRetryAt": None,
+        "requiresOperator": False,
+        "afterSubmit": None,
+    }
+    assert retryable["currentTask"]["recovery"] == {
+        "status": "retryable",
+        "retryable": True,
+        "code": "provider_timeout",
+        "detail": "upstream timed out",
+        "retryScope": "task",
+        "recoveryPoint": "source_extraction",
+        "nextRetryAt": None,
+        "requiresOperator": False,
+        "afterSubmit": None,
+    }
+
+    terminal_run = replace(
+        retryable_run,
+        run_id="run-v2-terminal",
+        terminal_reason="operator_cancelled",
+        blocked_problem_json=json.dumps(
+            {
+                "code": "operator_cancelled",
+                "detail": "operator stopped the run",
+                "retryable": False,
+            }
+        ),
+    )
+    terminal_attempt = replace(
+        retryable_attempt,
+        run_id=terminal_run.run_id,
+        node_run_id="nr-run-v2-terminal-source_extraction-a1",
+        problem_json=terminal_run.blocked_problem_json,
+    )
+    terminal = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=terminal_run,
+            definition=definition,
+            attempts=(terminal_attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(retry_offer,),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert terminal["retry"]["available"] is False
+    assert terminal["recovery"]["status"] == "terminal"
+    assert terminal["recovery"]["retryable"] is False
+    assert terminal["currentTask"]["responsibility"] == "operator"
+    assert terminal["currentTask"]["recovery"]["retryScope"] == "none"
+    assert terminal["currentTask"]["recovery"]["recoveryPoint"] is None
+    assert terminal["currentTask"]["recovery"]["requiresOperator"] is True
+
+
+def test_snapshot_live_attempt_owns_auto_running_state_over_start_offer() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-live-with-start-offer"),
+        status="running",
+        active_node_id="source_finding",
+    )
+    attempt = build_attempt_record(
+        node_run_id="nr-v2-live-with-start-offer",
+        run_id=run.run_id,
+        node_id="source_finding",
+        status="running",
+        actor_kind="agent",
+    )
+    offer = CommandOffer(
+        command=WorkflowCommandKind.START_NODE,
+        node_id="source_finding",
+        available=True,
+        label="启动资料发现",
+        reason_code="start_available",
+        blocker_ids=(),
+        idempotency_key="offer:live-start",
+        expected_run_version=run.run_version,
+    )
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(offer,),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert payload["currentTask"]["state"] == "auto_running"
+    assert payload["currentTask"]["responsibility"] == "system"
+    assert payload["currentTask"]["automaticNextStep"] is None
+
+
+def test_snapshot_ignores_stale_human_task_when_current_node_run_id_is_known() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-stale-human-task"),
+        status="running",
+        active_node_id="source_finding",
+    )
+    current_node_run_id = "nr-v2-stale-human-task-current"
+    attempt = build_attempt_record(
+        node_run_id=current_node_run_id,
+        run_id=run.run_id,
+        node_id="source_finding",
+        status="running",
+        actor_kind="agent",
+    )
+    stale_task = {
+        "taskId": "task-v2-stale-human",
+        "runId": run.run_id,
+        "nodeRunId": "nr-v2-stale-human-task-old",
+        "nodeId": "source_finding",
+        "taskKind": "old_gate",
+        "status": "pending",
+        "createdAtMs": FIXED_NOW_MS - 100,
+    }
+    current_task = {
+        "taskId": "task-v2-current-human",
+        "runId": run.run_id,
+        "nodeRunId": current_node_run_id,
+        "nodeId": "source_finding",
+        "taskKind": "current_gate",
+        "status": "pending",
+        "createdAtMs": FIXED_NOW_MS,
+    }
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(attempt,),
+            pending_human_tasks=(stale_task,),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+
+    assert payload["currentTask"]["state"] == "auto_running"
+
+    exact_payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(attempt,),
+            pending_human_tasks=(stale_task, current_task),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert exact_payload["currentTask"]["state"] == "waiting_user"
+    assert exact_payload["currentTask"]["taskId"] == "task-v2-current-human"
+
+
+def test_snapshot_current_task_key_uses_formal_identity_priority_and_no_role_key() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    run = replace(
+        build_run_record(run_id="run-v2-key-priority"),
+        status="waiting_human",
+        active_node_id="protocol_freeze",
+    )
+    attempt = build_attempt_record(
+        node_run_id="nr-v2-key-priority",
+        run_id=run.run_id,
+        node_id="protocol_freeze",
+        status="waiting_human",
+        actor_kind="human",
+    )
+    task = {
+        "taskId": "task-v2-key-priority",
+        "nodeRunId": attempt.node_run_id,
+        "nodeId": attempt.node_id,
+        "roleKey": "must-not-be-used-as-task-key",
+    }
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=definition,
+            attempts=(attempt,),
+            pending_human_tasks=(task,),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert payload["currentTask"]["key"] == "task-v2-key-priority"
+    assert payload["currentTask"]["responsibility"] == "user"
+    assert "roleKey" not in payload["currentTask"]
+
+
+def test_snapshot_unknown_recovery_scope_is_fail_closed_without_retry_offer() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-unknown-recovery"),
+        status="blocked",
+        active_node_id="source_extraction",
+        blocked_problem_json=json.dumps(
+            {
+                "code": "provider_timeout",
+                "detail": "unknown retry authority",
+                "retryable": True,
+            }
+        ),
+    )
+    attempt = build_attempt_record(
+        node_run_id="nr-v2-unknown-recovery",
+        run_id=run.run_id,
+        node_id="source_extraction",
+        status="blocked",
+        problem_json=run.blocked_problem_json,
+    )
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert payload["currentTask"]["state"] == "blocked_terminal"
+    assert payload["currentTask"]["responsibility"] == "operator"
+    assert payload["currentTask"]["recovery"]["retryScope"] == "none"
+    assert payload["currentTask"]["recovery"]["recoveryPoint"] is None
+    assert payload["currentTask"]["recovery"]["requiresOperator"] is True
+
+
+def test_snapshot_projects_artifacts_delivery_and_launch_context() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-delivery"),
+        status="succeeded",
+        active_node_id=None,
+        input_snapshot_json=json.dumps(
+            {
+                "teamId": "research-team",
+                "projectId": "challenge-sci-096",
+                "questionId": "SCI-096",
+                "sourceCollectionRunId": "source-run-1",
+                "constraintSnapshot": {"launchSource": "catalog"},
+            }
+        ),
+    )
+    artifact = {
+        "receiptId": "receipt-v2-1",
+        "nodeRunId": "nr-result-package-1",
+        "artifactKind": "research_result_package",
+        "canonicalRef": "workflow://research_result_package/result-v2",
+        "artifactVersion": "1.0.0",
+        "sha256": "b" * 64,
+        "domainRevision": "rev-1",
+        "materialized": True,
+        "verifiedAtMs": FIXED_NOW_MS,
+    }
+    snapshot = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            artifact_receipts=(artifact,),
+            delivery_status="succeeded",
+            launch_context={
+                "source": "catalog",
+                "sourceCollectionRunId": "source-run-1",
+                "authorizationId": "auth-1",
+            },
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert snapshot["deliveryStatus"] == "succeeded"
+    assert snapshot["artifactSummary"] == {
+        "count": 1,
+        "materializedCount": 1,
+        "kinds": ["research_result_package"],
+        "finalArtifactId": None,
+        "finalArtifactLocator": None,
+        "refs": [
+            {
+                "receiptId": "receipt-v2-1",
+                "nodeRunId": "nr-result-package-1",
+                "kind": "research_result_package",
+                "version": "1.0.0",
+                "canonicalRef": "workflow://research_result_package/result-v2",
+                "sha256": "b" * 64,
+                "domainRevision": "rev-1",
+                "materialized": True,
+                "verifiedAtMs": FIXED_NOW_MS,
+            }
+        ],
+    }
+    assert snapshot["launchContext"] == {
+        "source": "catalog",
+        "sourceCollectionRunId": "source-run-1",
+        "authorizationId": "auth-1",
+        "planId": None,
+        "questionId": "SCI-096",
+        "hypothesisSelectionId": None,
+        "catalogAuthorizationId": "auth-1",
+        "readinessReportSha256": None,
+        "chainCorrelationId": None,
+        "inputSnapshotHash": "a" * 64,
+    }
+
+
+def test_snapshot_v2_current_task_and_stage_progress_are_explicit() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    run = replace(
+        build_run_record(run_id="run-v2-explicit-task"),
+        status="created",
+        active_node_id="source_finding",
+        safety_limits_json=json.dumps({"maxAttempts": 4}),
+    )
+    offer = CommandOffer(
+        command=WorkflowCommandKind.START_NODE,
+        node_id="source_finding",
+        available=True,
+        label="启动 资料寻找",
+        reason_code="ready",
+        blocker_ids=(),
+        idempotency_key="offer:explicit-start",
+        expected_run_version=run.run_version,
+        payload={},
+    )
+
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=definition,
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(offer,),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+
+    task = payload["currentTask"]
+    assert task is not None
+    assert task["key"] == "offer:explicit-start"
+    assert task["stageId"] == "knowledge_collection"
+    assert task["state"] == "waiting_user"
+    assert task["responsibility"] == "user"
+    assert task["maxAttempts"] == 4
+    assert task["automaticNextStep"] is None
+    assert task["blockedReason"] is None
+    assert task["recovery"] == {
+        "status": "none",
+        "retryable": False,
+        "code": None,
+        "detail": None,
+        "retryScope": "none",
+        "recoveryPoint": None,
+        "nextRetryAt": None,
+        "requiresOperator": False,
+        "afterSubmit": None,
+    }
+
+    progress = payload["progress"]
+    assert progress["status"] == "waiting_user"
+    assert progress["currentStageId"] == "knowledge_collection"
+    assert progress["completedNodes"] == 0
+    assert progress["totalNodes"] == len(definition.nodes)
+    assert progress["blockedNodes"] == 0
+    assert progress["completedNodeIds"] == []
+    assert progress["blockedNodeIds"] == []
+    assert progress["stages"] == [
+        {
+            "id": "knowledge_collection",
+            "completed": 0,
+            "total": 5,
+            "blocked": 0,
+            "state": "current",
+        },
+        {
+            "id": "experiment_design",
+            "completed": 0,
+            "total": 5,
+            "blocked": 0,
+            "state": "upcoming",
+        },
+        {
+            "id": "execution_iteration",
+            "completed": 0,
+            "total": 6,
+            "blocked": 0,
+            "state": "upcoming",
+        },
+    ]
+
+
+def test_snapshot_v2_waiting_user_stale_blocked_completed_and_terminal_states() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    waiting_run = replace(
+        build_run_record(run_id="run-v2-waiting-user"),
+        status="waiting_human",
+        active_node_id="protocol_freeze",
+    )
+    waiting_attempt = build_attempt_record(
+        node_run_id="nr-v2-waiting-user",
+        run_id=waiting_run.run_id,
+        node_id="protocol_freeze",
+        actor_kind="human",
+        status="waiting_human",
+    )
+    waiting_payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=waiting_run,
+            definition=definition,
+            attempts=(waiting_attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert waiting_payload["currentTask"]["state"] == "waiting_user"
+    assert waiting_payload["currentTask"]["responsibility"] == "user"
+    assert waiting_payload["currentTask"]["stageId"] == "experiment_design"
+    assert waiting_payload["progress"]["status"] == "waiting_user"
+    assert waiting_payload["progress"]["currentStageId"] == "experiment_design"
+
+    stale_blocked_run = replace(
+        build_run_record(run_id="run-v2-stale-blocked"),
+        status="running",
+        active_node_id="source_extraction",
+    )
+    stale_blocked_attempt = build_attempt_record(
+        node_run_id="nr-v2-stale-blocked",
+        run_id=stale_blocked_run.run_id,
+        node_id="source_extraction",
+        status="blocked",
+        problem_json=json.dumps(
+            {"code": "provider_timeout", "detail": "timed out", "retryable": True}
+        ),
+    )
+    retry_offer = CommandOffer(
+        command=WorkflowCommandKind.RETRY_NODE,
+        node_id="source_extraction",
+        available=True,
+        label="重试 资料提炼",
+        reason_code="retry_available",
+        blocker_ids=(),
+        idempotency_key="offer:stale-retry",
+        expected_run_version=stale_blocked_run.run_version,
+        payload={"retryKind": "same_node"},
+    )
+    stale_payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=stale_blocked_run,
+            definition=definition,
+            attempts=(stale_blocked_attempt,),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(retry_offer,),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert stale_payload["run"]["status"] == "blocked"
+    assert stale_payload["currentTask"]["state"] == "blocked_retryable"
+    assert stale_payload["progress"]["status"] == "blocked_retryable"
+    assert stale_payload["progress"]["blockedNodes"] == 1
+    assert stale_payload["progress"]["blockedNodeIds"] == ["source_extraction"]
+    assert stale_payload["progress"]["stages"][0]["blocked"] == 1
+
+    completed_run = replace(
+        build_run_record(run_id="run-v2-completed"),
+        status="succeeded",
+        active_node_id=None,
+    )
+    completed_payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=completed_run,
+            definition=definition,
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert completed_payload["currentTask"]["state"] == "completed"
+    assert completed_payload["currentTask"]["responsibility"] == "system"
+    assert completed_payload["progress"]["status"] == "completed"
+    assert completed_payload["progress"]["percent"] == 100
+    assert completed_payload["progress"]["completedNodes"] == len(definition.nodes)
+    assert completed_payload["progress"]["completedNodeIds"] == [
+        node.nodeId for node in definition.nodes
+    ]
+    assert all(stage["state"] == "completed" for stage in completed_payload["progress"]["stages"])
+
+    terminal_run = replace(
+        build_run_record(run_id="run-v2-terminal-explicit"),
+        status="cancelled",
+        active_node_id="source_finding",
+        terminal_reason="operator_cancelled",
+        blocked_problem_json=json.dumps(
+            {"code": "operator_cancelled", "detail": "stopped", "retryable": False}
+        ),
+    )
+    terminal_payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=terminal_run,
+            definition=definition,
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert terminal_payload["currentTask"]["state"] == "blocked_terminal"
+    assert terminal_payload["currentTask"]["responsibility"] == "operator"
+    assert terminal_payload["currentTask"]["blockedReason"] == {
+        "code": "operator_cancelled",
+        "detail": "stopped",
+        "retryable": False,
+        "failureClass": None,
+        "message": None,
+        "blockerIds": [],
+    }
+    assert terminal_payload["currentTask"]["recovery"]["status"] == "terminal"
+    assert terminal_payload["currentTask"]["recovery"]["retryScope"] == "none"
+    assert terminal_payload["currentTask"]["recovery"]["recoveryPoint"] is None
+    assert terminal_payload["currentTask"]["recovery"]["requiresOperator"] is True
+    assert terminal_payload["progress"]["status"] == "blocked_terminal"
+
+
+def test_snapshot_v2_delivery_event_is_authority_for_final_artifact_and_launch_names() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-final-artifact"),
+        status="succeeded",
+        input_snapshot_json=json.dumps(
+            {
+                "questionId": "SCI-096",
+                "hypothesisSelectionId": "selection-1",
+                "chainCorrelationId": "chain-input",
+            }
+        ),
+    )
+    locator = "delivery_orchestration_result://research-team/run-v2-final-artifact/hash"
+    receipt = {
+        "receiptId": "receipt-final",
+        "nodeRunId": "nr-result-package",
+        "artifactKind": "delivery_orchestration_result",
+        "canonicalRef": locator,
+        "artifactVersion": "1",
+        "sha256": "a" * 64,
+        "domainRevision": "rev-1",
+        "materialized": True,
+        "verifiedAtMs": FIXED_NOW_MS,
+    }
+    authorization_event = replace(
+        build_event_record(
+            sequence=2,
+            run_id=run.run_id,
+            event_type="catalog_run_authorized",
+            event_id="evt-v2-catalog-auth",
+            correlation_id="chain-event",
+        ),
+        payload_json=json.dumps(
+            {
+                "authorizationId": "catalog-auth-1",
+                "readinessReportSha256": "b" * 64,
+            }
+        ),
+    )
+    delivery_event = replace(
+        build_event_record(
+            sequence=3,
+            run_id=run.run_id,
+            event_type="delivery_orchestration_completed",
+            event_id="evt-v2-delivery-completed",
+        ),
+        payload_json=json.dumps(
+            {
+                "deliveryStatus": "succeeded",
+                "artifactKind": "delivery_orchestration_result",
+                "artifactRef": locator,
+            }
+        ),
+    )
+    delivery_status, delivery_artifact = _delivery_projection_from_events(
+        [authorization_event, delivery_event],
+        run_status=run.status,
+    )
+    launch_context = _launch_context_from_run(run, [authorization_event])
+    assert delivery_status == "succeeded"
+    assert delivery_artifact == {
+        "artifactKind": "delivery_orchestration_result",
+        "artifactRef": locator,
+        "artifactId": None,
+    }
+    assert launch_context["catalogAuthorizationId"] == "catalog-auth-1"
+    assert launch_context["readinessReportSha256"] == "b" * 64
+    assert launch_context["chainCorrelationId"] == "chain-input"
+
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            artifact_receipts=(receipt,),
+            delivery_status=delivery_status,
+            delivery_artifact=delivery_artifact,
+            launch_context=launch_context,
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    assert payload["artifactSummary"]["finalArtifactId"] == "receipt-final"
+    assert payload["artifactSummary"]["finalArtifactLocator"] == locator
+    assert payload["launchContext"] == {
+        "questionId": "SCI-096",
+        "hypothesisSelectionId": "selection-1",
+        "catalogAuthorizationId": "catalog-auth-1",
+        "readinessReportSha256": "b" * 64,
+        "chainCorrelationId": "chain-input",
+        "source": None,
+        "sourceCollectionRunId": None,
+        "authorizationId": "catalog-auth-1",
+        "planId": None,
+        "inputSnapshotHash": "a" * 64,
+    }
+
+
+def test_launch_context_does_not_invent_chain_correlation_from_event_envelope() -> None:
+    run = replace(
+        build_run_record(run_id="run-v2-generic-correlation"),
+        input_snapshot_json=json.dumps({"questionId": "SCI-096"}),
+    )
+    generic_event = replace(
+        build_event_record(
+            sequence=2,
+            run_id=run.run_id,
+            event_type="catalog_run_authorized",
+            event_id="evt-v2-generic-correlation",
+            correlation_id="transport-correlation-only",
+        ),
+        payload_json=json.dumps({"authorizationId": "catalog-auth-2"}),
+    )
+    explicit_event = replace(
+        generic_event,
+        payload_json=json.dumps(
+            {
+                "authorizationId": "catalog-auth-2",
+                "chainCorrelationId": "chain-explicit",
+            }
+        ),
+    )
+
+    assert _launch_context_from_run(run, [generic_event])["chainCorrelationId"] is None
+    assert _launch_context_from_run(run, [explicit_event])["chainCorrelationId"] == (
+        "chain-explicit"
+    )
+
+
+def test_snapshot_query_reads_bounded_event_head_and_tail() -> None:
+    class FakeRepo:
+        def __init__(self):
+            self.events = list(range(1, 601))
+            self.calls: list[tuple[int, int]] = []
+
+        def list_events(self, run_id: str, after_sequence: int = 0, limit: int = 500):
+            self.calls.append((after_sequence, limit))
+            return [
+                sequence
+                for sequence in self.events
+                if sequence > after_sequence
+            ][:limit]
+
+    repo = FakeRepo()
+    events = _read_bounded_events(repo, "run-v2-many-events", latest_sequence=600)
+    assert len(events) == 500
+    assert events[0] == 1
+    assert events[-1] == 600
+    assert repo.calls == [(0, 250), (350, 500)]

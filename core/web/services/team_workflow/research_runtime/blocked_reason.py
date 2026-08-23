@@ -27,13 +27,36 @@ def parse_problem_json(raw: str | None) -> dict[str, Any] | None:
             if isinstance(inner, dict):
                 code = str(inner.get("code") or payload.get("code") or "").strip()
                 detail = str(inner.get("detail") or nested)
-                return {"code": code or "workflow_blocked", "detail": detail}
+                result: dict[str, Any] = {
+                    "code": code or "workflow_blocked",
+                    "detail": detail,
+                }
+                if "retryable" in inner:
+                    result["retryable"] = bool(inner.get("retryable"))
+                elif "retryable" in payload:
+                    result["retryable"] = bool(payload.get("retryable"))
+                _copy_explicit_problem_fields(result, payload, inner)
+                return result
     code = str(payload.get("code") or "").strip()
     detail = payload.get("detail")
-    return {
+    result = {
         "code": code or "workflow_blocked",
         "detail": "" if detail is None else str(detail),
     }
+    if "retryable" in payload:
+        result["retryable"] = bool(payload.get("retryable"))
+    _copy_explicit_problem_fields(result, payload)
+    return result
+
+
+def _copy_explicit_problem_fields(
+    target: dict[str, Any],
+    *sources: dict[str, Any],
+) -> None:
+    for source in sources:
+        for key in ("failureClass", "message", "blockerIds"):
+            if key in source:
+                target[key] = source.get(key)
 
 
 def problem_from_graph_error(detail: str) -> dict[str, str]:
