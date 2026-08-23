@@ -433,6 +433,77 @@ def test_empty_target_ledger_with_zero_wal_and_stale_shm_replaces_whole_bundle(
     assert target_ledger.with_name("workflow-ledger.sqlite-shm").read_bytes() == b"stale-shm"
 
 
+def test_empty_target_ledger_accepts_semantically_equal_schema_with_stale_shm(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    source_ledger = source / "workflow-ledger.sqlite"
+    _create_current_ledger(source_ledger, include_blocked_run=True)
+    target.mkdir(parents=True)
+    target_ledger = target / "workflow-ledger.sqlite"
+    _create_current_ledger(target_ledger)
+
+    connection = apsw.Connection(str(target_ledger))
+    try:
+        connection.execute("DROP INDEX idx_catalog_run_authorizations_lookup")
+        connection.execute("DROP TABLE catalog_run_authorizations")
+        connection.execute(
+            """
+            CREATE TABLE catalog_run_authorizations(
+              authorization_id TEXT PRIMARY KEY,
+              team_id TEXT NOT NULL,
+              plan_id TEXT NOT NULL,
+              batch_scope_json TEXT NOT NULL CHECK(json_valid(batch_scope_json)),
+              scope_hash TEXT NOT NULL,
+              approved_by TEXT NOT NULL,
+              approved_at_ms INTEGER NOT NULL CHECK(approved_at_ms > 0),
+              readiness_report_sha256 TEXT NOT NULL,
+              record_hash TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL CHECK(created_at_ms > 0),
+              UNIQUE(team_id, plan_id, scope_hash, readiness_report_sha256)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_catalog_run_authorizations_lookup
+            ON catalog_run_authorizations(
+              team_id, plan_id, scope_hash, readiness_report_sha256,
+              approved_at_ms DESC, authorization_id
+            )
+            """
+        )
+    finally:
+        connection.close()
+    target_ledger.with_name("workflow-ledger.sqlite-wal").write_bytes(b"")
+    target_ledger.with_name("workflow-ledger.sqlite-shm").write_bytes(b"stale-shm")
+
+    source_evidence = storage_migration._sqlite_evidence(source_ledger, kind="ledger")
+    target_evidence = storage_migration._sqlite_evidence(target_ledger, kind="ledger")
+    assert source_evidence.schema_digest != target_evidence.schema_digest
+    assert storage_migration._validate_v5_ledger(target_ledger)[0] is True
+
+    preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert preview.ready
+
+    applied = apply_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    manifest = Path(str(applied["manifestPath"]))
+    assert manifest.is_file()
+    assert not target_ledger.with_name("workflow-ledger.sqlite-wal").exists()
+    assert not target_ledger.with_name("workflow-ledger.sqlite-shm").exists()
+
+
 def test_preview_rejects_target_ledger_sidecar(tmp_path: Path, monkeypatch) -> None:
     project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
     _create_current_ledger(source / "workflow-ledger.sqlite")
