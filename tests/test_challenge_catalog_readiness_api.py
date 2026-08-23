@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from core.research.competition.real_control_batch import new_real_batch_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import experiment as experiment_routes
+from core.web.services import team_service
 from core.web.services.team_workflow import (
     challenge_catalog_readiness as readiness_service,
 )
@@ -18,6 +20,11 @@ def _client() -> TestClient:
 
 
 def test_catalog_readiness_missing_real_envelope_is_typed_not_ready(monkeypatch) -> None:
+    monkeypatch.setattr(
+        readiness_service.team_service,
+        "get_team",
+        lambda team_id: {"teamId": team_id},
+    )
     monkeypatch.setattr(readiness_service, "_server_readiness_snapshot", lambda _team_id: None)
     monkeypatch.setattr(
         readiness_service,
@@ -36,8 +43,37 @@ def test_catalog_readiness_missing_real_envelope_is_typed_not_ready(monkeypatch)
     assert len(report["readinessReportSha256"]) == 64
 
 
+def test_catalog_readiness_unknown_team_fails_with_team_not_found(monkeypatch) -> None:
+    def missing(_team_id: str) -> dict:
+        raise team_service.TeamNotFoundError("Team not found.")
+
+    monkeypatch.setattr(readiness_service.team_service, "get_team", missing)
+
+    with pytest.raises(team_service.TeamNotFoundError, match="Team not found"):
+        readiness_service.get_catalog_hypothesis_flow_readiness("missing-team")
+
+
+def test_catalog_readiness_route_unknown_team_maps_to_404(monkeypatch) -> None:
+    def missing(_team_id: str) -> dict:
+        raise team_service.TeamNotFoundError("Team not found.")
+
+    monkeypatch.setattr(readiness_service.team_service, "get_team", missing)
+
+    response = _client().get(
+        "/api/teams/missing-team/workflow-orchestration/challenge-program/catalog-readiness"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Team not found."
+
+
 def test_catalog_readiness_uses_real_state_and_durable_policy_hash(monkeypatch) -> None:
     state = new_real_batch_state("real-125")
+    monkeypatch.setattr(
+        readiness_service.team_service,
+        "get_team",
+        lambda team_id: {"teamId": team_id},
+    )
     monkeypatch.setattr(
         readiness_service,
         "_server_readiness_snapshot",

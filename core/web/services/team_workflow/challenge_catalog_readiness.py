@@ -32,6 +32,7 @@ from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CatalogHypothesisFlowReadinessReport,
     catalog_hypothesis_flow_report_hash,
 )
+from core.web.services import team_service
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
     get_challenge_cup_dev_control_snapshot,
 )
@@ -170,6 +171,10 @@ def _append_blocker(report: Mapping[str, Any], blocker: str) -> dict[str, Any]:
 def get_catalog_hypothesis_flow_readiness(team_id: str) -> dict[str, Any]:
     """Return the server-owned formal catalog readiness report for one team."""
 
+    # Keep the endpoint's team boundary aligned with every other team-scoped
+    # workflow surface.  Without this check, an unknown team could be treated
+    # as a valid team with a missing real-batch envelope and return 200.
+    team_service.get_team(team_id)
     snapshot = _server_readiness_snapshot(team_id)
     contracts = _server_contracts(snapshot)
     evidence = _evidence_from_server_snapshot(snapshot)

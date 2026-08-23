@@ -4,8 +4,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 FACADE = ROOT / "core" / "web" / "services" / "team_workflow_orchestration_service.py"
 PACK = ROOT / "core" / "web" / "services" / "team_workflow"
@@ -84,6 +82,20 @@ def test_facade_reexports_challenge_cup_dev_controls() -> None:
     route_src = (ROUTES / "challenge_cup_dev_controls.py").read_text(encoding="utf-8")
     assert "team_workflow_orchestration_service" in route_src
     assert "team_workflow.challenge_cup_dev_controls" not in route_src
+
+
+def test_facade_reexports_catalog_readiness_and_route_uses_facade() -> None:
+    from core.web.services import team_workflow_orchestration_service as facade
+
+    for name in ("CatalogReadinessStorageError", "get_catalog_hypothesis_flow_readiness"):
+        assert hasattr(facade, name), name
+
+    facade_src = FACADE.read_text(encoding="utf-8")
+    assert "challenge_catalog_readiness" in facade_src
+
+    route_src = (ROUTES / "experiment.py").read_text(encoding="utf-8")
+    assert "team_workflow_orchestration_service import *" in route_src
+    assert "team_workflow.challenge_catalog_readiness" not in route_src
 
 
 def test_source_collection_stages_package_split() -> None:
