@@ -177,10 +177,12 @@ def build_hypothesis_input_context(
                 "requiredFields": [
                     "statement",
                     "mechanism",
+                    "novelty_basis",
                     "predictions",
                     "falsificationCriteria",
                     "evidenceRefs",
                     "counterEvidenceRefs",
+                    "boundary_conditions",
                     "scores",
                 ],
             }

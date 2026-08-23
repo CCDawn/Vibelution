@@ -400,6 +400,10 @@ def write_feedback_iterations_artifact(
         )
         if exact is None:
             return _blocked("feedback_iteration_round_conflict")
+        if _optional_text(exact.get("contentHash")).lower() != canonical_sha256(
+            payload
+        ):
+            return _blocked("feedback_iteration_round_conflict")
 
     identity_seed = {
         "teamId": team,

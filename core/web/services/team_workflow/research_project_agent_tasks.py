@@ -492,7 +492,7 @@ def _task_message(
     if task.get("candidateId"):
         checklist_items = [
             "只研究 candidateContext 指定的当前假说，不读取或推断兄弟假说对话",
-            "输出 statement、mechanism、predictions、falsificationCriteria 与五维 scores",
+            "输出 statement、mechanism、novelty_basis、predictions、falsificationCriteria、boundary_conditions 与五维 scores",
             "反证引用只能来自当前 hypothesisInput.allowedEvidenceRefs",
             "通过 challenge_cup_experiment_writeback_tool 的 record_hypothesis_fragment 写回",
         ]

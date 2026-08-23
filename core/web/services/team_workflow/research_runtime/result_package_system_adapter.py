@@ -12,6 +12,11 @@ from .result_package import (
     build_result_package,
     terminal_package_candidate,
 )
+from .result_package_v2 import (
+    ResultPackageV2Error,
+    build_challenge_result_package_v2,
+    is_official_challenge_run,
+)
 from .store import WorkflowRunStore
 from .system_action_records import (
     SystemActionError,
@@ -58,8 +63,21 @@ def execute_result_package_action(
     candidate = terminal_package_candidate(record)
     try:
         package = build_result_package(candidate, research_ledger=research_ledger)
-    except ResultPackageError as exc:
-        raise SystemActionError(str(exc), code=exc.code) from exc
+        if is_official_challenge_run(candidate):
+            package = build_challenge_result_package_v2(
+                generic_package=package,
+                record=candidate,
+                team_id=str(record["teamId"]),
+                workflow_run_id=str(record["runId"]),
+                source_collection_run_id=str(
+                    (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                    or record["runId"]
+                ),
+            )
+    except (ResultPackageError, ResultPackageV2Error) as exc:
+        raise SystemActionError(
+            str(exc), code=str(getattr(exc, "code", "challenge_v2_package_failed"))
+        ) from exc
     action, created = begin_system_action(
         store,
         record=record,

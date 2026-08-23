@@ -3165,6 +3165,11 @@ def _ledger_result_package(
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Ledger path for result_package — UI projection, else bounded STOP package."""
     from .result_package import ResultPackageError, build_result_package
+    from .result_package_v2 import (
+        ResultPackageV2Error,
+        build_challenge_result_package_v2,
+        is_official_challenge_run,
+    )
 
     team_id = str(snapshot.get("teamId") or "").strip()
     if not team_id:
@@ -3184,7 +3189,21 @@ def _ledger_result_package(
     if isinstance(record, dict):
         try:
             package = build_result_package(record, research_ledger=research_ledger)
-        except ResultPackageError as exc:
+            if is_official_challenge_run(record):
+                package = build_challenge_result_package_v2(
+                    generic_package=package,
+                    record=record,
+                    team_id=team_id,
+                    workflow_run_id=action.run_id,
+                    source_collection_run_id=str(
+                        snapshot.get("sourceCollectionRunId")
+                        or (record.get("inputSnapshot") or {}).get(
+                            "sourceCollectionRunId"
+                        )
+                        or action.run_id
+                    ),
+                )
+        except (ResultPackageError, ResultPackageV2Error) as exc:
             bounded = _ledger_bounded_result_package(action, snapshot)
             if bounded is not None:
                 return bounded
