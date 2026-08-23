@@ -9,7 +9,6 @@ from copy import deepcopy
 from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping, Sequence
-from urllib.parse import quote
 from uuid import uuid4
 
 from core.research.workflow.contracts.model_invocation_receipt import (
@@ -23,6 +22,7 @@ STORE_KIND = "challenge_question_model_invocation_receipts"
 REQUIRED_OUTCOME_KINDS = frozenset(
     {"candidate", "review", "revision", "plan", "final_output"}
 )
+ALLOWED_OUTCOME_KINDS = REQUIRED_OUTCOME_KINDS | frozenset({"source_evidence"})
 _LOCK = RLock()
 
 
@@ -37,11 +37,22 @@ def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _path_component(value: Any, *, field_name: str) -> str:
+    """Map an audit identifier to an irreversible, single path component."""
+
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError(f"{field_name} is required")
+    # Never place caller-controlled identifiers in a filesystem path.  The
+    # digest is also safe for values such as '.', '..', '/' and '\\'.
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _path(team_id: str, question_id: str, workflow_run_id: str) -> Path:
-    safe_question = quote(str(question_id or "").strip().upper(), safe="")
-    safe_run = quote(str(workflow_run_id or "").strip(), safe="")
-    if not safe_question or not safe_run:
-        raise ValueError("questionId and workflowRunId are required")
+    normalized_question = str(question_id or "").strip().upper()
+    normalized_run = str(workflow_run_id or "").strip()
+    safe_question = _path_component(normalized_question, field_name="questionId")
+    safe_run = _path_component(normalized_run, field_name="workflowRunId")
     return (
         resolve_team_program_root(team_id)
         / "challenge_program"
@@ -51,14 +62,18 @@ def _path(team_id: str, question_id: str, workflow_run_id: str) -> Path:
     )
 
 
-def _load(path: Path) -> dict[str, Any]:
+def _load(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
     if not path.is_file():
-        return {}
+        raise ValueError("model invocation receipt store path is not a file")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("model invocation receipt store is unreadable or corrupt") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("model invocation receipt store must be a JSON object")
+    return payload
 
 
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
@@ -80,9 +95,16 @@ def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
             if str(item or "").strip()
         )
     )
-    if not values or any(item not in REQUIRED_OUTCOME_KINDS for item in values):
+    if not values or any(item not in ALLOWED_OUTCOME_KINDS for item in values):
         raise ValueError("model invocation receipt outcomeKinds are invalid")
     return values
+
+
+def _require_lower_sha256(value: Any, *, field_name: str) -> str:
+    normalized = str(value or "").strip()
+    if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
+        raise ValueError(f"{field_name} must be a lowercase sha256 hex digest")
+    return normalized
 
 
 def _validate_receipt(
@@ -91,6 +113,8 @@ def _validate_receipt(
     question_id: str,
     workflow_run_id: str,
 ) -> ModelInvocationReceipt:
+    if not isinstance(value, Mapping):
+        raise ValueError("model invocation receipt must be an object")
     receipt = ModelInvocationReceipt.from_dict(value)
     if receipt.status not in {
         ModelInvocationStatus.SUCCEEDED,
@@ -98,6 +122,7 @@ def _validate_receipt(
     }:
         raise ValueError("only successful model invocation receipts may be registered")
     scope = dict(receipt.scope or {})
+    locator = dict(receipt.evidence_locator or {})
     normalized_question = str(question_id or "").strip().upper()
     normalized_run = str(workflow_run_id or "").strip()
     if str(scope.get("questionId") or "").strip().upper() != normalized_question:
@@ -112,14 +137,76 @@ def _validate_receipt(
         ("turnId", "turnId"),
         ("formalNodeId", "formalNodeId"),
         ("formalNodeRunId", "formalNodeRunId"),
+        ("modelPolicySha256", "modelPolicySha256"),
     ):
         if not str(scope.get(scope_key) or "").strip() or (
             str(scope.get(scope_key) or "").strip()
-            != str(receipt.evidence_locator.get(locator_key) or "").strip()
+            != str(locator.get(locator_key) or "").strip()
         ):
             raise ValueError(f"model invocation receipt {scope_key} locator mismatch")
+    node_run_id = str(receipt.node_run_id or "").strip()
+    if (
+        not node_run_id
+        or node_run_id != str(scope.get("formalNodeRunId") or "").strip()
+        or node_run_id != str(locator.get("formalNodeRunId") or "").strip()
+    ):
+        raise ValueError("model invocation receipt nodeRunId scope mismatch")
+    _require_lower_sha256(scope.get("modelPolicySha256"), field_name="modelPolicySha256")
+    for locator_key in (
+        "kind",
+        "outputRef",
+        "invocationId",
+    ):
+        if not str(locator.get(locator_key) or "").strip():
+            raise ValueError(f"model invocation receipt evidenceLocator.{locator_key} is required")
+    _require_lower_sha256(locator.get("outputSha256"), field_name="evidenceLocator.outputSha256")
+    try:
+        locator_attempt = int(locator.get("attempt"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("evidenceLocator.attempt must be an integer") from exc
+    if isinstance(locator.get("attempt"), bool) or locator_attempt != int(receipt.attempt):
+        raise ValueError("model invocation receipt attempt locator mismatch")
     _outcome_kinds(receipt)
     return receipt
+
+
+def _validate_store_payload(
+    payload: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+) -> list[dict[str, Any]]:
+    """Validate an existing store before it can participate in a write."""
+
+    if payload is None:
+        return []
+    if (
+        payload.get("schemaVersion") != STORE_SCHEMA_VERSION
+        or payload.get("storeKind") != STORE_KIND
+        or str(payload.get("teamId") or "") != team_id
+        or str(payload.get("questionId") or "").strip().upper() != question_id
+        or str(payload.get("workflowRunId") or "") != workflow_run_id
+    ):
+        raise ValueError("model invocation receipt store header is invalid")
+    raw_receipts = payload.get("receipts")
+    if not isinstance(raw_receipts, list):
+        raise ValueError("model invocation receipt store receipts must be a list")
+    values: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_receipts:
+        if not isinstance(raw, Mapping):
+            raise ValueError("model invocation receipt store contains a non-object receipt")
+        receipt = _validate_receipt(
+            raw,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
+        if receipt.receipt_id in seen:
+            raise ValueError("model invocation receipt store contains duplicate receiptId")
+        seen.add(receipt.receipt_id)
+        values.append(dict(raw))
+    return values
 
 
 def register_question_model_invocation_receipts(
@@ -136,21 +223,26 @@ def register_question_model_invocation_receipts(
     normalized_run = str(workflow_run_id or "").strip()
     if not normalized_team:
         raise ValueError("teamId is required")
-    validated = [
-        _validate_receipt(
-            value,
-            question_id=normalized_question,
-            workflow_run_id=normalized_run,
+    validated = []
+    for value in receipts:
+        if not isinstance(value, Mapping):
+            raise ValueError("model invocation receipt must be an object")
+        validated.append(
+            _validate_receipt(
+                value,
+                question_id=normalized_question,
+                workflow_run_id=normalized_run,
+            )
         )
-        for value in receipts
-        if isinstance(value, Mapping)
-    ]
     path = _path(normalized_team, normalized_question, normalized_run)
     with _LOCK:
         stored = _load(path)
-        existing_values = [
-            item for item in list(stored.get("receipts") or []) if isinstance(item, dict)
-        ]
+        existing_values = _validate_store_payload(
+            stored,
+            team_id=normalized_team,
+            question_id=normalized_question,
+            workflow_run_id=normalized_run,
+        )
         existing = {
             str(item.get("receiptId") or "").strip(): item for item in existing_values
         }
@@ -165,7 +257,7 @@ def register_question_model_invocation_receipts(
             existing[receipt.receipt_id] = payload
             existing_values.append(payload)
             changed = True
-        if changed or not stored:
+        if changed or stored is None:
             _write(
                 path,
                 {
@@ -194,23 +286,22 @@ def question_model_invocation_receipt_refs(
 
     normalized_question = str(question_id or "").strip().upper()
     normalized_run = str(workflow_run_id or "").strip()
-    payload = _load(_path(team_id, normalized_question, normalized_run))
-    if not payload:
+    try:
+        payload = _load(_path(team_id, normalized_question, normalized_run))
+        existing_values = _validate_store_payload(
+            payload,
+            team_id=str(team_id or "").strip(),
+            question_id=normalized_question,
+            workflow_run_id=normalized_run,
+        )
+    except (OSError, TypeError, ValueError):
         return []
-    if (
-        payload.get("schemaVersion") != STORE_SCHEMA_VERSION
-        or payload.get("storeKind") != STORE_KIND
-        or str(payload.get("teamId") or "") != str(team_id or "").strip()
-        or str(payload.get("questionId") or "").upper() != normalized_question
-        or str(payload.get("workflowRunId") or "") != normalized_run
-    ):
+    if not existing_values:
         return []
     refs: list[dict[str, Any]] = []
     seen: set[str] = set()
     try:
-        for raw in list(payload.get("receipts") or []):
-            if not isinstance(raw, Mapping):
-                return []
+        for raw in existing_values:
             receipt = _validate_receipt(
                 raw,
                 question_id=normalized_question,
@@ -247,10 +338,12 @@ def model_invocation_receipt_coverage(
         for kind in list(ref.get("outcomeKinds") or [])
         if str(kind or "").strip()
     }
+    observed = sorted(covered & REQUIRED_OUTCOME_KINDS)
     missing = sorted(REQUIRED_OUTCOME_KINDS - covered)
     return {
-        "status": "passed" if not missing else "failed",
-        "coveredKinds": sorted(covered & REQUIRED_OUTCOME_KINDS),
+        "status": "observed" if observed else "missing",
+        "observedKinds": observed,
+        "coveredKinds": observed,
         "missingKinds": missing,
         "receiptCount": len(list(refs)),
     }
@@ -287,6 +380,7 @@ def model_invocation_receipt_evidence_entries(
 
 
 __all__ = [
+    "ALLOWED_OUTCOME_KINDS",
     "REQUIRED_OUTCOME_KINDS",
     "model_invocation_receipt_coverage",
     "model_invocation_receipt_evidence_entries",

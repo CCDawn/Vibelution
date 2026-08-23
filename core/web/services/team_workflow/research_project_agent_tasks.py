@@ -359,33 +359,6 @@ def _read_store(team_id: str, research_project_id: str) -> dict[str, Any]:
     }
 
 
-def _read_research_project_agent_task_record(
-    team_id: str,
-    research_project_id: str,
-    task_id: str,
-) -> dict[str, Any] | None:
-    """Read the normalized internal task authority without exposing a DTO."""
-
-    s = _service()
-    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
-    normalized_project_id = s._normalize_required_id(
-        research_project_id,
-        "Research project id is required.",
-    )
-    normalized_task_id = s._normalize_required_id(task_id, "Task id is required.")
-    with _TASK_LOCK:
-        store = _read_store(normalized_team_id, normalized_project_id)
-        task = next(
-            (
-                item
-                for item in store["tasks"]
-                if item.get("taskId") == normalized_task_id
-            ),
-            None,
-        )
-        return deepcopy(task) if task is not None else None
-
-
 def _write_store(
     team_id: str,
     research_project_id: str,

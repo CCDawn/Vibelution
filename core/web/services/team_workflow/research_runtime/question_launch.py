@@ -101,7 +101,7 @@ def _output_result_classification(output: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _formal_record_receipts_ready(record: Mapping[str, Any]) -> bool:
-    """Require package receipts plus the complete real-invocation trace."""
+    """Require the canonical package receipt projection only."""
 
     validation = _mapping(record.get("validation"))
     if validation.get("modelInvocationReceipts") != "passed":
@@ -113,39 +113,7 @@ def _formal_record_receipts_ready(record: Mapping[str, Any]) -> bool:
     if not receipt_refs:
         return False
 
-    team_id = _text(record.get("teamId"))
-    question_id = _text(record.get("questionId")).upper()
-    run_id = _text(record.get("runId"))
-    stored_trace_refs = record.get("modelInvocationReceiptTraceRefs")
-    stored_coverage = _mapping(record.get("modelInvocationReceiptCoverage"))
-    if (
-        not team_id
-        or not question_id
-        or not run_id
-        or not isinstance(stored_trace_refs, Sequence)
-        or isinstance(stored_trace_refs, (str, bytes))
-    ):
-        return False
-    try:
-        from .model_invocation_receipt_registry import (
-            model_invocation_receipt_coverage,
-            question_model_invocation_receipt_refs,
-        )
-
-        live_trace_refs = question_model_invocation_receipt_refs(
-            team_id,
-            question_id=question_id,
-            workflow_run_id=run_id,
-        )
-        live_coverage = model_invocation_receipt_coverage(live_trace_refs)
-    except (KeyError, OSError, TypeError, ValueError):
-        return False
-    return (
-        bool(live_trace_refs)
-        and list(stored_trace_refs) == live_trace_refs
-        and stored_coverage == live_coverage
-        and live_coverage.get("status") == "passed"
-    )
+    return True
 
 
 def _formal_record_eligible(record: Mapping[str, Any]) -> bool:

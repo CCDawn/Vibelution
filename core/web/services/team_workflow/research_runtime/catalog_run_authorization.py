@@ -364,7 +364,9 @@ def resolve_catalog_model_routing_policy(team_id: str) -> dict[str, Any]:
                 raise CatalogRunAuthorizationError(
                     f"formal model route is missing product role: {role_id}"
                 )
-            by_role[role_id] = dict(route)
+            normalized_route = dict(route)
+            normalized_route["productRoleId"] = role_id
+            by_role[role_id] = normalized_route
         routes[purpose] = {"byProductRole": by_role}
     return {
         "requiredModelPolicy": required_policy,
