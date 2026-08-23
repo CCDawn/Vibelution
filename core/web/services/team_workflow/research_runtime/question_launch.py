@@ -28,7 +28,8 @@ from core.research.competition.resources import (
     load_full_catalog_execution_core,
     load_science_question_catalog,
 )
-from core.research.workflow.contracts import DEFAULT_PROGRAM_ID, scope_hash_for
+from core.research.competition.result_set import CatalogScope
+from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.challenge_question_runs import (
     REQUIRED_HUMAN_GATE_KEYS,
@@ -642,14 +643,20 @@ def build_safety_budget_policy(safety_limits: Mapping[str, Any]) -> dict[str, An
 def _hypothesis_first_scope(team_id: str, question_id: str) -> dict[str, str]:
     """Resolve the server-authoritative full scope used by latest reads."""
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+    from core.web.services.team_workflow.research_scope import resolve_research_scope
 
-    scope = hypothesis_first_chain._question_scope_envelope(team_id, question_id)
-    scope["scopeHash"] = scope_hash_for(
-        **{field: scope[field] for field in hypothesis_first_chain._SCOPE_FIELDS},
-        agent_id=scope["agentId"],
-        mode=scope["mode"],
+    seed = hypothesis_first_chain._question_scope_envelope(team_id, question_id)
+    return resolve_research_scope(
+        team_id,
+        agent_id=seed["agentId"],
+        scope_seed=seed,
     )
-    return scope
+
+
+def _tracked_catalog_scope() -> dict[str, str]:
+    """Return the immutable identity of the tracked 125-question catalog."""
+
+    return CatalogScope.from_tracked_resources().to_dict()
 
 
 def _hypothesis_first_flag(
@@ -714,6 +721,8 @@ def _build_catalog_seed_run_input(
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
         "questionId": question_id,
+        "researchScopeEnvelope": hypothesis_scope,
+        "catalogScope": _tracked_catalog_scope(),
         "researchBriefHash": artifact_sha256,
         "datasetRefs": [artifact_ref],
         "metricContract": {
@@ -840,6 +849,8 @@ def build_question_run_input(
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
         "questionId": normalized_question_id,
+        "researchScopeEnvelope": _hypothesis_first_scope(team_id, normalized_question_id),
+        "catalogScope": _tracked_catalog_scope(),
         "researchBriefHash": artifact_sha256,
         "datasetRefs": [artifact_ref],
         "metricContract": {
