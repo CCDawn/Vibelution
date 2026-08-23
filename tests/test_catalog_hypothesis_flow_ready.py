@@ -23,6 +23,7 @@ from core.research.competition.result_set import (
     FullCatalogResultSet,
     QuestionResult,
     ResultSetContractError,
+    compute_scope_hash,
     official_question_ids,
 )
 from core.research.workflow.contracts._validation import ContractValidationError
@@ -91,6 +92,27 @@ def _authority(
         catalog_policy=_catalog_policy(),
         model_policy_sha256=_model_policy_sha256(result_set),
     )
+
+
+def _rebound_attacker_result_set(
+    result_set: FullCatalogResultSet,
+) -> FullCatalogResultSet:
+    attacker_scope = CatalogScope(
+        catalog_id="attacker-catalog",
+        catalog_version="999",
+        catalog_sha256="0" * 64,
+        scope_hash=compute_scope_hash(
+            "attacker-catalog",
+            "999",
+            "0" * 64,
+        ),
+    )
+    rebound = FullCatalogResultSet(scope=attacker_scope)
+    for result in result_set.results():
+        rebound.add_result(
+            replace(result, locator=attacker_scope.locator_for(result.question_id))
+        )
+    return rebound
 
 
 def _build(
@@ -260,6 +282,19 @@ def test_ready_rejects_rehashed_catalog_scope_tampering(
             report,
             trusted_authority=_authority(complete_result_set),
         )
+
+
+def test_rebound_packages_under_attacker_scope_cannot_be_ready(
+    complete_result_set: FullCatalogResultSet,
+) -> None:
+    rebound = _rebound_attacker_result_set(complete_result_set)
+
+    report = _build(rebound)
+    assert report["status"] == "NOT_READY"
+    assert "catalog_scope" in report["blockers"]
+
+    with pytest.raises(ContractValidationError, match="official tracked catalog scope"):
+        _authority(rebound)
 
 
 @pytest.mark.parametrize("mutation", ("source", "program", "policy", "model"))

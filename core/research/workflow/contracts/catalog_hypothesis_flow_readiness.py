@@ -314,10 +314,17 @@ class CatalogHypothesisFlowReadinessAuthority:
         experiment adapters or the platform DEV readiness module.
         """
 
-        from core.research.competition.result_set import FullCatalogResultSet
+        from core.research.competition.result_set import (
+            CatalogScope,
+            FullCatalogResultSet,
+        )
 
         if not isinstance(result_set, FullCatalogResultSet):
             raise TypeError("result_set must be a trusted FullCatalogResultSet")
+        if result_set.scope != CatalogScope.from_tracked_resources():
+            raise ContractValidationError(
+                "trusted authority requires the official tracked catalog scope"
+            )
         if not isinstance(program_contract, Mapping):
             raise TypeError("program_contract must be an object")
         if not isinstance(catalog_policy, Mapping):

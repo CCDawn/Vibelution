@@ -35,6 +35,7 @@ from .resources import (
 )
 from .result_set import (
     RESULT_MANIFEST_SCHEMA_VERSION,
+    CatalogScope,
     FullCatalogResultSet,
     ResultSetContractError,
 )
@@ -157,6 +158,8 @@ def _catalog_projection(
             matching_model_policy += 1
 
     blockers: list[str] = []
+    if result_set.scope != CatalogScope.from_tracked_resources():
+        blockers.append("catalog_scope")
     if state["present_count"] != CATALOG_QUESTION_COUNT or state["missing_count"]:
         blockers.append("catalog_present_count")
     if state["package_backed_count"] != CATALOG_QUESTION_COUNT:
