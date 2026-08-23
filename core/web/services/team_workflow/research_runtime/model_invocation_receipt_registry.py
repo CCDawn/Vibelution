@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -45,7 +46,8 @@ def _path_component(value: Any, *, field_name: str) -> str:
         raise ValueError(f"{field_name} is required")
     # Never place caller-controlled identifiers in a filesystem path.  The
     # digest is also safe for values such as '.', '..', '/' and '\\'.
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
 def _path(team_id: str, question_id: str, workflow_run_id: str) -> Path:
@@ -78,7 +80,7 @@ def _load(path: Path) -> dict[str, Any] | None:
 
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    temporary = path.with_name(f".tmp-{uuid4().hex}")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -341,8 +343,7 @@ def model_invocation_receipt_coverage(
     observed = sorted(covered & REQUIRED_OUTCOME_KINDS)
     missing = sorted(REQUIRED_OUTCOME_KINDS - covered)
     return {
-        "status": "observed" if observed else "missing",
-        "observedKinds": observed,
+        "status": "passed" if not missing else "failed",
         "coveredKinds": observed,
         "missingKinds": missing,
         "receiptCount": len(list(refs)),

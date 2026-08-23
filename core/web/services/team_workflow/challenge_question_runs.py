@@ -1686,7 +1686,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         trace_coverage_by_record_id[record_id] = trace_coverage
         if receipt_refs:
             receipt_refs_by_record_id[record_id] = receipt_refs
-        if receipt_refs:
+        if receipt_refs and trace_coverage.get("status") == "passed":
             receipt_ready_candidates.append(record)
     completed = [
         record
@@ -1695,6 +1695,10 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         and _all_human_gates_approved(record.get("humanGates"))
         and str(record.get("status") or "") == "approved"
         and str(record.get("recordId") or "") in receipt_refs_by_record_id
+        and trace_coverage_by_record_id.get(
+            str(record.get("recordId") or ""), {}
+        ).get("status")
+        == "passed"
     ]
     completed_question_ids = sorted({str(record.get("questionId") or "") for record in completed})
     completed_question_results = [
