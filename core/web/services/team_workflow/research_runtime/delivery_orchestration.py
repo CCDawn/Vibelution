@@ -39,6 +39,12 @@ DELIVERY_EVENT_COMPLETED = "delivery_orchestration_completed"
 DELIVERY_EVENT_BLOCKED = "delivery_orchestration_blocked"
 DELIVERY_EVENT_FAILED = "delivery_orchestration_failed"
 
+PROGRAM_CANDIDATE_HANDOFF_BLOCKED_CODE = "program_candidate_handoff_needs_context"
+PROGRAM_CANDIDATE_HANDOFF_BLOCKED_DETAIL = (
+    "Challenge Program candidate handoff requires canonical "
+    "challenge_question_output.v2 authority; the Program candidate remains unregistered."
+)
+
 _TRIGGER_NODE_ID = "result_package"
 
 
@@ -243,6 +249,30 @@ def run_delivery_orchestration(
     request = _delivery_request(snapshot)
     authority_run_id = str(snapshot.get("sourceCollectionRunId") or run.run_id).strip()
 
+    # The generic result package and the Challenge Program v2 output are
+    # separate contracts.  Handoff is deliberately best-effort at this
+    # delivery boundary: an incomplete upstream v2 authority is reported as
+    # NEEDS_CONTEXT in the immutable delivery artifact and becomes a blocked
+    # delivery outcome without changing the already-succeeded workflow run.
+    from .program_candidate_handoff import (
+        ProgramCandidateHandoffContractError,
+        handoff_result_package_to_challenge_program,
+    )
+
+    try:
+        program_candidate_handoff = handoff_result_package_to_challenge_program(
+            store,
+            team_id=team_id,
+            workflow_run_id=run.run_id,
+            source_collection_run_id=authority_run_id,
+        )
+    except ProgramCandidateHandoffContractError as exc:
+        raise DeliveryOrchestrationError(
+            "program_candidate_handoff_contract",
+            str(exc),
+            step="program_candidate_handoff",
+        ) from exc
+
     entries = _receipt_evidence_entries(store, run.run_id)
     entries.extend(_request_evidence_entries(request))
     try:
@@ -284,14 +314,30 @@ def run_delivery_orchestration(
         ) from exc
     pdf_report = {**pdf_report, "sizeSource": size_source}
 
-    status = "succeeded" if pdf_report["withinLimit"] else "blocked"
-    code = "" if status == "succeeded" else "pdf_limit_exceeded"
+    handoff_needs_context = (
+        str(program_candidate_handoff.get("status") or "").strip()
+        == "NEEDS_CONTEXT"
+    )
+    status = (
+        "blocked"
+        if handoff_needs_context or not pdf_report["withinLimit"]
+        else "succeeded"
+    )
+    code = (
+        PROGRAM_CANDIDATE_HANDOFF_BLOCKED_CODE
+        if handoff_needs_context
+        else ("" if status == "succeeded" else "pdf_limit_exceeded")
+    )
     detail = (
-        ""
-        if status == "succeeded"
+        PROGRAM_CANDIDATE_HANDOFF_BLOCKED_DETAIL
+        if handoff_needs_context
         else (
-            f"delivery content is {pdf_report['sizeBytes']} bytes, "
-            f"over the {pdf_report['limitBytes']}-byte limit"
+            ""
+            if status == "succeeded"
+            else (
+                f"delivery content is {pdf_report['sizeBytes']} bytes, "
+                f"over the {pdf_report['limitBytes']}-byte limit"
+            )
         )
     )
 
@@ -322,6 +368,7 @@ def run_delivery_orchestration(
             "pdfLimit": pdf_report,
         },
         "formalBlockers": list(formal_pack.get("blockers") or []),
+        "programCandidateHandoff": program_candidate_handoff,
         "diagnostics": diagnostics,
     }
     put_workflow_artifact(
@@ -359,6 +406,7 @@ def run_delivery_orchestration(
         "submissionProjection": projection_report,
         "pdfCheck": pdf_report,
         "diagnostics": diagnostics,
+        "programCandidateHandoff": program_candidate_handoff,
     }
 
 
@@ -388,6 +436,7 @@ def delivery_event_payload(outcome: dict[str, Any]) -> dict[str, Any]:
         "artifactKind": DELIVERY_ARTIFACT_KIND,
         "artifactRef": str(outcome.get("artifactRef") or ""),
         "diagnostics": [str(item) for item in outcome.get("diagnostics") or []],
+        "programCandidateHandoff": dict(outcome.get("programCandidateHandoff") or {}),
     }
 
 
