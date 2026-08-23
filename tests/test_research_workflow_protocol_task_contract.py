@@ -146,6 +146,43 @@ def _research_plan() -> dict[str, object]:
     }
 
 
+def _final_summary() -> dict[str, object]:
+    return {
+        "answer_boundary": "This is a bounded proposal, not an executed result.",
+        "selected_hypothesis": "H1",
+        "research_plan_summary": "Compare the intervention with a matched baseline.",
+        "key_evidence_refs": ["evidence-1"],
+        "counterevidence_refs": ["counterevidence-1"],
+        "limitations": ["The proposal awaits controlled execution."],
+        "next_validation_step": "Run the preregistered comparison.",
+    }
+
+
+def _competition_result_view() -> dict[str, object]:
+    return {
+        "problem_statement": "Decode the registered neural response under a bounded comparison.",
+        "rationale": "The selected mechanism has a testable prediction.",
+        "technical_details": "Use the preregistered decoder and matched baseline.",
+        "datasets": {
+            "source": ["Public spike dataset"],
+            "target": ["Versioned analysis dataset"],
+        },
+        "paper_title": "A bounded neural decoding proposal",
+        "paper_abstract": "This proposal defines a controlled test and its evidence boundary.",
+        "methods": ["Pre-registered controlled comparison"],
+        "experiments": ["Planned intervention-versus-baseline experiment"],
+        "results": ["Results are planned and not executed."],
+        "references": ["evidence-1"],
+    }
+
+
+def _result_view_payload() -> dict[str, object]:
+    return {
+        "finalSummary": _final_summary(),
+        "competitionResultView": _competition_result_view(),
+    }
+
+
 def _formal_task() -> dict[str, object]:
     question_id = official_question_ids()[0]
     return {
@@ -295,6 +332,18 @@ def test_protocol_input_context_reads_formal_hypothesis_set(monkeypatch) -> None
     assert context["hypothesisCount"] == 1
     assert context["candidates"][0]["candidateId"] == "H1"
     assert context["workflowRunId"] == "run-1"
+    assert context["finalSummaryContract"]["requiredFields"] == [
+        "answer_boundary",
+        "selected_hypothesis",
+        "research_plan_summary",
+        "key_evidence_refs",
+        "counterevidence_refs",
+        "limitations",
+        "next_validation_step",
+    ]
+    assert context["competitionResultViewContract"]["requiredFields"][-1] == (
+        "references"
+    )
 
 
 def test_experiment_task_context_exposes_formal_protocol_input(monkeypatch) -> None:
@@ -494,6 +543,7 @@ def test_protocol_writeback_registers_artifact_for_protocol_node(monkeypatch) ->
                     "metric": "held-out balanced accuracy",
                     "smokePlan": "2 sessions, 100 steps",
                     "researchPlan": _research_plan(),
+                    **_result_view_payload(),
                 }
             ),
             recorded_by_agent="agent-planner",
@@ -591,7 +641,9 @@ def test_formal_create_plan_writes_bound_research_plan_and_reads_back(
             research_project_id="project-1",
             task_id="task-protocol-1",
             operation="create_plan",
-            payload_json=json.dumps({"researchPlan": plan_payload}),
+            payload_json=json.dumps(
+                {"researchPlan": plan_payload, **_result_view_payload()}
+            ),
             recorded_by_agent="agent-planner",
         )
     )
@@ -626,6 +678,8 @@ def test_formal_create_plan_writes_bound_research_plan_and_reads_back(
     )
     assert payload["hypothesisSetHash"] == expected_hypothesis_hash
     assert payload["researchPlan"] == plan_payload
+    assert payload["finalSummary"] == _final_summary()
+    assert payload["competitionResultView"] == _competition_result_view()
 
 
 @pytest.mark.parametrize(
@@ -665,7 +719,9 @@ def test_formal_create_plan_rejects_tampered_node_or_run_binding(
             research_project_id="project-1",
             task_id="task-protocol-1",
             operation="create_plan",
-            payload_json=json.dumps({"researchPlan": _research_plan()}),
+            payload_json=json.dumps(
+                {"researchPlan": _research_plan(), **_result_view_payload()}
+            ),
             recorded_by_agent="agent-planner",
         )
     )
@@ -705,7 +761,87 @@ def test_formal_create_plan_rejects_placeholder_research_plan_before_write(
             research_project_id="project-1",
             task_id="task-protocol-1",
             operation="create_plan",
-            payload_json=json.dumps({"researchPlan": plan_payload}),
+            payload_json=json.dumps(
+                {"researchPlan": plan_payload, **_result_view_payload()}
+            ),
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "placeholder" in result["message"].lower()
+
+
+def test_formal_create_plan_requires_explicit_result_views_before_write(monkeypatch) -> None:
+    task = _formal_task()
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda *_args, **_kwargs: task,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda *_args, **_kwargs: pytest.fail(
+            "missing result views must reject before create_experiment_plan"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_protocol_context.build_protocol_input_context",
+        lambda *_args, **_kwargs: _formal_protocol_input(),
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-protocol-1",
+            operation="create_plan",
+            payload_json=json.dumps({"researchPlan": _research_plan()}),
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "finalSummary" in result["message"]
+
+
+def test_formal_create_plan_rejects_placeholder_result_view_before_write(monkeypatch) -> None:
+    task = _formal_task()
+    result_view = _result_view_payload()
+    result_view["competitionResultView"]["results"] = [
+        "PENDING_BLOCKED: execute experiment"
+    ]
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda *_args, **_kwargs: task,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda *_args, **_kwargs: pytest.fail(
+            "placeholder result view must reject before create_experiment_plan"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_protocol_context.build_protocol_input_context",
+        lambda *_args, **_kwargs: _formal_protocol_input(),
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-protocol-1",
+            operation="create_plan",
+            payload_json=json.dumps(
+                {"researchPlan": _research_plan(), **result_view}
+            ),
             recorded_by_agent="agent-planner",
         )
     )
@@ -734,6 +870,8 @@ def test_formal_snapshot_injection_is_ignored(monkeypatch, formal_ledger_runtime
         team_id="research-team",
         task_context={"task": task, "protocolInput": protocol_input},
         research_plan=_research_plan(),
+        final_summary=_final_summary(),
+        competition_result_view=_competition_result_view(),
     )
     assert prepared["snapshot"].projectId == "project-1"
 
@@ -833,7 +971,9 @@ def test_human_gate_self_approval_is_rejected_before_plan_write(
             research_project_id="project-1",
             task_id="task-protocol-1",
             operation="create_plan",
-            payload_json=json.dumps({"researchPlan": plan}),
+            payload_json=json.dumps(
+                {"researchPlan": plan, **_result_view_payload()}
+            ),
             recorded_by_agent="agent-planner",
         )
     )
