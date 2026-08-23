@@ -9,6 +9,7 @@ import pytest
 from core.research.competition.question_result_package import (
     QuestionResultPackage,
     QuestionResultPackageError,
+    canonical_model_policy,
 )
 from core.research.competition.result_set import CatalogScope, compute_scope_hash
 from core.research.workflow.contracts.model_invocation_receipt import (
@@ -567,6 +568,31 @@ def test_model_policy_normalizes_case_order_and_duplicates_before_hashing() -> N
     package = _create(payload)
 
     assert package.to_dict()["model_policy"] == canonical_policy
+
+
+def test_server_model_policy_canonicalization_is_order_and_case_stable() -> None:
+    first = canonical_model_policy(
+        {
+            "family": "QWEN",
+            "providerIds": ["DashScope", "ALIYUN", "dashscope"],
+            "modelIds": ["Qwen-Plus", "qwen-plus", "Qwen-Max"],
+            "requireOfficialProvider": True,
+        }
+    )
+    second = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["aliyun", "dashscope"],
+            "modelIds": ["qwen-max", "qwen-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+
+    assert first == second
+    assert first["policySha256"] == _model_policy(
+        provider_ids=["aliyun", "dashscope"],
+        model_ids=["qwen-max", "qwen-plus"],
+    )["policySha256"]
 
 
 def test_model_policy_hash_participates_in_idempotency_identity() -> None:

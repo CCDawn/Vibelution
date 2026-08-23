@@ -17,12 +17,26 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from config.settings import get_config
+from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
+from core.research.competition.question_result_package import (
+    QuestionResultPackageError,
+    canonical_model_policy,
+)
 from core.research.competition.real_control_batch import RealBatchError, real_plan
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
 from core.research.workflow.ledger import CatalogRunAuthorization
+from core.web.services import agent_directory_service
+from core.web.services.team_workflow.research_runtime.team_role_source import (
+    resolve_team_role_bindings,
+)
 
 from .formal_write_runtime import get_write_store
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_OFFICIAL_PROVIDER_MARKERS = ("aliyun", "dashscope", "bailian")
 
 
 class CatalogRunAuthorizationError(ValueError):
@@ -73,9 +87,140 @@ def batch_scope_sha256(batch_scope: Mapping[str, Any] | list[Any]) -> str:
     return canonical_sha256(batch_scope)
 
 
+def _model_policy_from_scope(
+    scope: Mapping[str, Any],
+    *,
+    required: bool,
+) -> dict[str, Any] | None:
+    raw = scope.get("modelPolicy")
+    if raw is None:
+        if required:
+            raise CatalogRunAuthorizationError(
+                "catalog authorization model policy snapshot is required"
+            )
+        return None
+    if not isinstance(raw, Mapping):
+        raise CatalogRunAuthorizationError(
+            "catalog authorization model policy snapshot is malformed"
+        )
+    try:
+        normalized = canonical_model_policy(dict(raw))
+    except QuestionResultPackageError as exc:
+        raise CatalogRunAuthorizationError(
+            "catalog authorization model policy snapshot is invalid"
+        ) from exc
+    if dict(raw) != normalized:
+        raise CatalogRunAuthorizationError(
+            "catalog authorization model policy snapshot is not canonical"
+        )
+    return normalized
+
+
+def _official_provider(provider: Any) -> bool:
+    service_class = str(getattr(provider, "service_class", "") or "").strip().lower()
+    descriptor = " ".join(
+        str(getattr(provider, field, "") or "").strip().lower()
+        for field in ("provider_id", "kind", "vendor", "label")
+    )
+    return service_class == "official_api" and any(
+        marker in descriptor for marker in _OFFICIAL_PROVIDER_MARKERS
+    )
+
+
+def _dialogue_model_identity(agent: Mapping[str, Any], config: Any) -> tuple[str, str]:
+    try:
+        resolved = resolve_agent_llm(dict(agent), "dialogue", config=config)
+    except (AgentLlmResolutionError, KeyError, TypeError, ValueError) as exc:
+        raise CatalogRunAuthorizationError(
+            "a formal research Agent dialogue LLM binding cannot be resolved"
+        ) from exc
+    runtime_config = resolved.config or config
+    try:
+        model_ref = runtime_config.llm.resolve_model_ref(
+            resolved.model_ref or resolved.model_id
+        )
+        provider = runtime_config.llm.get_provider(resolved.provider_id)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CatalogRunAuthorizationError(
+            "a formal research Agent dialogue LLM binding is not canonical"
+        ) from exc
+    if not model_ref or not _official_provider(provider):
+        raise CatalogRunAuthorizationError(
+            "formal research Agent dialogue LLM must use an official provider"
+        )
+    model_library = getattr(runtime_config.llm, "model_library", {}) or {}
+    entry = model_library.get(model_ref) if isinstance(model_library, Mapping) else None
+    model_id = str(
+        (entry or {}).get("upstream_id")
+        or (entry or {}).get("model")
+        or resolved.model
+        or model_ref.rsplit("/", 1)[-1]
+    ).strip()
+    if "qwen" not in f"{model_ref} {model_id}".lower():
+        raise CatalogRunAuthorizationError(
+            "formal research Agent dialogue LLM must use a Qwen model"
+        )
+    return str(provider.provider_id or resolved.provider_id).strip(), model_id
+
+
+def resolve_catalog_model_policy(team_id: str) -> dict[str, Any]:
+    """Resolve the server-owned six-Agent dialogue model allowlist.
+
+    The returned snapshot is derived from the current team bindings and
+    operator LLM config.  It never consumes a package or client-supplied hash.
+    """
+
+    bindings = resolve_team_role_bindings(str(team_id or "").strip())
+    if not bindings:
+        raise CatalogRunAuthorizationError(
+            "formal six-Agent team dialogue bindings are unavailable"
+        )
+    config = get_config()
+    provider_ids: set[str] = set()
+    model_ids: set[str] = set()
+    seen_agents: set[str] = set()
+    for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
+        agent_id = next(
+            (
+                str(bindings.get(key) or "").strip()
+                for key in (role.product_role_id, *role.legacy_role_aliases)
+                if str(bindings.get(key) or "").strip()
+            ),
+            "",
+        )
+        if not agent_id or agent_id in seen_agents:
+            raise CatalogRunAuthorizationError(
+                f"formal six-Agent binding is missing or duplicated: {role.product_role_id}"
+            )
+        seen_agents.add(agent_id)
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        if not isinstance(agent, Mapping):
+            raise CatalogRunAuthorizationError(
+                f"formal six-Agent binding references an unavailable Agent: {agent_id}"
+            )
+        provider_id, model_id = _dialogue_model_identity(agent, config)
+        provider_ids.add(provider_id)
+        model_ids.add(model_id)
+    try:
+        return canonical_model_policy(
+            {
+                "family": "qwen",
+                "providerIds": sorted(provider_ids),
+                "modelIds": sorted(model_ids),
+                "requireOfficialProvider": True,
+            }
+        )
+    except QuestionResultPackageError as exc:
+        raise CatalogRunAuthorizationError(
+            "server model policy snapshot could not be canonicalized"
+        ) from exc
+
+
 def _canonical_batch_scope(
     plan_id: str,
     batch_scope: Mapping[str, Any] | list[Any],
+    *,
+    require_model_policy: bool = False,
 ) -> dict[str, Any]:
     """Validate a scope against the frozen real-batch plan definition."""
 
@@ -103,7 +248,9 @@ def _canonical_batch_scope(
         raise CatalogRunAuthorizationError(
             "catalog authorization scope does not match the canonical plan"
         )
-    return dict(batch_scope)
+    normalized = dict(batch_scope)
+    _model_policy_from_scope(normalized, required=require_model_policy)
+    return normalized
 
 
 def _record_hash_payload(record: CatalogRunAuthorization) -> dict[str, Any]:
@@ -136,6 +283,7 @@ def validate_catalog_run_authorization(
     scope_hash: str | None = None,
     readiness_sha256: str | None = None,
     question_id: str | None = None,
+    require_model_policy: bool = False,
 ) -> bool:
     """Validate immutable content and optional lookup scope before use."""
 
@@ -149,7 +297,11 @@ def validate_catalog_run_authorization(
         )
         expected_scope_hash = _require_sha256(record.scope_hash, label="scope_hash")
         scope = json.loads(record.batch_scope_json)
-        canonical_scope = _canonical_batch_scope(record.plan_id, scope)
+        canonical_scope = _canonical_batch_scope(
+            record.plan_id,
+            scope,
+            require_model_policy=require_model_policy,
+        )
     except (CatalogRunAuthorizationError, TypeError, ValueError, json.JSONDecodeError):
         return False
     if batch_scope_sha256(canonical_scope) != expected_scope_hash:
@@ -176,6 +328,7 @@ def find_catalog_run_authorization(
     batch_scope: Mapping[str, Any] | list[Any],
     readiness_report_sha256_value: str | None = None,
     readiness_report_hash: str | None = None,
+    require_model_policy: bool = False,
 ) -> CatalogRunAuthorization | None:
     """Find and validate the exact approval for a current scope/evidence hash."""
 
@@ -207,6 +360,7 @@ def find_catalog_run_authorization(
         plan_id=normalized_plan,
         scope_hash=scope_hash,
         readiness_sha256=report_hash,
+        require_model_policy=require_model_policy,
     ):
         return None
     return record
@@ -223,6 +377,7 @@ def record_catalog_run_authorization(
     readiness_report_hash: str | None = None,
     approved_at_ms: int | None = None,
     authorization_id: str | None = None,
+    require_model_policy: bool = False,
 ) -> CatalogRunAuthorization:
     """Persist one approval, idempotently, for an exact scope/evidence pair.
 
@@ -241,7 +396,11 @@ def record_catalog_run_authorization(
         raise CatalogRunAuthorizationError("approved_by is required")
     if not isinstance(batch_scope, (Mapping, list)):
         raise CatalogRunAuthorizationError("batch_scope must be JSON object/array")
-    canonical_scope = _canonical_batch_scope(normalized_plan, batch_scope)
+    canonical_scope = _canonical_batch_scope(
+        normalized_plan,
+        batch_scope,
+        require_model_policy=require_model_policy,
+    )
     if (
         readiness_report_sha256_value is not None
         and readiness_report_hash is not None
@@ -287,6 +446,7 @@ def record_catalog_run_authorization(
             plan_id=normalized_plan,
             scope_hash=scope_hash,
             readiness_sha256=report_hash,
+            require_model_policy=require_model_policy,
         ):
             raise CatalogRunAuthorizationError("existing catalog authorization is corrupt")
         return existing
@@ -342,6 +502,7 @@ def record_catalog_run_authorization(
         plan_id=normalized_plan,
         scope_hash=scope_hash,
         readiness_sha256=report_hash,
+        require_model_policy=require_model_policy,
     ):
         raise CatalogRunAuthorizationError("catalog authorization was not persisted")
     return persisted
@@ -362,9 +523,24 @@ def authorization_to_dict(record: CatalogRunAuthorization) -> dict[str, Any]:
     }
 
 
+def authorized_model_policy_sha256(record: CatalogRunAuthorization) -> str:
+    """Return the policy hash only from a validated durable authorization."""
+
+    try:
+        scope = json.loads(record.batch_scope_json)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise CatalogRunAuthorizationError(
+            "catalog authorization scope is invalid"
+        ) from exc
+    policy = _model_policy_from_scope(scope, required=True)
+    assert policy is not None
+    return _require_sha256(policy["policySha256"], label="model_policy_sha256")
+
+
 __all__ = [
     "CatalogRunAuthorizationError",
     "authorization_to_dict",
+    "authorized_model_policy_sha256",
     "batch_scope_sha256",
     "canonical_sha256",
     "expected_record_hash",
@@ -372,5 +548,6 @@ __all__ = [
     "readiness_report_sha256",
     "record_catalog_run_authorization",
     "require_readiness_report_sha256",
+    "resolve_catalog_model_policy",
     "validate_catalog_run_authorization",
 ]

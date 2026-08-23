@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +26,10 @@ from core.research.competition.catalog_execution import (
     QuestionStatus,
     dev_plan,
 )
-from core.research.competition.question_result_package import QuestionResultPackage
+from core.research.competition.question_result_package import (
+    QuestionResultPackage,
+    canonical_model_policy,
+)
 from core.research.competition.real_control_batch import (
     RealBatchError,
     circuit_breaker_tripped,
@@ -67,6 +73,7 @@ class _Harness:
             "researchAuthorizationRequired": True,
             "reportId": "real-batch-test-readiness-v1",
         }
+        self.model_policy = deepcopy(_valid_payload()["model_policy"])
         self.runs: dict[str, dict] = {}
         self.approved: dict[str, dict] = {}
         self.launch_log: list[str] = []
@@ -89,6 +96,11 @@ class _Harness:
                 "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
                 "readinessReport": self.readiness_report,
             },
+        )
+        monkeypatch.setattr(
+            svc,
+            "resolve_catalog_model_policy",
+            lambda _team_id: deepcopy(self.model_policy),
         )
 
     def authorize(self, plan_id: str) -> None:
@@ -555,6 +567,281 @@ def test_cross_gate_seed_rejects_conflicting_package_hashes_before_mutation(
     assert target.result_for("SCI-091") is None
 
 
+def test_server_model_policy_requires_official_qwen_dialogue_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    role_bindings = {
+        role.product_role_id: f"agent-{index}"
+        for index, role in enumerate(
+            catalog_run_authorization.CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents
+        )
+    }
+    model_by_agent = {
+        "agent-0": ("dashscope", "qwen-plus"),
+        "agent-1": ("aliyun", "qwen-max"),
+        "agent-2": ("dashscope", "qwen-plus"),
+        "agent-3": ("aliyun", "qwen-max"),
+        "agent-4": ("dashscope", "qwen-plus"),
+        "agent-5": ("aliyun", "qwen-max"),
+    }
+
+    class _FakeLlm:
+        model_library: ClassVar[dict[str, object]] = {}
+
+        @staticmethod
+        def resolve_model_ref(value: str) -> str:
+            return value
+
+        @staticmethod
+        def get_provider(provider_id: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                provider_id=provider_id,
+                service_class="relay" if provider_id == "relay" else "official_api",
+                kind=provider_id,
+                vendor=provider_id,
+                label=provider_id,
+                base_url=f"https://{provider_id}.aliyuncs.com",
+            )
+
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_team_role_bindings",
+        lambda _team_id: role_bindings,
+    )
+    monkeypatch.setattr(
+        catalog_run_authorization.agent_directory_service,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "status": "active",
+            "llmBindings": {"dialogue": {"modelId": model_by_agent[agent_id][1]}},
+        },
+    )
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "get_config",
+        lambda: SimpleNamespace(llm=_FakeLlm()),
+    )
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_agent_llm",
+        lambda agent, slot, config: SimpleNamespace(
+            config=config,
+            model_ref=model_by_agent[agent["agentId"]][1],
+            model_id=model_by_agent[agent["agentId"]][1],
+            model=model_by_agent[agent["agentId"]][1],
+            provider_id=model_by_agent[agent["agentId"]][0],
+        ),
+    )
+
+    policy = catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+
+    assert policy["family"] == "qwen"
+    assert policy["providerIds"] == ["aliyun", "dashscope"]
+    assert policy["modelIds"] == ["qwen-max", "qwen-plus"]
+    assert len(policy["policySha256"]) == 64
+
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_agent_llm",
+        lambda agent, slot, config: SimpleNamespace(
+            config=config,
+            model_ref="gpt-5",
+            model_id="gpt-5",
+            model="gpt-5",
+            provider_id="aliyun",
+        ),
+    )
+    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="Qwen"):
+        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_agent_llm",
+        lambda agent, slot, config: SimpleNamespace(
+            config=config,
+            model_ref="qwen-plus",
+            model_id="qwen-plus",
+            model="qwen-plus",
+            provider_id="relay",
+        ),
+    )
+    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="official provider"):
+        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+
+
+def test_legacy_catalog_authorization_without_policy_fails_closed(
+    harness: _Harness,
+) -> None:
+    plan = real_plan("real-1")
+    legacy_scope = {
+        "planId": "real-1",
+        "gateId": str(plan.gate_id),
+        "questionIds": [str(question_id) for question_id in plan.question_ids],
+    }
+    legacy_record = catalog_run_authorization.record_catalog_run_authorization(
+        TEAM_ID,
+        plan_id="real-1",
+        batch_scope=legacy_scope,
+        approved_by="legacy-operator",
+        readiness_evidence=harness.readiness_report,
+        approved_at_ms=FIXED_NOW_MS,
+    )
+    envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-1",
+        concurrency=1,
+        failure_budget=3,
+        authorization=catalog_run_authorization.authorization_to_dict(legacy_record),
+    )
+
+    with pytest.raises(svc.RealBatchStorageError, match="authorization"):
+        svc._state_of(envelope)
+
+
+def test_question_launch_authorization_lookup_includes_server_model_policy(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.authorize("real-1")
+    from core.web.services.team_workflow import challenge_cup_dev_controls
+    from core.web.services.team_workflow.research_runtime import question_launch
+
+    monkeypatch.setattr(
+        challenge_cup_dev_controls,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda _team_id: {
+            "teamId": TEAM_ID,
+            "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+            "readinessReport": harness.readiness_report,
+        },
+    )
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "resolve_catalog_model_policy",
+        lambda _team_id: deepcopy(harness.model_policy),
+    )
+    captured: dict[str, object] = {}
+    original_find = catalog_run_authorization.find_catalog_run_authorization
+
+    def capture_find(*args, **kwargs):
+        captured["scope"] = kwargs["batch_scope"]
+        return original_find(*args, **kwargs)
+
+    monkeypatch.setattr(
+        catalog_run_authorization,
+        "find_catalog_run_authorization",
+        capture_find,
+    )
+
+    assert question_launch._dev_authorization_ready(TEAM_ID) is True
+    assert captured["scope"]["modelPolicy"] == harness.model_policy
+
+
+def test_cross_gate_checkpoint_restore_uses_durable_policy_and_seeds_without_state_mock(
+    harness: _Harness,
+) -> None:
+    harness.authorize("real-1")
+    prior_authorization = svc._current_catalog_run_authorization(TEAM_ID, "real-1")
+    prior_envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-1",
+        concurrency=1,
+        failure_budget=3,
+        authorization=prior_authorization,
+    )
+    svc._save_envelope(TEAM_ID, prior_envelope)
+    prior_envelope = svc._load_envelope(TEAM_ID, "real-1")
+    assert prior_envelope is not None
+    prior_state = svc._state_of(prior_envelope)
+    package = _approved_package(prior_state, "SCI-091")
+    prior_state.record_package(package)
+    prior_envelope["checkpoint"] = prior_state.to_checkpoint()
+    svc._save_envelope(TEAM_ID, prior_envelope)
+
+    harness.authorize("real-5")
+    target_authorization = svc._current_catalog_run_authorization(TEAM_ID, "real-5")
+    target_envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-5",
+        concurrency=1,
+        failure_budget=3,
+        authorization=target_authorization,
+    )
+    svc._save_envelope(TEAM_ID, target_envelope)
+    target_envelope = svc._load_envelope(TEAM_ID, "real-5")
+    assert target_envelope is not None
+    target_state = svc._state_of(target_envelope)
+    seeded = target_state.result_for("SCI-091")
+    assert seeded is not None
+    assert seeded.package_snapshot == package.to_dict()
+    assert (
+        seeded.package_snapshot["model_policy"]["policySha256"]
+        == package.model_policy["policySha256"]
+    )
+
+
+def test_policy_snapshot_is_record_hashed_and_old_policy_fails_closed(
+    harness: _Harness,
+) -> None:
+    harness.authorize("real-1")
+    authorization = svc._current_catalog_run_authorization(TEAM_ID, "real-1")
+    scope = authorization["batchScope"]
+    record = catalog_run_authorization.find_catalog_run_authorization(
+        TEAM_ID,
+        plan_id="real-1",
+        batch_scope=scope,
+        readiness_report_sha256_value=catalog_run_authorization.readiness_report_sha256(
+            harness.readiness_report
+        ),
+        require_model_policy=True,
+    )
+    assert record is not None
+    mutated_scope = deepcopy(scope)
+    mutated_scope["modelPolicy"]["modelIds"] = ["qwen-replaced"]
+    mutated_record = replace(
+        record,
+        batch_scope_json=json.dumps(
+            mutated_scope,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    assert catalog_run_authorization.expected_record_hash(mutated_record) != record.record_hash
+    assert (
+        catalog_run_authorization.validate_catalog_run_authorization(
+            mutated_record,
+            team_id=TEAM_ID,
+            plan_id="real-1",
+            require_model_policy=True,
+        )
+        is False
+    )
+
+    envelope = svc._new_envelope(
+        TEAM_ID,
+        "real-1",
+        concurrency=1,
+        failure_budget=3,
+        authorization=authorization,
+    )
+    envelope["catalogRunAuthorization"]["batchScope"].pop("modelPolicy")
+    with pytest.raises(svc.RealBatchStorageError, match="authorization"):
+        svc._state_of(envelope)
+
+    harness.model_policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope"],
+            "modelIds": ["qwen-replaced"],
+            "requireOfficialProvider": True,
+        }
+    )
+    with pytest.raises(svc.ChallengeCupRealBatchError, match="durable CatalogRunAuthorization"):
+        svc._current_catalog_run_authorization(TEAM_ID, "real-1")
+
+
 # ---------------------------------------------------------------------------
 # Service: launch, resume and harvest
 # ---------------------------------------------------------------------------
@@ -788,6 +1075,7 @@ def test_real_batch_authorization_route_is_server_principal_bound(
         assert body["planId"] == "real-1"
         assert body["readinessReportSha256"]
         assert body["recordHash"]
+        assert body["batchScope"]["modelPolicy"] == harness.model_policy
         assert harness.ledger.get_catalog_run_authorization(body["authorizationId"]) is not None
 
     started = _start(harness, "real-1")

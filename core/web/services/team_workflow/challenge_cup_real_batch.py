@@ -59,9 +59,11 @@ from core.web.services.team_workflow.research_projects import team_workspace_roo
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     CatalogRunAuthorizationError,
     authorization_to_dict,
+    authorized_model_policy_sha256,
     find_catalog_run_authorization,
     readiness_report_sha256,
     require_readiness_report_sha256,
+    resolve_catalog_model_policy,
 )
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     record_catalog_run_authorization as _record_catalog_run_authorization,
@@ -500,8 +502,53 @@ def _save_envelope(team_id: str, envelope: dict[str, Any]) -> None:
 
 def _state_of(envelope: dict[str, Any]) -> CatalogExecutionState:
     try:
-        return CatalogExecutionState.from_checkpoint(envelope["checkpoint"])
-    except (KeyError, CatalogExecutionError) as exc:
+        bound = envelope.get("catalogRunAuthorization")
+        if not isinstance(bound, Mapping):
+            raise CatalogRunAuthorizationError(
+                "real batch checkpoint has no durable catalog authorization"
+            )
+        team_id = str(bound.get("teamId") or "").strip()
+        plan_id = str(bound.get("planId") or "").strip()
+        scope = bound.get("batchScope")
+        readiness_hash = str(bound.get("readinessReportSha256") or "").strip()
+        if (
+            not team_id
+            or not plan_id
+            or str(envelope.get("teamId") or "").strip() != team_id
+            or str(envelope.get("planId") or "").strip() != plan_id
+            or not isinstance(scope, Mapping)
+            or not readiness_hash
+        ):
+            raise CatalogRunAuthorizationError(
+                "real batch checkpoint has an incomplete durable catalog authorization"
+            )
+        authorization = find_catalog_run_authorization(
+            team_id,
+            plan_id=plan_id,
+            batch_scope=scope,
+            readiness_report_sha256_value=readiness_hash,
+            require_model_policy=True,
+        )
+        if authorization is None:
+            raise CatalogRunAuthorizationError(
+                "real batch checkpoint durable catalog authorization is stale or invalid"
+            )
+        durable = authorization_to_dict(authorization)
+        for field in _AUTHORIZATION_BINDING_FIELDS:
+            if str(bound.get(field) or "").strip() != str(durable.get(field) or "").strip():
+                raise CatalogRunAuthorizationError(
+                    "real batch checkpoint durable catalog authorization binding is tampered"
+                )
+        if bound.get("batchScope") != durable.get("batchScope"):
+            raise CatalogRunAuthorizationError(
+                "real batch checkpoint durable catalog authorization scope is tampered"
+            )
+        expected_policy_sha256 = authorized_model_policy_sha256(authorization)
+        return CatalogExecutionState.from_checkpoint(
+            envelope["checkpoint"],
+            expected_model_policy_sha256=expected_policy_sha256,
+        )
+    except (KeyError, CatalogExecutionError, CatalogRunAuthorizationError) as exc:
         raise RealBatchStorageError(
             f"The real batch checkpoint is malformed: {exc}"
         ) from exc
@@ -550,12 +597,14 @@ def _readiness_evidence_from_snapshot(snapshot: Mapping[str, Any]) -> str:
     )
 
 
-def _batch_scope(plan_id: str) -> dict[str, Any]:
+def _batch_scope(team_id: str, plan_id: str) -> dict[str, Any]:
     plan = real_plan(plan_id)
+    model_policy = resolve_catalog_model_policy(team_id)
     return {
         "planId": str(plan_id),
         "gateId": str(plan.gate_id),
         "questionIds": [str(question_id) for question_id in plan.question_ids],
+        "modelPolicy": model_policy,
     }
 
 
@@ -583,13 +632,14 @@ def _require_catalog_run_authorization(
     snapshot: Mapping[str, Any],
 ):
     try:
-        scope = _batch_scope(plan_id)
+        scope = _batch_scope(team_id, plan_id)
         report_hash = _readiness_evidence_from_snapshot(snapshot)
         authorization = find_catalog_run_authorization(
             team_id,
             plan_id=plan_id,
             batch_scope=scope,
             readiness_report_sha256_value=report_hash,
+            require_model_policy=True,
         )
     except Exception as exc:
         raise ChallengeCupRealBatchError(
@@ -640,6 +690,12 @@ def _require_envelope_catalog_run_authorization(
             "start a new batch envelope for the current readiness report.",
             code="catalog_run_authorization_stale",
         )
+    if bound.get("batchScope") != current_authorization.get("batchScope"):
+        raise ChallengeCupRealBatchError(
+            "The real batch model-policy authorization has changed; "
+            "start a new batch envelope for the current model policy.",
+            code="catalog_run_authorization_stale",
+        )
 
 
 def record_catalog_run_authorization(
@@ -661,7 +717,7 @@ def record_catalog_run_authorization(
     """
 
     normalized_plan = validate_real_batch_plan(plan_id)
-    scope = _batch_scope(normalized_plan)
+    scope = _batch_scope(_resolve_team_id(team_id), normalized_plan)
     if (
         readiness_evidence is None
         and readiness_report_sha256_value is None
@@ -680,6 +736,7 @@ def record_catalog_run_authorization(
             readiness_report_hash=readiness_report_hash,
             approved_at_ms=approved_at_ms,
             authorization_id=authorization_id,
+            require_model_policy=True,
         )
     except CatalogRunAuthorizationError as exc:
         raise ChallengeCupRealBatchError(

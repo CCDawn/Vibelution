@@ -210,10 +210,11 @@ def _dev_authorization_ready(team_id: str) -> bool:
             find_catalog_run_authorization,
             readiness_report_sha256,
             require_readiness_report_sha256,
+            resolve_catalog_model_policy,
         )
 
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
-    except Exception:
+    except Exception:  # noqa: BLE001 - readiness probe is intentionally fail-closed.
         return False
     if not isinstance(snapshot, Mapping):
         return False
@@ -241,20 +242,24 @@ def _dev_authorization_ready(team_id: str) -> bool:
         report_hash = readiness_report_sha256(report)
     if not report_hash:
         return False
-    scope_plan = real_plan("real-1")
-    scope = {
-        "planId": "real-1",
-        "gateId": str(scope_plan.gate_id),
-        "questionIds": [str(question_id) for question_id in scope_plan.question_ids],
-    }
     try:
+        scope_plan = real_plan("real-1")
+        scope = {
+            "planId": "real-1",
+            "gateId": str(scope_plan.gate_id),
+            "questionIds": [str(question_id) for question_id in scope_plan.question_ids],
+            "modelPolicy": resolve_catalog_model_policy(
+                _text(snapshot.get("teamId")) or _text(team_id)
+            ),
+        }
         authorization = find_catalog_run_authorization(
             _text(snapshot.get("teamId")) or _text(team_id),
             plan_id="real-1",
             batch_scope=scope,
             readiness_report_sha256_value=report_hash,
+            require_model_policy=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - stale or malformed authorization stays closed.
         return False
     return authorization is not None
 

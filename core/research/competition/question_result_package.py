@@ -368,10 +368,11 @@ def _normalized_mechanism(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def _normalize_model_policy(payload: Any) -> dict[str, Any]:
+def _canonical_model_policy_body(payload: Any) -> dict[str, Any]:
     raw = _mapping(payload, "model_policy")
+    allowed_without_hash = _MODEL_POLICY_FIELDS - {"policySha256"}
     unknown = sorted(set(raw) - _MODEL_POLICY_FIELDS)
-    missing = sorted(_MODEL_POLICY_FIELDS - set(raw))
+    missing = sorted(allowed_without_hash - set(raw))
     if missing:
         raise QuestionResultPackageError(
             "model_policy is missing required fields: " + ", ".join(missing)
@@ -400,6 +401,22 @@ def _normalize_model_policy(payload: Any) -> dict[str, Any]:
         "modelIds": identifiers("modelIds"),
         "requireOfficialProvider": True,
     }
+    return body
+
+
+def _normalize_model_policy(payload: Any) -> dict[str, Any]:
+    raw = _mapping(payload, "model_policy")
+    unknown = sorted(set(raw) - _MODEL_POLICY_FIELDS)
+    missing = sorted(_MODEL_POLICY_FIELDS - set(raw))
+    if missing:
+        raise QuestionResultPackageError(
+            "model_policy is missing required fields: " + ", ".join(missing)
+        )
+    if unknown:
+        raise QuestionResultPackageError(
+            "model_policy contains unsupported fields: " + ", ".join(unknown)
+        )
+    body = _canonical_model_policy_body(raw)
     expected_hash = _canonical_hash(body)
     supplied_hash = _sha256(raw.get("policySha256"), "model_policy.policySha256")
     if supplied_hash != expected_hash:
@@ -407,6 +424,22 @@ def _normalize_model_policy(payload: Any) -> dict[str, Any]:
             "model_policy policy hash does not match its normalized content"
         )
     return {**body, "policySha256": expected_hash}
+
+
+def canonical_model_policy(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the canonical policy snapshot used by package validation.
+
+    The server uses this helper to create an allowlist from trusted runtime
+    bindings.  It deliberately shares the exact normalization and hashing
+    path with persisted package parsing; callers cannot supply a competing
+    canonicalization rule.
+    """
+
+    body = _canonical_model_policy_body(payload)
+    normalized = {**body, "policySha256": _canonical_hash(body)}
+    return _normalize_model_policy(normalized)
 
 
 def _normalize_human_gate(payload: Any, field: str) -> dict[str, Any]:
@@ -1522,6 +1555,7 @@ __all__ = [
     "REQUIRED_REVIEW_DIMENSIONS",
     "QuestionResultPackage",
     "QuestionResultPackageError",
+    "canonical_model_policy",
     "compute_question_result_package_hash",
     "question_result_package_idempotency_key",
 ]
