@@ -56,6 +56,9 @@ def _action() -> SimpleNamespace:
         node_run_id="node-run-problem-1",
         node_id="problem_understanding",
         attempt=1,
+        selection_id="",
+        candidate_id="",
+        scope={},
     )
 
 
