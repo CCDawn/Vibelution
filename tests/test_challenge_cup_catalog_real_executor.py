@@ -1395,7 +1395,7 @@ def test_checkpoint_round_trip_preserves_batch_state(harness: _Harness) -> None:
     _start(harness, "real-5")
     envelope = svc._load_envelope(TEAM_ID, "real-5")
     assert envelope is not None
-    state = CatalogExecutionState.from_checkpoint(envelope["checkpoint"])
+    state = svc._state_of(envelope)
     assert state.outcome_summary()["running"] == 2
     assert state.status("SCI-096") is QuestionStatus.RUNNING
 
