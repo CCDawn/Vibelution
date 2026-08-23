@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
+import sys
 from copy import deepcopy
 from dataclasses import replace
 
@@ -9,11 +12,12 @@ import pytest
 from core.research.competition.catalog_hypothesis_flow_ready import (
     build_catalog_hypothesis_flow_readiness_report,
 )
-from core.research.competition.platform_flow_ready import (
+from core.research.competition.resources import (
     CATALOG_POLICY_VERSION,
+    CORE_BEHAVIOR_HASH,
+    CORE_POLICY_HASH,
     PROGRAM_CONTRACT_VERSION,
 )
-from core.research.competition.resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
 from core.research.competition.result_set import (
     CatalogScope,
     FullCatalogResultSet,
@@ -27,6 +31,7 @@ from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION,
     RESEARCH_AUTHORIZATION_REQUIRED_ACTION,
     CatalogHypothesisFlowReadinessReport,
+    catalog_hypothesis_flow_report_hash,
 )
 from tests.test_catalog_execution_state_machine import _package
 
@@ -100,6 +105,22 @@ def _build(
     )
 
 
+def _rehash_report(report: dict) -> None:
+    manifest = report["catalogResultSet"]["resultManifest"]
+    manifest_body = {
+        key: value for key, value in manifest.items() if key != "manifest_sha256"
+    }
+    manifest["manifest_sha256"] = hashlib.sha256(
+        json.dumps(
+            manifest_body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest().upper()
+    report["readinessReportSha256"] = catalog_hypothesis_flow_report_hash(report)
+
+
 def test_ready_requires_all_125_canonical_packages_and_preserves_boundary(
     complete_result_set: FullCatalogResultSet,
 ) -> None:
@@ -120,6 +141,81 @@ def test_ready_requires_all_125_canonical_packages_and_preserves_boundary(
     assert report["catalogResultSet"]["receiptCompleteCount"] == 125
     assert len(report["catalogResultSet"]["resultManifest"]["entries"]) == 125
     assert report["blockers"] == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "schema_version",
+        "required_question_count",
+        "question_order",
+        "quality_status",
+        "human_gate",
+        "package_empty",
+        "package_duplicate",
+        "run_empty",
+        "run_duplicate",
+        "idempotency_empty",
+        "idempotency_duplicate",
+        "receipt_missing",
+        "receipt_empty",
+        "node_run_empty",
+        "locator_empty",
+        "locator_hash",
+        "receipt_duplicate",
+    ),
+)
+def test_ready_manifest_rejects_rehashed_semantic_tampering(
+    complete_result_set: FullCatalogResultSet,
+    mutation: str,
+) -> None:
+    report = deepcopy(_build(complete_result_set))
+    manifest = report["catalogResultSet"]["resultManifest"]
+    entries = manifest["entries"]
+    first = entries[0]
+    second = entries[1]
+    if mutation == "schema_version":
+        manifest["schema_version"] = 99
+    elif mutation == "required_question_count":
+        manifest["required_question_count"] = 124
+    elif mutation == "question_order":
+        first["question_id"] = "SCI-002"
+    elif mutation == "quality_status":
+        first["quality_status"] = "blocked"
+    elif mutation == "human_gate":
+        first["human_gate_decisions"]["selection"] = "rejected"
+    elif mutation == "package_empty":
+        first["package_id"] = ""
+    elif mutation == "package_duplicate":
+        second["package_id"] = first["package_id"]
+    elif mutation == "run_empty":
+        first["run_id"] = ""
+    elif mutation == "run_duplicate":
+        second["run_id"] = first["run_id"]
+    elif mutation == "idempotency_empty":
+        first["idempotency_key"] = ""
+    elif mutation == "idempotency_duplicate":
+        second["idempotency_key"] = first["idempotency_key"]
+    elif mutation == "receipt_missing":
+        first["receipts"].pop("revision")
+    elif mutation == "receipt_empty":
+        first["receipts"]["generation"]["receipt_id"] = ""
+    elif mutation == "node_run_empty":
+        first["receipts"]["generation"]["node_run_id"] = ""
+    elif mutation == "locator_empty":
+        first["receipts"]["generation"]["evidence_locator"] = {}
+    elif mutation == "locator_hash":
+        first["receipts"]["generation"]["evidence_locator_sha256"] = "0" * 64
+    elif mutation == "receipt_duplicate":
+        second["receipts"]["generation"]["receipt_id"] = first["receipts"][
+            "generation"
+        ]["receipt_id"]
+    else:
+        raise AssertionError(f"Unhandled mutation: {mutation}")
+
+    _rehash_report(report)
+    with pytest.raises(ContractValidationError):
+        CatalogHypothesisFlowReadinessReport.from_dict(report)
 
 
 def test_report_hash_is_stable_for_identical_evidence_and_ignores_generated_at(
@@ -317,3 +413,28 @@ def test_report_round_trip_rejects_manifest_tampering(
     ] = "0" * 64
     with pytest.raises(ContractValidationError, match="manifest"):
         CatalogHypothesisFlowReadinessReport.from_dict(tampered)
+
+
+def test_catalog_readiness_import_does_not_load_experiment_adapters() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "import core.research.competition.catalog_hypothesis_flow_ready; "
+                "assert 'core.research.experiment_adapters' not in sys.modules"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_platform_readiness_keeps_compatibility_version_exports() -> None:
+    from core.research.competition import platform_flow_ready
+
+    assert platform_flow_ready.PROGRAM_CONTRACT_VERSION == PROGRAM_CONTRACT_VERSION
+    assert platform_flow_ready.CATALOG_POLICY_VERSION == CATALOG_POLICY_VERSION

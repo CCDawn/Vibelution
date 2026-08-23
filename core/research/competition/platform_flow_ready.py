@@ -23,9 +23,11 @@ from core.research.competition.catalog_execution import (
     run_pending_batch,
 )
 from core.research.competition.resources import (
+    CATALOG_POLICY_VERSION,
     CATALOG_QUESTION_COUNT,
     CORE_BEHAVIOR_HASH,
     CORE_POLICY_HASH,
+    PROGRAM_CONTRACT_VERSION,
     load_competition_program_core,
     load_full_catalog_execution_core,
     load_science_question_catalog,
@@ -65,8 +67,6 @@ from core.research.workflow.contracts.multimodal_validation import (
     Verdict,
 )
 
-PROGRAM_CONTRACT_VERSION = "2.2.0"
-CATALOG_POLICY_VERSION = "1.2.0"
 REPORT_KIND = "ChallengeCupPlatformDevelopmentReadinessReport"
 GPU_ADAPTER = "gpu_operator_benchmark"
 NEURAL_ADAPTER = "neural_spike_coding"

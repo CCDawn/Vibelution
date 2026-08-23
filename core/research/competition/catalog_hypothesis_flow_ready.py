@@ -25,8 +25,13 @@ from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     sha256_hex,
 )
 
-from .platform_flow_ready import CATALOG_POLICY_VERSION, PROGRAM_CONTRACT_VERSION
-from .resources import CATALOG_QUESTION_COUNT, CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
+from .resources import (
+    CATALOG_POLICY_VERSION,
+    CATALOG_QUESTION_COUNT,
+    CORE_BEHAVIOR_HASH,
+    CORE_POLICY_HASH,
+    PROGRAM_CONTRACT_VERSION,
+)
 from .result_set import (
     RESULT_MANIFEST_SCHEMA_VERSION,
     FullCatalogResultSet,

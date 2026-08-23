@@ -35,6 +35,35 @@ CATALOG_HYPOTHESIS_FLOW_EVIDENCE_STATUSES = frozenset(
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_READY_MANIFEST_FIELDS = frozenset(
+    {
+        "schema_version",
+        "scope",
+        "required_question_count",
+        "entries",
+        "manifest_sha256",
+    }
+)
+_READY_MANIFEST_ENTRY_FIELDS = frozenset(
+    {
+        "question_id",
+        "package_id",
+        "run_id",
+        "canonical_sha256",
+        "idempotency_key",
+        "quality_status",
+        "human_gate_decisions",
+        "receipts",
+    }
+)
+_READY_MANIFEST_RECEIPT_FIELDS = frozenset(
+    {
+        "receipt_id",
+        "node_run_id",
+        "evidence_locator",
+        "evidence_locator_sha256",
+    }
+)
 _TOP_LEVEL_FIELDS = frozenset(
     {
         "schemaVersion",
@@ -93,6 +122,12 @@ def _sha256(value: Any, field: str, *, allow_empty: bool = False) -> str:
     return normalized
 
 
+def _required_text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ContractValidationError(f"{field} must be a non-empty string")
+    return value.strip()
+
+
 def _validate_result_manifest(
     manifest: Mapping[str, Any],
     *,
@@ -104,6 +139,21 @@ def _validate_result_manifest(
         if ready:
             raise ContractValidationError("result manifest hash is required for READY")
         return normalized
+    if ready:
+        if set(normalized) != _READY_MANIFEST_FIELDS:
+            raise ContractValidationError(
+                "READY result manifest contains unsupported or missing fields"
+            )
+        if normalized.get("schema_version") != 1:
+            raise ContractValidationError(
+                "READY result manifest schema_version must be 1"
+            )
+        if normalized.get("required_question_count") != 125:
+            raise ContractValidationError(
+                "READY result manifest required_question_count must be 125"
+            )
+        if not isinstance(normalized.get("scope"), Mapping):
+            raise ContractValidationError("READY result manifest scope must be an object")
     body = {
         key: copy.deepcopy(value)
         for key, value in normalized.items()
@@ -116,9 +166,18 @@ def _validate_result_manifest(
     if not isinstance(entries, list):
         raise ContractValidationError("result manifest entries must be a list")
     question_ids: list[str] = []
+    package_ids: set[str] = set()
+    run_ids: set[str] = set()
+    idempotency_keys: set[str] = set()
+    receipt_ids: set[str] = set()
+    node_run_ids: set[str] = set()
     for entry in entries:
         if not isinstance(entry, Mapping):
             raise ContractValidationError("result manifest entries must be objects")
+        if ready and set(entry) != _READY_MANIFEST_ENTRY_FIELDS:
+            raise ContractValidationError(
+                "READY result manifest entry contains unsupported or missing fields"
+            )
         question_id = str(entry.get("question_id") or "").strip()
         question_ids.append(question_id)
         _sha256(entry.get("canonical_sha256"), "result manifest canonical_sha256")
@@ -127,6 +186,30 @@ def _validate_result_manifest(
             raise ContractValidationError(
                 "result manifest human_gate_decisions must be an object"
             )
+        if ready:
+            if set(gates) != {"selection", "research_plan"}:
+                raise ContractValidationError(
+                    "READY result manifest human gates must contain selection and research_plan"
+                )
+            if any(gates.get(stage) != "approved" for stage in gates):
+                raise ContractValidationError(
+                    "READY result manifest human gates must both be approved"
+                )
+            if entry.get("quality_status") != "approved":
+                raise ContractValidationError(
+                    "READY result manifest quality_status must be approved"
+                )
+            for field, values in (
+                ("package_id", package_ids),
+                ("run_id", run_ids),
+                ("idempotency_key", idempotency_keys),
+            ):
+                value = _required_text(entry.get(field), f"result manifest {field}")
+                if value in values:
+                    raise ContractValidationError(
+                        f"READY result manifest {field} values must be unique"
+                    )
+                values.add(value)
         receipts = entry.get("receipts")
         if not isinstance(receipts, Mapping) or set(receipts) != {
             "generation",
@@ -141,11 +224,30 @@ def _validate_result_manifest(
                 raise ContractValidationError(
                     f"result manifest receipt {stage} must be an object"
                 )
+            if ready and set(receipt) != _READY_MANIFEST_RECEIPT_FIELDS:
+                raise ContractValidationError(
+                    f"READY result manifest receipt {stage} contains unsupported or missing fields"
+                )
             locator = receipt.get("evidence_locator")
             if not isinstance(locator, Mapping) or not locator:
                 raise ContractValidationError(
                     f"result manifest receipt {stage} requires evidence locator identity"
                 )
+            if ready:
+                receipt_id = _required_text(
+                    receipt.get("receipt_id"),
+                    f"result manifest receipt {stage}.receipt_id",
+                )
+                node_run_id = _required_text(
+                    receipt.get("node_run_id"),
+                    f"result manifest receipt {stage}.node_run_id",
+                )
+                if receipt_id in receipt_ids or node_run_id in node_run_ids:
+                    raise ContractValidationError(
+                        "READY result manifest receipt and node-run identities must be unique"
+                    )
+                receipt_ids.add(receipt_id)
+                node_run_ids.add(node_run_id)
             supplied_locator_hash = str(
                 receipt.get("evidence_locator_sha256") or ""
             ).strip().upper()
