@@ -24,6 +24,7 @@ from core.chat.turn_journal import (
     load_turn_events,
     model_visible_messages_from_events,
     read_model_invocation_receipt_from_events,
+    read_model_invocation_receipts_from_events,
     rewrite_turn_events,
     session_turn_items_from_events,
     turn_journal_path,
@@ -158,7 +159,26 @@ def test_canonical_receipt_is_audit_only_and_readable_from_final_answer_item(tmp
         "runId": "question-run-1",
         "responseExcerpt": "provider-secret-must-not-enter-model-context",
     }
+    earlier_receipt = {
+        "receiptId": "receipt-0",
+        "runId": "question-run-1",
+        "responseExcerpt": "tool-call-receipt",
+    }
     append_turn_event(tmp_path, "session-a", "turn-receipt", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-receipt",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "tool_call",
+            "channel": "analysis",
+            "phase": "tool_call",
+            "modelInvocationReceipt": earlier_receipt,
+        },
+        source="canonical_turn_outcome",
+    )
     append_canonical_turn_outcome(
         tmp_path,
         "session-a",
@@ -177,6 +197,9 @@ def test_canonical_receipt_is_audit_only_and_readable_from_final_answer_item(tmp
     assistant = next(message for message in visible if message.get("role") == "assistant")
     assert "modelInvocationReceipt" not in assistant.get("metadata", {})
     assert read_model_invocation_receipt_from_events(events, turn_id="turn-receipt") == receipt
+    assert read_model_invocation_receipts_from_events(
+        events, turn_id="turn-receipt"
+    ) == [earlier_receipt, receipt]
     assert read_model_invocation_receipt_from_events(events, turn_id="other-turn") is None
 
 

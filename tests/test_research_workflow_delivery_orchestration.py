@@ -227,6 +227,31 @@ def test_registered_program_candidate_closes_delivery_once(harness, monkeypatch)
     graph, worker, _clock = harness
     run_id = "run-delivery-registered"
     _close_run(graph, run_id)
+    _set_input_snapshot(
+        graph,
+        run_id,
+        {"teamId": "research-team", "questionId": "SCI-096"},
+    )
+    invocation_entry = {
+        "path": "model-invocations/receipt-final.json",
+        "kind": "model_invocation_receipt",
+        "sha256": "c" * 64,
+        "scope": {
+            "questionId": "SCI-096",
+            "runId": run_id,
+            "evidenceLocator": {
+                "sessionId": "session-final",
+                "turnId": "turn-final",
+                "invocationId": "invocation-final",
+            },
+            "evidenceLocatorSha256": "d" * 64,
+        },
+    }
+    monkeypatch.setattr(
+        delivery_orchestration,
+        "model_invocation_receipt_evidence_entries",
+        lambda *args, **kwargs: [dict(invocation_entry)],
+    )
     handoff = {
         "status": "registered",
         "teamId": "research-team",
@@ -265,6 +290,7 @@ def test_registered_program_candidate_closes_delivery_once(harness, monkeypatch)
     body = envelope["payload"]
     assert body["deliveryStatus"] == "succeeded"
     assert body["programCandidateHandoff"] == handoff
+    assert invocation_entry in body["steps"]["evidenceIndex"]["entries"]
 
     row = _outbox_row(graph, run_id)
     assert row is not None and row["status"] == "succeeded" and row["attempts"] == 1

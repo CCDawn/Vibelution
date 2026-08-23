@@ -277,6 +277,7 @@ def test_completion_snapshot_reads_receipt_from_canonical_journal_after_restart_
     monkeypatch,
 ):
     from core.chat.turn_journal import (
+        EVENT_ASSISTANT_ITEM_COMMITTED,
         EVENT_TURN_STARTED,
         append_canonical_turn_outcome,
         append_turn_event,
@@ -290,8 +291,27 @@ def test_completion_snapshot_reads_receipt_from_canonical_journal_after_restart_
         "runId": "question-run-1",
         "responseExcerpt": "audit-only-receipt",
     }
+    earlier_receipt = {
+        "receiptId": "receipt-0",
+        "runId": "question-run-1",
+        "responseExcerpt": "audit-only-earlier-receipt",
+    }
     identity = CanonicalItemIdentity("session-1", "turn-1", "inv-1", 0, "answer-1")
     append_turn_event(tmp_path, "session-1", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-1",
+        "turn-1",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "tool_call",
+            "channel": "analysis",
+            "phase": "tool_call",
+            "modelInvocationReceipt": earlier_receipt,
+        },
+        source="canonical_turn_outcome",
+    )
     append_canonical_turn_outcome(
         tmp_path,
         "session-1",
@@ -353,3 +373,4 @@ def test_completion_snapshot_reads_receipt_from_canonical_journal_after_restart_
 
     assert snapshot["terminal"] is True
     assert snapshot["modelInvocationReceipt"] == receipt
+    assert snapshot["modelInvocationReceipts"] == [earlier_receipt, receipt]

@@ -291,7 +291,16 @@ def _append_canonical_turn_output(project_root, task: dict, output: dict) -> Non
 
 
 def _isolate_store(tmp_path, monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
     monkeypatch.setattr(challenge_question_runs, "_workflow_root", lambda _team_id: tmp_path)
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "resolve_team_program_root",
+        lambda _team_id: tmp_path,
+    )
     monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
     monkeypatch.setattr(challenge_question_runs, "record_runtime_scene_event", lambda *args, **kwargs: None)
     evidence_path = tmp_path / "official_model_evidence" / "index.json"

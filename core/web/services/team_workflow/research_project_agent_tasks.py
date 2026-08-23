@@ -6,6 +6,7 @@ import json
 import re
 import threading
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -313,6 +314,16 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         "retryOfSessionId": _text(payload.get("retryOfSessionId")),
         "retrySourceTaskId": _text(payload.get("retrySourceTaskId")),
         "formalRetry": bool(payload.get("formalRetry")),
+        "modelInvocationReceiptBinding": deepcopy(
+            payload.get("modelInvocationReceiptBinding")
+            if isinstance(payload.get("modelInvocationReceiptBinding"), dict)
+            else {}
+        ),
+        "challengeTaskContract": deepcopy(
+            payload.get("challengeTaskContract")
+            if isinstance(payload.get("challengeTaskContract"), dict)
+            else {}
+        ),
         "status": status,
         "turn": turn,
         "resultRefs": result_refs,
@@ -346,6 +357,33 @@ def _read_store(team_id: str, research_project_id: str) -> dict[str, Any]:
         "tasks": tasks[-MAX_TASKS:],
         "updatedAt": _text(payload.get("updatedAt"), limit=120),
     }
+
+
+def _read_research_project_agent_task_record(
+    team_id: str,
+    research_project_id: str,
+    task_id: str,
+) -> dict[str, Any] | None:
+    """Read the normalized internal task authority without exposing a DTO."""
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
+    )
+    normalized_task_id = s._normalize_required_id(task_id, "Task id is required.")
+    with _TASK_LOCK:
+        store = _read_store(normalized_team_id, normalized_project_id)
+        task = next(
+            (
+                item
+                for item in store["tasks"]
+                if item.get("taskId") == normalized_task_id
+            ),
+            None,
+        )
+        return deepcopy(task) if task is not None else None
 
 
 def _write_store(
@@ -513,6 +551,11 @@ def _task_message(
 def _public_task(task: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_task(task)
     session_id = normalized["sessionId"]
+    # Receipt bindings and challenge contracts are server-owned authority, not
+    # public task DTO fields. Internal consumers read them through the helper
+    # above so a client projection cannot become the source of truth.
+    normalized.pop("modelInvocationReceiptBinding", None)
+    normalized.pop("challengeTaskContract", None)
     return {
         **normalized,
         "chatRoute": f"/chat?session={session_id}" if session_id else "",
@@ -589,6 +632,34 @@ def require_research_project_agent_task(
             code="task_agent_mismatch",
         )
     return _public_task(task)
+
+
+def _read_research_project_agent_task_record(
+    team_id: str,
+    research_project_id: str,
+    task_id: str,
+) -> dict[str, Any] | None:
+    """Internal readback that retains server-only execution bindings."""
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
+    )
+    normalized_task_id = s._normalize_required_id(task_id, "Task id is required.")
+    s.get_research_project(normalized_team_id, normalized_project_id)
+    with _TASK_LOCK:
+        store = _read_store(normalized_team_id, normalized_project_id)
+        task = next(
+            (
+                item
+                for item in store["tasks"]
+                if item.get("taskId") == normalized_task_id
+            ),
+            None,
+        )
+    return deepcopy(task) if isinstance(task, dict) else None
 
 
 def _compact_experiment_result(
@@ -967,6 +1038,9 @@ def start_research_project_agent_task(
     team_id: str,
     research_project_id: str,
     payload: dict[str, Any] | None = None,
+    *,
+    _challenge_task_contract: dict[str, Any] | None = None,
+    _model_invocation_receipt_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one bounded task turn in the correct flat project Agent session."""
     s = _service()
@@ -976,6 +1050,16 @@ def start_research_project_agent_task(
         "Research project id is required.",
     )
     request_payload = payload if isinstance(payload, dict) else {}
+    receipt_binding = (
+        deepcopy(_model_invocation_receipt_binding)
+        if isinstance(_model_invocation_receipt_binding, dict)
+        else {}
+    )
+    challenge_task_contract = (
+        deepcopy(_challenge_task_contract)
+        if isinstance(_challenge_task_contract, dict)
+        else {}
+    )
     task_kind = _text(request_payload.get("taskKind"), limit=80)
     contract = TASK_KIND_CONTRACTS.get(task_kind)
     if contract is None:
@@ -1214,6 +1298,11 @@ def start_research_project_agent_task(
                 str(exc),
                 code="session_resolution_failed",
             ) from exc
+        for internal_binding in (receipt_binding, challenge_task_contract):
+            if isinstance(internal_binding, dict):
+                internal_binding["taskId"] = task_id
+                internal_binding["sessionId"] = session["sessionId"]
+                internal_binding.setdefault("turnId", "")
         task = _normalize_task(
             {
                 "taskId": task_id,
@@ -1245,6 +1334,20 @@ def start_research_project_agent_task(
                 if previous_task
                 else "",
                 "formalRetry": formal_retry,
+                "modelInvocationReceiptBinding": {
+                    **receipt_binding,
+                    "taskId": task_id,
+                    "sessionId": session["sessionId"],
+                }
+                if receipt_binding
+                else {},
+                "challengeTaskContract": {
+                    **challenge_task_contract,
+                    "taskId": task_id,
+                    "sessionId": session["sessionId"],
+                }
+                if challenge_task_contract
+                else {},
                 "status": "queued",
                 "turn": {},
                 "returnTo": return_to,
@@ -1313,6 +1416,16 @@ def start_research_project_agent_task(
             )
         stored["status"] = next_status
         stored["turn"] = turn_payload
+        for internal_key in (
+            "modelInvocationReceiptBinding",
+            "challengeTaskContract",
+        ):
+            internal_binding = stored.get(internal_key)
+            if isinstance(internal_binding, dict):
+                internal_binding["taskId"] = task_id
+                internal_binding["sessionId"] = stored.get("sessionId", "")
+                internal_binding["turnId"] = turn_payload.get("turnId", "")
+                stored[internal_key] = internal_binding
         stored["failureCode"] = failure_code
         stored["updatedAt"] = s.utc_now_iso()
         _write_store(normalized_team_id, normalized_project_id, store)

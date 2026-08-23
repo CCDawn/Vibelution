@@ -849,12 +849,7 @@ def _canonical_item_payload(protocol_event: Any, *, outcome: Any) -> dict[str, A
     # answer, not model-visible content.  Keep it on the immutable item event
     # so later projections and writeback can recover it after a process restart.
     receipt = getattr(outcome, "model_invocation_receipt", None)
-    if (
-        isinstance(receipt, Mapping)
-        and kind == "assistant_message"
-        and channel == "answer"
-        and phase == "final_answer"
-    ):
+    if isinstance(receipt, Mapping):
         payload["modelInvocationReceipt"] = dict(receipt)
     return payload
 
@@ -1097,24 +1092,26 @@ def _ui_tool_status_from_journal(status: str) -> str:
     return normalized or "completed"
 
 
-def read_model_invocation_receipt_from_events(
+def read_model_invocation_receipts_from_events(
     events: Iterable[TurnJournalEvent],
     *,
     turn_id: str = "",
-) -> dict[str, Any] | None:
-    """Read an audit receipt from the canonical final-answer journal item.
+) -> list[dict[str, Any]]:
+    """Read every provider-bound receipt committed for one canonical turn.
 
     Receipts are deliberately not part of the model-visible projection.  This
-    readback is the dedicated audit path for restart-safe consumers and only
-    accepts the immutable ``canonical_turn_outcome`` final-answer item.
+    readback is the dedicated restart-safe audit path.  Receipt ids are
+    de-duplicated in journal order so an idempotent replay is a no-op while a
+    conflicting duplicate is rejected by the downstream registry.
     """
 
     normalized_turn_id = str(turn_id or "").strip()
     event_list = sorted(
         list(events or []),
         key=lambda item: (item.sequence, item.timestamp, item.event_id),
-        reverse=True,
     )
+    receipts: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
     for event in event_list:
         if event.event_type != EVENT_ASSISTANT_ITEM_COMMITTED:
             continue
@@ -1123,16 +1120,29 @@ def read_model_invocation_receipt_from_events(
         if normalized_turn_id and str(event.turn_id or "").strip() != normalized_turn_id:
             continue
         payload = event.payload if isinstance(event.payload, Mapping) else {}
-        if (
-            str(payload.get("kind") or "") != "assistant_message"
-            or str(payload.get("channel") or "") != "answer"
-            or str(payload.get("phase") or "") != "final_answer"
-        ):
-            continue
         receipt = payload.get("modelInvocationReceipt")
         if isinstance(receipt, Mapping):
-            return dict(receipt)
-    return None
+            receipt_id = str(receipt.get("receiptId") or "").strip()
+            normalized = dict(receipt)
+            if not receipt_id:
+                continue
+            previous = seen.get(receipt_id)
+            if previous == normalized:
+                continue
+            seen[receipt_id] = normalized
+            receipts.append(normalized)
+    return receipts
+
+
+def read_model_invocation_receipt_from_events(
+    events: Iterable[TurnJournalEvent],
+    *,
+    turn_id: str = "",
+) -> dict[str, Any] | None:
+    """Compatibility projection: return the last receipt for the turn."""
+
+    receipts = read_model_invocation_receipts_from_events(events, turn_id=turn_id)
+    return receipts[-1] if receipts else None
 
 
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
@@ -2131,6 +2141,7 @@ __all__ = [
     "model_visible_messages_from_events",
     "model_messages_from_events",
     "read_model_invocation_receipt_from_events",
+    "read_model_invocation_receipts_from_events",
     "session_turn_items_from_events",
     "turn_journal_path",
 ]

@@ -5,6 +5,10 @@ from __future__ import annotations
 import urllib.parse
 from typing import Any
 
+from core.research.competition.question_result_package import (
+    QuestionResultPackageError,
+    canonical_model_policy,
+)
 from core.research.workflow.contracts import WorkflowSessionScopeV3
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import NodeSessionScopePolicy
@@ -37,6 +41,170 @@ class AgentNodeExecutionError(ValueError):
     def __init__(self, message: str, *, code: str):
         super().__init__(message)
         self.code = code
+
+
+_MODEL_INVOCATION_OUTCOME_KINDS: dict[str, tuple[str, ...]] = {
+    "hypothesis_design": ("candidate",),
+    "protocol_design": ("plan", "revision"),
+    "protocol_review": ("review",),
+    "result_evaluation": ("review",),
+    "iteration_decision": ("revision",),
+    "version_governance": ("final_output",),
+}
+_MODEL_INVOCATION_STAGES: dict[str, str] = {
+    "hypothesis_design": "generation",
+    "protocol_design": "revision",
+    "protocol_review": "review",
+    "result_evaluation": "review",
+    "iteration_decision": "revision",
+    "version_governance": "revision",
+}
+
+
+def _model_invocation_receipt_binding(
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    node_run_id: str,
+    task_id: str = "",
+    session_id: str = "",
+    turn_id: str = "",
+) -> dict[str, Any]:
+    outcome_kinds = _MODEL_INVOCATION_OUTCOME_KINDS.get(node_id, ())
+    question_stage = _MODEL_INVOCATION_STAGES.get(node_id, "")
+    snapshot = record.get("inputSnapshot") if isinstance(record.get("inputSnapshot"), dict) else {}
+    question_id = str(record.get("questionId") or snapshot.get("questionId") or "").strip().upper()
+    workflow_run_id = str(record.get("runId") or "").strip()
+    node_run = latest_node_run(record, node_id)
+    model_policy = dict(snapshot.get("modelRoutingPolicy") or {})
+    required_model_policy = model_policy.get("requiredModelPolicy")
+    model_policy_sha256 = str(
+        model_policy.get("modelPolicySha256") or ""
+    ).strip().lower()
+    try:
+        canonical_required_model_policy = canonical_model_policy(
+            required_model_policy
+        )
+    except (QuestionResultPackageError, TypeError, ValueError):
+        return {}
+    if (
+        not isinstance(required_model_policy, dict)
+        or required_model_policy != canonical_required_model_policy
+        or model_policy_sha256
+        != canonical_required_model_policy["policySha256"]
+    ):
+        return {}
+    if (
+        not question_id
+        or not workflow_run_id
+        or not node_run_id
+        or not outcome_kinds
+        or not question_stage
+        or len(model_policy_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in model_policy_sha256)
+    ):
+        return {}
+    return {
+        "questionId": question_id,
+        "questionRunId": workflow_run_id,
+        "workflowRunId": workflow_run_id,
+        "workflowId": str(record.get("workflowId") or "challenge-cup-research"),
+        "workflowVersionId": str(record.get("workflowVersionId") or ""),
+        "formalNodeId": node_id,
+        "formalNodeRunId": node_run_id,
+        "formalNodeAttempt": int(node_run.get("attempt") or 1),
+        "questionStage": question_stage,
+        "taskId": str(task_id or ""),
+        "sessionId": str(session_id or ""),
+        "turnId": str(turn_id or ""),
+        "outcomeKinds": list(outcome_kinds),
+        "modelPolicySha256": model_policy_sha256,
+    }
+
+
+def _challenge_task_contract(
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    node_run_id: str,
+    agent_id: str,
+) -> dict[str, Any]:
+    """Create the server-owned contract persisted with a project Agent task."""
+
+    snapshot = (
+        record.get("inputSnapshot")
+        if isinstance(record.get("inputSnapshot"), dict)
+        else {}
+    )
+    model_policy = (
+        snapshot.get("modelRoutingPolicy")
+        if isinstance(snapshot.get("modelRoutingPolicy"), dict)
+        else {}
+    )
+    if not model_policy:
+        return {}
+    node_run = latest_node_run(record, node_id)
+    try:
+        route = select_model_route(record, node_run, {})
+    except ModelRoutingError as exc:
+        raise AgentNodeExecutionError(
+            str(exc),
+            code=str(getattr(exc, "code", "agent_route_invalid")),
+        ) from exc
+    required_policy = model_policy.get("requiredModelPolicy")
+    policy_sha256 = str(model_policy.get("modelPolicySha256") or "").strip().lower()
+    question_id = str(
+        record.get("questionId") or snapshot.get("questionId") or ""
+    ).strip().upper()
+    workflow_run_id = str(record.get("runId") or "").strip()
+    project_id = str(record.get("projectId") or "").strip()
+    input_snapshot_hash = str(node_run.get("inputSnapshotHash") or "").strip()
+    stage_id = _MODEL_INVOCATION_STAGES.get(node_id, "")
+    if (
+        not isinstance(required_policy, dict)
+        or not policy_sha256
+        or not question_id
+        or not workflow_run_id
+        or not project_id
+        or not input_snapshot_hash
+        or not stage_id
+        or str(route.get("agentId") or "").strip() != str(agent_id or "").strip()
+    ):
+        raise AgentNodeExecutionError(
+            "formal project Agent task contract is incomplete",
+            code="challenge_task_contract_incomplete",
+        )
+    return {
+        "schemaVersion": 1,
+        "questionId": question_id,
+        "researchProjectId": project_id,
+        "runId": workflow_run_id,
+        "workflowRunId": workflow_run_id,
+        "workflowNodeId": node_id,
+        "nodeRunId": str(node_run_id or "").strip(),
+        "nodeAttempt": int(node_run.get("attempt") or 1),
+        "inputSnapshotHash": input_snapshot_hash,
+        "modelPolicySha256": policy_sha256,
+        "requiredModelPolicy": dict(required_policy),
+        "stageId": stage_id,
+        "agentId": str(agent_id or "").strip(),
+        "productRoleId": str(route.get("productRoleId") or "").strip(),
+        "effectiveRoute": {
+            "modelRef": str(route.get("modelRef") or "").strip(),
+            "providerId": str(route.get("providerId") or "").strip(),
+            "modelId": str(route.get("modelId") or "").strip(),
+        },
+        "executionPolicy": {
+            "routeSource": "workflow_run_model_routing_policy",
+            "configuredModelAuthoritative": True,
+        },
+        "evidencePolicy": {
+            "recordCanonicalSuccessOnly": True,
+            "rawPayloadPersistence": "forbidden",
+            "publishRequiredForProgramLedger": True,
+            "officialEvidenceEligible": True,
+        },
+    }
 
 
 def _return_to(record: dict[str, Any], node_id: str) -> str:
@@ -274,6 +442,17 @@ def _start_external_task(
             "returnTo": return_to,
             "returnLabel": "科研工作流",
         },
+        _challenge_task_contract=_challenge_task_contract(
+            record,
+            node_id=node_id,
+            node_run_id=node_run_id,
+            agent_id=agent_id,
+        ),
+        _model_invocation_receipt_binding=_model_invocation_receipt_binding(
+            record,
+            node_id=node_id,
+            node_run_id=node_run_id,
+        ),
     )
     return record, started
 

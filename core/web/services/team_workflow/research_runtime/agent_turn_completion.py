@@ -36,6 +36,32 @@ _FAILURE_TERMINAL_STATUSES = frozenset(
 DEFAULT_AGENT_TURN_TIMEOUT_MS = 120_000
 
 
+def _persist_question_model_invocation_receipts(
+    snapshot: dict[str, Any],
+    *,
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+) -> list[dict[str, Any]]:
+    raw = snapshot.get("modelInvocationReceipts")
+    receipts = [item for item in list(raw or []) if isinstance(item, dict)]
+    if not receipts:
+        legacy = snapshot.get("modelInvocationReceipt")
+        receipts = [legacy] if isinstance(legacy, dict) else []
+    if not receipts or not question_id:
+        return []
+    from .model_invocation_receipt_registry import (
+        register_question_model_invocation_receipts,
+    )
+
+    return register_question_model_invocation_receipts(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+        receipts=receipts,
+    )
+
+
 def _formal_receipt_writeback_context(
     snapshot: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, str, str, dict[str, Any]]:
@@ -251,6 +277,12 @@ def complete_agent_turn_outputs(
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
     )
+    _persist_question_model_invocation_receipts(
+        snapshot,
+        team_id=team_id,
+        question_id=str(input_snapshot.get("questionId") or "").strip().upper(),
+        workflow_run_id=str(action.run_id or "").strip(),
+    )
 
     task_id = str(handle.task_id or "").strip()
     adapter_spec = resolve_agent_task_adapter(action.node_id)
@@ -291,34 +323,48 @@ def complete_agent_turn_outputs(
         workflow_run_id=str(action.run_id or ""),
         source_collection_run_id=source_collection_run_id,
     )
+    project_task_authority: dict[str, Any] | None = None
     if task_id and adapter_spec is not None and adapter_spec.family == "research_project":
-        _require_project_task_terminal(
+        project_task_authority = _require_project_task_terminal(
             team_id=team_id,
             project_id=str(input_snapshot.get("projectId") or "").strip(),
             task_id=task_id,
         )
+        challenge_contract = project_task_authority.get("challengeTaskContract")
+        if formal_receipt is not None and isinstance(challenge_contract, dict):
+            from core.web.services.team_workflow.challenge_question_runs import (
+                register_challenge_task_model_evidence,
+            )
+
+            register_challenge_task_model_evidence(
+                team_id,
+                project_task_authority,
+                final_status=str(project_task_authority.get("status") or "").strip(),
+                llm_usage=receipt_usage or None,
+                model_invocation_receipt=formal_receipt,
+                stage_id=str(challenge_contract.get("stageId") or "").strip(),
+                model_policy_sha256=str(
+                    challenge_contract.get("modelPolicySha256") or ""
+                ).strip().lower(),
+            )
     return refs
 
 
 def _require_project_task_terminal(
     *, team_id: str, project_id: str, task_id: str
-) -> None:
+) -> dict[str, Any]:
     """Close the canonical project task before the same Agent can take a successor."""
     if not project_id:
         raise RuntimeError("input snapshot has no projectId for project Agent task completion")
     from core.web.services.team_workflow.research_project_agent_tasks import (
+        _read_research_project_agent_task_record,
         get_research_project_agent_task_status,
     )
 
-    status = get_research_project_agent_task_status(team_id, project_id)
-    task = next(
-        (
-            item
-            for item in list(status.get("tasks") or [])
-            if isinstance(item, dict) and str(item.get("taskId") or "") == task_id
-        ),
-        None,
-    )
+    # Reconcile the canonical turn into the task store first, then read the
+    # internal record so status and contract come from one server authority.
+    get_research_project_agent_task_status(team_id, project_id)
+    task = _read_research_project_agent_task_record(team_id, project_id, task_id)
     if task is None:
         raise RuntimeError("completed project Agent task is missing from its authority")
     task_status = str(task.get("status") or "").strip().lower()
@@ -346,3 +392,4 @@ def _require_project_task_terminal(
                 ensure_ascii=False,
             )
         )
+    return task

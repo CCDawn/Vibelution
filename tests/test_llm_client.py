@@ -22,6 +22,7 @@ from core.llm.client import (
     _safe_prompt_cache_payload_summary,
     _safe_responses_continuation_summary,
     llm_cancel_context,
+    model_invocation_receipt_context_scope,
 )
 from core.llm.errors import classify_exception
 from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
@@ -128,33 +129,34 @@ def test_responses_continuation_summary_classifies_stateless_replay() -> None:
 def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture():
     source = inspect.getsource(LLMClient._stream_attempt)
     assert "provider_response_capture" not in source
-    assert "Callable[[TurnOutcome], TurnOutcome]" in source
+    assert "receipt_builder" in source
 
-    metadata = {
+    receipt_context = {
+        "questionStageBinding": {
+            "questionStage": "generation",
+            "questionId": "SCI-001",
+            "questionRunId": "question-run-1",
+            "workflowRunId": "workflow-run-1",
+            "workflowId": "workflow-1",
+            "workflowVersionId": "version-1",
+            "formalNodeId": "node-1",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "sessionId": "session-1",
+            "taskId": "task-1",
+            "turnId": "turn-2",
+        },
+        "receiptRunAuthority": "question_run",
+        "receiptRunId": "question-run-1",
+        "modelPolicySha256": "a" * 64,
+        "outputRef": "artifact://output-1",
+    }
+
+    metadata_without_authority = {
         "sessionId": "session-1",
         "turnId": "turn-2",
         "invocationId": "invocation-3",
         "iteration": 0,
-        "modelInvocationReceiptContext": {
-            "questionStageBinding": {
-                "questionStage": "generation",
-                "questionId": "SCI-001",
-                "questionRunId": "question-run-1",
-                "workflowRunId": "workflow-run-1",
-                "workflowId": "workflow-1",
-                "workflowVersionId": "version-1",
-                "formalNodeId": "node-1",
-                "formalNodeRunId": "node-run-1",
-                "formalNodeAttempt": 1,
-                "sessionId": "session-1",
-                "taskId": "task-1",
-                "turnId": "turn-2",
-            },
-            "receiptRunAuthority": "question_run",
-            "receiptRunId": "question-run-1",
-            "modelPolicySha256": "a" * 64,
-            "outputRef": "artifact://output-1",
-        },
     }
 
     def backend(_payload):
@@ -167,10 +169,21 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
         yield {
             "id": "chat-final",
             "choices": [{"delta": {}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 13,
+                "completion_tokens": 8,
+                "total_tokens": 21,
+            },
         }
 
     client = LLMClient(config=make_config(), backend=backend)
-    streamed = list(client.stream([{"role": "user", "content": "ping"}], metadata=metadata))
+    with model_invocation_receipt_context_scope(receipt_context):
+        streamed = list(
+            client.stream(
+                [{"role": "user", "content": "ping"}],
+                metadata=metadata_without_authority,
+            )
+        )
     outcome = next(
         chunk.additional_kwargs["turn_outcome"]
         for chunk in reversed(streamed)
@@ -183,6 +196,85 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
     assert "provider-secret" not in receipt["responseExcerpt"]
     assert "finalText" in receipt["responseExcerpt"]
     assert len(receipt["responseExcerpt"]) <= 259
+    assert receipt["tokenUsage"] == {
+        "inputTokens": 13,
+        "outputTokens": 8,
+        "totalTokens": 21,
+        "cachedInputTokens": 0,
+    }
+
+
+def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
+    receipt_context = {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "questionInvocationBinding": {
+            "questionId": "SCI-001",
+            "questionRunId": "workflow-run-1",
+            "workflowRunId": "workflow-run-1",
+            "workflowId": "workflow-1",
+            "workflowVersionId": "version-1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "sessionId": "session-1",
+            "taskId": "task-1",
+            "turnId": "turn-1",
+            "outcomeKinds": ["candidate"],
+        },
+    }
+
+    def backend(_payload):
+        return {
+            "choices": [
+                {"message": {"role": "assistant", "content": "candidate"}}
+            ],
+            "usage": {
+                "prompt_tokens": 7,
+                "completion_tokens": 3,
+                "total_tokens": 10,
+            },
+        }
+
+    captured = []
+    client = LLMClient(config=make_config(), backend=backend)
+    monkeypatch.setattr(
+        client,
+        "_record_canonical_outcome",
+        lambda outcome, **_kwargs: captured.append(outcome),
+    )
+    with model_invocation_receipt_context_scope(receipt_context):
+        client.invoke(
+            [{"role": "user", "content": "propose"}],
+            metadata={
+                "sessionId": "session-1",
+                "turnId": "turn-1",
+                "invocationId": "invocation-1",
+            },
+        )
+
+    receipt = captured[-1].model_invocation_receipt
+    assert receipt["scope"]["workflowRunId"] == "workflow-run-1"
+    assert receipt["metadata"]["outcomeKinds"] == ["candidate"]
+    assert receipt["tokenUsage"] == {
+        "inputTokens": 7,
+        "outputTokens": 3,
+        "totalTokens": 10,
+        "cachedInputTokens": 0,
+    }
+
+
+def test_client_message_metadata_cannot_mint_model_invocation_receipt() -> None:
+    client = LLMClient(config=make_config(), backend=lambda _payload: [])
+    scope = SimpleNamespace(session_id="session-1", turn_id="turn-2")
+    assert (
+        client._receipt_context(
+            {"modelInvocationReceiptContext": {"receiptRunAuthority": "question_run"}},
+            scope,
+        )
+        is None
+    )
 
 
 def test_prompt_cache_payload_summary_fingerprints_messages_and_tool_schema_without_content() -> None:

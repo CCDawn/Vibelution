@@ -78,6 +78,9 @@ _LLM_BACKEND_ATTEMPT_CONTEXT: ContextVar[tuple[int, int]] = ContextVar(
     "vibelution_llm_backend_attempt",
     default=(1, 0),
 )
+_MODEL_INVOCATION_RECEIPT_CONTEXT: ContextVar[Mapping[str, Any] | None] = (
+    ContextVar("vibelution_model_invocation_receipt_context", default=None)
+)
 _NO_PROXY_LOCK = threading.Lock()
 _NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
 _PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
@@ -85,6 +88,20 @@ _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
+
+
+@contextmanager
+def model_invocation_receipt_context_scope(
+    context: Mapping[str, Any] | None,
+) -> Iterator[None]:
+    """Bind a server-resolved question invocation scope to nested LLM calls."""
+
+    normalized = dict(context) if isinstance(context, Mapping) else None
+    token = _MODEL_INVOCATION_RECEIPT_CONTEXT.set(normalized)
+    try:
+        yield
+    finally:
+        _MODEL_INVOCATION_RECEIPT_CONTEXT.reset(token)
 
 
 def _receipt_output_hash(outcome: TurnOutcome) -> str:
@@ -2513,36 +2530,98 @@ class LLMClient:
     ) -> dict[str, Any] | None:
         """Read an explicit question-stage binding without inferring lineage."""
 
-        raw = metadata.get("modelInvocationReceiptContext") if isinstance(metadata, dict) else None
+        # Receipt authority is scoped by the server worker. Persisted or
+        # client-provided message metadata is transport data, not lineage
+        # authority and must never be allowed to mint a formal receipt.
+        raw = _MODEL_INVOCATION_RECEIPT_CONTEXT.get()
         if not isinstance(raw, Mapping):
             return None
         binding_payload = raw.get("questionStageBinding") or raw.get("binding")
         if hasattr(binding_payload, "to_dict"):
             binding_payload = binding_payload.to_dict()
-        if not isinstance(binding_payload, Mapping):
-            return None
-        try:
-            from core.research.workflow.contracts.question_stage_binding import (
-                QuestionStageBinding,
-            )
+        binding: Any
+        if isinstance(binding_payload, Mapping):
+            try:
+                from core.research.workflow.contracts.question_stage_binding import (
+                    QuestionStageBinding,
+                )
 
-            binding = QuestionStageBinding.from_dict(binding_payload)
-        except (TypeError, ValueError, KeyError):
-            return None
+                stage_binding = QuestionStageBinding.from_dict(binding_payload)
+            except (TypeError, ValueError, KeyError):
+                return None
+            outcome_kinds = tuple(
+                dict.fromkeys(
+                    str(item or "").strip().lower()
+                    for item in list(raw.get("outcomeKinds") or [])
+                    if str(item or "").strip()
+                )
+            ) or (stage_binding.question_stage,)
+            if any(
+                item not in {"candidate", "review", "revision", "plan", "final_output"}
+                for item in outcome_kinds
+            ):
+                return None
+            binding = {
+                "questionId": stage_binding.question_id,
+                "questionRunId": stage_binding.question_run_id,
+                "workflowRunId": stage_binding.workflow_run_id,
+                "workflowId": stage_binding.workflow_id,
+                "workflowVersionId": stage_binding.workflow_version_id,
+                "formalNodeId": stage_binding.formal_node_id,
+                "formalNodeRunId": stage_binding.formal_node_run_id,
+                "formalNodeAttempt": stage_binding.formal_node_attempt,
+                "sessionId": stage_binding.session_id,
+                "taskId": stage_binding.task_id,
+                "turnId": stage_binding.turn_id,
+                "questionStage": stage_binding.question_stage,
+                "outcomeKinds": list(outcome_kinds),
+                "mappingPolicyId": stage_binding.mapping_policy_id,
+            }
+        else:
+            binding = dict(raw.get("questionInvocationBinding") or {})
+            required = (
+                "questionId",
+                "workflowRunId",
+                "formalNodeId",
+                "formalNodeRunId",
+                "sessionId",
+                "taskId",
+                "turnId",
+            )
+            if any(not str(binding.get(key) or "").strip() for key in required):
+                return None
+            outcome_kinds = tuple(
+                dict.fromkeys(
+                    str(item or "").strip().lower()
+                    for item in list(binding.get("outcomeKinds") or [])
+                    if str(item or "").strip()
+                )
+            )
+            if not outcome_kinds or any(
+                item not in {"candidate", "review", "revision", "plan", "final_output"}
+                for item in outcome_kinds
+            ):
+                return None
+            binding["outcomeKinds"] = list(outcome_kinds)
+            binding.setdefault("questionRunId", binding["workflowRunId"])
+            binding.setdefault("workflowId", "challenge-cup-research")
+            binding.setdefault("workflowVersionId", "")
+            binding.setdefault("formalNodeAttempt", 1)
+            binding.setdefault("mappingPolicyId", "challenge-question-invocation-binding-v1")
         if (
             str(getattr(invocation_scope, "session_id", "") or "").strip()
-            != binding.session_id
+            != str(binding.get("sessionId") or "").strip()
             or str(getattr(invocation_scope, "turn_id", "") or "").strip()
-            != binding.turn_id
+            != str(binding.get("turnId") or "").strip()
         ):
             return None
 
         authority = str(raw.get("receiptRunAuthority") or "").strip().lower()
         receipt_run_id = str(raw.get("receiptRunId") or "").strip()
         if authority == "question_run":
-            expected_run_id = binding.question_run_id
+            expected_run_id = str(binding.get("questionRunId") or "").strip()
         elif authority == "workflow_run":
-            expected_run_id = binding.workflow_run_id
+            expected_run_id = str(binding.get("workflowRunId") or "").strip()
         elif authority == "source_run":
             expected_run_id = str(raw.get("sourceRunId") or "").strip()
         else:
@@ -2551,11 +2630,9 @@ class LLMClient:
             return None
 
         policy_sha256 = str(raw.get("modelPolicySha256") or "").strip().lower()
-        output_ref = str(raw.get("outputRef") or "").strip()
         if (
             len(policy_sha256) != 64
             or any(char not in "0123456789abcdef" for char in policy_sha256)
-            or not output_ref
         ):
             return None
         return {
@@ -2563,7 +2640,6 @@ class LLMClient:
             "binding": binding,
             "receiptRunId": receipt_run_id,
             "modelPolicySha256": policy_sha256,
-            "outputRef": output_ref,
         }
 
     def _attach_model_invocation_receipt(
@@ -2578,6 +2654,7 @@ class LLMClient:
         finished_at_ms: int,
         attempt: int,
         retry_count: int,
+        token_usage: Mapping[str, int] | None = None,
     ) -> TurnOutcome:
         """Attach a bounded receipt only when the caller supplied full binding."""
 
@@ -2599,8 +2676,10 @@ class LLMClient:
             else ModelInvocationStatus.SUCCEEDED
         )
         try:
-            usage = raw.get("tokenUsage") if isinstance(raw.get("tokenUsage"), Mapping) else {}
-            token_usage = {
+            usage = token_usage or (
+                raw.get("tokenUsage") if isinstance(raw.get("tokenUsage"), Mapping) else {}
+            )
+            normalized_token_usage = {
                 key: max(0, int(value or 0))
                 for key, value in {
                     "inputTokens": usage.get("inputTokens", 0),
@@ -2617,26 +2696,37 @@ class LLMClient:
             evidence_locator.update(
                 {
                     "kind": str(evidence_locator.get("kind") or "turn_journal"),
-                    "outputRef": context["outputRef"],
+                    "outputRef": str(
+                        evidence_locator.get("outputRef")
+                        or f"session:{binding['sessionId']}/turn:{binding['turnId']}"
+                        f"/invocation:{getattr(invocation_scope, 'invocation_id', '')}"
+                    ),
                     "outputSha256": str(
                         evidence_locator.get("outputSha256")
                         or raw.get("outputSha256")
                         or _receipt_output_hash(outcome)
                     ).strip().lower(),
-                    "sessionId": binding.session_id,
-                    "taskId": binding.task_id,
-                    "turnId": binding.turn_id,
-                    "formalNodeId": binding.formal_node_id,
-                    "formalNodeRunId": binding.formal_node_run_id,
+                    "sessionId": binding["sessionId"],
+                    "taskId": binding["taskId"],
+                    "turnId": binding["turnId"],
+                    "formalNodeId": binding["formalNodeId"],
+                    "formalNodeRunId": binding["formalNodeRunId"],
+                    "invocationId": str(
+                        getattr(invocation_scope, "invocation_id", "") or ""
+                    ),
+                    "iteration": int(
+                        getattr(invocation_scope, "iteration", 0) or 0
+                    ),
                 }
             )
             safe_metadata = {
                 "captureSource": "llm_provider_boundary",
-                "questionStage": binding.question_stage,
-                "mappingPolicyId": binding.mapping_policy_id,
-                "workflowId": binding.workflow_id,
-                "workflowVersionId": binding.workflow_version_id,
-                "formalNodeAttempt": binding.formal_node_attempt,
+                "questionStage": str(binding.get("questionStage") or ""),
+                "outcomeKinds": list(binding.get("outcomeKinds") or []),
+                "mappingPolicyId": binding["mappingPolicyId"],
+                "workflowId": binding["workflowId"],
+                "workflowVersionId": binding["workflowVersionId"],
+                "formalNodeAttempt": int(binding["formalNodeAttempt"]),
                 "llmPayloadTraceId": str(
                     (metadata or {}).get("llmPayloadTraceId") or ""
                 ).strip(),
@@ -2644,25 +2734,29 @@ class LLMClient:
             receipt = ModelInvocationReceipt.from_invocation(
                 receipt_id=str(
                     raw.get("receiptId")
-                    or f"model-receipt-{getattr(invocation_scope, 'invocation_id', '')}"
+                    or (
+                        "model-receipt-"
+                        f"{getattr(invocation_scope, 'invocation_id', '')}-"
+                        f"{int(getattr(invocation_scope, 'iteration', 0) or 0)}"
+                    )
                 ).strip(),
                 run_id=context["receiptRunId"],
-                node_run_id=binding.formal_node_run_id,
+                node_run_id=binding["formalNodeRunId"],
                 scope={
-                    "questionId": binding.question_id,
+                    "questionId": binding["questionId"],
                     "runId": context["receiptRunId"],
-                    "taskId": binding.task_id,
-                    "turnId": binding.turn_id,
-                    "stageId": binding.question_stage,
-                    "questionStage": binding.question_stage,
+                    "taskId": binding["taskId"],
+                    "turnId": binding["turnId"],
+                    "stageId": str(binding.get("questionStage") or binding["formalNodeId"]),
+                    "questionStage": str(binding.get("questionStage") or ""),
                     "modelPolicySha256": context["modelPolicySha256"],
-                    "workflowRunId": binding.workflow_run_id,
-                    "workflowId": binding.workflow_id,
-                    "workflowVersionId": binding.workflow_version_id,
-                    "formalNodeId": binding.formal_node_id,
-                    "formalNodeRunId": binding.formal_node_run_id,
-                    "formalNodeAttempt": str(binding.formal_node_attempt),
-                    "sessionId": binding.session_id,
+                    "workflowRunId": binding["workflowRunId"],
+                    "workflowId": binding["workflowId"],
+                    "workflowVersionId": binding["workflowVersionId"],
+                    "formalNodeId": binding["formalNodeId"],
+                    "formalNodeRunId": binding["formalNodeRunId"],
+                    "formalNodeAttempt": str(binding["formalNodeAttempt"]),
+                    "sessionId": binding["sessionId"],
                 },
                 provider=str(self.provider.kind or "").strip(),
                 model=actual_model,
@@ -2674,7 +2768,7 @@ class LLMClient:
                 finished_at_ms=max(max(0, int(started_at_ms)), int(finished_at_ms)),
                 attempt=max(1, int(attempt)),
                 retry_count=max(0, int(retry_count)),
-                token_usage=token_usage,
+                token_usage=normalized_token_usage,
                 cost=(
                     {"estimatedCost": float(raw.get("estimatedCost") or 0.0)}
                     if raw.get("estimatedCost") not in (None, "")
@@ -2870,6 +2964,12 @@ class LLMClient:
             finished_at_ms=backend_finished_at_ms,
             attempt=backend_attempt,
             retry_count=backend_retry_count,
+            token_usage={
+                "inputTokens": usage.input_tokens,
+                "outputTokens": usage.output_tokens,
+                "totalTokens": usage.total_tokens,
+                "cachedInputTokens": usage.cached_input_tokens,
+            },
         )
         self._record_canonical_outcome(turn_outcome, phase="invoke")
         return turn_outcome
@@ -3171,7 +3271,9 @@ class LLMClient:
         invocation_scope: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
         scene_identity: Optional[Dict[str, Any]] = None,
-        receipt_builder: Optional[Callable[[TurnOutcome], TurnOutcome]] = None,
+        receipt_builder: Optional[
+            Callable[[TurnOutcome, UsageStats | None], TurnOutcome]
+        ] = None,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
         _raise_if_llm_cancelled()
         emitted = False
@@ -3289,7 +3391,9 @@ class LLMClient:
                             _raise_if_llm_cancelled()
                         turn_outcome = normalized_iterator.outcome
                         if receipt_builder is not None:
-                            turn_outcome = receipt_builder(turn_outcome)
+                            turn_outcome = receipt_builder(
+                                turn_outcome, provider_usage or canonical_usage
+                            )
                         if turn_outcome.tool_calls:
                             yield from flush_pending_reasoning()
                             emitted = True
@@ -3519,7 +3623,7 @@ class LLMClient:
                             "invocationId": event_metadata.get("invocationId", ""),
                             "attempt": attempt,
                         },
-                        receipt_builder=lambda outcome: self._attach_model_invocation_receipt(
+                        receipt_builder=lambda outcome, usage: self._attach_model_invocation_receipt(
                             outcome,
                             metadata=metadata,
                             invocation_scope=invocation_scope,
@@ -3529,6 +3633,14 @@ class LLMClient:
                             finished_at_ms=int(time.time() * 1000),
                             attempt=attempt,
                             retry_count=max(0, attempt - 1),
+                            token_usage={
+                                "inputTokens": int(getattr(usage, "input_tokens", 0) or 0),
+                                "outputTokens": int(getattr(usage, "output_tokens", 0) or 0),
+                                "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
+                                "cachedInputTokens": int(
+                                    getattr(usage, "cached_input_tokens", 0) or 0
+                                ),
+                            },
                         ),
                     )
                     for event in events:

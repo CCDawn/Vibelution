@@ -31,6 +31,9 @@ from core.research.workflow.transitions import RunStatus
 from .artifact_readback_registry import build_canonical_ref
 from .human_gate_artifacts import canonical_sha256
 from .ids import new_id
+from .model_invocation_receipt_registry import (
+    model_invocation_receipt_evidence_entries,
+)
 from .workflow_artifact_store import put_workflow_artifact
 
 DELIVERY_OUTBOX_KIND = "delivery_orchestration"
@@ -274,6 +277,15 @@ def run_delivery_orchestration(
         ) from exc
 
     entries = _receipt_evidence_entries(store, run.run_id)
+    question_id = str(snapshot.get("questionId") or "").strip().upper()
+    if question_id:
+        entries.extend(
+            model_invocation_receipt_evidence_entries(
+                team_id,
+                question_id=question_id,
+                workflow_run_id=run.run_id,
+            )
+        )
     entries.extend(_request_evidence_entries(request))
     try:
         evidence_index = build_evidence_index(entries)
