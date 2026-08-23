@@ -258,6 +258,10 @@ def _authoritative_problem_understanding_binding(
         snapshot = WorkflowRunInputSnapshot.from_dict(decoded)
     except (TypeError, ValueError, json.JSONDecodeError, KeyError) as exc:
         raise ValueError("Formal workflow input snapshot is invalid.") from exc
+    if str(decoded.get("sourceCollectionRunId") or "").strip() != source_run_id:
+        raise ValueError(
+            "Formal problem-understanding source collection binding is not frozen."
+        )
     if snapshot.snapshotHash != run_hash:
         raise ValueError("Formal workflow input snapshot hash is invalid.")
     if (

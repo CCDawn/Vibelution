@@ -578,6 +578,11 @@ def _start_external_task(
             f"Agent node {node_id} has no task adapter",
             code="agent_task_adapter_missing",
         )
+    if node_id == "problem_understanding":
+        # The first project task writes into the source-collection-scoped
+        # canonical store, so create and freeze that run before opening the
+        # Agent turn.  This does not start the successor finding stage.
+        record, _ = _ensure_source_collection_run(store, record)
     from core.web.services.team_workflow.research_project_agent_tasks import (
         start_research_project_agent_task,
     )
