@@ -712,7 +712,10 @@ def test_registration_projects_verified_receipt_refs_into_record_summary_and_det
         len(item["evidence_locator_sha256"]) == 64 for item in refs.values()
     )
     assert registered["record"]["validation"]["modelInvocationReceipts"] == "passed"
-    assert registered["summary"]["receiptReadyQuestionIds"] == ["SCI-001"]
+    # The legacy three-stage package projection remains available, but formal
+    # readiness now also requires the complete five-kind real invocation trace.
+    assert registered["summary"]["receiptReadyQuestionIds"] == []
+    assert registered["record"]["modelInvocationReceiptCoverage"]["status"] == "failed"
     assert registered["summary"]["validatedQuestionResults"][0][
         "modelInvocationReceiptRefs"
     ] == refs

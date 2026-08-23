@@ -30,6 +30,7 @@ from .domain_ports import (
     ReadBackVerdict,
     ScopedAgentTaskHandle,
 )
+from .agent_node_execution import _formal_task_authorities
 from .formal_hypothesis_fanout import (
     HypothesisAuthorityUnavailable as _HypothesisAuthorityUnavailable,
 )
@@ -691,11 +692,20 @@ class RealDomainPorts:
                 discriminator=scope_mode,
             )
             if scope_mode == "on" and fan_out is not None:
+                challenge_task_contract, model_invocation_receipt_binding = (
+                    _formal_task_authorities(
+                        action=action,
+                        input_snapshot=snapshot,
+                        agent_id=binding.agent_id,
+                    )
+                )
                 return self._create_hypothesis_fan_out(
                     action=action,
                     binding=binding,
                     snapshot=snapshot,
                     fan_out=fan_out,
+                    challenge_task_contract=challenge_task_contract,
+                    model_invocation_receipt_binding=model_invocation_receipt_binding,
                 )
         if self._agent_task_factory is not None:
             return self._agent_task_factory(action=action, binding=binding)
@@ -765,6 +775,8 @@ class RealDomainPorts:
         binding: BindingResolution,
         snapshot: dict[str, Any],
         fan_out: dict[str, Any],
+        challenge_task_contract: Mapping[str, Any],
+        model_invocation_receipt_binding: Mapping[str, Any],
     ) -> AgentTaskHandle:
         """Create/replay one root and one canonical child task per candidate.
 
@@ -855,6 +867,8 @@ class RealDomainPorts:
                     candidate_context=candidate_context,
                     subtask_id=subtask_id,
                     previous=prior,
+                    challenge_task_contract=challenge_task_contract,
+                    model_invocation_receipt_binding=model_invocation_receipt_binding,
                 )
                 child = _scoped_handle_from_started(
                     started,
@@ -1547,6 +1561,13 @@ def _create_real_agent_task(
     if not team_id:
         raise RuntimeError("input snapshot has no teamId")
     idempotency_key = f"agent-task:{action.node_run_id}"
+    challenge_task_contract, model_invocation_receipt_binding = (
+        _formal_task_authorities(
+            action=action,
+            input_snapshot=input_snapshot,
+            agent_id=binding.agent_id,
+        )
+    )
     if spec.family == "source_collection":
         started = _start_source_collection_agent_task(
             team_id=team_id,
@@ -1558,6 +1579,7 @@ def _create_real_agent_task(
             role_key=spec.role_key or binding.role_key,
             idempotency_key=idempotency_key,
             store=store,
+            challenge_task_contract=challenge_task_contract,
         )
     else:
         from core.web.services.team_workflow.research_project_agent_tasks import (
@@ -1608,6 +1630,8 @@ def _create_real_agent_task(
                 ),
                 **scoped_payload,
             },
+            _challenge_task_contract=challenge_task_contract,
+            _model_invocation_receipt_binding=model_invocation_receipt_binding,
         )
     return _agent_handle_from_started(started)
 
@@ -1631,6 +1655,7 @@ def _start_source_collection_agent_task(
     role_key: str,
     idempotency_key: str,
     store: WorkflowLedgerStore | None = None,
+    challenge_task_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.source_collection.runs import (
         start_source_collection_run,
@@ -1690,10 +1715,7 @@ def _start_source_collection_agent_task(
             workflow_run_id=action.run_id,
             source_collection_run_id=source_run_id,
         )
-    return start_source_collection_stage_session_task(
-        team_id,
-        source_run_id,
-        {
+    stage_task_payload = {
             "stageId": stage_id,
             "agentId": binding.agent_id,
             "agentRole": role_key,
@@ -1705,7 +1727,18 @@ def _start_source_collection_agent_task(
             # terminal task.
             "formalRetry": False,
             "evidenceRemediationContract": evidence_remediation_contract,
-        },
+    }
+    if isinstance(challenge_task_contract, Mapping):
+        return start_source_collection_stage_session_task(
+            team_id,
+            source_run_id,
+            stage_task_payload,
+            _challenge_task_contract=dict(challenge_task_contract),
+        )
+    return start_source_collection_stage_session_task(
+        team_id,
+        source_run_id,
+        stage_task_payload,
     )
 
 

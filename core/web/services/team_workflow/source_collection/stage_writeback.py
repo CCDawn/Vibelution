@@ -535,6 +535,9 @@ def reconcile_source_collection_stage_session_task_after_turn(
     turn_id: str = "",
     final_status: str = "",
     llm_usage: dict[str, Any] | None = None,
+    model_invocation_receipt: Any = None,
+    stage_id: str | None = None,
+    model_policy_sha256: str | None = None,
     reason: str = "session_turn_completed",
 ) -> dict[str, Any]:
     s = _service()
@@ -623,6 +626,9 @@ def reconcile_source_collection_stage_session_task_after_turn(
         reconciled,
         final_status=final_status,
         llm_usage=llm_usage,
+        model_invocation_receipt=model_invocation_receipt,
+        stage_id=stage_id,
+        model_policy_sha256=model_policy_sha256,
     )
     after_gate = reconciled.get("completionGate") if isinstance(reconciled.get("completionGate"), dict) else {}
     task_tool_progress = reconciled.get("taskToolProgress") if isinstance(reconciled.get("taskToolProgress"), dict) else {}

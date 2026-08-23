@@ -21,6 +21,125 @@ from core.infrastructure.tool_execution_scope import (
 from core.orchestration.context_engine import AgentContextInterrupted
 
 
+def _model_invocation_receipt_context(
+    context: dict[str, Any],
+    *,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any] | None:
+    """Complete a server-created binding seed with the canonical Task/Turn."""
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    task_id = str(metadata.get("taskId") or "").strip()
+    team_id = str(metadata.get("teamId") or "").strip()
+    project_id = str(metadata.get("researchProjectId") or "").strip()
+    if not task_id or not team_id or not project_id:
+        return None
+    # Metadata is only a locator. The binding itself must be read back from
+    # the server-owned project task record; a client-supplied metadata object
+    # must never become receipt authority.
+    source_task = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+    try:
+        if source_task and source_task == task_id:
+            from core.web.services.team_workflow.source_collection.stage_session import (
+                _read_source_collection_stage_session_task_record,
+            )
+
+            task = _read_source_collection_stage_session_task_record(
+                team_id,
+                task_id,
+            )
+        else:
+            from core.web.services.team_workflow.research_project_agent_tasks import (
+                _read_research_project_agent_task_record,
+            )
+
+            task = _read_research_project_agent_task_record(
+                team_id,
+                project_id,
+                task_id,
+            )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if task is None or str(task.get("sessionId") or "").strip() != str(session_id or "").strip():
+        return None
+    if str(task.get("researchProjectId") or "").strip() != project_id:
+        return None
+    task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    stored_turn_id = str(task_turn.get("turnId") or "").strip()
+    if stored_turn_id and stored_turn_id != str(turn_id or "").strip():
+        return None
+    seed = task.get("modelInvocationReceiptBinding")
+    if isinstance(seed, dict):
+        binding = dict(seed)
+    elif source_task:
+        contract = (
+            task.get("challengeTaskContract")
+            if isinstance(task.get("challengeTaskContract"), dict)
+            else {}
+        )
+        binding = {
+            "questionStage": str(contract.get("stageId") or ""),
+            "questionId": str(contract.get("questionId") or ""),
+            "questionRunId": str(contract.get("workflowRunId") or ""),
+            "workflowRunId": str(contract.get("workflowRunId") or ""),
+            "workflowId": str(contract.get("workflowId") or ""),
+            "workflowVersionId": str(contract.get("workflowVersionId") or ""),
+            "formalNodeId": str(contract.get("workflowNodeId") or ""),
+            "formalNodeRunId": str(contract.get("nodeRunId") or ""),
+            "formalNodeAttempt": int(contract.get("nodeAttempt") or 0),
+            "outcomeKinds": ["source_evidence"],
+            "modelPolicySha256": str(contract.get("modelPolicySha256") or ""),
+        }
+    else:
+        return None
+    binding.update(
+        {
+            "sessionId": str(session_id or "").strip(),
+            "turnId": str(turn_id or "").strip(),
+            "taskId": task_id,
+        }
+    )
+    try:
+        from core.research.workflow.contracts.question_stage_binding import (
+            QuestionStageBinding,
+        )
+
+        stage_binding = QuestionStageBinding.from_dict(binding).to_dict()
+    except (TypeError, ValueError, KeyError):
+        return None
+    required = (
+        "questionId",
+        "workflowRunId",
+        "workflowId",
+        "workflowVersionId",
+        "formalNodeId",
+        "formalNodeRunId",
+        "sessionId",
+        "taskId",
+        "turnId",
+    )
+    policy_sha256 = str(binding.pop("modelPolicySha256", "") or "").strip().lower()
+    if (
+        any(not str(binding.get(key) or "").strip() for key in required)
+        or len(policy_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in policy_sha256)
+    ):
+        return None
+    run_id = str(binding.get("workflowRunId") or "").strip()
+    return {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": run_id,
+        "modelPolicySha256": policy_sha256,
+        "questionStageBinding": stage_binding,
+        "outcomeKinds": list(binding.get("outcomeKinds") or []),
+    }
+
+
 def _service():
     """Late-bound facade module (avoids import cycles at package import time)."""
 
@@ -1199,6 +1318,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     try:
                         result = _run_session_continuation_loop(
                             runtime_agent,
+                            context=context,
                             session_id=session_id,
                             turn_control=turn_control,
                             initial_prompt=user_message,
@@ -1285,6 +1405,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
 def _run_session_continuation_loop(
     agent: Any,
     *,
+    context: dict[str, Any],
     session_id: str,
     turn_control: Any = None,
     initial_prompt: str,
@@ -1429,15 +1550,24 @@ def _run_session_continuation_loop(
             session_id,
             turn_id=getattr(turn_control, "turn_id", ""),
         )
-        result = s.run_existing_agent_single_turn(
-            agent,
-            initial_prompt=prompt,
-            attachments=turn_attachments,
-            disable_tools=disable_tools,
-            prompt_cache_partition=prompt_cache_partition,
-            turn_identity=str(getattr(turn_control, "turn_id", "") or "").strip(),
-            chat_history=history_messages if turn_index == 1 else None,
+        from core.llm.client import model_invocation_receipt_context_scope
+
+        canonical_turn_id = str(getattr(turn_control, "turn_id", "") or "").strip()
+        receipt_context = _model_invocation_receipt_context(
+            context,
+            session_id=session_id,
+            turn_id=canonical_turn_id,
         )
+        with model_invocation_receipt_context_scope(receipt_context):
+            result = s.run_existing_agent_single_turn(
+                agent,
+                initial_prompt=prompt,
+                attachments=turn_attachments,
+                disable_tools=disable_tools,
+                prompt_cache_partition=prompt_cache_partition,
+                turn_identity=canonical_turn_id,
+                chat_history=history_messages if turn_index == 1 else None,
+            )
         result = s._attach_session_prompt_cache_metadata(
             result,
             prompt_cache_scope=prompt_cache_scope,

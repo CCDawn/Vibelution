@@ -57,6 +57,82 @@ def test_ordinary_agent_inbox_does_not_gain_internal_continuation() -> None:
     )
 
 
+def test_receipt_context_accepts_binding_without_research_project_id(
+    monkeypatch,
+) -> None:
+    task = {
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "researchProjectId": "project-1",
+        "turn": {"turnId": "turn-1"},
+        "modelInvocationReceiptBinding": {
+            "questionStage": "generation",
+            "questionId": "SCI-096",
+            "questionRunId": "run-1",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "taskId": "task-1",
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "modelPolicySha256": "a" * 64,
+            "outcomeKinds": ["candidate"],
+        },
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda *_args, **_kwargs: task,
+    )
+
+    context = worker._model_invocation_receipt_context(
+        {
+            "message_metadata": {
+                "teamId": "team-1",
+                "researchProjectId": "project-1",
+                "taskId": "task-1",
+            }
+        },
+        session_id="session-1",
+        turn_id="turn-1",
+    )
+
+    assert context is not None
+    assert context["questionStageBinding"]["formalNodeRunId"] == "node-run-1"
+    assert context["modelPolicySha256"] == "a" * 64
+
+
+def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:
+    task = {
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "researchProjectId": "project-authoritative",
+        "turn": {"turnId": "turn-1"},
+        "modelInvocationReceiptBinding": {},
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda *_args, **_kwargs: task,
+    )
+
+    assert (
+        worker._model_invocation_receipt_context(
+            {
+                "message_metadata": {
+                    "teamId": "team-1",
+                    "researchProjectId": "project-client",
+                    "taskId": "task-1",
+                }
+            },
+            session_id="session-1",
+            turn_id="turn-1",
+        )
+        is None
+    )
+
+
 def test_run_session_turn_binds_child_trace_span_and_restores_context(monkeypatch) -> None:
     root = new_trace_context(request_id="worker-request")
     observed: list[tuple[dict, object]] = []

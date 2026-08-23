@@ -698,10 +698,14 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
     class _FakeLlm:
         model_library: ClassVar[dict[str, object]] = {
-            "qwen-plus": {"upstream_id": "qwen-plus"},
-            "qwen-max": {"upstream_id": "qwen-max"},
-            "gpt-5": {"upstream_id": "gpt-5"},
-            "qwen-alias": {"upstream_id": "gpt-5"},
+            "dashscope/qwen-plus": {"upstream_id": "qwen-plus"},
+            "aliyun/qwen-plus": {"upstream_id": "qwen-plus"},
+            "aliyun/qwen-max": {"upstream_id": "qwen-max"},
+            "aliyun/gpt-5": {"upstream_id": "gpt-5"},
+            "aliyun/qwen-alias": {"upstream_id": "gpt-5"},
+            "relay/qwen-plus": {"upstream_id": "qwen-plus"},
+            "default-dashscope/qwen-plus": {"upstream_id": "qwen-plus"},
+            "forged/qwen-plus": {"upstream_id": "qwen-plus"},
         }
 
         @staticmethod
@@ -752,7 +756,10 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref=model_by_agent[agent["agentId"]][1],
+            model_ref=(
+                f"{model_by_agent[agent['agentId']][0]}/"
+                f"{model_by_agent[agent['agentId']][1]}"
+            ),
             model_id=model_by_agent[agent["agentId"]][1],
             model=model_by_agent[agent["agentId"]][1],
             provider_id=model_by_agent[agent["agentId"]][0],
@@ -766,12 +773,19 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
     assert policy["modelIds"] == ["qwen-max", "qwen-plus"]
     assert len(policy["policySha256"]) == 64
 
+    routing_policy = catalog_run_authorization.resolve_catalog_model_routing_policy(
+        TEAM_ID
+    )
+    for purpose_routes in routing_policy["routes"].values():
+        for role_id, route in purpose_routes["byProductRole"].items():
+            assert route["productRoleId"] == role_id
+
     monkeypatch.setattr(
         catalog_run_authorization,
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="gpt-5",
+            model_ref="aliyun/gpt-5",
             model_id="gpt-5",
             model="gpt-5",
             provider_id="aliyun",
@@ -785,7 +799,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="qwen-alias",
+            model_ref="aliyun/qwen-alias",
             model_id="qwen-alias",
             model="gpt-5",
             provider_id="aliyun",
@@ -799,7 +813,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="qwen-plus",
+            model_ref="relay/qwen-plus",
             model_id="qwen-plus",
             model="qwen-plus",
             provider_id="relay",
@@ -825,7 +839,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="qwen-plus",
+            model_ref="default-dashscope/qwen-plus",
             model_id="qwen-plus",
             model="qwen-plus",
             provider_id="default-dashscope",
@@ -871,7 +885,7 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
             "resolve_agent_llm",
             lambda agent, slot, config: SimpleNamespace(
                 config=config,
-                model_ref="qwen-plus",
+                model_ref="forged/qwen-plus",
                 model_id="qwen-plus",
                 model="qwen-plus",
                 provider_id="forged",

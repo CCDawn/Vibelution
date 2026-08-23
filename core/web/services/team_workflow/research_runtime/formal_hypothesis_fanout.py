@@ -323,6 +323,76 @@ def _started_from_anchor(anchor: Mapping[str, Any]) -> dict[str, Any] | None:
     return _started_from_task(anchor)
 
 
+def _require_formal_task_authority(
+    *,
+    action: PendingAction,
+    agent_id: str,
+    challenge_task_contract: Mapping[str, Any],
+    model_invocation_receipt_binding: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reject a candidate start without a scoped server-owned authority pair."""
+
+    contract = _mapping(challenge_task_contract)
+    receipt = _mapping(model_invocation_receipt_binding)
+    run_id = _text(action.run_id)
+    node_id = _text(action.node_id)
+    node_run_id = _text(action.node_run_id)
+    agent = _text(agent_id)
+    try:
+        attempt = int(action.attempt or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("formal candidate task authority has an invalid attempt") from exc
+    if not run_id or not node_id or not node_run_id or not agent or attempt <= 0:
+        raise RuntimeError("formal candidate task authority is incomplete")
+    if (
+        not _text(contract.get("questionId"))
+        or not _text(contract.get("workflowId"))
+        or not _text(contract.get("workflowVersionId"))
+        or _text(contract.get("workflowRunId")) != run_id
+        or _text(contract.get("workflowNodeId")) != node_id
+        or _text(contract.get("nodeRunId")) != node_run_id
+        or _text(contract.get("agentId")) != agent
+        or int(contract.get("nodeAttempt") or 0) != attempt
+        or len(_text(contract.get("modelPolicySha256"))) != 64
+        or not isinstance(contract.get("requiredModelPolicy"), Mapping)
+    ):
+        raise RuntimeError("formal candidate task contract scope is invalid")
+    expected_outcomes: tuple[str, ...]
+    expected_stage: str
+    try:
+        from .agent_node_execution import (
+            _MODEL_INVOCATION_OUTCOME_KINDS,
+            _MODEL_INVOCATION_STAGES,
+        )
+
+        expected_outcomes = _MODEL_INVOCATION_OUTCOME_KINDS.get(node_id, ())
+        expected_stage = _MODEL_INVOCATION_STAGES.get(node_id, "")
+    except Exception as exc:
+        raise RuntimeError("formal candidate task model authority is unavailable") from exc
+    receipt_outcomes = tuple(
+        _text(item) for item in list(receipt.get("outcomeKinds") or []) if _text(item)
+    )
+    if (
+        not _text(receipt.get("questionId"))
+        or _text(receipt.get("workflowId")) != _text(contract.get("workflowId"))
+        or _text(receipt.get("workflowVersionId"))
+        != _text(contract.get("workflowVersionId"))
+        or _text(receipt.get("questionId")).upper()
+        != _text(contract.get("questionId")).upper()
+        or _text(receipt.get("questionRunId")) != run_id
+        or _text(receipt.get("workflowRunId")) != run_id
+        or _text(receipt.get("formalNodeId")) != node_id
+        or _text(receipt.get("formalNodeRunId")) != node_run_id
+        or int(receipt.get("formalNodeAttempt") or 0) != attempt
+        or _text(receipt.get("questionStage")) != expected_stage
+        or tuple(expected_outcomes) != receipt_outcomes
+        or _text(receipt.get("modelPolicySha256")).lower()
+        != _text(contract.get("modelPolicySha256")).lower()
+    ):
+        raise RuntimeError("formal candidate receipt binding scope is invalid")
+    return contract, receipt
+
+
 def resolve_formal_candidate_task(
     *,
     team_id: str,
@@ -336,6 +406,8 @@ def resolve_formal_candidate_task(
     candidate_context: dict[str, Any],
     subtask_id: str,
     previous: Mapping[str, Any],
+    challenge_task_contract: Mapping[str, Any],
+    model_invocation_receipt_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Reuse active/successful sibling; formal-retry only a failed child."""
 
@@ -367,6 +439,13 @@ def resolve_formal_candidate_task(
         started = _started_from_anchor(previous)
         if started is not None:
             return started
+
+    contract, receipt_binding = _require_formal_task_authority(
+        action=action,
+        agent_id=agent_id,
+        challenge_task_contract=challenge_task_contract,
+        model_invocation_receipt_binding=model_invocation_receipt_binding,
+    )
 
     # Failed prior work receives a formal retry. Successful siblings return
     # their canonical Session/Task/Turn and replay only their structured
@@ -400,6 +479,8 @@ def resolve_formal_candidate_task(
                 "formalRetry": formal_retry,
                 "retryTaskId": retry_task_id if formal_retry else "",
             },
+            _challenge_task_contract=contract,
+            _model_invocation_receipt_binding=receipt_binding,
         )
     except HypothesisAuthorityUnavailable:
         raise

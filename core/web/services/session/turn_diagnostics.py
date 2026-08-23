@@ -198,6 +198,18 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
                 "activeTurnId": active_turn_id,
                 "turnCurrent": turn_current,
             }
+        try:
+            from core.chat.turn_journal import (
+                read_model_invocation_receipts_from_events,
+            )
+
+            model_invocation_receipts = read_model_invocation_receipts_from_events(
+                s._load_session_conversation_events_cached(normalized_session_id),
+                turn_id=normalized_turn_id,
+            )
+        except Exception:
+            # Receipt audit readback must never break ordinary chat diagnostics.
+            model_invocation_receipts = []
         last_turn_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
         messages = s._session_ledger_visible_messages(session_id)
 
@@ -239,7 +251,7 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         terminal_status = "ready"
         completion_source = "assistant_marker"
         completion_recovered = True
-    return {
+    snapshot = {
         "sessionId": normalized_session_id,
         "turnId": normalized_turn_id,
         "terminal": terminal,
@@ -255,6 +267,10 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         "activeTurnId": active_turn_id,
         "turnCurrent": turn_current,
     }
+    if model_invocation_receipts:
+        snapshot["modelInvocationReceipts"] = deepcopy(model_invocation_receipts)
+        snapshot["modelInvocationReceipt"] = deepcopy(model_invocation_receipts[-1])
+    return snapshot
 
 
 def create_chat_review_candidate_from_session(session_id: str) -> dict:

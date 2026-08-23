@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from core.research.competition.question_result_package import QuestionResultPackage
+from core.research.competition.question_result_package import (
+    QuestionResultPackage,
+    canonical_model_policy,
+)
 from core.research.competition.result_set import (
     CatalogScope,
     QuestionResult,
@@ -119,7 +122,9 @@ def _package_bound_record(tmp_path: Path) -> dict:
         encoding="utf-8",
     )
     receipt_refs = QuestionResult.from_package(package).manifest_entry()["receipts"]
+    trace_refs = _full_trace_refs()
     return {
+        "teamId": "research-team",
         "recordId": "SCI-096:run-sci-096-r1",
         "questionId": "SCI-096",
         "runId": "run-sci-096-r1",
@@ -142,6 +147,13 @@ def _package_bound_record(tmp_path: Path) -> dict:
             "modelInvocationReceipts": "passed",
         },
         "modelInvocationReceiptRefs": receipt_refs,
+        "modelInvocationReceiptTraceRefs": trace_refs,
+        "modelInvocationReceiptCoverage": {
+            "status": "passed",
+            "coveredKinds": ["candidate", "final_output", "plan", "review", "revision"],
+            "missingKinds": [],
+            "receiptCount": 5,
+        },
         "resultPackage": {
             "schemaVersion": package.schema_version,
             "packageId": package.package_id,
@@ -151,6 +163,22 @@ def _package_bound_record(tmp_path: Path) -> dict:
             "locator": str(package_path),
         },
     }
+
+
+def _full_trace_refs() -> list[dict]:
+    return [
+        {
+            "receiptId": f"trace-{kind}",
+            "receiptSha256": "a" * 64,
+            "nodeRunId": f"node-{kind}",
+            "sessionId": f"session-{kind}",
+            "turnId": f"turn-{kind}",
+            "outcomeKinds": [kind],
+            "evidenceLocator": {"kind": "turn_journal", "turnId": f"turn-{kind}"},
+            "evidenceLocatorSha256": "b" * 64,
+        }
+        for kind in ("candidate", "review", "revision", "plan", "final_output")
+    ]
 
 
 def _replace_record_package(
@@ -184,7 +212,16 @@ def test_formal_record_requires_canonical_package_and_matching_receipts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
     record = _package_bound_record(tmp_path)
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(_full_trace_refs()),
+    )
 
     assert question_launch._formal_record_eligible(record) is True
 
@@ -263,8 +300,32 @@ def test_formal_record_requires_canonical_package_and_matching_receipts(
     )
     assert question_launch._formal_record_eligible(alternate_scope_record) is False
 
+    missing_final = deepcopy(record)
+    missing_final["modelInvocationReceiptTraceRefs"] = [
+        ref
+        for ref in missing_final["modelInvocationReceiptTraceRefs"]
+        if ref["outcomeKinds"] != ["final_output"]
+    ]
+    missing_final["modelInvocationReceiptCoverage"] = (
+        model_invocation_receipt_registry.model_invocation_receipt_coverage(
+            missing_final["modelInvocationReceiptTraceRefs"]
+        )
+    )
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(
+            missing_final["modelInvocationReceiptTraceRefs"]
+        ),
+    )
+    assert question_launch._formal_record_eligible(missing_final) is False
+
 
 def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
     fixture_receipt_refs = {
         stage_id: {
             "receipt_id": f"fixture-{stage_id}",
@@ -287,12 +348,94 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
         "modelPolicySha256": "d" * 64,
         "locator": "fixture://question-result-package",
     }
+    fixture_trace_refs = _full_trace_refs()
+    required_model_policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+    role_routes = {
+        role_id: {
+            "agentId": f"agent-{role_id}",
+            "productRoleId": role_id,
+            "modelRef": "dashscope_main/qwen3.6-plus",
+            "providerId": "dashscope_main",
+            "modelId": "qwen3.6-plus",
+        }
+        for role_id in (
+            "challenge_cup_search",
+            "challenge_cup_extractor",
+            "challenge_cup_knowledge_manager",
+            "challenge_cup_experiment_revision",
+            "challenge_cup_evaluator",
+            "challenge_cup_execution_steward",
+        )
+    }
+    model_routing_policy = {
+        "requiredModelPolicy": required_model_policy,
+        "modelPolicySha256": required_model_policy["policySha256"],
+        "routes": {
+            "source_discovery": {
+                "byProductRole": {
+                    "challenge_cup_search": role_routes["challenge_cup_search"]
+                }
+            },
+            "extraction": {
+                "byProductRole": {
+                    role_id: role_routes[role_id]
+                    for role_id in (
+                        "challenge_cup_extractor",
+                        "challenge_cup_knowledge_manager",
+                    )
+                }
+            },
+            "reasoning": {
+                "byProductRole": {
+                    "challenge_cup_experiment_revision": role_routes[
+                        "challenge_cup_experiment_revision"
+                    ]
+                }
+            },
+            "review": {
+                "byProductRole": {
+                    "challenge_cup_evaluator": role_routes[
+                        "challenge_cup_evaluator"
+                    ]
+                }
+            },
+            "governance": {
+                "byProductRole": {
+                    "challenge_cup_knowledge_manager": role_routes[
+                        "challenge_cup_knowledge_manager"
+                    ]
+                }
+            },
+            "execution": {
+                "byProductRole": {
+                    "challenge_cup_execution_steward": role_routes[
+                        "challenge_cup_execution_steward"
+                    ]
+                }
+            },
+        },
+    }
     original_formal_record_eligible = question_launch._formal_record_eligible
 
     def fixture_formal_record_eligible(record: dict) -> bool:
         enriched = dict(record)
+        enriched.setdefault("teamId", "research-team")
         enriched.setdefault("resultPackage", fixture_package)
         enriched.setdefault("modelInvocationReceiptRefs", fixture_receipt_refs)
+        enriched.setdefault("modelInvocationReceiptTraceRefs", fixture_trace_refs)
+        enriched.setdefault(
+            "modelInvocationReceiptCoverage",
+            model_invocation_receipt_registry.model_invocation_receipt_coverage(
+                fixture_trace_refs
+            ),
+        )
         validation = dict(enriched.get("validation") or {})
         validation.setdefault("modelInvocationReceipts", "passed")
         enriched["validation"] = validation
@@ -304,9 +447,19 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _record: fixture_receipt_refs,
     )
     monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(fixture_trace_refs),
+    )
+    monkeypatch.setattr(
         question_launch,
         "_formal_record_eligible",
         fixture_formal_record_eligible,
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_server_model_routing_policy",
+        lambda _team_id: deepcopy(model_routing_policy),
     )
     monkeypatch.setattr(
         question_launch,
@@ -416,7 +569,13 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     ]
     assert run_input["researchObjectiveContract"]["question"] == "How does the brain retrieve memories?"
     assert run_input["budgetPolicy"]["stageBudgets"]["execution_iteration"]["tokens"] == 250000
-    assert set(run_input["modelRoutingPolicy"].values()) == {"relay_openai/gpt-5.6-luna"}
+    assert run_input["modelRoutingPolicy"]["requiredModelPolicy"]["family"] == "qwen"
+    assert run_input["modelRoutingPolicy"]["modelPolicySha256"] == run_input[
+        "modelRoutingPolicy"
+    ]["requiredModelPolicy"]["policySha256"]
+    assert run_input["modelRoutingPolicy"]["routes"]["review"]["byProductRole"][
+        "challenge_cup_evaluator"
+    ]["modelRef"] == "dashscope_main/qwen3.6-plus"
     assert run_input["competitionProgramSnapshot"]["programContractVersion"] == "2.2.0"
     assert run_input["competitionProgramSnapshot"]["fullCatalogPolicyVersion"] == "1.2.0"
     assert run_input["competitionProgramSnapshot"]["catalogQuestionCount"] == 125
