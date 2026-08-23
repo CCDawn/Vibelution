@@ -56,6 +56,9 @@ const harness = vi.hoisted(() => ({
     selection: null,
     loading: false,
     error: null as string | null,
+    recoveryBusy: false,
+    recoveryError: null as string | null,
+    recoverCollection: vi.fn(),
   },
   nodeDetail: { state: { kind: "idle" } as unknown, retry: vi.fn() },
   insights: { ledger: null, budget: null, hypotheses: null },
@@ -269,6 +272,8 @@ describe("ResearchProcessWorkspace", () => {
     harness.chain.reviewRoundLinks = [];
     harness.chain.selection = null;
     harness.chain.loading = false;
+    harness.chain.recoveryBusy = false;
+    harness.chain.recoveryError = null;
   });
 
   it("shows the canvas loading state while no projection is available", async () => {
@@ -485,6 +490,45 @@ describe("ResearchProcessWorkspace", () => {
     await act(async () => submit?.click());
     expect(harness.commands.submitOffer).toHaveBeenCalledTimes(1);
     expect(harness.commands.submitOffer).toHaveBeenCalledWith(formalOffer);
+  });
+
+  it("keeps collection recovery actionable in the fixed current-task footer", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-004";
+    harness.location.selectedNodeId = "source_finding";
+    harness.chain.questionId = "SCI-004";
+    harness.chain.selection = {
+      questionId: "SCI-004",
+      selectionId: "selection-1",
+      selectedCandidateIds: ["candidate-1"],
+    } as never;
+    harness.chain.collectionRequests = [{
+      requestId: "collection-request-1",
+      questionId: "SCI-004",
+      status: "failed",
+      collectionRunId: "",
+      handoffRef: "",
+      createdAt: "2026-08-24T00:00:00Z",
+    }] as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+    harness.chain.recoveryError = "worker unavailable";
+    harness.chain.recoverCollection.mockResolvedValue(undefined);
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(rendered.container.querySelector('[data-task-status="recoverable_error"]')).not.toBeNull();
+    const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
+    const retry = Array.from(footer?.querySelectorAll("button") ?? []).find((button) => (
+      button.textContent?.includes("重试搜集")
+    ));
+    expect(retry).toBeTruthy();
+    expect(footer?.querySelector('[role="alert"]')?.textContent).toContain("worker unavailable");
+    await act(async () => retry?.click());
+    expect(harness.chain.recoverCollection).toHaveBeenCalledTimes(1);
+    expect(harness.chain.recoverCollection).toHaveBeenCalledWith("collection-request-1");
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {

@@ -407,6 +407,17 @@ export function ResearchProcessWorkspace({
   const atCurrentTask = Boolean(
     workflowActive && (workflowContext.view.selectedIsCurrentTask || formalWritesPaused),
   );
+  const formalPrimaryAction = workspaceModel.primaryAction;
+  const currentTaskCommand = workflowContext.currentTask?.commandAction;
+  const collectionRecoveryAction = workspaceModel.source === "hypothesis_first"
+    && workflowContext.currentTask?.collectionRequestId
+    && (currentTaskCommand?.command === "retry_collection"
+      || currentTaskCommand?.command === "continue_collection")
+    ? {
+        label: currentTaskCommand.label,
+        requestId: workflowContext.currentTask.collectionRequestId,
+      }
+    : null;
 
   const inspectorPane = showInspector ? (
     <ResearchProcessInspectorPane
@@ -435,13 +446,9 @@ export function ResearchProcessWorkspace({
         submitOffer: commands.submitOffer,
       }}
       nextAction={workspaceNavigationAction}
-      onRecoverCollection={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoverCollection : undefined}
-      collectionRecoveryBusy={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoveryBusy : false}
-      collectionRecoveryError={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoveryError : null}
       primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
     />
   ) : null;
-  const formalPrimaryAction = workspaceModel.primaryAction;
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
@@ -539,6 +546,29 @@ export function ResearchProcessWorkspace({
               >
                 {formalPrimaryAction.offer.label}
               </VButton>
+            ) : collectionRecoveryAction ? (
+              <>
+                <VButton
+                  type="button"
+                  variant="primary"
+                  isPending={hypothesisFirstChain.recoveryBusy}
+                  isDisabled={hypothesisFirstChain.recoveryBusy}
+                  onClick={() => {
+                    if (hypothesisFirstChain.recoveryBusy) return;
+                    void hypothesisFirstChain.recoverCollection(collectionRecoveryAction.requestId);
+                  }}
+                >
+                  {collectionRecoveryAction.label}
+                </VButton>
+                {hypothesisFirstChain.recoveryError ? (
+                  <div
+                    className="mt-2 [font-size:var(--vui-font-xs)] leading-4 text-[var(--fg-danger)]"
+                    role="alert"
+                  >
+                    恢复搜集失败：{hypothesisFirstChain.recoveryError}
+                  </div>
+                ) : null}
+              </>
             ) : undefined}
             onRetryDispatch={formalPrimaryAction ? undefined : retryDispatch}
             retryPending={commandBusy}
