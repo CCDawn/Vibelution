@@ -82,7 +82,7 @@ _EXPERIMENT_NODES: tuple[WorkflowNodeSpec, ...] = (
         label="协议设计",
         actorKind=ActorKind.AGENT,
         primaryRoleKey="experiment_planner",
-        producesArtifactKinds=("protocol_draft",),
+        producesArtifactKinds=("research_plan", "protocol_draft"),
     ),
     WorkflowNodeSpec(
         nodeId="protocol_review",

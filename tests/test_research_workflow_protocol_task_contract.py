@@ -12,6 +12,7 @@ from core.research.workflow.contracts.research_scope import (
     scope_locators_for,
 )
 from core.research.workflow.contracts import WorkflowRunInputSnapshot
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services import team_workflow_orchestration_service
 from core.web.services.team_workflow import research_project_agent_tasks
 from core.web.services.team_workflow.research_project_protocol_context import (
@@ -29,6 +30,9 @@ from core.web.services.team_workflow.research_runtime.protocol_artifact_writer i
 )
 from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
     canonical_sha256,
+)
+from core.web.services.team_workflow.research_runtime.agent_task_artifact_builder import (
+    build_agent_task_artifacts,
 )
 from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
     put_workflow_artifact,
@@ -835,3 +839,147 @@ def test_human_gate_self_approval_is_rejected_before_plan_write(
     )
 
     assert result["status"] == "error"
+
+
+def _protocol_builder_fixture() -> tuple[
+    dict[str, object],
+    object,
+    dict[str, object],
+    dict[str, object],
+    dict[str, dict[str, object]],
+]:
+    definition = build_challenge_cup_workflow_definition()
+    node_spec = next(
+        node for node in definition.nodes if node.nodeId == "protocol_design"
+    )
+    record = {
+        "teamId": "research-team",
+        "runId": "run-1",
+        "workflowVersionId": "challenge-cup-v2",
+        "inputSnapshot": {"environmentSnapshotRef": "env-1"},
+        "artifactManifests": [],
+    }
+    node_run = {
+        "nodeRunId": "nr-run-1-protocol_design-a1",
+        "attempt": 1,
+        "inputSnapshotHash": "a" * 64,
+        "agentId": "agent-planner",
+        "modelRef": "fixture-model",
+    }
+    task = {
+        **_formal_task(),
+        "result": {
+            "summary": "forged summary must not become a canonical artifact",
+            "artifactPayloads": {
+                "research_plan": {"planId": "forged-research-plan"},
+                "protocol_draft": {"planId": "forged-protocol-draft"},
+            },
+        },
+    }
+    producer = {
+        "nodeRunId": node_run["nodeRunId"],
+        "attempt": node_run["attempt"],
+        "taskId": task["taskId"],
+        "sessionId": task["sessionId"],
+        "turnId": task["turn"]["turnId"],
+        "agentId": task["agentId"],
+    }
+    envelopes = {
+        "research_plan": {
+            "teamId": "research-team",
+            "kind": "research_plan",
+            "workflowRunId": "run-1",
+            "sourceCollectionRunId": "source-run-1",
+            "payload": {
+                "planId": "plan-1",
+                "inputSnapshotHash": node_run["inputSnapshotHash"],
+                "producer": producer,
+            },
+        },
+        "protocol_draft": {
+            "teamId": "research-team",
+            "kind": "protocol_draft",
+            "workflowRunId": "run-1",
+            "sourceCollectionRunId": "source-run-1",
+            "payload": {
+                "planId": "plan-1",
+                "createdFromTaskId": task["taskId"],
+                "createdFromSessionId": task["sessionId"],
+                "createdFromTurnId": task["turn"]["turnId"],
+            },
+        },
+    }
+    return record, node_spec, node_run, task, envelopes
+
+
+def test_protocol_design_definition_keeps_draft_edge_and_adds_research_plan() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    node = next(item for item in definition.nodes if item.nodeId == "protocol_design")
+    edge = next(item for item in definition.edges if item.edgeId == "e_proto_review")
+
+    assert node.producesArtifactKinds == ("research_plan", "protocol_draft")
+    assert edge.requiredArtifactKinds == ("protocol_draft",)
+
+
+def test_protocol_design_manifests_hash_canonical_envelopes_and_ignore_task_payloads(
+    monkeypatch,
+) -> None:
+    record, node_spec, node_run, task, envelopes = _protocol_builder_fixture()
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_task_artifact_builder.load_scoped_artifact_payload",
+        lambda kind, **_kwargs: envelopes.get(kind),
+    )
+
+    manifests, payloads = build_agent_task_artifacts(
+        record=record,
+        node_spec=node_spec,
+        node_run=node_run,
+        task=task,
+        created_at="2026-08-23T00:00:00Z",
+    )
+
+    assert [item.artifactId.split(":", 1)[0] for item in manifests] == [
+        "research_plan",
+        "protocol_draft",
+    ]
+    for kind, envelope in envelopes.items():
+        manifest = next(
+            item for item in manifests if item.artifactId.startswith(f"{kind}:")
+        )
+        assert manifest.contentHash == canonical_sha256(envelope)
+        assert payloads[manifest.artifactId] == envelope
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_research_plan", "research_plan"),
+        ("wrong_producer", "producer"),
+        ("mismatched_plan_id", "planId"),
+    ],
+)
+def test_protocol_design_canonical_readback_fails_closed(
+    monkeypatch, mutation: str, message: str
+) -> None:
+    record, node_spec, node_run, task, envelopes = _protocol_builder_fixture()
+    if mutation == "missing_research_plan":
+        envelopes.pop("research_plan")
+    elif mutation == "wrong_producer":
+        envelopes["research_plan"]["payload"]["producer"]["nodeRunId"] = (
+            "nr-other"
+        )
+    else:
+        envelopes["protocol_draft"]["payload"]["planId"] = "plan-other"
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_task_artifact_builder.load_scoped_artifact_payload",
+        lambda kind, **_kwargs: envelopes.get(kind),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        build_agent_task_artifacts(
+            record=record,
+            node_spec=node_spec,
+            node_run=node_run,
+            task=task,
+            created_at="2026-08-23T00:00:00Z",
+        )
