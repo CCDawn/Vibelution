@@ -117,7 +117,6 @@ def _model_invocation_receipt_context(
         "workflowRunId",
         "workflowId",
         "workflowVersionId",
-        "researchProjectId",
         "formalNodeId",
         "formalNodeRunId",
         "sessionId",

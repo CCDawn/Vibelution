@@ -163,7 +163,13 @@ def _challenge_task_contract(
         if isinstance(snapshot.get("modelRoutingPolicy"), dict)
         else {}
     )
-    if not model_policy:
+    if not {
+        "requiredModelPolicy",
+        "modelPolicySha256",
+        "routes",
+    }.issubset(model_policy):
+        # Compatibility/dev runs may still use the pre-authorization flat
+        # route map. They can execute, but cannot mint official receipts.
         return {}
     node_run = latest_node_run(record, node_id)
     try:
@@ -528,10 +534,7 @@ def _start_external_task(
         )
 
         try:
-            started = start_source_collection_stage_session_task(
-                str(record.get("teamId") or ""),
-                source_run_id,
-                {
+            source_task_payload = {
                     "stageId": stage_id,
                     "agentId": agent_id,
                     "agentRole": role_key,
@@ -545,11 +548,22 @@ def _start_external_task(
                     "evidenceRemediationContract": dict(
                         record.get("evidenceRemediationContract") or {}
                     ),
-                },
-                # Keyword-only authority cannot be supplied through the
-                # request payload handled by public source-task routes.
-                _challenge_task_contract=source_challenge_task_contract,
-            )
+            }
+            if source_challenge_task_contract:
+                started = start_source_collection_stage_session_task(
+                    str(record.get("teamId") or ""),
+                    source_run_id,
+                    source_task_payload,
+                    # Keyword-only authority cannot be supplied through the
+                    # request payload handled by public source-task routes.
+                    _challenge_task_contract=source_challenge_task_contract,
+                )
+            else:
+                started = start_source_collection_stage_session_task(
+                    str(record.get("teamId") or ""),
+                    source_run_id,
+                    source_task_payload,
+                )
         except TeamWorkflowOrchestrationError as exc:
             raise AgentNodeExecutionError(
                 str(exc),
@@ -566,10 +580,7 @@ def _start_external_task(
         start_research_project_agent_task,
     )
 
-    started = start_research_project_agent_task(
-        str(record.get("teamId") or ""),
-        str(record.get("projectId") or ""),
-        {
+    project_task_payload = {
             "taskKind": task_kind,
             "agentId": agent_id,
             "idempotencyKey": idempotency_key,
@@ -591,19 +602,32 @@ def _start_external_task(
             ),
             "returnTo": return_to,
             "returnLabel": "科研工作流",
-        },
-        _challenge_task_contract=_challenge_task_contract(
-            record,
-            node_id=node_id,
-            node_run_id=node_run_id,
-            agent_id=agent_id,
-        ),
-        _model_invocation_receipt_binding=_model_invocation_receipt_binding(
-            record,
-            node_id=node_id,
-            node_run_id=node_run_id,
-        ),
+    }
+    challenge_task_contract = _challenge_task_contract(
+        record,
+        node_id=node_id,
+        node_run_id=node_run_id,
+        agent_id=agent_id,
     )
+    receipt_binding = _model_invocation_receipt_binding(
+        record,
+        node_id=node_id,
+        node_run_id=node_run_id,
+    )
+    if challenge_task_contract and receipt_binding:
+        started = start_research_project_agent_task(
+            str(record.get("teamId") or ""),
+            str(record.get("projectId") or ""),
+            project_task_payload,
+            _challenge_task_contract=challenge_task_contract,
+            _model_invocation_receipt_binding=receipt_binding,
+        )
+    else:
+        started = start_research_project_agent_task(
+            str(record.get("teamId") or ""),
+            str(record.get("projectId") or ""),
+            project_task_payload,
+        )
     return record, started
 
 
