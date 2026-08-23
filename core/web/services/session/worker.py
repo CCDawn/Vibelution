@@ -225,6 +225,26 @@ def _abort_session_turn_for_stop(
 
 
 def _run_session_turn(context: dict[str, Any]) -> None:
+    """Run one scheduled turn inside a scoped child trace span."""
+
+    from core.logging.trace_context import (
+        TraceContext,
+        bind_trace_context,
+        get_current_trace_context,
+        new_trace_context,
+    )
+
+    parent_context = TraceContext.from_carrier(context.get("trace_context_carrier"))
+    if parent_context is None:
+        parent_context = get_current_trace_context() or new_trace_context()
+    child_context = parent_context.child_span()
+    worker_context = dict(context)
+    worker_context["trace_context_carrier"] = child_context.to_carrier()
+    with bind_trace_context(child_context):
+        return _run_session_turn_impl(worker_context)
+
+
+def _run_session_turn_impl(context: dict[str, Any]) -> None:
     s = _service()
     prepare_started_at = s._perf_counter()
     session_id = str(context.get("session_id") or "").strip()

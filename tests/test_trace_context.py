@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.logging.trace_context import (
+    TraceContext,
     bind_trace_context,
     current_trace_fields,
     get_current_trace_context,
@@ -68,3 +69,21 @@ def test_bound_trace_context_is_scoped_and_explicit_fields_win() -> None:
 
     assert get_current_trace_context() is None
     assert current_trace_fields() == {}
+
+
+def test_trace_context_carrier_round_trip_and_child_span() -> None:
+    root = new_trace_context(
+        traceparent=f"00-{'1' * 32}-{'2' * 16}-01",
+        request_id="request-carrier",
+    )
+
+    child = root.child_span()
+    carrier = child.to_carrier()
+    restored = TraceContext.from_carrier(carrier)
+
+    assert restored == child
+    assert child.trace_id == root.trace_id
+    assert child.parent_span_id == root.span_id
+    assert child.span_id != root.span_id
+    assert carrier["traceparent"] == child.to_traceparent()
+    assert carrier["requestId"] == "request-carrier"

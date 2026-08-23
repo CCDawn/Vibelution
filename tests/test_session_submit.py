@@ -14,6 +14,7 @@ from core.chat.conversation_ledger import (
     append_conversation_event,
     load_conversation_events,
 )
+from core.logging.trace_context import bind_trace_context, new_trace_context
 from core.web.services import session_service
 from core.web.services.session import submit
 from tests.helpers.web_chat_state import (
@@ -224,6 +225,68 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
     finally:
         _reset_seeded_session_runtime(session_id)
         admission.close_development_submission_admission_runtimes()
+
+
+def test_submit_scheduled_context_carries_trace_context_carrier(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    session_id = "session-trace-carrier"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+    carrier = new_trace_context(request_id="submit-request").to_carrier()
+
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "trace carrier",
+            client_submission_id="submission-trace-carrier",
+            trace_context_carrier=carrier,
+            mental_model_enabled=False,
+        )
+
+        assert result["accepted"] is True
+        assert scheduled_contexts
+        assert scheduled_contexts[0]["trace_context_carrier"] == carrier
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_session_lifecycle_event_prefers_explicit_trace_carrier(monkeypatch) -> None:
+    current_context = new_trace_context(request_id="current-request")
+    carrier_context = new_trace_context(request_id="carrier-request")
+    recorded: list[dict] = []
+
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded.append(dict(kwargs)),
+    )
+
+    with bind_trace_context(current_context):
+        session_service._record_session_turn_lifecycle_event(
+            "session-trace-lifecycle",
+            "scheduled",
+            turn_id="turn-trace-lifecycle",
+            trace_context_carrier=carrier_context.to_carrier(),
+        )
+
+    assert len(recorded) == 1
+    expected = carrier_context.to_fields()
+    for payload_name in ("fields", "child_log_payload"):
+        payload = recorded[0][payload_name]
+        for field_name, expected_value in expected.items():
+            assert payload[field_name] == expected_value
+        assert payload["traceId"] != current_context.trace_id
+        assert payload["spanId"] != current_context.span_id
+        assert payload["requestId"] != current_context.request_id
 
 
 def test_steer_guidance_stays_in_model_history_but_is_not_editable() -> None:
