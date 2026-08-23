@@ -137,7 +137,18 @@ class WorkflowQueryService:
                 raise RunNotFoundError(run_id)
             raise TeamScopeMismatchError()
 
-        run, attempts, human_tasks, handoffs, budget_receipts, latest_seq = bundle
+        (
+            run,
+            attempts,
+            human_tasks,
+            handoffs,
+            budget_receipts,
+            artifact_receipts,
+            delivery_status,
+            delivery_artifact,
+            launch_context,
+            latest_seq,
+        ) = bundle
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
 
@@ -163,6 +174,10 @@ class WorkflowQueryService:
                 handoffs=tuple(handoffs),
                 budget_receipts=tuple(budget_receipts),
                 command_offers=tuple(offers),
+                artifact_receipts=tuple(artifact_receipts),
+                delivery_status=delivery_status,
+                delivery_artifact=delivery_artifact,
+                launch_context=launch_context,
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )
@@ -316,13 +331,28 @@ class WorkflowQueryService:
                 _budget_receipt_summary(row)
                 for row in repo.list_budget_receipts_for_run(run_id)
             ]
+            artifact_receipts = repo.list_artifact_receipts_for_run(run_id)
             latest_seq = repo.latest_event_sequence(run_id)
+            events = _read_bounded_events(
+                repo,
+                run_id,
+                latest_sequence=latest_seq,
+            )
+            delivery_status, delivery_artifact = _delivery_projection_from_events(
+                events,
+                run_status=run.status,
+            )
+            launch_context = _launch_context_from_run(run, events)
             return (
                 run,
                 attempts,
                 human_tasks,
                 handoffs,
                 budget_receipts,
+                artifact_receipts,
+                delivery_status,
+                delivery_artifact,
+                launch_context,
                 latest_seq,
             )
 
@@ -419,6 +449,166 @@ def _artifact_ref_from_receipt(row: tuple) -> dict[str, Any]:
         "contentHash": str(row[5] or ""),
         "uri": canonical_ref,
     }
+
+
+def _event_sequence(event: Any) -> int:
+    value = getattr(event, "sequence", event)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _read_bounded_events(
+    repo: WorkflowLedgerRepository,
+    run_id: str,
+    *,
+    latest_sequence: int | None = None,
+) -> list[Any]:
+    """Read a bounded head+tail window from the capped Ledger event query.
+
+    The head preserves launch/authorization facts while the tail preserves
+    the newest delivery/recovery fact. Two bounded reads avoid both the
+    repository's 500-row cap and an unbounded timeline scan.
+    """
+    latest = int(
+        latest_sequence
+        if latest_sequence is not None
+        else repo.latest_event_sequence(run_id)
+    )
+    head = repo.list_events(run_id, 0, 250)
+    tail_after = max(0, latest - 250)
+    tail = repo.list_events(run_id, tail_after, 500)
+    merged: dict[tuple[int, str], Any] = {}
+    for event in (*head, *tail):
+        key = (_event_sequence(event), str(getattr(event, "event_id", "")))
+        merged[key] = event
+    return sorted(merged.values(), key=_event_sequence)
+
+
+def _event_payload(event: Any) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(str(getattr(event, "payload_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    return payload if isinstance(payload, Mapping) else {}
+
+
+def _delivery_projection_from_events(
+    events: list[Any],
+    *,
+    run_status: str | None = None,
+) -> tuple[str | None, Mapping[str, Any] | None]:
+    """Read delivery status and only the event-authoritative final artifact."""
+    for event in reversed(events or []):
+        event_type = str(getattr(event, "event_type", "") or "")
+        if not event_type.startswith("delivery_orchestration_"):
+            continue
+        payload = _event_payload(event)
+        status = str(
+            payload.get("deliveryStatus")
+            or {
+                "delivery_orchestration_completed": "succeeded",
+                "delivery_orchestration_blocked": "blocked",
+                "delivery_orchestration_failed": "failed",
+            }.get(event_type, "")
+        ).strip().lower()
+        artifact = None
+        if event_type == "delivery_orchestration_completed":
+            artifact_ref = str(payload.get("artifactRef") or "").strip()
+            artifact_kind = str(payload.get("artifactKind") or "").strip()
+            if artifact_ref and artifact_kind:
+                artifact = {
+                    "artifactKind": artifact_kind,
+                    "artifactRef": artifact_ref,
+                    "artifactId": payload.get("artifactId"),
+                }
+        return status or None, artifact
+    # A successful run atomically enqueues delivery orchestration.  Until its
+    # terminal delivery event appears, expose that durable lifecycle fact as
+    # pending rather than claiming success or inventing a result.
+    return (
+        "pending" if str(run_status or "").strip() == "succeeded" else None,
+        None,
+    )
+
+
+def _delivery_status_from_events(
+    events: list[Any],
+    *,
+    run_status: str | None = None,
+) -> str | None:
+    """Compatibility helper returning only the delivery status."""
+    return _delivery_projection_from_events(events, run_status=run_status)[0]
+
+
+def _launch_context_from_run(run: Any, events: list[Any]) -> dict[str, Any]:
+    try:
+        snapshot = json.loads(str(run.input_snapshot_json or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        snapshot = {}
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    constraint = snapshot.get("constraintSnapshot")
+    constraint = constraint if isinstance(constraint, Mapping) else {}
+    source = str(
+        snapshot.get("launchSource")
+        or constraint.get("launchSource")
+        or ("catalog" if snapshot.get("competitionRuleRef") else "")
+    ).strip() or None
+    context: dict[str, Any] = {
+        "source": source,
+        "sourceCollectionRunId": str(snapshot.get("sourceCollectionRunId") or "").strip() or None,
+        "authorizationId": str(
+            snapshot.get("authorizationId") or snapshot.get("catalogAuthorizationId") or ""
+        ).strip() or None,
+        "planId": str(snapshot.get("planId") or "").strip() or None,
+        "questionId": str(
+            snapshot.get("questionId") or getattr(run, "question_id", "") or ""
+        ).strip() or None,
+        "hypothesisSelectionId": str(
+            snapshot.get("hypothesisSelectionId")
+            or snapshot.get("selectionId")
+            or ""
+        ).strip() or None,
+        "catalogAuthorizationId": str(
+            snapshot.get("catalogAuthorizationId")
+            or snapshot.get("authorizationId")
+            or ""
+        ).strip() or None,
+        "readinessReportSha256": str(
+            snapshot.get("readinessReportSha256") or ""
+        ).strip() or None,
+        "chainCorrelationId": str(
+            snapshot.get("chainCorrelationId") or ""
+        ).strip() or None,
+        "inputSnapshotHash": str(
+            getattr(run, "input_snapshot_hash", "") or ""
+        ).strip() or None,
+    }
+    for event in events or []:
+        if str(getattr(event, "event_type", "") or "") != "catalog_run_authorized":
+            continue
+        payload = _event_payload(event)
+        authorization_id = payload.get("authorizationId")
+        if authorization_id is not None:
+            context["authorizationId"] = authorization_id
+            context["catalogAuthorizationId"] = authorization_id
+        for key in (
+            "planId",
+            "scopeHash",
+            "readinessReportSha256",
+            "recordHash",
+            "approvedBy",
+            "approvedAtMs",
+        ):
+            if key in payload and payload.get(key) is not None:
+                context[key] = payload.get(key)
+        if "chainCorrelationId" in payload:
+            context["chainCorrelationId"] = str(
+                payload.get("chainCorrelationId") or ""
+            ).strip() or None
+        break
+    return context
 
 
 def _node_blocked_reason(latest: Any, run_blocked_reason: str | None) -> str:
