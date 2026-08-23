@@ -2,6 +2,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
@@ -20,6 +21,7 @@ from core.infrastructure import developer_sandbox
 from core.runtime_manager import work_run_store
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
+from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
 
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
@@ -2349,6 +2351,62 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
     assert invocations[0]["turnId"].startswith("chat-room:")
     latest_message = detail["rounds"][-1]["messages"][0]
     assert "ledger identity" not in str(latest_message.get("content") or "").lower()
+
+
+def test_formal_meeting_speaker_builds_question_receipt_context():
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+
+    receipt_context = meeting_receipt_authority.build_speaker_receipt_context(
+        {"participantId": "participant-1", "agentId": "agent-1"},
+        {
+            "roundId": "round-1",
+            "meetingRoundId": "meeting-1",
+            "meetingType": "hypothesis_candidate_generation",
+            "teamId": "team-formal",
+            "questionId": "SCI-096",
+            "_modelInvocationReceiptAuthority": authority,
+        },
+        session_id="session-1",
+        turn_identity="chat-room:round-1:participant-1",
+    )
+
+    assert receipt_context is not None
+    assert receipt_context["receiptRunId"] == "run-formal"
+    assert receipt_context["outcomeKinds"] == ["candidate"]
+    binding = receipt_context["questionStageBinding"]
+    assert binding["questionStage"] == "generation"
+    assert binding["formalNodeId"] == "hypothesis_design"
+    assert binding["formalNodeRunId"] == "meeting:meeting-1:round-1:participant-1"
+    assert receipt_context["evidenceLocator"]["executionKind"] == "chat_room_meeting"
+
+
+def test_formal_meeting_speaker_without_receipt_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.load_conversation_events",
+        lambda *_args: [],
+    )
+
+    with pytest.raises(
+        meeting_receipt_authority.MeetingReceiptAuthorityError,
+        match="without a verifiable invocation receipt",
+    ):
+        meeting_receipt_authority.register_speaker_receipts(
+            project_root=Path("."),
+            team_id="team-formal",
+            question_id="SCI-096",
+            workflow_run_id="run-formal",
+            session_id="session-1",
+            turn_identity="turn-1",
+        )
 
 
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):

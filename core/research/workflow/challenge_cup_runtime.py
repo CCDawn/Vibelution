@@ -22,7 +22,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from core.research.workflow.contracts import ExecutionReceipt, PendingAction
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition import (
+    build_challenge_cup_workflow_definition,
+    graph_conditional_targets,
+    graph_static_edge_pairs,
+)
 from core.research.workflow.iteration_decisions import (
     IterationDecisionError,
     route_target_after_governance,
@@ -298,30 +302,15 @@ def _route_after_linear(source: str, target: str):
 
 def successor_map() -> dict[str, tuple[str, ...]]:
     """Deterministic successor set per node (drives worker attempt injection)."""
-    successors: dict[str, tuple[str, ...]] = {
-        source: (target,) for source, target in _LINEAR_EDGES
+    collected: dict[str, list[str]] = {node_id: [] for node_id in _node_order()}
+    for source, target in graph_static_edge_pairs():
+        collected.setdefault(source, []).append(target)
+    for source in ("iteration_decision", "version_governance"):
+        collected[source] = list(graph_conditional_targets(source))
+    return {
+        node_id: tuple(dict.fromkeys(collected.get(node_id, [])))
+        for node_id in _node_order()
     }
-    successors["iteration_decision"] = ("controlled_run", "version_governance")
-    successors["version_governance"] = ("candidate_promotion", "result_package")
-    successors["candidate_promotion"] = ("result_package",)
-    successors["result_package"] = ()
-    return successors
-
-
-_LINEAR_EDGES: tuple[tuple[str, str], ...] = (
-    ("source_finding", "source_extraction"),
-    ("source_extraction", "evidence_relations"),
-    ("evidence_relations", "knowledge_ingestion"),
-    ("knowledge_ingestion", "knowledge_handoff"),
-    ("knowledge_handoff", "hypothesis_design"),
-    ("hypothesis_design", "protocol_design"),
-    ("protocol_design", "protocol_review"),
-    ("protocol_review", "protocol_freeze"),
-    ("protocol_freeze", "smoke_gate"),
-    ("smoke_gate", "controlled_run"),
-    ("controlled_run", "result_evaluation"),
-    ("result_evaluation", "iteration_decision"),
-)
 
 
 def build_formal_graph() -> StateGraph:
@@ -329,7 +318,12 @@ def build_formal_graph() -> StateGraph:
     for node_id in _node_order():
         builder.add_node(node_id, _make_node_fn(node_id))
     builder.add_edge(START, _node_order()[0])
-    for source, target in _LINEAR_EDGES:
+    for source, target in graph_static_edge_pairs():
+        if source == "candidate_promotion":
+            # Preserve the existing post-promotion terminal packaging step;
+            # only the edge identity comes from the definition.
+            builder.add_edge(source, target)
+            continue
         builder.add_conditional_edges(
             source,
             _route_after_linear(source, target),
@@ -353,7 +347,6 @@ def build_formal_graph() -> StateGraph:
             END: END,
         },
     )
-    builder.add_edge("candidate_promotion", "result_package")
     builder.add_edge("result_package", END)
     return builder
 

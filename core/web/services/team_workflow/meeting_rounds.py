@@ -192,6 +192,7 @@ def _meeting_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "resolutionHash",
             "inputArtifactRefs",
             "linkedChatRoomId",
+            "modelInvocationReceiptAuthority",
         )
     }
 
@@ -288,6 +289,15 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
         "linkedChatRoomId": str(request.get("linkedChatRoomId") or "").strip(),
         "chatRoomRoundIds": [],
+        **(
+            {
+                "modelInvocationReceiptAuthority": dict(
+                    request["modelInvocationReceiptAuthority"]
+                )
+            }
+            if isinstance(request.get("modelInvocationReceiptAuthority"), Mapping)
+            else {}
+        ),
     }
     if not record["participants"]:
         raise ContractValidationError("a meeting round requires at least one participant")

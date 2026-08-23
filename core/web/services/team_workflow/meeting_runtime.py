@@ -45,6 +45,7 @@ MEETING_SOURCE = "hypothesis_first_meeting"
 # lines), so meeting rounds need a line budget beyond the generic chat-room
 # topic cap: 3 framing lines + rules + host line + one line per candidate.
 MEETING_TOPIC_MAX_LINES = MAX_SELECTED_CANDIDATES + 8
+_MEETING_RECEIPT_AUTHORITY_SCHEMA_VERSION = 1
 
 _DEFAULT_AGENDA = (
     "回顾入选假说候选与赛题已有证据",
@@ -552,6 +553,75 @@ def _round_config(
     }
 
 
+def _normalized_model_invocation_receipt_authority(
+    authority: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    question_id: str,
+) -> dict[str, Any] | None:
+    """Validate the private server-owned run binding before it reaches chat."""
+
+    if authority is None:
+        return None
+    if not isinstance(authority, Mapping):
+        raise ResearchMeetingRuntimeError("meeting receipt authority must be an object")
+    normalized = {
+        "schemaVersion": authority.get("schemaVersion"),
+        "authorityKind": str(authority.get("authorityKind") or "").strip(),
+        "teamId": str(authority.get("teamId") or "").strip(),
+        "questionId": str(authority.get("questionId") or "").strip().upper(),
+        "workflowRunId": str(authority.get("workflowRunId") or "").strip(),
+        "workflowId": str(authority.get("workflowId") or "").strip(),
+        "workflowVersionId": str(authority.get("workflowVersionId") or "").strip(),
+        "modelPolicySha256": str(authority.get("modelPolicySha256") or "")
+        .strip()
+        .lower(),
+    }
+    expected_team = str(team_id or "").strip()
+    expected_question = str(question_id or "").strip().upper()
+    if (
+        normalized["schemaVersion"] != _MEETING_RECEIPT_AUTHORITY_SCHEMA_VERSION
+        or normalized["authorityKind"] != "workflow_run"
+        or normalized["teamId"] != expected_team
+        or normalized["questionId"] != expected_question
+        or any(
+            not normalized[key]
+            for key in ("workflowRunId", "workflowId", "workflowVersionId")
+        )
+    ):
+        raise ResearchMeetingRuntimeError("meeting receipt authority scope is invalid")
+    policy_sha256 = normalized["modelPolicySha256"]
+    if len(policy_sha256) != 64 or any(
+        char not in "0123456789abcdef" for char in policy_sha256
+    ):
+        raise ResearchMeetingRuntimeError("meeting receipt authority policy hash is invalid")
+    return normalized
+
+
+def _require_matching_model_invocation_receipt_authority(
+    meeting_round: Mapping[str, Any],
+    authority: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    question_id: str,
+) -> dict[str, Any] | None:
+    """Refuse to rebind a deterministic meeting id to another formal run."""
+
+    if authority is None:
+        return None
+    normalized = _normalized_model_invocation_receipt_authority(
+        authority,
+        team_id=team_id,
+        question_id=question_id,
+    )
+    stored = meeting_round.get("modelInvocationReceiptAuthority")
+    if not isinstance(stored, Mapping) or dict(stored) != normalized:
+        raise ResearchMeetingRuntimeError(
+            "existing meeting is not bound to this formal workflow run"
+        )
+    return normalized
+
+
 def _round_id_from_start_result(result: Mapping[str, Any], meeting_round_id: str) -> str:
     round_id = str(result.get("roundId") or "").strip()
     if round_id:
@@ -580,6 +650,7 @@ def open_hypothesis_review_meeting(
     agent_runner: Callable[..., dict[str, Any]] | None = None,
     background: bool = True,
     candidate_contexts: Sequence[Mapping[str, Any]] = (),
+    _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open a hypothesis-review meeting from a hypothesis selection payload.
 
@@ -594,6 +665,11 @@ def open_hypothesis_review_meeting(
     request = dict(payload) if isinstance(payload, Mapping) else {}
     selection = _validated_selection(request)
     team, room_id = _ensure_linked_room(str(team_id or "").strip())
+    receipt_authority = _normalized_model_invocation_receipt_authority(
+        _model_invocation_receipt_authority,
+        team_id=team["teamId"],
+        question_id=str(selection.get("questionId") or ""),
+    )
     participant_resolution = _validated_participant_resolution(
         team["teamId"], room_id, "hypothesis_review", request
     )
@@ -635,6 +711,11 @@ def open_hypothesis_review_meeting(
             "agendaQuestions": agenda_questions,
             "agendaRules": agenda_rules,
             "linkedChatRoomId": room_id,
+            **(
+                {"modelInvocationReceiptAuthority": receipt_authority}
+                if receipt_authority is not None
+                else {}
+            ),
         },
     )
     meeting_round = created["meetingRound"]
@@ -667,6 +748,7 @@ def open_hypothesis_review_meeting(
         background=background,
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
+        _model_invocation_receipt_authority=receipt_authority,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
     bound = meeting_rounds.bind_meeting_chat_room_round(
@@ -694,6 +776,7 @@ def open_candidate_generation_meeting(
     *,
     agent_runner: Callable[..., dict[str, Any]] | None = None,
     background: bool = True,
+    _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open the round-0 candidate-generation discussion for a question.
 
@@ -714,6 +797,11 @@ def open_candidate_generation_meeting(
             "opening a candidate generation meeting requires a questionId"
         )
     team, room_id = _ensure_linked_room(str(team_id or "").strip())
+    receipt_authority = _normalized_model_invocation_receipt_authority(
+        _model_invocation_receipt_authority,
+        team_id=team["teamId"],
+        question_id=question_id,
+    )
     participant_resolution = _validated_participant_resolution(
         team["teamId"], room_id, CANDIDATE_GENERATION_MEETING_TYPE, request
     )
@@ -751,6 +839,11 @@ def open_candidate_generation_meeting(
             "agendaQuestions": agenda_questions,
             "agendaRules": agenda_rules,
             "linkedChatRoomId": room_id,
+            **(
+                {"modelInvocationReceiptAuthority": receipt_authority}
+                if receipt_authority is not None
+                else {}
+            ),
         },
     )
     meeting_round = created["meetingRound"]
@@ -794,6 +887,7 @@ def open_candidate_generation_meeting(
         background=background,
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
+        _model_invocation_receipt_authority=receipt_authority,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
     bound = meeting_rounds.bind_meeting_chat_room_round(
@@ -905,6 +999,11 @@ def _run_meeting_discussion_impl(
         )
     _frozen_participant_agent_ids(meeting_round)
     selection = _selection_from_meeting(meeting_round)
+    receipt_authority = (
+        dict(meeting_round.get("modelInvocationReceiptAuthority"))
+        if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+        else None
+    )
     budget = int(meeting_round.get("rounds") or 3)
     stop_reason = ""
     while len(bound_round_ids) < budget:
@@ -942,6 +1041,7 @@ def _run_meeting_discussion_impl(
             agent_runner=agent_runner,
             background=False,
             max_topic_lines=MEETING_TOPIC_MAX_LINES,
+            _model_invocation_receipt_authority=receipt_authority,
         )
         round_id = _round_id_from_start_result(result, normalized_round_id)
         bound = meeting_rounds.bind_meeting_chat_room_round(

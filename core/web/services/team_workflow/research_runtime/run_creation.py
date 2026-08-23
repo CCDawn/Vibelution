@@ -40,7 +40,11 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _auto_open_candidate_generation(run_input: Mapping[str, Any]) -> dict[str, Any] | None:
+def _auto_open_candidate_generation(
+    run_input: Mapping[str, Any],
+    *,
+    created_run: Mapping[str, Any],
+) -> dict[str, Any] | None:
     """Best-effort round-0 candidate generation for hypothesis-first launches.
 
     The run is already persisted, so a meeting failure is reported
@@ -55,6 +59,9 @@ def _auto_open_candidate_generation(run_input: Mapping[str, Any]) -> dict[str, A
         from core.web.services.team_workflow.research_runtime import (
             hypothesis_first_chain,
         )
+        from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+            authority_from_created_run,
+        )
 
         team_id = str(run_input.get("teamId") or "").strip()
         question_id = str(run_input.get("questionId") or "").strip()
@@ -66,6 +73,10 @@ def _auto_open_candidate_generation(run_input: Mapping[str, Any]) -> dict[str, A
             team_id,
             question_id,
             background=True,
+            _model_invocation_receipt_authority=authority_from_created_run(
+                run_input,
+                created_run,
+            ),
         )
         return {
             "status": str(opened.get("status") or ""),
@@ -110,7 +121,7 @@ def create_question_run(
         idempotency_key=idempotency_key,
         catalog_run_authorization=catalog_run_authorization,
     )
-    generation = _auto_open_candidate_generation(run_input)
+    generation = _auto_open_candidate_generation(run_input, created_run=created)
     if generation is not None:
         created = {**created, "candidateGeneration": generation}
     return created
