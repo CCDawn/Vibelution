@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.infrastructure.research_workflow_storage_migration import (
     ResearchWorkflowMigrationError,
+    acknowledge_proven_stale_runtime_quiescence,
     apply_research_workflow_migration,
     preview_research_workflow_migration,
     rollback_research_workflow_migration,
@@ -29,19 +30,37 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_argument("--project", default=str(PROJECT_ROOT))
         sub.add_argument("--manifest", default="")
         sub.add_argument("--json", action="store_true", help="输出 JSON（默认也是 JSON，保留兼容开关）")
+        sub.add_argument(
+            "--acknowledge-proven-stale-runtime",
+            action="store_true",
+            help="仅在无 claim、无 live writer 且 Launcher 已关闭时显式确认已证明 stale 的历史 runtime 记录",
+        )
     args = parser.parse_args(argv)
     project = Path(args.project).expanduser().resolve()
     manifest = Path(args.manifest).expanduser().resolve() if args.manifest else None
+    quiescence_probe = (
+        acknowledge_proven_stale_runtime_quiescence
+        if args.acknowledge_proven_stale_runtime
+        else None
+    )
     try:
         if args.command == "preview":
-            result = preview_research_workflow_migration(project)
+            result = preview_research_workflow_migration(project, quiescence_probe=quiescence_probe)
             payload = result.to_dict()
         elif args.command == "apply":
-            payload = apply_research_workflow_migration(project)
+            payload = apply_research_workflow_migration(project, quiescence_probe=quiescence_probe)
         elif args.command == "verify":
-            payload = verify_research_workflow_migration(project, manifest_path=manifest)
+            payload = verify_research_workflow_migration(
+                project,
+                manifest_path=manifest,
+                quiescence_probe=quiescence_probe,
+            )
         else:
-            payload = rollback_research_workflow_migration(project, manifest_path=manifest)
+            payload = rollback_research_workflow_migration(
+                project,
+                manifest_path=manifest,
+                quiescence_probe=quiescence_probe,
+            )
     except ResearchWorkflowMigrationError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 2
