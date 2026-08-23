@@ -10,6 +10,7 @@ import pytest
 import core.infrastructure.research_workflow_storage_migration as storage_migration
 from core.infrastructure.research_workflow_storage_migration import (
     ResearchWorkflowMigrationError,
+    acknowledge_proven_stale_runtime_quiescence,
     apply_research_workflow_migration,
     preview_research_workflow_migration,
     rollback_research_workflow_migration,
@@ -430,6 +431,66 @@ def test_empty_target_ledger_with_zero_wal_and_stale_shm_replaces_whole_bundle(
     )
     assert rolled_back["ok"] is True
     assert target_ledger.with_name("workflow-ledger.sqlite-shm").read_bytes() == b"stale-shm"
+
+
+def test_empty_target_ledger_accepts_semantically_equal_schema_with_stale_shm(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    source_ledger = source / "workflow-ledger.sqlite"
+    _create_current_ledger(source_ledger, include_blocked_run=True)
+    target.mkdir(parents=True)
+    target_ledger = target / "workflow-ledger.sqlite"
+    _create_current_ledger(target_ledger)
+
+    connection = apsw.Connection(str(target_ledger))
+    try:
+        connection.execute("DROP INDEX idx_catalog_run_authorizations_lookup")
+        connection.execute("DROP TABLE catalog_run_authorizations")
+        connection.execute(
+            """
+            CREATE TABLE catalog_run_authorizations(
+              authorization_id TEXT PRIMARY KEY,
+              team_id TEXT NOT NULL,
+              plan_id TEXT NOT NULL,
+              batch_scope_json TEXT NOT NULL CHECK(json_valid(batch_scope_json)),
+              scope_hash TEXT NOT NULL,
+              approved_by TEXT NOT NULL,
+              approved_at_ms INTEGER NOT NULL CHECK(approved_at_ms > 0),
+              readiness_report_sha256 TEXT NOT NULL,
+              record_hash TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL CHECK(created_at_ms > 0),
+              UNIQUE(team_id, plan_id, scope_hash, readiness_report_sha256)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_catalog_run_authorizations_lookup
+            ON catalog_run_authorizations(
+              team_id, plan_id, scope_hash, readiness_report_sha256,
+              approved_at_ms DESC, authorization_id
+            )
+            """
+        )
+    finally:
+        connection.close()
+    target_ledger.with_name("workflow-ledger.sqlite-wal").write_bytes(b"")
+    target_ledger.with_name("workflow-ledger.sqlite-shm").write_bytes(b"stale-shm")
+
+    source_evidence = storage_migration._sqlite_evidence(source_ledger, kind="ledger")
+    target_evidence = storage_migration._sqlite_evidence(target_ledger, kind="ledger")
+    assert source_evidence.schema_digest != target_evidence.schema_digest
+    assert storage_migration._validate_v5_ledger(target_ledger)[0] is True
+
+    preview = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        sample_delay_seconds=0,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+    )
+    assert preview.ready
 
 
 def test_preview_rejects_target_ledger_sidecar(tmp_path: Path, monkeypatch) -> None:
@@ -1690,6 +1751,19 @@ def test_default_guard_does_not_upgrade_stale_raw_writers_to_ready(
     assert not result.ready
     assert any(item["code"] == "quiescence_guard_not_ready" for item in result.blockers)
     assert any(item["code"] == "stale_runtime_manager_lock" for item in result.warnings)
+
+    acknowledged = acknowledge_proven_stale_runtime_quiescence(project)
+    assert acknowledged["ok"] is True
+    assert acknowledged["blockers"] == []
+    assert acknowledged["operatorAcknowledgement"] == {
+        "kind": "proven_stale_runtime_only",
+        "warningCodes": ["stale_runtime_manager_lock", "stale_source_collection_snapshot"],
+        "warningCount": 3,
+    }
+    assert any(
+        item["code"] == "proven_stale_runtime_operator_acknowledged"
+        for item in acknowledged["warnings"]
+    )
 
 
 def test_rollback_rechecks_guard_and_target_delta_after_staging(tmp_path: Path, monkeypatch) -> None:

@@ -766,6 +766,13 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
     assert policy["modelIds"] == ["qwen-max", "qwen-plus"]
     assert len(policy["policySha256"]) == 64
 
+    routing_policy = catalog_run_authorization.resolve_catalog_model_routing_policy(
+        TEAM_ID
+    )
+    for purpose_routes in routing_policy["routes"].values():
+        for role_id, route in purpose_routes["byProductRole"].items():
+            assert route["productRoleId"] == role_id
+
     monkeypatch.setattr(
         catalog_run_authorization,
         "resolve_agent_llm",

@@ -30,6 +30,7 @@ const harness = vi.hoisted(() => ({
   runState: {
     run: null as unknown,
     projection: null as unknown,
+    snapshot: null as unknown,
     error: null as string | null,
     busy: false,
     commandOffers: [] as unknown[],
@@ -106,9 +107,24 @@ vi.mock("../../../components/vui", async () => {
       canvas?: React.ReactNode;
       inspector?: React.ReactNode;
       shellTestId?: string;
+      toolbarClassName?: string;
+      layoutId?: string;
+      responsive?: {
+        enabled?: boolean;
+        rail?: { label?: string };
+        inspector?: { label?: string };
+      };
     }) => (
-      <div data-testid={props.shellTestId ?? "research-process-workspace-shell"}>
+      <div
+        data-testid={props.shellTestId ?? "research-process-workspace-shell"}
+        data-toolbar-class={props.toolbarClassName}
+        data-layout-id={props.layoutId}
+        data-responsive-enabled={String(props.responsive?.enabled)}
+        data-responsive-rail={props.responsive?.rail?.label}
+        data-responsive-inspector={props.responsive?.inspector?.label}
+      >
         {props.toolbar}
+        <div data-vui="canvas-workbench-rail">{props.rail}</div>
         <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
         <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
       </div>
@@ -240,7 +256,10 @@ describe("ResearchProcessWorkspace", () => {
     harness.runState.error = null;
     harness.runState.run = null;
     harness.runState.projection = null;
+    harness.runState.snapshot = null;
+    harness.runState.commandOffers = [];
     harness.commands.error = null;
+    harness.commands.busy = false;
     harness.formalCommand.commandError = null;
     harness.chain.chainState = null;
     harness.chain.questionId = "";
@@ -258,15 +277,73 @@ describe("ResearchProcessWorkspace", () => {
 
     expect(rendered.container.textContent).toContain("加载流程定义");
     expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui-region="current-task-body"]')).not.toBeNull();
   });
 
-  it("leaves overall progress to the parent rail and keeps this workspace focused on canvas details", async () => {
+  it("mounts the unified stage navigator beside the fixed canvas and inspector", async () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.querySelector('[data-testid="research-process-rail"]')).toBeNull();
-    expect(rendered.container.querySelector('[data-vui="canvas-workbench-rail"]')).toBeNull();
+    const shell = rendered.container.querySelector('[data-testid="research-process-workspace-shell"]');
+    expect(rendered.container.querySelector('[data-testid="research-workflow-stage-navigator"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-rail"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
+    expect(shell?.getAttribute("data-layout-id")).toBe("research-flow");
+    expect(shell?.getAttribute("data-toolbar-class")).toContain("overflow-hidden");
+    expect(shell?.getAttribute("data-responsive-enabled")).toBe("true");
+    expect(shell?.getAttribute("data-responsive-rail")).toBe("研究阶段");
+    expect(shell?.getAttribute("data-responsive-inspector")).toBe("当前任务");
+  });
+
+  it("navigates from the stage rail through URL view state only", async () => {
+    harness.runState.projection = {
+      definition: {
+        nodes: [{
+          nodeId: "source_finding",
+          stageId: "knowledge_collection",
+          label: "资料发现",
+          actorKind: "agent",
+          description: "发现资料",
+          primaryRoleKey: "researcher",
+          collaboratorRoleKeys: [],
+          producesArtifactKinds: [],
+          acceptsGateKinds: [],
+        }],
+        edges: [],
+        stages: [{
+          stageId: "knowledge_collection",
+          label: "知识搜集",
+          nodeIds: ["source_finding"],
+          index: 0,
+        }],
+      },
+      run: {
+        teamId: "research-team",
+        status: "not_started",
+        runtimeCurrentNodeIds: [],
+        nodeRuns: {},
+      },
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const nodeButton = Array.from(rendered.container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("资料发现"));
+    expect(nodeButton).toBeTruthy();
+    await act(async () => nodeButton?.click());
+
+    expect(harness.location.replaceParams).toHaveBeenCalledTimes(1);
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      node: "source_finding",
+      panel: "node",
+    });
+    expect(harness.location.selectNode).not.toHaveBeenCalled();
+    expect(harness.commands.submitOffer).not.toHaveBeenCalled();
+    expect(harness.commands.submitRun).not.toHaveBeenCalled();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
   });
 
   it("surfaces run-state errors on the canvas host", async () => {
@@ -324,20 +401,33 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.textContent).toContain("正在切换题目");
     expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
     expect(rendered.container.textContent).not.toContain("选择题目开始研究");
-    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-task-status="blocked"]')).not.toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
-  it("shows a created run that never dispatched and retries through submitRun", async () => {
+  it("submits the authoritative formal offer once from the fixed footer", async () => {
+    const formalOffer = {
+      command: "resolve_human_task",
+      nodeId: "knowledge_handoff",
+      available: true,
+      label: "确认知识包交接",
+      reasonCode: "ready",
+      blockerIds: [],
+      idempotencyKey: "offer:run-created:knowledge_handoff:resolve_human_task:v1",
+      expectedRunVersion: 1,
+      payload: { taskId: "human-1", decision: "accept" },
+    };
     harness.location.panel = "node";
     harness.location.runId = "run-created";
     harness.location.questionId = "SCI-004";
+    harness.location.selectedNodeId = "knowledge_handoff";
     harness.chain.questionId = "SCI-004";
     harness.runState.run = {
       ...currentRun,
       runId: "run-created",
       questionId: "SCI-004",
-      status: "created",
+      status: "waiting_human",
     } as WorkflowRunRecord;
     harness.runState.projection = {
       definition: { nodes: [], edges: [], stages: [] },
@@ -345,29 +435,56 @@ describe("ResearchProcessWorkspace", () => {
         runId: "run-created",
         teamId: "research-team",
         runVersion: 1,
-        status: "created",
-        runtimeCurrentNodeIds: [],
-        nodeRuns: {
-          source_finding: { nodeId: "source_finding", status: "pending", attempt: 0 },
-        },
+        status: "waiting_human",
+        runtimeCurrentNodeIds: ["knowledge_handoff"],
+        nodeRuns: {},
       },
     } as never;
-    harness.commands.submitRun.mockResolvedValue(undefined);
+    harness.runState.snapshot = {
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        workflowId: "challenge-cup-research",
+        workflowVersionId: "v1",
+        runVersion: 1,
+        questionId: "SCI-004",
+        status: "waiting_human",
+      },
+      currentTask: {
+        key: "human-1",
+        nodeId: "knowledge_handoff",
+        stageId: "knowledge_collection",
+        nodeRunId: "node-run-1",
+        attempt: 1,
+        actorKind: "human",
+        taskId: "human-1",
+        state: "waiting_user",
+        kind: "human_task",
+        label: "确认知识包交接",
+        detail: "确认后自动继续实验设计。",
+        responsibility: "user",
+        automaticNextStep: { kind: "auto_continue", label: "提交后自动继续" },
+        blockedReason: null,
+        recovery: { retryable: false, scope: "none", resumeFromNodeId: null },
+      },
+      commandOffers: [formalOffer],
+      progress: null,
+      latestEventSequence: 1,
+    } as never;
+    harness.runState.commandOffers = [formalOffer];
+    harness.commands.submitOffer.mockResolvedValue(undefined);
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.querySelector('[data-task-status="never_started"]')).not.toBeNull();
-    expect(rendered.container.querySelector('[aria-live="assertive"]')?.textContent).toContain("运行已创建");
-    const retry = Array.from(rendered.container.querySelectorAll("button")).find((button) => (
-      button.textContent?.includes("重试启动")
+    expect(rendered.container.querySelector('[data-task-status="waiting_user"]')).not.toBeNull();
+    const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
+    const submit = Array.from(footer?.querySelectorAll("button") ?? []).find((button) => (
+      button.textContent?.includes("确认知识包交接")
     ));
-    expect(retry).not.toBeUndefined();
-    await act(async () => retry?.click());
-    expect(harness.commands.submitRun).toHaveBeenCalledWith(expect.objectContaining({
-      teamId: "research-team",
-      questionId: "SCI-004",
-      idempotencyKey: expect.stringContaining(":fresh:"),
-    }));
+    expect(footer?.querySelectorAll("button")).toHaveLength(1);
+    await act(async () => submit?.click());
+    expect(harness.commands.submitOffer).toHaveBeenCalledTimes(1);
+    expect(harness.commands.submitOffer).toHaveBeenCalledWith(formalOffer);
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {

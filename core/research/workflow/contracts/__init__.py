@@ -83,6 +83,12 @@ from .node_readiness import (
     ReadinessBlocker,
 )
 from .pending_action import ExecutionReceipt, PendingAction
+from .question_stage_binding import (
+    QUESTION_PACKAGE_STAGES,
+    QUESTION_STAGE_BINDING_POLICY_ID,
+    QUESTION_STAGE_BINDING_SCHEMA_VERSION,
+    QuestionStageBinding,
+)
 from .platform_readiness import (
     BLOCKER_CAMPAIGN_THEME_MISMATCH,
     BLOCKER_DEV_THEME_ONLY,
@@ -237,6 +243,10 @@ __all__ = [
     "PendingAction",
     "PersonalMemoryCandidate",
     "PlatformFlowReadinessReport",
+    "QUESTION_PACKAGE_STAGES",
+    "QUESTION_STAGE_BINDING_POLICY_ID",
+    "QUESTION_STAGE_BINDING_SCHEMA_VERSION",
+    "QuestionStageBinding",
     "ProductAgentRole",
     "REQUIRED_SCOPE_FIELDS",
     "RESEARCH_PARTICIPANT_POLICY_VERSION",

@@ -48,6 +48,24 @@ from .formal_write_runtime import get_write_store
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OFFICIAL_DASHSCOPE_HOST = "dashscope.aliyuncs.com"
 
+# Workflow purpose and product ownership are separate authorities. A purpose
+# may have more than one product role (extraction), so the route snapshot
+# keeps a role-indexed map instead of choosing a model by purpose alone.
+_CATALOG_MODEL_PURPOSE_ROLES: dict[str, tuple[str, ...]] = {
+    "source_discovery": ("challenge_cup_search",),
+    "extraction": (
+        "challenge_cup_extractor",
+        "challenge_cup_knowledge_manager",
+    ),
+    "reasoning": ("challenge_cup_experiment_revision",),
+    "review": ("challenge_cup_evaluator",),
+    "governance": ("challenge_cup_knowledge_manager",),
+    # The execution steward is frozen and validated with the six-Agent
+    # contract, but its controlled_run node remains system-owned until the
+    # governed deep-experiment phase.
+    "execution": ("challenge_cup_execution_steward",),
+}
+
 
 class CatalogRunAuthorizationError(ValueError):
     """The approval evidence is malformed, stale, or unavailable."""
@@ -167,7 +185,20 @@ def _official_provider(provider: Any) -> bool:
     )
 
 
-def _dialogue_model_identity(agent: Mapping[str, Any], config: Any) -> tuple[str, str]:
+def _resolve_dialogue_model_binding(
+    agent_id: str,
+    agent: Mapping[str, Any],
+    config: Any,
+) -> dict[str, str]:
+    """Resolve one server-owned Agent dialogue route without fallback.
+
+    resolve_agent_llm selects the Agent binding, while the effective model
+    library entry supplies the canonical upstream id. A missing library entry
+    is a hard failure: using resolved.model here would allow a display or
+    legacy profile value to become formal evidence without a resolvable model
+    reference.
+    """
+
     try:
         resolved = resolve_agent_llm(dict(agent), "dialogue", config=config)
     except (AgentLlmResolutionError, KeyError, TypeError, ValueError) as exc:
@@ -184,34 +215,66 @@ def _dialogue_model_identity(agent: Mapping[str, Any], config: Any) -> tuple[str
         raise CatalogRunAuthorizationError(
             "a formal research Agent dialogue LLM binding is not canonical"
         ) from exc
-    if not model_ref or not _official_provider(provider):
+    normalized_agent_id = str(agent_id or "").strip()
+    resolved_agent_id = str(getattr(resolved, "agent_id", "") or "").strip()
+    if (
+        normalized_agent_id
+        and resolved_agent_id
+        and resolved_agent_id != normalized_agent_id
+    ):
+        raise CatalogRunAuthorizationError(
+            "formal research Agent dialogue binding does not match the team role"
+        )
+    provider_id = str(
+        getattr(provider, "provider_id", "") or getattr(resolved, "provider_id", "")
+    ).strip()
+    if not model_ref or not provider_id or not _official_provider(provider):
         raise CatalogRunAuthorizationError(
             "formal research Agent dialogue LLM must use an official provider"
         )
+    ref_provider, separator, _ = str(model_ref).partition("/")
+    if not separator or ref_provider.strip().casefold() != provider_id.casefold():
+        raise CatalogRunAuthorizationError(
+            "formal research Agent dialogue modelRef is not a canonical provider/model ref"
+        )
     model_library = getattr(runtime_config.llm, "model_library", {}) or {}
     entry = model_library.get(model_ref) if isinstance(model_library, Mapping) else None
-    if entry is not None and not isinstance(entry, Mapping):
+    if not isinstance(entry, Mapping):
         raise CatalogRunAuthorizationError(
             "a formal research Agent dialogue LLM binding has no effective upstream model"
         )
     model_id = str(
-        (entry or {}).get("upstream_id")
-        or (entry or {}).get("model")
-        or resolved.model
+        entry.get("upstream_id")
+        or entry.get("model")
     ).strip()
     if not is_qwen_model_id(model_id):
         raise CatalogRunAuthorizationError(
             "formal research Agent dialogue LLM must use a Qwen model"
         )
-    return str(provider.provider_id or resolved.provider_id).strip(), model_id
+    entry_provider_id = str(entry.get("provider_id") or "").strip()
+    if entry_provider_id and entry_provider_id.casefold() != provider_id.casefold():
+        raise CatalogRunAuthorizationError(
+            "formal research Agent dialogue model library provider does not match binding"
+        )
+    return {
+        "agentId": normalized_agent_id or resolved_agent_id,
+        "modelRef": str(model_ref).strip(),
+        "providerId": provider_id,
+        "modelId": model_id,
+    }
 
 
-def resolve_catalog_model_policy(team_id: str) -> dict[str, Any]:
-    """Resolve the server-owned six-Agent dialogue model allowlist.
+def _dialogue_model_identity(agent: Mapping[str, Any], config: Any) -> tuple[str, str]:
+    route = _resolve_dialogue_model_binding(
+        str(agent.get("agentId") or "").strip(),
+        agent,
+        config,
+    )
+    return route["providerId"], route["modelId"]
 
-    The returned snapshot is derived from the current team bindings and
-    operator LLM config.  It never consumes a package or client-supplied hash.
-    """
+
+def _resolve_catalog_dialogue_routes(team_id: str) -> dict[str, dict[str, str]]:
+    """Resolve every current product Agent binding exactly once for a launch."""
 
     bindings = resolve_team_role_bindings(str(team_id or "").strip())
     if not bindings:
@@ -219,8 +282,7 @@ def resolve_catalog_model_policy(team_id: str) -> dict[str, Any]:
             "formal six-Agent team dialogue bindings are unavailable"
         )
     config = get_config()
-    provider_ids: set[str] = set()
-    model_ids: set[str] = set()
+    routes: dict[str, dict[str, str]] = {}
     seen_agents: set[str] = set()
     for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
         agent_id = next(
@@ -241,15 +303,27 @@ def resolve_catalog_model_policy(team_id: str) -> dict[str, Any]:
             raise CatalogRunAuthorizationError(
                 f"formal six-Agent binding references an unavailable Agent: {agent_id}"
             )
-        provider_id, model_id = _dialogue_model_identity(agent, config)
-        provider_ids.add(provider_id)
-        model_ids.add(model_id)
+        routes[role.product_role_id] = _resolve_dialogue_model_binding(
+            agent_id,
+            agent,
+            config,
+        )
+    return routes
+
+
+def _canonical_model_policy_for_routes(
+    routes: Mapping[str, Mapping[str, str]],
+) -> dict[str, Any]:
+    provider_ids = sorted(
+        {str(route["providerId"]).strip() for route in routes.values()}
+    )
+    model_ids = sorted({str(route["modelId"]).strip() for route in routes.values()})
     try:
         return canonical_model_policy(
             {
                 "family": "qwen",
-                "providerIds": sorted(provider_ids),
-                "modelIds": sorted(model_ids),
+                "providerIds": provider_ids,
+                "modelIds": model_ids,
                 "requireOfficialProvider": True,
             }
         )
@@ -257,6 +331,48 @@ def resolve_catalog_model_policy(team_id: str) -> dict[str, Any]:
         raise CatalogRunAuthorizationError(
             "server model policy snapshot could not be canonicalized"
         ) from exc
+
+
+def resolve_catalog_model_policy(team_id: str) -> dict[str, Any]:
+    """Resolve the server-owned six-Agent dialogue model allowlist.
+
+    The returned snapshot is derived from the current team bindings and
+    operator LLM config.  It never consumes a package or client-supplied hash.
+    """
+
+    routes = _resolve_catalog_dialogue_routes(team_id)
+    return _canonical_model_policy_for_routes(routes)
+
+
+def resolve_catalog_model_routing_policy(team_id: str) -> dict[str, Any]:
+    """Build the immutable formal route snapshot for a Challenge Cup launch.
+
+    The snapshot is derived only from the server role bindings and the
+    effective Agent dialogue model library. modelPolicySha256 is the
+    canonical policy digest, not a digest of this envelope, so receipts and
+    authorization records share one stable identity.
+    """
+
+    role_routes = _resolve_catalog_dialogue_routes(team_id)
+    required_policy = _canonical_model_policy_for_routes(role_routes)
+    routes: dict[str, Any] = {}
+    for purpose, role_ids in _CATALOG_MODEL_PURPOSE_ROLES.items():
+        by_role: dict[str, dict[str, str]] = {}
+        for role_id in role_ids:
+            route = role_routes.get(role_id)
+            if route is None:
+                raise CatalogRunAuthorizationError(
+                    f"formal model route is missing product role: {role_id}"
+                )
+            normalized_route = dict(route)
+            normalized_route["productRoleId"] = role_id
+            by_role[role_id] = normalized_route
+        routes[purpose] = {"byProductRole": by_role}
+    return {
+        "requiredModelPolicy": required_policy,
+        "modelPolicySha256": required_policy["policySha256"],
+        "routes": routes,
+    }
 
 
 def _canonical_batch_scope(
@@ -681,5 +797,6 @@ __all__ = [
     "record_catalog_run_authorization",
     "require_readiness_report_sha256",
     "resolve_catalog_model_policy",
+    "resolve_catalog_model_routing_policy",
     "validate_catalog_run_authorization",
 ]

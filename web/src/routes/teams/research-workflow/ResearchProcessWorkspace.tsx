@@ -2,7 +2,7 @@ import { useCallback, useMemo, type ReactNode } from "react";
 
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
-import { VCanvasWorkbenchPage } from "../../../components/vui";
+import { VButton, VCanvasWorkbenchPage } from "../../../components/vui";
 import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
@@ -25,6 +25,10 @@ import {
 import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
+import {
+  buildResearchWorkflowStageNavigatorModel,
+  ResearchWorkflowStageNavigator,
+} from "./ResearchWorkflowStageNavigator";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
 import { buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
@@ -295,6 +299,18 @@ export function ResearchProcessWorkspace({
   const workspaceNextAction = workspaceModel.source === "formal_runtime"
     ? undefined
     : workspaceModel.legacyNextAction || safeNextAction;
+  const stageNavigatorModel = useMemo(() => buildResearchWorkflowStageNavigatorModel({
+    graph,
+    progress: workspaceModel.progress,
+    currentTaskNodeId: workspaceModel.currentTask?.source === "formal_runtime"
+      ? workspaceModel.currentTask.nodeId
+      : workspaceModel.currentTask?.source === "hypothesis_first"
+        ? workspaceModel.currentTask.targetNodeId
+        : null,
+    loadState: workspaceModel.loadState,
+    scopeMismatch: workspaceModel.scopeMismatch,
+    error: workspaceModel.error,
+  }), [graph, workspaceModel]);
   const formalWritesPaused = workspaceModel.source === "formal_runtime" && (
     workspaceModel.resyncRequired
     || workspaceModel.loadState === "loading"
@@ -422,9 +438,10 @@ export function ResearchProcessWorkspace({
       onRecoverCollection={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoverCollection : undefined}
       collectionRecoveryBusy={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoveryBusy : false}
       collectionRecoveryError={workspaceModel.source === "hypothesis_first" ? hypothesisFirstChain.recoveryError : null}
+      primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
     />
   ) : null;
-  const archiveOpen = location.panel === "question";
+  const formalPrimaryAction = workspaceModel.primaryAction;
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
@@ -442,7 +459,7 @@ export function ResearchProcessWorkspace({
         ariaLabel={isZh ? "科研流程工作区" : "Research workflow workspace"}
         title={isZh ? "科研流程" : "Research workflow"}
         hideHeader
-        toolbarClassName="!flex-nowrap overflow-hidden"
+        toolbarClassName={styles.toolbar}
         toolbar={(
           <ResearchWorkflowToolbar
             leading={toolbarLeading}
@@ -452,7 +469,6 @@ export function ResearchProcessWorkspace({
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
             experimentOptions={experimentOptions}
             panel={location.panel}
-            createDisabled={runState.busy}
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
@@ -480,6 +496,7 @@ export function ResearchProcessWorkspace({
         )}
         layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
         resize={{
+          sidebar: { id: "stages", defaultWidth: 220, minWidth: 180, maxWidth: 300 },
           aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
         }}
         responsive={{
@@ -487,11 +504,16 @@ export function ResearchProcessWorkspace({
           rail: { label: "研究阶段" },
           inspector: { label: "当前任务" },
         }}
-        canvas={archiveOpen && inspectorPane ? (
-          <div className={styles.archive} data-vui="research-question-archive-workspace">
-            {inspectorPane}
+        rail={(
+          <div className={styles.stageNavigator}>
+            <ResearchWorkflowStageNavigator
+              lang={lang}
+              model={stageNavigatorModel}
+              onNavigateNode={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
+            />
           </div>
-        ) : (
+        )}
+        canvas={
           <ResearchWorkflowCanvasPane
             graph={graph}
             selectedNodeId={location.selectedNodeId}
@@ -500,23 +522,35 @@ export function ResearchProcessWorkspace({
             error={displayError}
             onSelectNode={location.selectNode}
           />
+        }
+        inspector={(
+          <ResearchCurrentTaskInspector
+            context={workflowContext}
+            footer={formalPrimaryAction ? (
+              <VButton
+                type="button"
+                variant="primary"
+                isPending={commandBusy}
+                isDisabled={commandBusy}
+                onClick={() => {
+                  if (commandBusy) return;
+                  void commands.submitOffer(formalPrimaryAction.offer).catch(() => undefined);
+                }}
+              >
+                {formalPrimaryAction.offer.label}
+              </VButton>
+            ) : undefined}
+            onRetryDispatch={formalPrimaryAction ? undefined : retryDispatch}
+            retryPending={commandBusy}
+            onReturnCurrentTask={
+              workflowContext.currentTask?.targetNodeId
+                ? () => location.replaceParams({ node: workflowContext.currentTask?.targetNodeId, panel: "node" })
+                : undefined
+            }
+          >
+            {inspectorPane}
+          </ResearchCurrentTaskInspector>
         )}
-        inspector={!archiveOpen && inspectorPane ? (
-          location.panel === "node" ? (
-            <ResearchCurrentTaskInspector
-              context={workflowContext}
-              onRetryDispatch={retryDispatch}
-              retryPending={commandBusy}
-              onReturnCurrentTask={
-                workflowContext.currentTask?.targetNodeId
-                  ? () => location.replaceParams({ node: workflowContext.currentTask?.targetNodeId, panel: "node" })
-                  : undefined
-              }
-            >
-              {inspectorPane}
-            </ResearchCurrentTaskInspector>
-          ) : inspectorPane
-        ) : undefined}
         canvasClassName={styles.canvas}
         inspectorClassName={styles.inspector}
         className={styles.page}

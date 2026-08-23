@@ -43,7 +43,6 @@ import {
 } from "../../../components/vui";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
-import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
 import { ChallengeCatalogOverview } from "../challenge-cup/ChallengeCatalogOverview";
 import { ChallengeTokenUsageStrip } from "../challenge-cup/ChallengeTokenUsageStrip";
 import { isTokenUsageOverview } from "../challenge-cup/challengeTokenUsageModel";
@@ -64,6 +63,8 @@ export type ChallengeMvpProgressPanelProps = {
   onOpenQuestion: (questionId: string) => void;
   /** Dev-phase sessions may start expanded; product default stays collapsed. */
   defaultDevControlsOpen?: boolean;
+  /** Explicit test/dev capability; production defaults to the build DEV flag. */
+  devControlsEnabled?: boolean;
 };
 
 function errorMessage(reason: unknown): string {
@@ -123,12 +124,14 @@ export function ChallengeMvpProgressPanel({
   lang: langProp,
   onOpenQuestion,
   defaultDevControlsOpen = false,
+  devControlsEnabled: devControlsEnabledProp,
 }: ChallengeMvpProgressPanelProps) {
   // The inspector mount point cannot thread lang yet (claimed by another task);
   // self-serve the shell language and let an explicit prop win.
   const { lang: shellLang } = useShellI18n();
   const lang = langProp ?? shellLang;
   const zh = lang === "zh";
+  const devControlsEnabled = devControlsEnabledProp ?? import.meta.env.DEV;
   // Canonical keys: the question run status and the experiment planning status
   // are shared with the other team panels, so React Query dedupes the requests
   // and mutation invalidations reach this panel.
@@ -150,7 +153,7 @@ export function ChallengeMvpProgressPanel({
   const devControlsQuery = useQuery({
     queryKey: devControlsKey,
     queryFn: () => fetchChallengeCupDevControlSnapshot(teamId),
-    enabled: Boolean(teamId.trim()),
+    enabled: devControlsEnabled && Boolean(teamId.trim()),
     staleTime: 15_000,
   });
   const tokenUsageQuery = useQuery({
@@ -163,7 +166,6 @@ export function ChallengeMvpProgressPanel({
 
   const queryClient = useQueryClient();
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
-  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const [devControlsOpen, setDevControlsOpen] = useState(defaultDevControlsOpen);
   const refreshDevControls = async () => {
     setSnapshotRefreshing(true);
@@ -370,10 +372,10 @@ export function ChallengeMvpProgressPanel({
         teamId={teamId}
         lang={lang}
         onOpenQuestion={onOpenQuestion}
-        onRegisterQuestion={() => setRegisterDialogOpen(true)}
+        devBatchControlsEnabled={devControlsEnabled}
       />
 
-      <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
+      {devControlsEnabled ? <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
           <div className={styles.sectionHeaderActions}>
@@ -651,16 +653,13 @@ export function ChallengeMvpProgressPanel({
             )}
           </p>
         )}
-      </section>
+      </section> : null}
 
       <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "单题结果与审核" : "Question results"}</strong>
           <div className={styles.actions}>
             {summary ? <span>{zh ? `已验证 ${summary.validatedQuestionCount}` : `${summary.validatedQuestionCount} validated`}</span> : null}
-            <VButton type="button" variant="secondary" density="compact" onClick={() => setRegisterDialogOpen(true)}>
-              {zh ? "登记 / 发布题目产出" : "Register / publish output"}
-            </VButton>
           </div>
         </div>
         {questionStatusQuery.isPending ? (
@@ -694,17 +693,6 @@ export function ChallengeMvpProgressPanel({
         )}
       </section>
 
-      {registerDialogOpen ? (
-        <ChallengeQuestionRegisterDialog
-          teamId={teamId}
-          lang={lang}
-          onClose={() => setRegisterDialogOpen(false)}
-          onOpenQuestion={(questionId) => {
-            setRegisterDialogOpen(false);
-            onOpenQuestion(questionId);
-          }}
-        />
-      ) : null}
     </VSurface>
   );
 }

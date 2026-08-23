@@ -318,12 +318,19 @@ def start_source_collection_stage_session_task(
     team_id: str,
     run_id: str,
     payload: dict[str, Any] | None = None,
+    *,
+    _challenge_task_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = s._normalize_required_id(run_id, "Data processing run id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
+    server_challenge_task_contract = (
+        dict(_challenge_task_contract)
+        if isinstance(_challenge_task_contract, dict)
+        else {}
+    )
     stage_id = s._normalize_source_collection_stage_id(request_payload.get("stageId"), default="finding")
     agent_id = s._trim_text(request_payload.get("agentId"), max_length=160)
     agent_role = s._normalize_source_collection_agent_role(request_payload.get("agentRole"))
@@ -392,13 +399,16 @@ def start_source_collection_stage_session_task(
     run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
     question_id = s._trim_text(
-        request_payload.get("questionId")
+        server_challenge_task_contract.get("questionId")
+        or request_payload.get("questionId")
         or run_scope.get("questionId")
         or run_metadata.get("questionId"),
         max_length=32,
     )
     required_model_policy = (
-        request_payload.get("requiredModelPolicy")
+        server_challenge_task_contract.get("requiredModelPolicy")
+        if isinstance(server_challenge_task_contract.get("requiredModelPolicy"), dict)
+        else request_payload.get("requiredModelPolicy")
         if isinstance(request_payload.get("requiredModelPolicy"), dict)
         else run_scope.get("requiredModelPolicy")
         if isinstance(run_scope.get("requiredModelPolicy"), dict)
@@ -523,6 +533,52 @@ def start_source_collection_stage_session_task(
         )
     except ValueError as exc:
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    if server_challenge_task_contract:
+        server_route = (
+            server_challenge_task_contract.get("effectiveRoute")
+            if isinstance(server_challenge_task_contract.get("effectiveRoute"), dict)
+            else {}
+        )
+        resolved_route = (
+            challenge_task_contract.get("effectiveRoute")
+            if isinstance(challenge_task_contract.get("effectiveRoute"), dict)
+            else {}
+        )
+        required_server_fields = (
+            "questionId",
+            "workflowId",
+            "workflowVersionId",
+            "workflowRunId",
+            "workflowNodeId",
+            "nodeRunId",
+            "modelPolicySha256",
+            "stageId",
+        )
+        if (
+            any(
+                not str(server_challenge_task_contract.get(key) or "").strip()
+                for key in required_server_fields
+            )
+            or str(challenge_task_contract.get("questionId") or "").strip().upper()
+            != str(server_challenge_task_contract.get("questionId") or "").strip().upper()
+            or challenge_task_contract.get("requiredModelPolicy")
+            != server_challenge_task_contract.get("requiredModelPolicy")
+            or str(challenge_task_contract.get("modelPolicySha256") or "").strip().lower()
+            != str(server_challenge_task_contract.get("modelPolicySha256") or "").strip().lower()
+            or str(server_challenge_task_contract.get("researchProjectId") or "").strip()
+            != str(research_project.get("projectId") or "").strip()
+            or str(server_challenge_task_contract.get("agentId") or "").strip()
+            != agent_id
+            or resolved_route != server_route
+        ):
+            raise s.TeamWorkflowOrchestrationError(
+                "Formal source-collection task authority does not match the resolved Agent route."
+            )
+        challenge_task_contract = {
+            **challenge_task_contract,
+            **server_challenge_task_contract,
+            "effectiveRoute": resolved_route,
+        }
     if challenge_task_contract:
         challenge_task_contract = {
             **challenge_task_contract,
@@ -763,6 +819,7 @@ def start_source_collection_stage_session_task(
             ),
             "challengeTaskContract": challenge_task_contract,
             "sourceCollectionStageTaskId": task_id,
+            "taskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
             "sourceContextMode": source_context_mode,
             "writebackContract": writeback_contract,
@@ -848,3 +905,17 @@ def start_source_collection_stage_session_task(
         "sessionIsolation": session_isolation,
         "boundaries": s._source_collection_stage_session_task_boundaries(stage_id=stage_id, agent_role=agent_role),
     }
+
+
+def _read_source_collection_stage_session_task_record(
+    team_id: str,
+    task_id: str,
+) -> dict[str, Any] | None:
+    """Read the private task authority used by the session worker."""
+
+    s = _service()
+    task, _run_id = s._find_source_collection_stage_session_task_by_id(
+        team_id,
+        task_id,
+    )
+    return dict(task) if isinstance(task, dict) else None

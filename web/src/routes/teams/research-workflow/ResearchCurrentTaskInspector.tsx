@@ -79,9 +79,17 @@ export function ResearchCurrentTaskInspector({
         data-vui="research-current-task-inspector"
         data-load-state={context.loadState}
       >
-        <div className={styles.empty} role={context.loadState === "error" ? "alert" : "status"}>
-          {message}
+        <header className={styles.header} data-vui-region="current-task-header">
+          <div className={styles.empty} role={context.loadState === "error" ? "alert" : "status"}>
+            {message}
+          </div>
+        </header>
+        <div className={styles.body} data-vui-region="current-task-body">
+          {children}
         </div>
+        <footer className={styles.footer} data-vui-region="current-task-action">
+          {footer}
+        </footer>
       </section>
     );
   }
@@ -95,7 +103,7 @@ export function ResearchCurrentTaskInspector({
       data-current-task-key={task.key}
       data-task-status={task.status}
     >
-      <header className={styles.header}>
+      <header className={styles.header} data-vui-region="current-task-header">
         <div className={styles.eyebrow}>{historyMode ? "历史回顾 · 只读" : "当前任务 · 唯一操作面"}</div>
         <div className={styles.titleRow}>
           <h2 className={styles.title}>{task.title}</h2>
@@ -123,22 +131,24 @@ export function ResearchCurrentTaskInspector({
       <div className={styles.body} data-vui-region="current-task-body">
         {children}
       </div>
-      {!historyMode && (footer || (task.retryAction && onRetryDispatch)) ? (
-        <footer className={styles.footer} data-vui-region="current-task-action">
-          {task.retryAction && onRetryDispatch ? (
-            <VButton
-              type="button"
-              variant="primary"
-              isPending={retryPending}
-              isDisabled={retryPending}
-              onClick={onRetryDispatch}
-            >
-              {task.retryAction.label}
-            </VButton>
-          ) : null}
-          {footer}
-        </footer>
-      ) : null}
+      <footer className={styles.footer} data-vui-region="current-task-action">
+        {!historyMode ? (
+          <>
+            {task.retryAction && onRetryDispatch ? (
+              <VButton
+                type="button"
+                variant="primary"
+                isPending={retryPending}
+                isDisabled={retryPending}
+                onClick={onRetryDispatch}
+              >
+                {task.retryAction.label}
+              </VButton>
+            ) : null}
+            {footer}
+          </>
+        ) : null}
+      </footer>
     </section>
   );
 }

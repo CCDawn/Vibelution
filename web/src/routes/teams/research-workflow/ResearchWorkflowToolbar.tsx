@@ -82,8 +82,6 @@ export function ResearchWorkflowToolbar(props: {
   runStatus: string;
   experimentOptions: ExperimentSwitchOption[];
   panel: ResearchProcessPanel;
-  createDisabled: boolean;
-  createDisabledReason?: string;
   /** A hypothesis-first chain may be active without a formal run id. */
   workflowActive?: boolean;
   navigationLabel?: string;
@@ -91,7 +89,7 @@ export function ResearchWorkflowToolbar(props: {
   formalRuntimeActive?: boolean;
   /** Authoritative hypothesis-first stage when no formal runtime node exists. */
   nextActionStage?: HypothesisFirstStage;
-  /** Fail-closed scope transition state: show status instead of a launch action. */
+  /** Fail-closed scope transition state shown as read-only workflow health. */
   scopeMismatch?: boolean;
   statusMessage?: string;
   atCurrentTask?: boolean;
@@ -127,9 +125,8 @@ export function ResearchWorkflowToolbar(props: {
     || props.panel === "progress"
     || props.panel === "launch"
   ) ? props.panel : null;
-  // Navigation tabs for the inspector pane: views only. Actions never live
-  // here — 新建运行 stays a button so navigation and actions stay separable
-  // (GitHub Actions keeps view switches and run actions apart).
+  // Navigation tabs for the inspector pane: views only. Workflow mutations
+  // stay in the fixed current-task inspector so users always advance in one place.
   const detailTabs = [
     { id: "progress", label: isZh ? "题目进度" : "Progress" },
     { id: "question", label: isZh ? "题目档案" : "Question archive" },
@@ -203,22 +200,10 @@ export function ResearchWorkflowToolbar(props: {
             {isZh ? "团队沟通" : "Team communication"}
           </VButton>
         ) : null}
-        {props.runId ? (
-          <VButton
-            type="button"
-            density="compact"
-            variant="ghost"
-            isDisabled={props.createDisabled}
-            disabledReason={props.createDisabledReason}
-            onClick={() => props.onOpenPanel("launch")}
-          >
-            {isZh ? "新建运行" : "New run"}
-          </VButton>
-        ) : null}
         {workflowActive && props.atCurrentTask ? (
           // Position indicator, not a dead button: a disabled ghost labeled
           // 当前任务 reads as broken while adding no action (audit #7).
-          <VStatusChip tone="accent" className={styles.primary}>
+          <VStatusChip tone="accent" className={styles.trailing}>
             {isZh ? "当前任务" : "Current task"}
           </VStatusChip>
         ) : null}
@@ -226,8 +211,8 @@ export function ResearchWorkflowToolbar(props: {
           <VButton
             type="button"
             density="compact"
-            variant="primary"
-            className={styles.primary}
+            variant="secondary"
+            className={styles.trailing}
             isDisabled={!props.onNavigateCurrent}
             disabledReason={
               !props.onNavigateCurrent
@@ -236,26 +221,13 @@ export function ResearchWorkflowToolbar(props: {
             }
             onClick={props.onNavigateCurrent}
           >
-            {(props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
+            {isZh ? "定位当前任务" : "Locate current task"}
           </VButton>
         ) : null}
         {props.scopeMismatch && props.statusMessage ? (
-          <VStatusChip tone="warning" role="status" className={styles.primary}>
+          <VStatusChip tone="warning" role="status" className={styles.trailing}>
             {props.statusMessage}
           </VStatusChip>
-        ) : null}
-        {!workflowActive && !props.scopeMismatch ? (
-          <VButton
-            type="button"
-            density="compact"
-            variant="primary"
-            className={styles.primary}
-            onClick={() => props.onOpenPanel("launch")}
-            isDisabled={props.createDisabled}
-            disabledReason={props.createDisabledReason}
-          >
-            {isZh ? "选择题目开始研究" : "Choose a question to start research"}
-          </VButton>
         ) : null}
       </div>
     </VToolbar>

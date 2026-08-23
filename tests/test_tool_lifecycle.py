@@ -4,6 +4,7 @@ import threading
 from contextvars import ContextVar
 from typing import Any
 
+import pytest
 from langchain_core.messages import ToolMessage
 
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalToolResult
@@ -76,6 +77,103 @@ def test_execute_tool_passes_call_id_to_executor_events():
         "args": {"path": "agent.py"},
         "call_id": "call-identity",
     }
+
+
+def test_execute_tool_records_content_free_execution_lifecycle(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda _component, _phase, event_code, **kwargs: events.append(
+            {"eventCode": event_code, **kwargs}
+        ),
+    )
+    identity = CanonicalItemIdentity(
+        session_id="session-tool",
+        turn_id="turn-tool",
+        invocation_id="invocation-tool",
+        iteration=1,
+        item_id="call-safe",
+    )
+    canonical_call = CanonicalToolCall(
+        identity=identity,
+        call_id="call-safe",
+        name="read_file_tool",
+        arguments={"path": "private-input.txt"},
+    )
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda *_args, **_kwargs: (
+            {"ok": True, "content": "private-result"},
+            None,
+        )
+    )
+
+    result, action = bridge.execute_tool(
+        {
+            "name": "read_file_tool",
+            "id": "call-safe",
+            "args": {"path": "private-input.txt"},
+            "canonical_tool_call": canonical_call,
+        },
+        [],
+    )
+
+    assert result["ok"] is True
+    assert action is None
+    assert [event["eventCode"] for event in events] == [
+        "tool.execution.started",
+        "tool.execution.completed",
+    ]
+    terminal = events[-1]
+    assert terminal["outcome"] == "completed"
+    assert terminal["fields"] == {
+        "toolCallId": "call-safe",
+        "toolName": "read_file_tool",
+        "executionMode": "readonly",
+        "durationMs": terminal["fields"]["durationMs"],
+        "businessSuccess": True,
+        "sessionId": "session-tool",
+        "turnId": "turn-tool",
+        "invocationId": "invocation-tool",
+    }
+    assert terminal["fields"]["durationMs"] >= 0
+    assert "private-input.txt" not in repr(events)
+    assert "private-result" not in repr(events)
+
+
+def test_execute_tool_records_exception_type_without_exception_message(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda _component, _phase, event_code, **kwargs: events.append(
+            {"eventCode": event_code, **kwargs}
+        ),
+    )
+
+    def fail_execute(*_args, **_kwargs):
+        raise RuntimeError("private provider detail")
+
+    bridge = ToolLifecycleBridge(tool_executor_execute=fail_execute)
+
+    with pytest.raises(RuntimeError, match="private provider detail"):
+        bridge.execute_tool(
+            {"name": "write_file_tool", "id": "call-failed", "args": {"secret": "hidden"}},
+            [],
+        )
+
+    assert [event["eventCode"] for event in events] == [
+        "tool.execution.started",
+        "tool.execution.failed",
+    ]
+    assert events[-1]["fields"]["errorType"] == "RuntimeError"
+    assert events[-1]["fields"]["executionMode"] == "mutating"
+    assert "private provider detail" not in repr(events)
+    assert "hidden" not in repr(events)
 
 
 def test_execute_tool_projects_runtime_metadata_without_leaking_navigation_to_model_history():

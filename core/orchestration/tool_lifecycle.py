@@ -11,6 +11,7 @@ import json
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
+from time import perf_counter
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -191,6 +192,14 @@ class ToolLifecycleBridge:
     }
 
     DEFAULT_PARALLEL_READONLY_WORKERS: ClassVar[int] = 4
+    SAFE_LIFECYCLE_ACTIONS: ClassVar[set[str]] = {
+        "hibernated",
+        "restart",
+        "rollback",
+        "skip",
+        "tool_budget_exhausted",
+        "turn_complete",
+    }
 
     @classmethod
     def is_readonly_tool(cls, tool_name: Any) -> bool:
@@ -215,8 +224,44 @@ class ToolLifecycleBridge:
 
     def execute_tool(self, tool_call: Dict[str, Any], messages: list) -> tuple:
         """执行单个工具调用。"""
-        ui = get_ui()
         call = _as_mapping(tool_call)
+        started_at = perf_counter()
+        self._record_tool_execution_event(
+            call,
+            event_code="tool.execution.started",
+            outcome="started",
+        )
+        try:
+            result, action, outcome, error_type = self._execute_tool_impl(call, messages)
+        except Exception as exc:
+            self._record_tool_execution_event(
+                call,
+                event_code="tool.execution.failed",
+                outcome="failed",
+                duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+                error_type=type(exc).__name__,
+            )
+            raise
+        self._record_tool_execution_event(
+            call,
+            event_code=f"tool.execution.{outcome}",
+            outcome=outcome,
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            action=action,
+            business_success=(
+                False if outcome == "blocked" else infer_tool_business_success(result)
+            ),
+            error_type=error_type,
+        )
+        return (result, action)
+
+    def _execute_tool_impl(
+        self,
+        call: Dict[str, Any],
+        messages: list,
+    ) -> Tuple[Any, Optional[str], str, str]:
+        """Run one tool and return content-free terminal classification."""
+        ui = get_ui()
         tool_name = _tool_call_name(call)
         tool_args = _tool_call_args(call)
         tool_call_id = _tool_call_id(call) or None
@@ -236,7 +281,7 @@ class ToolLifecycleBridge:
                 )
                 _debug_logger.warning(f"[工具护栏] {tool_name} 被短路: {blocked_reason}", tag="TOOL")
                 self._observe_tool_result(call, blocked_reason, None)
-                return (blocked_reason, None)
+                return (blocked_reason, None, "blocked", "ToolGuardBlocked")
 
         if tool_name == "trigger_self_restart_tool":
             from core.authorization.tool_authorization_service import authorize_tool_execution
@@ -260,7 +305,7 @@ class ToolLifecycleBridge:
                     tag="TOOL",
                 )
                 self._observe_tool_result(call, blocked_reason, None)
-                return (blocked_reason, None)
+                return (blocked_reason, None, "blocked", "ToolAuthorizationDenied")
             ui.update_status("ACTING")
             result, action = handle_restart_request(
                 tool_args=tool_args,
@@ -275,7 +320,13 @@ class ToolLifecycleBridge:
                 tool_call_id=tool_call_id,
             )
             self._observe_tool_result(call, result, action)
-            return (result, action)
+            execution_success = infer_tool_execution_success(result)
+            return (
+                result,
+                action,
+                "completed" if execution_success else "failed",
+                "" if execution_success else "ToolResultError",
+            )
 
         ui.update_status("ACTING")
         result, tool_action = self._tool_executor_execute(
@@ -314,7 +365,74 @@ class ToolLifecycleBridge:
             _debug_logger.warning(f"[警告] {tool_name} 返回 None", tag="TOOL")
 
         self._observe_tool_result(call, result, action)
-        return (result, action)
+        return (
+            result,
+            action,
+            "completed" if execution_success else "failed",
+            "" if execution_success else "ToolResultError",
+        )
+
+    @classmethod
+    def _record_tool_execution_event(
+        cls,
+        tool_call: Mapping[str, Any],
+        *,
+        event_code: str,
+        outcome: str,
+        duration_ms: Optional[int] = None,
+        action: Optional[str] = None,
+        business_success: Optional[bool] = None,
+        error_type: str = "",
+    ) -> None:
+        """Emit one content-free execution milestone without arguments or results."""
+        try:
+            from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+            call = _as_mapping(tool_call)
+            canonical_call = call.get("canonical_tool_call") or call.get("canonicalToolCall")
+            identity = getattr(canonical_call, "identity", None)
+            tool_name = _tool_call_name(call)
+            fields: dict[str, Any] = {
+                "toolCallId": _tool_call_id(call),
+                "toolName": tool_name,
+                "executionMode": "readonly" if cls.is_readonly_tool(tool_name) else "mutating",
+            }
+            if duration_ms is not None:
+                fields["durationMs"] = max(0, int(duration_ms))
+            if business_success is not None:
+                fields["businessSuccess"] = bool(business_success)
+            safe_action = _coerce_text(action).strip()
+            if safe_action in cls.SAFE_LIFECYCLE_ACTIONS:
+                fields["action"] = safe_action
+            if error_type:
+                fields["errorType"] = _coerce_text(error_type).strip()[:128]
+            for source_name, field_name in (
+                ("session_id", "sessionId"),
+                ("turn_id", "turnId"),
+                ("invocation_id", "invocationId"),
+            ):
+                value = _coerce_text(getattr(identity, source_name, "")).strip()
+                if value:
+                    fields[field_name] = value
+            record_runtime_scene_event(
+                "tool_lifecycle",
+                "execution",
+                event_code,
+                message=f"Tool execution {outcome}.",
+                level=(
+                    "error"
+                    if outcome == "failed"
+                    else ("warning" if outcome == "blocked" else "info")
+                ),
+                outcome=outcome,
+                fields=fields,
+                lifecycle=True,
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具生命周期] 记录工具执行事件失败: {type(exc).__name__}",
+                tag="TOOL",
+            )
 
     def _observe_tool_result(self, tool_call: Dict[str, Any], result: Any, action: Optional[str]) -> None:
         if self._tool_result_observer is not None:

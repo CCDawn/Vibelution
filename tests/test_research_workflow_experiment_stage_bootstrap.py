@@ -48,6 +48,7 @@ def _hypothesis_action() -> PendingAction:
 def test_bootstrap_ignores_nodes_outside_hypothesis_entry(monkeypatch) -> None:
     from core.web.services.team_workflow.research_runtime import (
         experiment_stage_bootstrap,
+        real_domain_ports,
     )
 
     calls: list[tuple[str, dict[str, Any]]] = []
@@ -72,6 +73,7 @@ def test_bootstrap_ignores_nodes_outside_hypothesis_entry(monkeypatch) -> None:
 def test_bootstrap_blocks_hypothesis_without_accepted_package() -> None:
     from core.web.services.team_workflow.research_runtime import (
         experiment_stage_bootstrap,
+        real_domain_ports,
     )
 
     with pytest.raises(
@@ -179,10 +181,27 @@ def test_real_agent_task_bootstraps_stage_before_starting_hypothesis_agent(
 ) -> None:
     from core.web.services.team_workflow.research_runtime import (
         experiment_stage_bootstrap,
+        real_domain_ports,
     )
     from core.web.services.team_workflow import research_project_agent_tasks
 
     order: list[str] = []
+    authority_calls: list[dict[str, Any]] = []
+    challenge_contract = {
+        "workflowRunId": "run-sci-096",
+        "workflowNodeId": "hypothesis_design",
+        "nodeRunId": "nr-run-sci-096-hypothesis_design-a3",
+    }
+    receipt_binding = {
+        "workflowRunId": "run-sci-096",
+        "formalNodeId": "hypothesis_design",
+        "formalNodeRunId": "nr-run-sci-096-hypothesis_design-a3",
+    }
+    monkeypatch.setattr(
+        real_domain_ports,
+        "_formal_task_authorities",
+        lambda **_kwargs: (challenge_contract, receipt_binding),
+    )
 
     def fake_bootstrap(**kwargs: Any) -> dict[str, Any]:
         order.append("bootstrap")
@@ -196,8 +215,10 @@ def test_real_agent_task_bootstraps_stage_before_starting_hypothesis_agent(
         team_id: str,
         project_id: str,
         payload: dict[str, Any],
+        **kwargs: Any,
     ) -> dict[str, Any]:
         order.append("agent")
+        authority_calls.append(dict(kwargs))
         assert team_id == "research-team"
         assert project_id == "challenge-sci-096"
         assert payload["taskKind"] == "hypothesis_design"
@@ -244,6 +265,12 @@ def test_real_agent_task_bootstraps_stage_before_starting_hypothesis_agent(
     )
 
     assert order == ["bootstrap", "agent"]
+    assert authority_calls == [
+        {
+            "_challenge_task_contract": challenge_contract,
+            "_model_invocation_receipt_binding": receipt_binding,
+        }
+    ]
     assert handle.session_id == "session-hypothesis"
     assert handle.task_id == "task-hypothesis"
     assert handle.turn_id == "turn-hypothesis"

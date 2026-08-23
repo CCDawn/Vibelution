@@ -348,6 +348,8 @@ def test_formal_non_hypothesis_first_without_selection_uses_bounded_compatibilit
             "teamId": "team-1",
             "projectId": "project-1",
             "questionId": "SCI-096",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": False},
         }
@@ -414,6 +416,8 @@ def test_formal_hypothesis_first_without_selection_fails_closed(
             "teamId": "team-1",
             "projectId": "project-1",
             "questionId": "SCI-096",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": True},
         }
@@ -580,8 +584,11 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
         lambda *_args, **_kwargs: {"tasks": list(statuses.values())},
     )
 
-    def start(_team: str, _project: str, payload: dict) -> dict:
+    authorities: list[dict] = []
+
+    def start(_team: str, _project: str, payload: dict, **kwargs) -> dict:
         starts.append(dict(payload))
+        authorities.append(dict(kwargs))
         return {
             "task": {
                 "taskId": "task-H2-retry",
@@ -611,6 +618,31 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
         "candidate_context": {"candidateId": "H2"},
         "subtask_id": "node-2:selection-1:H2",
         "previous": {},
+        "challenge_task_contract": {
+            "questionId": "SCI-096",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "workflowRunId": "run-1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-2",
+            "nodeAttempt": 2,
+            "agentId": "agent-1",
+            "modelPolicySha256": "a" * 64,
+            "requiredModelPolicy": {"providerIds": ["dashscope"]},
+        },
+        "model_invocation_receipt_binding": {
+            "questionId": "SCI-096",
+            "questionRunId": "run-1",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-2",
+            "formalNodeAttempt": 2,
+            "questionStage": "generation",
+            "outcomeKinds": ["candidate"],
+            "modelPolicySha256": "a" * 64,
+        },
     }
     reused = formal_hypothesis_fanout.resolve_formal_candidate_task(
         **{**common, "candidate_id": "H1"}
@@ -622,6 +654,10 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
     assert retried["sessionId"] == "child-H2-retry"
     assert starts[0]["formalRetry"] is True
     assert starts[0]["retryTaskId"] == "task-H2"
+    assert authorities[0]["_challenge_task_contract"]["nodeRunId"] == "node-2"
+    assert authorities[0]["_model_invocation_receipt_binding"]["outcomeKinds"] == [
+        "candidate"
+    ]
     reused_previous = formal_hypothesis_fanout.resolve_formal_candidate_task(
         **{
             **common,

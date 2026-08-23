@@ -970,7 +970,23 @@ def register_challenge_task_model_evidence(
     if not all((research_project_id, question_id, task_id, turn_id)):
         return None
     source_session_id = str(task.get("sessionId") or turn.get("sessionId") or "").strip()
-    source_run_id = str(task.get("runId") or "").strip()
+    challenge_contract = (
+        task.get("challengeTaskContract")
+        if isinstance(task.get("challengeTaskContract"), dict)
+        else {}
+    )
+    source_run_id = next(
+        (
+            value
+            for value in (
+                task.get("runId"),
+                task.get("workflowRunId"),
+                challenge_contract.get("runId"),
+            )
+            if str(value or "").strip()
+        ),
+        "",
+    )
     source_binding = _read_canonical_turn_output(
         session_id=source_session_id,
         source_run_id=source_run_id,
@@ -1410,6 +1426,69 @@ def _model_invocation_receipt_refs_from_package(package: Any) -> dict[str, dict[
     return deepcopy(QuestionResult.from_package(package).manifest_entry()["receipts"])
 
 
+def _question_model_invocation_trace_projection(
+    team_id: str,
+    record: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read and verify the immutable per-invocation projection for one run."""
+
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        model_invocation_receipt_coverage,
+        question_model_invocation_receipt_refs,
+    )
+
+    question_id = str(record.get("questionId") or "").strip().upper()
+    run_id = str(record.get("runId") or "").strip()
+    refs = (
+        question_model_invocation_receipt_refs(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=run_id,
+        )
+        if question_id and run_id
+        else []
+    )
+    coverage = model_invocation_receipt_coverage(refs)
+    refs_present = "modelInvocationReceiptTraceRefs" in record
+    coverage_present = "modelInvocationReceiptCoverage" in record
+    if (
+        refs_present
+        and record.get("modelInvocationReceiptTraceRefs") != refs
+    ) or (
+        coverage_present
+        and record.get("modelInvocationReceiptCoverage") != coverage
+    ):
+        failed = model_invocation_receipt_coverage([])
+        failed["integrityIssue"] = "stored_projection_mismatch"
+        return [], failed
+    return refs, coverage
+
+
+def _apply_question_model_invocation_trace_projection(
+    team_id: str,
+    record: dict[str, Any],
+) -> bool:
+    refs_present = "modelInvocationReceiptTraceRefs" in record
+    coverage_present = "modelInvocationReceiptCoverage" in record
+    refs, coverage = _question_model_invocation_trace_projection(team_id, record)
+    if coverage.get("integrityIssue") == "stored_projection_mismatch":
+        raise ValueError(
+            "challenge_question_run_receipt_trace_mismatch: immutable real "
+            "invocation receipts changed."
+        )
+    changed = (
+        record.get("teamId") != team_id
+        or not refs_present
+        or not coverage_present
+        or record.get("modelInvocationReceiptTraceRefs") != refs
+        or record.get("modelInvocationReceiptCoverage") != coverage
+    )
+    record["teamId"] = team_id
+    record["modelInvocationReceiptTraceRefs"] = deepcopy(refs)
+    record["modelInvocationReceiptCoverage"] = deepcopy(coverage)
+    return changed
+
+
 def _validated_model_invocation_receipt_refs(value: Any) -> dict[str, dict[str, Any]]:
     """Return canonical stored refs only when all stages and locator hashes verify."""
 
@@ -1594,12 +1673,20 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         if (record.get("validation") or {}).get("semanticValidation") == "passed"
     ]
     receipt_refs_by_record_id: dict[str, dict[str, dict[str, Any]]] = {}
+    trace_refs_by_record_id: dict[str, list[dict[str, Any]]] = {}
+    trace_coverage_by_record_id: dict[str, dict[str, Any]] = {}
     receipt_ready_candidates: list[dict[str, Any]] = []
     for record in validated_candidates:
         receipt_refs = _package_bound_model_invocation_receipt_refs(record)
+        record_id = str(record.get("recordId") or "")
+        trace_refs, trace_coverage = _question_model_invocation_trace_projection(
+            team_id, record
+        )
+        trace_refs_by_record_id[record_id] = trace_refs
+        trace_coverage_by_record_id[record_id] = trace_coverage
         if receipt_refs:
-            record_id = str(record.get("recordId") or "")
             receipt_refs_by_record_id[record_id] = receipt_refs
+        if receipt_refs:
             receipt_ready_candidates.append(record)
     completed = [
         record
@@ -1613,6 +1700,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     completed_question_results = [
         {
             "questionId": str(record.get("questionId") or ""),
+            "teamId": team_id,
             "runId": str(record.get("runId") or ""),
             "schemaVersion": record.get("schemaVersion"),
             "submissionEligible": record.get("submissionEligible") is True,
@@ -1626,6 +1714,12 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             "artifactPath": str(record.get("artifactPath") or ""),
             "modelInvocationReceiptRefs": deepcopy(
                 receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
+            "modelInvocationReceiptTraceRefs": deepcopy(
+                trace_refs_by_record_id.get(str(record.get("recordId") or ""), [])
+            ),
+            "modelInvocationReceiptCoverage": deepcopy(
+                trace_coverage_by_record_id.get(str(record.get("recordId") or ""), {})
             ),
             "resultPackage": deepcopy(record.get("resultPackage"))
             if isinstance(record.get("resultPackage"), dict)
@@ -1646,6 +1740,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     validated_question_results = [
         {
             "questionId": question_id,
+            "teamId": team_id,
             "runId": str(record.get("runId") or ""),
             "status": str(record.get("status") or ""),
             "validation": _summary_receipt_validation(
@@ -1657,6 +1752,12 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             "artifactPath": str(record.get("artifactPath") or ""),
             "modelInvocationReceiptRefs": deepcopy(
                 receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
+            "modelInvocationReceiptTraceRefs": deepcopy(
+                trace_refs_by_record_id.get(str(record.get("recordId") or ""), [])
+            ),
+            "modelInvocationReceiptCoverage": deepcopy(
+                trace_coverage_by_record_id.get(str(record.get("recordId") or ""), {})
             ),
             "resultPackage": deepcopy(record.get("resultPackage"))
             if isinstance(record.get("resultPackage"), dict)
@@ -1682,6 +1783,14 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         )
         latest_candidate["modelInvocationReceiptRefs"] = deepcopy(
             latest_receipt_refs
+        )
+        latest_record_id = str(latest_candidate.get("recordId") or "")
+        latest_candidate["teamId"] = team_id
+        latest_candidate["modelInvocationReceiptTraceRefs"] = deepcopy(
+            trace_refs_by_record_id.get(latest_record_id, [])
+        )
+        latest_candidate["modelInvocationReceiptCoverage"] = deepcopy(
+            trace_coverage_by_record_id.get(latest_record_id, {})
         )
         latest_candidate["validation"] = _summary_receipt_validation(
             latest_candidate, latest_receipt_refs
@@ -1808,6 +1917,8 @@ def get_challenge_question_run_detail(
         }
     else:
         _apply_model_invocation_receipt_projection(selected_record, {})
+
+    _apply_question_model_invocation_trace_projection(team_id, selected_record)
 
     return {
         "teamId": team_id,
@@ -2009,6 +2120,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     _apply_model_invocation_receipt_projection(
         record, model_invocation_receipt_refs
     )
+    _apply_question_model_invocation_trace_projection(team_id, record)
     if package_metadata is not None:
         record["resultPackage"] = package_metadata
     if source_result_package_hash:
@@ -2106,6 +2218,12 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             ):
                 projection_changed = _apply_model_invocation_receipt_projection(
                     existing_record, model_invocation_receipt_refs
+                )
+                projection_changed = (
+                    _apply_question_model_invocation_trace_projection(
+                        team_id, existing_record
+                    )
+                    or projection_changed
                 )
                 if projection_changed:
                     store["updatedAt"] = _utc_now()

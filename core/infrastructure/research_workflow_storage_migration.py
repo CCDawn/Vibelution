@@ -483,6 +483,45 @@ def _schema_digest(connection: apsw.Connection) -> str:
     return digest.hexdigest()
 
 
+def _ledger_schema_contract_digest(path: Path) -> str:
+    """Hash the ledger schema contract after authority-owned SQL normalization."""
+
+    try:
+        from core.research.workflow.ledger.database import _normalize_sql
+    except Exception as exc:
+        raise _SQLiteBundleSnapshotError(
+            "ledger_schema_contract_unavailable", type(exc).__name__
+        ) from exc
+    try:
+        with _sqlite_bundle_snapshot_context(path) as snapshot:
+            connection = _open_readonly(snapshot)
+            try:
+                rows = connection.execute(
+                    "SELECT type, name, tbl_name, COALESCE(sql, '') "
+                    "FROM sqlite_master "
+                    "WHERE type IN ('table','index','trigger','view') "
+                    "ORDER BY type, name"
+                )
+                digest = hashlib.sha256()
+                for row in rows:
+                    object_type, name, table_name, raw_sql = (str(value) for value in row)
+                    digest.update(
+                        "\x1f".join(
+                            (object_type, name, table_name, _normalize_sql(raw_sql))
+                        ).encode("utf-8")
+                    )
+                    digest.update(b"\n")
+                return digest.hexdigest()
+            finally:
+                connection.close()
+    except _SQLiteBundleSnapshotError:
+        raise
+    except Exception as exc:
+        raise _SQLiteBundleSnapshotError(
+            "ledger_schema_contract_unreadable", type(exc).__name__
+        ) from exc
+
+
 def _row_counts(connection: apsw.Connection) -> dict[str, int]:
     tables = [
         str(row[0])
@@ -1102,6 +1141,83 @@ def _default_quiescence(project_root: Path) -> dict[str, object]:
     return normalized
 
 
+def acknowledge_proven_stale_runtime_quiescence(project_root: Path) -> dict[str, object]:
+    """Explicitly acknowledge only a fully explained stale-runtime guard.
+
+    The default probe remains fail-closed. This operator-only adapter may
+    promote it to ready only when every remaining blocker is the synthetic
+    ``raw_guard_not_ready`` marker and the normalized evidence independently
+    proves there are no claims, live writers, or Launcher process. Historical
+    runtime files stay untouched and their warning evidence is retained for
+    the migration journal and manifest.
+    """
+
+    guard = _default_quiescence(project_root)
+    if guard.get("ok") is True:
+        return guard
+    blockers = [item for item in (guard.get("blockers") or []) if isinstance(item, dict)]
+    if (
+        len(blockers) != 1
+        or blockers[0].get("code") != "quiescence_guard_not_ready"
+        or blockers[0].get("reasonCode") != "raw_guard_not_ready"
+    ):
+        return guard
+    active_work = guard.get("activeWork")
+    runtime_writers = guard.get("runtimeWriters")
+    launcher = guard.get("launcher")
+    if (
+        not isinstance(active_work, dict)
+        or not isinstance(runtime_writers, dict)
+        or not isinstance(launcher, dict)
+    ):
+        return guard
+    raw_claims = active_work.get("claims")
+    if isinstance(raw_claims, dict):
+        claims = list(raw_claims.values())
+    elif isinstance(raw_claims, list):
+        claims = list(raw_claims)
+    elif raw_claims is None:
+        claims = []
+    else:
+        return guard
+    if active_work.get("blocking") or active_work.get("uncertain") or claims:
+        return guard
+    raw_writers = runtime_writers.get("writers")
+    if isinstance(raw_writers, list):
+        writers = list(raw_writers)
+    elif raw_writers is None:
+        writers = []
+    else:
+        return guard
+    if runtime_writers.get("blocking") or runtime_writers.get("uncertain") or writers:
+        return guard
+    if launcher.get("blocking") or launcher.get("uncertain") or launcher.get("alive"):
+        return guard
+    warnings = [item for item in (guard.get("warnings") or []) if isinstance(item, dict)]
+    stale_codes = {"stale_runtime_manager_lock", "stale_source_collection_snapshot"}
+    warning_codes = [str(item.get("code") or "") for item in warnings]
+    if not warning_codes or any(code not in stale_codes for code in warning_codes):
+        return guard
+    acknowledged = dict(guard)
+    acknowledged["ok"] = True
+    acknowledged["blockers"] = []
+    acknowledged["sourceCollectionSnapshots"] = []
+    acknowledged["operatorAcknowledgement"] = {
+        "kind": "proven_stale_runtime_only",
+        "warningCodes": sorted(set(warning_codes)),
+        "warningCount": len(warnings),
+    }
+    acknowledged["warnings"] = [
+        *warnings,
+        {
+            "code": "proven_stale_runtime_operator_acknowledged",
+            "warningCodes": sorted(set(warning_codes)),
+            "warningCount": len(warnings),
+        },
+    ]
+    return acknowledged
+
+
 def _marker_blockers(roots: _ResolvedRoots) -> tuple[list[dict[str, object]], Path | None, Path | None]:
     blockers: list[dict[str, object]] = []
     marker = roots.marker
@@ -1222,13 +1338,17 @@ def _target_asset_state(
             wal_size = int(wal_path.stat().st_size) if wal_path.is_file() else 0
             if unsafe_sidecar is None and wal_size == 0:
                 evidence = _sqlite_evidence(target, kind="ledger")
+                target_ledger_valid, _target_ledger_detail = _validate_v5_ledger(target)
+                source_schema_contract = _ledger_schema_contract_digest(asset.source_path)
+                target_schema_contract = _ledger_schema_contract_digest(target)
                 if (
                     evidence.valid
                     and evidence.known_schema
                     and evidence.business_rows == 0
                     and asset.sqlite is not None
                     and evidence.schema_version == asset.sqlite.schema_version
-                    and evidence.schema_digest == asset.sqlite.schema_digest
+                    and target_ledger_valid
+                    and target_schema_contract == source_schema_contract
                 ):
                     return "empty-schema", {
                         "code": "replaceable_empty_target_bundle",
@@ -3229,6 +3349,7 @@ __all__ = [
     "ResearchWorkflowMigrationError",
     "ResearchWorkflowMigrationResult",
     "SQLiteEvidence",
+    "acknowledge_proven_stale_runtime_quiescence",
     "apply_research_workflow_migration",
     "preview_research_workflow_migration",
     "rollback_research_workflow_migration",

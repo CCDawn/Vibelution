@@ -43,14 +43,6 @@ from core.web.services.team_workflow.research_projects import (
     get_theme_activation,
 )
 
-_MODEL_REF = "relay_openai/gpt-5.6-luna"
-_MODEL_PURPOSES = (
-    "source_discovery",
-    "extraction",
-    "reasoning",
-    "review",
-    "governance",
-)
 _STAGES = (
     "knowledge_collection",
     "experiment_design",
@@ -78,6 +70,28 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _server_model_routing_policy(team_id: str) -> dict[str, Any]:
+    """Resolve the formal route snapshot from the server-owned Agent bindings."""
+
+    try:
+        from .catalog_run_authorization import (
+            resolve_catalog_model_routing_policy,
+        )
+
+        policy = resolve_catalog_model_routing_policy(_text(team_id))
+    except Exception as exc:  # noqa: BLE001 - launch must remain fail-closed.
+        raise QuestionLaunchError(
+            "The formal six-Agent Qwen model routing policy is unavailable.",
+            code="challenge_model_routing_policy_unavailable",
+        ) from exc
+    if not isinstance(policy, Mapping):
+        raise QuestionLaunchError(
+            "The formal six-Agent Qwen model routing policy is invalid.",
+            code="challenge_model_routing_policy_invalid",
+        )
+    return dict(policy)
+
+
 def _output_identity(output: Mapping[str, Any]) -> dict[str, Any]:
     return _mapping(output.get("identity"))
 
@@ -87,7 +101,7 @@ def _output_result_classification(output: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _formal_record_receipts_ready(record: Mapping[str, Any]) -> bool:
-    """Require the stored receipt projection to remain bound to its package."""
+    """Require the canonical package receipt projection only."""
 
     validation = _mapping(record.get("validation"))
     if validation.get("modelInvocationReceipts") != "passed":
@@ -96,7 +110,10 @@ def _formal_record_receipts_ready(record: Mapping[str, Any]) -> bool:
         receipt_refs = _package_bound_model_invocation_receipt_refs(dict(record))
     except (KeyError, OSError, TypeError, ValueError):
         return False
-    return bool(receipt_refs)
+    if not receipt_refs:
+        return False
+
+    return True
 
 
 def _formal_record_eligible(record: Mapping[str, Any]) -> bool:
@@ -726,6 +743,7 @@ def _build_catalog_seed_run_input(
             code=getattr(exc, "code", "challenge_project_resolution_failed"),
         ) from exc
     competition_program_snapshot, program_body = _competition_program_snapshot()
+    model_routing_policy = _server_model_routing_policy(team_id)
     artifact_sha256 = _catalog_seed_hash(question_id)
     artifact_ref = (
         f"challenge-question-catalog://{CATALOG_ID}/{question_id}/"
@@ -779,7 +797,7 @@ def _build_catalog_seed_run_input(
         "budgetPolicy": build_safety_budget_policy(safety_limits),
         "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
         "environmentSnapshotRef": artifact_ref,
-        "modelRoutingPolicy": {purpose: _MODEL_REF for purpose in _MODEL_PURPOSES},
+        "modelRoutingPolicy": model_routing_policy,
         "evaluationContract": {
             "minimumClaimEvidenceCoverage": 0.9,
             "requiredSeeds": [11, 29, 47],
@@ -854,6 +872,7 @@ def build_question_run_input(
     final_summary = _mapping(_output_result_classification(output).get("final_summary"))
     research_plan = _mapping(output.get("research_plan"))
     competition_program_snapshot, program_body = _competition_program_snapshot()
+    model_routing_policy = _server_model_routing_policy(team_id)
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
     hypothesis_first = _hypothesis_first_flag(
@@ -903,7 +922,7 @@ def build_question_run_input(
         "budgetPolicy": build_safety_budget_policy(safety_limits),
         "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
         "environmentSnapshotRef": artifact_ref,
-        "modelRoutingPolicy": {purpose: _MODEL_REF for purpose in _MODEL_PURPOSES},
+        "modelRoutingPolicy": model_routing_policy,
         "evaluationContract": {
             "minimumClaimEvidenceCoverage": 0.9,
             "requiredSeeds": [11, 29, 47],
