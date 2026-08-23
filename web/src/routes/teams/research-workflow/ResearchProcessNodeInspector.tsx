@@ -29,6 +29,8 @@ export type ResearchProcessNodeInspectorProps = {
   busy: boolean;
   /** Historical formal nodes expose evidence only; the current task owns writes. */
   isCurrentTask?: boolean;
+  /** Formal runtime primary actions are rendered by the fixed workspace footer. */
+  primaryActionOwnedByWorkspace?: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
   hideStartOffer?: boolean;
   statusBanner?: string | null;
@@ -68,12 +70,15 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   const offers = props.hideStartOffer
     ? withoutStartNodeOffers(detail.commandOffers)
     : (detail.commandOffers ?? []);
-  const primaryOffer = isCurrentTask && adapter.actorKind === "agent"
+  const selectedPrimaryOffer = isCurrentTask && adapter.actorKind === "agent"
     ? pickPrimaryCommandOffer(offers)
     : null;
-  const restOffers = isCurrentTask && adapter.actorKind === "agent"
-    ? remainingCommandOffers(offers, primaryOffer)
-    : isCurrentTask ? offers : [];
+  const primaryOffer = props.primaryActionOwnedByWorkspace ? null : selectedPrimaryOffer;
+  const restOffers = props.primaryActionOwnedByWorkspace
+    ? []
+    : isCurrentTask && adapter.actorKind === "agent"
+      ? remainingCommandOffers(offers, selectedPrimaryOffer)
+      : isCurrentTask ? offers : [];
   const showHypothesisNav = Boolean(
     props.onNavigateHypothesis
     && (props.hypothesisNavLabel || (primaryOffer && isHypothesisFirstMeetingBlocker(primaryOffer))),

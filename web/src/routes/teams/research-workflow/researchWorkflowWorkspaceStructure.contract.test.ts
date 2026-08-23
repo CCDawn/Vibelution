@@ -44,12 +44,24 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("ResearchProcessInspectorPane");
   });
 
-  it("renders question archives in the wide canvas region instead of the narrow inspector", () => {
+  it("keeps every panel inside the fixed current-task inspector", () => {
     const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
-    expect(source).toContain('const archiveOpen = location.panel === "question"');
-    expect(source).toContain('data-vui="research-question-archive-workspace"');
-    expect(source).toContain("canvas={archiveOpen && inspectorPane");
-    expect(source).toContain("inspector={!archiveOpen && inspectorPane");
+    expect(source).not.toContain('const archiveOpen = location.panel === "question"');
+    expect(source).toContain("inspector={(\n          <ResearchCurrentTaskInspector");
+    expect(source).not.toContain("inspector={inspectorPane ? (");
+    expect(source).toContain("<ResearchCurrentTaskInspector");
+    expect(source).toContain("{inspectorPane}");
+  });
+
+  it("submits the workspace model offer unchanged from the sole formal primary action", () => {
+    const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    expect(source).toContain("const formalPrimaryAction = workspaceModel.primaryAction");
+    expect(source).toContain("commands.submitOffer(formalPrimaryAction.offer)");
+    expect(source).toContain("if (commandBusy) return");
+    expect(source).toContain("isDisabled={commandBusy}");
+    expect(source).toContain("primaryActionOwnedByWorkspace={workspaceModel.source === \"formal_runtime\"}");
+    expect(source).not.toContain("idempotencyKey: formalPrimaryAction");
+    expect(source).not.toContain("expectedRunVersion: formalPrimaryAction");
   });
 
   it("opts into the approved tablet and compact drawer contract", () => {

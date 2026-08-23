@@ -80,6 +80,7 @@ export function ResearchProcessInspectorPane(props: {
   onRecoverCollection?: (requestId: string) => Promise<void>;
   collectionRecoveryBusy?: boolean;
   collectionRecoveryError?: string | null;
+  primaryActionOwnedByWorkspace?: boolean;
 }) {
   const {
     scope,
@@ -218,6 +219,7 @@ export function ResearchProcessInspectorPane(props: {
       handoffPending={Boolean(actions.pendingTaskId(scope.selectedNodeId))}
       busy={state.busy}
       isCurrentTask={isCurrentTask}
+      primaryActionOwnedByWorkspace={props.primaryActionOwnedByWorkspace}
       onOffer={actions.submitOffer}
       hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
       statusBanner={

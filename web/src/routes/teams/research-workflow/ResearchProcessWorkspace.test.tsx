@@ -258,6 +258,8 @@ describe("ResearchProcessWorkspace", () => {
 
     expect(rendered.container.textContent).toContain("加载流程定义");
     expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-vui-region="current-task-body"]')).not.toBeNull();
   });
 
   it("leaves overall progress to the parent rail and keeps this workspace focused on canvas details", async () => {
@@ -324,7 +326,8 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.textContent).toContain("正在切换题目");
     expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
     expect(rendered.container.textContent).not.toContain("选择题目开始研究");
-    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-load-state="scope_mismatch"]')).not.toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
