@@ -254,6 +254,10 @@ let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
 let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
+let resolveLauncherControlPlaneReady: (() => void) | null = null;
+const launcherControlPlaneReady = new Promise<void>((resolve) => {
+  resolveLauncherControlPlaneReady = resolve;
+});
 let launcherStateWatchers: FSWatcher[] = [];
 let launcherStateHintTimer: ReturnType<typeof setTimeout> | null = null;
 let launcherStateStatTimer: ReturnType<typeof setInterval> | null = null;
@@ -4028,6 +4032,12 @@ async function applyPendingProjectSlot(projectRoot: string, lifecycleCommand = "
   if (!wanted) {
     return;
   }
+  if (windowProvider === null || launcherBootstrap === null) {
+    // A second-instance launch can arrive while the primary Electron shell is
+    // still bootstrapping. Wait for the same control-plane boundary instead of
+    // dropping the lifecycle command after merely starting Electron.
+    await launcherControlPlaneReady;
+  }
   const provider = windowProvider;
   if (provider === null || launcherBootstrap === null) {
     pendingProjectRoot = wanted;
@@ -4135,6 +4145,8 @@ app.whenReady()
     electronStartupStage = "tray_ready";
     const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
+    resolveLauncherControlPlaneReady?.();
+    resolveLauncherControlPlaneReady = null;
     updateLauncherWindowTruth();
     startLauncherStateFileHints(paths);
     scheduleLauncherStatusCliRefresh();
@@ -4237,9 +4249,7 @@ app.whenReady()
           console.warn(error instanceof Error ? error.message : String(error));
         });
       } else {
-        void handleSecondInstanceLifecycleCommand(firstLifecycle).catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
+        await handleSecondInstanceLifecycleCommand(firstLifecycle);
       }
     }
     // T6: window actions are orchestrated by Electron main; the Python desktop
@@ -4305,6 +4315,11 @@ app.on("second-instance", (_event, argv) => {
 });
 
 async function handleSecondInstanceLifecycleCommand(command: string): Promise<void> {
+  if (launcherBootstrap === null || windowProvider === null) {
+    // Electron emits second-instance after ready, but the primary app may not
+    // have finished its asynchronous Launcher bootstrap yet.
+    await launcherControlPlaneReady;
+  }
   if (command === "status") {
     focusExistingDesktopShell();
     return;

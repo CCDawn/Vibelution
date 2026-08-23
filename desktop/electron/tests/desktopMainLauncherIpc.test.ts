@@ -153,6 +153,29 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("signal: intentLease.signal");
   });
 
+  it("waits for the Electron control plane before dispatching startup and second-instance lifecycle commands", () => {
+    const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths);");
+    const readyResolveIndex = mainSource.indexOf("resolveLauncherControlPlaneReady?.();");
+    expect(bootstrapIndex).toBeGreaterThan(0);
+    expect(readyResolveIndex).toBeGreaterThan(bootstrapIndex);
+
+    const projectSlotStart = mainSource.indexOf("async function applyPendingProjectSlot");
+    const projectSlotEnd = mainSource.indexOf("if (runPrimaryWhenReady)", projectSlotStart);
+    const projectSlotBody = mainSource.slice(projectSlotStart, projectSlotEnd);
+    expect(projectSlotBody).toContain("await launcherControlPlaneReady");
+
+    const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
+    const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);
+    const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
+    expect(secondInstanceBody).toContain("await launcherControlPlaneReady");
+
+    const firstLifecycleIndex = mainSource.indexOf("const firstLifecycle =");
+    const firstLifecycleEnd = mainSource.indexOf("// T6:", firstLifecycleIndex);
+    const firstLifecycleBody = mainSource.slice(firstLifecycleIndex, firstLifecycleEnd);
+    expect(firstLifecycleBody).toContain("await handleSecondInstanceLifecycleCommand(firstLifecycle)");
+    expect(firstLifecycleBody).not.toContain("void handleSecondInstanceLifecycleCommand(firstLifecycle)");
+  });
+
   it("keeps command ids on reused main-line starts and accepted stop results", () => {
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle", lifecycleStart);
