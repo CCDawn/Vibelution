@@ -44,7 +44,8 @@ import {
   requestGracefulWorkbenchShutdown,
   retireRegisteredHandles,
   terminatePid,
-  waitForPortRelease
+  waitForPortRelease,
+  type GracefulWorkbenchShutdownResult
 } from "./workbenchBackendRetire.js";
 import {
   blockLifecycleIfActiveWork,
