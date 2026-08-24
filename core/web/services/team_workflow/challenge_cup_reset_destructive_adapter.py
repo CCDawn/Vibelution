@@ -172,6 +172,7 @@ class ChallengeCupLiveDestructiveAdapter:
             existing = self._stages.get(plan_id)
             if existing is not None:
                 return self._stage_summary(existing)
+        self._discard_recovered_staging(team_id, plan_id)
 
         from core.research.workflow.checkpoint_store import prepare_checkpoint_reset_stage
         from core.research.workflow.ledger import prepare_team_ledger_reset_stage
@@ -239,7 +240,19 @@ class ChallengeCupLiveDestructiveAdapter:
             handles["ledger"] = prepare_team_ledger_reset_stage(store, team_id, plan_id)
             completed.append("ledger")
         except Exception:
-            self._restore_handles(team_id, plan_id, handles, reversed(completed), temporary_store=temporary_store)
+            try:
+                self._restore_handles(
+                    team_id,
+                    plan_id,
+                    handles,
+                    reversed(completed),
+                    temporary_store=temporary_store,
+                )
+                self._discard_recovered_staging(team_id, plan_id)
+            except Exception as recovery_exc:
+                raise ChallengeCupDestructiveAdapterError(
+                    "Reset staging failed and recovered staging cleanup was incomplete."
+                ) from recovery_exc
             raise
         finally:
             if temporary_store is not None:
@@ -292,8 +305,12 @@ class ChallengeCupLiveDestructiveAdapter:
         self._assert_plan(team_id, plan)
         current = self._stage(plan, stage)
         self._restore_handles(team_id, current["planId"], current["handles"], ("ledger", "receipts", "checkpoints", "artifacts", "workspace", "sessions", "rooms"))
+        self._discard_recovered_staging(team_id, current["planId"])
         current["status"] = "restored"
-        return self._stage_summary(current)
+        summary = self._stage_summary(current)
+        with _LOCK:
+            self._stages.pop(current["planId"], None)
+        return summary
 
     def verify_zero(self, team_id: str, plan: Mapping[str, Any]) -> Mapping[str, Any]:
         self._assert_plan(team_id, plan)
@@ -460,6 +477,29 @@ class ChallengeCupLiveDestructiveAdapter:
         finally:
             if temporary is not None:
                 temporary.close()
+
+    def _discard_recovered_staging(self, team_id: str, plan_id: str) -> dict[str, Any]:
+        """Let each owner drop only its verified-restored recovery material."""
+
+        from core.web.services.session.agent_sessions import (
+            discard_restored_team_agent_session_reset_staging,
+        )
+        from core.web.services.team_workflow.research_projects import (
+            discard_restored_challenge_cup_experiment_state_reset,
+        )
+        from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+            discard_restored_workflow_artifact_reset,
+        )
+
+        return {
+            "artifacts": discard_restored_workflow_artifact_reset(
+                team_id, reset_id=plan_id
+            ),
+            "workspace": discard_restored_challenge_cup_experiment_state_reset(
+                team_id, reset_id=plan_id
+            ),
+            "sessions": discard_restored_team_agent_session_reset_staging(team_id, plan_id),
+        }
 
     def _stage(self, plan: Mapping[str, Any], stage: Mapping[str, Any]) -> dict[str, Any]:
         plan_id = str(plan.get("purgePlanId") or "")

@@ -2047,6 +2047,147 @@ def restore_team_agent_session_reset(
     return _team_agent_session_reset_summary(token)
 
 
+def discard_restored_team_agent_session_reset_staging(
+    team_id: str,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Remove only verified-restored session staging before the same reset retries.
+
+    A failed cross-store reset restores the selected chat rows and workspace
+    roots, but its private session token is deliberately not durable.  This
+    recovery entry therefore verifies the durable, redacted manifests plus the
+    restored live state before removing the reset-owned directories.  It never
+    deletes a staged or purged reset.
+    """
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    allowed_roots = [Path(root).resolve() for root in s._agent_session_workspace_roots()]
+    staging_roots = [
+        _team_agent_session_reset_staging_root(root, team_id=team, reset_id=reset)
+        for root in allowed_roots
+    ]
+    existing_roots = [root for root in staging_roots if root.exists()]
+    if not existing_roots:
+        return {
+            "status": "absent",
+            "teamId": team,
+            "resetId": reset,
+            "stagingRootCount": 0,
+        }
+
+    expected_session_ids: set[str] | None = None
+    workspace_moves: list[dict[str, Any]] | None = None
+    expected_root_paths = {str(root) for root in staging_roots}
+    for staging_root in existing_roots:
+        if not _team_agent_session_reset_staging_root_is_safe(
+            staging_root,
+            allowed_roots=allowed_roots,
+        ):
+            raise TeamAgentSessionResetValidationError(
+                f"Unsafe session reset staging root: {staging_root}"
+            )
+        manifest = _team_agent_session_reset_read_manifest(staging_root)
+        if (
+            manifest.get("schemaVersion") != _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION
+            or manifest.get("operation") != _TEAM_AGENT_SESSION_RESET_OPERATION
+            or str(manifest.get("teamId") or "").strip() != team
+            or str(manifest.get("resetId") or "").strip() != reset
+            or str(manifest.get("status") or "").strip().lower() != "restored"
+        ):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging is not a verified restored reset."
+            )
+        if str(manifest.get("manifestHash") or "").strip() != _team_agent_session_reset_manifest_hash(manifest):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifest hash is invalid."
+            )
+        manifest_roots = {
+            str(Path(str(value or "")).resolve())
+            for value in list(manifest.get("stagingRoots") or [])
+        }
+        if manifest_roots != expected_root_paths:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging roots do not match the reset scope."
+            )
+        session_ids = {
+            str(value or "").strip()
+            for value in list(manifest.get("sessionIds") or [])
+            if str(value or "").strip()
+        }
+        moves = list(manifest.get("workspaceMoves") or [])
+        if not session_ids or any(not isinstance(move, dict) for move in moves):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset staging recovery authority is incomplete."
+            )
+        if expected_session_ids is None:
+            expected_session_ids = session_ids
+            workspace_moves = moves
+        elif expected_session_ids != session_ids or workspace_moves != moves:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifests do not agree."
+            )
+
+    with s._CHAT_STATE_LOCK:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    live_session_ids = {
+        _team_agent_session_reset_session_id(row)
+        for row in list(payload.get("conversations") or [])
+        if isinstance(row, dict)
+    }
+    if not expected_session_ids or not expected_session_ids.issubset(live_session_ids):
+        raise TeamAgentSessionResetConflictError(
+            "Session reset staging cannot be discarded before all sessions are restored."
+        )
+
+    for move in workspace_moves or []:
+        source = Path(str(move.get("source") or "")).resolve()
+        staged = Path(str(move.get("staged") or "")).resolve()
+        if not any(source.is_relative_to(root) for root in allowed_roots) or not any(
+            staged.is_relative_to(root) for root in staging_roots
+        ):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset workspace recovery path is unsafe."
+            )
+        if not source.exists() or staged.exists():
+            raise TeamAgentSessionResetConflictError(
+                "Session reset workspace was not fully restored."
+            )
+
+    for staging_root in existing_roots:
+        unexpected = [
+            path
+            for path in staging_root.iterdir()
+            if path.name != _TEAM_AGENT_SESSION_RESET_MANIFEST_NAME
+        ]
+        if unexpected:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging still contains recoverable workspace data."
+            )
+    try:
+        for staging_root in existing_roots:
+            shutil.rmtree(staging_root)
+    except Exception as exc:
+        raise TeamAgentSessionResetConflictError(
+            "Session reset recovered staging cleanup is incomplete."
+        ) from exc
+    _team_agent_session_reset_event(
+        s,
+        "recovered_staging_discarded",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=[],
+        session_ids=sorted(expected_session_ids),
+    )
+    return {
+        "status": "discarded",
+        "teamId": team,
+        "resetId": reset,
+        "sessionCount": len(expected_session_ids),
+        "stagingRootCount": len(existing_roots),
+    }
+
+
 def destroy_team_agent_session_reset(
     team_id: str,
     reset_id: str,
@@ -2173,6 +2314,7 @@ purge_team_agent_sessions = purge_team_agent_session_reset
 commit_team_agent_session_reset = purge_team_agent_session_reset
 commit_team_agent_sessions = purge_team_agent_session_reset
 restore_team_agent_sessions = restore_team_agent_session_reset
+discard_restored_team_agent_sessions = discard_restored_team_agent_session_reset_staging
 destroy_team_agent_sessions = destroy_team_agent_session_reset
 
 
