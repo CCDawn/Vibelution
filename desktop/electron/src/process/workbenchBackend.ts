@@ -938,13 +938,20 @@ export async function ensureFrontendBuild(input: {
   });
 }
 
+export type FrontendReleaseEnsureResult = {
+  skipped: boolean;
+  rebuilt: boolean;
+  buildKey?: string;
+  release?: string;
+};
+
 export async function ensureFrontendRelease(input: {
   workspaceRoot: string;
   pythonPath: string;
   signal?: AbortSignal;
   runBridge?: typeof runPythonJsonBridge;
   terminateProcessTree?: PythonOwnedProcessTreeTerminator;
-}): Promise<void> {
+}): Promise<FrontendReleaseEnsureResult> {
   const runBridge = input.runBridge ?? runPythonJsonBridge;
   const terminateProcessTree = input.terminateProcessTree ?? createPythonOwnedProcessTreeTerminator({
     pythonPath: input.pythonPath,
@@ -988,10 +995,23 @@ export async function ensureFrontendRelease(input: {
       pid
     })
   });
-  const payload = parsePythonJsonBridgePayload<{ ok?: unknown; reason?: unknown }>(raw, "frontend build preflight");
+  const payload = parsePythonJsonBridgePayload<{
+    ok?: unknown;
+    reason?: unknown;
+    skipped?: unknown;
+    rebuilt?: unknown;
+    buildKey?: unknown;
+    release?: unknown;
+  }>(raw, "frontend build preflight");
   if (payload.ok !== true) {
     throw new Error(String(payload.reason || "frontend build preflight failed"));
   }
+  return {
+    skipped: Boolean(payload.skipped),
+    rebuilt: Boolean(payload.rebuilt),
+    ...(typeof payload.buildKey === "string" && payload.buildKey ? { buildKey: payload.buildKey } : {}),
+    ...(typeof payload.release === "string" && payload.release ? { release: payload.release } : {})
+  };
 }
 
 function defaultEnsureFrontend(
@@ -1001,7 +1021,7 @@ function defaultEnsureFrontend(
   pythonPath?: string
 ): Promise<void> {
   if (pythonPath) {
-    return ensureFrontendRelease({ workspaceRoot, pythonPath, signal: options.signal });
+    return ensureFrontendRelease({ workspaceRoot, pythonPath, signal: options.signal }).then(() => undefined);
   }
   return ensureFrontendBuild({
     workspaceRoot,

@@ -247,14 +247,24 @@ describe("Electron main Launcher IPC facade", () => {
     expect(startupBody).not.toContain("windowProvider.openOrFocusWorkbench()");
   });
 
-  it("refreshes the live workbench URL after start instead of waiting on a stale bootstrap port", () => {
+  it("checks the verified release before reusing a live workbench", () => {
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
     const readyBody = mainSource.slice(readyStart, readyStart + 700);
     expect(readyBody).toContain("await refreshLiveWorkbenchUrl(paths)");
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeLessThan(
+      lifecycleBody.indexOf("await mainLineBackendIsReusable(paths.workspaceRoot)")
+    );
+    expect(lifecycleBody).toContain("mainLineBackendIsReachable(paths.workspaceRoot)");
+    expect(lifecycleBody).toContain('lifecycleOperation = "restart"');
+    expect(lifecycleBody).toContain("app.relaunch()");
     const productStart = mainSource.indexOf("async function startOrFocusWorkbenchFromProductEntryOnShell");
     const productBody = mainSource.slice(productStart, productStart + 1200);
-    expect(productBody).toContain("await refreshLiveWorkbenchUrl(");
     expect(productBody).toContain('orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })');
+    expect(productBody).not.toContain("waitForHttp");
+    expect(productBody).not.toContain("openOrFocus:");
     const secondStart = mainSource.indexOf("async function requestOpenWorkbenchFromSecondInstance");
     const secondBody = mainSource.slice(secondStart, secondStart + 900);
     expect(secondBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
