@@ -201,6 +201,7 @@ async function renderInspectorLeaf(
   language: "zh" | "en",
   scope: InspectorProps["scope"],
   nodeDetail: NodeDetailState = { kind: "idle" },
+  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection">> = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -216,6 +217,7 @@ async function renderInspectorLeaf(
             scope={scope}
             state={makeInspectorState(nodeDetail)}
             actions={makeInspectorActions()}
+            {...extras}
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -368,6 +370,40 @@ describe("ResearchProcessInspectorPane collection recovery wiring", () => {
     expect(leafHarness.props?.onRecoverCollection).toBe(onRecoverCollection);
     expect(leafHarness.props?.collectionRecoveryBusy).toBe(true);
     expect(leafHarness.props?.collectionRecoveryError).toBe("worker unavailable");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("hides launch actions when the URL is stale during collection recovery", async () => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("launch", { runId: "", selectedNodeId: null, questionId: "SCI-004" }),
+      { kind: "idle" },
+      {
+        nextAction: {
+          stage: "collection_recovery",
+          targetNodeId: "source_finding",
+          navigationLabel: "前往资料搜集",
+          command: "retry_collection",
+          commandLabel: "重试搜集",
+          collectionRequestId: "collection-request-1",
+          recovery: {
+            command: "retry_collection",
+            label: "重试搜集",
+            reason: "资料搜集失败，请重试。",
+          },
+        },
+        onRecoverCollection: async () => undefined,
+      },
+    );
+
+    expect(container.textContent).toContain("资料补充需要处理");
+    expect(container.textContent).not.toContain("取消");
+    expect(container.textContent).not.toContain("开始实验");
+    expect(container.textContent).not.toContain("重试搜集");
 
     await act(async () => {
       root.unmount();

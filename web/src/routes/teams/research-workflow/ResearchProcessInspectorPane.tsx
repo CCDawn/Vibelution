@@ -132,6 +132,11 @@ export function ResearchProcessInspectorPane(props: {
     staleTime: 60_000,
   });
 
+  const collectionRecoveryOwnsCurrentTask = Boolean(
+    nextAction?.collectionRequestId
+    && (nextAction.command === "retry_collection" || nextAction.command === "continue_collection"),
+  );
+
   if (scope.panel === "progress") {
     return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
   }
@@ -170,6 +175,14 @@ export function ResearchProcessInspectorPane(props: {
   }
   if (scope.panel === "agents") {
     return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang={lang} />;
+  }
+  if (scope.panel === "launch" && collectionRecoveryOwnsCurrentTask) {
+    return (
+      <ResearchCenteredEmptyState
+        title={isZh ? "资料补充需要处理" : "Evidence collection needs attention"}
+        hint={nextAction?.recovery?.reason || nextAction?.statusMessage}
+      />
+    );
   }
   if (scope.panel === "launch" || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)) {
     return (

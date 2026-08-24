@@ -292,6 +292,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.runState.run = null;
     harness.runState.projection = null;
     harness.runState.snapshot = null;
+    (harness.runState as { resyncRequired?: boolean }).resyncRequired = false;
     harness.runState.commandOffers = [];
     harness.commands.error = null;
     harness.commands.busy = false;
@@ -307,6 +308,29 @@ describe("ResearchProcessWorkspace", () => {
     harness.chain.recoveryBusy = false;
     harness.chain.recoveryError = null;
   });
+
+  function configureCollectionRecoveryLaunch() {
+    harness.location.panel = "launch";
+    harness.location.questionId = "SCI-004";
+    harness.chain.questionId = "SCI-004";
+    harness.chain.selection = {
+      questionId: "SCI-004",
+      selectionId: "selection-1",
+      selectedCandidateIds: ["candidate-1"],
+    } as never;
+    harness.chain.collectionRequests = [{
+      requestId: "collection-request-1",
+      questionId: "SCI-004",
+      status: "failed",
+      collectionRunId: "",
+      handoffRef: "",
+      createdAt: "2026-08-24T00:00:00Z",
+    }] as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+  }
 
   it("shows the canvas loading state while no projection is available", async () => {
     const rendered = await renderWorkspace();
@@ -767,6 +791,57 @@ describe("ResearchProcessWorkspace", () => {
     await act(async () => retry?.click());
     expect(harness.chain.recoverCollection).toHaveBeenCalledTimes(1);
     expect(harness.chain.recoverCollection).toHaveBeenCalledWith("collection-request-1");
+  });
+
+  it("hides collection recovery actions while the current-task scope is not ready", async () => {
+    const cases: Array<{
+      label: string;
+      prepare: () => void;
+      reset: () => void;
+    }> = [
+      {
+        label: "loading",
+        prepare: () => {
+          harness.chain.loading = true;
+        },
+        reset: () => {
+          harness.chain.loading = false;
+        },
+      },
+      {
+        label: "resync",
+        prepare: () => {
+          (harness.runState as { resyncRequired?: boolean }).resyncRequired = true;
+        },
+        reset: () => {
+          (harness.runState as { resyncRequired?: boolean }).resyncRequired = false;
+        },
+      },
+      {
+        label: "error",
+        prepare: () => {
+          harness.chain.error = "worker unavailable";
+        },
+        reset: () => {
+          harness.chain.error = null;
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      configureCollectionRecoveryLaunch();
+      testCase.prepare();
+      const rendered = await renderWorkspace();
+      root = rendered.root;
+
+      const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
+      expect(footer?.querySelectorAll("button"), testCase.label).toHaveLength(0);
+
+      await act(async () => root?.unmount());
+      root = null;
+      document.body.innerHTML = "";
+      testCase.reset();
+    }
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {
