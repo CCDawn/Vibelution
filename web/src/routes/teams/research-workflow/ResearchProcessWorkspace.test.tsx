@@ -378,7 +378,7 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node")).toBe("hf_review");
   });
 
-  it("keeps the visible hypothesis task current while a formal run is staged", async () => {
+  it("keeps an unresolved hypothesis gate current when convergence is already projected", async () => {
     harness.location.panel = "node";
     harness.location.runId = "run-created";
     harness.location.questionId = "SCI-096";
@@ -386,7 +386,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.chain.chainState = {
       questionId: "SCI-096",
       candidateCount: 0,
-      hypothesisConverged: false,
+      hypothesisConverged: true,
     } as never;
     harness.chain.meetings = [{
       question: "SCI-096",
@@ -395,7 +395,7 @@ describe("ResearchProcessWorkspace", () => {
       mode: "review",
       scopeHash: "scope-1",
       participants: ["search", "extractor", "reviewer", "experiment"],
-      status: "open",
+      status: "awaiting_approval",
       startedAt: "2026-08-24T00:00:00Z",
       roundIndex: 0,
     }] as never;
@@ -454,8 +454,9 @@ describe("ResearchProcessWorkspace", () => {
     const currentInspector = rendered.container.querySelector(
       '[data-vui="research-current-task-inspector"]',
     );
-    expect(currentInspector?.textContent).toContain("候选假说讨论中");
+    expect(currentInspector?.textContent).toContain("确认候选假说清单");
     expect(currentInspector?.textContent).not.toContain("问题理解");
+    expect(currentInspector?.getAttribute("data-history-mode")).toBe("false");
     expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node"))
       .toBe("hf_generation");
   });

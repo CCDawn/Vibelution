@@ -57,7 +57,7 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(workspaceSource).toContain("toolbarClassName={styles.toolbar}");
   });
 
-  it("keeps workflow mutations out of the toolbar", () => {
+  it("keeps workflow mutations and current-task navigation out of the toolbar", () => {
     expect(toolbarSource).not.toContain("选择题目开始研究");
     expect(toolbarSource).not.toContain("Choose a question to start research");
     expect(toolbarSource).not.toContain("新建运行");
@@ -65,7 +65,9 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(toolbarSource).not.toContain('variant="primary"');
     expect(toolbarSource).not.toContain('onOpenPanel("launch")');
     expect(toolbarSource).toContain('variant="secondary"');
-    expect(toolbarSource).toContain('"定位当前任务"');
+    expect(toolbarSource).not.toContain('"定位当前任务"');
+    expect(workspaceSource).toContain("currentTaskNodeId={semanticCurrentTaskNodeId}");
+    expect(canvasSource).toContain("resolveCanvasCurrentNodeIds");
   });
 
   it("research teams never land on org canvas or challenge launcher", () => {

@@ -263,15 +263,19 @@ export function ResearchProcessWorkspace({
       recovery: null,
     };
   }, [hypothesisFirstChain.scopeMismatch, nextAction]);
-  // A formal run may already be staged while the hypothesis-first ledger is
-  // still the only visible/operable graph. Keep that ledger as the current
-  // task authority until convergence; otherwise the inspector points at a
-  // hidden formal node (for example problem_understanding) and navigation
-  // cannot land on anything the user can operate.
-  const hypothesisFirstOwnsCurrentTask = Boolean(
-    hypothesisFirstChain.chainState
-    && !hypothesisFirstChain.chainState.hypothesisConverged,
-  );
+  // A formal run may already be staged while an unresolved hypothesis gate is
+  // still the only visible/operable task. Use the resolved next action as the
+  // convergence authority: meeting gates deliberately outrank a stale/early
+  // chainState.hypothesisConverged projection. Otherwise a pending candidate
+  // confirmation is replaced by a hidden formal node and cannot be located.
+  const hypothesisFirstOwnsCurrentTask = hypothesisFirstReady
+    && safeNextAction.stage !== "converged"
+    && Boolean(
+      hypothesisFirstChain.chainState
+      || hypothesisFirstChain.selection
+      || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
+      || hypothesisFirstChain.collectionRequests.length > 0,
+    );
   const semanticSelectedNodeId = hypothesisFirstSemanticNodeId(location.selectedNodeId);
   const prospectiveCurrentTaskNodeId = runState.snapshot?.currentTask?.nodeId
     ?? safeNextAction.targetNodeId;
