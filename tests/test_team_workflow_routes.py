@@ -28,7 +28,13 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
-from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+from core.web.services.team_workflow.research_runtime import (
+    hypothesis_first_chain,
+    workflow_artifact_store,
+)
+from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
+    write_problem_understanding_artifact,
+)
 from core.web.services.team_workflow.source_collection import (
     runs as source_collection_runs,
 )
@@ -1164,6 +1170,7 @@ def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(
 
 def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     client = _client()
     finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
     direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
@@ -1171,6 +1178,7 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
         "/api/teams",
         json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
+    workflow_run_id = "workflow-route-agent-session-context"
     start_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
         json={
@@ -1179,19 +1187,40 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
             "agentIds": {"source_finder": finder["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
+        },
+    )
+    assert start_response.status_code == 201, start_response.text
+    source_run_id = start_response.json()["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        node_run_id="node-problem-route-agent-session-context",
+        problem_understanding={
+            "scope": "验证 finding Agent 会话只读取当前问题边界。",
+            "subquestions": ["会话上下文是否绑定唯一的 canonical 问题理解？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["Agent 尚未返回资料结果。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以创建 finding 会话。",
+            },
         },
     )
 
     response = client.post(
-        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/agent-session-context",
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{source_run_id}/agent-session-context",
         json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
     )
     duplicate = client.post(
-        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/agent-session-context",
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{source_run_id}/agent-session-context",
         json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
     )
 
-    assert start_response.status_code == 201, start_response.text
     assert response.status_code == 201, response.text
     assert response.json()["created"] is True
     assert response.json()["sessionId"] != direct_session["id"]

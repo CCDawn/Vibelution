@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
+    write_problem_understanding_artifact,
+)
 from tests._support.team_workflow.helpers import *  # noqa: F403
 from tests.test_challenge_question_runs import _append_canonical_turn_output
 
@@ -34,6 +38,7 @@ def test_source_collection_summary_reuses_processing_status_for_projection(tmp_p
 
 def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
@@ -42,6 +47,7 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
+    workflow_run_id = "workflow-stage-summary-needs-continue"
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -50,9 +56,29 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
             "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
         },
     )
     run_id = run_response["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=run_id,
+        node_run_id="node-problem-stage-summary-needs-continue",
+        problem_understanding={
+            "scope": "验证资料搜集任务在中断后可以继续。",
+            "subquestions": ["finding 阶段是否保留可恢复的任务状态？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["恢复后的实际搜索结果尚未产生。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以进入 finding 阶段。",
+            },
+        },
+    )
     monkeypatch.setattr(
         session_service,
         "submit_session_message",
