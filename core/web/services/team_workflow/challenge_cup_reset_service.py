@@ -858,7 +858,30 @@ class ChallengeCupResetService:
                 raise ResetExecutionError("VERIFY_ZERO did not prove that the delete set is empty.")
             steps.append({"step": "VERIFY_ZERO", "status": "succeeded", "result": _clone_json(verify_result)})
 
-            bootstrap_result = _adapter_method(adapter, "rebootstrap")(normalized_team_id, plan)
+            try:
+                bootstrap_result = _adapter_method(adapter, "rebootstrap")(normalized_team_id, plan)
+            except Exception as exc:
+                # COMMIT and VERIFY_ZERO have already made the deletion
+                # irreversible.  A bootstrap failure must retain the empty
+                # state and its governed staging, never restore old research.
+                steps.append(
+                    {
+                        "step": "REBOOTSTRAP",
+                        "status": "blocked",
+                        "error": type(exc).__name__,
+                    }
+                )
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "operation": RESET_OPERATION,
+                    "status": "needs_rebootstrap",
+                    "teamId": normalized_team_id,
+                    "purgePlanId": plan_id,
+                    "inventoryHash": preview.inventory_hash,
+                    "steps": steps,
+                    "stagingDestroyed": False,
+                    "irreversible": True,
+                }
             if not _verify_bootstrap_result(bootstrap_result):
                 steps.append(
                     {"step": "REBOOTSTRAP", "status": "blocked", "result": _clone_json(bootstrap_result)}

@@ -2188,6 +2188,141 @@ def discard_restored_team_agent_session_reset_staging(
     }
 
 
+def destroy_orphaned_purged_team_agent_session_reset_staging(
+    team_id: str,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Destroy durable purged staging after its live session authority is gone.
+
+    This recovery port deliberately has no in-memory restore token.  It is
+    only for a reset that reached the irreversible purge state and then lost
+    its coordinator before staging could be finalized.  Every durable manifest
+    must agree, selected sessions must remain absent from chat authority, and
+    every workspace must still be contained in a safe managed staging root.
+    """
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    allowed_roots = [Path(root).resolve() for root in s._agent_session_workspace_roots()]
+    staging_roots = [
+        _team_agent_session_reset_staging_root(root, team_id=team, reset_id=reset)
+        for root in allowed_roots
+    ]
+    existing_roots = [root for root in staging_roots if root.exists()]
+    if not existing_roots:
+        return {
+            "status": "absent",
+            "teamId": team,
+            "resetId": reset,
+            "stagingRootCount": 0,
+        }
+
+    expected_root_paths = {str(root) for root in staging_roots}
+    expected_session_ids: set[str] | None = None
+    workspace_moves: list[dict[str, Any]] | None = None
+    for staging_root in existing_roots:
+        if not _team_agent_session_reset_staging_root_is_safe(
+            staging_root,
+            allowed_roots=allowed_roots,
+        ):
+            raise TeamAgentSessionResetValidationError(
+                f"Unsafe session reset staging root: {staging_root}"
+            )
+        manifest = _team_agent_session_reset_read_manifest(staging_root)
+        if (
+            manifest.get("schemaVersion") != _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION
+            or manifest.get("operation") != _TEAM_AGENT_SESSION_RESET_OPERATION
+            or str(manifest.get("teamId") or "").strip() != team
+            or str(manifest.get("resetId") or "").strip() != reset
+            or str(manifest.get("status") or "").strip().lower() != "purged"
+        ):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging is not a verified purged reset."
+            )
+        if str(manifest.get("manifestHash") or "").strip() != _team_agent_session_reset_manifest_hash(manifest):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifest hash is invalid."
+            )
+        manifest_roots = {
+            str(Path(str(value or "")).resolve())
+            for value in list(manifest.get("stagingRoots") or [])
+        }
+        if manifest_roots != expected_root_paths:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging roots do not match the reset scope."
+            )
+        session_ids = {
+            str(value or "").strip()
+            for value in list(manifest.get("sessionIds") or [])
+            if str(value or "").strip()
+        }
+        moves = list(manifest.get("workspaceMoves") or [])
+        if not session_ids or any(not isinstance(move, dict) for move in moves):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset destruction authority is incomplete."
+            )
+        if expected_session_ids is None:
+            expected_session_ids = session_ids
+            workspace_moves = moves
+        elif expected_session_ids != session_ids or workspace_moves != moves:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifests do not agree."
+            )
+
+    with s._CHAT_STATE_LOCK:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    live_session_ids = {
+        _team_agent_session_reset_session_id(row)
+        for row in list(payload.get("conversations") or [])
+        if isinstance(row, dict)
+    }
+    if expected_session_ids is None or expected_session_ids & live_session_ids:
+        raise TeamAgentSessionResetConflictError(
+            "Orphaned session staging cannot be destroyed while its sessions are live."
+        )
+
+    for move in workspace_moves or []:
+        source = Path(str(move.get("source") or "")).resolve()
+        staged = Path(str(move.get("staged") or "")).resolve()
+        if not any(source.is_relative_to(root) for root in allowed_roots) or not any(
+            staged.is_relative_to(root) for root in staging_roots
+        ):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset workspace destruction path is unsafe."
+            )
+        if source.exists() or not staged.exists():
+            raise TeamAgentSessionResetConflictError(
+                "Orphaned session staging is incomplete or has already been restored."
+            )
+        if staged.is_symlink() or bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(staged)):
+            raise TeamAgentSessionResetValidationError(
+                f"Session workspace staging is a reparse point: {staged}"
+            )
+
+    try:
+        for staging_root in existing_roots:
+            shutil.rmtree(staging_root)
+    except Exception as exc:
+        raise TeamAgentSessionResetConflictError(
+            "Agent session orphaned staging cleanup is incomplete."
+        ) from exc
+    _team_agent_session_reset_event(
+        s,
+        "orphaned_purged_staging_destroyed",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=[],
+        session_ids=sorted(expected_session_ids),
+    )
+    return {
+        "status": "destroyed",
+        "teamId": team,
+        "resetId": reset,
+        "sessionCount": len(expected_session_ids),
+        "stagingRootCount": len(existing_roots),
+    }
+
+
 def destroy_team_agent_session_reset(
     team_id: str,
     reset_id: str,
@@ -2315,6 +2450,7 @@ commit_team_agent_session_reset = purge_team_agent_session_reset
 commit_team_agent_sessions = purge_team_agent_session_reset
 restore_team_agent_sessions = restore_team_agent_session_reset
 discard_restored_team_agent_sessions = discard_restored_team_agent_session_reset_staging
+destroy_orphaned_purged_team_agent_sessions = destroy_orphaned_purged_team_agent_session_reset_staging
 destroy_team_agent_sessions = destroy_team_agent_session_reset
 
 

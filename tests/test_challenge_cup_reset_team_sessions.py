@@ -282,3 +282,32 @@ def test_team_agent_session_reset_rejects_active_session(monkeypatch, tmp_path: 
         "session-other",
         "other-session",
     }
+
+
+def test_orphaned_purged_staging_can_only_be_destroyed_after_sessions_are_gone(monkeypatch, tmp_path: Path) -> None:
+    service = _service_fixture(tmp_path)
+    monkeypatch.setattr(agent_sessions, "_service", lambda: service)
+
+    stage = agent_sessions.stage_team_agent_session_reset(
+        "research-team", ["agent-search"], "reset-orphaned-1"
+    )
+    agent_sessions.purge_team_agent_session_reset("research-team", "reset-orphaned-1", stage)
+
+    destroyed = agent_sessions.destroy_orphaned_purged_team_agent_session_reset_staging(
+        "research-team", "reset-orphaned-1"
+    )
+
+    assert destroyed["status"] == "destroyed"
+    assert destroyed["sessionCount"] == 2
+    assert all(not Path(root).exists() for root in stage["stagingRoots"])
+
+    retry = agent_sessions.stage_team_agent_session_reset(
+        "research-team", ["agent-exec"], "reset-orphaned-live"
+    )
+    agent_sessions.purge_team_agent_session_reset("research-team", "reset-orphaned-live", retry)
+    service.chat_state["conversations"].append(_conversation("session-exec", agent_id="agent-exec"))
+
+    with pytest.raises(agent_sessions.TeamAgentSessionResetConflictError, match="sessions are live"):
+        agent_sessions.destroy_orphaned_purged_team_agent_session_reset_staging(
+            "research-team", "reset-orphaned-live"
+        )

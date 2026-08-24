@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.research.competition import resources
 from core.research.workflow import checkpoint_store
 from core.research.workflow import ledger
+from core.web.services import agent_directory_service, session_service
 from core.web.services import chat_room_service
 from core.web.services.session import agent_sessions
 from core.web.services.team_workflow import challenge_cup_reset_destructive_adapter as adapter_module
@@ -48,6 +50,41 @@ def _stage(plan_id: str, *, with_receipts: bool = True) -> dict[str, Any]:
         "receiptScopeAuthority": [{"teamId": "research-team", "questionId": "SCI-096", "workflowRunId": "run-1"}],
         "handles": handles,
     }
+
+
+def test_rebootstrap_accepts_catalog_id_for_sci_096(monkeypatch) -> None:
+    instance = adapter_module.ChallengeCupLiveDestructiveAdapter()
+    plan = _plan("b" * 64)
+    ensure_calls: list[str] = []
+
+    monkeypatch.setattr(
+        resources,
+        "load_science_question_catalog",
+        lambda: {"questions": [{"id": "SCI-096", "question_en": "Golden sample"}]},
+    )
+    monkeypatch.setattr(
+        research_projects,
+        "ensure_challenge_question_project",
+        lambda *_args, **_kwargs: {"project": {"projectId": adapter_module.GOLDEN_SAMPLE_PROJECT_ID}},
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {"agentId": agent_id, "name": agent_id},
+    )
+    monkeypatch.setattr(session_service, "update_agent_instance", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        session_service,
+        "ensure_agent_direct_session",
+        lambda agent_id, **_kwargs: ensure_calls.append(agent_id) or {"id": f"session-{agent_id}"},
+    )
+
+    result = instance.rebootstrap("research-team", plan)
+
+    assert result["status"] == "initialized"
+    assert result["questionId"] == "SCI-096"
+    assert result["directSessionCount"] == len(adapter_module.RETAINED_AGENT_ROLE_KEYS)
+    assert ensure_calls == [f"agent-{index}" for index in range(len(adapter_module.RETAINED_AGENT_ROLE_KEYS))]
 
 
 def test_destroy_staging_finalizes_each_port_without_rebootstrapping(monkeypatch) -> None:

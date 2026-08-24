@@ -345,7 +345,10 @@ class ChallengeCupLiveDestructiveAdapter:
             (
                 item for item in questions
                 if isinstance(item, Mapping)
-                and str(item.get("question_id") or item.get("questionId") or "").strip().upper() == GOLDEN_SAMPLE_QUESTION_ID
+                and str(
+                    item.get("id") or item.get("question_id") or item.get("questionId") or ""
+                ).strip().upper()
+                == GOLDEN_SAMPLE_QUESTION_ID
             ),
             None,
         )
