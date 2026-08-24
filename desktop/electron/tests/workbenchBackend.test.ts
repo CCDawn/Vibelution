@@ -1224,7 +1224,12 @@ describe("runWorkbenchLifecycle", () => {
         alive.delete(pid);
       },
       connect: async () => false,
-      readDaemonPid: () => 77
+      readDaemonPid: () => 77,
+      readDaemonIdentity: () => ({
+        pid: 77,
+        createTime: 1,
+        executable: "C:/repo/.venv/Scripts/pythonw.exe"
+      })
     });
     expect(result.accepted).toBe(true);
     expect(killed).toEqual([77, 51]);
@@ -1247,10 +1252,52 @@ describe("runWorkbenchLifecycle", () => {
         alive.delete(pid);
       },
       connect: async () => false,
-      readDaemonPid: () => 77
+      readDaemonPid: () => 77,
+      readDaemonIdentity: () => ({
+        pid: 77,
+        createTime: 1,
+        executable: "C:/repo/.venv/Scripts/pythonw.exe"
+      })
     });
     expect(result.accepted).toBe(true);
     expect(killed).toEqual([77, 51]);
+  });
+
+  it("shutdown ignores a stale Runtime Manager PID without an identity", async () => {
+    const alive = new Set([51]);
+    const terminateProcessTree = vi.fn(async (pid: number) => {
+      alive.delete(pid);
+      return true;
+    });
+    let written: Record<string, unknown> = {};
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "shutdown",
+      command: { commandId: "cmd_shutdown_stale_daemon", type: "close", operation: "shutdown", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/repo/.venv/Scripts/pythonw.exe"
+      }),
+      writeState: (state) => {
+        written = state;
+      },
+      pidAlive: (pid) => alive.has(pid),
+      connect: async () => false,
+      readDaemonPid: () => 7788,
+      readDaemonIdentity: () => null,
+      terminateProcessTree
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(terminateProcessTree).toHaveBeenCalledWith(51, expect.objectContaining({ pid: 51 }));
+    expect(terminateProcessTree).not.toHaveBeenCalledWith(7788, expect.anything());
+    expect(written).toMatchObject({
+      observedState: "closed",
+      lifecycleWarning: expect.stringContaining("7788")
+    });
   });
 
   it("retains an unverified browser handle while allowing stop cleanup to finish", async () => {

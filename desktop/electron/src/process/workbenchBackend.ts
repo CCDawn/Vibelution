@@ -1314,12 +1314,18 @@ export async function executeMainLineWorkbench(
     }
     const previous = readState();
     const port = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
-    const extraPids = [(input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot)];
+    const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
+    const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
+    const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
+    // A daemon PID without its captured identity is only a historical hint.
+    // It may refer to a terminated process (or a reused PID), so it must never
+    // be sent to the owned-tree terminator during shutdown or desktop startup.
+    const unverifiedDaemonPid = daemonPid > 0 && !verifiedDaemonPid ? daemonPid : 0;
+    const extraPids = verifiedDaemonPid > 0 ? [verifiedDaemonPid] : [];
     const expectedIdentities: Record<string, PythonProcessIdentity> = {
       ...stateProcessIdentities(previous),
       ...(input.expectedIdentities ?? {})
     };
-    const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
     if (daemonIdentity && extraPids.includes(daemonIdentity.pid)) {
       expectedIdentities[String(daemonIdentity.pid)] = daemonIdentity;
     }
@@ -1427,9 +1433,15 @@ export async function executeMainLineWorkbench(
     const previousBrowserWindowPid = Math.trunc(Number(previous.browserWindowPid || previous.workbenchBrowserWindowPid || 0));
     const retainedBrowserLaunchPid = unverifiedHandles.includes(previousBrowserLaunchPid) ? previousBrowserLaunchPid : 0;
     const retainedBrowserWindowPid = unverifiedHandles.includes(previousBrowserWindowPid) ? previousBrowserWindowPid : 0;
-    const unverifiedMessage = unverifiedHandles.length > 0
-      ? `unverified browser/window handles retained: ${[...new Set(unverifiedHandles)].join(",")}`
-      : undefined;
+    const lifecycleWarnings = [
+      unverifiedDaemonPid > 0
+        ? `Skipped unverified Runtime Manager daemon pid ${unverifiedDaemonPid}; no process was terminated.`
+        : "",
+      unverifiedHandles.length > 0
+        ? `unverified browser/window handles retained: ${[...new Set(unverifiedHandles)].join(",")}`
+        : ""
+    ].filter(Boolean);
+    const lifecycleWarning = lifecycleWarnings.join("; ");
     writeState({
       ...previous,
       desiredState: "closed",
@@ -1447,12 +1459,12 @@ export async function executeMainLineWorkbench(
       browserLaunchPid: retainedBrowserLaunchPid,
       browserWindowPid: retainedBrowserWindowPid,
       ...(staleReclaim.reclaimed ? { staleReclaimNote: staleReclaim.reason } : {}),
-      ...(unverifiedMessage ? { lifecycleWarning: unverifiedMessage } : {}),
+      ...(lifecycleWarning ? { lifecycleWarning } : {}),
       lastReason: `electron_main_${operation.replace("-", "_")}`,
       lastSource: "electron_main",
       updatedAt: isoNow(input.now)
     });
-    return accepted(operation, commandId, unverifiedMessage ? { message: unverifiedMessage } : {});
+    return accepted(operation, commandId, lifecycleWarning ? { message: lifecycleWarning } : {});
   }
 
   if (operation === "restart") {
