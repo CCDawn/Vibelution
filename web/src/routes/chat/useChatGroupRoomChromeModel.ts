@@ -117,6 +117,16 @@ export function deriveAvailableGroupParticipants(
   return visibleParticipants;
 }
 
+export function deriveManageableGroupParticipantSessionIds(
+  participants: readonly ChatRoomParticipant[],
+): Set<string> {
+  return new Set(
+    participants
+      .filter(isAvailableGroupParticipant)
+      .map((participant) => participant.sessionId),
+  );
+}
+
 export function useChatGroupRoomChromeModel({
   teams,
   activeGroupRoom,
@@ -177,6 +187,10 @@ export function useChatGroupRoomChromeModel({
     () => new Set(availableGroupParticipants.map((participant) => participant.sessionId)),
     [availableGroupParticipants],
   );
+  const activeGroupManageParticipantSessionSet = useMemo(
+    () => deriveManageableGroupParticipantSessionIds(activeGroupRoom?.participants ?? []),
+    [activeGroupRoom?.participants],
+  );
 
   const expandedGroupAgentDetailsBySessionId = useMemo(() => {
     const entries = expandedGroupAgentSessionIds.map((sessionId, index) => {
@@ -213,7 +227,7 @@ export function useChatGroupRoomChromeModel({
     groupManageModeDraft,
     groupManagePurposeDraft,
     groupManageSessionIds,
-    activeGroupParticipantSessionIds: activeGroupParticipantSessionSet,
+    activeGroupParticipantSessionIds: activeGroupManageParticipantSessionSet,
   });
 
   const {

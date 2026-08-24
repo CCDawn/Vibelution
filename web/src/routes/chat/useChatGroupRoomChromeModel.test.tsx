@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatRoomDetail, ChatRoomParticipant, ChatRoomRound } from "../../api/types";
+import { buildChatGroupManageChanged } from "./chatGroupRoomActionModel";
 import {
   deriveAvailableGroupParticipants,
+  deriveManageableGroupParticipantSessionIds,
   latestFormalChatRoomRound,
 } from "./useChatGroupRoomChromeModel";
 
@@ -106,5 +108,27 @@ describe("deriveAvailableGroupParticipants", () => {
     expect(deriveAvailableGroupParticipants(roster, latestFormalRound?.speakerOrder).map(
       (item) => item.participantId,
     )).toEqual(["p1", "p2", "p3"]);
+  });
+
+  it("keeps the full manageable roster while a formal meeting narrows visible members", () => {
+    const roster = [participant("p1"), participant("p2"), participant("p3")];
+    const visible = deriveAvailableGroupParticipants(roster, ["p3", "p1"]);
+    const manageableSessionIds = deriveManageableGroupParticipantSessionIds(roster);
+
+    expect(visible.map((item) => item.sessionId)).toEqual(["session-p3", "session-p1"]);
+    expect([...manageableSessionIds]).toEqual(["session-p1", "session-p2", "session-p3"]);
+    expect(buildChatGroupManageChanged({
+      standardGroupRoomActive: true,
+      activeGroupRoom: {
+        title: "群聊",
+        mode: "round_robin",
+        purpose: "discussion",
+      },
+      groupManageTitleDraft: "群聊",
+      groupManageModeDraft: "round_robin",
+      groupManagePurposeDraft: "discussion",
+      groupManageSessionIds: ["session-p1", "session-p2", "session-p3"],
+      activeGroupParticipantSessionIds: manageableSessionIds,
+    })).toBe(false);
   });
 });
