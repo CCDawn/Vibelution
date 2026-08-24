@@ -181,10 +181,14 @@ describe("Electron main Launcher IPC facade", () => {
     const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle", lifecycleStart);
     const lifecycleBody = mainSource.slice(lifecycleStart, lifecycleEnd);
     const reuseStart = lifecycleBody.indexOf("mainLineBackendIsReusable(paths.workspaceRoot)");
-    const reuseEnd = lifecycleBody.indexOf("const intentLease", reuseStart);
+    const intentLeaseIndex = lifecycleBody.indexOf("const intentLease");
+    const reuseEnd = lifecycleBody.indexOf("// A reachable but non-reusable backend", reuseStart);
     const reuseBody = lifecycleBody.slice(reuseStart, reuseEnd);
 
+    expect(intentLeaseIndex).toBeGreaterThan(0);
+    expect(intentLeaseIndex).toBeLessThan(reuseStart);
     expect(reuseBody).toContain("commandId: randomUUID()");
+    expect(reuseBody).toContain("launcherLifecycleSupervisor.isCurrent(intentLease)");
     expect(lifecycleBody).toContain("mutation.value.accepted && !mutation.value.commandId?.trim()");
     expect(lifecycleBody).toContain("commandId: randomUUID()");
     expect(lifecycleBody).toContain('desiredState === "closed"');

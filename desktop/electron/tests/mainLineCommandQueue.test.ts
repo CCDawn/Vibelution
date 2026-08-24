@@ -1,15 +1,38 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createMainLineCommandQueue,
   type MainLineLifecycleResult,
 } from "../src/lifecycle/mainLine/commandQueue.js";
+import { writeMainLineQueueOwnerMarker } from "../src/lifecycle/mainLine/ownerMarker.js";
 
 function ok(operation: string, commandId: string): MainLineLifecycleResult {
   return { schemaVersion: 1, accepted: true, operation, commandId };
 }
 
 describe("mainLineCommandQueue", () => {
+  it("records the Electron executable with the marker timestamp", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-main-line-owner-"));
+    try {
+      const marker = await writeMainLineQueueOwnerMarker(dir, {
+        pid: 4242,
+        executable: "C:/Vibelution/Vibelution.exe",
+        nowMs: Date.parse("2026-08-20T10:00:00Z"),
+      });
+      expect(marker).toMatchObject({
+        pid: 4242,
+        executable: "C:/Vibelution/Vibelution.exe",
+        updatedAt: "2026-08-20T10:00:00.000Z",
+      });
+      expect(JSON.parse(readFileSync(join(dir, "main_line_queue_owner.json"), "utf8"))).toEqual(marker);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("joins ten restarts in one second onto a single execute", async () => {
     const execute = vi.fn().mockImplementation(
       (command: { commandId: string; operation: string }) =>

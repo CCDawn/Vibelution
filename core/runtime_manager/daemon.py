@@ -53,6 +53,7 @@ from .constants import (
 )
 from .hot_restart_backup import create_failure_package, create_stable_backup, latest_stable_backup, restore_stable_backup
 from .process_identity import (
+    capture_process_identity,
     is_runtime_manager_process as _is_runtime_manager_process,
     # Kept as a module attribute: tests monkeypatch this alias.
     runtime_manager_command_line_for_pid as _runtime_manager_command_line_for_pid,  # noqa: F401
@@ -1255,6 +1256,45 @@ def _electron_external_window_pending_ack(workbench: dict[str, Any], observation
 MAIN_LINE_QUEUE_OWNER_FILE = "main_line_queue_owner.json"
 
 
+def _normalized_process_executable(value: object) -> str:
+    text = str(value or "").strip()
+    return os.path.normcase(os.path.normpath(text)) if text else ""
+
+
+def _main_line_owner_marker_written_at(value: object) -> float:
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        return 0.0
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def _electron_queue_owner_identity_matches(payload: dict[str, object], owner_pid: int) -> bool:
+    expected_executable = _normalized_process_executable(payload.get("executable"))
+    marker_written_at = _main_line_owner_marker_written_at(payload.get("updatedAt"))
+    if not expected_executable or marker_written_at <= 0:
+        return False
+    identity = capture_process_identity(owner_pid)
+    actual_executable = _normalized_process_executable(identity.get("executable"))
+    try:
+        created_at = float(identity.get("createTime") or 0)
+    except (TypeError, ValueError):
+        return False
+    # A process created after the marker cannot be the Electron process that
+    # wrote it, even if Windows has already reused the same PID.
+    return bool(
+        actual_executable
+        and actual_executable == expected_executable
+        and created_at > 0
+        and created_at <= marker_written_at
+    )
+
+
 def electron_owns_main_line_queue() -> bool:
     """Return True when Electron main owns the main-line command queue (I4b).
 
@@ -1276,11 +1316,7 @@ def electron_owns_main_line_queue() -> bool:
         return False
     if owner_pid <= 0:
         return False
-    try:
-        os.kill(owner_pid, 0)
-    except OSError:
-        return False
-    return True
+    return _electron_queue_owner_identity_matches(payload, owner_pid)
 
 
 def should_run_workbench_idle_reconcile() -> bool:

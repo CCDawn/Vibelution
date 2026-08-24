@@ -2922,6 +2922,11 @@ async function orchestrateLauncherLifecycle(
   }
 
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
+  const intentLease = launcherLifecycleSupervisor.beginIntent({
+    instanceId: "main",
+    operation: lifecycleOperation,
+    desiredState
+  });
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
     const servingVersion = !frontendReleaseChanged && !unpackagedElectronRebuilt && !packagedShellStale
@@ -2937,8 +2942,17 @@ async function orchestrateLauncherLifecycle(
       && servingVersion.ok
       && await mainLineBackendIsReusable(paths.workspaceRoot)
     ) {
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       const url = await refreshLiveWorkbenchUrl(paths);
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       await openWorkbenchAtCurrentLauncherUrl(paths, launcherBootstrap, windowProvider, { workbenchUrl: url });
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       scheduleLauncherStatusCliRefresh();
       return {
         schemaVersion: 1,
@@ -2956,14 +2970,12 @@ async function orchestrateLauncherLifecycle(
     // release.  Route it through restart instead of the destructive start path
     // so the active-work guard can preserve an in-progress formal task.
     if (await mainLineBackendIsReachable(paths.workspaceRoot)) {
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       lifecycleOperation = "restart";
     }
   }
-  const intentLease = launcherLifecycleSupervisor.beginIntent({
-    instanceId: "main",
-    operation: lifecycleOperation,
-    desiredState
-  });
   if (app.isPackaged) {
     try {
       const status = await inspectCurrentDesktopShell();

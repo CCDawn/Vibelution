@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import {
   claimStopIfGeneration,
   ownerLeaseOf,
   reclaimStaleInFlightStops,
+  readRegistry,
   recordSpawnPid,
   type RegistryPayload
 } from "../src/lifecycle/instanceRegistryStore.js";
@@ -629,5 +630,26 @@ describe("instanceRegistryStore shared fixture", () => {
       port: 8000,
       controlPort: 8765
     });
+  });
+
+  it.each([
+    "{not-json",
+    JSON.stringify({ instances: [] }),
+    JSON.stringify({ schemaVersion: 3, instances: { "worktree:bad": [] } }),
+  ])("fails closed without replacing a corrupt registry", async (contents) => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-corrupt-"));
+    tempDirs.push(dir);
+    const registryPath = join(dir, "instances.json");
+    writeFileSync(registryPath, contents, "utf8");
+
+    await expect(readRegistry(registryPath)).rejects.toThrow("instances registry is corrupt");
+    await expect(claimStart(registryPath, {
+      instanceId: "worktree:task",
+      projectRoot: "C:/worktree/task",
+      commandId: "start-1",
+      deadlineAt: "2026-08-21T12:30:00Z",
+      ownerPid: 1234,
+    })).rejects.toThrow("instances registry is corrupt");
+    expect(readFileSync(registryPath, "utf8")).toBe(contents);
   });
 });
