@@ -24,11 +24,12 @@ const styles = {
     "flex min-w-0 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden [&::-webkit-details-marker]:[display:none]",
   settingsSummaryValue: "min-w-0 flex-auto truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary",
   settingsSummaryHint: "shrink-0 [font-size:var(--vui-font-2xs)] text-vui-fg-tertiary",
-  settingsBody: "mt-1.5 grid min-w-0 gap-2",
+  settingsBody:
+    "mt-1.5 grid min-h-0 min-w-0 max-h-[46vh] content-start gap-2 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5 [scrollbar-gutter:stable]",
   settingsSaveButton: `${primaryControl} justify-self-end self-end py-[3px]`,
   settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 w-full max-w-full gap-2 overflow-hidden ${panelSurface} px-2 py-1.5`,
   settingsPrimary:
-    "grid min-w-0 max-w-full grid-cols-4 items-end gap-1.5 max-[860px]:grid-cols-2 max-[620px]:grid-cols-[minmax(0,1fr)]",
+    "grid min-w-0 max-w-full grid-cols-[repeat(4,minmax(0,1fr))] items-end gap-1.5 max-[1120px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
   settingsWindow:
     "grid min-w-0 max-w-full grid-cols-[max-content_minmax(140px,0.4fr)_max-content] items-end gap-1.5 max-[860px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
   settingsSecondary:
