@@ -84,12 +84,12 @@ describe("fetchHypothesisFirstFocusNode", () => {
     mockedRequests.mockResolvedValue({ requests: [] } as never);
     mockedReviewLinks.mockResolvedValue({
       links: [
-        { meetingRoundId: "r1", roundIndex: 1 },
-        { meetingRoundId: "r5", roundIndex: 5 },
+        { meetingRoundId: "r1", roundIndex: 1, candidateId: "cand-r1" },
+        { meetingRoundId: "r5", roundIndex: 5, candidateId: "cand-r5" },
       ],
     } as never);
 
-    await expect(fetchHypothesisFirstFocusNode("team-1", "SCI-002")).resolves.toBe("hf_meeting_5");
+    await expect(fetchHypothesisFirstFocusNode("team-1", "SCI-002")).resolves.toBe("hf_meeting_5_cand-r5");
   });
 
   it("falls back to generation when the chain cannot be read", async () => {
