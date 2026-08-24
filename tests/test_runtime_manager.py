@@ -10685,47 +10685,51 @@ def test_listening_pid_for_port_prefers_psutil(monkeypatch):
 def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, tmp_path):
     class FakeProc:
         def __init__(self, info):
-            self.info = info
+            self._info = info
+
+        @property
+        def info(self):
+            return {key: self._info[key] for key in ("pid", "ppid", "name")}
+
+        def as_dict(self, attrs):
+            return {key: self._info.get(key) for key in attrs}
 
     repo = tmp_path / "repo"
     repo.mkdir()
     other = tmp_path / "other"
     other.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 18860,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "-m", "core.runtime_manager.cli", "daemon"],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 3000,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "9001", "--no-browser"],
-                        "cwd": str(other),
-                    }
-                ),
-            ]
+    processes = [
+        FakeProc(
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                "cwd": str(repo),
+            }
         ),
-    )
+        FakeProc(
+            {
+                "pid": 18860,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "-m", "core.runtime_manager.cli", "daemon"],
+                "cwd": str(repo),
+            }
+        ),
+        FakeProc(
+            {
+                "pid": 3000,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "9001", "--no-browser"],
+                "cwd": str(other),
+            }
+        ),
+    ]
+    by_pid = {proc.info["pid"]: proc for proc in processes}
+    monkeypatch.setattr(process_inventory.psutil, "process_iter", lambda attrs: iter(processes))
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: by_pid[pid])
 
     payload = process_inventory.residual_process_payload(project_root=repo, exclude_pids={18860})
 
