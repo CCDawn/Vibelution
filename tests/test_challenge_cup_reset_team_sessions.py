@@ -311,3 +311,53 @@ def test_orphaned_purged_staging_can_only_be_destroyed_after_sessions_are_gone(m
         agent_sessions.destroy_orphaned_purged_team_agent_session_reset_staging(
             "research-team", "reset-orphaned-live"
         )
+
+
+def test_team_agent_session_reset_destroy_removes_recreated_empty_direct_session(monkeypatch, tmp_path: Path) -> None:
+    service = _service_fixture(tmp_path)
+    monkeypatch.setattr(agent_sessions, "_service", lambda: service)
+
+    stage = agent_sessions.stage_team_agent_session_reset(
+        "research-team", ["agent-search"], "reset-recreated-direct"
+    )
+    agent_sessions.purge_team_agent_session_reset("research-team", "reset-recreated-direct", stage)
+    service.chat_state["conversations"].append(
+        {
+            "conversation_id": "session-search",
+            "agent_id": "agent-search",
+            "messages": [],
+        }
+    )
+
+    destroyed = agent_sessions.destroy_team_agent_session_reset(
+        "research-team", "reset-recreated-direct", stage
+    )
+
+    assert destroyed["status"] == "destroyed"
+    assert "session-search" not in {
+        row["conversation_id"] for row in service.chat_state["conversations"]
+    }
+
+
+def test_team_agent_session_reset_destroy_rejects_recreated_direct_session_with_messages(monkeypatch, tmp_path: Path) -> None:
+    service = _service_fixture(tmp_path)
+    monkeypatch.setattr(agent_sessions, "_service", lambda: service)
+
+    stage = agent_sessions.stage_team_agent_session_reset(
+        "research-team", ["agent-search"], "reset-recreated-direct-message"
+    )
+    agent_sessions.purge_team_agent_session_reset(
+        "research-team", "reset-recreated-direct-message", stage
+    )
+    service.chat_state["conversations"].append(
+        {
+            "conversation_id": "session-search",
+            "agent_id": "agent-search",
+            "messages": [{"role": "user", "content": "must not be deleted"}],
+        }
+    )
+
+    with pytest.raises(agent_sessions.TeamAgentSessionResetConflictError, match="Active chat state"):
+        agent_sessions.destroy_team_agent_session_reset(
+            "research-team", "reset-recreated-direct-message", stage
+        )

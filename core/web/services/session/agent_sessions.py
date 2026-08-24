@@ -2344,18 +2344,46 @@ def destroy_team_agent_session_reset(
         raise TeamAgentSessionResetValidationError(
             "Only a purged Agent session reset can be destroyed."
         )
-    selected = set(str(value or "").strip() for value in list(token.get("sessionIds") or []))
-    with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-    current_ids = {
-        _team_agent_session_reset_session_id(raw)
-        for raw in list(payload.get("conversations") or [])
-        if isinstance(raw, dict)
+    selected = {
+        str(value or "").strip() for value in list(token.get("sessionIds") or [])
     }
-    if selected & current_ids:
-        raise TeamAgentSessionResetConflictError(
-            "Active chat state still contains a session selected for destruction."
+    with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            raise TeamAgentSessionResetValidationError(
+                "Chat-state authority is missing its conversations list."
+            )
+        current_ids = {
+            _team_agent_session_reset_session_id(raw)
+            for raw in conversations
+            if isinstance(raw, dict)
+        }
+        recreated_direct_ids = _team_agent_session_reset_recreated_empty_direct_session_ids(
+            conversations,
+            direct_session_ids=token.get("directSessionIds"),
         )
+        recreated_direct_ids &= selected
+        conflicting_ids = (selected & current_ids) - recreated_direct_ids
+        if conflicting_ids:
+            raise TeamAgentSessionResetConflictError(
+                "Active chat state still contains a session selected for destruction."
+            )
+        if recreated_direct_ids:
+            payload["conversations"] = [
+                raw
+                for raw in conversations
+                if _team_agent_session_reset_session_id(raw) not in recreated_direct_ids
+            ]
+            if str(payload.get("active_conversation_id") or "").strip() in recreated_direct_ids:
+                payload["active_conversation_id"] = _replacement_session_after_agent_session_removal(
+                    payload,
+                    removed_session_ids=recreated_direct_ids,
+                    timestamp=s._now_timestamp(),
+                )
+            payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
+            payload["updated_at"] = s._now_timestamp()
+            s.save_chat_state(s.PROJECT_ROOT, payload)
     for move in list(token.get("workspaceMoves") or []):
         staged = Path(str(move.get("staged") or "")).resolve()
         if staged.exists() and (staged.is_symlink() or bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(staged))):
@@ -2396,6 +2424,81 @@ def destroy_team_agent_session_reset(
     result = _team_agent_session_reset_summary(token)
     result["workspaceDestroyedCount"] = destroyed_count
     return result
+
+
+def _team_agent_session_reset_recreated_empty_direct_session_ids(
+    conversations: list[Any],
+    *,
+    direct_session_ids: Any,
+) -> set[str]:
+    """Identify only disposable direct rows recreated during reset finalization.
+
+    Directory reads can materialize an Agent's old direct-session id after it
+    was staged but before the reset coordinator clears the durable stage.  That
+    row is safe to remove only when it is an unscoped, relationship-free empty
+    shell for the exact Agent/direct-session binding in the signed stage token.
+    Every other selected row remains a hard conflict.
+    """
+
+    if not isinstance(direct_session_ids, dict):
+        return set()
+    direct_to_agent: dict[str, str] = {}
+    for raw_agent_id, raw_session_id in direct_session_ids.items():
+        agent_id = str(raw_agent_id or "").strip()
+        session_id = str(raw_session_id or "").strip()
+        if not agent_id or not session_id or session_id in direct_to_agent:
+            return set()
+        direct_to_agent[session_id] = agent_id
+
+    rows_by_id = {
+        _team_agent_session_reset_session_id(row): row
+        for row in conversations
+        if isinstance(row, dict) and _team_agent_session_reset_session_id(row)
+    }
+    recreated: set[str] = set()
+    for session_id, expected_agent_id in direct_to_agent.items():
+        row = rows_by_id.get(session_id)
+        if not isinstance(row, dict):
+            continue
+        messages = row.get("messages")
+        if (
+            _team_agent_session_reset_agent_id(row) != expected_agent_id
+            or not isinstance(messages, list)
+            or messages
+            or _team_agent_session_reset_parent_id(row)
+            or _team_agent_session_reset_root_id(row)
+            or _team_agent_session_reset_team_id(row)
+            or _team_agent_session_reset_nested(row, "createdBy", "created_by")
+            or _team_agent_session_reset_child_ids(row)
+        ):
+            continue
+        if any(
+            _team_agent_session_reset_parent_id(candidate) == session_id
+            or _team_agent_session_reset_root_id(candidate) == session_id
+            for candidate in rows_by_id.values()
+        ):
+            continue
+        recreated.add(session_id)
+    return recreated
+
+
+def _team_agent_session_reset_child_ids(row: Any) -> list[str]:
+    if not isinstance(row, dict):
+        return []
+    values: list[str] = []
+    containers: list[dict[str, Any]] = [row]
+    for key in ("metadata", "scope", "binding", "teamBinding", "experimentBinding"):
+        nested = row.get(key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in ("childSessionIds", "child_session_ids"):
+            raw = container.get(key)
+            if isinstance(raw, (list, tuple, set)):
+                values.extend(str(value or "").strip() for value in raw if str(value or "").strip())
+            elif str(raw or "").strip():
+                values.append(str(raw).strip())
+    return values
 
 
 def _team_agent_session_reset_summary(token: dict[str, Any]) -> dict[str, Any]:
