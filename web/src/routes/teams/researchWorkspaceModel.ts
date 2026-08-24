@@ -1,3 +1,5 @@
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
+
 export type ResearchStageWorkspaceView = "knowledge_collection" | "experiment" | "iteration";
 export type ResearchLegacyWorkspaceView =
   | "source_collection"
@@ -24,8 +26,8 @@ export const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
 }> = [
   {
     view: "knowledge_collection",
-    zh: "知识搜集",
-    en: "Knowledge collection",
+    zh: RESEARCH_STAGE_TERMS.knowledge_collection.zh,
+    en: RESEARCH_STAGE_TERMS.knowledge_collection.en,
     zhDetail: "搜索、提炼、审查与入库",
     enDetail: "Search, extraction, review, and ingestion",
     zhModules: "资料寻找 / 资料提炼 / 资料关系整理 / 资料入库",
@@ -54,7 +56,7 @@ export const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
 export const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: string; en: string }> = {
   overview: { zh: "科研总览", en: "Overview" },
   workflow: { zh: "科研流程", en: "Research workflow" },
-  knowledge_collection: { zh: "知识搜集", en: "Knowledge collection" },
+  knowledge_collection: { zh: RESEARCH_STAGE_TERMS.knowledge_collection.zh, en: RESEARCH_STAGE_TERMS.knowledge_collection.en },
   experiment: { zh: "实验设计", en: "Experiment design" },
   iteration: { zh: "执行迭代", en: "Execution & iteration" },
   source_collection: { zh: "搜索资料", en: "Source search" },

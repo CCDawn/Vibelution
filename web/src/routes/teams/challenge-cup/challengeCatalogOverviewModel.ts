@@ -83,9 +83,21 @@ export function catalogOverviewStageLabel(stage: string, zh: boolean): string {
 }
 
 export function catalogOverviewActionLabel(action: CatalogOverviewAction, zh: boolean): string {
-  if (action === "retry") return zh ? "重试" : "Retry";
+  // The retry mutation is plan-scoped (retryFailed re-runs every failed
+  // question in the plan), so the label must not read as "retry this row".
+  if (action === "retry") return zh ? "重试失败题" : "Retry failed";
   if (action === "continue") return zh ? "继续" : "Continue";
   return zh ? "查看" : "View";
+}
+
+export function failedQuestionIdsInPlan(
+  rows: readonly CatalogOverviewQuestion[],
+  planId: string,
+): string[] {
+  return rows
+    .filter((row) => row.planId === planId && row.status === "failed")
+    .map((row) => row.questionId)
+    .sort((left, right) => left.localeCompare(right, "en"));
 }
 
 export function catalogOverviewCountLabel(

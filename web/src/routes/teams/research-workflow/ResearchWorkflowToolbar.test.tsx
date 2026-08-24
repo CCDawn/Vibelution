@@ -101,7 +101,7 @@ describe("ResearchWorkflowToolbar", () => {
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(running).not.toContain("新建运行");
     expect(running).toContain("切换实验");
-    expect(running).toContain("运行记录");
+    expect(running).toContain("运行时间线");
     expect(running).toContain("定位当前任务");
     expect(running).not.toContain("前往假说选择");
     expect(running).toContain('data-variant="secondary"');
@@ -121,7 +121,7 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
       onNavigateCurrent: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>, "en");
-    expect(running).toContain("History");
+    expect(running).toContain("Run timeline");
     expect(running).toContain("Progress");
     expect(running).toContain("Hypothesis prep · 3/5");
     expect(running).not.toContain("Status");
@@ -148,7 +148,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain('data-variant="secondary"');
     expect(running).not.toContain('data-variant="primary"');
     expect(running).toContain("题目进度");
-    expect(running).toContain("运行记录");
+    expect(running).toContain("运行时间线");
     expect(running).not.toContain("生成纪要");
     expect(running).not.toContain("确认并结束本轮");
   });
@@ -319,6 +319,27 @@ describe("ResearchWorkflowToolbar", () => {
     expect(researchWorkflowPhase("前往下一轮讨论")).toMatchObject({ step: 3, zh: "团队评审" });
     expect(researchWorkflowPhase("查看资料搜集")).toMatchObject({ step: 4, zh: "资料搜集" });
     expect(researchWorkflowPhase("前往假说收敛")).toMatchObject({ step: 5, zh: "假说收敛" });
+  });
+
+  it("derives the phase structurally from the hypothesis-first stage, not label wording", () => {
+    // The stage is authoritative: reworded navigation labels can no longer
+    // move the progress marker.
+    expect(researchWorkflowPhase("前往假说收敛", null, true, "review_running"))
+      .toMatchObject({ step: 3, zh: "团队评审" });
+    expect(researchWorkflowPhase("前往候选生成", null, true, "selection_required"))
+      .toMatchObject({ step: 2, zh: "假说选择" });
+    expect(researchWorkflowPhase("", null, true, "generation_awaiting_approval"))
+      .toMatchObject({ step: 1, zh: "候选形成" });
+    expect(researchWorkflowPhase("", null, true, "budget_exhausted"))
+      .toMatchObject({ step: 3, zh: "团队评审" });
+    expect(researchWorkflowPhase("", null, true, "collecting"))
+      .toMatchObject({ step: 4, zh: "资料搜集" });
+    expect(researchWorkflowPhase("", null, true, "collection_recovery"))
+      .toMatchObject({ step: 4, zh: "资料搜集" });
+    expect(researchWorkflowPhase("", null, true, "handoff_pending"))
+      .toMatchObject({ step: 4, zh: "资料搜集" });
+    expect(researchWorkflowPhase("", null, true, "converged"))
+      .toMatchObject({ step: null, zh: "假说先行闭环已完成" });
   });
 
   it("uses a two-row compact layout below 1280 while retaining details and navigation", () => {

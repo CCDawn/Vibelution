@@ -638,7 +638,7 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
   return {
     supervised: "监督进化",
     self: "自进化",
-    source_collection: "知识搜集",
+    source_collection: "资料搜集",
     chat_room: "Agent 群聊",
     chat: "对话",
   }[kind];

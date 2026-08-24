@@ -307,7 +307,7 @@ export function ResearchWorkflowStageNavigator({
           </div>
         ) : model.state !== "ready" ? (
           <div className={styles.state} data-state={model.state}>
-            <Circle size={22} aria-hidden="true" className="mx-auto text-[var(--fg-tertiary)]" />
+            <Circle size={22} aria-hidden="true" className={styles.stateIcon} />
             <h3 className={styles.stateTitle}>{model.state === "error" ? (zh ? "进度读取失败" : "Progress unavailable") : model.state === "unknown" ? (zh ? "进度待确认" : "Progress pending") : (zh ? "等待流程定义" : "Waiting for workflow")}</h3>
             <p className={styles.stateDetail}>{model.detail}</p>
           </div>

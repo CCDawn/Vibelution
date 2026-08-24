@@ -15,6 +15,10 @@ import {
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import type { HypothesisFirstStage } from "./hypothesisFirstNextAction";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import {
+  RESEARCH_STAGE_TERMS,
+  RUN_TIMELINE_TERM,
+} from "./researchTerminology";
 import styles from "./ResearchWorkflowToolbar.styles";
 
 type WorkflowPhase = {
@@ -25,6 +29,24 @@ type WorkflowPhase = {
   currentNodeEn?: string;
   stageZh?: string;
   stageEn?: string;
+};
+
+const HYPOTHESIS_FIRST_STAGE_PHASES: Partial<Record<HypothesisFirstStage, WorkflowPhase>> = {
+  generation_missing: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_running: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_ready_to_summarize: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_summarizing: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_awaiting_approval: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  selection_required: { step: 2, zh: "假说选择", en: "Hypothesis selection" },
+  review_running: { step: 3, zh: "团队评审", en: "Team review" },
+  review_ready_to_summarize: { step: 3, zh: "团队评审", en: "Team review" },
+  review_summarizing: { step: 3, zh: "团队评审", en: "Team review" },
+  review_awaiting_approval: { step: 3, zh: "团队评审", en: "Team review" },
+  next_review: { step: 3, zh: "团队评审", en: "Team review" },
+  budget_exhausted: { step: 3, zh: "团队评审", en: "Team review" },
+  collecting: { step: 4, zh: "资料搜集", en: "Evidence collection" },
+  collection_recovery: { step: 4, zh: "资料搜集", en: "Evidence collection" },
+  handoff_pending: { step: 4, zh: "资料搜集", en: "Evidence collection" },
 };
 
 export function researchWorkflowPhase(
@@ -39,11 +61,7 @@ export function researchWorkflowPhase(
       .find(Boolean)
     : null;
   if (runtimeNode) {
-    const stage = {
-      knowledge_collection: { zh: "资料搜集", en: "Knowledge collection" },
-      experiment_design: { zh: "实验设计", en: "Experiment design" },
-      execution_iteration: { zh: "执行迭代", en: "Execution & iteration" },
-    }[runtimeNode.stageId];
+    const stage = RESEARCH_STAGE_TERMS[runtimeNode.stageId];
     return {
       step: null,
       zh: stage.zh,
@@ -64,6 +82,14 @@ export function researchWorkflowPhase(
       zh: "假说先行闭环已完成",
       en: "Hypothesis-first loop complete",
     };
+  }
+  // Structural stage mapping is authoritative whenever the hypothesis-first
+  // chain provides one. The navigation-label ladder below stays only as a
+  // fallback for callers without a stage, so label rewording can no longer
+  // silently move the progress marker.
+  const stagedPhase = nextActionStage ? HYPOTHESIS_FIRST_STAGE_PHASES[nextActionStage] : undefined;
+  if (stagedPhase) {
+    return stagedPhase;
   }
   const label = String(navigationLabel || "").trim();
   if (label.includes("假说收敛")) return { step: 5, zh: "假说收敛", en: "Convergence" };
@@ -133,7 +159,7 @@ export function ResearchWorkflowToolbar(props: {
     { id: "team", label: isZh ? "成员与讨论" : "Members" },
     { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph" },
     { id: "agents", label: "Agent" },
-    { id: "timeline", label: isZh ? "运行记录" : "History" },
+    { id: "timeline", label: isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en },
   ];
   const activeDetailTab = detailTabs.some((tab) => tab.id === detailsPanel)
     ? String(detailsPanel ?? "")

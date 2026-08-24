@@ -802,7 +802,7 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("dev-12 / dev-125");
     expect(markup).toContain("fixtureOnly=true");
     expect(markup).toContain("real_qwen_invocation");
-    expect(markup).toContain("CLI 诊断");
+    expect(markup).toContain("开发者诊断");
     expect(markup).toContain("platform_flow_ready.py");
     expect(markup).toContain("下一合法动作：运行 DEV readiness");
   });

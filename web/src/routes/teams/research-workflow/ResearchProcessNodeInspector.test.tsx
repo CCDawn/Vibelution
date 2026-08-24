@@ -105,7 +105,7 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     const markup = renderInspector(makeDetail({ nodeAttempt: 2 }));
     expect(markup).toContain("Finder Agent");
     expect(markup).toContain("agent-1");
-    expect(markup).toContain("知识搜集");
+    expect(markup).toContain("资料搜集");
     expect(markup).toContain("Tokens");
     expect(markup).toContain('data-testid="node-inspector-model-trigger"');
     expect(markup).not.toContain("source_finder");

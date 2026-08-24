@@ -114,7 +114,9 @@ function actionLabel(zh: boolean, action: string): string {
     [devActions.repairReadiness]: zh ? "修复失败的平台门禁" : "Repair failed platform gates",
     [devActions.repairDev1]: zh ? "修复 dev-1 fixture" : "Repair dev-1 fixture",
     [devActions.repairDev5]: zh ? "修复 dev-5 fixture" : "Repair dev-5 fixture",
-    [devActions.researchAuthorizationRequired]: devActions.researchAuthorizationRequired,
+    [devActions.researchAuthorizationRequired]: zh
+      ? "需要科研负责人授权"
+      : "Research-owner authorization required",
   };
   return labels[action] ?? action;
 }
@@ -596,8 +598,8 @@ export function ChallengeMvpProgressPanel({
               {nextLegalAction === devActions.researchAuthorizationRequired ? (
                 <div className={styles.notice} role="status">
                   {zh
-                    ? "DEV fixture 已全部通过，停在 RESEARCH_AUTHORIZATION_REQUIRED；真实 Qwen / CUDA / DANDI / 125 题 / 提交需单独科研授权。"
-                    : "DEV fixtures all passed; stopped at RESEARCH_AUTHORIZATION_REQUIRED. Real Qwen/CUDA/DANDI/125-question/submission needs separate research authorization."}
+                    ? "DEV fixture 已全部通过，当前没有可自动执行的下一步（系统状态 RESEARCH_AUTHORIZATION_REQUIRED）。请科研负责人单独授权后，真实 Qwen / CUDA / DANDI / 125 题运行与正式提交才会解锁。"
+                    : "DEV fixtures all passed; there is no automatic next step (system state RESEARCH_AUTHORIZATION_REQUIRED). Real Qwen/CUDA/DANDI/125-question runs and formal submission unlock only after separate research-owner authorization."}
                 </div>
               ) : null}
               <div className={styles.locator}>
@@ -613,6 +615,11 @@ export function ChallengeMvpProgressPanel({
                     ? `DEV fixture 只允许计划 ${boundary.authorizedPlans.join(" / ")}；${boundary.forbiddenPlans.join(" / ")} 与真实 G1/G5/G12/G125、Qwen、CUDA/GPU、DANDI 下载、联网搜集、正式提交均未授权（fixtureOnly=${String(boundary.fixtureOnly)}）。`
                     : `DEV fixture plans ${boundary.authorizedPlans.join(" / ")} only; ${boundary.forbiddenPlans.join(" / ")} and real G1/G5/G12/G125, Qwen, CUDA/GPU, DANDI download, live collection and formal submission are unauthorized (fixtureOnly=${String(boundary.fixtureOnly)}).`}
                 </span>
+                <span>
+                  {zh
+                    ? "G1/G5/G12/G125 指分层试点批次：1 题 → 5 题 → 12 题领域分层 → 125 题全量；任一前置批次失败都不会放行下一层。"
+                    : "G1/G5/G12/G125 are staged pilot batches: 1 → 5 → 12-domain → all 125 questions; a failed stage never unlocks the next."}
+                </span>
                 <div className={styles.devMeta}>
                   forbiddenFeatures: {boundary.forbiddenFeatures.join(" / ") || "—"}
                 </div>
@@ -621,8 +628,8 @@ export function ChallengeMvpProgressPanel({
 
             <div className={styles.locator} data-dev-controls={devMarkers.cliLocator}>
               {zh
-                ? "CLI 诊断（非授权入口）：python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"
-                : "CLI diagnostic (not an authorization entry): python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"}
+                ? "开发者诊断（非授权入口，普通使用者可忽略）：python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"
+                : "Developer diagnostic (not an authorization entry; safe to ignore): python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"}
             </div>
           </>
         )}

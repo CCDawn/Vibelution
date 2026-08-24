@@ -2,18 +2,66 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ChallengeCatalogOverview,
   ChallengeCatalogOverviewView,
   isDevBatchCatalogAction,
 } from "./ChallengeCatalogOverview";
 import {
   catalogOverviewCountLabel,
+  failedQuestionIdsInPlan,
   visibleCatalogOverviewRows,
   type CatalogOverview,
   type CatalogOverviewQuestion,
 } from "./challengeCatalogOverviewModel";
+
+const containerApiMock = vi.hoisted(() => ({
+  fetchChallengeCupCatalogOverview: vi.fn(),
+  runChallengeCupDevBatch: vi.fn(async () => ({ schemaVersion: 1, ok: true })),
+}));
+
+const containerState = vi.hoisted(() => ({
+  overviewData: { current: null as CatalogOverview | null },
+  mutationCalls: [] as Array<{ planId: string; retryFailed: boolean }>,
+}));
+
+vi.mock("../../../api/teamExperiment", () => containerApiMock);
+vi.mock("../../../api/queryKeys", () => ({
+  queryKeys: {
+    challengeCupCatalogOverview: () => ["challenge-cup-overview"],
+    challengeCupDevControlsSnapshot: () => ["challenge-cup-dev-snapshot"],
+  },
+}));
+vi.mock("../../../app/pollingPolicy", () => ({
+  usePageVisibility: () => true,
+  resolvePollingInterval: () => 5_000,
+}));
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({
+    data: containerState.overviewData.current,
+    isPending: false,
+    isError: false,
+    error: null,
+    refetch: () => Promise.resolve(),
+  }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useMutation: (options: {
+    mutationFn: (input: { planId: string; retryFailed: boolean }) => Promise<unknown>;
+    onSuccess?: (result: unknown) => Promise<void>;
+  }) => ({
+    isPending: false,
+    error: null,
+    mutate: (input: { planId: string; retryFailed: boolean }) => {
+      containerState.mutationCalls.push(input);
+      void (async () => {
+        const result = await options.mutationFn(input);
+        await options.onSuccess?.(result);
+      })();
+    },
+  }),
+}));
 
 function question(
   overrides: Partial<CatalogOverviewQuestion> & Pick<CatalogOverviewQuestion, "questionId" | "status">,
@@ -84,6 +132,16 @@ describe("challengeCatalogOverviewModel", () => {
     expect(failed.map((row) => row.questionId)).toEqual(["SCI-003"]);
     expect(visibleCatalogOverviewRows(catalog125(), "running")).toHaveLength(1);
     expect(visibleCatalogOverviewRows(catalog125(), "queued")).toHaveLength(121);
+  });
+
+  it("collects every failed question of a plan, not only the selected row", () => {
+    const rows = [
+      ...catalog125().filter((row) => row.status !== "queued"),
+      question({ questionId: "SCI-008", status: "failed" }),
+      question({ questionId: "SCI-004", status: "succeeded" }),
+    ];
+    expect(failedQuestionIdsInPlan(rows, "dev-1")).toEqual(["SCI-003", "SCI-008"]);
+    expect(failedQuestionIdsInPlan(rows, "other-plan")).toEqual([]);
   });
 });
 
@@ -163,7 +221,7 @@ describe("ChallengeCatalogOverviewView", () => {
         />,
       );
     });
-    const button = Array.from(container.querySelectorAll("button")).find((node) => node.textContent === "重试");
+    const button = Array.from(container.querySelectorAll("button")).find((node) => node.textContent === "重试失败题");
     expect(button).toBeTruthy();
     await act(async () => {
       button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -187,5 +245,81 @@ describe("ChallengeCatalogOverviewView", () => {
     expect(isDevBatchCatalogAction(running, false)).toBe(false);
     expect(isDevBatchCatalogAction(failed, true)).toBe(true);
     expect(isDevBatchCatalogAction(running, true)).toBe(true);
+  });
+});
+
+describe("ChallengeCatalogOverview retry scope confirmation", () => {
+  beforeEach(() => {
+    containerApiMock.fetchChallengeCupCatalogOverview.mockClear();
+    containerApiMock.runChallengeCupDevBatch.mockClear();
+    containerState.mutationCalls.length = 0;
+    containerState.overviewData.current = overview([
+      question({ questionId: "SCI-003", status: "failed" }),
+      question({ questionId: "SCI-008", status: "failed" }),
+      question({ questionId: "SCI-007", status: "running" }),
+      question({ questionId: "SCI-004", status: "queued" }),
+    ]);
+    document.body.innerHTML = "";
+  });
+
+  function findButton(label: string): HTMLButtonElement | undefined {
+    return Array.from(document.body.querySelectorAll("button"))
+      .find((node) => node.textContent?.trim() === label);
+  }
+
+  async function mountOverview() {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <ChallengeCatalogOverview teamId="team-1" onOpenQuestion={() => {}} devBatchControlsEnabled />,
+      );
+    });
+    return async () => {
+      await act(async () => {
+        root.unmount();
+      });
+      host.remove();
+    };
+  }
+
+  it("shows the full failed set of the plan before retrying and cancels without mutating", async () => {
+    const unmount = await mountOverview();
+    const retryButton = findButton("重试失败题");
+    expect(retryButton).toBeTruthy();
+    await act(async () => {
+      retryButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain("重试该批次的全部失败题目？");
+    expect(document.body.textContent).toContain("不只是当前这一题");
+    expect(document.body.textContent).toContain("SCI-003");
+    expect(document.body.textContent).toContain("SCI-008");
+    expect(findButton("重试全部 2 道失败题")).toBeTruthy();
+
+    await act(async () => {
+      findButton("取消")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(containerState.mutationCalls).toEqual([]);
+    expect(document.body.textContent).not.toContain("重试该批次的全部失败题目？");
+    await unmount();
+  });
+
+  it("confirms the retry as a plan-scoped retryFailed batch", async () => {
+    const unmount = await mountOverview();
+    await act(async () => {
+      findButton("重试失败题")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      findButton("重试全部 2 道失败题")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(containerState.mutationCalls).toEqual([{ planId: "dev-1", retryFailed: true }]);
+    expect(containerApiMock.runChallengeCupDevBatch).toHaveBeenCalledWith(
+      "team-1",
+      "dev-1",
+      { maxItems: null, retryFailed: true },
+    );
+    await unmount();
   });
 });

@@ -10,11 +10,12 @@ import {
   totalResearchRunSafetyTokens,
 } from "./researchRunSafetyBudget";
 import styles from "./ResearchRunSafetyLimitPanel.styles";
+import { RESEARCH_STAGE_TERMS } from "./researchTerminology";
 
 const STAGES: Array<{ id: ResearchRunSafetyStageId; label: string; labelEn: string }> = [
-  { id: "knowledge_collection", label: "知识搜集", labelEn: "Knowledge collection" },
-  { id: "experiment_design", label: "实验设计", labelEn: "Experiment design" },
-  { id: "execution_iteration", label: "执行迭代", labelEn: "Execution & iteration" },
+  { id: "knowledge_collection", label: RESEARCH_STAGE_TERMS.knowledge_collection.zh, labelEn: RESEARCH_STAGE_TERMS.knowledge_collection.en },
+  { id: "experiment_design", label: RESEARCH_STAGE_TERMS.experiment_design.zh, labelEn: RESEARCH_STAGE_TERMS.experiment_design.en },
+  { id: "execution_iteration", label: RESEARCH_STAGE_TERMS.execution_iteration.zh, labelEn: RESEARCH_STAGE_TERMS.execution_iteration.en },
 ];
 
 const PRESET_LABEL_EN: Record<ResearchRunSafetyPresetId, string> = {

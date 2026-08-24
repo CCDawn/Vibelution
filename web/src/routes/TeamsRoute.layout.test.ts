@@ -1256,13 +1256,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("搜索资料");
     // Wave 8H: research console copy lives on TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("科研控制台");
-    expect(teamResearchStageLauncherPanelSource).toContain("开始知识搜集");
+    expect(teamResearchStageLauncherPanelSource).toContain("开始${RESEARCH_STAGE_TERMS.knowledge_collection.zh}");
     expect(teamResearchStageLauncherPanelSource).toContain("搜索下一批");
     expect(routeSource).toContain("新一轮搜集");
     expect(routeSource).toContain("继续审查");
     expect(routeSource).toContain("准备实验");
     expect(runModelSource).toContain("正在团队搜索");
-    expect(sourceCollectionControllerSource).toContain("知识搜集操作台");
+    expect(sourceCollectionControllerSource).toContain("${RESEARCH_STAGE_TERMS.knowledge_collection.zh}操作台");
     expect(routeSource).toContain("sourceCollectionDecisionText");
     expect(routeSource).toContain("下一步");
     expect(routeSource).toContain("待执行");
@@ -1563,7 +1563,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchWorkspaceStageRoute");
     expect(routeSource).toContain("RESEARCH_TEAM_ID");
     expect(routeSource).toContain("onSecondaryAction: sourceCollectionIngestionReadyForExperiment");
-    expect(routeSource).toContain("进入实验设计（离开知识搜集）");
+    expect(routeSource).toContain("进入实验设计（离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}）");
     expect(routeSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
@@ -2019,12 +2019,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchCanvasRoute");
     expect(routeSource).toContain("teamChatRoomRoute");
     expect(routeSource).toContain("返回团队页面");
-    expect(routeSource).toContain("返回知识搜集");
+    expect(routeSource).toContain("返回${RESEARCH_STAGE_TERMS.knowledge_collection.zh}");
     // Wave 8I: stage-page chat back-link copy lives on the standalone stage panel.
     expect(routeSource).toContain("返回阶段页");
     expect(routeSource).toContain("renderSourceCollectionConversation");
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
-    expect(routeSource).toContain("知识搜集工作台");
+    expect(routeSource).toContain("${RESEARCH_STAGE_TERMS.knowledge_collection.zh}工作台");
     expect(routeSource).not.toContain("挑战杯ai科研团队 / 知识搜集阶段");
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
@@ -3291,7 +3291,7 @@ describe("TeamsRoute layout contract", () => {
     expect(ingestionModuleSource).toContain("onSecondaryAction: sourceCollectionIngestionReadyForExperiment");
     expect(ingestionModuleSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
     expect(ingestionModuleSource).toContain('onAction: () => void startSourceCollectionStageSessionTask("ingestion")');
-    expect(ingestionModuleSource).toContain("进入实验设计（离开知识搜集）");
+    expect(ingestionModuleSource).toContain("进入实验设计（离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}）");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");

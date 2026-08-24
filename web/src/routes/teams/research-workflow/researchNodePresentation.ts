@@ -1,9 +1,10 @@
 import type { ActorKind, WorkflowStageId } from "../../../api/types/researchWorkflow";
+import { RESEARCH_STAGE_TERMS } from "./researchTerminology";
 
 const STAGE_LABELS: Record<WorkflowStageId, string> = {
-  knowledge_collection: "知识搜集",
-  experiment_design: "实验设计",
-  execution_iteration: "执行迭代",
+  knowledge_collection: RESEARCH_STAGE_TERMS.knowledge_collection.zh,
+  experiment_design: RESEARCH_STAGE_TERMS.experiment_design.zh,
+  execution_iteration: RESEARCH_STAGE_TERMS.execution_iteration.zh,
 };
 
 const ACTOR_LABELS: Record<ActorKind, string> = {

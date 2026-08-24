@@ -1,6 +1,7 @@
 /**
  * Pure model for research board kanban columns (preview-aligned).
  */
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import type { ResearchStagePhaseStatus } from "./source-collection/stageProjection";
 
 export type ResearchBoardCard = {
@@ -136,7 +137,7 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
   knowledgeCards.push(
     cardFromPhase(knowledge, {
       id: "kc-empty",
-      title: input.lang === "zh" ? "开始知识搜集" : "Start knowledge collection",
+      title: input.lang === "zh" ? `开始${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Start knowledge collection",
       body: input.lang === "zh"
         ? "生成搜索计划和团队分工，先把资料搜索跑起来。"
         : "Create the search plan and team assignments.",
@@ -221,8 +222,8 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
   return [
     {
       id: "knowledge_collection",
-      titleZh: "知识搜集",
-      titleEn: "Knowledge",
+      titleZh: RESEARCH_STAGE_TERMS.knowledge_collection.zh,
+      titleEn: RESEARCH_STAGE_TERMS.knowledge_collection.en,
       cards: knowledgeCards.slice(0, 3),
     },
     {
