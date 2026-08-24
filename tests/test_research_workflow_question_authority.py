@@ -838,9 +838,9 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     assert attached[0]["checkpoint"]["runId"] == "run-new"
     assert attached[0]["checkpoint"]["currentNodeId"] == "protocol_design"
     assert attached[0]["checkpoint"]["currentNodeLabel"] == "协议设计"
-    assert attached[0]["checkpoint"]["completedCount"] == 6
+    assert attached[0]["checkpoint"]["completedCount"] == 7
     assert attached[0]["checkpoint"]["resumable"] is True
-    assert attached[0]["checkpoint"]["totalSteps"] == 16
+    assert attached[0]["checkpoint"]["totalSteps"] == 17
     assert attached[1]["checkpoint"] is None
 
     finished = question_launch.attach_question_run_checkpoints(
@@ -857,7 +857,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     )
     assert finished[0]["checkpoint"]["runId"] == "run-iso"
     assert finished[0]["checkpoint"]["resumable"] is False
-    assert finished[0]["checkpoint"]["completedCount"] == 16
+    assert finished[0]["checkpoint"]["completedCount"] == 17
 
 
 def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
@@ -884,7 +884,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
     checkpoint = attached[0]["checkpoint"]
     assert checkpoint["runId"] == "run-won"
     assert checkpoint["status"] == "succeeded"
-    assert checkpoint["completedCount"] == 16
+    assert checkpoint["completedCount"] == 17
     assert checkpoint["resumable"] is False
 
     # An in-flight retry still surfaces as running/resumable.

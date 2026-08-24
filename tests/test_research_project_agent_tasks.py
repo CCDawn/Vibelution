@@ -55,6 +55,11 @@ def test_source_collection_task_receipt_context_uses_server_task_authority(
                 "nodeAttempt": 1,
                 "stageId": "generation",
                 "modelPolicySha256": policy_sha256,
+                "effectiveRoute": {
+                    "modelRef": "openai/gpt-5.6",
+                    "providerId": "openai",
+                    "modelId": "gpt-5.6",
+                },
             },
         },
     )
