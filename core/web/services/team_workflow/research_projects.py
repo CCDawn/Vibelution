@@ -926,17 +926,21 @@ def destroy_challenge_cup_experiment_state_reset(
 def _destroy_challenge_cup_workspace_staging(staging_root: Path) -> None:
     """Retry one Windows transient child disappearance without widening scope."""
 
+    def ignore_missing_child(_function: Any, _path: str, error: BaseException) -> None:
+        if isinstance(error, FileNotFoundError):
+            return
+        raise error
+
     for attempt in range(2):
         if not staging_root.exists():
             return
         try:
-            shutil.rmtree(staging_root)
-            return
+            shutil.rmtree(staging_root, onexc=ignore_missing_child)
         except FileNotFoundError:
-            if not staging_root.exists() or attempt:
-                if staging_root.exists():
-                    raise
-                return
+            if attempt:
+                raise
+        if not staging_root.exists():
+            return
     raise ResearchProjectError("Challenge Cup workspace staging cleanup is incomplete")
 
 
