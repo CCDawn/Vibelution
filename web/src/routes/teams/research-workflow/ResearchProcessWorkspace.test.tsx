@@ -378,6 +378,88 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node")).toBe("hf_review");
   });
 
+  it("keeps the visible hypothesis task current while a formal run is staged", async () => {
+    harness.location.panel = "node";
+    harness.location.runId = "run-created";
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.chainState = {
+      questionId: "SCI-096",
+      candidateCount: 0,
+      hypothesisConverged: false,
+    } as never;
+    harness.chain.meetings = [{
+      question: "SCI-096",
+      meetingRoundId: "candidate-generation-1",
+      meetingType: "hypothesis_candidate_generation",
+      mode: "review",
+      scopeHash: "scope-1",
+      participants: ["search", "extractor", "reviewer", "experiment"],
+      status: "open",
+      startedAt: "2026-08-24T00:00:00Z",
+      roundIndex: 0,
+    }] as never;
+    harness.runState.run = {
+      ...currentRun,
+      runId: "run-created",
+      questionId: "SCI-096",
+      runtimeCurrentNodeIds: ["problem_understanding"],
+    } as WorkflowRunRecord;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        runVersion: 1,
+        status: "running",
+        runtimeCurrentNodeIds: ["problem_understanding"],
+        nodeRuns: {},
+      },
+    } as never;
+    harness.runState.snapshot = {
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        workflowId: "challenge-cup-research",
+        workflowVersionId: "v1",
+        runVersion: 1,
+        questionId: "SCI-096",
+        status: "running",
+      },
+      currentTask: {
+        key: "formal-problem-1",
+        nodeId: "problem_understanding",
+        stageId: "knowledge_collection",
+        nodeRunId: "formal-problem-node-1",
+        attempt: 1,
+        actorKind: "agent",
+        taskId: "formal-problem-task-1",
+        state: "auto_running",
+        kind: "agent_task",
+        label: "问题理解",
+        detail: "工作流正在处理当前任务",
+        responsibility: "agent",
+        automaticNextStep: null,
+        blockedReason: null,
+        recovery: { retryable: false, scope: "none", resumeFromNodeId: null },
+      },
+      commandOffers: [],
+      progress: null,
+      latestEventSequence: 1,
+    } as never;
+
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const currentInspector = rendered.container.querySelector(
+      '[data-vui="research-current-task-inspector"]',
+    );
+    expect(currentInspector?.textContent).toContain("候选假说讨论中");
+    expect(currentInspector?.textContent).not.toContain("问题理解");
+    expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node"))
+      .toBe("hf_generation");
+  });
+
   it("navigates from the stage rail through URL view state only", async () => {
     harness.runState.projection = {
       definition: {

@@ -263,6 +263,15 @@ export function ResearchProcessWorkspace({
       recovery: null,
     };
   }, [hypothesisFirstChain.scopeMismatch, nextAction]);
+  // A formal run may already be staged while the hypothesis-first ledger is
+  // still the only visible/operable graph. Keep that ledger as the current
+  // task authority until convergence; otherwise the inspector points at a
+  // hidden formal node (for example problem_understanding) and navigation
+  // cannot land on anything the user can operate.
+  const hypothesisFirstOwnsCurrentTask = Boolean(
+    hypothesisFirstChain.chainState
+    && !hypothesisFirstChain.chainState.hypothesisConverged,
+  );
   const semanticSelectedNodeId = hypothesisFirstSemanticNodeId(location.selectedNodeId);
   const prospectiveCurrentTaskNodeId = runState.snapshot?.currentTask?.nodeId
     ?? safeNextAction.targetNodeId;
@@ -286,8 +295,10 @@ export function ResearchProcessWorkspace({
       teamId,
       workflowId: CHALLENGE_CUP_WORKFLOW_ID,
       questionId: chainQuestionId || null,
-      runId: location.runId || null,
-      runVersion: runState.snapshot?.run.runVersion ?? runState.run?.runVersion ?? null,
+      runId: hypothesisFirstOwnsCurrentTask ? null : location.runId || null,
+      runVersion: hypothesisFirstOwnsCurrentTask
+        ? null
+        : runState.snapshot?.run.runVersion ?? runState.run?.runVersion ?? null,
     },
     snapshot: runState.snapshot,
     commandOffers: runState.commandOffers,
@@ -301,6 +312,7 @@ export function ResearchProcessWorkspace({
     chainQuestionId,
     displayError,
     hypothesisFirstReady,
+    hypothesisFirstOwnsCurrentTask,
     location.panel,
     location.runId,
     workspaceSelectedNodeId,
