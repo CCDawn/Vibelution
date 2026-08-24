@@ -125,6 +125,7 @@ _DISCUSSION_DRIVER = threading.local()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
 _SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
+_PREFORMAL_CANDIDATE_ROOM_SOURCE = "hypothesis_first_candidate_review.v1"
 
 
 @contextmanager
@@ -393,7 +394,17 @@ def _resolve_scoped_meeting_room(
     """Bind role-resolved Agents to hidden Child Sessions and one room."""
 
     if scope is None:
-        return base_room_id, None
+        return (
+            _resolve_preformal_candidate_review_room(
+                team_id,
+                request,
+                base_room_id=base_room_id,
+                participant_resolution=participant_resolution,
+                meeting_type=meeting_type,
+                selected_candidate_ids=selected_candidate_ids,
+            ),
+            None,
+        )
 
     from core.web.services.team_workflow.discussion_room_runtime import (
         resolve_scoped_discussion_room,
@@ -472,6 +483,133 @@ def _resolve_scoped_meeting_room(
     if not room_id:
         raise ResearchMeetingRuntimeError("formal discussion room resolver returned no roomId")
     return room_id, scope
+
+
+def _resolve_preformal_candidate_review_room(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    base_room_id: str,
+    participant_resolution: Mapping[str, Any],
+    meeting_type: str,
+    selected_candidate_ids: Sequence[str],
+) -> str:
+    """Allocate one deterministic room for an unscoped candidate review.
+
+    Candidate selection normally precedes creation of the formal research
+    runtime, so it intentionally has no ``WorkflowDiscussionScopeV1`` yet.
+    It must nevertheless not reuse the team room: a background round makes
+    that room busy and prevents sibling candidate reviews from ever opening.
+    These rooms retain the exact server-resolved roster and carry a compact
+    preformal binding, while formal flows continue to use child-session rooms
+    through ``_resolve_scoped_meeting_room`` above.
+    """
+
+    selected = _normalized_str_list(selected_candidate_ids)
+    if (
+        str(meeting_type or "").strip().lower() != "hypothesis_review"
+        or len(selected) != 1
+    ):
+        return base_room_id
+
+    from core.web.services import chat_room_service
+
+    selection_id = str(request.get("selectionId") or "").strip()
+    question_id = str(request.get("questionId") or "").strip().upper()
+    meeting_round_id = str(request.get("meetingRoundId") or "").strip()
+    candidate_id = selected[0]
+    if not selection_id or not question_id or not meeting_round_id:
+        raise ResearchMeetingRuntimeError(
+            "preformal candidate review room requires selection, question and meeting ids"
+        )
+
+    room_id = "room-hf-review-" + sha256_hex(
+        {
+            "teamId": str(team_id or "").strip(),
+            "meetingRoundId": meeting_round_id,
+            "selectionId": selection_id,
+            "candidateId": candidate_id,
+        }
+    )[:24]
+    expected_config = {
+        "source": _PREFORMAL_CANDIDATE_ROOM_SOURCE,
+        "teamId": str(team_id or "").strip(),
+        "meetingRoundId": meeting_round_id,
+        "selectionId": selection_id,
+        "questionId": question_id,
+        "candidateId": candidate_id,
+    }
+    existing = chat_room_service.get_chat_room_detail(room_id)
+    if isinstance(existing, Mapping):
+        config = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+        if any(str(config.get(key) or "") != value for key, value in expected_config.items()):
+            raise ResearchMeetingRuntimeError(
+                "preformal candidate review room is already bound to different content"
+            )
+        return room_id
+
+    participant_agent_ids = _normalized_str_list(participant_resolution.get("participants"))
+    if not participant_agent_ids:
+        raise ResearchMeetingRuntimeError(
+            "preformal candidate review room requires a resolved participant roster"
+        )
+    participant_contexts = _preformal_candidate_room_participant_contexts(
+        chat_room_service.get_chat_room_detail(base_room_id),
+        participant_resolution,
+        participant_agent_ids,
+    )
+    created = chat_room_service.create_chat_room(
+        room_id=room_id,
+        title=f"{question_id} | 候选评审 | {candidate_id}",
+        participant_agent_ids=participant_agent_ids,
+        participant_contexts_by_agent_id=participant_contexts,
+        mode="round_robin",
+        purpose="meeting",
+        config=expected_config,
+    )
+    created_room_id = str(created.get("roomId") or "").strip()
+    if created_room_id != room_id:
+        raise ResearchMeetingRuntimeError("preformal candidate room resolver returned no roomId")
+    return room_id
+
+
+def _preformal_candidate_room_participant_contexts(
+    base_room: Mapping[str, Any] | None,
+    participant_resolution: Mapping[str, Any],
+    participant_agent_ids: Sequence[str],
+) -> dict[str, dict[str, Any]]:
+    """Copy the fixed roster's team context into a derived candidate room."""
+
+    allowed_agent_ids = set(_normalized_str_list(participant_agent_ids))
+    role_by_agent_id = {
+        str(item.get("agentId") or "").strip(): str(item.get("observedRole") or "").strip()
+        for item in list(participant_resolution.get("participantRoleSnapshot") or [])
+        if isinstance(item, Mapping) and str(item.get("agentId") or "").strip()
+    }
+    context_fields = (
+        "teamId",
+        "teamName",
+        "teamPurpose",
+        "teamRole",
+        "teamMemberPurpose",
+        "teamResponsibilities",
+    )
+    contexts: dict[str, dict[str, Any]] = {}
+    for participant in list((base_room or {}).get("participants") or []):
+        if not isinstance(participant, Mapping):
+            continue
+        agent_id = str(participant.get("agentId") or "").strip()
+        if agent_id not in allowed_agent_ids:
+            continue
+        context = {
+            field: participant.get(field)
+            for field in context_fields
+            if participant.get(field) not in (None, "")
+        }
+        if not context.get("teamRole") and role_by_agent_id.get(agent_id):
+            context["teamRole"] = role_by_agent_id[agent_id]
+        contexts[agent_id] = context
+    return contexts
 
 
 def _persist_discussion_scope_projection(

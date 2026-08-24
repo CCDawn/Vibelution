@@ -102,6 +102,27 @@ class _InlineExecutor:
         return future
 
 
+class _DeferredExecutor:
+    """Keep background room rounds running until the test releases them."""
+
+    def __init__(self) -> None:
+        self.submitted: list[dict] = []
+
+    def submit(self, fn, *args, **kwargs):
+        future: Future = Future()
+        self.submitted.append(
+            {"fn": fn, "args": args, "kwargs": kwargs, "future": future}
+        )
+        return future
+
+    def drain(self) -> None:
+        for submitted in self.submitted:
+            future = submitted["future"]
+            if future.done():
+                continue
+            future.set_result(submitted["fn"](*submitted["args"], **submitted["kwargs"]))
+
+
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -1724,6 +1745,52 @@ def test_selection_review_prompt_hydrates_canonical_candidate_content(
     assert all("canonical statement b" not in prompt for prompt in prompts_for_a)
     assert all("canonical mechanism b" in prompt for prompt in prompts_for_b)
     assert all("canonical statement a" not in prompt for prompt in prompts_for_b)
+
+
+def test_preformal_fanout_binds_each_candidate_before_sibling_rounds_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A busy first review room must not prevent its sibling from opening."""
+
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    executor = _DeferredExecutor()
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+
+    try:
+        recorded = selections.record_hypothesis_selection(
+            team_id,
+            _selection_payload(agents["coordinator"]),
+            agent_runner=_marker_runner,
+        )
+        meetings = _review_meetings(recorded)
+        links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
+
+        assert len(meetings) == 2
+        assert len(links) == 2
+        assert {link["candidateId"] for link in links} == {"hyp-a", "hyp-b"}
+        assert {link["meetingRoundId"] for link in links} == {
+            meeting["meetingRoundId"] for meeting in meetings
+        }
+        room_ids = {str(meeting["linkedChatRoomId"]) for meeting in meetings}
+        assert len(room_ids) == 2
+        assert all(meeting["chatRoomRoundIds"] for meeting in meetings)
+        for room_id in room_ids:
+            room = chat_room_service.get_chat_room_detail(room_id)
+            assert room is not None
+            assert room["config"]["source"] == "hypothesis_first_candidate_review.v1"
+            assert room["config"]["teamId"] == team_id
+            expected_roles = {
+                str(item["agentId"]): str(item["observedRole"])
+                for item in meetings[0]["participantRoleSnapshot"]
+            }
+            assert {
+                str(participant["agentId"]): participant.get("teamRole")
+                for participant in room["participants"]
+            } == expected_roles
+        assert len(executor.submitted) == 2
+    finally:
+        executor.drain()
 
 
 def _close_first_meeting_with_envelope(
