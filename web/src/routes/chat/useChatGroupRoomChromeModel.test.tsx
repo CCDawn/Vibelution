@@ -84,7 +84,7 @@ describe("deriveAvailableGroupParticipants", () => {
     ]);
   });
 
-  it("uses the newest formal meeting round and ignores a newer ordinary round", () => {
+  it("restores the complete roster when a newer ordinary round replaces a formal round", () => {
     const roster = [participant("p1"), participant("p2"), participant("p3")];
     const formalRound = round({
       speakerOrder: ["p3", "p1"],
@@ -102,9 +102,9 @@ describe("deriveAvailableGroupParticipants", () => {
       roomWithRounds([formalRound, ordinaryRound]),
     );
 
-    expect(latestFormalRound).toBe(formalRound);
+    expect(latestFormalRound).toBeNull();
     expect(deriveAvailableGroupParticipants(roster, latestFormalRound?.speakerOrder).map(
       (item) => item.participantId,
-    )).toEqual(["p3", "p1"]);
+    )).toEqual(["p1", "p2", "p3"]);
   });
 });

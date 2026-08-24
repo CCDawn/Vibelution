@@ -78,12 +78,8 @@ export function latestFormalChatRoomRound(
   room: ChatRoomDetail | null | undefined,
 ): ChatRoomRound | null {
   const rounds = room?.rounds ?? [];
-  for (let index = rounds.length - 1; index >= 0; index -= 1) {
-    if (isFormalChatRoomRound(rounds[index])) {
-      return rounds[index];
-    }
-  }
-  return null;
+  const latestRound = rounds.length ? rounds[rounds.length - 1] : null;
+  return latestRound && isFormalChatRoomRound(latestRound) ? latestRound : null;
 }
 
 /**
