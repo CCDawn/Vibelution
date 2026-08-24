@@ -40,6 +40,7 @@ import {
 } from "./workbenchBackendHealth.js";
 import {
   collectRegisteredHandles,
+  reconcileDeadRegisteredHandles,
   requestGracefulWorkbenchShutdown,
   retireRegisteredHandles,
   terminatePid,
@@ -1332,10 +1333,23 @@ export async function executeMainLineWorkbench(
     const backendTreePids = ["backendPid", "backendLaunchPid", "spawnPid"]
       .map((key) => Math.trunc(Number(previous[key] || 0)))
       .filter((pid) => Number.isFinite(pid) && pid > 0);
+    const registeredHandles = collectRegisteredHandles(previous, extraPids);
+    const deadHandleReconcile = await reconcileDeadRegisteredHandles({
+      pids: registeredHandles,
+      port,
+      host,
+      expectedIdentities,
+      pidAlive: input.pidAlive,
+      connect: input.connect
+    });
+    const reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
+    const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
+    const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
+    const retainedExtraPids = extraPids.filter((pid) => !reconciledDeadPids.has(pid));
     // An injected killPid is a test/host override for the known backend and
     // daemon handles only; browser/window handles remain fail-closed below.
     const injectedOwnedDirectPids = input.killPid
-      ? [...backendTreePids, ...extraPids]
+      ? [...retainedBackendTreePids, ...retainedExtraPids]
       : [];
     const terminateProcessTree = input.terminateProcessTree
       ?? (input.killPid
@@ -1362,8 +1376,8 @@ export async function executeMainLineWorkbench(
         expectedIdentities,
         controlToken: input.controlToken,
         gracefulShutdown,
-        registeredPids: backendTreePids,
-        extraPids
+        registeredPids: retainedBackendTreePids,
+        extraPids: retainedExtraPids
       });
     } else {
       staleReclaim = {
@@ -1373,7 +1387,7 @@ export async function executeMainLineWorkbench(
     }
     const unverifiedHandles: number[] = [];
     await retireRegisteredHandles({
-      pids: collectRegisteredHandles(previous, extraPids),
+      pids: retainedRegisteredHandles,
       port,
       host,
       signal: input.signal,
@@ -1383,7 +1397,7 @@ export async function executeMainLineWorkbench(
       // reclaimStaleWorkbenchBackend has already established this one
       // backend's completion (through graceful shutdown or a verified tree
       // terminator). Do not re-run a root-only helper after that root exited.
-      treePids: [...backendTreePids, ...extraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
+      treePids: [...retainedBackendTreePids, ...retainedExtraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
       expectedIdentities,
       ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
       reportUnverified: (pids) => unverifiedHandles.push(...pids),
@@ -1404,8 +1418,8 @@ export async function executeMainLineWorkbench(
         terminateProcessTree,
         expectedIdentities,
         controlToken: input.controlToken,
-        registeredPids: backendTreePids,
-        extraPids
+        registeredPids: retainedBackendTreePids,
+        extraPids: retainedExtraPids
       });
     }
     if (!staleReclaim.reclaimed) {
@@ -1434,6 +1448,9 @@ export async function executeMainLineWorkbench(
     const retainedBrowserLaunchPid = unverifiedHandles.includes(previousBrowserLaunchPid) ? previousBrowserLaunchPid : 0;
     const retainedBrowserWindowPid = unverifiedHandles.includes(previousBrowserWindowPid) ? previousBrowserWindowPid : 0;
     const lifecycleWarnings = [
+      reconciledDeadPids.size > 0
+        ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
+        : "",
       unverifiedDaemonPid > 0
         ? `Skipped unverified Runtime Manager daemon pid ${unverifiedDaemonPid}; no process was terminated.`
         : "",
@@ -1542,8 +1559,21 @@ export async function executeMainLineWorkbench(
   const backendTreePids = ["backendPid", "backendLaunchPid", "spawnPid"]
     .map((key) => Math.trunc(Number(previous[key] || 0)))
     .filter((pid) => Number.isFinite(pid) && pid > 0);
+  const registeredHandles = collectRegisteredHandles(previous, extraPids);
+  const deadHandleReconcile = await reconcileDeadRegisteredHandles({
+    pids: registeredHandles,
+    port: preferred,
+    host,
+    expectedIdentities,
+    pidAlive: input.pidAlive,
+    connect: input.connect
+  });
+  const reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
+  const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
+  const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
+  const retainedExtraPids = extraPids.filter((pid) => !reconciledDeadPids.has(pid));
   const injectedOwnedDirectPids = input.killPid
-    ? [...backendTreePids, ...extraPids]
+    ? [...retainedBackendTreePids, ...retainedExtraPids]
     : [];
   const terminateProcessTree = input.terminateProcessTree
     ?? (input.killPid
@@ -1557,14 +1587,14 @@ export async function executeMainLineWorkbench(
   let resolved: { port: number; note: string };
   try {
     await retireRegisteredHandles({
-      pids: collectRegisteredHandles(previous, extraPids),
+      pids: retainedRegisteredHandles,
       port: preferred,
       host,
       signal: input.signal,
       pidAlive: input.pidAlive,
       killPid: input.killPid,
       terminateProcessTree,
-      treePids: [...backendTreePids, ...extraPids],
+      treePids: [...retainedBackendTreePids, ...retainedExtraPids],
       expectedIdentities,
       ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
       reportUnverified: (pids) => unverifiedHandles.push(...pids),
@@ -1711,9 +1741,14 @@ export async function executeMainLineWorkbench(
         }
       : {}),
     portRelocationNote: resolved.note,
-    lifecycleWarning: ignoredStaleDaemonPid > 0
-      ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
-      : "",
+    lifecycleWarning: [
+      reconciledDeadPids.size > 0
+        ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
+        : "",
+      ignoredStaleDaemonPid > 0
+        ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
+        : ""
+    ].filter(Boolean).join("; "),
     lastReason: `electron_main_${operation.replace(/-/g, "_")}`,
     lastSource: "electron_main",
     pythonExecutable: spawned.pythonPath,

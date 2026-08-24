@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { probeBackendHealthy, waitForBackendHealthy, workbenchHealthUrl } from "../src/process/workbenchBackendHealth.js";
 import {
   collectRegisteredHandles,
+  reconcileDeadRegisteredHandles,
   requestGracefulWorkbenchShutdown,
   retireRegisteredHandles,
   waitForPortRelease
@@ -312,6 +313,67 @@ describe("workbenchBackendRetire", () => {
         browserLaunchPid: 0
       }, [99, 11])
     ).toEqual([99, 12, 11]);
+  });
+
+  it("reconciles a dead registered handle only after its identity and port are proven safe", async () => {
+    await expect(
+      reconcileDeadRegisteredHandles({
+        pids: [11],
+        port: 8000,
+        expectedIdentities: {
+          "11": { pid: 11, createTime: 123, executable: "C:/Python/python.exe" }
+        },
+        pidAlive: () => false,
+        connect: async () => false
+      })
+    ).resolves.toEqual({
+      reconciledPids: [11],
+      retainedPids: [],
+      reason: "reconciled 1 dead registered handle(s) after port 8000 was released"
+    });
+  });
+
+  it("retains a dead handle when its persisted identity does not bind to that pid", async () => {
+    await expect(
+      reconcileDeadRegisteredHandles({
+        pids: [11],
+        port: 8000,
+        expectedIdentities: {
+          "11": { pid: 12, createTime: 123, executable: "C:/Python/python.exe" }
+        },
+        pidAlive: () => false,
+        connect: async () => false
+      })
+    ).resolves.toMatchObject({ reconciledPids: [], retainedPids: [11] });
+  });
+
+  it("retains a handle when the pid is alive, even if the listener is released", async () => {
+    await expect(
+      reconcileDeadRegisteredHandles({
+        pids: [11],
+        port: 8000,
+        expectedIdentities: {
+          "11": { pid: 11, createTime: 123, executable: "C:/Python/python.exe" }
+        },
+        pidAlive: () => true,
+        connect: async () => false
+      })
+    ).resolves.toMatchObject({ reconciledPids: [], retainedPids: [11] });
+  });
+
+  it("retains every registered handle while the owned backend port is still listening", async () => {
+    await expect(
+      reconcileDeadRegisteredHandles({
+        pids: [11, 12],
+        port: 8000,
+        expectedIdentities: {
+          "11": { pid: 11, createTime: 123, executable: "C:/Python/python.exe" },
+          "12": { pid: 12, createTime: 456, executable: "C:/Python/python.exe" }
+        },
+        pidAlive: () => false,
+        connect: async () => true
+      })
+    ).resolves.toMatchObject({ reconciledPids: [], retainedPids: [11, 12] });
   });
 
   it("terminates registered pids and waits for the port to drop", async () => {
@@ -1131,6 +1193,44 @@ describe("runWorkbenchLifecycle", () => {
     expect(written.at(-1)).toMatchObject({
       observedState: "open",
       lifecycleWarning: expect.stringContaining("7788"),
+    });
+  });
+
+  it("reconciles a dead backend handle before start instead of invoking the tree terminator", async () => {
+    const { spawnImpl, input, written } = harness();
+    const terminateProcessTree = vi.fn(async () => false);
+    let listening = false;
+    const wrappedSpawn = vi.fn((...args: Parameters<typeof spawnImpl>) => {
+      listening = true;
+      return spawnImpl(...args);
+    });
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_reconcile_dead_backend", type: "open", operation: "start", noBrowser: true },
+      spawnImpl: wrappedSpawn,
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 123,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 123,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 123,
+        spawnExecutable: "C:/Python/python.exe"
+      }),
+      pidAlive: () => false,
+      connect: async () => listening,
+      terminateProcessTree
+    });
+    expect(result.accepted).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({
+      observedState: "open",
+      lifecycleWarning: expect.stringContaining("reconciled 1 dead registered handle")
     });
   });
 
