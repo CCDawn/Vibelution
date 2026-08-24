@@ -810,6 +810,7 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
 
 def test_seed_source_collection_agent_session_context_writes_and_dedupes_project_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     _use_fake_local_research_config(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
@@ -818,6 +819,7 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_project
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
 
+    workflow_run_id = "workflow-seed-agent-session-context"
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -827,17 +829,38 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_project
             "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
+        },
+    )
+    source_run_id = run_response["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        node_run_id="node-problem-seed-agent-session-context",
+        problem_understanding={
+            "scope": "验证资料搜集 Agent 会话上下文的创建与去重。",
+            "subquestions": ["同一 finding 上下文是否只写入一次？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["Agent 尚未返回资料结果。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以创建 finding 会话。",
+            },
         },
     )
 
     first = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
         team["teamId"],
-        run_response["run"]["runId"],
+        source_run_id,
         {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     second = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
         team["teamId"],
-        run_response["run"]["runId"],
+        source_run_id,
         {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
 

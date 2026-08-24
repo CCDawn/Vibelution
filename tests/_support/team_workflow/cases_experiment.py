@@ -951,6 +951,7 @@ def test_prepare_experiment_full_run_records_preflight_without_starting_executio
     team = team_service.create_team(name="挑战杯科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
+    output_root = (tmp_path / "experiments" / "prepared").resolve()
 
     monkeypatch.setattr(
         team_workflow_orchestration_service.formal_runner,
@@ -964,7 +965,14 @@ def test_prepare_experiment_full_run_records_preflight_without_starting_executio
     )
 
     response = team_workflow_orchestration_service.prepare_experiment_full_run(
-        team["teamId"], plan_id, {"executionConfig": {"pythonExecutable": "C:/runner/python.exe"}}
+        team["teamId"],
+        plan_id,
+        {
+            "executionConfig": {
+                "pythonExecutable": "C:/runner/python.exe",
+                "outputRoot": str(output_root),
+            }
+        },
     )
 
     assert response["preparation"]["status"] == "prepared"
