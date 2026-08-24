@@ -196,6 +196,29 @@ def test_stage_captures_scope_authority_before_artifact_staging(monkeypatch) -> 
     assert order == ["discard", "authority", "artifacts"]
 
 
+def test_stage_skips_empty_checkpoint_port_without_scope_authority(monkeypatch) -> None:
+    plan = _plan("u" * 64)
+    instance = adapter_module.ChallengeCupLiveDestructiveAdapter()
+
+    monkeypatch.setattr(adapter_module, "_run_scope_authority", lambda _team_id: [])
+    monkeypatch.setattr(instance, "_discard_recovered_staging", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(chat_room_service, "prepare_team_chat_room_reset", lambda *_args, **_kwargs: {"stageId": "rooms"})
+    monkeypatch.setattr(agent_sessions, "stage_team_agent_session_reset", lambda *_args, **_kwargs: {"stageId": "sessions"})
+    monkeypatch.setattr(research_projects, "prepare_challenge_cup_experiment_state_reset", lambda *_args, **_kwargs: {"stageId": "workspace"})
+    monkeypatch.setattr(workflow_artifact_store, "prepare_workflow_artifact_reset", lambda *_args, **_kwargs: {"stageId": "artifacts"})
+    monkeypatch.setattr(
+        checkpoint_store,
+        "prepare_checkpoint_reset_stage",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("empty checkpoints must not stage")),
+    )
+    monkeypatch.setattr(ledger, "prepare_team_ledger_reset_stage", lambda *_args, **_kwargs: {"stageId": "ledger"})
+    monkeypatch.setattr(instance, "_ledger_store", lambda _path: (object(), None))
+
+    staged = instance.stage("research-team", plan)
+
+    assert "checkpoints" not in staged["ports"]
+
+
 def test_stage_requires_real_receipt_authority_when_receipts_are_planned(monkeypatch) -> None:
     plan = _plan("t" * 64)
     plan["deleteSet"] = {"receipts": ["receipt-1"]}
