@@ -264,11 +264,12 @@ export function ResearchProcessWorkspace({
     };
   }, [hypothesisFirstChain.scopeMismatch, nextAction]);
   // A formal run may already be staged while an unresolved hypothesis gate is
-  // still the only visible/operable task. Use the resolved next action as the
-  // convergence authority: meeting gates deliberately outrank a stale/early
-  // chainState.hypothesisConverged projection. Otherwise a pending candidate
-  // confirmation is replaced by a hidden formal node and cannot be located.
-  const hypothesisFirstOwnsCurrentTask = hypothesisFirstReady
+  // still the only visible/operable task. Use question-scoped evidence and the
+  // resolved next action as the authority: meeting gates deliberately outrank
+  // both an early convergence projection and ancillary queries that are still
+  // loading. Otherwise a pending candidate confirmation is replaced by a
+  // hidden formal node and cannot be located.
+  const hypothesisFirstOwnsCurrentTask = !hypothesisFirstChain.scopeMismatch
     && safeNextAction.stage !== "converged"
     && Boolean(
       hypothesisFirstChain.chainState

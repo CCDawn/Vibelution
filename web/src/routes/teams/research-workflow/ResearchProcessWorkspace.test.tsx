@@ -388,6 +388,7 @@ describe("ResearchProcessWorkspace", () => {
       candidateCount: 0,
       hypothesisConverged: true,
     } as never;
+    harness.chain.loading = true;
     harness.chain.meetings = [{
       question: "SCI-096",
       meetingRoundId: "candidate-generation-1",
