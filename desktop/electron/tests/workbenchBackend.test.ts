@@ -1116,6 +1116,44 @@ describe("runWorkbenchLifecycle", () => {
     });
   });
 
+  it("starts when a stale dead Runtime Manager PID has no identity", async () => {
+    const { spawnImpl, input, written } = harness();
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_stale_daemon", type: "open", operation: "start", noBrowser: true },
+      readDaemonPid: () => 7788,
+      readDaemonIdentity: () => null,
+      pidAlive: () => false,
+    });
+    expect(result.accepted).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(written.at(-1)).toMatchObject({
+      observedState: "open",
+      lifecycleWarning: expect.stringContaining("7788"),
+    });
+  });
+
+  it("persists a visible failure when an unverified Runtime Manager PID is still live", async () => {
+    const { spawnImpl, input, written } = harness();
+    await expect(executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_live_unverified_daemon", type: "open", operation: "start", noBrowser: true },
+      readDaemonPid: () => 7788,
+      readDaemonIdentity: () => null,
+      pidAlive: (pid) => pid === 7788,
+    })).rejects.toThrow("Runtime Manager daemon pid 7788 is live but has no verifiable identity");
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({
+      desiredState: "closed",
+      observedState: "failed",
+      phase: "failed",
+      lifecycleWarning: expect.stringContaining("7788"),
+      lastReason: "electron_main_start_preflight_failed",
+    });
+  });
+
   it("coalesces a 1s restart storm into one backend spawn", async () => {
     const { spawnImpl, input } = harness();
     const queue = createMainLineCommandQueue();

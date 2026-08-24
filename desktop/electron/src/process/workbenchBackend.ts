@@ -1473,24 +1473,57 @@ export async function executeMainLineWorkbench(
     }
   }
 
-  await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(
-    input.workspaceRoot,
-    opts,
-    fileExists,
-    input.pythonPath
-  )))({
-    force: operation === "rebuild-and-start",
-    signal: input.signal
-  });
-
   const previous = readState();
+  const persistStartPreflightFailure = (error: unknown): void => {
+    const detail = error instanceof Error ? error.message : String(error);
+    writeState({
+      ...previous,
+      desiredState: "closed",
+      observedState: "failed",
+      phase: "failed",
+      lifecycleWarning: detail,
+      lastReason: `electron_main_${operation.replace(/-/g, "_")}_preflight_failed`,
+      lastSource: "electron_main",
+      updatedAt: isoNow(input.now)
+    });
+  };
+  try {
+    await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(
+      input.workspaceRoot,
+      opts,
+      fileExists,
+      input.pythonPath
+    )))({
+      force: operation === "rebuild-and-start",
+      signal: input.signal
+    });
+  } catch (error: unknown) {
+    persistStartPreflightFailure(error);
+    throw error;
+  }
+
   const preferred = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
-  const extraPids = [(input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot)];
+  const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
+  const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
+  const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
+  const daemonPidIsAlive = daemonPid > 0 && (input.pidAlive ?? knownPidIsAlive)(daemonPid);
+  if (daemonPid > 0 && !verifiedDaemonPid && daemonPidIsAlive) {
+    const error = new Error(
+      `Runtime Manager daemon pid ${daemonPid} is live but has no verifiable identity; refusing to retire it before starting the workbench.`,
+    );
+    persistStartPreflightFailure(error);
+    throw error;
+  }
+  // A PID alone is not ownership evidence: Windows can reuse it after the
+  // historical Runtime Manager process has exited. Keep the stale record on
+  // disk for the owning lifecycle to reconcile, but never let it block a new
+  // workbench start or target an unrelated process for termination.
+  const ignoredStaleDaemonPid = daemonPid > 0 && !verifiedDaemonPid ? daemonPid : 0;
+  const extraPids = verifiedDaemonPid > 0 ? [verifiedDaemonPid] : [];
   const expectedIdentities: Record<string, PythonProcessIdentity> = {
     ...stateProcessIdentities(previous),
     ...(input.expectedIdentities ?? {})
   };
-  const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
   if (daemonIdentity && extraPids.includes(daemonIdentity.pid)) {
     expectedIdentities[String(daemonIdentity.pid)] = daemonIdentity;
   }
@@ -1509,36 +1542,42 @@ export async function executeMainLineWorkbench(
           allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
         }));
   const unverifiedHandles: number[] = [];
-  await retireRegisteredHandles({
-    pids: collectRegisteredHandles(previous, extraPids),
-    port: preferred,
-    host,
-    signal: input.signal,
-    pidAlive: input.pidAlive,
-    killPid: input.killPid,
-    terminateProcessTree,
-    treePids: [...backendTreePids, ...extraPids],
-    expectedIdentities,
-    ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
-    reportUnverified: (pids) => unverifiedHandles.push(...pids),
-    connect: input.connect
-  });
-  if (unverifiedHandles.length > 0) {
-    throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
+  let resolved: { port: number; note: string };
+  try {
+    await retireRegisteredHandles({
+      pids: collectRegisteredHandles(previous, extraPids),
+      port: preferred,
+      host,
+      signal: input.signal,
+      pidAlive: input.pidAlive,
+      killPid: input.killPid,
+      terminateProcessTree,
+      treePids: [...backendTreePids, ...extraPids],
+      expectedIdentities,
+      ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
+      reportUnverified: (pids) => unverifiedHandles.push(...pids),
+      connect: input.connect
+    });
+    if (unverifiedHandles.length > 0) {
+      throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
+    }
+    resolved = await resolveBindableWorkbenchPort({
+      preferred,
+      host,
+      workspaceRoot: input.workspaceRoot,
+      signal: input.signal,
+      connect: input.connect,
+      fetchHealth: input.fetchHealth,
+      pidAlive: input.pidAlive,
+      killPid: input.killPid,
+      terminateProcessTree,
+      expectedIdentities,
+      gracefulShutdown: input.gracefulShutdown
+    });
+  } catch (error: unknown) {
+    persistStartPreflightFailure(error);
+    throw error;
   }
-  const resolved = await resolveBindableWorkbenchPort({
-    preferred,
-    host,
-    workspaceRoot: input.workspaceRoot,
-    signal: input.signal,
-    connect: input.connect,
-    fetchHealth: input.fetchHealth,
-    pidAlive: input.pidAlive,
-    killPid: input.killPid,
-    terminateProcessTree,
-    expectedIdentities,
-    gracefulShutdown: input.gracefulShutdown
-  });
   const spawned = spawnWorkbenchBackend({
     workspaceRoot: input.workspaceRoot,
     pythonPath: input.pythonPath,
@@ -1660,6 +1699,9 @@ export async function executeMainLineWorkbench(
         }
       : {}),
     portRelocationNote: resolved.note,
+    lifecycleWarning: ignoredStaleDaemonPid > 0
+      ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
+      : "",
     lastReason: `electron_main_${operation.replace(/-/g, "_")}`,
     lastSource: "electron_main",
     pythonExecutable: spawned.pythonPath,
