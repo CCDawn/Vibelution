@@ -445,7 +445,51 @@ def _run_scope_rows(team_id: str) -> list[dict[str, str]]:
             "projectId": _text(_first(raw, "projectId", "project_id", "researchProjectId")),
         }
         result.append(item)
-    return sorted(result, key=lambda item: item["runId"])
+    # A pre-formal runtime used ``thread-<workflowRunId>`` checkpoint threads
+    # before the ledger began persisting matching run/thread rows.  That
+    # legacy convention is not enough by itself: it is admitted only when a
+    # current team-owned canonical workflow artifact proves the exact run and
+    # the checkpoint port subsequently validates the stored team/run fields.
+    # Any unpaired checkpoint thread remains a hard blocker.
+    from core.research.workflow.checkpoint_store import list_checkpoint_thread_ids
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        list_workflow_artifacts,
+    )
+
+    checkpoint_threads = set(list_checkpoint_thread_ids())
+    by_thread = {item["threadId"]: item for item in result}
+    if not checkpoint_threads:
+        return sorted(by_thread.values(), key=lambda item: item["runId"])
+    legacy_threads: dict[str, dict[str, str]] = {}
+    for kind in ARTIFACT_KINDS:
+        for artifact in list_workflow_artifacts(team_id, kind=kind):
+            if not isinstance(artifact, Mapping):
+                raise LiveInventoryAuthorityError("legacy artifact run authority is malformed")
+            if _text(_first(artifact, "teamId", "team_id")) != team_id:
+                raise LiveInventoryAuthorityError("legacy artifact run authority has a team mismatch")
+            workflow_run_id = _text(_first(artifact, "workflowRunId", "workflow_run_id"))
+            if not workflow_run_id:
+                continue
+            thread_id = f"thread-{workflow_run_id}"
+            if thread_id not in checkpoint_threads:
+                continue
+            candidate = {
+                "teamId": team_id,
+                "runId": thread_id,
+                "threadId": thread_id,
+                "scopeHash": "",
+                "questionId": "",
+                "projectId": "",
+            }
+            previous = legacy_threads.get(thread_id) or by_thread.get(thread_id)
+            if previous is not None and previous != candidate:
+                raise LiveInventoryAuthorityError("legacy checkpoint thread authority conflicts")
+            legacy_threads[thread_id] = candidate
+    by_thread.update(legacy_threads)
+    unresolved_threads = checkpoint_threads - set(by_thread)
+    if unresolved_threads:
+        raise LiveInventoryAuthorityError("checkpoint thread scope authority is absent")
+    return sorted(by_thread.values(), key=lambda item: item["runId"])
 
 
 def _list_checkpoints(team_id: str) -> Any:
