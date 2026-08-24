@@ -615,11 +615,18 @@ export async function reclaimStaleWorkbenchBackend(input: {
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
+  /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
+  forceRetireOnActiveWorkRefusal?: boolean;
   registeredPids?: number[];
   extraPids?: number[];
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
-}): Promise<{ reclaimed: boolean; reason: string; verifiedPid?: number }> {
+}): Promise<{
+  reclaimed: boolean;
+  reason: string;
+  verifiedPid?: number;
+  activeWorkBlocked?: boolean;
+}> {
   const port = Math.trunc(input.port);
   if (!Number.isFinite(port) || port <= 0) {
     const pidAlive = input.pidAlive ?? knownPidIsAlive;
@@ -728,9 +735,10 @@ export async function reclaimStaleWorkbenchBackend(input: {
     };
   }
   let gracefulCompleted = false;
+  let graceful: GracefulWorkbenchShutdownResult | undefined;
   if (pidAlive(occupant.pid)) {
     if (input.gracefulShutdown) {
-      const graceful = await input.gracefulShutdown({
+      graceful = await input.gracefulShutdown({
         port,
         host: input.host,
         backendPid: occupant.pid,
@@ -743,6 +751,18 @@ export async function reclaimStaleWorkbenchBackend(input: {
         delay: input.delay
       });
       gracefulCompleted = graceful.completed;
+    }
+    if (
+      !gracefulCompleted
+      && graceful?.status === 409
+      && !input.forceRetireOnActiveWorkRefusal
+    ) {
+      return {
+        reclaimed: false,
+        activeWorkBlocked: true,
+        reason: graceful.reason,
+        verifiedPid: occupant.pid
+      };
     }
     if (!gracefulCompleted) {
       const terminated = await terminateOne(occupant.pid);
@@ -829,6 +849,8 @@ export async function resolveBindableWorkbenchPort(input: {
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
+  /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
+  forceRetireOnActiveWorkRefusal?: boolean;
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
 }): Promise<{ port: number; note: string }> {
@@ -1385,7 +1407,12 @@ export async function executeMainLineWorkbench(
           }));
     const gracefulShutdown = input.gracefulShutdown
       ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
-    let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
+    let staleReclaim: {
+      reclaimed: boolean;
+      reason: string;
+      verifiedPid?: number;
+      activeWorkBlocked?: boolean;
+    };
     if (gracefulShutdown && terminateProcessTree) {
       staleReclaim = await reclaimStaleWorkbenchBackend({
         port,
@@ -1400,6 +1427,7 @@ export async function executeMainLineWorkbench(
         expectedIdentities,
         controlToken: input.controlToken,
         gracefulShutdown,
+        forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
         extraPids: retainedExtraPids
       });
@@ -1410,26 +1438,28 @@ export async function executeMainLineWorkbench(
       };
     }
     const unverifiedHandles: number[] = [];
-    await retireRegisteredHandles({
-      pids: retainedRegisteredHandles,
-      port,
-      host,
-      signal: input.signal,
-      pidAlive: input.pidAlive,
-      killPid: input.killPid,
-      terminateProcessTree,
-      // reclaimStaleWorkbenchBackend has already established this one
-      // backend's completion (through graceful shutdown or a verified tree
-      // terminator). Do not re-run a root-only helper after that root exited.
-      treePids: [...retainedBackendTreePids, ...retainedExtraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
-      expectedIdentities,
-      ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
-      reportUnverified: (pids) => unverifiedHandles.push(...pids),
-      connect: input.connect
-    });
+    if (!staleReclaim.activeWorkBlocked) {
+      await retireRegisteredHandles({
+        pids: retainedRegisteredHandles,
+        port,
+        host,
+        signal: input.signal,
+        pidAlive: input.pidAlive,
+        killPid: input.killPid,
+        terminateProcessTree,
+        // reclaimStaleWorkbenchBackend has already established this one
+        // backend's completion (through graceful shutdown or a verified tree
+        // terminator). Do not re-run a root-only helper after that root exited.
+        treePids: [...retainedBackendTreePids, ...retainedExtraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
+        expectedIdentities,
+        ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
+        reportUnverified: (pids) => unverifiedHandles.push(...pids),
+        connect: input.connect
+      });
+    }
     // A stale same-project backend whose pid was lost from state must not
     // outlive a stop; foreign occupants are intentionally left alone.
-    if (!gracefulShutdown || !terminateProcessTree) {
+    if (!staleReclaim.activeWorkBlocked && (!gracefulShutdown || !terminateProcessTree)) {
       staleReclaim = await reclaimStaleWorkbenchBackend({
         port,
         host,
@@ -1442,6 +1472,7 @@ export async function executeMainLineWorkbench(
         terminateProcessTree,
         expectedIdentities,
         controlToken: input.controlToken,
+        forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
         extraPids: retainedExtraPids
       });
@@ -1463,7 +1494,7 @@ export async function executeMainLineWorkbench(
         accepted: false,
         operation,
         commandId,
-        code: "backend_retire_incomplete",
+        code: staleReclaim.activeWorkBlocked ? "active_work_blocked" : "backend_retire_incomplete",
         message
       };
     }
@@ -1608,9 +1639,29 @@ export async function executeMainLineWorkbench(
           workspaceRoot: input.workspaceRoot,
           allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
         }));
+  const gracefulShutdown = input.gracefulShutdown
+    ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
   const unverifiedHandles: number[] = [];
   let resolved: { port: number; note: string };
   try {
+    // Classify and, when necessary, gracefully retire the port occupant before
+    // touching registered handles.  A backend HTTP 409 is an active-work
+    // protection decision; ordinary restart must not kill its process tree
+    // merely because the port needs to be rebound.
+    resolved = await resolveBindableWorkbenchPort({
+      preferred,
+      host,
+      workspaceRoot: input.workspaceRoot,
+      signal: input.signal,
+      connect: input.connect,
+      fetchHealth: input.fetchHealth,
+      pidAlive: input.pidAlive,
+      killPid: input.killPid,
+      terminateProcessTree,
+      expectedIdentities,
+      gracefulShutdown,
+      forceRetireOnActiveWorkRefusal: false
+    });
     await retireRegisteredHandles({
       pids: retainedRegisteredHandles,
       port: preferred,
@@ -1628,19 +1679,6 @@ export async function executeMainLineWorkbench(
     if (unverifiedHandles.length > 0) {
       throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
     }
-    resolved = await resolveBindableWorkbenchPort({
-      preferred,
-      host,
-      workspaceRoot: input.workspaceRoot,
-      signal: input.signal,
-      connect: input.connect,
-      fetchHealth: input.fetchHealth,
-      pidAlive: input.pidAlive,
-      killPid: input.killPid,
-      terminateProcessTree,
-      expectedIdentities,
-      gracefulShutdown: input.gracefulShutdown
-    });
   } catch (error: unknown) {
     persistStartPreflightFailure(error);
     throw error;

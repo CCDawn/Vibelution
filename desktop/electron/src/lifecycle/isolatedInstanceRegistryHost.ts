@@ -455,6 +455,8 @@ export async function retireClaimedIsolatedRuntime(input: {
   signal?: AbortSignal;
   pythonPath?: string;
   isCurrent?: () => boolean;
+  /** Only the explicitly authorized force-stop may bypass backend HTTP 409. */
+  forceRetireOnActiveWorkRefusal?: boolean;
   desiredStateOnFailure: "open" | "closed";
   successFailureMessage?: string;
   retainedWindowPid?: number;
@@ -553,6 +555,7 @@ export async function retireClaimedIsolatedRuntime(input: {
           expectedIdentities,
           terminateProcessTree,
           gracefulShutdown: requestGracefulWorkbenchShutdown,
+          forceRetireOnActiveWorkRefusal: input.forceRetireOnActiveWorkRefusal === true,
           signal: input.signal,
           pidAlive: dependencies.pidAlive,
           connect: dependencies.connect

@@ -3576,6 +3576,7 @@ async function runIsolatedRegistryMutation(input: {
       pythonPath: input.pythonPath,
       signal: input.signal,
       isCurrent: input.isCurrent,
+      forceRetireOnActiveWorkRefusal: input.operation === "force-stop",
       desiredStateOnFailure: "closed"
     });
     const commandId = String(claimed.entry.commandId || stopCommandId);

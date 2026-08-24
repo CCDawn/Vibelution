@@ -558,7 +558,7 @@ describe("reclaimStaleWorkbenchBackend", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
-  it("falls back to the owned process tree when graceful shutdown is refused", async () => {
+  it("only falls back to the owned process tree after an explicit force authorization", async () => {
     const alive = new Set([4242]);
     const terminateProcessTree = vi.fn(async (pid: number) => {
       alive.delete(pid);
@@ -584,12 +584,53 @@ describe("reclaimStaleWorkbenchBackend", () => {
         "4242": { pid: 4242, createTime: 1, executable: "C:/Python/python.exe" }
       },
       gracefulShutdown,
+      forceRetireOnActiveWorkRefusal: true,
       delay: async () => undefined
     });
 
     expect(result).toMatchObject({ reclaimed: true, verifiedPid: 4242 });
     expect(gracefulShutdown).toHaveBeenCalledOnce();
     expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
+  });
+
+  it("preserves the backend tree when graceful shutdown is refused by active work", async () => {
+    const alive = new Set([4242]);
+    const terminateProcessTree = vi.fn(async () => {
+      alive.delete(4242);
+      return true;
+    });
+    const gracefulShutdown = vi.fn(async () => ({
+      requested: false,
+      completed: false,
+      status: 409,
+      reason: "backend refused graceful shutdown because active work is running"
+    }));
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => alive.has(4242),
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      terminateProcessTree,
+      expectedIdentities: {
+        "4242": { pid: 4242, createTime: 1, executable: "C:/Python/python.exe" }
+      },
+      gracefulShutdown,
+      delay: async () => undefined
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: false,
+      activeWorkBlocked: true,
+      verifiedPid: 4242
+    });
+    expect(result.reason).toContain("active work");
+    expect(gracefulShutdown).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(alive.has(4242)).toBe(true);
   });
 
   it("does not claim a registered pid is safe when the health identity is not confirmed", async () => {
@@ -1370,6 +1411,144 @@ describe("runWorkbenchLifecycle", () => {
       message: ACTIVE_WORK_BLOCK_MESSAGE_STOP
     });
     expect(killed).toEqual([]);
+  });
+
+  it("keeps registered backend handles when HTTP shutdown reports active work", async () => {
+    const terminateProcessTree = vi.fn(async () => false);
+    let written: Record<string, unknown> = {};
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "shutdown",
+      command: { commandId: "cmd_shutdown_http_active", type: "close", operation: "shutdown", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 1,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 1,
+        spawnExecutable: "C:/Python/python.exe"
+      }),
+      writeState: (state) => {
+        written = state;
+      },
+      listActiveWork: () => [],
+      connect: async () => true,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: () => true,
+      terminateProcessTree,
+      gracefulShutdown: async () => ({
+        requested: false,
+        completed: false,
+        status: 409,
+        reason: "backend refused graceful shutdown because active work is running"
+      })
+    });
+
+    expect(result).toMatchObject({ accepted: false, code: "active_work_blocked" });
+    expect(result.message).toContain("active work");
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(written).toMatchObject({
+      backendPid: 51,
+      backendLaunchPid: 51,
+      spawnPid: 51,
+      observedState: "failed"
+    });
+  });
+
+  it("allows an explicit force-stop to retire a backend after HTTP active-work refusal", async () => {
+    const alive = new Set([51]);
+    const terminateProcessTree = vi.fn(async (pid: number) => {
+      alive.delete(pid);
+      return true;
+    });
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "force-stop",
+      command: { commandId: "cmd_force_http_active", type: "close", operation: "force-stop", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 1,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 1,
+        spawnExecutable: "C:/Python/python.exe"
+      }),
+      writeState: () => undefined,
+      connect: async () => alive.has(51),
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      terminateProcessTree,
+      gracefulShutdown: async () => ({
+        requested: false,
+        completed: false,
+        status: 409,
+        reason: "backend refused graceful shutdown because active work is running"
+      })
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "force-stop" });
+    expect(terminateProcessTree).toHaveBeenCalledWith(51, expect.objectContaining({ pid: 51 }));
+    expect(alive.has(51)).toBe(false);
+  });
+
+  it("does not kill a backend during ordinary restart when its HTTP shutdown is protected", async () => {
+    const terminateProcessTree = vi.fn(async () => false);
+    let written: Record<string, unknown> = {};
+    await expect(executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "restart",
+      command: { commandId: "cmd_restart_http_active", type: "open", operation: "restart", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 1,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 1,
+        spawnExecutable: "C:/Python/python.exe"
+      }),
+      writeState: (state) => {
+        written = state;
+      },
+      ensureFrontend: async () => undefined,
+      listActiveWork: () => [],
+      connect: async () => true,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: () => true,
+      terminateProcessTree,
+      gracefulShutdown: async () => ({
+        requested: false,
+        completed: false,
+        status: 409,
+        reason: "backend refused graceful shutdown because active work is running"
+      })
+    })).rejects.toThrow("still held by stale backend pid 51");
+
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(written).toMatchObject({ backendPid: 51, observedState: "failed" });
   });
 
   it("ordinary stop also retires the Runtime Manager daemon pid", async () => {

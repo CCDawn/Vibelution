@@ -366,6 +366,95 @@ describe("isolatedInstanceRegistryHost", () => {
     });
   });
 
+  it("does not force-retire an isolated backend after an HTTP active-work refusal", async () => {
+    const reclaimBackend = vi.fn(async (input) => {
+      if (input.forceRetireOnActiveWorkRefusal) {
+        return { reclaimed: true, reason: "force retired", verifiedPid: undefined };
+      }
+      return {
+        reclaimed: false,
+        activeWorkBlocked: true,
+        reason: "backend refused graceful shutdown because active work is running"
+      };
+    });
+    const upsert = vi.fn(async () => ({ applied: true, entry: { status: "failed" } }));
+    const completeStop = vi.fn(async () => ({ applied: true, entry: { status: "closed" } }));
+    const clearRuntimeState = vi.fn(() => ({ cleared: true, removedCount: 1, failedCount: 0 }));
+    const entry = {
+      projectRoot: "C:/wt/task",
+      host: "127.0.0.1",
+      port: 8003,
+      spawnPid: 4242,
+      spawnCreateTime: 101,
+      spawnExecutable: "C:/Python/pythonw.exe",
+      generation: 5,
+      status: "stopping"
+    };
+    const common = {
+      readDaemonPid: () => 9191,
+      readDaemonIdentity: () => ({
+        pid: 9191,
+        createTime: 202,
+        executable: "C:/Python/pythonw.exe"
+      }),
+      reclaimBackend,
+      upsert,
+      completeStop,
+      clearRuntimeState
+    };
+
+    const ordinary = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry,
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        ...common,
+        connect: async () => true,
+        pidAlive: () => true
+      }
+    });
+
+    expect(ordinary).toMatchObject({ ok: false, code: "backend_retire_incomplete" });
+    expect(reclaimBackend.mock.calls[0]?.[0]).toMatchObject({
+      registeredPids: [4242],
+      extraPids: [9191],
+      forceRetireOnActiveWorkRefusal: false
+    });
+    expect(clearRuntimeState).not.toHaveBeenCalled();
+    expect(completeStop).not.toHaveBeenCalled();
+    expect(upsert).toHaveBeenCalledWith(
+      "C:/tmp/instances.json",
+      "worktree:task",
+      expect.objectContaining({ status: "failed", desiredState: "closed" }),
+      5
+    );
+
+    const forced = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry,
+      forceRetireOnActiveWorkRefusal: true,
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        ...common,
+        connect: async () => false,
+        pidAlive: () => false
+      }
+    });
+
+    expect(forced).toEqual({ ok: true });
+    expect(reclaimBackend.mock.calls[1]?.[0]).toMatchObject({
+      forceRetireOnActiveWorkRefusal: true
+    });
+    expect(clearRuntimeState).toHaveBeenCalledOnce();
+    expect(completeStop).toHaveBeenCalledOnce();
+  });
+
   it("never passes a daemon pid with a mismatched identity to reclaim", async () => {
     const reclaimBackend = vi.fn(async (input) => {
       expect(input.registeredPids).toEqual([]);
