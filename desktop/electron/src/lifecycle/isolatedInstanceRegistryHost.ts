@@ -9,10 +9,11 @@ import {
   type WorkbenchRuntimeStateCleanupResult
 } from "../process/workbenchBackend.js";
 import {
+  reconcileDeadRegisteredHandles,
   requestGracefulWorkbenchShutdown
 } from "../process/workbenchBackendRetire.js";
 import { createPythonOwnedProcessTreeTerminator, type PythonProcessIdentity } from "../process/pythonJsonBridge.js";
-import { knownPidIsAlive } from "./mainLine/observation.js";
+import { knownPidIsAlive, probeTcpConnect } from "./mainLine/observation.js";
 
 /** Isolated-instance lifecycle operations Electron main owns end to end. */
 export type BranchInstanceOperation =
@@ -90,6 +91,9 @@ type IsolatedStartRetireDependencies = {
     input: { instanceId: string; expectedGeneration?: number; retainWindowPid?: number }
   ) => Promise<ObserveResult>;
   clearRuntimeState: (workspaceRoot: string) => WorkbenchRuntimeStateCleanupResult;
+  readDaemonPid: (workspaceRoot: string) => number;
+  readDaemonIdentity: (workspaceRoot: string) => PythonProcessIdentity | null;
+  connect: (port: number, host: string) => Promise<boolean>;
   upsert: (
     registryPath: string,
     instanceId: string,
@@ -105,6 +109,9 @@ const DEFAULT_ISOLATED_START_RETIRE_DEPENDENCIES: IsolatedStartRetireDependencie
   reclaimBackend: reclaimStaleWorkbenchBackend,
   completeStop: (registryPath, input) => completeStop(registryPath, input),
   clearRuntimeState: clearWorkbenchLauncherRuntimeState,
+  readDaemonPid,
+  readDaemonIdentity,
+  connect: (port, host) => probeTcpConnect(port, host),
   upsert: (registryPath, instanceId, fields, expectedGeneration) =>
     upsert(registryPath, instanceId, fields, expectedGeneration),
   pidAlive: knownPidIsAlive
@@ -490,7 +497,7 @@ export async function retireClaimedIsolatedRuntime(input: {
   }
   let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
   try {
-    const daemonPid = readDaemonPid(workspaceRoot);
+    const daemonPid = dependencies.readDaemonPid(workspaceRoot);
     const pythonPath = String(input.pythonPath || "").trim();
     if (!pythonPath) {
       return settleFailed("isolated backend retirement cannot verify process ownership: python path missing; registered handles retained");
@@ -498,17 +505,38 @@ export async function retireClaimedIsolatedRuntime(input: {
     const expectedIdentities: Record<string, PythonProcessIdentity> = {};
     const spawnCreateTime = Number(entry.spawnCreateTime || 0);
     const spawnExecutable = String(entry.spawnExecutable || "").trim();
-    if (registeredSpawnPid > 0 && spawnCreateTime > 0 && spawnExecutable) {
+    if (registeredSpawnPid > 0 && Number.isFinite(spawnCreateTime) && spawnCreateTime > 0 && spawnExecutable) {
       expectedIdentities[String(registeredSpawnPid)] = {
         pid: registeredSpawnPid,
         createTime: spawnCreateTime,
         executable: spawnExecutable
       };
     }
-    const daemonIdentity = readDaemonIdentity(workspaceRoot);
-    if (daemonIdentity && daemonIdentity.pid === daemonPid) {
+    const daemonIdentity = dependencies.readDaemonIdentity(workspaceRoot);
+    const verifiedDaemonPid = daemonIdentity
+      && daemonPid > 0
+      && daemonIdentity.pid === daemonPid
+      && Number.isFinite(Number(daemonIdentity.createTime))
+      && Number(daemonIdentity.createTime) > 0
+      && String(daemonIdentity.executable || "").trim()
+      ? daemonPid
+      : 0;
+    if (verifiedDaemonPid > 0 && daemonIdentity) {
       expectedIdentities[String(daemonPid)] = daemonIdentity;
     }
+    const registeredPids = registeredSpawnPid > 0 ? [registeredSpawnPid] : [];
+    const extraPids = verifiedDaemonPid > 0 ? [verifiedDaemonPid] : [];
+    const reconciled = await reconcileDeadRegisteredHandles({
+      pids: [...registeredPids, ...extraPids],
+      port,
+      host: String(entry.host || "127.0.0.1"),
+      expectedIdentities,
+      pidAlive: dependencies.pidAlive,
+      connect: dependencies.connect
+    });
+    const reconciledPids = new Set(reconciled.reconciledPids);
+    const reclaimRegisteredPids = registeredPids.filter((pid) => !reconciledPids.has(pid));
+    const reclaimExtraPids = extraPids.filter((pid) => !reconciledPids.has(pid));
     const terminateProcessTree = createPythonOwnedProcessTreeTerminator({
       pythonPath,
       workspaceRoot,
@@ -520,12 +548,14 @@ export async function retireClaimedIsolatedRuntime(input: {
           port,
           host: String(entry.host || "127.0.0.1"),
           workspaceRoot,
-          registeredPids: [registeredSpawnPid],
-          extraPids: [daemonPid],
+          registeredPids: reclaimRegisteredPids,
+          extraPids: reclaimExtraPids,
           expectedIdentities,
           terminateProcessTree,
           gracefulShutdown: requestGracefulWorkbenchShutdown,
-          signal: input.signal
+          signal: input.signal,
+          pidAlive: dependencies.pidAlive,
+          connect: dependencies.connect
         })
       : {
           reclaimed: false,

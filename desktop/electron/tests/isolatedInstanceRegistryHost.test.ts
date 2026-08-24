@@ -254,6 +254,166 @@ describe("isolatedInstanceRegistryHost", () => {
     ]);
   });
 
+  it("reconciles dead isolated spawn and daemon handles before the kill path", async () => {
+    const reclaimBackend = vi.fn(async (input) => {
+      expect(input.registeredPids).toEqual([]);
+      expect(input.extraPids).toEqual([]);
+      return { reclaimed: true, reason: "port already released", verifiedPid: undefined };
+    });
+    const completeStop = vi.fn(async () => ({ applied: true, entry: { status: "closed" } }));
+    const clearRuntimeState = vi.fn(() => ({ cleared: true, removedCount: 2, failedCount: 0 }));
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: {
+        projectRoot: "C:/wt/task",
+        host: "127.0.0.1",
+        port: 8003,
+        spawnPid: 4242,
+        spawnCreateTime: 101,
+        spawnExecutable: "C:/Python/pythonw.exe",
+        generation: 5,
+        status: "stopping"
+      },
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        readDaemonPid: () => 9191,
+        readDaemonIdentity: () => ({
+          pid: 9191,
+          createTime: 202,
+          executable: "C:/Python/pythonw.exe"
+        }),
+        connect: async () => false,
+        pidAlive: () => false,
+        reclaimBackend,
+        clearRuntimeState,
+        completeStop
+      }
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(reclaimBackend).toHaveBeenCalledOnce();
+    expect(clearRuntimeState).toHaveBeenCalledOnce();
+    expect(completeStop).toHaveBeenCalledOnce();
+  });
+
+  it("retains isolated handles when the port is listening or a pid is alive", async () => {
+    const reclaimBackend = vi.fn(async () => ({ reclaimed: false, reason: "retirement remains unverified" }));
+    const upsert = vi.fn(async () => ({ applied: true, entry: { status: "failed" } }));
+    const entry = {
+      projectRoot: "C:/wt/task",
+      host: "127.0.0.1",
+      port: 8003,
+      spawnPid: 4242,
+      spawnCreateTime: 101,
+      spawnExecutable: "C:/Python/pythonw.exe",
+      generation: 5,
+      status: "stopping"
+    };
+    const daemonIdentity = {
+      pid: 9191,
+      createTime: 202,
+      executable: "C:/Python/pythonw.exe"
+    };
+    const commonDependencies = {
+      readDaemonPid: () => daemonIdentity.pid,
+      readDaemonIdentity: () => daemonIdentity,
+      reclaimBackend,
+      upsert,
+      completeStop: vi.fn(async () => ({ applied: true, entry: { status: "closed" } })),
+      clearRuntimeState: vi.fn(() => ({ cleared: true, removedCount: 0, failedCount: 0 }))
+    };
+
+    const portListening = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry,
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        ...commonDependencies,
+        connect: async () => true,
+        pidAlive: () => false
+      }
+    });
+    expect(portListening).toMatchObject({ ok: false, code: "backend_retire_incomplete" });
+    expect(reclaimBackend.mock.calls[0]?.[0]).toMatchObject({
+      registeredPids: [4242],
+      extraPids: [9191]
+    });
+
+    reclaimBackend.mockClear();
+    const pidAlive = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry,
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        ...commonDependencies,
+        connect: async () => false,
+        pidAlive: () => true
+      }
+    });
+    expect(pidAlive).toMatchObject({ ok: false, code: "backend_retire_incomplete" });
+    expect(reclaimBackend.mock.calls[0]?.[0]).toMatchObject({
+      registeredPids: [4242],
+      extraPids: [9191]
+    });
+  });
+
+  it("never passes a daemon pid with a mismatched identity to reclaim", async () => {
+    const reclaimBackend = vi.fn(async (input) => {
+      expect(input.registeredPids).toEqual([]);
+      expect(input.extraPids).toEqual([]);
+      expect(input.expectedIdentities).toEqual({
+        "4242": {
+          pid: 4242,
+          createTime: 101,
+          executable: "C:/Python/pythonw.exe"
+        }
+      });
+      return { reclaimed: true, reason: "port already released", verifiedPid: undefined };
+    });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: {
+        projectRoot: "C:/wt/task",
+        host: "127.0.0.1",
+        port: 8003,
+        spawnPid: 4242,
+        spawnCreateTime: 101,
+        spawnExecutable: "C:/Python/pythonw.exe",
+        generation: 5,
+        status: "stopping"
+      },
+      desiredStateOnFailure: "closed",
+      dependencies: {
+        readDaemonPid: () => 9191,
+        readDaemonIdentity: () => ({
+          pid: 9292,
+          createTime: 202,
+          executable: "C:/Python/pythonw.exe"
+        }),
+        connect: async () => false,
+        pidAlive: () => false,
+        reclaimBackend,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 0, failedCount: 0 }),
+        completeStop: async () => ({ applied: true, entry: { status: "closed" } })
+      }
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(reclaimBackend).toHaveBeenCalledOnce();
+  });
+
   it("keeps an alive registered pid from being confirmed closed before a new start", async () => {
     const upsert = vi.fn(async () => ({
       applied: true,
