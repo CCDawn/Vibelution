@@ -1891,7 +1891,7 @@ def stage_team_agent_session_reset(
         for staging_root in staging_roots:
             try:
                 if staging_root.exists():
-                    shutil.rmtree(staging_root)
+                    shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
             except Exception:
                 pass
         raise exc
@@ -2166,7 +2166,7 @@ def discard_restored_team_agent_session_reset_staging(
             )
     try:
         for staging_root in existing_roots:
-            shutil.rmtree(staging_root)
+            shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
     except Exception as exc:
         raise TeamAgentSessionResetConflictError(
             "Session reset recovered staging cleanup is incomplete."
@@ -2301,7 +2301,7 @@ def destroy_orphaned_purged_team_agent_session_reset_staging(
 
     try:
         for staging_root in existing_roots:
-            shutil.rmtree(staging_root)
+            shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
     except Exception as exc:
         raise TeamAgentSessionResetConflictError(
             "Agent session orphaned staging cleanup is incomplete."
@@ -2402,7 +2402,7 @@ def destroy_team_agent_session_reset(
                     f"Unsafe session reset staging root: {staging_root}"
                 )
             if staging_root.exists():
-                shutil.rmtree(staging_root)
+                shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
                 destroyed_count += 1
     except Exception as exc:
         raise TeamAgentSessionResetConflictError(
@@ -2499,6 +2499,15 @@ def _team_agent_session_reset_child_ids(row: Any) -> list[str]:
             elif str(raw or "").strip():
                 values.append(str(raw).strip())
     return values
+
+
+def _team_agent_session_reset_native_path(path: Path) -> str:
+    """Return a Windows extended path only after the reset root was validated."""
+
+    value = str(path.resolve(strict=False))
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    return "\\\\?\\" + value
 
 
 def _team_agent_session_reset_summary(token: dict[str, Any]) -> dict[str, Any]:
