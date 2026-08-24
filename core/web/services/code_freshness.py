@@ -60,6 +60,12 @@ def running_code_fingerprint_path(project_root: Path | str) -> Path:
     return Path(project_root) / FINGERPRINT_RELATIVE
 
 
+def serving_frontend_lease_path(project_root: Path | str, *, pid: int, create_time: float) -> Path:
+    from core.launcher.frontend_build import serving_frontend_lease_path as _lease_path
+
+    return _lease_path(project_root, pid=pid, create_time=create_time)
+
+
 def frontend_build_provenance_path(project_root: Path | str) -> Path:
     from core.launcher.frontend_build import resolve_active_frontend_dist
 
@@ -120,6 +126,36 @@ def write_running_code_fingerprint(
         tmp_path.replace(path)
         payload["written"] = True
         payload["path"] = str(path)
+        lease_release = str(payload.get("servingFrontendRelease") or "").strip()
+        try:
+            lease_create_time = float(payload.get("createTime") or 0)
+        except (TypeError, ValueError):
+            lease_create_time = 0.0
+        lease_executable = str(payload.get("executable") or "").strip()
+        if lease_release and lease_create_time > 0 and lease_executable:
+            try:
+                lease_path = serving_frontend_lease_path(
+                    root,
+                    pid=int(payload["pid"]),
+                    create_time=lease_create_time,
+                )
+                lease_path.parent.mkdir(parents=True, exist_ok=True)
+                lease_payload = {
+                    "schemaVersion": 1,
+                    "projectRoot": str(root.resolve()),
+                    "pid": int(payload["pid"]),
+                    "createTime": lease_create_time,
+                    "executable": lease_executable,
+                    "servingFrontendBuildKey": str(payload.get("servingFrontendBuildKey") or ""),
+                    "servingFrontendRelease": lease_release,
+                    "startedAt": started_at,
+                }
+                lease_tmp = lease_path.with_suffix(lease_path.suffix + ".tmp")
+                lease_tmp.write_text(json.dumps(lease_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                lease_tmp.replace(lease_path)
+                payload["servingLeasePath"] = str(lease_path)
+            except OSError as exc:
+                payload["servingLeaseErrorType"] = type(exc).__name__
     except OSError as exc:
         payload["written"] = False
         payload["errorType"] = type(exc).__name__
@@ -264,11 +300,29 @@ def resolve_frontend_freshness(*, project_root: Path | str) -> dict[str, Any]:
             active_release = str(pointer.get("release") or "").strip()
     except (OSError, ValueError, TypeError):
         active_release = ""
-    serving_metadata_present = "servingFrontendBuildKey" in running
-    serving_mismatch = serving_metadata_present and (
-        not serving_build_key
-        or serving_build_key != active_build_key
-        or (serving_release and active_release and serving_release != active_release)
+    serving_metadata_present = bool(
+        str(running.get("servingFrontendBuildKey") or "").strip()
+        and str(running.get("servingFrontendRelease") or "").strip()
+    )
+    if not serving_metadata_present:
+        return {
+            "available": False,
+            "reason": "serving_metadata_missing",
+            "stale": True,
+            "builtFromCommit": built_from,
+            "frontendTree": frontend_tree,
+            "buildKey": active_build_key,
+            "servingBuildKey": serving_build_key,
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    serving_mismatch = bool(
+        serving_metadata_present
+        and (
+            not serving_build_key
+            or serving_build_key != active_build_key
+            or (serving_release and active_release and serving_release != active_release)
+        )
     )
     return {
         "available": True,

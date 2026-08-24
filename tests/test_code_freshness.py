@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from core.web.services import code_freshness
@@ -28,6 +29,8 @@ def _write_snapshot(
                 "runningBranch": branch,
                 "dirty": bool(dirty_status),
                 "dirtyTreeDigest": hashlib.sha256(dirty_status.encode("utf-8")).hexdigest(),
+                "servingFrontendBuildKey": "key",
+                "servingFrontendRelease": "release-test",
                 "startedAt": started_at,
                 "source": "test",
             }
@@ -73,6 +76,39 @@ def test_write_and_read_running_fingerprint_roundtrip(tmp_path: Path, monkeypatc
     assert parsed["source"] == "test"
     # written payload matches the on-disk snapshot
     assert parsed["startedAt"] == result["startedAt"]
+
+
+def test_write_running_fingerprint_publishes_identity_bound_serving_lease(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        code_freshness,
+        "_capture_git_text",
+        lambda root, args: "abc123def456" if args[:2] == ["rev-parse", "HEAD"] else "main",
+    )
+    monkeypatch.setattr(
+        code_freshness,
+        "capture_process_identity",
+        lambda pid: {"pid": pid, "createTime": 456.5, "executable": "python.exe"},
+    )
+    result = code_freshness.write_running_code_fingerprint(
+        project_root=tmp_path,
+        source="test",
+        serving_metadata={
+            "apiContractVersion": "v1",
+            "frontend": {
+                "buildKey": "build-key",
+                "release": "release-build-key",
+            },
+            "backend": {"startedAt": "started"},
+        },
+    )
+
+    lease_path = code_freshness.serving_frontend_lease_path(
+        tmp_path,
+        pid=os.getpid(),
+        create_time=456.5,
+    )
+    assert result["servingLeasePath"] == str(lease_path)
+    assert json.loads(lease_path.read_text(encoding="utf-8"))["servingFrontendRelease"] == "release-build-key"
 
 
 def test_read_missing_fingerprint_returns_none(tmp_path: Path) -> None:
@@ -178,6 +214,7 @@ def test_resolve_backend_missing_snapshot_is_unknown(tmp_path: Path, monkeypatch
 
 
 def test_resolve_frontend_stale_when_tree_differs(tmp_path: Path, monkeypatch) -> None:
+    _write_snapshot(tmp_path, head="oldhead000000")
     monkeypatch.setattr(
         code_freshness,
         "_inspect_active_frontend_build",
@@ -194,6 +231,7 @@ def test_resolve_frontend_stale_when_tree_differs(tmp_path: Path, monkeypatch) -
 
 
 def test_resolve_frontend_current_when_tree_matches(tmp_path: Path, monkeypatch) -> None:
+    _write_snapshot(tmp_path, head="newhead000000")
     monkeypatch.setattr(
         code_freshness,
         "_inspect_active_frontend_build",
@@ -206,6 +244,30 @@ def test_resolve_frontend_current_when_tree_matches(tmp_path: Path, monkeypatch)
     result = code_freshness.resolve_frontend_freshness(project_root=tmp_path)
     assert result["available"] is True
     assert result["stale"] is False
+
+
+def test_resolve_frontend_missing_serving_metadata_is_unknown(tmp_path: Path, monkeypatch) -> None:
+    _write_snapshot(tmp_path, head="head00000000")
+    path = code_freshness.running_code_fingerprint_path(tmp_path)
+    parsed = json.loads(path.read_text(encoding="utf-8"))
+    parsed.pop("servingFrontendBuildKey", None)
+    parsed.pop("servingFrontendRelease", None)
+    path.write_text(json.dumps(parsed), encoding="utf-8")
+    monkeypatch.setattr(
+        code_freshness,
+        "_inspect_active_frontend_build",
+        lambda root: {
+            "current": True,
+            "reason": "frontend build is current",
+            "provenance": {"builtFromCommit": "head00000000", "frontendTree": "tree", "buildKey": "key"},
+        },
+    )
+
+    result = code_freshness.resolve_frontend_freshness(project_root=tmp_path)
+
+    assert result["available"] is False
+    assert result["stale"] is True
+    assert result["reason"] == "serving_metadata_missing"
 
 
 def test_resolve_freshness_verdict_combinations(tmp_path: Path, monkeypatch) -> None:

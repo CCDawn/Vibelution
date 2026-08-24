@@ -54,7 +54,20 @@ def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:
     # Only pin an actually published directory; an absent fallback must not
     # mask the normal resolver or make the SPA appear blank.
     pinned_path = Path(pinned_dist) if pinned_dist else None
-    dist = web_dist if web_dist is not None else (pinned_path if pinned_path and pinned_path.is_dir() else _web_dist())
+    if web_dist is not None:
+        dist = web_dist
+    elif pinned_path is not None:
+        # A running backend must keep serving the immutable release it pinned
+        # during app construction.  Falling back to the mutable active pointer
+        # after that release disappears would silently mix an old backend with
+        # a newer frontend (or produce a blank, incompatible shell).
+        if not pinned_path.is_dir():
+            raise RuntimeError(f"Pinned serving frontend release is unavailable: {pinned_path}")
+        dist = pinned_path
+    else:
+        dist = _web_dist()
+    if not dist.is_dir():
+        raise RuntimeError(f"Serving frontend directory is unavailable: {dist}")
 
     @app.get("/", include_in_schema=False)
     def index(request: Request):

@@ -3451,6 +3451,42 @@ class RuntimeManagerDaemon:
         )
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
         observation = _observe_workbench_for_open(workbench) if should_probe_before_launch else {}
+        frontend_release_changed = build_preflight.get("skipped") is False
+        if frontend_release_changed and observation and str(observation.get("observedState") or "closed") in {"open", "partial"}:
+            # Publishing a new release invalidates the already-open fast path:
+            # the running backend has pinned the previous dist.  Reuse the
+            # restart implementation so active-work protection and the normal
+            # close/retire verification remain in force.  The build just ran,
+            # therefore the restart must not build a second release.
+            blocked = self._block_lifecycle_command_if_active_work(
+                command_id=command_id,
+                command_type="restart_workbench",
+                args={
+                    **args,
+                    "reason": str(args.get("reason") or "frontend_release_changed"),
+                    "source": str(args.get("source") or "runtime_manager"),
+                },
+            )
+            if blocked is not None:
+                return blocked
+            restart_data = self._perform_restart_workbench(
+                command_id=command_id,
+                args={
+                    **args,
+                    "reason": str(args.get("reason") or "frontend_release_changed"),
+                    "source": str(args.get("source") or "runtime_manager"),
+                    "skipFrontendBuildPreflight": True,
+                },
+            )
+            return self._finish_command(
+                command_id,
+                ok=True,
+                message="Workbench restarted after publishing the latest frontend release.",
+                result_data={
+                    "buildPreflight": build_preflight,
+                    **restart_data,
+                },
+            )
         if (
             observation
             and _open_request_already_satisfied(observation, no_browser=no_browser)

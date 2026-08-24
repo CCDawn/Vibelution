@@ -5,6 +5,7 @@ function healthPayload(overrides: Record<string, unknown> = {}): Record<string, 
   return {
     status: "ok",
     routesReady: true,
+    workspaceRoot: "C:/workspace",
     apiContractVersion: "v1",
     serving: {
       frontend: { buildKey: "build-current", release: "release-current" },
@@ -26,6 +27,11 @@ function input(overrides: Record<string, unknown> = {}) {
     fetchHealth: async () => ({ status: 200, json: async () => healthPayload() }),
     readActive: () => ({ buildKey: "build-current", release: "release-current" }),
     currentCode: () => ({ head: "head-current", dirtyTreeDigest: "dirty-current" }),
+    readState: () => ({
+      backendPid: 4321,
+      backendCreateTime: 123.5,
+      backendExecutable: "python.exe"
+    }),
     ...overrides,
   };
 }
@@ -99,5 +105,34 @@ describe("workbench serving-version handshake", () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("serving_contract_missing");
+  });
+
+  it("rejects a health response from another workspace", async () => {
+    const result = await inspectWorkbenchServingVersion(
+      input({
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => healthPayload({ workspaceRoot: "C:/other-workspace" })
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("serving_workspace_mismatch");
+  });
+
+  it("rejects a healthy backend whose identity no longer matches launcher state", async () => {
+    const result = await inspectWorkbenchServingVersion(
+      input({
+        readState: () => ({
+          backendPid: 9999,
+          backendCreateTime: 999.5,
+          backendExecutable: "python.exe"
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("serving_backend_identity_mismatch");
   });
 });

@@ -138,7 +138,10 @@ def test_publish_switches_only_after_complete_staging_release(monkeypatch: pytes
     assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
 
 
-def test_gc_frontend_releases_preserves_active_serving_and_recent_entries(tmp_path: Path) -> None:
+def test_gc_frontend_releases_preserves_active_serving_and_recent_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     now = time.time()
     active = _release(tmp_path, "release-active", key="active")
     serving = _release(tmp_path, "release-serving", key="serving")
@@ -148,9 +151,16 @@ def test_gc_frontend_releases_preserves_active_serving_and_recent_entries(tmp_pa
     fingerprint_path = tmp_path / ".runtime" / "running-code-fingerprint.json"
     fingerprint_path.parent.mkdir(parents=True, exist_ok=True)
     fingerprint_path.write_text(
-        json.dumps({"schemaVersion": 1, "servingFrontendRelease": serving.name}),
+        json.dumps({
+            "schemaVersion": 1,
+            "servingFrontendRelease": serving.name,
+            "pid": 101,
+            "createTime": 1.0,
+            "executable": "python.exe",
+        }),
         encoding="utf-8",
     )
+    monkeypatch.setattr(frontend_build, "inspect_process_identity", lambda _identity: {"status": "match"})
     os.utime(active, (now - 10_000, now - 10_000))
     os.utime(serving, (now - 10_000, now - 10_000))
     os.utime(removable, (now - 10_000, now - 10_000))
@@ -170,6 +180,49 @@ def test_gc_frontend_releases_preserves_active_serving_and_recent_entries(tmp_pa
     assert removable.name in result["removed"]
     assert active.name in result["skipped"]
     assert serving.name in result["skipped"]
+
+
+def test_gc_frontend_releases_preserves_all_releases_when_lease_identity_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    now = time.time()
+    active = _release(tmp_path, "release-active", key="active")
+    serving = _release(tmp_path, "release-serving", key="serving")
+    removable = _release(tmp_path, "release-removable", key="removable")
+    _activate(tmp_path, active.name, key="active")
+    lease_path = frontend_build.serving_frontend_lease_path(
+        tmp_path,
+        pid=303,
+        create_time=3.0,
+    )
+    lease_path.parent.mkdir(parents=True, exist_ok=True)
+    lease_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "servingFrontendRelease": serving.name,
+            "pid": 303,
+            "createTime": 3.0,
+            "executable": "python.exe",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(frontend_build, "inspect_process_identity", lambda _identity: {"status": "unknown"})
+    for path in (active, serving, removable):
+        os.utime(path, (now - 10_000, now - 10_000))
+
+    result = frontend_build.gc_frontend_releases(
+        tmp_path,
+        now=now,
+        release_retention_seconds=3600,
+        keep_release_count=0,
+    )
+
+    assert result["leaseStatus"] == "unknown"
+    assert active.is_dir()
+    assert serving.is_dir()
+    assert removable.is_dir()
+    assert result["removed"] == []
 
 
 def test_gc_frontend_releases_removes_only_expired_staging_directories(tmp_path: Path) -> None:

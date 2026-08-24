@@ -6842,6 +6842,107 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     }
 
 
+def test_handle_open_workbench_restarts_when_frontend_release_was_published(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+    }
+    calls = []
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: {"skipped": False, "buildKey": "new-build"},
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_block_lifecycle_command_if_active_work",
+        lambda **kwargs: calls.append(("guard", kwargs)) or None,
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda **kwargs: calls.append(("restart", kwargs)) or {"closeStrategy": "verified"},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("published release must not use open fast path")),
+    )
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench restarted after publishing the latest frontend release."
+    assert calls[0][0] == "guard"
+    assert calls[0][1]["command_type"] == "restart_workbench"
+    assert calls[1][0] == "restart"
+    assert calls[1][1]["args"]["skipFrontendBuildPreflight"] is True
+    assert result["buildPreflight"]["skipped"] is False
+
+
+def test_handle_open_workbench_refuses_release_restart_while_active_work_is_present(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+    }
+    blocked = {"ok": False, "message": "有进行中的任务，无法重启 Vibelution。"}
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: {"skipped": False, "buildKey": "new-build"},
+    )
+    monkeypatch.setattr(runtime_daemon, "_block_lifecycle_command_if_active_work", lambda **_kwargs: blocked)
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("active work must block restart")),
+    )
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result is blocked
+
+
 def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_ready(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {

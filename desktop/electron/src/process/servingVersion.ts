@@ -2,7 +2,13 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { launcherPortsPath, preferredWorkbenchPort, readLauncherStateFile } from "./workbenchBackend.js";
+import {
+  launcherPortsPath,
+  launcherStatePath,
+  preferredWorkbenchPort,
+  readLauncherStateFile,
+  sameProjectRoot
+} from "./workbenchBackend.js";
 import { workbenchHealthUrl } from "./workbenchBackendHealth.js";
 
 export const WORKBENCH_API_CONTRACT_VERSION = "v1";
@@ -26,6 +32,7 @@ type ServingVersionInput = {
   fetchHealth?: (url: string) => Promise<{ status: number; json?: () => Promise<unknown> }>;
   readActive?: (workspaceRoot: string) => { buildKey: string; release: string };
   currentCode?: (workspaceRoot: string) => { head: string; dirtyTreeDigest: string };
+  readState?: (workspaceRoot: string) => Record<string, unknown>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,6 +92,7 @@ function servingHealthPayload(body: Record<string, unknown>): {
   apiContractVersion: string;
   buildKey: string;
   release: string;
+  workspaceRoot: string;
   backendPid: number;
   code: Record<string, unknown>;
 } | null {
@@ -98,8 +106,9 @@ function servingHealthPayload(body: Record<string, unknown>): {
   const apiContractVersion = String(body.apiContractVersion || serving?.apiContractVersion || "").trim();
   const buildKey = String(frontend?.buildKey || body.servingBuildKey || "").trim();
   const release = normalizeRelease(frontend?.release || body.servingRelease);
+  const workspaceRoot = String(body.workspaceRoot || "").trim();
   const backendPid = Number(body.pid || backend?.pid || 0);
-  if (!apiContractVersion || !buildKey || !release || !backend || !Number.isFinite(backendPid) || backendPid <= 0) {
+  if (!apiContractVersion || !buildKey || !release || !workspaceRoot || !backend || !Number.isFinite(backendPid) || backendPid <= 0) {
     return null;
   }
   if (Number(backend.pid || 0) !== backendPid || !String(backend.head || "").trim()) {
@@ -108,7 +117,7 @@ function servingHealthPayload(body: Record<string, unknown>): {
   if (!String(backend.dirtyTreeDigest || "").trim() || Number(backend.createTime || 0) <= 0 || !String(backend.executable || "").trim()) {
     return null;
   }
-  return { apiContractVersion, buildKey, release, backendPid, code: backend };
+  return { apiContractVersion, buildKey, release, workspaceRoot, backendPid, code: backend };
 }
 
 export async function inspectWorkbenchServingVersion(input: ServingVersionInput): Promise<ServingVersionInspection> {
@@ -142,6 +151,50 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
     return {
       ok: false,
       reason: `api_contract_mismatch:${serving.apiContractVersion}`,
+      port,
+      apiContractVersion: serving.apiContractVersion,
+      buildKey: serving.buildKey,
+      release: serving.release,
+      backendPid: serving.backendPid,
+      health: raw
+    };
+  }
+  if (!sameProjectRoot(serving.workspaceRoot, input.workspaceRoot)) {
+    return {
+      ok: false,
+      reason: "serving_workspace_mismatch",
+      port,
+      apiContractVersion: serving.apiContractVersion,
+      buildKey: serving.buildKey,
+      release: serving.release,
+      backendPid: serving.backendPid,
+      health: raw
+    };
+  }
+  const launcherState = (input.readState || ((workspaceRoot: string) =>
+    readLauncherStateFile(launcherStatePath(workspaceRoot))))(input.workspaceRoot);
+  const statePid = Number(launcherState.backendPid || 0);
+  const stateCreateTime = Number(launcherState.backendCreateTime || 0);
+  const stateExecutable = String(launcherState.backendExecutable || "").trim();
+  const healthCreateTime = Number(serving.code.createTime || 0);
+  const healthExecutable = String(serving.code.executable || "").trim();
+  const normalizeExecutable = (value: string): string => value.trim().replace(/\\/g, "/").toLowerCase();
+  if (
+    !Number.isFinite(statePid)
+    || statePid <= 0
+    || statePid !== serving.backendPid
+    || !Number.isFinite(stateCreateTime)
+    || stateCreateTime <= 0
+    || !Number.isFinite(healthCreateTime)
+    || healthCreateTime <= 0
+    || Math.abs(stateCreateTime - healthCreateTime) > 0.001
+    || !stateExecutable
+    || !healthExecutable
+    || normalizeExecutable(stateExecutable) !== normalizeExecutable(healthExecutable)
+  ) {
+    return {
+      ok: false,
+      reason: "serving_backend_identity_mismatch",
       port,
       apiContractVersion: serving.apiContractVersion,
       buildKey: serving.buildKey,
