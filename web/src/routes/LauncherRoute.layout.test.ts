@@ -109,6 +109,7 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("mounts the Launcher as an independent top-level control surface", () => {
+    expect(homeRouteSource).toContain('import "../design/route-css/workbench-secondary.tailwind.css"');
     expect(routerSource).toContain("const LauncherRoute = lazyRoute");
     expect(routerSource).toContain('path: "/launcher"');
     expect(routerSource).toContain("element: <LauncherShell />");
@@ -499,6 +500,13 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelStyles.settingsStrip).toContain("mx-2");
     expect(startupSettingsPanelStyles.settingsStrip).toContain("overflow-hidden");
     expect(startupSettingsPanelStyles.settingsPrimary).toContain("grid-cols-");
+    expect(startupSettingsPanelStyles.settingsPrimary).toContain("repeat(4,minmax(0,1fr))");
+    expect(startupSettingsPanelStyles.settingsPrimary).toContain("max-[1120px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(startupSettingsPanelStyles.settingsPrimary).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
+    expect(startupSettingsPanelStyles.settingsBody).toContain("max-h-[46vh]");
+    expect(startupSettingsPanelStyles.settingsBody).toContain("overflow-y-auto");
+    expect(startupSettingsPanelStyles.settingsBody).toContain("overscroll-contain");
+    expect(startupSettingsPanelStyles.settingsBody).toContain("scrollbar-gutter:stable");
     expect(startupSettingsPanelStyles.settingsSaveButton).toContain("justify-self-end");
     expect(startupSettingsPanelStyles.settingsStrip).not.toContain("mx-3");
 
@@ -784,8 +792,8 @@ describe("LauncherRoute layout contract", () => {
     expect(settingsIndex).toBeGreaterThan(railStart);
     expect(branchIndex).toBeGreaterThan(railStart);
     expect(statusErrorIndex).toBeGreaterThan(settingsIndex);
-    // Collapsed settings sit in an auto-height top strip; the branch table fills the rest.
-    // Expanding the form grows that strip full-width instead of reserving an empty side column.
+    // Collapsed settings sit in an auto-height top strip; expanded fields stay in that
+    // full-width strip but scroll within their viewport budget, leaving the branch table usable.
     expect(styles.primaryRail).toContain("grid-cols-1");
     expect(styles.primaryRail).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(styles.primaryRail).not.toContain("minmax(250px,");
