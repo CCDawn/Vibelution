@@ -13,6 +13,13 @@ const styles = {
   commandWrap: "flex flex-col items-start gap-1",
   commandDetail: "[font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   stageSummary: "flex flex-col gap-1 rounded-[var(--vui-radius-sm)] border border-[color:var(--vui-border-subtle)] bg-[color:var(--vui-surface-raised)] p-3",
+  history: "grid gap-2 border-t border-[var(--vui-border-subtle)] pt-3",
+  historySummary: "flex flex-wrap items-center justify-between gap-2",
+  historyList: "m-0 grid list-none gap-2 p-0",
+  historyItem: "grid gap-1.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
+  historyTopline: "flex items-center justify-between gap-2 [font-size:var(--vui-font-sm)]",
+  historyCopy: "m-0 [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)]",
+  historyRetry: "w-fit rounded-full bg-[var(--vui-surface-inset)] px-2 py-0.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]",
   task: "flex min-h-0 flex-col gap-3",
   fill: "h-full",
 } as const;

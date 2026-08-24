@@ -129,6 +129,8 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", null)).toBe(false);
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_meeting_1")).toBe(true);
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_collection_1")).toBe(false);
+    expect(inspectorNodeOwnsCurrentStep("hf_review", "hf_meeting_5")).toBe(true);
+    expect(inspectorNodeOwnsCurrentStep("hf_collection", "source_finding")).toBe(true);
   });
 
   beforeEach(() => {
@@ -428,7 +430,42 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("假说选择");
     expect(container.querySelector('[data-testid="selection-list"]')?.textContent).toContain("记录选择并开启评审");
     expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ compact: true }));
-    expect(container.textContent).toContain("打开赛题详情");
+    expect(container.textContent).toContain("打开题目档案");
+  });
+
+  it("shows effective review rounds as read-only history on the semantic review node", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        hypothesisConverged: true,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        selectedCandidateIds: ["c1"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r1", meetingType: "hypothesis_review", status: "closed", roundIndex: 1, digestId: "d1" }),
+        scopeMeeting({ meetingRoundId: "r2", meetingType: "hypothesis_review", status: "closed", roundIndex: 2, recoveryReason: "discussion_has_no_completed_messages" }),
+        scopeMeeting({ meetingRoundId: "r3", meetingType: "hypothesis_review", status: "closed", roundIndex: 3, digestId: "d3" }),
+      ] as HypothesisFirstChainData["meetings"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("2 轮有效评审");
+    expect(container.textContent).toContain("1 次失败重试");
+    expect(container.textContent).toContain("第 1 轮");
+    expect(container.textContent).toContain("第 3 轮");
+    expect(container.textContent).not.toContain("第 2 轮");
   });
 
   it("shows 资料搜集中 without a start-collection command", () => {

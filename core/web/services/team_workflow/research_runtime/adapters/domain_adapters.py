@@ -362,6 +362,7 @@ class SystemActionAdapter:
 
 
 _STAGE_BY_NODE: dict[str, str] = {
+    "problem_understanding": "knowledge_collection",
     "source_finding": "knowledge_collection",
     "source_extraction": "knowledge_collection",
     "evidence_relations": "knowledge_collection",

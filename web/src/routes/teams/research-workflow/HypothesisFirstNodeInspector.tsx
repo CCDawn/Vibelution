@@ -14,19 +14,24 @@ import {
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import {
   VButton,
   VEmptyState,
   VErrorSummary,
   VStateRow,
   VStateSurface,
+  VStatusChip,
   VSurface,
 } from "../../../components/vui";
 import { HypothesisSelectionList } from "../challenge-cup/HypothesisSelectionList";
 import {
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+  HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+  HYPOTHESIS_FIRST_REVIEW_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+  isHypothesisReviewRetryAttempt,
 } from "./hypothesisFirstCanvasRegion";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import {
@@ -90,7 +95,12 @@ export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: strin
   // the chain scope is loading or cannot resolve the current step.
   if (!targetNodeId) return false;
   if (nodeId === targetNodeId) return true;
-  return nodeId.startsWith("hf_collection_") && targetNodeId === "source_finding";
+  if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID && targetNodeId.startsWith("hf_meeting_")) return true;
+  if (
+    (nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID || nodeId.startsWith("hf_collection_"))
+    && (targetNodeId === "source_finding" || targetNodeId.startsWith("hf_collection_"))
+  ) return true;
+  return false;
 }
 
 export function HypothesisFirstNodeInspector({
@@ -141,6 +151,9 @@ export function HypothesisFirstNodeInspector({
   const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
   );
+  const reviewHistory = reviewMeetings
+    .filter((meeting) => !isHypothesisReviewRetryAttempt(meeting))
+    .sort((left, right) => (left.roundIndex ?? 0) - (right.roundIndex ?? 0));
   const stageSummary = chain.chainState?.hypothesisConverged && reviewMeetings.length > 0
     ? {
         rounds: reviewMeetings.filter((meeting) => meeting.status === "closed").length,
@@ -223,18 +236,25 @@ export function HypothesisFirstNodeInspector({
         <VStateRow tone="warning">{nextAction.disabledReason}</VStateRow>
       ) : null}
       {nodeOwnsCurrentStep ? (
-        <InspectorBody
-          teamId={teamId}
-          questionId={questionId}
-          nodeId={nodeId}
-          liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
-          nextAction={nextAction}
-          lang={lang}
-          stageSummary={stageSummary}
-          onRetryCollection={onRetryCollection}
-          onNavigateToNode={onNavigateToNode}
-          onOpenQuestion={onOpenQuestion}
-        />
+        <>
+          <InspectorBody
+            teamId={teamId}
+            questionId={questionId}
+            nodeId={nodeId}
+            liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
+            nextAction={nextAction}
+            lang={lang}
+            stageSummary={stageSummary}
+            onRetryCollection={onRetryCollection}
+            onNavigateToNode={onNavigateToNode}
+            onOpenQuestion={onOpenQuestion}
+          />
+          {nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID ? (
+            <ReviewHistory meetings={reviewHistory} allMeetings={reviewMeetings} lang={lang} />
+          ) : null}
+        </>
+      ) : nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID ? (
+        <ReviewHistory meetings={reviewHistory} allMeetings={reviewMeetings} lang={lang} />
       ) : (
         <div className={styles.task} data-testid="hypothesis-first-previous-step-pending">
           <VStateRow tone="warning">
@@ -258,7 +278,7 @@ export function HypothesisFirstNodeInspector({
       )}
       <div className={styles.secondary}>
         <VButton type="button" variant="ghost" density="compact" onClick={() => onOpenQuestion(questionId)}>
-          {isZh ? "打开赛题详情" : "Open question details"}
+          {isZh ? "打开题目档案" : "Open question archive"}
         </VButton>
       </div>
     </VSurface>
@@ -268,10 +288,12 @@ export function HypothesisFirstNodeInspector({
 function inspectorTitle(nodeId: string, lang: Language): string {
   if (nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID) return lang === "zh" ? "候选假说生成" : "Candidate generation";
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) return lang === "zh" ? "假说选择" : "Hypothesis selection";
+  if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID) return lang === "zh" ? "假说评审" : "Hypothesis review";
   if (nodeId.startsWith("hf_meeting_")) return lang === "zh"
     ? `第 ${nodeId.slice("hf_meeting_".length)} 轮讨论·评审`
     : `Review discussion · round ${nodeId.slice("hf_meeting_".length)}`;
   if (nodeId.startsWith("hf_collection_")) return lang === "zh" ? "资料搜集" : "Evidence collection";
+  if (nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID) return lang === "zh" ? "资料补充" : "Evidence collection";
   if (nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID) return lang === "zh" ? "假说收敛门" : "Hypothesis convergence gate";
   return lang === "zh" ? "当前任务" : "Current task";
 }
@@ -340,7 +362,7 @@ function InspectorBody(props: {
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
     return <HypothesisSelectionList teamId={teamId} questionId={questionId} compact lang={lang} />;
   }
-  if (nodeId.startsWith("hf_meeting_")) {
+  if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID || nodeId.startsWith("hf_meeting_")) {
     if (!liveMeetingRoundId && !nextAction.meetingRoundId) {
       return <p className={styles.description}>{isZh ? "尚未找到对应评审讨论。" : "The matching review discussion was not found."}</p>;
     }
@@ -406,7 +428,7 @@ function InspectorBody(props: {
               density="compact"
               onClick={() => props.onOpenQuestion(questionId)}
             >
-              {isZh ? "打开赛题详情" : "Open question details"}
+              {isZh ? "打开题目档案" : "Open question archive"}
             </VButton>
           </div>
         ) : null}
@@ -420,6 +442,77 @@ function InspectorBody(props: {
       </p>
     </VEmptyState>
   );
+}
+
+function ReviewHistory({
+  meetings,
+  allMeetings,
+  lang,
+}: {
+  meetings: MeetingRoundRecord[];
+  allMeetings: MeetingRoundRecord[];
+  lang: Language;
+}) {
+  const isZh = lang === "zh";
+  const retryCount = allMeetings.filter(isHypothesisReviewRetryAttempt).length;
+  if (!meetings.length) {
+    return (
+      <VEmptyState title={isZh ? "尚无有效评审" : "No effective reviews yet"}>
+        <p className={styles.description}>
+          {isZh ? "失败 attempt 会计入重试统计，但不会占用新的画布节点。" : "Failed attempts count as retries without creating more canvas nodes."}
+        </p>
+      </VEmptyState>
+    );
+  }
+  return (
+    <section className={styles.history} aria-label={isZh ? "假说评审历史" : "Hypothesis review history"}>
+      <div className={styles.historySummary}>
+        <strong>{isZh ? `${meetings.length} 轮有效评审` : `${meetings.length} effective reviews`}</strong>
+        <VStatusChip tone="neutral">
+          {isZh ? `${retryCount} 次失败重试` : `${retryCount} failed retries`}
+        </VStatusChip>
+      </div>
+      <ol className={styles.historyList}>
+        {meetings.map((meeting, index) => {
+          const round = meeting.roundIndex ?? index + 1;
+          const previousRound = index > 0 ? (meetings[index - 1]?.roundIndex ?? index) : 0;
+          const retries = allMeetings.filter((candidate) => {
+            const candidateRound = candidate.roundIndex ?? 0;
+            return isHypothesisReviewRetryAttempt(candidate)
+              && candidateRound > previousRound
+              && candidateRound < round;
+          }).length;
+          const label = meeting.status === "closed"
+            ? (isZh ? "已闭环" : "Closed")
+            : meeting.status === "open"
+              ? (isZh ? "进行中" : "Active")
+              : (isZh ? "待确认" : "Awaiting review");
+          return (
+            <li className={styles.historyItem} key={meeting.meetingRoundId}>
+              <div className={styles.historyTopline}>
+                <strong>{isZh ? `第 ${round} 轮` : `Round ${round}`}</strong>
+                <VStatusChip tone={meeting.status === "closed" ? "success" : "accent"}>{label}</VStatusChip>
+              </div>
+              <p className={styles.historyCopy}>
+                {meetingHasDigestForHistory(meeting)
+                  ? (isZh ? "评审结论与纪要已归档。" : "Review conclusion and digest archived.")
+                  : (isZh ? "评审仍在进行或等待纪要。" : "Review is active or awaiting its digest.")}
+              </p>
+              {retries > 0 ? (
+                <span className={styles.historyRetry}>
+                  {isZh ? `包含 ${retries} 次失败重试` : `Includes ${retries} failed retries`}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function meetingHasDigestForHistory(meeting: MeetingRoundRecord): boolean {
+  return Boolean(meeting.digestId || meeting.digestRef);
 }
 
 function NextReviewRoundButton(props: { teamId: string; questionId: string; meetingRoundId: string; lang: Language }) {

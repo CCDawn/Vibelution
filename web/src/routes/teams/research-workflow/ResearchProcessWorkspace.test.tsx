@@ -135,8 +135,22 @@ vi.mock("../../../components/vui", async () => {
   };
 });
 vi.mock("./ResearchWorkflowCanvasPane", () => ({
-  ResearchWorkflowCanvasPane: (props: { error?: string | null }) => (
-    <div role={props.error ? "alert" : undefined}>{props.error || "加载流程定义"}</div>
+  ResearchWorkflowCanvasPane: (props: { error?: string | null; currentTaskNodeId?: string | null }) => (
+    <div
+      role={props.error ? "alert" : undefined}
+      data-current-task-node={props.currentTaskNodeId || undefined}
+    >
+      {props.error || "加载流程定义"}
+    </div>
+  ),
+}));
+vi.mock("./ResearchProcessInspectorPane", () => ({
+  ResearchProcessInspectorPane: (props: { scope: { panel: string }; archiveSummary?: unknown }) => (
+    <div
+      data-testid="research-process-inspector-pane"
+      data-panel={props.scope.panel}
+      data-has-archive-summary={String(Boolean(props.archiveSummary))}
+    />
   ),
 }));
 
@@ -300,6 +314,68 @@ describe("ResearchProcessWorkspace", () => {
     expect(shell?.getAttribute("data-responsive-enabled")).toBe("true");
     expect(shell?.getAttribute("data-responsive-rail")).toBe("研究阶段");
     expect(shell?.getAttribute("data-responsive-inspector")).toBe("当前任务");
+  });
+
+  it("places the read-only question archive in the wide center pane", async () => {
+    harness.location.panel = "question";
+    harness.location.questionId = "SCI-096";
+    harness.location.selectedNodeId = "hf_review";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.selection = {
+      questionId: "SCI-096",
+      selectionId: "selection-1",
+      selectedCandidateIds: ["candidate-1"],
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const rail = rendered.container.querySelector('[data-vui="canvas-workbench-rail"]');
+    const canvas = rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]');
+    const inspector = rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]');
+    expect(rail?.childElementCount).toBe(0);
+    expect(canvas?.querySelector('[data-vui="research-question-archive-canvas"]')).not.toBeNull();
+    expect(canvas?.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-panel")).toBe("question");
+    expect(canvas?.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-has-archive-summary")).toBe("true");
+    expect(inspector?.childElementCount).toBe(0);
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
+  });
+
+  it("treats a stable review card as the current ledger meeting", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-096";
+    harness.location.selectedNodeId = "hf_review";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.chainState = {
+      questionId: "SCI-096",
+      selectionId: "selection-1",
+      candidateCount: 1,
+      hypothesisConverged: false,
+    } as never;
+    harness.chain.selection = {
+      questionId: "SCI-096",
+      selectionId: "selection-1",
+      selectedCandidateIds: ["candidate-1"],
+    } as never;
+    harness.chain.meetings = [{
+      question: "SCI-096",
+      meetingRoundId: "meeting-1",
+      meetingType: "hypothesis_review",
+      mode: "review",
+      scopeHash: "scope-1",
+      participants: ["reviewer"],
+      status: "open",
+      startedAt: "2026-08-24T00:00:00Z",
+      roundIndex: 1,
+    }] as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')?.getAttribute("data-history-mode")).toBe("false");
+    expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node")).toBe("hf_review");
   });
 
   it("navigates from the stage rail through URL view state only", async () => {

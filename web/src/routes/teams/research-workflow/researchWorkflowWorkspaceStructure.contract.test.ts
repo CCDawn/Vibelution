@@ -44,10 +44,12 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("ResearchProcessInspectorPane");
   });
 
-  it("keeps every panel inside the fixed current-task inspector", () => {
+  it("keeps live operations in the fixed inspector and opens the read-only archive in the wide canvas", () => {
     const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
-    expect(source).not.toContain('const archiveOpen = location.panel === "question"');
-    expect(source).toContain("inspector={(\n          <ResearchCurrentTaskInspector");
+    expect(source).toContain('const archiveOpen = location.panel === "question"');
+    expect(source).toContain("canvas={archiveOpen ? (");
+    expect(source).toContain('data-vui="research-question-archive-canvas"');
+    expect(source).toContain("inspector={archiveOpen ? null : (");
     expect(source).not.toContain("inspector={inspectorPane ? (");
     expect(source).toContain("<ResearchCurrentTaskInspector");
     expect(source).toContain("{inspectorPane}");

@@ -10,6 +10,7 @@ import {
   VButton,
   VEmptyState,
   VErrorSummary,
+  VMetricStrip,
   VDropdownMenu,
   VStateSurface,
   VStatusChip,
@@ -27,7 +28,10 @@ import { ChallengeQuestionRunResetDialog } from "./ChallengeQuestionRunResetDial
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 import { ChallengeQuestionTokenUsage } from "./ChallengeTokenUsageStrip";
 import { isTokenUsageOverview, questionTokenUsage } from "./challengeTokenUsageModel";
-import { challengeRecordStatusLabel } from "./ChallengeQuestionDetailPrimitives";
+import {
+  challengeRecordStatusLabel,
+  ChallengeQuestionSectionHeading,
+} from "./ChallengeQuestionDetailPrimitives";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
@@ -41,6 +45,21 @@ export type ChallengeQuestionDetailPanelProps = {
   selectedRunId?: string;
   onSelectRunId?: (runId: string) => void;
   onNavigateToNode?: (nodeId: string) => void;
+  /** Workflow archive mode: summary-first, read-only, and safe to mount in the wide center pane. */
+  readOnlyArchive?: boolean;
+  archiveSummary?: {
+    selectedHypotheses?: number;
+    effectiveReviews: number;
+    retryAttempts: number;
+    collectionRequests: number;
+    reviewHistory?: Array<{
+      id: string;
+      round: number;
+      status: string;
+      digestAvailable: boolean;
+      retryAttempts: number;
+    }>;
+  };
 };
 
 const DETAIL_ANCHORS_ZH = [
@@ -81,6 +100,8 @@ export function ChallengeQuestionDetailPanel({
   selectedRunId = "",
   onSelectRunId,
   onNavigateToNode,
+  readOnlyArchive = false,
+  archiveSummary,
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -90,7 +111,7 @@ export function ChallengeQuestionDetailPanel({
   const tokenUsageQuery = useQuery({
     queryKey: queryKeys.challengeCupTokenUsage(teamId),
     queryFn: () => fetchChallengeCupTokenUsage(teamId),
-    enabled: Boolean(teamId.trim()),
+    enabled: !readOnlyArchive && Boolean(teamId.trim()),
     staleTime: 15_000,
     retry: false,
   });
@@ -143,13 +164,31 @@ export function ChallengeQuestionDetailPanel({
     return (
       <VSurface className={css.state} tone="workspace">
         <VStateSurface
-          title={isZh ? `正在读取 ${requestedQuestionId} 的审核工件` : `Loading review artifacts for ${requestedQuestionId}`}
+          title={isZh
+            ? `正在读取 ${requestedQuestionId} 的${readOnlyArchive ? "题目档案" : "审核工件"}`
+            : `Loading ${readOnlyArchive ? "question archive" : "review artifacts"} for ${requestedQuestionId}`}
           tone="loading"
         />
       </VSurface>
     );
   }
   if (errorMessage || !detail) {
+    if (readOnlyArchive) {
+      return (
+        <VSurface className={css.archiveError} tone="workspace" data-testid="question-archive-error">
+          <VErrorSummary
+            tone="warning"
+            label={requestedQuestionId ? `${requestedQuestionId} · ${isZh ? "题目档案 · 只读" : "Question archive · read only"}` : (isZh ? "题目档案 · 只读" : "Question archive · read only")}
+            summary={isZh
+              ? "题目档案暂不可用，但不会覆盖或阻断当前任务。返回当前任务后可继续处理流程。"
+              : "The question archive is temporarily unavailable, but the current task remains intact."}
+          />
+          <VButton variant="primary" onPress={onClose}>
+            {isZh ? "返回当前任务" : "Back to current task"}
+          </VButton>
+        </VSurface>
+      );
+    }
     const operableTeamId = detail?.teamId || teamId;
     const canContinueReview = Boolean(operableTeamId && requestedQuestionId);
     return (
@@ -212,10 +251,14 @@ export function ChallengeQuestionDetailPanel({
   const { output, record } = detail;
 
   return (
-    <main className={css.workspace} aria-label={isZh ? `${detail.questionId} 单题验收` : `${detail.questionId} acceptance`}>
+    <main
+      className={`${css.workspace} ${readOnlyArchive ? css.archiveWorkspace : ""}`}
+      aria-label={isZh ? `${detail.questionId} ${readOnlyArchive ? "题目档案" : "单题验收"}` : `${detail.questionId} ${readOnlyArchive ? "question archive" : "acceptance"}`}
+      data-testid={readOnlyArchive ? "question-archive" : undefined}
+    >
       <header className={css.header}>
         <div>
-          <span className={css.eyebrow}>{isZh ? "单题验收" : "Question acceptance"}</span>
+          <span className={css.eyebrow}>{isZh ? (readOnlyArchive ? "题目档案 · 只读" : "单题验收") : (readOnlyArchive ? "Question archive · read only" : "Question acceptance")}</span>
           <h2>{detail.questionId}: {output.question_en}</h2>
           {output.question_zh ? <p className={css.questionZh}>{output.question_zh}</p> : null}
         </div>
@@ -237,39 +280,67 @@ export function ChallengeQuestionDetailPanel({
               />
             </label>
           ) : null}
-          {record.status === "needs_revision" ? (
+          {!readOnlyArchive && record.status === "needs_revision" ? (
             <VButton density="compact" variant="primary" onPress={() => setReviseDialogOpen(true)}>
               {isZh ? "登记修订产出" : "Register revision output"}
             </VButton>
           ) : null}
-          {questionResetMenu}
+          {readOnlyArchive ? null : questionResetMenu}
           <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
-            {isZh ? "返回题目列表" : "Back to question list"}
+            {isZh ? (readOnlyArchive ? "返回当前任务" : "返回题目列表") : (readOnlyArchive ? "Back to current task" : "Back to question list")}
           </VButton>
         </div>
       </header>
 
-      <nav className={css.anchorNav} aria-label={isZh ? "单题验收章节" : "Acceptance sections"}>
-        {detailAnchors.map(([id, label]) => (
+      <nav className={css.anchorNav} aria-label={isZh ? (readOnlyArchive ? "题目档案章节" : "单题验收章节") : (readOnlyArchive ? "Question archive sections" : "Acceptance sections")}>
+        {(readOnlyArchive
+          ? ([
+              ["hypotheses", isZh ? "假说摘要" : "Hypothesis summary"],
+              ["hypothesis-first-rounds", isZh ? "评审历程" : "Review history"],
+            ] as const)
+          : detailAnchors).map(([id, label]) => (
           <a href={`#${id}`} key={id}>{label}</a>
         ))}
       </nav>
 
-      {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} state={tokenUsageState} /> : null}
+      {readOnlyArchive ? (
+        <>
+          <VMetricStrip
+            ariaLabel={isZh ? "题目档案摘要" : "Question archive summary"}
+            className={css.archiveMetrics}
+            metrics={[
+              { id: "selected", label: isZh ? "采用假说" : "Selected", value: archiveSummary?.selectedHypotheses ?? Number(Boolean(output.selection.selected_hypothesis_id)) },
+              { id: "reviews", label: isZh ? "有效评审" : "Reviews", value: archiveSummary?.effectiveReviews ?? "—" },
+              { id: "retries", label: isZh ? "失败重试" : "Retries", value: archiveSummary?.retryAttempts ?? "—" },
+              { id: "collections", label: isZh ? "资料请求" : "Collections", value: archiveSummary?.collectionRequests ?? "—" },
+            ]}
+          />
+          <div className={css.archiveGrid}>
+            <ChallengeQuestionAnalysisSection output={output} lang={lang} summaryOnly />
+            <QuestionArchiveReviewTimeline
+              history={archiveSummary?.reviewHistory ?? []}
+              lang={lang}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} state={tokenUsageState} /> : null}
+          <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
+          <ChallengeQuestionAnalysisSection output={output} lang={lang} />
+          <HypothesisSelectionPanel
+            teamId={detail.teamId}
+            questionId={detail.questionId}
+            lang={lang}
+            onOpenReviewMeeting={onNavigateToNode}
+          />
+          <TeamMeetingRoundPanel teamId={detail.teamId} questionId={detail.questionId} />
+          <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
+          <ChallengeQuestionPlanSection detail={detail} lang={lang} />
+        </>
+      )}
 
-      <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
-      <ChallengeQuestionAnalysisSection output={output} lang={lang} />
-      <HypothesisSelectionPanel
-        teamId={detail.teamId}
-        questionId={detail.questionId}
-        lang={lang}
-        onOpenReviewMeeting={onNavigateToNode}
-      />
-      <TeamMeetingRoundPanel teamId={detail.teamId} questionId={detail.questionId} />
-      <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
-      <ChallengeQuestionPlanSection detail={detail} lang={lang} />
-
-      {reviseDialogOpen ? (
+      {!readOnlyArchive && reviseDialogOpen ? (
         <ChallengeQuestionRegisterDialog
           teamId={detail.teamId}
           initialMode="register"
@@ -279,7 +350,65 @@ export function ChallengeQuestionDetailPanel({
           lang={lang}
         />
       ) : null}
-      {resetDialog}
+      {readOnlyArchive ? null : resetDialog}
     </main>
+  );
+}
+
+function QuestionArchiveReviewTimeline({
+  history,
+  lang,
+}: {
+  history: Array<{
+    id: string;
+    round: number;
+    status: string;
+    digestAvailable: boolean;
+    retryAttempts: number;
+  }>;
+  lang: "zh" | "en";
+}) {
+  const isZh = lang === "zh";
+  return (
+    <section className={css.section} id="hypothesis-first-rounds">
+      <ChallengeQuestionSectionHeading
+        index="02"
+        title={isZh ? "评审历程" : "Review history"}
+      />
+      {history.length ? (
+        <ol className={css.archiveTimeline}>
+          {history.map((item) => {
+            const statusLabel = item.status === "closed"
+              ? (isZh ? "已闭环" : "Closed")
+              : item.status === "open"
+                ? (isZh ? "进行中" : "Active")
+                : (isZh ? "待确认" : "Awaiting review");
+            return (
+              <li className={css.archiveTimelineItem} key={item.id}>
+                <span className={css.archiveTimelineMarker} aria-hidden="true" />
+                <div>
+                  <div className={css.archiveTimelineTopline}>
+                    <strong>{isZh ? `第 ${item.round} 轮` : `Round ${item.round}`}</strong>
+                    <VStatusChip tone={item.status === "closed" ? "success" : "accent"}>
+                      {statusLabel}
+                    </VStatusChip>
+                  </div>
+                  <p className={css.archiveTimelineDetail}>
+                    {item.digestAvailable
+                      ? (isZh ? "评审结论与纪要已归档。" : "Review conclusion and digest archived.")
+                      : (isZh ? "评审仍在进行或等待纪要。" : "Review is active or awaiting its digest.")}
+                    {item.retryAttempts > 0
+                      ? (isZh ? ` 含 ${item.retryAttempts} 次失败重试。` : ` Includes ${item.retryAttempts} failed retries.`)
+                      : ""}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className={css.archiveHint}>{isZh ? "尚无有效评审记录。" : "No effective review history yet."}</p>
+      )}
+    </section>
   );
 }

@@ -375,9 +375,9 @@ describe("hypothesis-first region serpentine layout (HFC-5)", () => {
     ]);
 
     const xOf = (nodeId: string) => result.nodes.find((node) => node.id === nodeId)!.x;
-    // Stage 0 (region) flows RIGHT: selection → meeting → gate.
-    expect(xOf("hf_selection")).toBeLessThan(xOf("hf_meeting_1"));
-    expect(xOf("hf_meeting_1")).toBeLessThan(xOf("hf_convergence_gate"));
+    // Stage 0 (region) flows RIGHT: selection → semantic review → gate.
+    expect(xOf("hf_selection")).toBeLessThan(xOf("hf_review"));
+    expect(xOf("hf_review")).toBeLessThan(xOf("hf_convergence_gate"));
     // Existing stages flip once: knowledge_collection now runs LEFT.
     expect(xOf("source_finding")).toBeGreaterThan(xOf("knowledge_handoff"));
     // experiment_design RIGHT, execution_iteration LEFT.
@@ -414,11 +414,12 @@ describe("hypothesis-first region serpentine layout (HFC-5)", () => {
     }
   });
 
-  it("adding a round changes the structure hash and relayouts without overlap or stage drift", async () => {
+  it("adding the semantic collection category relayouts without overlap or stage drift", async () => {
     const before = composedHypothesisFirstGraph(1);
     const after = composedHypothesisFirstGraph(2);
 
-    // Round growth = topology change → relayout; a status-only flip is not one.
+    // A new semantic work category changes topology; another ledger round by
+    // itself would remain inside the existing review card.
     expect(structuralWorkflowLayoutHash(after).structure)
       .not.toBe(structuralWorkflowLayoutHash(before).structure);
     const statusFlip = composedHypothesisFirstGraph(1);
@@ -450,11 +451,10 @@ describe("hypothesis-first region serpentine layout (HFC-5)", () => {
       expect(task.y + task.height, task.id).toBeLessThanOrEqual(stage.y + stage.height + 1e-3);
     }
 
-    // The region chain keeps its ledger order along the stage direction.
+    // The region chain keeps semantic task order along the stage direction.
     const xOf = (nodeId: string) => result.nodes.find((node) => node.id === nodeId)!.x;
-    expect(xOf("hf_selection")).toBeLessThan(xOf("hf_meeting_1"));
-    expect(xOf("hf_meeting_1")).toBeLessThan(xOf("hf_collection_req-1"));
-    expect(xOf("hf_collection_req-1")).toBeLessThan(xOf("hf_meeting_2"));
-    expect(xOf("hf_meeting_2")).toBeLessThan(xOf("hf_convergence_gate"));
+    expect(xOf("hf_selection")).toBeLessThan(xOf("hf_review"));
+    expect(xOf("hf_review")).toBeLessThan(xOf("hf_collection"));
+    expect(xOf("hf_collection")).toBeLessThan(xOf("hf_convergence_gate"));
   });
 });
