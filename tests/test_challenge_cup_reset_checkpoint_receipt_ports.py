@@ -9,6 +9,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from core.research.workflow.checkpoint_store import (
     CheckpointResetPortError,
+    list_checkpoint_thread_ids,
     list_team_scoped_checkpoints,
     prepare_checkpoint_reset_stage,
     purge_checkpoint_reset_stage,
@@ -95,6 +96,8 @@ def test_checkpoint_reset_stage_is_scoped_and_restorable(tmp_path: Path) -> None
         "run-research": {"teamId": "research-team", "runId": "run-research"},
         "run-other": {"teamId": "other-team", "runId": "run-other"},
     }
+
+    assert list_checkpoint_thread_ids(path) == ["run-other", "run-research"]
 
     rows = list_team_scoped_checkpoints(
         "research-team", checkpoint_path=path, scope_authority=authority
