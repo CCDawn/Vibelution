@@ -23,11 +23,11 @@ import json
 
 from core.infrastructure import developer_sandbox
 from concurrent.futures import Future, ThreadPoolExecutor
+import threading
 import time
 from pathlib import Path
 
 import pytest
-
 from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
@@ -1791,6 +1791,58 @@ def test_preformal_fanout_binds_each_candidate_before_sibling_rounds_finish(
         assert len(executor.submitted) == 2
     finally:
         executor.drain()
+
+
+def test_preformal_fanout_persists_siblings_while_kernel_trace_is_slow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow trace may delay workers but must not hold up sibling room creation."""
+
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    trace_started = threading.Event()
+    release_trace = threading.Event()
+    selection_finished = threading.Event()
+    recorded: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    from core.agent_kernel import service as agent_kernel_service
+
+    def slow_kernel_trace(_event_payload):
+        trace_started.set()
+        assert release_trace.wait(timeout=5), "test must release the background trace"
+        return {"event": {}, "task": {}, "execution": {}, "outcome": {}}
+
+    def record_selection() -> None:
+        try:
+            recorded["value"] = selections.record_hypothesis_selection(
+                team_id,
+                _selection_payload(agents["coordinator"]),
+                agent_runner=_marker_runner,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface selection errors from the worker thread
+            errors.append(exc)
+        finally:
+            selection_finished.set()
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-slow-trace")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+    monkeypatch.setattr(agent_kernel_service, "handle_kernel_event", slow_kernel_trace)
+    selection_thread = threading.Thread(target=record_selection, name="pytest-selection", daemon=True)
+
+    try:
+        selection_thread.start()
+        assert trace_started.wait(timeout=5), "background worker did not start the trace"
+        assert selection_finished.wait(timeout=5), "slow trace blocked candidate fan-out"
+        assert not errors
+
+        review_meetings = _review_meetings(recorded["value"])
+        assert len(review_meetings) == 2
+        assert all(meeting["chatRoomRoundIds"] for meeting in review_meetings)
+    finally:
+        release_trace.set()
+        selection_thread.join(timeout=5)
+        executor.shutdown(wait=True)
 
 
 def _close_first_meeting_with_envelope(

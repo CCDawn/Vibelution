@@ -1267,21 +1267,26 @@ def start_chat_room_round(
 
     inflight_submitted = False
     try:
-        stage_started_at = _perf_counter()
-        kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
-        if kernel_trace:
-            room, round_payload = _attach_chat_room_round_kernel_trace(
-                normalized_room_id,
-                round_id,
-                kernel_trace,
-                fallback_room=room,
-                fallback_round=round_payload,
-            )
-        submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
+        # A background round must become observable as soon as its durable room
+        # and round records exist. Kernel tracing and WorkRun persistence can
+        # touch other stores, so doing either before ``submit`` makes sibling
+        # candidate reviews wait behind an unrelated slow trace.
+        if not background:
+            stage_started_at = _perf_counter()
+            kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
+            if kernel_trace:
+                room, round_payload = _attach_chat_room_round_kernel_trace(
+                    normalized_room_id,
+                    round_id,
+                    kernel_trace,
+                    fallback_room=room,
+                    fallback_round=round_payload,
+                )
+            submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
 
-        stage_started_at = _perf_counter()
-        _persist_chat_room_work_run(room, round_payload, status="running", summary="")
-        submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
+            stage_started_at = _perf_counter()
+            _persist_chat_room_work_run(room, round_payload, status="running", summary="")
+            submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
         submit_timings["submitElapsedBeforeStartLogMs"] = _elapsed_ms(submit_started_at)
         _record_room_event(
             "round",
@@ -1726,6 +1731,16 @@ def _run_chat_room_round_background(
         lifecycle=True,
     )
     try:
+        kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
+        if kernel_trace:
+            room, round_payload = _attach_chat_room_round_kernel_trace(
+                room_id,
+                round_id,
+                kernel_trace,
+                fallback_room=room,
+                fallback_round=round_payload,
+            )
+        _persist_chat_room_work_run(room, round_payload, status="running", summary="")
         _execute_chat_room_round(
             room_id,
             round_id,
