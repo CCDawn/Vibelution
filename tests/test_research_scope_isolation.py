@@ -31,6 +31,12 @@ def _isolate_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "team_workspace_root",
         lambda team_id: tmp_path / "teams" / str(team_id),
     )
+    monkeypatch.setattr(
+        research_projects,
+        "formal_team_workspace_root",
+        lambda team_id: tmp_path / "teams" / str(team_id),
+    )
+    assert research_projects._store_path("research-team").is_relative_to(tmp_path)
     monkeypatch.setattr(research_projects, "_record_project_event", lambda *args, **kwargs: None)
 
 
