@@ -2403,10 +2403,6 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
         build_speaker_receipt_context,
     )
-
-    receipt_context = build_speaker_receipt_context(
-        participant, context, session_id=session_id, turn_identity=turn_identity
-    )
     stage_started_at = _perf_counter()
     agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     if agent_id and not agent:
@@ -2461,6 +2457,17 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         stage_started_at = _perf_counter()
         resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
         agent_config = resolved_agent_llm.config
+        receipt_context = build_speaker_receipt_context(
+            participant,
+            context,
+            session_id=session_id,
+            turn_identity=turn_identity,
+            expected_model_route={
+                "modelRef": str(getattr(resolved_agent_llm, "model_ref", "") or "").strip(),
+                "providerId": str(getattr(resolved_agent_llm, "provider_id", "") or "").strip(),
+                "modelId": str(getattr(resolved_agent_llm, "model", "") or "").strip(),
+            },
+        )
         timings["agentConfigMs"] = _elapsed_ms(stage_started_at)
         stage_started_at = _perf_counter()
         ledger_events = load_conversation_events(PROJECT_ROOT, session_id) if session_id else []

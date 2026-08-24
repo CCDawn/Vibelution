@@ -2261,6 +2261,18 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         llm_bindings={"dialogue": {"modelId": "agent-explorer-model"}},
     )
     captured = {}
+    captured_receipt_routes = []
+    original_build_receipt_context = meeting_receipt_authority.build_speaker_receipt_context
+
+    def capture_receipt_context(*args, **kwargs):
+        captured_receipt_routes.append(dict(kwargs["expected_model_route"]))
+        return original_build_receipt_context(*args, **kwargs)
+
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "build_speaker_receipt_context",
+        capture_receipt_context,
+    )
 
     class ProfileAwareAgent:
         def __init__(self, workspace_path=None, config=None):
@@ -2313,6 +2325,13 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert captured["history"]
     assert captured["turn_identity"].startswith("chat-room:")
     assert captured["active_runtime"]["turnId"] == captured["turn_identity"]
+    assert captured_receipt_routes == [
+        {
+            "modelRef": "agent-explorer-model",
+            "providerId": base_config.llm.profiles["primary"].provider_id,
+            "modelId": "explorer-model",
+        }
+    ]
     assert turn_results[-1]["agentId"] == agent_id
     assert turn_results[-1]["status"] == "completed"
     assert detail["rounds"][-1]["messages"][0]["status"] == "completed"
@@ -2377,11 +2396,21 @@ def test_formal_meeting_speaker_builds_question_receipt_context():
         },
         session_id="session-1",
         turn_identity="chat-room:round-1:participant-1",
+        expected_model_route={
+            "modelRef": "opencode/deepseek-v4-flash",
+            "providerId": "opencode",
+            "modelId": "deepseek-v4-flash",
+        },
     )
 
     assert receipt_context is not None
     assert receipt_context["receiptRunId"] == "run-formal"
     assert receipt_context["outcomeKinds"] == ["candidate"]
+    assert receipt_context["expectedModelRoute"] == {
+        "modelRef": "opencode/deepseek-v4-flash",
+        "providerId": "opencode",
+        "modelId": "deepseek-v4-flash",
+    }
     binding = receipt_context["questionStageBinding"]
     assert binding["questionStage"] == "generation"
     assert binding["formalNodeId"] == "hypothesis_design"
