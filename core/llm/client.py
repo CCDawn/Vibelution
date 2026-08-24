@@ -42,7 +42,7 @@ from .stream_http_timing import (
     current_stream_http_timings,
 )
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
-from .semantic_messages import SemanticGenerationSettings
+from .semantic_messages import SemanticGenerationSettings, SemanticOutputSchema
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
 from .types import LLMCapabilities, LLMError, LLMProtocolEvent, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
@@ -2144,8 +2144,21 @@ class LLMClient:
         metadata: Optional[Dict[str, Any]] = None,
         invocation_scope: Any = None,
         replay_state: Any = None,
+        output_schema: SemanticOutputSchema | None = None,
     ) -> Dict[str, Any]:
         wire_adapter = self._required_wire_adapter()
+        if output_schema is not None and not self.capabilities.supports_strict_json_schema:
+            raise LLMError(
+                "capability_error",
+                f"profile `{self.profile_id}` does not support strict JSON Schema output",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "capability": "strict_json_schema",
+                    "payloadValidationResult": "blocked_before_provider",
+                },
+            )
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
@@ -2364,6 +2377,7 @@ class LLMClient:
                     allow_assistant_prefill=self.protocol_route.policy.allow_assistant_prefill,
                     reasoning_roundtrip=self.protocol_route.compat.reasoning_roundtrip,
                     replay_state=replay_state,
+                    output_schema=output_schema,
                 )
             )
             wire_payload = wire_adapter.encode_request(semantic_request, route=self.protocol_route)
@@ -2375,6 +2389,15 @@ class LLMClient:
         else:
             raise AssertionError("registered wire adapter uses unsupported protocol")
         self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
+        if output_schema is not None:
+            self._last_payload_protocol_summary.update(
+                {
+                    "structuredOutput": True,
+                    "outputSchemaName": output_schema.name,
+                    "outputSchemaSha256": output_schema.schema_sha256,
+                    "outputSchemaStrict": True,
+                }
+            )
         if provider_tool_chain_repaired:
             self._last_payload_protocol_summary["payloadPolicyProviderToolChainRepaired"] = max(
                 provider_tool_chain_repaired,
@@ -2855,6 +2878,7 @@ class LLMClient:
         tools: Optional[List[Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         replay_state: Any = None,
+        output_schema: SemanticOutputSchema | None = None,
     ) -> TurnOutcome:
         from .invocation import invocation_scope_from_metadata
 
@@ -2867,6 +2891,7 @@ class LLMClient:
             metadata=metadata,
             invocation_scope=invocation_scope,
             replay_state=replay_state,
+            output_schema=output_schema,
         )
         provider_conversation_items = _payload_conversation_items(payload) or messages
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
@@ -3119,12 +3144,14 @@ class LLMClient:
         tools: Optional[List[Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         replay_state: Any = None,
+        output_schema: SemanticOutputSchema | None = None,
     ) -> AIMessage:
         outcome = self.invoke_outcome(
             messages,
             tools=tools,
             metadata=metadata,
             replay_state=replay_state,
+            output_schema=output_schema,
         )
         return self.project_outcome_message(outcome, metadata=metadata, include_outcome=True)
 
@@ -3522,6 +3549,7 @@ class LLMClient:
         metadata: Optional[Dict[str, Any]] = None,
         replay_state: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
+        output_schema: SemanticOutputSchema | None = None,
     ) -> Iterator[StreamChunk]:
         """Yield normalized stream events independent of LangChain chunks."""
         from .invocation import invocation_scope_from_metadata
@@ -3536,6 +3564,7 @@ class LLMClient:
             metadata=metadata,
             invocation_scope=invocation_scope,
             replay_state=replay_state,
+            output_schema=output_schema,
         )
         payload_build_ms = max(0, int((time.perf_counter() - payload_build_started) * 1000))
         payload_summary_started = time.perf_counter()
@@ -4045,8 +4074,20 @@ class LLMClient:
                 if not should_retry:
                     raise llm_error from exc
 
-    def stream(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Iterator[AIMessageChunk]:
-        for event in self.stream_events(messages, tools=tools, metadata=metadata):
+    def stream(
+        self,
+        messages: List[Any],
+        *,
+        tools: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        output_schema: SemanticOutputSchema | None = None,
+    ) -> Iterator[AIMessageChunk]:
+        for event in self.stream_events(
+            messages,
+            tools=tools,
+            metadata=metadata,
+            output_schema=output_schema,
+        ):
             response_metadata = self._response_metadata(metadata)
             if event.type == "done":
                 turn_outcome = (event.provider_payload or {}).get("turn_outcome")

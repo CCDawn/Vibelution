@@ -181,6 +181,7 @@ class AgentLlmTurnHooks:
     force_disable_tools: bool
     stop_error_cls: type
     base_llm: Any = None
+    structured_output_contract: Any = None
 
 
 @dataclass
@@ -210,6 +211,29 @@ def sanitize_llm_turn_messages(messages: list) -> list:
         else:
             clean_messages.append(msg)
     return clean_messages
+
+
+def _validate_structured_output_outcome(outcome: Any, contract: Any) -> None:
+    if contract is None or getattr(outcome, "kind", "") != "final_answer":
+        return
+    try:
+        payload = json.loads(str(getattr(outcome, "final_text", "") or ""))
+        if not isinstance(payload, Mapping):
+            raise ValueError("structured output root must be an object")
+        validator = getattr(contract, "validator", None)
+        if callable(validator):
+            validator(dict(payload))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise LLMError(
+            "structured_output_validation_error",
+            "Model final output did not satisfy the bound strict task schema.",
+            retryable=False,
+            details={
+                "schemaName": str(getattr(contract, "name", "") or ""),
+                "validationErrorType": type(exc).__name__,
+                "payloadValidationResult": "rejected_after_provider",
+            },
+        ) from exc
 
 
 def invoke_agent_llm_turn(
@@ -291,14 +315,23 @@ def invoke_agent_llm_turn(
                             if callable(stream_response):
                                 stream_response(event.text, done=False)
 
+                    stream_kwargs = {
+                        "context": invocation_context,
+                        "on_event": on_protocol_event,
+                        "replay_state": replay_state,
+                    }
+                    if hooks.structured_output_contract is not None:
+                        stream_kwargs["output_schema"] = hooks.structured_output_contract
                     outcome = hooks.run_streaming_outcome(
                         llm_for_turn,
                         clean_messages,
-                        context=invocation_context,
-                        on_event=on_protocol_event,
-                        replay_state=replay_state,
+                        **stream_kwargs,
                     )
                     outcome = hooks.canonicalize(outcome)
+                    _validate_structured_output_outcome(
+                        outcome,
+                        hooks.structured_output_contract,
+                    )
                     if outcome.kind in {"tool_calls", "final_answer"}:
                         hooks.record_route_success(
                             trace_fields=trace_fields,
@@ -308,13 +341,22 @@ def invoke_agent_llm_turn(
                     result.payload = (outcome, llm_for_turn.project_outcome_message(outcome))
                     return result
                 hooks.raise_if_stop()
+                invoke_kwargs = {
+                    "context": invocation_context,
+                    "replay_state": replay_state,
+                }
+                if hooks.structured_output_contract is not None:
+                    invoke_kwargs["output_schema"] = hooks.structured_output_contract
                 outcome = hooks.invoke_outcome(
                     llm_for_turn,
                     clean_messages,
-                    context=invocation_context,
-                    replay_state=replay_state,
+                    **invoke_kwargs,
                 )
                 outcome = hooks.canonicalize(outcome)
+                _validate_structured_output_outcome(
+                    outcome,
+                    hooks.structured_output_contract,
+                )
                 if outcome.kind in {"tool_calls", "final_answer"}:
                     hooks.record_route_success(
                         trace_fields=trace_fields,

@@ -271,6 +271,15 @@ class ResponsesWireAdapter:
             payload["temperature"] = request.settings.temperature
         if request.settings.top_p is not None:
             payload["top_p"] = request.settings.top_p
+        if request.output_schema is not None:
+            payload["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": request.output_schema.name,
+                    "strict": True,
+                    "schema": _thaw(request.output_schema.schema),
+                }
+            }
         return BuiltPayload(
             body=payload,
             endpoint=str(getattr(route, "runtime_endpoint", "") or ""),
