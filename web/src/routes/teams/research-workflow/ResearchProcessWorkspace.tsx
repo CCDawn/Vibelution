@@ -37,7 +37,10 @@ import {
 } from "./ResearchWorkflowStageNavigator";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
-import { buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
+import {
+  allowsResearchRunLaunch,
+  buildResearchWorkflowWorkspaceModel,
+} from "./researchWorkflowWorkspaceModel";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
@@ -592,6 +595,7 @@ export function ResearchProcessWorkspace({
   const formalPrimaryAction = workspaceModel.primaryAction;
   const visibleFormalPrimaryAction = currentTaskActionsReady ? formalPrimaryAction : null;
   const currentTaskCommand = workflowContext.currentTask?.commandAction;
+  const allowLaunchPanel = allowsResearchRunLaunch(workspaceModel);
   const collectionRecoveryAction = currentTaskActionsReady
     && workspaceModel.source === "hypothesis_first"
     && workflowContext.currentTask?.collectionRequestId
@@ -644,6 +648,7 @@ export function ResearchProcessWorkspace({
         : currentTaskActionsReady
           ? hypothesisFirstChain.recoveryError
           : null}
+      allowLaunchPanel={allowLaunchPanel}
       primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
       archiveSummary={archiveSummary}
     />

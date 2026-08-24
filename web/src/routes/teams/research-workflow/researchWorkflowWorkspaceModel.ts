@@ -150,6 +150,18 @@ export type ResearchWorkflowWorkspaceModel = {
   error: string | null;
 };
 
+/**
+ * The launch tool is only a mutation surface when there is no authoritative
+ * current task. Once formal runtime or hypothesis-first owns the task, a
+ * stale `panel=launch` URL must not expose a second start/new-run action.
+ */
+export function allowsResearchRunLaunch(model: ResearchWorkflowWorkspaceModel): boolean {
+  if (model.source === "route") return true;
+  if (model.source !== "hypothesis_first") return false;
+  return model.currentTask?.source === "hypothesis_first"
+    && model.currentTask.nextAction.stage === "no_run";
+}
+
 const HYPOTHESIS_STAGE_LABELS: Record<string, string> = {
   no_run: "选择题目开始研究",
   generation_missing: "生成候选假说",

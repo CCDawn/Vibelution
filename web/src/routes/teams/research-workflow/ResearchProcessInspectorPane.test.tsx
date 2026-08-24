@@ -208,7 +208,7 @@ async function renderInspectorLeaf(
   language: "zh" | "en",
   scope: InspectorProps["scope"],
   nodeDetail: NodeDetailState = { kind: "idle" },
-  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection">> = {},
+  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection" | "allowLaunchPanel">> = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -445,6 +445,33 @@ describe("ResearchProcessInspectorPane collection recovery wiring", () => {
     expect(container.textContent).not.toContain("取消");
     expect(container.textContent).not.toContain("开始实验");
     expect(container.textContent).not.toContain("重试搜集");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it.each([
+    ["formal runtime", undefined],
+    ["hypothesis-first", {
+      stage: "selection_required" as const,
+      targetNodeId: "hf_selection",
+      navigationLabel: "前往假说选择",
+      command: "record_selection" as const,
+      commandLabel: "记录选择并开启评审",
+    }],
+  ])("hides the launch actions from a stale URL when %s owns the task", async (_label, nextAction) => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("launch", { runId: "run-1", selectedNodeId: null, questionId: "SCI-004" }),
+      { kind: "idle" },
+      { nextAction, allowLaunchPanel: false },
+    );
+
+    expect(container.textContent).toContain("当前任务已接管操作");
+    expect(container.textContent).not.toContain("开始实验");
+    expect(container.textContent).not.toContain("新建运行");
 
     await act(async () => {
       root.unmount();
