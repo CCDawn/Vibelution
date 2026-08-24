@@ -761,6 +761,25 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
         if any(raw_scope.get(key) != expected for key, expected in expected_scope.items()):
             return None
         binding["scope"] = expected_scope
+    from .discussion_scope_binding import (
+        DiscussionScopeBindingError,
+        normalize_discussion_scope_binding,
+    )
+
+    try:
+        binding.update(
+            normalize_discussion_scope_binding(
+                value,
+                team_id=binding["teamId"],
+                research_project_id=research_project_id,
+                workflow_run_id=workflow_run_id,
+                workflow_node_id=workflow_node_id,
+                selection_id=selection_id,
+                candidate_id=candidate_id,
+            )
+        )
+    except DiscussionScopeBindingError:
+        return None
     return binding
 
 

@@ -8,7 +8,7 @@
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../../api/queryKeys";
@@ -151,6 +151,7 @@ vi.mock("./ResearchProcessInspectorPane", () => ({
     onRecoverCollection?: (requestId: string) => Promise<void>;
     collectionRecoveryBusy?: boolean;
     collectionRecoveryError?: string | null;
+    discussionModel?: { status?: string; roomId?: string };
   }) => (
     <div
       data-testid="research-process-inspector-pane"
@@ -159,6 +160,8 @@ vi.mock("./ResearchProcessInspectorPane", () => ({
       data-has-collection-recovery={String(Boolean(props.onRecoverCollection))}
       data-collection-recovery-busy={String(Boolean(props.collectionRecoveryBusy))}
       data-collection-recovery-error={props.collectionRecoveryError || undefined}
+      data-discussion-status={props.discussionModel?.status || undefined}
+      data-discussion-room={props.discussionModel?.roomId || undefined}
     />
   ),
 }));
@@ -167,6 +170,11 @@ import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import { ResearchProcessWorkspace } from "./ResearchProcessWorkspace";
 
 const mockedFocus = vi.mocked(fetchHypothesisFirstFocusNode);
+
+function RouteProbe() {
+  const location = useLocation();
+  return <output data-testid="route-probe">{location.pathname}{location.search}</output>;
+}
 
 const checkpointQuestion: ResearchWorkflowLaunchOption = {
   questionId: "SCI-096",
@@ -237,6 +245,7 @@ async function renderWorkspace() {
     root.render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
+          <RouteProbe />
           <ResearchProcessWorkspace teamId="research-team" lang="zh" />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -385,6 +394,62 @@ describe("ResearchProcessWorkspace", () => {
 
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')?.getAttribute("data-history-mode")).toBe("false");
     expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node")).toBe("hf_review");
+  });
+
+  it("uses the server-owned scoped discussion anchor for current-task navigation", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.chainState = {
+      questionId: "SCI-096",
+      candidateCount: 0,
+      hypothesisConverged: false,
+    } as never;
+    harness.runState.snapshot = {
+      launchContext: {
+        activeDiscussionAnchor: {
+        scope: {
+          version: 1,
+          kind: "question_generation",
+          teamId: "research-team",
+          researchProjectId: "project-x",
+          workflowRunId: "run-1",
+          workflowNodeId: "hypothesis-generation",
+          questionId: "SCI-096",
+        },
+        scopeHash: "scope-hash",
+        roomId: "scoped-room-1",
+        meetingRoundId: "meeting-1",
+        questionId: "SCI-096",
+        selectionId: "",
+        candidateId: "",
+        deepLink: "/chat?room=scoped-room-1",
+        status: "ready",
+        degradedReason: "",
+        },
+      },
+    } as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    const inspector = rendered.container.querySelector('[data-testid="research-process-inspector-pane"]');
+    expect(inspector?.getAttribute("data-discussion-status")).toBe("ready");
+    expect(inspector?.getAttribute("data-discussion-room")).toBe("scoped-room-1");
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+    });
+
+    const command = Array.from(document.body.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("前往候选生成"));
+    expect(command).toBeTruthy();
+    await act(async () => command?.click());
+
+    expect(rendered.container.querySelector('[data-testid="route-probe"]')?.textContent)
+      .toBe("/chat?room=scoped-room-1");
+    expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
   it("keeps an unresolved hypothesis gate current when convergence is already projected", async () => {

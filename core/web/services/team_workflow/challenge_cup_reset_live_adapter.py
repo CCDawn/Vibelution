@@ -1,0 +1,634 @@
+"""Read-only Challenge Cup inventory adapter.
+
+This module is the bridge between governed list/readback owners and
+``ChallengeCupResetService``. It never opens SQLite, walks a data directory,
+or calls a lifecycle/purge operation. A missing read owner becomes an empty
+identity sentinel, which the existing reset service turns into a blocker.
+Only bounded identity/status metadata crosses this boundary; chat content and
+prompts are intentionally not copied or hashed.
+"""
+
+from __future__ import annotations
+
+import copy
+import threading
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+
+SCHEMA_VERSION = 1
+RESEARCH_TEAM_ID = "research-team"
+ACTIVE_STATUSES = frozenset(
+    {
+        "queued",
+        "starting",
+        "dispatching",
+        "running",
+        "stopping",
+        "paused",
+        "waiting_human",
+        "summarizing",
+        "awaiting_approval",
+        "collecting",
+    }
+)
+
+ARTIFACT_KINDS = (
+    "run_artifacts",
+    "research_result_package",
+    "smoke_evidence",
+    "smoke_release",
+    "frozen_protocol",
+    "evaluation_report",
+    "hypothesis_fragment",
+    "hypothesis_set",
+    "research_plan",
+    "protocol_draft",
+    "protocol_review_report",
+    "iteration_decision",
+    "version_governance_record",
+    "delivery_orchestration_result",
+    "problem_understanding",
+    "dimension_reviews",
+    "feedback_iterations",
+)
+ARTIFACT_FAMILY_BY_KIND = {
+    "research_plan": "plans",
+    "protocol_draft": "plans",
+    "hypothesis_fragment": "candidates",
+    "hypothesis_set": "candidates",
+    "iteration_decision": "selections",
+    "research_result_package": "results",
+    "evaluation_report": "results",
+    "smoke_evidence": "results",
+    "smoke_release": "results",
+}
+PROTECTION_FAMILIES = ("teams", "agents", "sessions", "rooms", "meetings", "workflowRuns", "artifacts")
+
+_ID_KEYS = (
+    "id",
+    "teamId",
+    "team_id",
+    "agentId",
+    "agent_id",
+    "sessionId",
+    "session_id",
+    "roomId",
+    "room_id",
+    "roundId",
+    "round_id",
+    "meetingRoundId",
+    "meeting_round_id",
+    "runId",
+    "run_id",
+    "workflowRunId",
+    "workflow_run_id",
+    "recordId",
+    "artifactId",
+    "artifact_id",
+    "checkpointId",
+    "checkpoint_id",
+    "receiptId",
+    "receipt_id",
+    "projectId",
+    "project_id",
+    "planId",
+    "plan_id",
+    "candidateId",
+    "candidate_id",
+    "selectionId",
+    "selection_id",
+    "catalogId",
+    "catalog_id",
+    "programId",
+    "program_id",
+    "policyId",
+    "policy_id",
+)
+_SAFE_KEYS = {
+    "status",
+    "state",
+    "currentPhase",
+    "kind",
+    "runKind",
+    "workflowId",
+    "scopeHash",
+    "discussionScopeHash",
+    "questionId",
+    "projectId",
+    "researchProjectId",
+    "workflowRunId",
+    "workflowNodeId",
+    "selectionId",
+    "candidateId",
+    "roleKey",
+    "agentId",
+    "sessionId",
+    "roomId",
+    "roundId",
+    "meetingRoundId",
+    "activeRoundId",
+    "createdAt",
+    "updatedAt",
+    "finishedAt",
+    "immutable",
+    "sha256",
+    "contentHash",
+    "recordId",
+    "sourceCollectionRunId",
+    "questionCount",
+}
+_ALIASES = {
+    "agentId": ("agentId", "agent_id"),
+    "roleKey": ("roleKey", "role_key", "agentRoleKey", "role"),
+    "questionId": ("questionId", "question_id"),
+    "researchProjectId": ("researchProjectId", "research_project_id"),
+    "workflowRunId": ("workflowRunId", "workflow_run_id"),
+    "workflowNodeId": ("workflowNodeId", "workflow_node_id"),
+    "selectionId": ("selectionId", "selection_id"),
+    "candidateId": ("candidateId", "candidate_id"),
+    "scopeHash": ("scopeHash", "scope_hash"),
+    "discussionScopeHash": ("discussionScopeHash", "discussion_scope_hash"),
+    "sessionId": ("sessionId", "session_id"),
+    "roomId": ("roomId", "room_id"),
+    "roundId": ("roundId", "round_id"),
+    "meetingRoundId": ("meetingRoundId", "meeting_round_id"),
+}
+
+
+class LiveInventoryAuthorityError(RuntimeError):
+    """A required managed read owner is unavailable."""
+
+
+def _text(value: Any, *, upper: bool = False, limit: int = 240) -> str:
+    value = str(value or "").strip()[:limit]
+    return value.upper() if upper else value
+
+
+def _first(item: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _nested(item: Mapping[str, Any], *keys: str) -> Any:
+    value = _first(item, *keys)
+    if value not in (None, ""):
+        return value
+    for container in ("scope", "config", "metadata", "binding", "experimentBinding", "roomConfig"):
+        nested = item.get(container)
+        if isinstance(nested, Mapping):
+            value = _first(nested, *keys)
+            if value not in (None, ""):
+                return value
+    return ""
+
+
+def _record_id(item: Any) -> str:
+    if isinstance(item, str):
+        return _text(item, limit=320)
+    if not isinstance(item, Mapping):
+        return ""
+    return _text(_first(item, *_ID_KEYS), limit=320)
+
+
+def _owner(item: Mapping[str, Any], agent_team_by_id: Mapping[str, str]) -> str:
+    owner = _text(
+        _nested(item, "teamId", "team_id", "ownerTeamId", "owner_team_id", "researchTeamId")
+    )
+    if owner:
+        return owner
+    agent_id = _text(_nested(item, "agentId", "agent_id"))
+    return _text(agent_team_by_id.get(agent_id)) if agent_id else ""
+
+
+def _rows(value: Any, *keys: str) -> list[Any]:
+    if isinstance(value, Mapping):
+        for key in keys:
+            candidate = value.get(key)
+            if isinstance(candidate, Sequence) and not isinstance(candidate, (str, bytes, bytearray)):
+                return list(candidate)
+        return [value] if _record_id(value) else []
+    return list(value) if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) else []
+
+
+def _safe_record(
+    item: Any,
+    *,
+    family: str,
+    owner_team_id: str = "",
+    agent_team_by_id: Mapping[str, str] | None = None,
+    role_by_id: Mapping[str, str] | None = None,
+    source_kind: str = "",
+    immutable: bool | None = None,
+) -> dict[str, Any]:
+    source = item if isinstance(item, Mapping) else {"id": item}
+    payload: dict[str, Any] = {"id": _record_id(source)}
+    owner = owner_team_id or _owner(source, agent_team_by_id or {})
+    if owner:
+        payload["teamId"] = owner
+    for public_key, aliases in _ALIASES.items():
+        value = _nested(source, *aliases)
+        if value not in (None, ""):
+            payload[public_key] = _text(value, upper=public_key == "questionId")
+    for key in _SAFE_KEYS:
+        if key in payload or key not in source:
+            continue
+        value = source[key]
+        if isinstance(value, (str, int, float, bool)):
+            payload[key] = _text(value, limit=160) if isinstance(value, str) else value
+    if payload.get("agentId") and not payload.get("roleKey") and role_by_id:
+        payload["roleKey"] = _text(role_by_id.get(payload["agentId"]))
+    if source_kind:
+        payload["sourceKind"] = _text(source_kind, limit=120)
+    if immutable is not None:
+        payload["immutable"] = bool(immutable)
+    payload["sourceFamily"] = _text(family, limit=80)
+    return payload
+
+
+def _sentinel(family: str, reason: str) -> dict[str, Any]:
+    return {
+        "id": "",
+        "sourceFamily": _text(family, limit=80),
+        "authorityMissing": _text(reason, limit=160) or "authority_missing",
+    }
+
+
+def _status(item: Mapping[str, Any]) -> str:
+    return _text(_first(item, "status", "state", "currentPhase")).lower()
+
+
+# Managed defaults are late-bound so constructing this reader performs no live
+# read and no data-root initialization.
+def _list_teams() -> Any:
+    from core.web.services import team_service
+
+    return team_service.list_team_graph_references(include_archived=True)
+
+
+def _list_agents() -> Any:
+    from core.web.services import agent_directory_service
+
+    return agent_directory_service.list_agents(include_archived=True, detail="summary")
+
+
+def _list_sessions() -> Any:
+    from core.web.services import session_service
+
+    return session_service.list_sessions(include_hidden_internal=True, repair_collisions=False)
+
+
+def _list_rooms() -> Any:
+    from core.web.services import chat_room_service
+
+    # Every public room-list facade currently reconciles orphan rounds before
+    # returning and can persist that repair.  Reset PREVIEW must be strictly
+    # read-only, so use the room owner's bounded store load until it exposes a
+    # zero-write read facade.  Do not call detail/list APIs here: they can also
+    # repair participant bindings and would mutate the inventory being hashed.
+    state = chat_room_service._store().load()
+    return list(state.get("rooms") or []) if isinstance(state, Mapping) else []
+
+
+def _list_meetings(team_id: str) -> Any:
+    from core.web.services.team_workflow import meeting_rounds
+
+    return meeting_rounds.list_meeting_rounds(team_id)
+
+
+def _list_runs(team_id: str) -> Any:
+    from core.web.services.team_workflow.research_runtime.service import get_research_workflow_runtime_service
+
+    return get_research_workflow_runtime_service().list_runs(team_id=team_id)
+
+
+def _list_artifacts(team_id: str, kind: str) -> Any:
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import list_workflow_artifacts
+
+    return list_workflow_artifacts(team_id, kind=kind)
+
+
+def _list_active_session_work() -> Any:
+    from core.web.services import session_service
+
+    return session_service.list_active_session_work_runs(reconcile=False)
+
+
+def _load_catalog() -> Any:
+    from core.research.competition.resources import load_science_question_catalog
+
+    return load_science_question_catalog()
+
+
+def _load_program() -> Any:
+    from core.research.competition.resources import load_competition_program_core
+
+    return load_competition_program_core()
+
+
+def _load_policy() -> Any:
+    from core.research.competition.resources import load_full_catalog_execution_core
+
+    return load_full_catalog_execution_core()
+
+
+@dataclass(frozen=True)
+class ChallengeCupInventoryPorts:
+    """Read-only owner ports. ``None`` deliberately means unavailable."""
+
+    list_teams: Callable[[], Any] | None = None
+    list_agents: Callable[[], Any] | None = None
+    list_sessions: Callable[[], Any] | None = None
+    list_rooms: Callable[[], Any] | None = None
+    list_meeting_rounds: Callable[[str], Any] | None = None
+    list_workflow_runs: Callable[[str], Any] | None = None
+    list_artifacts: Callable[[str, str], Any] | None = None
+    list_checkpoints: Callable[[str], Any] | None = None
+    list_receipts: Callable[[str], Any] | None = None
+    list_active_session_work: Callable[[], Any] | None = None
+    load_catalog: Callable[[], Any] | None = None
+    load_program: Callable[[], Any] | None = None
+    load_policy: Callable[[], Any] | None = None
+
+    @classmethod
+    def managed_defaults(cls) -> "ChallengeCupInventoryPorts":
+        return cls(
+            list_teams=_list_teams,
+            list_agents=_list_agents,
+            list_sessions=_list_sessions,
+            list_rooms=_list_rooms,
+            list_meeting_rounds=_list_meetings,
+            list_workflow_runs=_list_runs,
+            list_artifacts=_list_artifacts,
+            list_checkpoints=None,
+            list_receipts=None,
+            list_active_session_work=_list_active_session_work,
+            load_catalog=_load_catalog,
+            load_program=_load_program,
+            load_policy=_load_policy,
+        )
+
+
+class LiveChallengeCupInventoryReader:
+    """Read-only ``ChallengeCupInventoryReader`` implementation."""
+
+    def __init__(
+        self,
+        ports: ChallengeCupInventoryPorts | None = None,
+        *,
+        sources: ChallengeCupInventoryPorts | None = None,
+    ) -> None:
+        if ports is not None and sources is not None:
+            raise ValueError("Pass either ports or sources, not both.")
+        self._ports = ports or sources or ChallengeCupInventoryPorts.managed_defaults()
+        self._authority_lock = threading.RLock()
+        self._last_authority: dict[str, Any] = {}
+
+    @property
+    def ports(self) -> ChallengeCupInventoryPorts:
+        return self._ports
+
+    def read_authority(self, team_id: str = RESEARCH_TEAM_ID) -> dict[str, Any]:
+        with self._authority_lock:
+            value = copy.deepcopy(self._last_authority)
+        return value or {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": _text(team_id),
+            "status": "not_read",
+            "families": {},
+        }
+
+    def _read(
+        self,
+        family: str,
+        reader: Callable[..., Any] | None,
+        args: tuple[Any, ...] = (),
+        keys: tuple[str, ...] = (),
+    ) -> tuple[list[Any], bool]:
+        if not callable(reader):
+            return [_sentinel(family, "authority_not_registered")], False
+        try:
+            return _rows(reader(*args), *keys), True
+        except Exception:  # noqa: BLE001 - fail closed without leaking details
+            return [_sentinel(family, "authority_read_failed")], False
+
+    def read_inventory(self, team_id: str) -> dict[str, Any]:
+        team_id = _text(team_id)
+        if not team_id:
+            raise ValueError("team_id is required")
+        authority: dict[str, Any] = {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": team_id,
+            "status": "ready",
+            "families": {},
+            "blockers": [],
+        }
+        raw_teams, teams_ok = self._read("teams", self._ports.list_teams, keys=("teams",))
+        raw_agents, agents_ok = self._read("agents", self._ports.list_agents, keys=("agents",))
+        raw_sessions, sessions_ok = self._read("sessions", self._ports.list_sessions, keys=("sessions",))
+        raw_rooms, rooms_ok = self._read("rooms", self._ports.list_rooms, keys=("rooms",))
+        team_rows = [item for item in raw_teams if isinstance(item, Mapping)]
+        team_ids = {_text(_first(item, "teamId", "team_id", "id")) for item in team_rows}
+        team_ids.discard("")
+        if team_id not in team_ids:
+            authority["blockers"].append("target_team_missing")
+            raw_teams.append(_sentinel("teams", "target_team_missing"))
+
+        agent_team: dict[str, str] = {}
+        role_by_agent: dict[str, str] = {}
+        for item in raw_agents:
+            if not isinstance(item, Mapping):
+                continue
+            agent_id = _text(_first(item, "agentId", "agent_id", "id"))
+            if not agent_id:
+                continue
+            owner = _owner(item, {})
+            if owner:
+                agent_team[agent_id] = owner
+            role = _text(_nested(item, "roleKey", "role_key", "agentRoleKey", "role"))
+            if role:
+                role_by_agent[agent_id] = role
+        for item in team_rows:
+            owner = _text(_first(item, "teamId", "team_id", "id"))
+            members = item.get("members")
+            if not owner or not isinstance(members, Sequence) or isinstance(members, (str, bytes, bytearray)):
+                continue
+            for member in members:
+                if isinstance(member, Mapping):
+                    agent_id = _text(_first(member, "agentId", "agent_id", "id"))
+                    if agent_id:
+                        agent_team.setdefault(agent_id, owner)
+
+        safe_teams = [_safe_record(item, family="teams", owner_team_id=_text(_first(item, "teamId", "team_id", "id"))) for item in raw_teams]
+        safe_agents = [_safe_record(item, family="agents", agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in raw_agents]
+        safe_sessions = [_safe_record(item, family="sessions", agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in raw_sessions]
+        safe_rooms = [_safe_record(item, family="rooms", agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in raw_rooms]
+        session_team = {_record_id(item): _owner(item, agent_team) for item in raw_sessions if isinstance(item, Mapping) and _record_id(item)}
+
+        all_team_ids = sorted(team_ids | {team_id})
+        meetings: list[dict[str, Any]] = []
+        meetings_ok = True
+        runs: list[dict[str, Any]] = []
+        runs_ok = True
+        for current_team in all_team_ids:
+            rows, ok = self._read(f"meetings:{current_team}", self._ports.list_meeting_rounds, (current_team,), ("meetings", "meetingRounds", "rounds"))
+            meetings_ok = meetings_ok and ok
+            meetings.extend(_safe_record(item, family="meetings", owner_team_id=current_team, source_kind="meeting_round") for item in rows)
+            rows, ok = self._read(f"workflowRuns:{current_team}", self._ports.list_workflow_runs, (current_team,), ("runs", "workflowRuns"))
+            runs_ok = runs_ok and ok
+            runs.extend(_safe_record(item, family="workflowRuns", owner_team_id=current_team, agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in rows)
+        if not meetings_ok:
+            meetings.append(_sentinel("meetings", "meeting_round_authority_missing"))
+        if not runs_ok:
+            runs.append(_sentinel("workflowRuns", "workflow_run_authority_missing"))
+
+        artifact_families: dict[str, list[dict[str, Any]]] = {"plans": [], "candidates": [], "selections": [], "results": [], "artifacts": []}
+        artifacts_ok = True
+        for current_team in all_team_ids:
+            for kind in ARTIFACT_KINDS:
+                rows, ok = self._read(f"artifacts:{current_team}:{kind}", self._ports.list_artifacts, (current_team, kind), ("artifacts", "rows"))
+                artifacts_ok = artifacts_ok and ok
+                family = ARTIFACT_FAMILY_BY_KIND.get(kind, "artifacts")
+                artifact_families[family].extend(_safe_record(item, family=family, owner_team_id=current_team, agent_team_by_id=agent_team, role_by_id=role_by_agent, source_kind=kind) for item in rows)
+        if not artifacts_ok:
+            artifact_families["artifacts"].append(_sentinel("artifacts", "workflow_artifact_authority_missing"))
+
+        checkpoints, checkpoints_ok = self._read("checkpoints", self._ports.list_checkpoints, (team_id,), ("checkpoints", "rows"))
+        receipts, receipts_ok = self._read("receipts", self._ports.list_receipts, (team_id,), ("receipts", "rows"))
+        if not checkpoints_ok:
+            checkpoints.append(_sentinel("checkpoints", "checkpoint_readback_authority_missing"))
+        if not receipts_ok:
+            receipts.append(_sentinel("receipts", "receipt_readback_authority_missing"))
+        safe_checkpoints = [_safe_record(item, family="checkpoints", owner_team_id=team_id) for item in checkpoints]
+        safe_receipts = [_safe_record(item, family="receipts", owner_team_id=team_id) for item in receipts]
+
+        rounds: list[dict[str, Any]] = []
+        bindings: list[dict[str, Any]] = []
+        for raw_room, room in zip(raw_rooms, safe_rooms):
+            if not isinstance(raw_room, Mapping):
+                continue
+            owner = _text(room.get("teamId"))
+            for raw_round in _rows(raw_room.get("rounds"), "rounds"):
+                compact = _safe_record(raw_round, family="rounds", owner_team_id=owner, source_kind="chat_room_round")
+                if compact["id"]:
+                    rounds.append(compact)
+            participants = raw_room.get("participants")
+            if isinstance(participants, Sequence) and not isinstance(participants, (str, bytes, bytearray)):
+                for participant in participants:
+                    if not isinstance(participant, Mapping):
+                        continue
+                    participant_id = _text(_first(participant, "participantId", "participant_id", "agentId", "sessionId"))
+                    if participant_id:
+                        bindings.append({"id": f"{room.get('id')}:{participant_id}", "teamId": owner, "roomId": _text(room.get("id")), "participantId": participant_id, "agentId": _text(_first(participant, "agentId", "agent_id")), "sessionId": _text(_first(participant, "sessionId", "session_id", "directSessionId")), "sourceFamily": "legacyParticipantBindings"})
+        if not rooms_ok:
+            rounds.append(_sentinel("rounds", "room_round_authority_missing"))
+            bindings.append(_sentinel("legacyParticipantBindings", "room_participant_authority_missing"))
+
+        active, active_ok = self._active(team_id, raw_rooms, runs, session_team)
+        protection, protection_ok = self._protection(
+            team_id,
+            team_ids,
+            {"teams": safe_teams, "agents": safe_agents, "sessions": safe_sessions, "rooms": safe_rooms, "meetings": meetings, "workflowRuns": runs, **artifact_families},
+            {"teams": teams_ok, "agents": agents_ok, "sessions": sessions_ok, "rooms": rooms_ok, "meetings": meetings_ok, "workflowRuns": runs_ok, "artifacts": artifacts_ok},
+        )
+        authority["families"].update({"teams": teams_ok, "agents": agents_ok, "sessions": sessions_ok, "rooms": rooms_ok, "meetings": meetings_ok, "workflowRuns": runs_ok, "artifacts": artifacts_ok, "checkpoints": checkpoints_ok, "receipts": receipts_ok, "activeWork": active_ok, "otherTeamProtection": protection_ok})
+        if not active_ok:
+            authority["blockers"].append("active_work_authority_missing")
+        if not protection_ok:
+            authority["blockers"].append("other_team_protection_missing")
+        if authority["blockers"]:
+            authority["status"] = "blocked"
+        authority["families"] = dict(sorted(authority["families"].items()))
+        with self._authority_lock:
+            self._last_authority = copy.deepcopy(authority)
+
+        objects = {"teams": safe_teams, "agents": safe_agents, "sessions": safe_sessions, "rooms": safe_rooms, "meetings": meetings, "rounds": rounds, "workflowRuns": runs, **artifact_families, "receipts": safe_receipts, "checkpoints": safe_checkpoints, "legacyParticipantBindings": bindings}
+        objects.update(self._immutable(authority))
+        return {"schemaVersion": SCHEMA_VERSION, "teamId": team_id, "objects": objects, "activeWork": active, "otherTeamProtection": protection}
+
+    def _immutable(self, authority: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        specs = (("catalog", self._ports.load_catalog, "catalogId", "science-125-questions-2021"), ("program", self._ports.load_program, "programId", "competition_program_core"), ("policy", self._ports.load_policy, "policyId", "full_catalog_execution_core"))
+        result: dict[str, list[dict[str, Any]]] = {}
+        for family, loader, id_key, fallback in specs:
+            if not callable(loader):
+                result[family] = [_sentinel(family, "immutable_resource_authority_missing")]
+                authority["families"][family] = False
+                continue
+            try:
+                source = loader()
+                source = source if isinstance(source, Mapping) else {}
+                row = {"id": _text(_first(source, id_key, "catalog_id", "id", "version")) or fallback, "immutable": True, "sourceFamily": family}
+                for key in ("sha256", "catalogSha256", "coreBehaviorHash", "corePolicyHash", "version", "contractVersion", "questionCount", "question_count"):
+                    if key in source and isinstance(source[key], (str, int, float, bool)):
+                        row["questionCount" if key == "question_count" else key] = source[key]
+                result[family] = [row]
+                authority["families"][family] = True
+            except Exception:  # noqa: BLE001 - resource drift is a blocker
+                result[family] = [_sentinel(family, "immutable_resource_read_failed")]
+                authority["families"][family] = False
+        return result
+
+    def _active(self, team_id: str, raw_rooms: Sequence[Any], runs: Sequence[Mapping[str, Any]], session_team: Mapping[str, str]) -> tuple[dict[str, Any], bool]:
+        rows, ok = self._read("activeSessionWork", self._ports.list_active_session_work, keys=("activeItems", "items", "runs"))
+        active: dict[tuple[str, str], dict[str, str]] = {}
+        for raw in rows:
+            item = raw if isinstance(raw, Mapping) else {"id": raw}
+            session_id = _text(_first(item, "sessionId", "session_id"))
+            owner = _owner(item, {}) or _text(session_team.get(session_id))
+            status = _status(item)
+            if owner not in {"", team_id} or status not in ACTIVE_STATUSES:
+                continue
+            item_id = _record_id(item)
+            kind = _text(_first(item, "kind", "runKind", "family", "type"))
+            if item_id:
+                active[(item_id, kind)] = {"id": item_id, "kind": kind, "status": status}
+        for raw in raw_rooms:
+            if not isinstance(raw, Mapping) or _owner(raw, {}) not in {"", team_id}:
+                continue
+            round_id = _text(_first(raw, "activeRoundId", "active_round_id"))
+            if round_id and _status(raw) in ACTIVE_STATUSES:
+                active[(round_id, "chat_room_round")] = {"id": round_id, "kind": "chat_room_round", "status": _status(raw)}
+        for raw in runs:
+            status = _status(raw)
+            if status in ACTIVE_STATUSES and not _text(_first(raw, "finishedAt", "endedAt")):
+                item_id = _record_id(raw)
+                if item_id:
+                    kind = _text(_first(raw, "workflowId", "workflowKind", "kind")) or "workflow_run"
+                    active[(item_id, kind)] = {"id": item_id, "kind": kind, "status": status}
+        items = sorted(active.values(), key=lambda item: (item["kind"], item["id"]))
+        statuses: dict[str, int] = {}
+        for item in items:
+            statuses[item["status"]] = statuses.get(item["status"], 0) + 1
+        return {"authorityPresent": ok, "activeCount": len(items), "items": items, "statuses": dict(sorted(statuses.items()))}, ok
+
+    def _protection(self, team_id: str, team_ids: set[str], families: Mapping[str, Sequence[Mapping[str, Any]]], source_ok: Mapping[str, bool]) -> tuple[dict[str, Any], bool]:
+        good = bool(team_ids) and all(bool(source_ok.get(family)) for family in PROTECTION_FAMILIES)
+        counts: dict[str, dict[str, int]] = {}
+        unresolved = 0
+        for family, rows in families.items():
+            for row in rows:
+                owner = _text(row.get("teamId")) if isinstance(row, Mapping) else ""
+                if not owner:
+                    if _text(row.get("id")):
+                        unresolved += 1
+                elif owner != team_id:
+                    counts.setdefault(owner, {})[family] = counts.setdefault(owner, {}).get(family, 0) + 1
+        if unresolved:
+            good = False
+        snapshot = {"teamIds": sorted(team_ids), "otherTeamCounts": {key: dict(sorted(value.items())) for key, value in sorted(counts.items())}, "unresolvedRuntimeObjectCount": unresolved}
+        return {"authorityPresent": good, "snapshot": snapshot}, good
+
+
+ChallengeCupLiveInventoryAdapter = LiveChallengeCupInventoryReader
+ChallengeCupResetLiveInventoryReader = LiveChallengeCupInventoryReader
+
+
+def build_live_challenge_cup_inventory_reader(ports: ChallengeCupInventoryPorts | None = None) -> LiveChallengeCupInventoryReader:
+    return LiveChallengeCupInventoryReader(ports=ports)
+
+
+__all__ = ["ChallengeCupInventoryPorts", "ChallengeCupLiveInventoryAdapter", "ChallengeCupResetLiveInventoryReader", "LiveChallengeCupInventoryReader", "LiveInventoryAuthorityError", "build_live_challenge_cup_inventory_reader"]

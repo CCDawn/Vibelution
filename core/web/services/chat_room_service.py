@@ -307,6 +307,7 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
         session_summaries=participant_indexes["session_summaries"],
         active_agents_by_id=participant_indexes["active_agents_by_id"],
         active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
+        preserve_scoped_session_ids=_is_scoped_discussion_room(room),
     )
     _append_chat_room_detail_timing(phase_timings, "participant_repair", stage_started_at)
     if repaired:
@@ -926,7 +927,10 @@ def start_chat_room_round(
             participant_seed = copy.deepcopy(room.get("participants") or [])
 
         stage_started_at = _perf_counter()
-        refreshed_participants = _refresh_chat_room_round_participants(participant_seed)
+        refreshed_participants = _refresh_chat_room_round_participants(
+            participant_seed,
+            preserve_scoped_session_ids=_is_scoped_discussion_room(room),
+        )
         refreshed_participant_count = len(refreshed_participants)
         participants = _dedupe_chat_room_participants(refreshed_participants)
         submit_timings["participantDedupeRemoved"] = max(0, refreshed_participant_count - len(participants))
@@ -3395,6 +3399,19 @@ def _participant_from_session(
     }
 
 
+def _is_scoped_discussion_room(value: Mapping[str, Any] | None) -> bool:
+    """Identify the formal room envelope that owns Child Session bindings."""
+
+    if not isinstance(value, Mapping):
+        return False
+    config = value.get("config") if isinstance(value.get("config"), Mapping) else value
+    if str(config.get("scopeAuthority") or "").strip() != "workflow_discussion_scope.v1":
+        return False
+    return isinstance(config.get("discussionScope"), Mapping) and bool(
+        str(config.get("scopeHash") or "").strip()
+    )
+
+
 def _refresh_participants(
     participants: list[dict[str, Any]],
     *,
@@ -3402,6 +3419,7 @@ def _refresh_participants(
     session_summaries: dict[str, dict[str, Any]] | None = None,
     active_agents_by_id: dict[str, dict[str, Any]] | None = None,
     active_agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+    preserve_scoped_session_ids: bool = False,
 ) -> list[dict[str, Any]]:
     refreshed: list[dict[str, Any]] = []
     for item in participants:
@@ -3413,7 +3431,14 @@ def _refresh_participants(
             active_agents_by_session_id=active_agents_by_session_id,
         )
         current_direct_session_id = str((active_agent or {}).get("directSessionId") or "").strip()
-        session_id = current_direct_session_id or str(item.get("sessionId") or item.get("directSessionId") or "").strip()
+        stored_session_id = str(
+            item.get("sessionId") or item.get("directSessionId") or ""
+        ).strip()
+        session_id = (
+            stored_session_id
+            if preserve_scoped_session_ids and stored_session_id
+            else current_direct_session_id or stored_session_id
+        )
         summary = _session_summary(session_id, session_summaries=session_summaries)
         if summary:
             participant = _participant_from_session(
@@ -3443,14 +3468,18 @@ def _refresh_participants(
                 or participant.get("sessionId")
                 or ""
             ).strip()
-            participant["sessionId"] = str(current_direct_session_id or participant.get("sessionId") or "").strip()
+            participant["sessionId"] = str(
+                session_id if preserve_scoped_session_ids else current_direct_session_id
+                or participant.get("sessionId")
+                or ""
+            ).strip()
             for field in _PARTICIPANT_CONTEXT_FIELDS:
                 if field in item:
                     participant[field] = item.get(field)
             refreshed.append(participant)
         else:
             fallback = dict(item)
-            if current_direct_session_id:
+            if current_direct_session_id and not preserve_scoped_session_ids:
                 fallback["sessionId"] = current_direct_session_id
                 fallback["directSessionId"] = current_direct_session_id
             if active_agent:
@@ -3479,6 +3508,8 @@ def _refresh_participants(
 
 def _refresh_chat_room_round_participants(
     participants: list[dict[str, Any]],
+    *,
+    preserve_scoped_session_ids: bool = False,
 ) -> list[dict[str, Any]]:
     """Refresh round participants without holding the chat-room persistence lock."""
 
@@ -3489,6 +3520,7 @@ def _refresh_chat_room_round_participants(
         session_summaries=participant_indexes["session_summaries"],
         active_agents_by_id=participant_indexes["active_agents_by_id"],
         active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
+        preserve_scoped_session_ids=preserve_scoped_session_ids,
     )
 
 
@@ -3849,6 +3881,7 @@ def _repair_room_participants(
     session_summaries: dict[str, dict[str, Any]] | None = None,
     active_agents_by_id: dict[str, dict[str, Any]] | None = None,
     active_agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+    preserve_scoped_session_ids: bool = False,
 ) -> bool:
     participants = list(room.get("participants") or [])
     refreshed = _refresh_participants(
@@ -3856,6 +3889,7 @@ def _repair_room_participants(
         session_summaries=session_summaries,
         active_agents_by_id=active_agents_by_id,
         active_agents_by_session_id=active_agents_by_session_id,
+        preserve_scoped_session_ids=preserve_scoped_session_ids,
     )
     previous_missing_sessions = {
         str(item.get("sessionId") or item.get("directSessionId") or "").strip()
@@ -3905,6 +3939,7 @@ def _repair_room_participants_in_state(
             session_summaries=session_summaries,
             active_agents_by_id=active_agent_indexes["by_id"],
             active_agents_by_session_id=active_agent_indexes["by_session_id"],
+            preserve_scoped_session_ids=_is_scoped_discussion_room(room),
         ):
             changed = True
     return changed

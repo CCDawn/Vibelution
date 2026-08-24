@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.contracts import CommandOffer, WorkflowCommandKind
+from core.research.workflow.contracts.discussion_scope import WorkflowDiscussionScopeV1
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.research_runtime.command_offer_builder import (
     build_command_offers,
@@ -21,6 +22,7 @@ from core.web.services.team_workflow.research_runtime.query_service import (
     TeamScopeMismatchError,
     WorkflowLedgerUnavailable,
     WorkflowQueryService,
+    _discussion_inputs_from_run,
     _delivery_projection_from_events,
     _launch_context_from_run,
     _read_bounded_events,
@@ -36,6 +38,16 @@ from tests._support.workflow_ledger_helpers import (
 )
 
 FIXED_GENERATED_AT = "2026-08-12T14:00:00.000Z"
+
+
+def _discussion_scope_for_projection() -> WorkflowDiscussionScopeV1:
+    return WorkflowDiscussionScopeV1.generation(
+        teamId="research-team",
+        researchProjectId="challenge-sci-096",
+        workflowRunId="run-discussion-anchor",
+        workflowNodeId="hypothesis_design",
+        questionId="SCI-096",
+    )
 
 
 def _seed_projection_run(harness: CommandHarness, run_id: str = "run-snap") -> None:
@@ -1336,3 +1348,104 @@ def test_snapshot_query_reads_bounded_event_head_and_tail() -> None:
     assert events[0] == 1
     assert events[-1] == 600
     assert repo.calls == [(0, 250), (350, 500)]
+
+
+def test_snapshot_projection_exposes_server_active_discussion_anchor() -> None:
+    scope = _discussion_scope_for_projection()
+    run = build_run_record(run_id="run-discussion-anchor")
+    meeting = {
+        "meetingRoundId": "meeting-discussion-anchor",
+        "discussionScope": scope.to_dict(),
+        "scopeHash": scope.scope_hash,
+        "linkedChatRoomId": "room-discussion-anchor",
+        "status": "open",
+    }
+    room = {
+        "roomId": "room-discussion-anchor",
+        "status": "active",
+        "config": {
+            "discussionScope": scope.to_dict(),
+            "scopeHash": scope.scope_hash,
+        },
+    }
+    snapshot = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=0,
+            generated_at=FIXED_GENERATED_AT,
+            discussion_projection={"scope": scope.to_dict()},
+            discussion_meetings=(meeting,),
+            discussion_rooms=(room,),
+        )
+    )
+
+    anchor = snapshot.to_dict()["launchContext"]["activeDiscussionAnchor"]
+    assert anchor["status"] == "ready"
+    assert anchor["scopeHash"] == scope.scope_hash
+    assert anchor["roomId"] == "room-discussion-anchor"
+    assert anchor["meetingRoundId"] == "meeting-discussion-anchor"
+    assert anchor["deepLink"] == "/chat?room=room-discussion-anchor"
+
+
+def test_snapshot_projection_keeps_missing_discussion_authority_degraded() -> None:
+    scope = _discussion_scope_for_projection()
+    run = build_run_record(run_id="run-discussion-degraded")
+    snapshot = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=(),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=0,
+            generated_at=FIXED_GENERATED_AT,
+            discussion_projection={"scope": scope.to_dict()},
+            discussion_meetings=(),
+            discussion_rooms=(),
+        )
+    )
+
+    anchor = snapshot.to_dict()["launchContext"]["activeDiscussionAnchor"]
+    assert anchor["status"] == "degraded"
+    assert anchor["degradedReason"] == "meeting_missing"
+    assert anchor["roomId"] == ""
+    assert anchor["deepLink"] == ""
+
+
+def test_discussion_query_uses_formal_meeting_read_and_raw_room_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope = _discussion_scope_for_projection()
+    run = replace(
+        build_run_record(run_id="run-discussion-read-owner"),
+        input_snapshot_json=json.dumps({"discussionScope": scope.to_dict()}),
+    )
+    from core.web.services import chat_room_service
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_calls: list[str] = []
+    monkeypatch.setattr(
+        meeting_rounds,
+        "list_meeting_rounds",
+        lambda team_id: meeting_calls.append(team_id) or {"meetings": []},
+    )
+
+    class ReadOnlyRoomStore:
+        def load(self) -> dict[str, object]:
+            return {"rooms": []}
+
+    monkeypatch.setattr(chat_room_service, "_store", lambda: ReadOnlyRoomStore())
+    projection, meetings, rooms = _discussion_inputs_from_run(run, [], {})
+
+    assert projection == {"scope": scope.to_dict()}
+    assert meetings == []
+    assert rooms == []
+    assert meeting_calls == ["research-team"]

@@ -36,6 +36,22 @@ from .decision_record import (
     DECISION_STATUSES,
     DecisionRecord,
 )
+from .discussion_scope import (
+    CANDIDATE_REVIEW_SCOPE_KIND,
+    DiscussionScopeV1,
+    DISCUSSION_SCOPE_KINDS,
+    DISCUSSION_SCOPE_VERSION,
+    QUESTION_GENERATION_SCOPE_KIND,
+    WorkflowDiscussionScopeV1,
+    canonical_discussion_scope,
+    canonical_discussion_scope_json,
+    discussion_scope_hash,
+    discussion_scope_hash_for,
+    discussion_scope_key,
+    discussion_scope_key_for,
+    parse_discussion_scope,
+    session_scope_key,
+)
 from .execution import NodeExecutionEnvelope, TaskLease, TaskLeaseStatus
 from .execution_anchor import ExecutionAnchor
 from .experiment_campaign import ExperimentCampaign, ExperimentCampaignStage
@@ -206,6 +222,20 @@ __all__ = [
     "DEV_PROGRAM_ID",
     "DEV_THEME_PREFIX",
     "DecisionRecord",
+    "CANDIDATE_REVIEW_SCOPE_KIND",
+    "DiscussionScopeV1",
+    "DISCUSSION_SCOPE_KINDS",
+    "DISCUSSION_SCOPE_VERSION",
+    "QUESTION_GENERATION_SCOPE_KIND",
+    "WorkflowDiscussionScopeV1",
+    "canonical_discussion_scope",
+    "canonical_discussion_scope_json",
+    "discussion_scope_hash",
+    "discussion_scope_hash_for",
+    "discussion_scope_key",
+    "discussion_scope_key_for",
+    "parse_discussion_scope",
+    "session_scope_key",
     "EVIDENCE_STATUSES",
     "ExecutionAnchor",
     "ExecutionReceipt",

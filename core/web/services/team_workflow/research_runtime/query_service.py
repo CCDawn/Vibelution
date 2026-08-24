@@ -147,6 +147,9 @@ class WorkflowQueryService:
             delivery_status,
             delivery_artifact,
             launch_context,
+            discussion_projection,
+            discussion_meetings,
+            discussion_rooms,
             latest_seq,
         ) = bundle
         if run.team_id != scoped_team:
@@ -178,6 +181,9 @@ class WorkflowQueryService:
                 delivery_status=delivery_status,
                 delivery_artifact=delivery_artifact,
                 launch_context=launch_context,
+                discussion_projection=discussion_projection,
+                discussion_meetings=discussion_meetings,
+                discussion_rooms=discussion_rooms,
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )
@@ -343,6 +349,15 @@ class WorkflowQueryService:
                 run_status=run.status,
             )
             launch_context = _launch_context_from_run(run, events)
+            (
+                discussion_projection,
+                discussion_meetings,
+                discussion_rooms,
+            ) = _discussion_inputs_from_run(
+                run,
+                events,
+                launch_context,
+            )
             return (
                 run,
                 attempts,
@@ -353,6 +368,9 @@ class WorkflowQueryService:
                 delivery_status,
                 delivery_artifact,
                 launch_context,
+                discussion_projection,
+                discussion_meetings,
+                discussion_rooms,
                 latest_seq,
             )
 
@@ -609,6 +627,181 @@ def _launch_context_from_run(run: Any, events: list[Any]) -> dict[str, Any]:
             ).strip() or None
         break
     return context
+
+
+def _discussion_inputs_from_run(
+    run: Any,
+    events: list[Any],
+    launch_context: Mapping[str, Any],
+) -> tuple[Mapping[str, Any] | None, Any, Any]:
+    """Read only the canonical discussion authorities needed by projection.
+
+    The formal ledger owns the workflow run, while hypothesis-first meetings
+    and chat rooms remain append-only domain authorities.  This adapter keeps
+    those reads out of ``projection_builder`` (which must stay pure) and never
+    calls public room APIs that reconcile or repair state.  If no explicit
+    discussion scope is present, no anchor is emitted for an ordinary run.
+    A scoped run with missing authorities receives empty projections so the
+    anchor returns a visible degraded reason instead of falling back to a team
+    room.
+    """
+
+    projection = _discussion_projection_from_sources(run, events, launch_context)
+    snapshot = _run_input_snapshot(run)
+    objective = snapshot.get("researchObjectiveContract")
+    hypothesis_first = isinstance(objective, Mapping) and objective.get(
+        "hypothesisFirst"
+    ) is True
+    if projection is None and not hypothesis_first:
+        return None, None, None
+
+    snapshot_authority = snapshot.get("discussionAuthority")
+    if isinstance(snapshot_authority, Mapping):
+        authority_projection = snapshot_authority.get("projection")
+        if projection is None and isinstance(authority_projection, Mapping):
+            projection = dict(authority_projection)
+        meetings = snapshot_authority.get("meetings")
+        rooms = snapshot_authority.get("rooms")
+        if meetings is not None or rooms is not None:
+            return projection or {}, meetings if meetings is not None else [], rooms if rooms is not None else []
+
+    # Some adapters carry authority beside the scope in the event payload or
+    # launch context.  Accept only the explicit discussion envelope.
+    for source in (
+        launch_context,
+        *(payload for payload in (_event_payload(event) for event in events) if payload),
+    ):
+        if not isinstance(source, Mapping):
+            continue
+        authority = source.get("discussionAuthority")
+        if not isinstance(authority, Mapping):
+            continue
+        meetings = authority.get("meetings")
+        rooms = authority.get("rooms")
+        if meetings is not None or rooms is not None:
+            return projection or {}, meetings if meetings is not None else [], rooms if rooms is not None else []
+
+    # Read the two append-only authorities without invoking their public
+    # service methods: those methods reconcile active rounds/participants and
+    # are therefore not suitable for a zero-write snapshot query.
+    meetings: list[Mapping[str, Any]] = []
+    rooms: list[Mapping[str, Any]] = []
+    try:
+        from core.web.services.team_workflow import meeting_rounds
+
+        # Meeting rounds already have a formal read facade.  It folds the
+        # append-only log and validates the team scope without writing, so do
+        # not bypass that owner through its private path helpers.
+        meeting_payload = meeting_rounds.list_meeting_rounds(
+            str(getattr(run, "team_id", ""))
+        )
+        raw_meetings = (
+            meeting_payload.get("meetings")
+            if isinstance(meeting_payload, Mapping)
+            else meeting_payload
+        )
+        raw_meetings = raw_meetings if isinstance(raw_meetings, list) else []
+        latest: dict[str, Mapping[str, Any]] = {}
+        for item in raw_meetings:
+            if not isinstance(item, Mapping):
+                continue
+            meeting_id = str(item.get("meetingRoundId") or "").strip()
+            if meeting_id:
+                latest[meeting_id] = item
+        meetings = list(latest.values())
+    except Exception:  # noqa: BLE001 - missing legacy authority is degraded
+        meetings = []
+    try:
+        from core.web.services import chat_room_service
+
+        # There is currently no formal zero-write room read facade: every
+        # public ``list_chat_rooms*`` path first runs orphan-round
+        # reconciliation, which may persist state.  Keep this bounded raw
+        # load until the chat-room owner exposes a read-only adapter; do not
+        # substitute a public API that silently repairs while querying.
+        state = chat_room_service._store().load()
+        raw_rooms = state.get("rooms") if isinstance(state, Mapping) else []
+        rooms = [item for item in raw_rooms if isinstance(item, Mapping)]
+    except Exception:  # noqa: BLE001 - missing legacy authority is degraded
+        rooms = []
+    return projection or {}, meetings, rooms
+
+
+def _discussion_projection_from_sources(
+    run: Any,
+    events: list[Any],
+    launch_context: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Extract explicit active discussion identity from immutable envelopes."""
+
+    sources: list[Mapping[str, Any]] = []
+    snapshot = _run_input_snapshot(run)
+    if snapshot:
+        sources.append(snapshot)
+    if isinstance(launch_context, Mapping):
+        sources.append(launch_context)
+    for event in events:
+        payload = _event_payload(event)
+        if payload:
+            sources.append(payload)
+
+    for source in sources:
+        active = source.get("activeDiscussionAnchor")
+        if isinstance(active, Mapping):
+            return dict(active)
+        for key in (
+            "activeDiscussion",
+            "discussionProjection",
+            "discussionScope",
+            "activeDiscussionScope",
+        ):
+            candidate = source.get(key)
+            if isinstance(candidate, Mapping):
+                if key in {"discussionScope", "activeDiscussionScope"}:
+                    projection: dict[str, Any] = {"scope": dict(candidate)}
+                else:
+                    projection = dict(candidate)
+                _copy_discussion_refs(source, projection)
+                return projection
+        binding = source.get("scopeBinding")
+        if isinstance(binding, Mapping):
+            scope = binding.get("discussionScope") or binding.get("scope")
+            if isinstance(scope, Mapping):
+                projection = {"scope": dict(scope)}
+                _copy_discussion_refs(source, projection)
+                _copy_discussion_refs(binding, projection)
+                return projection
+    return None
+
+
+def _copy_discussion_refs(source: Mapping[str, Any], target: dict[str, Any]) -> None:
+    for key in (
+        "scopeHash",
+        "discussionScopeHash",
+        "activeMeetingRoundId",
+        "currentMeetingRoundId",
+        "meetingRoundId",
+        "activeRoomId",
+        "currentRoomId",
+        "discussionRoomId",
+        "roomId",
+        "activeSelectionId",
+        "currentSelectionId",
+        "selectionId",
+        "activeCandidateId",
+        "currentCandidateId",
+        "candidateId",
+    ):
+        if key in source and key not in target:
+            target[key] = source.get(key)
+
+
+def _run_input_snapshot(run: Any) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 def _node_blocked_reason(latest: Any, run_blocked_reason: str | None) -> str:

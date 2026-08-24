@@ -22,6 +22,7 @@ from core.research.workflow.contracts.workflow_snapshot import (
 from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
 from core.research.workflow.models import WorkflowDefinition
 
+from ..active_discussion_anchor import project_active_discussion_anchor
 from .blocked_reason import format_blocked_reason, parse_problem_json
 
 
@@ -40,6 +41,12 @@ class ProjectionInputs:
     delivery_status: str | None = None
     delivery_artifact: Mapping[str, Any] | None = None
     launch_context: Mapping[str, Any] | None = None
+    # Discussion authority is deliberately supplied as already-loaded
+    # projections.  The builder never reaches into meeting/chat stores and
+    # therefore remains a pure read-model function.
+    discussion_projection: Mapping[str, Any] | None = None
+    discussion_meetings: Any = None
+    discussion_rooms: Any = None
 
 
 def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkflowSnapshot:
@@ -113,6 +120,18 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         current_task=current_task,
         command_offers=inputs.command_offers,
     )
+    launch_context = _normalize_launch_context(inputs.launch_context, run)
+    discussion_anchor = _discussion_anchor(
+        inputs,
+        launch_context=launch_context,
+    )
+    if discussion_anchor is not None:
+        # ``launchContext`` is an existing additive projection envelope.  Keep
+        # the formal snapshot DTO stable while making the server-authored
+        # anchor available to current clients.  A route may promote this
+        # value to a top-level response field without creating another rule.
+        launch_context["activeDiscussionAnchor"] = discussion_anchor
+
     return ResearchWorkflowSnapshot(
         run=run_summary,
         definition=inputs.definition.to_dict(),
@@ -156,7 +175,7 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
             delivery_artifact=inputs.delivery_artifact,
         ),
         delivery_status=_normalize_delivery_status(inputs.delivery_status),
-        launch_context=_normalize_launch_context(inputs.launch_context, run),
+        launch_context=launch_context,
     )
 
 
@@ -1029,6 +1048,46 @@ def _normalize_launch_context(
         context.get("chainCorrelationId")
     )
     return context
+
+
+def _discussion_anchor(
+    inputs: ProjectionInputs,
+    *,
+    launch_context: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Project the one server-authored discussion anchor for a snapshot.
+
+    ``active_discussion_anchor`` owns all identity matching and degraded
+    reasons.  This adapter only decides whether the caller supplied enough
+    authority to invoke it and adapts the immutable run input when a caller
+    has not supplied a richer workflow projection.  In particular, it never
+    derives a room from ``linkedChatRoomId`` or from an array position.
+    """
+
+    supplied_authority = (
+        inputs.discussion_projection is not None
+        or inputs.discussion_meetings is not None
+        or inputs.discussion_rooms is not None
+    )
+    existing = launch_context.get("activeDiscussionAnchor")
+    if not supplied_authority and isinstance(existing, Mapping):
+        # A query adapter may already have projected the canonical anchor.  It
+        # is an input fact, not a second selection algorithm; preserve it for
+        # compatibility with the additive launch-context envelope.
+        return dict(existing)
+    if not supplied_authority:
+        return None
+
+    workflow_projection: Mapping[str, Any] = (
+        inputs.discussion_projection
+        if isinstance(inputs.discussion_projection, Mapping)
+        else {}
+    )
+    return project_active_discussion_anchor(
+        workflow_projection,
+        inputs.discussion_meetings,
+        inputs.discussion_rooms,
+    )
 
 
 def _normalize_delivery_status(value: Any) -> str | None:

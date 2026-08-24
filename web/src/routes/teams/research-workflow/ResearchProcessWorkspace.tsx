@@ -1,4 +1,5 @@
 import { useCallback, useMemo, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
@@ -39,6 +40,8 @@ import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
 import { buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
+import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import {
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -68,6 +71,28 @@ export type ResearchProcessWorkspaceProps = {
 // projection is loaded yet.
 const EMPTY_RUNTIME_NODE_IDS: string[] = [];
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Read only the server's explicit activeDiscussionAnchor envelope. The formal
+ * snapshot/projection and hypothesis-first chain can arrive through different
+ * route adapters, so the same exact field is checked at their boundaries.
+ * No linkedChatRoomId or sibling room is ever considered.
+ */
+function findActiveDiscussionAnchor(value: unknown): { found: boolean; value: unknown } {
+  if (!isRecord(value)) return { found: false, value: undefined };
+  if (Object.prototype.hasOwnProperty.call(value, "activeDiscussionAnchor")) {
+    return { found: true, value: value.activeDiscussionAnchor };
+  }
+  for (const key of ["launchContext", "formalSnapshot", "run", "projection", "state"]) {
+    const nested = findActiveDiscussionAnchor(value[key]);
+    if (nested.found) return nested;
+  }
+  return { found: false, value: undefined };
+}
+
 function freshRetryIdempotencyKey(baseKey: string): string {
   const random = typeof globalThis.crypto?.randomUUID === "function"
     ? globalThis.crypto.randomUUID()
@@ -84,12 +109,38 @@ export function ResearchProcessWorkspace({
   onOpenTeamCommunication,
 }: ResearchProcessWorkspaceProps) {
   const isZh = lang === "zh";
+  const navigate = useNavigate();
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const chainQuestionId = location.questionId || runState.run?.questionId || "";
   const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId);
   useHypothesisFirstChainInvalidation(teamId, chainQuestionId, runState.lastSequence);
+  const activeDiscussionAnchor = useMemo(() => {
+    for (const source of [
+      runState.snapshot,
+      runState.projection,
+      runState.run,
+      hypothesisFirstChain.chainState,
+    ]) {
+      const result = findActiveDiscussionAnchor(source);
+      if (result.found) return result.value;
+    }
+    return undefined;
+  }, [
+    hypothesisFirstChain.chainState,
+    runState.projection,
+    runState.run,
+    runState.snapshot,
+  ]);
+  const scopedDiscussionModel = useMemo<ScopedDiscussionModel>(
+    () => buildScopedDiscussionModel({ anchor: activeDiscussionAnchor }),
+    [activeDiscussionAnchor],
+  );
+  const navigateToDiscussion = useCallback((deepLink: string) => {
+    if (!deepLink || scopedDiscussionModel.status !== "ready") return;
+    navigate(deepLink);
+  }, [navigate, scopedDiscussionModel.status]);
   const nodeDetail = useNodeDetailState(
     teamId,
     location.runId,
@@ -366,6 +417,42 @@ export function ResearchProcessWorkspace({
   const semanticCurrentTaskNodeId = hypothesisFirstSemanticNodeId(
     workspaceNavigationAction.targetNodeId,
   );
+  const navigateToCurrentTask = useCallback(() => {
+    if (scopedDiscussionModel.status === "ready" && scopedDiscussionModel.deepLink) {
+      navigateToDiscussion(scopedDiscussionModel.deepLink);
+      return;
+    }
+    if (semanticCurrentTaskNodeId) {
+      location.replaceParams({ node: semanticCurrentTaskNodeId, panel: "node" });
+    }
+  }, [
+    location,
+    navigateToDiscussion,
+    scopedDiscussionModel.deepLink,
+    scopedDiscussionModel.status,
+    semanticCurrentTaskNodeId,
+  ]);
+  const replaceParamsForInspector = useCallback((patch: Record<string, string | null | undefined>) => {
+    const requestedNode = typeof patch.node === "string" ? patch.node.trim() : "";
+    const requestedSemanticNode = hypothesisFirstSemanticNodeId(requestedNode);
+    if (
+      patch.panel === "node"
+      && requestedSemanticNode
+      && requestedSemanticNode === semanticCurrentTaskNodeId
+      && scopedDiscussionModel.status === "ready"
+      && scopedDiscussionModel.deepLink
+    ) {
+      navigateToDiscussion(scopedDiscussionModel.deepLink);
+      return;
+    }
+    location.replaceParams(patch);
+  }, [
+    location,
+    navigateToDiscussion,
+    scopedDiscussionModel.deepLink,
+    scopedDiscussionModel.status,
+    semanticCurrentTaskNodeId,
+  ]);
   const archiveOpen = location.panel === "question";
   const scopedReviewMeetings = useMemo(() => hypothesisFirstChain.meetings
     .filter((meeting) => (
@@ -531,13 +618,14 @@ export function ResearchProcessWorkspace({
         busy: commandBusy,
       }}
       actions={{
-        replaceParams: location.replaceParams,
+        replaceParams: replaceParamsForInspector,
         retryNodeDetail: nodeDetail.retry,
         submitRun: commands.submitRun,
         pendingTaskId: commands.pendingTaskId,
         submitOffer: commands.submitOffer,
       }}
       nextAction={workspaceNavigationAction}
+      discussionModel={scopedDiscussionModel}
       onRecoverCollection={hypothesisFirstChain.recoverCollection}
       collectionRecoveryBusy={hypothesisFirstChain.recoveryBusy}
       collectionRecoveryError={hypothesisFirstChain.recoveryError}
@@ -555,6 +643,8 @@ export function ResearchProcessWorkspace({
         onSelectExperiment={selectExperiment}
         onOpenPanel={(panel) => location.openPanel(panel)}
         onNavigateNode={(nodeId) => location.replaceParams({ node: hypothesisFirstSemanticNodeId(nodeId) ?? nodeId, panel: "node" })}
+        discussionModel={scopedDiscussionModel}
+        onNavigateDiscussion={navigateToDiscussion}
       />
       <VCanvasWorkbenchPage
         data-vui="research-process-workspace"
@@ -592,7 +682,7 @@ export function ResearchProcessWorkspace({
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
               hypothesisFirstReady && semanticCurrentTaskNodeId
-                ? () => location.replaceParams({ node: semanticCurrentTaskNodeId, panel: "node" })
+                ? navigateToCurrentTask
                 : undefined
             }
           />
@@ -674,7 +764,7 @@ export function ResearchProcessWorkspace({
             retryPending={commandBusy}
             onReturnCurrentTask={
               semanticCurrentTaskNodeId
-                ? () => location.replaceParams({ node: semanticCurrentTaskNodeId, panel: "node" })
+                ? navigateToCurrentTask
                 : undefined
             }
           >

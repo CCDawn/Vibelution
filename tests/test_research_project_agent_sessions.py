@@ -13,6 +13,9 @@ from core.research.workflow.contracts.session_scope import (
     ContractValidationError,
     WorkflowSessionScopeV3,
 )
+from core.research.workflow.contracts.discussion_scope import (
+    WorkflowDiscussionScopeV1,
+)
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -1712,3 +1715,78 @@ def test_candidate_resolver_rejects_child_not_hidden_from_index(tmp_path, monkey
             **common,
             created_from_task_id="candidate-replay",
         )
+
+
+def test_discussion_generation_and_candidate_are_sibling_children_of_node_root(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "team_id": team["teamId"],
+        "research_project_id": project["projectId"],
+        "agent_id": agent["agentId"],
+        "role_key": "source_finder",
+        "role_label": "假设设计",
+        "workflow_run_id": "run-sci-096",
+        "workflow_node_id": "hypothesis_design",
+    }
+    root = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="node-root",
+    )
+    generation_scope = WorkflowDiscussionScopeV1.generation(
+        teamId=team["teamId"],
+        researchProjectId=project["projectId"],
+        workflowRunId=common["workflow_run_id"],
+        workflowNodeId=common["workflow_node_id"],
+        questionId="SCI-096",
+    )
+    generation = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="question-generation",
+        discussion_scope=generation_scope,
+    )
+    review_scope = WorkflowDiscussionScopeV1.review(
+        teamId=team["teamId"],
+        researchProjectId=project["projectId"],
+        workflowRunId=common["workflow_run_id"],
+        workflowNodeId=common["workflow_node_id"],
+        questionId="SCI-096",
+        selectionId="selection-1",
+        candidateId="H1",
+    )
+    review = resolve_research_project_agent_session(
+        **common,
+        selection_id="selection-1",
+        candidate_id="H1",
+        selected_candidate_ids=["H1", "H2"],
+        created_from_task_id="candidate-review",
+        discussion_scope=review_scope,
+    )
+
+    assert generation["sessionKind"] == "child"
+    assert review["sessionKind"] == "child"
+    assert generation["sessionId"] != review["sessionId"]
+    assert generation["parentSessionId"] == root["sessionId"]
+    assert review["parentSessionId"] == root["sessionId"]
+    assert generation["rootSessionId"] == root["sessionId"]
+    assert review["rootSessionId"] == root["sessionId"]
+
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"], project["projectId"]
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry_path.unlink()
+    recovered_generation = resolve_research_project_agent_session(
+        **common,
+        created_from_task_id="question-generation-replay",
+        discussion_scope=generation_scope,
+    )
+
+    assert recovered_generation["sessionId"] == generation["sessionId"]
+    assert recovered_generation["sessionCreated"] is False
+    assert recovered_generation["sessionKind"] == "child"

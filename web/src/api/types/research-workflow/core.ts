@@ -235,6 +235,20 @@ export type ResearchWorkflowArtifactSummary = {
   }>;
 };
 
+/** Server-authored identity for the one active Challenge Cup discussion. */
+export type ResearchWorkflowActiveDiscussionAnchor = {
+  scope: Record<string, unknown> | null;
+  scopeHash: string;
+  roomId: string;
+  meetingRoundId: string;
+  questionId: string;
+  selectionId: string;
+  candidateId: string;
+  deepLink: string;
+  status: "ready" | "degraded";
+  degradedReason: string;
+};
+
 export type ResearchWorkflowLaunchContext = {
   questionId: string | null;
   hypothesisSelectionId: string | null;
@@ -250,6 +264,8 @@ export type ResearchWorkflowLaunchContext = {
   approvedBy?: string | null;
   approvedAtMs?: number | null;
   inputSnapshotHash?: string | null;
+  /** Never inferred from the team's legacy linkedChatRoomId. */
+  activeDiscussionAnchor?: ResearchWorkflowActiveDiscussionAnchor | null;
 };
 
 export type ResearchWorkflowNodeDetail = {
