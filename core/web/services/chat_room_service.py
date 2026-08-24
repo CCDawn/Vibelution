@@ -188,6 +188,22 @@ def list_chat_room_purposes() -> list[dict[str, str]]:
     return [dict(item) for item in CHAT_ROOM_PURPOSES]
 
 
+def read_chat_rooms_snapshot() -> list[dict[str, Any]]:
+    """Read the durable room authority without reconciliation or repair.
+
+    Workflow projections must remain zero-write.  Public list/detail APIs
+    intentionally reconcile runtime state, so they are not safe for a query
+    service that only needs the persisted room/scope bindings.
+    """
+
+    state = _store().load()
+    return [
+        copy.deepcopy(item)
+        for item in list(state.get("rooms") or [])
+        if isinstance(item, dict)
+    ]
+
+
 def list_chat_rooms(
     *,
     session_summaries: dict[str, dict[str, Any]] | None = None,

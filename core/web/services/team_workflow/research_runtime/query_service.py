@@ -654,6 +654,19 @@ def _discussion_inputs_from_run(
     ) is True
     if projection is None and not hypothesis_first:
         return None, None, None
+    if projection is None and hypothesis_first:
+        try:
+            from . import hypothesis_first_chain
+
+            chain = hypothesis_first_chain.chain_state(
+                str(getattr(run, "team_id", "") or ""),
+                str(snapshot.get("questionId") or getattr(run, "question_id", "") or ""),
+            )
+            active = chain.get("activeDiscussionAnchor")
+            if isinstance(active, Mapping):
+                projection = dict(active)
+        except Exception:  # noqa: BLE001 - missing authority stays degraded
+            projection = None
 
     snapshot_authority = snapshot.get("discussionAuthority")
     if isinstance(snapshot_authority, Mapping):
@@ -714,14 +727,7 @@ def _discussion_inputs_from_run(
     try:
         from core.web.services import chat_room_service
 
-        # There is currently no formal zero-write room read facade: every
-        # public ``list_chat_rooms*`` path first runs orphan-round
-        # reconciliation, which may persist state.  Keep this bounded raw
-        # load until the chat-room owner exposes a read-only adapter; do not
-        # substitute a public API that silently repairs while querying.
-        state = chat_room_service._store().load()
-        raw_rooms = state.get("rooms") if isinstance(state, Mapping) else []
-        rooms = [item for item in raw_rooms if isinstance(item, Mapping)]
+        rooms = chat_room_service.read_chat_rooms_snapshot()
     except Exception:  # noqa: BLE001 - missing legacy authority is degraded
         rooms = []
     return projection or {}, meetings, rooms

@@ -510,13 +510,13 @@ def _persist_discussion_scope_projection(
             "workflowNodeId": scope.workflowNodeId,
         }
     )
-    append_round_record = getattr(meeting_rounds, "_append_round_record", None)
-    if not callable(append_round_record):
-        raise ResearchMeetingRuntimeError(
-            "meeting round store cannot persist the formal discussion scope"
-        )
-    append_round_record(str(team_id or "").strip(), record)
-    return record
+    return meeting_rounds.persist_meeting_discussion_scope(
+        str(team_id or "").strip(),
+        str(record.get("meetingRoundId") or "").strip(),
+        discussion_scope=scope.to_dict(),
+        discussion_scope_hash=scope.scope_hash,
+        scope_authority=_SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+    )
 
 
 def _role_owner_index() -> dict[str, str]:

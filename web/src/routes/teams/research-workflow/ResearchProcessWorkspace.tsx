@@ -252,7 +252,7 @@ export function ResearchProcessWorkspace({
 
 
   const formalRuntimeActive = Boolean(
-    runState.snapshot?.run.runId === location.runId && location.runId
+    runState.snapshot?.run?.runId === location.runId && location.runId
   ) || Boolean(hypothesisFirstChain.chainState?.hypothesisConverged);
   const formalRuntimeCurrentNodeIds = formalRuntimeActive
     ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)

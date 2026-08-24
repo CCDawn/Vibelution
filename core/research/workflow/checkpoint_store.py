@@ -270,7 +270,7 @@ def build_checkpoint_binding_payload(
         key: value for key, value in normalized_scope.items() if key != "scopeHash"
     }
     payload: dict[str, Any] = {
-        "scope": scope_identity,
+        "scope": dict(normalized_scope),
         "scopeRef": _safe_ref(scope_ref, field="scopeRef") if scope_ref is not None else scope_identity,
         "scopeHash": normalized_scope["scopeHash"],
     }

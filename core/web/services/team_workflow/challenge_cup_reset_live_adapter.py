@@ -106,6 +106,22 @@ _ID_KEYS = (
     "policyId",
     "policy_id",
 )
+_FAMILY_ID_KEYS = {
+    "teams": ("teamId", "team_id", "id"),
+    "agents": ("agentId", "agent_id", "id"),
+    "sessions": ("sessionId", "session_id", "id"),
+    "rooms": ("roomId", "room_id", "id"),
+    "meetings": ("meetingRoundId", "meeting_round_id", "id"),
+    "rounds": ("roundId", "round_id", "id"),
+    "workflowRuns": ("workflowRunId", "workflow_run_id", "runId", "run_id", "id"),
+    "plans": ("planId", "plan_id", "recordId", "artifactId", "artifact_id", "id"),
+    "candidates": ("candidateId", "candidate_id", "recordId", "artifactId", "artifact_id", "id"),
+    "selections": ("selectionId", "selection_id", "recordId", "artifactId", "artifact_id", "id"),
+    "results": ("recordId", "artifactId", "artifact_id", "id"),
+    "artifacts": ("recordId", "artifactId", "artifact_id", "id"),
+    "receipts": ("receiptId", "receipt_id", "id"),
+    "checkpoints": ("checkpointId", "checkpoint_id", "id"),
+}
 _SAFE_KEYS = {
     "status",
     "state",
@@ -226,7 +242,11 @@ def _safe_record(
     immutable: bool | None = None,
 ) -> dict[str, Any]:
     source = item if isinstance(item, Mapping) else {"id": item}
-    payload: dict[str, Any] = {"id": _record_id(source)}
+    identifier = _text(
+        _first(source, *_FAMILY_ID_KEYS.get(family, _ID_KEYS)),
+        limit=320,
+    )
+    payload: dict[str, Any] = {"id": identifier}
     owner = owner_team_id or _owner(source, agent_team_by_id or {})
     if owner:
         payload["teamId"] = owner
@@ -290,8 +310,7 @@ def _list_rooms() -> Any:
     # read-only, so use the room owner's bounded store load until it exposes a
     # zero-write read facade.  Do not call detail/list APIs here: they can also
     # repair participant bindings and would mutate the inventory being hashed.
-    state = chat_room_service._store().load()
-    return list(state.get("rooms") or []) if isinstance(state, Mapping) else []
+    return chat_room_service.read_chat_rooms_snapshot()
 
 
 def _list_meetings(team_id: str) -> Any:
@@ -503,8 +522,22 @@ class LiveChallengeCupInventoryReader:
             checkpoints.append(_sentinel("checkpoints", "checkpoint_readback_authority_missing"))
         if not receipts_ok:
             receipts.append(_sentinel("receipts", "receipt_readback_authority_missing"))
-        safe_checkpoints = [_safe_record(item, family="checkpoints", owner_team_id=team_id) for item in checkpoints]
-        safe_receipts = [_safe_record(item, family="receipts", owner_team_id=team_id) for item in receipts]
+        safe_checkpoints = [
+            _safe_record(
+                item,
+                family="checkpoints",
+                owner_team_id=team_id if _record_id(item) else "",
+            )
+            for item in checkpoints
+        ]
+        safe_receipts = [
+            _safe_record(
+                item,
+                family="receipts",
+                owner_team_id=team_id if _record_id(item) else "",
+            )
+            for item in receipts
+        ]
 
         rounds: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
@@ -582,7 +615,21 @@ class LiveChallengeCupInventoryReader:
             status = _status(item)
             if owner not in {"", team_id} or status not in ACTIVE_STATUSES:
                 continue
-            item_id = _record_id(item)
+            item_id = _text(
+                _first(
+                    item,
+                    "runId",
+                    "run_id",
+                    "workRunId",
+                    "work_run_id",
+                    "turnId",
+                    "turn_id",
+                    "taskId",
+                    "task_id",
+                    "id",
+                ),
+                limit=320,
+            )
             kind = _text(_first(item, "kind", "runKind", "family", "type"))
             if item_id:
                 active[(item_id, kind)] = {"id": item_id, "kind": kind, "status": status}
@@ -595,7 +642,10 @@ class LiveChallengeCupInventoryReader:
         for raw in runs:
             status = _status(raw)
             if status in ACTIVE_STATUSES and not _text(_first(raw, "finishedAt", "endedAt")):
-                item_id = _record_id(raw)
+                item_id = _text(
+                    _first(raw, *_FAMILY_ID_KEYS["workflowRuns"]),
+                    limit=320,
+                )
                 if item_id:
                     kind = _text(_first(raw, "workflowId", "workflowKind", "kind")) or "workflow_run"
                     active[(item_id, kind)] = {"id": item_id, "kind": kind, "status": status}
