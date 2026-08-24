@@ -1,7 +1,13 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
-import type { ChatRoomDetail, ChatRoomParticipant, SessionDetail, Team } from "../../api/types";
+import type {
+  ChatRoomDetail,
+  ChatRoomParticipant,
+  ChatRoomRound,
+  SessionDetail,
+  Team,
+} from "../../api/types";
 import { isAvailableGroupParticipant } from "./chatRoutePresentation";
 import {
   buildChatGroupManageChanged,
@@ -49,6 +55,72 @@ export type UseChatGroupRoomChromeModelResult = {
   groupStopDisabled: boolean;
 };
 
+const FORMAL_MEETING_TYPES = new Set([
+  "hypothesis_candidate_generation",
+  "hypothesis_review",
+]);
+
+function isFormalChatRoomRound(round: ChatRoomRound): boolean {
+  const config = round.config && typeof round.config === "object" ? round.config : {};
+  const meetingRoundId = String(config.meetingRoundId ?? "").trim();
+  if (!meetingRoundId) {
+    return false;
+  }
+  const meetingType = String(config.meetingType ?? "").trim().toLowerCase();
+  const receiptAuthority = config.modelInvocationReceiptAuthority;
+  const hasReceiptAuthority = Boolean(
+    receiptAuthority && typeof receiptAuthority === "object" && !Array.isArray(receiptAuthority),
+  );
+  return FORMAL_MEETING_TYPES.has(meetingType) || hasReceiptAuthority;
+}
+
+export function latestFormalChatRoomRound(
+  room: ChatRoomDetail | null | undefined,
+): ChatRoomRound | null {
+  const rounds = room?.rounds ?? [];
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    if (isFormalChatRoomRound(rounds[index])) {
+      return rounds[index];
+    }
+  }
+  return null;
+}
+
+/**
+ * Keep the room roster as the source of identity, while a formal round owns
+ * the smaller set and order that is currently visible in the group chrome.
+ */
+export function deriveAvailableGroupParticipants(
+  participants: readonly ChatRoomParticipant[],
+  speakerOrder: readonly string[] | null | undefined,
+): ChatRoomParticipant[] {
+  const availableParticipants = participants.filter(isAvailableGroupParticipant);
+  if (!speakerOrder?.length) {
+    return availableParticipants;
+  }
+
+  const participantsById = new Map<string, ChatRoomParticipant>();
+  for (const participant of availableParticipants) {
+    if (!participantsById.has(participant.participantId)) {
+      participantsById.set(participant.participantId, participant);
+    }
+  }
+  const visibleParticipants: ChatRoomParticipant[] = [];
+  const seenParticipantIds = new Set<string>();
+  for (const rawParticipantId of speakerOrder) {
+    const participantId = String(rawParticipantId ?? "").trim();
+    if (!participantId || seenParticipantIds.has(participantId)) {
+      continue;
+    }
+    seenParticipantIds.add(participantId);
+    const participant = participantsById.get(participantId);
+    if (participant) {
+      visibleParticipants.push(participant);
+    }
+  }
+  return visibleParticipants;
+}
+
 export function useChatGroupRoomChromeModel({
   teams,
   activeGroupRoom,
@@ -79,14 +151,18 @@ export function useChatGroupRoomChromeModel({
 
   const activeGroupTeamOwned = Boolean(activeGroupTeam);
 
+  const activeGroupRound = latestChatRoomRound(activeGroupRoom);
+  const latestFormalGroupRound = latestFormalChatRoomRound(activeGroupRoom);
+
   const availableGroupParticipants = useMemo(
-    () => (activeGroupRoom?.participants ?? []).filter(isAvailableGroupParticipant),
-    [activeGroupRoom?.participants],
+    () => deriveAvailableGroupParticipants(
+      activeGroupRoom?.participants ?? [],
+      latestFormalGroupRound?.speakerOrder,
+    ),
+    [activeGroupRoom?.participants, latestFormalGroupRound?.speakerOrder],
   );
 
   const availableGroupParticipantCount = availableGroupParticipants.length;
-
-  const activeGroupRound = latestChatRoomRound(activeGroupRoom);
 
   const {
     groupRoundRunning,
