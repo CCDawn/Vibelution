@@ -783,10 +783,13 @@ describe("ResearchProcessWorkspace", () => {
       button.textContent?.includes("重试搜集")
     ));
     expect(retry).toBeTruthy();
+    expect(Array.from(footer?.querySelectorAll("button") ?? []).filter((button) => (
+      button.textContent?.includes("重试搜集")
+    ))).toHaveLength(1);
     const inspector = rendered.container.querySelector('[data-testid="research-process-inspector-pane"]');
-    expect(inspector?.getAttribute("data-has-collection-recovery")).toBe("true");
+    expect(inspector?.getAttribute("data-has-collection-recovery")).toBe("false");
     expect(inspector?.getAttribute("data-collection-recovery-busy")).toBe("false");
-    expect(inspector?.getAttribute("data-collection-recovery-error")).toBe("worker unavailable");
+    expect(inspector?.getAttribute("data-collection-recovery-error")).toBeNull();
     expect(footer?.querySelector('[role="alert"]')?.textContent).toContain("worker unavailable");
     await act(async () => retry?.click());
     expect(harness.chain.recoverCollection).toHaveBeenCalledTimes(1);

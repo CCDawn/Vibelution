@@ -631,9 +631,19 @@ export function ResearchProcessWorkspace({
       }}
       nextAction={workspaceNavigationAction}
       discussionModel={scopedDiscussionModel}
-      onRecoverCollection={currentTaskActionsReady ? hypothesisFirstChain.recoverCollection : undefined}
-      collectionRecoveryBusy={currentTaskActionsReady && hypothesisFirstChain.recoveryBusy}
-      collectionRecoveryError={currentTaskActionsReady ? hypothesisFirstChain.recoveryError : null}
+      onRecoverCollection={collectionRecoveryAction
+        ? undefined
+        : currentTaskActionsReady
+          ? hypothesisFirstChain.recoverCollection
+          : undefined}
+      collectionRecoveryBusy={collectionRecoveryAction
+        ? undefined
+        : currentTaskActionsReady && hypothesisFirstChain.recoveryBusy}
+      collectionRecoveryError={collectionRecoveryAction
+        ? undefined
+        : currentTaskActionsReady
+          ? hypothesisFirstChain.recoveryError
+          : null}
       primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
       archiveSummary={archiveSummary}
     />

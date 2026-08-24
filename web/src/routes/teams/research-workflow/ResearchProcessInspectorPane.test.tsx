@@ -22,6 +22,9 @@ import type { NodeDetailState } from "./useNodeDetailState";
 const leafHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
+const hypothesisLeafHarness = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
 
 vi.mock("../teamLazyPanels", async () => {
   const actual = await vi.importActual<typeof import("../teamLazyPanels")>("../teamLazyPanels");
@@ -30,6 +33,10 @@ vi.mock("../teamLazyPanels", async () => {
     ResearchProcessNodeInspector: (props: Record<string, unknown>) => {
       leafHarness.props = props;
       return <div data-testid="mock-research-process-node-inspector" />;
+    },
+    HypothesisFirstNodeInspector: (props: Record<string, unknown>) => {
+      hypothesisLeafHarness.props = props;
+      return <div data-testid="mock-hypothesis-first-node-inspector" />;
     },
   };
 });
@@ -326,6 +333,7 @@ describe("ResearchProcessInspectorPane current-task ownership", () => {
 describe("ResearchProcessInspectorPane collection recovery wiring", () => {
   afterEach(() => {
     leafHarness.props = null;
+    hypothesisLeafHarness.props = null;
     document.body.innerHTML = "";
   });
 
@@ -375,6 +383,39 @@ describe("ResearchProcessInspectorPane collection recovery wiring", () => {
       root.unmount();
     });
     container.remove();
+  });
+
+  it("keeps collection recovery mutation out of source and hypothesis leaves without an owner callback", async () => {
+    const nextAction = {
+      stage: "collection_recovery" as const,
+      targetNodeId: "source_finding",
+      navigationLabel: "前往资料搜集",
+      command: "retry_collection" as const,
+      collectionRequestId: "collection-request-1",
+    };
+    const source = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", { selectedNodeId: "source_finding" }),
+      makeReadyNodeDetail(),
+      { nextAction },
+    );
+
+    expect(leafHarness.props?.onRecoverCollection).toBeUndefined();
+    expect(leafHarness.props?.collectionRecoveryBusy).toBe(false);
+    expect(leafHarness.props?.collectionRecoveryError).toBeNull();
+    await act(async () => source.root.unmount());
+    source.container.remove();
+
+    const hypothesis = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", { selectedNodeId: "hf_collection" }),
+      { kind: "idle" },
+      { nextAction },
+    );
+
+    expect(hypothesisLeafHarness.props?.onRetryCollection).toBeUndefined();
+    await act(async () => hypothesis.root.unmount());
+    hypothesis.container.remove();
   });
 
   it("hides launch actions when the URL is stale during collection recovery", async () => {
