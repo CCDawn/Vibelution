@@ -558,6 +558,36 @@ describe("reclaimStaleWorkbenchBackend", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
+  it("captures a health-verified orphan backend identity before fallback retirement", async () => {
+    const alive = new Set([4242]);
+    const identity = { pid: 4242, createTime: 1, executable: "C:/Python/pythonw.exe" };
+    const terminateProcessTree = vi.fn(async (pid: number, expectedIdentity?: typeof identity) => {
+      expect(expectedIdentity).toEqual(identity);
+      alive.delete(pid);
+      return true;
+    });
+    const captureProcessIdentity = vi.fn(async () => identity);
+
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => alive.has(4242),
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      terminateProcessTree,
+      captureProcessIdentity,
+      gracefulShutdown: async () => ({ requested: false, completed: false, reason: "graceful shutdown timed out" }),
+      delay: async () => undefined
+    });
+
+    expect(result).toMatchObject({ reclaimed: true, verifiedPid: 4242 });
+    expect(captureProcessIdentity).toHaveBeenCalledWith(4242);
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, identity);
+  });
+
   it("only falls back to the owned process tree after an explicit force authorization", async () => {
     const alive = new Set([4242]);
     const terminateProcessTree = vi.fn(async (pid: number) => {
@@ -1305,6 +1335,55 @@ describe("runWorkbenchLifecycle", () => {
       port: 8001,
       portRelocationNote: expect.stringContaining("another Vibelution project")
     });
+  });
+
+  it("reclaims a health-verified orphan backend before starting a replacement", async () => {
+    let orphanListening = true;
+    let spawned = false;
+    const orphanIdentity = { pid: 3020, createTime: 11, executable: "C:/Python/pythonw.exe" };
+    const spawnedIdentity = { pid: 4242, createTime: 12, executable: "C:/Python/pythonw.exe" };
+    const captureProcessIdentity = vi.fn(async ({ pid }: { pid: number }) =>
+      pid === orphanIdentity.pid ? orphanIdentity : spawnedIdentity
+    );
+    const terminateProcessTree = vi.fn(async (pid: number, identity?: typeof orphanIdentity) => {
+      if (pid === orphanIdentity.pid) {
+        expect(identity).toEqual(orphanIdentity);
+        orphanListening = false;
+      }
+      return true;
+    });
+    const spawnImpl = vi.fn(() => {
+      spawned = true;
+      return fakeBackendChild(spawnedIdentity.pid);
+    });
+
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "start",
+      command: { commandId: "cmd_orphan_recovery", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({ backendPid: 6712, backendPort: 8000 }),
+      writeState: () => undefined,
+      ensureFrontend: async () => undefined,
+      connect: async () => orphanListening || spawned,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => spawned
+          ? { status: "ok", routesReady: true, pid: spawnedIdentity.pid, workspaceRoot: "C:/repo" }
+          : { status: "ok", routesReady: true, pid: orphanIdentity.pid, workspaceRoot: "C:/repo" }
+      }),
+      pidAlive: (pid) => pid === orphanIdentity.pid,
+      terminateProcessTree,
+      gracefulShutdown: async () => ({ requested: false, completed: false, reason: "orphan does not accept shutdown" }),
+      spawnImpl,
+      fileExists: (path) => path.endsWith("pythonw.exe"),
+      captureProcessIdentity
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "start" });
+    expect(captureProcessIdentity).toHaveBeenCalledWith(expect.objectContaining({ pid: orphanIdentity.pid }));
+    expect(terminateProcessTree).toHaveBeenCalledWith(orphanIdentity.pid, orphanIdentity);
+    expect(spawnImpl).toHaveBeenCalledOnce();
   });
 
   it("rejects a live unverified browser handle before graceful backend shutdown", async () => {
