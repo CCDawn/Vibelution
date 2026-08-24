@@ -202,6 +202,63 @@ describe("ChallengeCatalogOverviewView", () => {
     expect(markup).toContain("没有匹配的题目");
   });
 
+  it("surfaces a human approval gate in the metric, filter, row, and detail", () => {
+    const awaiting = question({
+      questionId: "SCI-009",
+      status: "queued",
+      executionStatus: "awaiting_human_approval",
+      blocker: {
+        code: "awaiting_human_approval",
+        message: "等待人工审批",
+        remediationLabel: "打开题目档案",
+      },
+    });
+    const data = overview([
+      awaiting,
+      question({ questionId: "SCI-002", status: "running" }),
+    ]);
+    const markup = renderToStaticMarkup(
+      <ChallengeCatalogOverviewView
+        overview={data}
+        selectedId="SCI-009"
+        filter="all"
+        onSelect={() => {}}
+        onFilterChange={() => {}}
+        onAction={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("1 待审批");
+    expect(markup).toContain("SCI-009");
+    expect(markup).toContain("待审批");
+    expect(markup).toContain("等待人工审批");
+    expect(markup).toContain('data-tone="warning"');
+  });
+
+  it("filters the catalog to only approval-gated questions", () => {
+    const data = overview([
+      question({
+        questionId: "SCI-009",
+        status: "queued",
+        executionStatus: "awaiting_human_approval",
+      }),
+      question({ questionId: "SCI-002", status: "running" }),
+    ]);
+    const markup = renderToStaticMarkup(
+      <ChallengeCatalogOverviewView
+        overview={data}
+        selectedId="SCI-009"
+        filter="awaiting_approval"
+        onSelect={() => {}}
+        onFilterChange={() => {}}
+        onAction={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="catalog-overview-row-SCI-009"');
+    expect(markup).not.toContain('data-testid="catalog-overview-row-SCI-002"');
+  });
+
   it("invokes retry on the selected failed row", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const onAction = vi.fn();

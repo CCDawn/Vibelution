@@ -22,7 +22,9 @@ import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingP
 import styles from "./ChallengeCatalogOverview.styles";
 import {
   catalogOverviewActionLabel,
+  catalogOverviewAwaitingApprovalCount,
   catalogOverviewCountLabel,
+  catalogOverviewDisplayStatus,
   catalogOverviewProgressPercent,
   catalogOverviewStageLabel,
   catalogOverviewStatusLabel,
@@ -32,6 +34,7 @@ import {
   type CatalogOverviewAction,
   type CatalogOverviewFilter,
   type CatalogOverviewQuestion,
+  type CatalogOverviewDisplayStatus,
   type CatalogOverviewStatus,
 } from "./challengeCatalogOverviewModel";
 
@@ -44,10 +47,11 @@ export type ChallengeCatalogOverviewProps = {
   devBatchControlsEnabled?: boolean;
 };
 
-function statusTone(status: CatalogOverviewStatus): VStatusTone {
+function statusTone(status: CatalogOverviewDisplayStatus): VStatusTone {
   if (status === "failed") return "danger";
   if (status === "succeeded") return "success";
   if (status === "running") return "accent";
+  if (status === "awaiting_approval") return "warning";
   return "neutral";
 }
 
@@ -97,6 +101,7 @@ export function ChallengeCatalogOverviewView({
   const selected = visible.find((row) => row.questionId === selectedId) ?? visible[0] ?? null;
   const percent = catalogOverviewProgressPercent(overview.counts, overview.questionCount);
   const counts = overview.counts;
+  const awaitingApprovalCount = catalogOverviewAwaitingApprovalCount(overview.questions);
 
   return (
     <VListDetailPage
@@ -104,7 +109,7 @@ export function ChallengeCatalogOverviewView({
       className={styles.root}
       fill={false}
       title={zh ? "125 题批次总览" : "125-question batch overview"}
-      meta={catalogOverviewCountLabel(counts, zh)}
+      meta={catalogOverviewCountLabel(counts, zh, awaitingApprovalCount)}
       toolbar={(
         <div className={styles.toolbar}>
           <div
@@ -125,6 +130,7 @@ export function ChallengeCatalogOverviewView({
               { id: "failed", label: zh ? "失败" : "Failed", value: counts.failed, tone: "danger" },
               { id: "running", label: zh ? "进行中" : "Running", value: counts.running, tone: "accent" },
               { id: "queued", label: zh ? "排队" : "Queued", value: counts.queued },
+              { id: "awaiting-approval", label: zh ? "待审批" : "Awaiting approval", value: awaitingApprovalCount, tone: "warning" },
             ]}
           />
           <VSelect
@@ -139,6 +145,7 @@ export function ChallengeCatalogOverviewView({
               { id: "running", label: catalogOverviewStatusLabel("running", zh) },
               { id: "queued", label: catalogOverviewStatusLabel("queued", zh) },
               { id: "succeeded", label: catalogOverviewStatusLabel("succeeded", zh) },
+              { id: "awaiting_approval", label: catalogOverviewStatusLabel("awaiting_approval", zh) },
             ]}
           />
         </div>
@@ -155,7 +162,11 @@ export function ChallengeCatalogOverviewView({
               onRowClick={(row) => onSelect(row.questionId)}
               getRowState={(row) => ({
                 selected: row.questionId === selected?.questionId,
-                tone: row.status === "failed" ? "warning" : row.status === "succeeded" ? "success" : "neutral",
+                tone: catalogOverviewDisplayStatus(row) === "failed"
+                  ? "warning"
+                  : catalogOverviewDisplayStatus(row) === "succeeded"
+                    ? "success"
+                    : "neutral",
               })}
               columns={[
                 {
@@ -179,8 +190,8 @@ export function ChallengeCatalogOverviewView({
                   header: zh ? "状态" : "Status",
                   width: 88,
                   render: (row) => (
-                    <VStatusChip tone={statusTone(row.status)}>
-                      {catalogOverviewStatusLabel(row.status, zh)}
+                    <VStatusChip tone={statusTone(catalogOverviewDisplayStatus(row))}>
+                      {catalogOverviewStatusLabel(catalogOverviewDisplayStatus(row), zh)}
                     </VStatusChip>
                   ),
                 },
@@ -207,8 +218,8 @@ export function ChallengeCatalogOverviewView({
           <div className={styles.detailMeta}>
             {catalogOverviewStageLabel(selected.currentStage, zh)} · {selected.checkpointProgress} · attempts={selected.attempts}
           </div>
-          <VStatusChip tone={statusTone(selected.status)}>
-            {catalogOverviewStatusLabel(selected.status, zh)}
+          <VStatusChip tone={statusTone(catalogOverviewDisplayStatus(selected))}>
+            {catalogOverviewStatusLabel(catalogOverviewDisplayStatus(selected), zh)}
           </VStatusChip>
           {selected.blocker ? (
             <div className={styles.blocker} data-testid="catalog-overview-blocker">

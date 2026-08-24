@@ -538,6 +538,9 @@ export function ResearchProcessWorkspace({
         submitOffer: commands.submitOffer,
       }}
       nextAction={workspaceNavigationAction}
+      onRecoverCollection={hypothesisFirstChain.recoverCollection}
+      collectionRecoveryBusy={hypothesisFirstChain.recoveryBusy}
+      collectionRecoveryError={hypothesisFirstChain.recoveryError}
       primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
       archiveSummary={archiveSummary}
     />

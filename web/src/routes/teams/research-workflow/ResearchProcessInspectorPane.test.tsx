@@ -4,12 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import type { ComponentProps } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../../api/queryKeys";
 import type { AgentConfigWorkspaceAgent } from "../../../api/types";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
+import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import {
   ownsResearchCurrentTask,
   researchArchiveReturnNodeId,
@@ -17,6 +18,21 @@ import {
 } from "./ResearchProcessInspectorPane";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import type { NodeDetailState } from "./useNodeDetailState";
+
+const leafHarness = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
+
+vi.mock("../teamLazyPanels", async () => {
+  const actual = await vi.importActual<typeof import("../teamLazyPanels")>("../teamLazyPanels");
+  return {
+    ...actual,
+    ResearchProcessNodeInspector: (props: Record<string, unknown>) => {
+      leafHarness.props = props;
+      return <div data-testid="mock-research-process-node-inspector" />;
+    },
+  };
+});
 
 type InspectorProps = ComponentProps<typeof ResearchProcessInspectorPane>;
 
@@ -153,6 +169,34 @@ function makeInspectorActions(): InspectorProps["actions"] {
   };
 }
 
+function makeReadyNodeDetail(): NodeDetailState {
+  return {
+    kind: "ready",
+    detail: {
+      runId: "run-1",
+      teamId: "research-team",
+      nodeId: "source_finding",
+      runVersion: 1,
+      actorKind: "agent",
+      primaryRoleKey: "source_finder",
+      label: "资料寻找",
+      runtimeCurrent: true,
+      status: "waiting_human",
+      attempts: [],
+      commandOffers: [],
+      latestEventSequence: 1,
+      generatedAt: "2026-08-24T00:00:00.000Z",
+      agentId: "agent-finder",
+      displayName: "Finder Agent",
+      resolvedFrom: "workflow_default",
+      sessionAnchorDegraded: false,
+      chatDeepLink: null,
+      nodeAttempt: 1,
+      blockedReason: "",
+    } as ResearchWorkflowNodeDetail,
+  };
+}
+
 async function renderInspectorLeaf(
   language: "zh" | "en",
   scope: InspectorProps["scope"],
@@ -274,5 +318,60 @@ describe("ResearchProcessInspectorPane current-task ownership", () => {
   it("returns from the archive to the semantic current task", () => {
     expect(researchArchiveReturnNodeId("hf_selection", "hf_meeting_4")).toBe("hf_review");
     expect(researchArchiveReturnNodeId("hf_collection", null)).toBe("hf_collection");
+  });
+});
+
+describe("ResearchProcessInspectorPane collection recovery wiring", () => {
+  afterEach(() => {
+    leafHarness.props = null;
+    document.body.innerHTML = "";
+  });
+
+  it("forwards the current collection recovery props to the node inspector leaf", async () => {
+    const onRecoverCollection = async () => undefined;
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", {
+        selectedNodeId: "source_finding",
+      }),
+      makeReadyNodeDetail(),
+    );
+
+    // The helper renders the default node state first; rerender the pane with
+    // the recovery action so the assertion covers the actual prop boundary.
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter>
+            <ResearchProcessInspectorPane
+              scope={makeInspectorScope("node", { selectedNodeId: "source_finding" })}
+              state={makeInspectorState(makeReadyNodeDetail())}
+              actions={makeInspectorActions()}
+              nextAction={{
+                stage: "collection_recovery",
+                targetNodeId: "source_finding",
+                navigationLabel: "打开资料搜集",
+                command: "retry_collection",
+                collectionRequestId: "collection-request-1",
+              }}
+              onRecoverCollection={onRecoverCollection}
+              collectionRecoveryBusy
+              collectionRecoveryError="worker unavailable"
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+
+    expect(container.querySelector('[data-testid="mock-research-process-node-inspector"]')).not.toBeNull();
+    expect(leafHarness.props?.collectionRecoveryRequestId).toBe("collection-request-1");
+    expect(leafHarness.props?.onRecoverCollection).toBe(onRecoverCollection);
+    expect(leafHarness.props?.collectionRecoveryBusy).toBe(true);
+    expect(leafHarness.props?.collectionRecoveryError).toBe("worker unavailable");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 });

@@ -145,11 +145,20 @@ vi.mock("./ResearchWorkflowCanvasPane", () => ({
   ),
 }));
 vi.mock("./ResearchProcessInspectorPane", () => ({
-  ResearchProcessInspectorPane: (props: { scope: { panel: string }; archiveSummary?: unknown }) => (
+  ResearchProcessInspectorPane: (props: {
+    scope: { panel: string };
+    archiveSummary?: unknown;
+    onRecoverCollection?: (requestId: string) => Promise<void>;
+    collectionRecoveryBusy?: boolean;
+    collectionRecoveryError?: string | null;
+  }) => (
     <div
       data-testid="research-process-inspector-pane"
       data-panel={props.scope.panel}
       data-has-archive-summary={String(Boolean(props.archiveSummary))}
+      data-has-collection-recovery={String(Boolean(props.onRecoverCollection))}
+      data-collection-recovery-busy={String(Boolean(props.collectionRecoveryBusy))}
+      data-collection-recovery-error={props.collectionRecoveryError || undefined}
     />
   ),
 }));
@@ -685,6 +694,10 @@ describe("ResearchProcessWorkspace", () => {
       button.textContent?.includes("重试搜集")
     ));
     expect(retry).toBeTruthy();
+    const inspector = rendered.container.querySelector('[data-testid="research-process-inspector-pane"]');
+    expect(inspector?.getAttribute("data-has-collection-recovery")).toBe("true");
+    expect(inspector?.getAttribute("data-collection-recovery-busy")).toBe("false");
+    expect(inspector?.getAttribute("data-collection-recovery-error")).toBe("worker unavailable");
     expect(footer?.querySelector('[role="alert"]')?.textContent).toContain("worker unavailable");
     await act(async () => retry?.click());
     expect(harness.chain.recoverCollection).toHaveBeenCalledTimes(1);
