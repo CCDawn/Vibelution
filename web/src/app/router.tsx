@@ -46,6 +46,7 @@ const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((
 const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
 const KernelTaskCenterRoute = lazyRoute(() => import("../routes/KernelTaskCenterRoute").then((module) => ({ default: module.KernelTaskCenterRoute })));
 const LauncherRoute = lazyRoute(() => import("../routes/LauncherRoute").then((module) => ({ default: module.LauncherRoute })));
+const LauncherToolsRoute = lazyRoute(() => import("../routes/LauncherToolsRoute").then((module) => ({ default: module.LauncherToolsRoute })));
 const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) => ({ default: module.LogsRoute })));
 const MemoryRoute = lazyRoute(() => import("../routes/MemoryRoute").then((module) => ({ default: module.MemoryRoute })));
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
@@ -111,6 +112,7 @@ export const router = createBrowserRouter([
     errorElement: routeErrorElement("launcher"),
     children: [
       { index: true, ...guardedLazyElement(<LauncherRoute />, "launcher") },
+      { path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher") },
     ],
   },
   {

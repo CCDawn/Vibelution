@@ -31,6 +31,11 @@ export const launcherRouteStyles = {
     "mx-0 grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] items-stretch gap-1.5 px-0",
   primaryColumn: "flex min-h-0 min-w-0 flex-col row-start-2",
   settingsRail: "min-w-0 min-h-0 row-start-1",
+  toolsLinkRow: "flex justify-end px-2 pt-2",
+  toolsPageHeader: "mx-2 mt-2 flex min-w-0 items-start justify-between gap-3 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel px-3 py-2 max-[620px]:flex-col",
+  toolsPageTitle: "m-0 text-sm font-semibold text-vui-fg-primary",
+  toolsPageHint: "mb-0 mt-1 text-xs text-vui-fg-secondary",
+  toolsWorkspace: "grid min-w-0 gap-1.5 px-0 pb-2",
   statusBar:
     "grid w-full max-w-none min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
   statusBarReason:
