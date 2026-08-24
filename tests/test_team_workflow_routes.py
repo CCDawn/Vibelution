@@ -1360,6 +1360,7 @@ def test_team_workflow_route_returns_source_collection_summary(tmp_path, monkeyp
 
 def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     _stub_source_collection_search_background(monkeypatch)
     client = _client()
     finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
@@ -1368,6 +1369,7 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
         "/api/teams",
         json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
+    workflow_run_id = "workflow-route-stage-task-writeback"
     stage_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
         json={
@@ -1377,6 +1379,28 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
             "agentIds": {"source_finder": finder["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
+        },
+    )
+    assert stage_response.status_code == 201, stage_response.text
+    source_run_id = stage_response.json()["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        node_run_id="node-problem-route-stage-task-writeback",
+        problem_understanding={
+            "scope": "验证 finding 阶段任务的受管写回。",
+            "subquestions": ["任务写回是否保持人工复核边界？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["正式知识尚未写入。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以进入 finding 阶段。",
+            },
         },
     )
     monkeypatch.setattr(
@@ -1385,7 +1409,7 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
         lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-stage-task", "status": "running"},
     )
     task_response = client.post(
-        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{stage_response.json()['run']['runId']}/stage-session-tasks",
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{source_run_id}/stage-session-tasks",
         json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
     )
 
