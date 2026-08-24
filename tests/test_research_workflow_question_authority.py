@@ -29,7 +29,10 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import team_service
 from core.web.services.team_workflow import research_projects
-from core.web.services.team_workflow.research_runtime import question_launch
+from core.web.services.team_workflow.research_runtime import (
+    model_routing,
+    question_launch,
+)
 from core.web.services.team_workflow.research_runtime import (
     service as runtime_service_module,
 )
@@ -41,6 +44,54 @@ from core.web.services.team_workflow.research_runtime.service import (
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 from tests.test_catalog_execution_state_machine import _package
+
+
+def test_formal_model_routing_accepts_flash_but_rejects_route_override() -> None:
+    required_policy = canonical_model_policy(
+        {
+            "family": "deepseek",
+            "providerIds": ["opencode_go"],
+            "modelIds": ["deepseek-v4-flash"],
+            "requireOfficialProvider": False,
+        }
+    )
+    route = {
+        "agentId": "agent-search",
+        "productRoleId": "challenge_cup_search",
+        "modelRef": "opencode_go/deepseek-v4-flash",
+        "providerId": "opencode_go",
+        "modelId": "deepseek-v4-flash",
+    }
+    record = {
+        "runId": "run-sci-096",
+        "inputSnapshot": {
+            "modelRoutingPolicy": {
+                "requiredModelPolicy": required_policy,
+                "modelPolicySha256": required_policy["policySha256"],
+                "routes": {
+                    "source_discovery": {
+                        "byProductRole": {"challenge_cup_search": route}
+                    }
+                },
+            }
+        },
+    }
+    node_run = {
+        "nodeId": "problem_understanding",
+        "nodeRunId": "node-problem-1",
+        "agentId": "agent-search",
+    }
+
+    decision = model_routing.select_model_route(record, node_run, {})
+
+    assert decision["modelRef"] == "opencode_go/deepseek-v4-flash"
+    assert decision["modelId"] == "deepseek-v4-flash"
+    with pytest.raises(model_routing.ModelRoutingError, match="frozen"):
+        model_routing.select_model_route(
+            record,
+            node_run,
+            {"modelRef": "opencode_go/deepseek-v3.2"},
+        )
 
 
 def _approved_detail(question_id: str = "SCI-096") -> dict:

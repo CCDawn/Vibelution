@@ -516,7 +516,7 @@ def _validate_receipt_evidence(
             )
         if receipt.status not in {ModelInvocationStatus.SUCCEEDED, ModelInvocationStatus.RETRIED}:
             raise QuestionResultPackageAdapterError(
-                f"receipt.{stage} must be a successful Qwen invocation"
+                f"receipt.{stage} must be a successful model invocation"
             )
         if receipt_dict["receiptId"] != receipt_id:
             raise QuestionResultPackageAdapterError(

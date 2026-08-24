@@ -6,6 +6,10 @@ from copy import deepcopy
 import pytest
 
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED, append_turn_event
+from core.research.competition.question_result_package import canonical_model_policy
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+)
 from core.web.services.team_workflow import challenge_question_runs
 
 
@@ -376,6 +380,177 @@ def test_task_model_evidence_requires_success_and_is_idempotent(tmp_path, monkey
     assert store["evidence"][0]["outputSha256"] == challenge_question_runs._output_sha256(output)
     assert store["evidence"][0]["outputRef"].startswith("turn-journal://")
     assert store["evidence"][0]["outputRef"] != task["result"]["outputRef"]
+
+
+def test_flash_task_route_records_exact_canonical_receipt(tmp_path, monkeypatch):
+    monkeypatch.setattr(challenge_question_runs, "_project_root", lambda: tmp_path)
+    project_root = tmp_path / "project-sci-096"
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: project_root,
+    )
+    task = _challenge_task()
+    task["challengeTaskContract"].update(
+        {
+            "requiredModelPolicy": {
+                "providerIds": ["opencode_go"],
+                "modelIds": ["deepseek-v4-flash"],
+                "requireOfficialProvider": False,
+            },
+            "effectiveRoute": {
+                "modelRef": "opencode_go/deepseek-v4-flash",
+                "providerId": "opencode_go",
+                "modelId": "deepseek-v4-flash",
+            },
+            "evidencePolicy": {"officialEvidenceEligible": True},
+        }
+    )
+    output = _output()
+    output["run"].update(
+        {
+            "run_id": task["runId"],
+            "model_provider": "opencode_go",
+            "model_id": "opencode_go/deepseek-v4-flash",
+            "platform": "other_official_tool",
+        }
+    )
+    _append_canonical_turn_output(tmp_path, task, output)
+    source_binding = challenge_question_runs._read_canonical_turn_output(
+        session_id=task["sessionId"],
+        source_run_id=task["runId"],
+        task_id=task["taskId"],
+        turn_id=task["turn"]["turnId"],
+    )
+    assert source_binding is not None
+    policy_sha256 = "a" * 64
+    receipt = ModelInvocationReceipt.from_invocation(
+        receipt_id="receipt-flash-generation",
+        run_id=task["runId"],
+        node_run_id="node-flash-generation",
+        scope={
+            "questionId": "SCI-096",
+            "runId": task["runId"],
+            "taskId": task["taskId"],
+            "turnId": task["turn"]["turnId"],
+            "stageId": "generation",
+            "modelPolicySha256": policy_sha256,
+        },
+        provider="opencode_go",
+        model="deepseek-v4-flash",
+        requested_model="deepseek-v4-flash",
+        request_content={"kind": "bounded-test-request"},
+        response_content={"kind": "bounded-test-response"},
+        started_at_ms=100,
+        finished_at_ms=125,
+        token_usage={"input": 20, "output": 10, "total": 30},
+        evidence_locator={
+            "outputSha256": source_binding["outputSha256"],
+            "outputRef": source_binding["outputRef"],
+        },
+    )
+    usage = {
+        "source": "provider",
+        "provider": "opencode_go",
+        "model": "deepseek-v4-flash",
+        "llmModelId": "opencode_go/deepseek-v4-flash",
+        "inputTokens": 20,
+        "outputTokens": 10,
+        "totalTokens": 30,
+    }
+
+    evidence = challenge_question_runs.register_challenge_task_model_evidence(
+        "research-team",
+        task,
+        final_status="completed",
+        llm_usage=usage,
+        model_invocation_receipt=receipt,
+        stage_id="generation",
+        model_policy_sha256=policy_sha256,
+    )
+
+    assert evidence is not None
+    assert evidence["schemaVersion"] == 2
+    assert evidence["providerId"] == "opencode_go"
+    assert evidence["modelId"] == "deepseek-v4-flash"
+    assert evidence["receiptId"] == "receipt-flash-generation"
+    store = json.loads(
+        (project_root / "official_model_evidence" / "index.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert store["receipts"] == [receipt.to_dict()]
+
+
+def test_flash_task_policy_is_derived_and_bound_without_qwen_gate(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: tmp_path,
+    )
+    policy = challenge_question_runs.derive_challenge_required_model_policy(
+        "opencode_go/deepseek-v4-flash"
+    )
+
+    contract = challenge_question_runs.bind_challenge_research_task_model(
+        team_id="research-team",
+        research_project_id="project-sci-096",
+        question_id="SCI-096",
+        required_model_policy=policy,
+        dialogue_model_id="opencode_go/deepseek-v4-flash",
+        model_library={
+            "opencode_go/deepseek-v4-flash": {
+                "provider_id": "opencode_go",
+                "upstream_id": "deepseek-v4-flash",
+            }
+        },
+    )
+
+    assert contract["requiredModelPolicy"] == {
+        "providerIds": ["opencode_go"],
+        "modelIds": ["deepseek-v4-flash"],
+        "requireOfficialProvider": False,
+    }
+    assert contract["evidencePolicy"]["officialEvidenceEligible"] is True
+
+
+def test_formal_flash_task_policy_preserves_server_hash_authority(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: tmp_path,
+    )
+    required_policy = canonical_model_policy(
+        {
+            "family": "deepseek",
+            "providerIds": ["opencode_go"],
+            "modelIds": ["deepseek-v4-flash"],
+            "requireOfficialProvider": False,
+        }
+    )
+
+    contract = challenge_question_runs.bind_challenge_research_task_model(
+        team_id="research-team",
+        research_project_id="project-sci-096",
+        question_id="SCI-096",
+        required_model_policy=required_policy,
+        dialogue_model_id="opencode_go/deepseek-v4-flash",
+        model_library={
+            "opencode_go/deepseek-v4-flash": {
+                "provider_id": "opencode_go",
+                "upstream_id": "deepseek-v4-flash",
+            }
+        },
+    )
+
+    assert contract["requiredModelPolicy"] == required_policy
+    assert contract["modelPolicySha256"] == required_policy["policySha256"]
 
 
 def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_path, monkeypatch):

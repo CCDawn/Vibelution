@@ -79,14 +79,14 @@ def _server_model_routing_policy(team_id: str) -> dict[str, Any]:
         )
 
         policy = resolve_catalog_model_routing_policy(_text(team_id))
-    except Exception as exc:  # noqa: BLE001 - launch must remain fail-closed.
+    except Exception as exc:
         raise QuestionLaunchError(
-            "The formal six-Agent Qwen model routing policy is unavailable.",
+            "The formal six-Agent model routing policy is unavailable.",
             code="challenge_model_routing_policy_unavailable",
         ) from exc
     if not isinstance(policy, Mapping):
         raise QuestionLaunchError(
-            "The formal six-Agent Qwen model routing policy is invalid.",
+            "The formal six-Agent model routing policy is invalid.",
             code="challenge_model_routing_policy_invalid",
         )
     return dict(policy)
@@ -279,7 +279,7 @@ def _dev_authorization_ready(team_id: str) -> bool:
         )
 
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
-    except Exception:  # noqa: BLE001 - readiness probe is intentionally fail-closed.
+    except Exception:
         return False
     if not isinstance(snapshot, Mapping):
         return False
@@ -311,7 +311,7 @@ def _dev_authorization_ready(team_id: str) -> bool:
             readiness_report_sha256_value=report_hash,
             require_model_policy=True,
         )
-    except Exception:  # noqa: BLE001 - stale or malformed authorization stays closed.
+    except Exception:
         return False
     return authorization is not None
 

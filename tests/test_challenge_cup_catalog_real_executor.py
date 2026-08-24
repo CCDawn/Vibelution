@@ -21,7 +21,6 @@ from typing import ClassVar
 import pytest
 from fastapi.testclient import TestClient
 
-from config.models import ProviderConfig
 from core.research.competition.catalog_execution import (
     CatalogExecutionError,
     CatalogExecutionState,
@@ -678,7 +677,7 @@ def test_cross_gate_seed_rejects_conflicting_package_hashes_before_mutation(
     assert target.result_for("SCI-091") is None
 
 
-def test_server_model_policy_requires_official_qwen_dialogue_bindings(
+def test_server_model_policy_freezes_configured_flash_dialogue_bindings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     role_bindings = {
@@ -688,24 +687,16 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         )
     }
     model_by_agent = {
-        "agent-0": ("dashscope", "qwen-plus"),
-        "agent-1": ("aliyun", "qwen-max"),
-        "agent-2": ("dashscope", "qwen-plus"),
-        "agent-3": ("aliyun", "qwen-max"),
-        "agent-4": ("dashscope", "qwen-plus"),
-        "agent-5": ("aliyun", "qwen-max"),
+        f"agent-{index}": ("opencode_go", "deepseek-v4-flash")
+        for index in range(6)
     }
 
     class _FakeLlm:
         model_library: ClassVar[dict[str, object]] = {
-            "dashscope/qwen-plus": {"upstream_id": "qwen-plus"},
-            "aliyun/qwen-plus": {"upstream_id": "qwen-plus"},
-            "aliyun/qwen-max": {"upstream_id": "qwen-max"},
-            "aliyun/gpt-5": {"upstream_id": "gpt-5"},
-            "aliyun/qwen-alias": {"upstream_id": "gpt-5"},
-            "relay/qwen-plus": {"upstream_id": "qwen-plus"},
-            "default-dashscope/qwen-plus": {"upstream_id": "qwen-plus"},
-            "forged/qwen-plus": {"upstream_id": "qwen-plus"},
+            "opencode_go/deepseek-v4-flash": {
+                "upstream_id": "deepseek-v4-flash"
+            },
+            "opencode_go/gpt-5": {"upstream_id": "gpt-5"},
         }
 
         @staticmethod
@@ -714,22 +705,13 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
         @staticmethod
         def get_provider(provider_id: str) -> SimpleNamespace:
-            if provider_id == "relay":
-                return SimpleNamespace(
-                    provider_id=provider_id,
-                    service_class="relay",
-                    kind="relay",
-                    vendor="custom",
-                    label="relay",
-                    base_url="https://ai-pixel.online/v1",
-                )
             return SimpleNamespace(
                 provider_id=provider_id,
-                service_class="official_api",
-                kind="aliyun",
-                vendor="aliyun",
+                service_class="aggregator",
+                kind="opencode",
+                vendor="opencode",
                 label=provider_id,
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                base_url="https://opencode.ai/zen/go/v1",
             )
 
     monkeypatch.setattr(
@@ -768,9 +750,10 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
     policy = catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
-    assert policy["family"] == "qwen"
-    assert policy["providerIds"] == ["aliyun", "dashscope"]
-    assert policy["modelIds"] == ["qwen-max", "qwen-plus"]
+    assert policy["family"] == "deepseek"
+    assert policy["providerIds"] == ["opencode_go"]
+    assert policy["modelIds"] == ["deepseek-v4-flash"]
+    assert policy["requireOfficialProvider"] is False
     assert len(policy["policySha256"]) == 64
 
     routing_policy = catalog_run_authorization.resolve_catalog_model_routing_policy(
@@ -779,123 +762,50 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
     for purpose_routes in routing_policy["routes"].values():
         for role_id, route in purpose_routes["byProductRole"].items():
             assert route["productRoleId"] == role_id
+            assert route["modelRef"] == "opencode_go/deepseek-v4-flash"
+            assert route["officialProvider"] is False
 
+    model_by_agent["agent-5"] = ("opencode_go", "gpt-5")
     monkeypatch.setattr(
         catalog_run_authorization,
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="aliyun/gpt-5",
-            model_id="gpt-5",
-            model="gpt-5",
-            provider_id="aliyun",
+            model_ref=(
+                f"{model_by_agent[agent['agentId']][0]}/"
+                f"{model_by_agent[agent['agentId']][1]}"
+            ),
+            model_id=model_by_agent[agent["agentId"]][1],
+            model=model_by_agent[agent["agentId"]][1],
+            provider_id=model_by_agent[agent["agentId"]][0],
         ),
     )
-    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="Qwen"):
+    with pytest.raises(
+        catalog_run_authorization.CatalogRunAuthorizationError,
+        match="one model family",
+    ):
         catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
-    monkeypatch.setattr(
-        catalog_run_authorization,
-        "resolve_agent_llm",
-        lambda agent, slot, config: SimpleNamespace(
-            config=config,
-            model_ref="aliyun/qwen-alias",
-            model_id="qwen-alias",
-            model="gpt-5",
-            provider_id="aliyun",
-        ),
-    )
-    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="Qwen"):
-        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
-
-    monkeypatch.setattr(
-        catalog_run_authorization,
-        "resolve_agent_llm",
-        lambda agent, slot, config: SimpleNamespace(
-            config=config,
-            model_ref="relay/qwen-plus",
-            model_id="qwen-plus",
-            model="qwen-plus",
-            provider_id="relay",
-        ),
-    )
-    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="official provider"):
-        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
-
-    legal_default_provider = ProviderConfig(
-        provider_id="default-dashscope",
-        kind="aliyun",
-        service_class="official_api",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    )
-    assert legal_default_provider.vendor == "custom"
+    model_by_agent["agent-5"] = ("opencode_go", "deepseek-v4-flash")
     monkeypatch.setattr(
         _FakeLlm,
         "get_provider",
-        staticmethod(lambda _provider_id: legal_default_provider),
-    )
-    monkeypatch.setattr(
-        catalog_run_authorization,
-        "resolve_agent_llm",
-        lambda agent, slot, config: SimpleNamespace(
-            config=config,
-            model_ref="default-dashscope/qwen-plus",
-            model_id="qwen-plus",
-            model="qwen-plus",
-            provider_id="default-dashscope",
+        staticmethod(
+            lambda provider_id: SimpleNamespace(
+                provider_id=provider_id,
+                service_class="aggregator",
+                kind="opencode",
+                vendor="opencode",
+                label=provider_id,
+                base_url="http://opencode.ai/zen/go/v1",
+            )
         ),
     )
-    default_policy = catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
-    assert default_policy["providerIds"] == ["default-dashscope"]
-
-    forged_providers = (
-        SimpleNamespace(
-            provider_id="forged",
-            service_class="official_api",
-            kind="custom",
-            vendor="custom",
-            label="DashScope",
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        ),
-        SimpleNamespace(
-            provider_id="forged",
-            service_class="official_api",
-            kind="openai",
-            vendor="openai",
-            label="DashScope",
-            base_url="https://api.openai.com/v1",
-        ),
-        SimpleNamespace(
-            provider_id="forged",
-            service_class="official_api",
-            kind="aliyun",
-            vendor="aliyun",
-            label="DashScope",
-            base_url="https://api.openai.com/v1",
-        ),
-    )
-    for forged_provider in forged_providers:
-        monkeypatch.setattr(
-            _FakeLlm,
-            "get_provider",
-            staticmethod(lambda _provider_id, value=forged_provider: value),
-        )
-        monkeypatch.setattr(
-            catalog_run_authorization,
-            "resolve_agent_llm",
-            lambda agent, slot, config: SimpleNamespace(
-                config=config,
-                model_ref="forged/qwen-plus",
-                model_id="qwen-plus",
-                model="qwen-plus",
-                provider_id="forged",
-            ),
-        )
-        with pytest.raises(
-            catalog_run_authorization.CatalogRunAuthorizationError,
-            match="official provider",
-        ):
-            catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+    with pytest.raises(
+        catalog_run_authorization.CatalogRunAuthorizationError,
+        match="valid configured provider",
+    ):
+        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
 
 def test_legacy_catalog_authorization_without_policy_fails_closed(

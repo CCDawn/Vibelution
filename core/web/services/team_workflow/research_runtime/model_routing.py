@@ -9,7 +9,6 @@ from typing import Any
 from core.research.competition.question_result_package import (
     QuestionResultPackageError,
     canonical_model_policy,
-    is_qwen_model_id,
 )
 
 NODE_MODEL_PURPOSE: dict[str, str] = {
@@ -158,7 +157,7 @@ def _formal_route(
         )
     if normalized["modelId"].casefold() not in {
         str(value).casefold() for value in required["modelIds"]
-    } or not is_qwen_model_id(normalized["modelId"]):
+    }:
         raise ModelRoutingError(
             "formal model route upstream model is outside requiredModelPolicy",
             code="model_not_allowed",

@@ -15,6 +15,10 @@ from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from core.research.competition.question_result_package import (
+    QuestionResultPackageError,
+    canonical_model_policy,
+)
 from core.research.competition.resources import (
     CATALOG_SHA256,
     QUESTION_CATALOG_PATH,
@@ -821,7 +825,7 @@ def normalize_challenge_research_task_policy(
     question_id: Any,
     required_model_policy: Any,
 ) -> dict[str, Any]:
-    """Validate the explicit question and official Qwen route contract."""
+    """Validate the explicit question and frozen server model route contract."""
     normalized_question_id = str(question_id or "").strip()[:32]
     policy = dict(required_model_policy) if isinstance(required_model_policy, dict) else {}
     if not normalized_question_id and not policy:
@@ -830,43 +834,70 @@ def normalize_challenge_research_task_policy(
         raise ValueError("challenge_task_contract_incomplete: questionId and requiredModelPolicy are both required.")
     if _catalog_question(normalized_question_id) is None:
         raise ValueError("challenge_task_question_unknown: questionId is not present in the official catalog.")
+    canonical_policy: dict[str, Any] | None = None
+    if "family" in policy or "policySha256" in policy:
+        try:
+            canonical_policy = canonical_model_policy(policy)
+        except QuestionResultPackageError as exc:
+            raise ValueError(
+                "challenge_task_model_policy_invalid: requiredModelPolicy is not canonical."
+            ) from exc
+        supplied_hash = str(policy.get("policySha256") or "").strip().lower()
+        if supplied_hash and supplied_hash != canonical_policy["policySha256"]:
+            raise ValueError(
+                "challenge_task_model_policy_invalid: requiredModelPolicy hash does not match."
+            )
+        policy = canonical_policy
     provider_ids = _normalized_string_list(policy.get("providerIds"))
     model_ids = _normalized_string_list(policy.get("modelIds"))
-    require_official = policy.get("requireOfficialProvider") is not False
-    if not provider_ids or not model_ids or not require_official:
+    require_official = policy.get("requireOfficialProvider")
+    if (
+        not provider_ids
+        or not model_ids
+        or not isinstance(require_official, bool)
+    ):
         raise ValueError(
-            "challenge_task_model_policy_invalid: official providerIds, modelIds and requireOfficialProvider=true are required."
+            "challenge_task_model_policy_invalid: providerIds, modelIds and a boolean requireOfficialProvider are required."
         )
-    if any(not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS) for provider_id in provider_ids):
+    if require_official and any(
+        not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
+        for provider_id in provider_ids
+    ):
         raise ValueError("challenge_task_model_policy_invalid: providerIds must identify DashScope/Bailian/Aliyun.")
-    if any("qwen" not in model_id.lower() for model_id in model_ids):
-        raise ValueError("challenge_task_model_policy_invalid: modelIds must identify Qwen models.")
-    return {
-        "questionId": normalized_question_id,
-        "requiredModelPolicy": {
+    required_policy = (
+        canonical_policy
+        if canonical_policy is not None
+        else {
             "providerIds": provider_ids,
             "modelIds": model_ids,
-            "requireOfficialProvider": True,
-        },
+            "requireOfficialProvider": require_official,
+        }
+    )
+    contract = {
+        "questionId": normalized_question_id,
+        "requiredModelPolicy": required_policy,
     }
+    if canonical_policy is not None:
+        contract["modelPolicySha256"] = canonical_policy["policySha256"]
+    return contract
 
 
 def derive_challenge_required_model_policy(model_ref: Any) -> dict[str, Any]:
-    """Recover a narrow official-model policy from a canonical provider/model ref."""
+    """Recover a narrow frozen-model policy from a canonical provider/model ref."""
     normalized_model_ref = str(model_ref or "").strip()[:160]
     provider_id, separator, model_id = normalized_model_ref.partition("/")
     if (
         not separator
         or not provider_id
         or not model_id
-        or not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
-        or "qwen" not in model_id.lower()
     ):
         return {}
     return {
         "providerIds": [provider_id],
         "modelIds": [model_id],
-        "requireOfficialProvider": True,
+        "requireOfficialProvider": any(
+            marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS
+        ),
     }
 
 
@@ -896,11 +927,13 @@ def bind_challenge_research_task_model(
     allowed_provider_ids = {item.lower() for item in policy["providerIds"]}
     allowed_model_ids = {item.lower() for item in policy["modelIds"]}
     model_candidates = {model_ref.lower(), upstream_model_id.lower()}
+    provider_is_official = any(
+        marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS
+    )
     official_evidence_eligible = (
         provider_id.lower() in allowed_provider_ids
-        and any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
         and bool(model_candidates & allowed_model_ids)
-        and "qwen" in upstream_model_id.lower()
+        and (not policy["requireOfficialProvider"] or provider_is_official)
     )
     return {
         **contract,
@@ -956,7 +989,6 @@ def register_challenge_task_model_evidence(
     expected_model_ref = str(effective.get("modelRef") or "").strip()
     if (
         not usage_provider
-        or not any(marker in usage_provider.lower() for marker in OFFICIAL_PROVIDERS)
         or usage_provider.lower() not in {expected_provider.lower(), expected_provider.partition("_")[0].lower()}
         or usage_model.lower() != expected_model.lower()
         or (usage_model_ref and usage_model_ref != expected_model_ref)
@@ -1597,7 +1629,9 @@ def _package_bound_model_invocation_receipt_refs(
     if not package_payload or not package_path.is_file():
         return {}
     try:
-        from core.research.competition.question_result_package import QuestionResultPackage
+        from core.research.competition.question_result_package import (
+            QuestionResultPackage,
+        )
         from core.research.competition.result_set import CatalogScope
 
         restored_package = QuestionResultPackage.from_dict(

@@ -9,8 +9,9 @@ free-form task summaries.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from core.research.competition import (
     CATALOG_ID,
@@ -229,7 +230,7 @@ def _model_run(
     coverage = model_invocation_receipt_coverage(refs)
     if coverage.get("status") != "passed":
         raise ResultPackageV2Error(
-            "official model invocation receipts do not cover the complete research loop",
+            "registered model invocation receipts do not cover the complete research loop",
             code="challenge_v2_receipts_incomplete",
         )
     final_node_ids = {
@@ -253,12 +254,6 @@ def _model_run(
     model_id = _require_text(
         route.get("modelRef") or route.get("modelId"), "run.model_id"
     )
-    normalized_provider = provider.lower()
-    if "dashscope" not in normalized_provider and "aliyun" not in normalized_provider:
-        raise ResultPackageV2Error(
-            "final_output receipt is not bound to an Alibaba Cloud Qwen provider",
-            code="challenge_v2_provider_not_official",
-        )
     started_at = _require_text(
         record.get("createdAt") or record.get("startedAt"), "run.started_at"
     )
@@ -267,7 +262,7 @@ def _model_run(
         "started_at": started_at,
         "model_provider": provider,
         "model_id": model_id,
-        "platform": "aliyun_bailian",
+        "platform": _platform_for_provider(provider),
         "invocation_evidence_refs": [
             f"model-invocation-receipt:{_require_text(ref.get('receiptId'), 'receiptId')}"
             for ref in refs
@@ -280,6 +275,19 @@ def _model_run(
     if workflow_version:
         result["workflow_version"] = workflow_version
     return result
+
+
+def _platform_for_provider(provider: str) -> str:
+    normalized = str(provider or "").strip().casefold()
+    if any(marker in normalized for marker in ("dashscope", "aliyun", "bailian")):
+        return "aliyun_bailian"
+    if "qoderwork" in normalized:
+        return "qoderwork"
+    if "qoder" in normalized:
+        return "qoder"
+    if "meoo" in normalized:
+        return "meoo"
+    return "other_official_tool"
 
 
 def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:

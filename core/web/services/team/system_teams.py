@@ -928,6 +928,11 @@ def _challenge_cup_research_team_role_agent_expected_config(
         )
     return {
         "displayName": label,
+        "llmBindings": {
+            "dialogue": {
+                "modelId": s.CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
+            }
+        },
         "primaryMode": "research",
         "roleKey": role_key,
         "permissionPreset": "full_access",
@@ -947,6 +952,7 @@ def _challenge_cup_research_team_agent_matches_expected_config(
 ) -> bool:
     for key in (
         "displayName",
+        "llmBindings",
         "primaryMode",
         "roleKey",
         "permissionPreset",
@@ -1082,7 +1088,11 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
         )
         existing = agent_directory_service.create_agent_instance(
             display_name=label,
-            llm_bindings=session_service.default_session_llm_bindings(),
+            llm_bindings={
+                "dialogue": {
+                    "modelId": s.CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
+                }
+            },
             primary_mode="research",
             role_key=role_key,
             created_by=s.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
@@ -1126,6 +1136,7 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
         return existing
     update_kwargs: dict[str, Any] = {
         "display_name": expected["displayName"],
+        "llm_bindings": expected["llmBindings"],
         "primary_mode": expected["primaryMode"],
         "role_key": expected["roleKey"],
         "permission_preset": expected["permissionPreset"],

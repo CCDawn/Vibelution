@@ -24,7 +24,7 @@ from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
 from core.research.competition.question_result_package import (
     QuestionResultPackageError,
     canonical_model_policy,
-    is_qwen_model_id,
+    model_family_for_model_id,
 )
 from core.research.competition.real_control_batch import RealBatchError, real_plan
 from core.research.workflow.contracts._validation import ContractValidationError
@@ -162,21 +162,26 @@ def _model_policy_from_scope(
     return normalized
 
 
-def _official_provider(provider: Any) -> bool:
-    service_class = str(getattr(provider, "service_class", "") or "").strip().lower()
-    vendor = str(getattr(provider, "vendor", "") or "").strip().lower()
-    provider_kind = str(getattr(provider, "kind", "") or "").strip().lower()
+def _provider_target_is_valid(provider: Any) -> bool:
     try:
-        endpoint_host = (
-            urlparse(str(getattr(provider, "base_url", "") or "").strip())
-            .hostname
-            or ""
-        ).strip().lower().rstrip(".")
         validate_llm_provider_target(
             provider,
             context="formal_research_dialogue_provider",
         )
     except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _official_provider(provider: Any) -> bool:
+    service_class = str(getattr(provider, "service_class", "") or "").strip().lower()
+    vendor = str(getattr(provider, "vendor", "") or "").strip().lower()
+    provider_kind = str(getattr(provider, "kind", "") or "").strip().lower()
+    endpoint_host = (
+        urlparse(str(getattr(provider, "base_url", "") or "").strip()).hostname
+        or ""
+    ).strip().lower().rstrip(".")
+    if not _provider_target_is_valid(provider):
         return False
     return (
         service_class == "official_api"
@@ -189,7 +194,7 @@ def _resolve_dialogue_model_binding(
     agent_id: str,
     agent: Mapping[str, Any],
     config: Any,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Resolve one server-owned Agent dialogue route without fallback.
 
     resolve_agent_llm selects the Agent binding, while the effective model
@@ -228,9 +233,9 @@ def _resolve_dialogue_model_binding(
     provider_id = str(
         getattr(provider, "provider_id", "") or getattr(resolved, "provider_id", "")
     ).strip()
-    if not model_ref or not provider_id or not _official_provider(provider):
+    if not model_ref or not provider_id or not _provider_target_is_valid(provider):
         raise CatalogRunAuthorizationError(
-            "formal research Agent dialogue LLM must use an official provider"
+            "formal research Agent dialogue LLM must use a valid configured provider"
         )
     ref_provider, separator, _ = str(model_ref).partition("/")
     if not separator or ref_provider.strip().casefold() != provider_id.casefold():
@@ -247,10 +252,6 @@ def _resolve_dialogue_model_binding(
         entry.get("upstream_id")
         or entry.get("model")
     ).strip()
-    if not is_qwen_model_id(model_id):
-        raise CatalogRunAuthorizationError(
-            "formal research Agent dialogue LLM must use a Qwen model"
-        )
     entry_provider_id = str(entry.get("provider_id") or "").strip()
     if entry_provider_id and entry_provider_id.casefold() != provider_id.casefold():
         raise CatalogRunAuthorizationError(
@@ -261,6 +262,7 @@ def _resolve_dialogue_model_binding(
         "modelRef": str(model_ref).strip(),
         "providerId": provider_id,
         "modelId": model_id,
+        "officialProvider": _official_provider(provider),
     }
 
 
@@ -273,7 +275,7 @@ def _dialogue_model_identity(agent: Mapping[str, Any], config: Any) -> tuple[str
     return route["providerId"], route["modelId"]
 
 
-def _resolve_catalog_dialogue_routes(team_id: str) -> dict[str, dict[str, str]]:
+def _resolve_catalog_dialogue_routes(team_id: str) -> dict[str, dict[str, Any]]:
     """Resolve every current product Agent binding exactly once for a launch."""
 
     bindings = resolve_team_role_bindings(str(team_id or "").strip())
@@ -282,7 +284,7 @@ def _resolve_catalog_dialogue_routes(team_id: str) -> dict[str, dict[str, str]]:
             "formal six-Agent team dialogue bindings are unavailable"
         )
     config = get_config()
-    routes: dict[str, dict[str, str]] = {}
+    routes: dict[str, dict[str, Any]] = {}
     seen_agents: set[str] = set()
     for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
         agent_id = next(
@@ -312,19 +314,33 @@ def _resolve_catalog_dialogue_routes(team_id: str) -> dict[str, dict[str, str]]:
 
 
 def _canonical_model_policy_for_routes(
-    routes: Mapping[str, Mapping[str, str]],
+    routes: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     provider_ids = sorted(
         {str(route["providerId"]).strip() for route in routes.values()}
     )
     model_ids = sorted({str(route["modelId"]).strip() for route in routes.values()})
+    families = sorted(
+        {
+            model_family_for_model_id(model_id)
+            for model_id in model_ids
+            if model_family_for_model_id(model_id)
+        }
+    )
+    if len(families) != 1:
+        raise CatalogRunAuthorizationError(
+            "formal six-Agent dialogue routes must use one model family"
+        )
     try:
         return canonical_model_policy(
             {
-                "family": "qwen",
+                "family": families[0],
                 "providerIds": provider_ids,
                 "modelIds": model_ids,
-                "requireOfficialProvider": True,
+                "requireOfficialProvider": all(
+                    route.get("officialProvider") is True
+                    for route in routes.values()
+                ),
             }
         )
     except QuestionResultPackageError as exc:
@@ -357,7 +373,7 @@ def resolve_catalog_model_routing_policy(team_id: str) -> dict[str, Any]:
     required_policy = _canonical_model_policy_for_routes(role_routes)
     routes: dict[str, Any] = {}
     for purpose, role_ids in _CATALOG_MODEL_PURPOSE_ROLES.items():
-        by_role: dict[str, dict[str, str]] = {}
+        by_role: dict[str, dict[str, Any]] = {}
         for role_id in role_ids:
             route = role_routes.get(role_id)
             if route is None:

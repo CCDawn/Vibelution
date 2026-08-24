@@ -294,3 +294,22 @@ def test_model_run_uses_real_receipt_ids_and_final_route(monkeypatch) -> None:
     assert run["invocation_evidence_refs"] == [
         "model-invocation-receipt:receipt-final"
     ]
+
+    record["modelRoutingDecisions"][0].update(
+        {
+            "providerId": "opencode_go",
+            "modelId": "deepseek-v4-flash",
+            "modelRef": "opencode_go/deepseek-v4-flash",
+        }
+    )
+    flash_run = result_package_v2._model_run(
+        record,
+        team_id="research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+    )
+
+    assert flash_run["model_provider"] == "opencode_go"
+    assert flash_run["model_id"] == "opencode_go/deepseek-v4-flash"
+    assert flash_run["platform"] == "other_official_tool"
