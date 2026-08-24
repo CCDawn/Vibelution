@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import queue
 import re
@@ -139,6 +140,7 @@ _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_MAX_ENTRIES = 8
 _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT = False
 _MISSING_SESSION_STATUS_MESSAGE = "缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。"
+_CHALLENGE_CUP_ROOM_RESET_STAGES: dict[str, dict[str, Any]] = {}
 
 
 def _perf_counter() -> float:
@@ -202,6 +204,154 @@ def read_chat_rooms_snapshot() -> list[dict[str, Any]]:
         for item in list(state.get("rooms") or [])
         if isinstance(item, dict)
     ]
+
+
+def _challenge_cup_reset_text(value: Any, *, field: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ChatRoomValidationError(f"{field} is required")
+    return normalized
+
+
+def _challenge_cup_room_team_id(room: Mapping[str, Any]) -> str:
+    config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
+    return str(
+        room.get("teamId")
+        or room.get("researchTeamId")
+        or config.get("teamId")
+        or config.get("researchTeamId")
+        or ""
+    ).strip()
+
+
+def _challenge_cup_room_reset_fingerprint(rooms: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(
+        json.dumps(rooms, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _challenge_cup_room_stage_summary(stage: Mapping[str, Any]) -> dict[str, Any]:
+    rooms = stage.get("rooms") if isinstance(stage.get("rooms"), list) else []
+    return {
+        "kind": "chat_room_team_reset",
+        "schemaVersion": 1,
+        "stageId": str(stage["stageId"]),
+        "resetId": str(stage["resetId"]),
+        "teamId": str(stage["teamId"]),
+        "status": str(stage.get("status") or "staged"),
+        "roomCount": len(rooms),
+        "roomIds": [str(room.get("roomId") or "") for room in rooms],
+        "fingerprint": str(stage["fingerprint"]),
+    }
+
+
+def _challenge_cup_room_stage(stage: Mapping[str, Any], *, reset_id: str | None = None) -> dict[str, Any]:
+    if not isinstance(stage, Mapping) or stage.get("kind") != "chat_room_team_reset" or stage.get("schemaVersion") != 1:
+        raise ChatRoomValidationError("Chat room reset stage schema is invalid.")
+    stage_id = _challenge_cup_reset_text(stage.get("stageId"), field="stageId")
+    cached = _CHALLENGE_CUP_ROOM_RESET_STAGES.get(stage_id)
+    if cached is None:
+        raise ChatRoomValidationError("Chat room reset stage is unavailable.")
+    for key in ("resetId", "teamId", "fingerprint"):
+        if str(stage.get(key) or "") != str(cached.get(key) or ""):
+            raise ChatRoomValidationError(f"Chat room reset stage {key} does not match.")
+    if reset_id is not None and str(reset_id).strip() != str(cached["resetId"]):
+        raise ChatRoomValidationError("Chat room reset stage resetId does not match.")
+    return cached
+
+
+def prepare_team_chat_room_reset(
+    team_id: str,
+    *,
+    reset_id: str,
+    room_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Stage exactly one team's idle rooms for a reversible governed reset."""
+
+    team = _challenge_cup_reset_text(team_id, field="teamId")
+    reset = _challenge_cup_reset_text(reset_id, field="resetId")
+    requested_ids = {str(value or "").strip() for value in (room_ids or [])}
+    if "" in requested_ids:
+        raise ChatRoomValidationError("Chat room reset plan contains an empty room id.")
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        all_rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
+        target = [room for room in all_rooms if _challenge_cup_room_team_id(room) == team]
+        target_ids = {str(room.get("roomId") or "").strip() for room in target}
+        if requested_ids and requested_ids != target_ids:
+            raise ChatRoomValidationError("Chat room reset plan does not match the current team room set.")
+        for room in target:
+            _raise_if_room_busy(room)
+        snapshot = [copy.deepcopy(room) for room in target]
+        stage = {
+            "kind": "chat_room_team_reset",
+            "schemaVersion": 1,
+            "stageId": f"chat-room-stage-{uuid.uuid4().hex}",
+            "resetId": reset,
+            "teamId": team,
+            "rooms": snapshot,
+            "fingerprint": _challenge_cup_room_reset_fingerprint(snapshot),
+            "status": "staged",
+        }
+        # Persist the inverse operation before the selected rooms disappear.
+        _CHALLENGE_CUP_ROOM_RESET_STAGES[str(stage["stageId"])] = stage
+        state["rooms"] = [room for room in all_rooms if room not in target]
+        _store().save(state)
+    return _challenge_cup_room_stage_summary(stage)
+
+
+def purge_team_chat_room_reset(stage: Mapping[str, Any], *, reset_id: str | None = None) -> dict[str, Any]:
+    """Commit a staged room reset after the parent transaction succeeds."""
+
+    with _CHAT_ROOM_LOCK:
+        cached = _challenge_cup_room_stage(stage, reset_id=reset_id)
+        if cached.get("status") == "destroyed":
+            raise ChatRoomValidationError("A finalized chat room reset cannot be purged.")
+        current = _store().load()
+        staged_ids = {str(room.get("roomId") or "") for room in cached.get("rooms") or []}
+        if any(str(room.get("roomId") or "") in staged_ids for room in current.get("rooms") or [] if isinstance(room, dict)):
+            raise ChatRoomValidationError("A staged chat room reappeared before commit.")
+        cached["status"] = "purged"
+        return {**_challenge_cup_room_stage_summary(cached), "operation": "purge"}
+
+
+def restore_team_chat_room_reset(stage: Mapping[str, Any], *, reset_id: str | None = None) -> dict[str, Any]:
+    """Restore exactly the staged room records when a later reset port fails."""
+
+    with _CHAT_ROOM_LOCK:
+        cached = _challenge_cup_room_stage(stage, reset_id=reset_id)
+        if cached.get("status") == "destroyed":
+            raise ChatRoomValidationError("A finalized chat room reset cannot be restored.")
+        state = _store().load()
+        rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
+        by_id = {str(room.get("roomId") or "").strip(): room for room in rooms}
+        restored = 0
+        for room in cached.get("rooms") or []:
+            room_id = str(room.get("roomId") or "").strip()
+            existing = by_id.get(room_id)
+            if existing is not None:
+                if _challenge_cup_room_reset_fingerprint([existing]) != _challenge_cup_room_reset_fingerprint([room]):
+                    raise ChatRoomValidationError("Chat room reset restore conflicts with a current room.")
+                continue
+            rooms.append(copy.deepcopy(room))
+            restored += 1
+        state["rooms"] = rooms
+        if restored:
+            _store().save(state)
+        cached["status"] = "restored"
+        return {**_challenge_cup_room_stage_summary(cached), "operation": "restore", "restoredCount": restored}
+
+
+def destroy_team_chat_room_reset(stage: Mapping[str, Any], *, reset_id: str | None = None) -> dict[str, Any]:
+    """Discard staged room payloads only after the reset has fully succeeded."""
+
+    with _CHAT_ROOM_LOCK:
+        cached = _challenge_cup_room_stage(stage, reset_id=reset_id)
+        if cached.get("status") not in {"purged", "destroyed"}:
+            raise ChatRoomValidationError("Only a purged chat room reset can be finalized.")
+        cached["status"] = "destroyed"
+        cached["rooms"] = []
+        return _challenge_cup_room_stage_summary(cached)
 
 
 def list_chat_rooms(

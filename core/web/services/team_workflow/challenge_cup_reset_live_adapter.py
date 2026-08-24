@@ -64,7 +64,7 @@ ARTIFACT_FAMILY_BY_KIND = {
     "smoke_evidence": "results",
     "smoke_release": "results",
 }
-PROTECTION_FAMILIES = ("teams", "agents", "sessions", "rooms", "meetings", "workflowRuns", "artifacts")
+PROTECTION_FAMILIES = ("teams", "agents", "sessions", "rooms", "meetings", "workflowRuns", "projects", "artifacts")
 
 _ID_KEYS = (
     "id",
@@ -388,9 +388,125 @@ def _list_meetings(team_id: str) -> Any:
 
 
 def _list_runs(team_id: str) -> Any:
-    from core.web.services.team_workflow.research_runtime.service import get_research_workflow_runtime_service
+    """Read the formal ledger when it is available, otherwise the legacy run store.
 
-    return get_research_workflow_runtime_service().list_runs(team_id=team_id)
+    Reset inventory must not silently omit formal runs merely because the
+    process also still exposes the transitional JSON-run facade.  A formal
+    reader which is unavailable is an expected migration state, so only that
+    bounded condition falls back to the legacy owner.
+    """
+
+    try:
+        from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+        from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
+            FormalReadRuntimeUnavailable,
+            get_query_service,
+        )
+
+        return get_query_service().list_runs(
+            team_id=team_id,
+            workflow_id=CHALLENGE_CUP_WORKFLOW_ID,
+        )
+    except FormalReadRuntimeUnavailable:
+        from core.web.services.team_workflow.research_runtime.service import (
+            get_research_workflow_runtime_service,
+        )
+
+        return get_research_workflow_runtime_service().list_runs(team_id=team_id)
+
+
+def _run_scope_rows(team_id: str) -> list[dict[str, str]]:
+    """Build only explicitly provable checkpoint/receipt scope authority.
+
+    The destructive ports deliberately reject a path-only or inferred scope.
+    When a ledger row lacks the fields they need, PREVIEW is blocked rather
+    than trying to recover ownership from a filename or a UI projection.
+    """
+
+    payload = _list_runs(team_id)
+    rows = _rows(payload, "runs", "workflowRuns")
+    result: list[dict[str, str]] = []
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            raise LiveInventoryAuthorityError("workflow run authority is malformed")
+        owner = _text(_first(raw, "teamId", "team_id"))
+        if owner != team_id:
+            raise LiveInventoryAuthorityError("workflow run authority has a team mismatch")
+        run_id = _text(_first(raw, "runId", "run_id", "workflowRunId", "workflow_run_id", "id"))
+        thread_id = _text(_first(raw, "threadId", "thread_id", "workflowThreadId"))
+        if not run_id or not thread_id or run_id != thread_id:
+            raise LiveInventoryAuthorityError("workflow run lacks matching run/thread authority")
+        item = {
+            "teamId": team_id,
+            "runId": run_id,
+            "threadId": thread_id,
+            "scopeHash": _text(_first(raw, "scopeHash", "scope_hash")).lower(),
+            "questionId": _text(_first(raw, "questionId", "question_id"), upper=True),
+            "projectId": _text(_first(raw, "projectId", "project_id", "researchProjectId")),
+        }
+        result.append(item)
+    return sorted(result, key=lambda item: item["runId"])
+
+
+def _list_checkpoints(team_id: str) -> Any:
+    from core.research.workflow.checkpoint_store import (
+        checkpoint_store_has_rows,
+        default_checkpoint_path,
+        list_team_scoped_checkpoints,
+    )
+
+    authority = _run_scope_rows(team_id)
+    path = default_checkpoint_path()
+    if not authority:
+        # An empty, absent store has no reset work.  A non-empty store without
+        # run/thread authority is dangerous and must be reported as unavailable.
+        if checkpoint_store_has_rows(path):
+            raise LiveInventoryAuthorityError("checkpoint scope authority is absent")
+        return []
+    return list_team_scoped_checkpoints(
+        team_id,
+        checkpoint_path=path,
+        scope_authority=authority,
+    )
+
+
+def _list_receipts(team_id: str) -> Any:
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        list_team_scoped_model_invocation_receipts,
+    )
+    from core.web.services.team_workflow.research_projects import resolve_team_program_root
+
+    authority = _run_scope_rows(team_id)
+    receipt_authority = [
+        {
+            "teamId": item["teamId"],
+            "questionId": item["questionId"],
+            "workflowRunId": item["runId"],
+        }
+        for item in authority
+        if item["questionId"]
+    ]
+    if not receipt_authority:
+        root = resolve_team_program_root(team_id) / "challenge_program" / "model_invocation_receipts"
+        if root.exists() and any(path.is_file() for path in root.rglob("*")):
+            raise LiveInventoryAuthorityError("receipt scope authority is absent")
+        return []
+    return list_team_scoped_model_invocation_receipts(
+        team_id,
+        scope_authority=receipt_authority,
+    )
+
+
+def _list_projects(team_id: str) -> Any:
+    from core.web.services.team_workflow.research_projects import read_research_projects_snapshot
+
+    return read_research_projects_snapshot(team_id)
+
+
+def _list_workspace_state(team_id: str) -> Any:
+    from core.web.services.team_workflow.research_projects import list_challenge_cup_experiment_state
+
+    return list_challenge_cup_experiment_state(team_id)
 
 
 def _list_artifacts(team_id: str, kind: str) -> Any:
@@ -436,6 +552,8 @@ class ChallengeCupInventoryPorts:
     list_artifacts: Callable[[str, str], Any] | None = None
     list_checkpoints: Callable[[str], Any] | None = None
     list_receipts: Callable[[str], Any] | None = None
+    list_projects: Callable[[str], Any] | None = None
+    list_workspace_state: Callable[[str], Any] | None = None
     list_active_session_work: Callable[[], Any] | None = None
     load_catalog: Callable[[], Any] | None = None
     load_program: Callable[[], Any] | None = None
@@ -451,8 +569,10 @@ class ChallengeCupInventoryPorts:
             list_meeting_rounds=_list_meetings,
             list_workflow_runs=_list_runs,
             list_artifacts=_list_artifacts,
-            list_checkpoints=None,
-            list_receipts=None,
+            list_checkpoints=_list_checkpoints,
+            list_receipts=_list_receipts,
+            list_projects=_list_projects,
+            list_workspace_state=_list_workspace_state,
             list_active_session_work=_list_active_session_work,
             load_catalog=_load_catalog,
             load_program=_load_program,
@@ -612,6 +732,36 @@ class LiveChallengeCupInventoryReader:
         if not runs_ok:
             runs.append(_sentinel("workflowRuns", "workflow_run_authority_missing"))
 
+        projects: list[dict[str, Any]] = []
+        projects_ok = True
+        for current_team in all_team_ids:
+            rows, ok = self._read(f"projects:{current_team}", self._ports.list_projects, (current_team,), ("projects",))
+            projects_ok = projects_ok and ok
+            projects.extend(
+                _safe_record(
+                    item,
+                    family="projects",
+                    owner_team_id=current_team,
+                    source_kind="research_project",
+                )
+                for item in rows
+            )
+        if not projects_ok:
+            projects.append(_sentinel("projects", "research_project_authority_missing"))
+
+        workspace_state, workspace_state_ok = self._read(
+            "workspaceState",
+            self._ports.list_workspace_state,
+            (team_id,),
+            ("state", "entries", "items"),
+        )
+        if not workspace_state_ok:
+            workspace_state.append(_sentinel("workspaceState", "workspace_state_authority_missing"))
+        safe_workspace_state = [
+            _safe_record(item, family="workspaceState", owner_team_id=team_id)
+            for item in workspace_state
+        ]
+
         artifact_families: dict[str, list[dict[str, Any]]] = {"plans": [], "candidates": [], "selections": [], "results": [], "artifacts": []}
         artifacts_ok = True
         for current_team in all_team_ids:
@@ -672,10 +822,10 @@ class LiveChallengeCupInventoryReader:
         protection, protection_ok = self._protection(
             team_id,
             team_ids,
-            {"teams": safe_teams, "agents": safe_agents, "sessions": safe_sessions, "rooms": safe_rooms, "meetings": meetings, "workflowRuns": runs, **artifact_families},
-            {"teams": teams_ok, "agents": agents_ok, "sessions": sessions_ok, "rooms": rooms_ok, "meetings": meetings_ok, "workflowRuns": runs_ok, "artifacts": artifacts_ok},
+            {"teams": safe_teams, "agents": safe_agents, "sessions": safe_sessions, "rooms": safe_rooms, "meetings": meetings, "workflowRuns": runs, "projects": projects, **artifact_families},
+            {"teams": teams_ok, "agents": agents_ok, "sessions": sessions_ok, "rooms": rooms_ok, "meetings": meetings_ok, "workflowRuns": runs_ok, "projects": projects_ok, "artifacts": artifacts_ok},
         )
-        authority["families"].update({"teams": teams_ok, "agents": agents_ok, "sessions": sessions_ok, "rooms": rooms_ok, "meetings": meetings_ok, "workflowRuns": runs_ok, "artifacts": artifacts_ok, "checkpoints": checkpoints_ok, "receipts": receipts_ok, "activeWork": active_ok, "otherTeamProtection": protection_ok})
+        authority["families"].update({"teams": teams_ok, "agents": agents_ok, "sessions": sessions_ok, "rooms": rooms_ok, "meetings": meetings_ok, "workflowRuns": runs_ok, "projects": projects_ok, "workspaceState": workspace_state_ok, "artifacts": artifacts_ok, "checkpoints": checkpoints_ok, "receipts": receipts_ok, "activeWork": active_ok, "otherTeamProtection": protection_ok})
         if not active_ok:
             authority["blockers"].append("active_work_authority_missing")
         if not protection_ok:
@@ -686,7 +836,7 @@ class LiveChallengeCupInventoryReader:
         with self._authority_lock:
             self._last_authority = copy.deepcopy(authority)
 
-        objects = {"teams": safe_teams, "agents": safe_agents, "sessions": safe_sessions, "rooms": safe_rooms, "meetings": meetings, "rounds": rounds, "workflowRuns": runs, **artifact_families, "receipts": safe_receipts, "checkpoints": safe_checkpoints, "legacyParticipantBindings": bindings}
+        objects = {"teams": safe_teams, "agents": safe_agents, "sessions": safe_sessions, "rooms": safe_rooms, "meetings": meetings, "rounds": rounds, "workflowRuns": runs, "projects": projects, "workspaceState": safe_workspace_state, **artifact_families, "receipts": safe_receipts, "checkpoints": safe_checkpoints, "legacyParticipantBindings": bindings}
         objects.update(self._immutable(authority))
         return {"schemaVersion": SCHEMA_VERSION, "teamId": team_id, "objects": objects, "activeWork": active, "otherTeamProtection": protection}
 

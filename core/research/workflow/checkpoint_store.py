@@ -906,6 +906,33 @@ def _checkpoint_store_rows(
         connection.close()
 
 
+def checkpoint_store_has_rows(
+    checkpoint_path: Path | str | None = None,
+) -> bool:
+    """Return whether a managed checkpoint store has persisted checkpoint rows.
+
+    This small presence probe deliberately does not infer team ownership.  It
+    lets callers distinguish an initialized-but-empty SQLite file from one
+    that contains rows but lacks the scope authority required to classify
+    them.  Schema/read failures remain errors so reset preview stays
+    fail-closed.
+    """
+
+    path = _reset_path(checkpoint_path)
+    if not path.exists():
+        return False
+    connection = _checkpoint_open_connection(path, read_only=True)
+    try:
+        return connection.execute("SELECT 1 FROM checkpoints LIMIT 1").fetchone() is not None
+    except sqlite3.Error as exc:
+        raise CheckpointResetPortError(
+            "checkpoint store presence cannot be determined",
+            code="checkpoint_store_unavailable",
+        ) from exc
+    finally:
+        connection.close()
+
+
 def _checkpoint_target_rows(
     rows: Iterable[Mapping[str, Any]], team_id: str
 ) -> list[dict[str, Any]]:
@@ -995,6 +1022,7 @@ def prepare_checkpoint_reset_stage(
             "rows": target_rows,
             "storeFingerprint": store_fingerprint,
             "storeMissing": not path.exists(),
+            "status": "staged",
         }
     return {
         "schemaVersion": CHECKPOINT_RESET_PORT_SCHEMA_VERSION,
@@ -1226,6 +1254,8 @@ def _checkpoint_mutate_stage(
             raise CheckpointResetPortError(
                 "checkpoint restore verification failed", code="checkpoint_restore_failed"
             )
+    with _CHECKPOINT_RESET_LOCK:
+        cached["status"] = "purged" if operation == "purge" else "restored"
     return {
         "ok": True,
         "kind": CHECKPOINT_RESET_PORT_KIND,
@@ -1274,6 +1304,29 @@ def restore_checkpoint_reset_stage(
     )
 
 
+def destroy_checkpoint_reset_stage(
+    stage: Mapping[str, Any],
+    *,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    """Discard only reset-owned recovery rows after a successful full reset."""
+
+    cached = _checkpoint_stage_for_operation(stage)
+    if reset_id is not None and str(reset_id).strip() != str(cached["resetId"]):
+        raise CheckpointResetPortError(
+            "checkpoint resetId does not match staged reset", code="checkpoint_stage_mismatch"
+        )
+    with _CHECKPOINT_RESET_LOCK:
+        status = str(cached.get("status") or "staged")
+        if status not in {"purged", "destroyed"}:
+            raise CheckpointResetPortError(
+                "only a purged checkpoint stage can be finalized", code="checkpoint_stage_invalid"
+            )
+        cached["status"] = "destroyed"
+        cached["rows"] = []
+    return {**_checkpoint_stage_summary(stage), "operation": "destroy", "destroyed": True}
+
+
 # Compatibility aliases for the parent reset adapter's port wiring.  They are
 # deliberately aliases, not second implementations or public route DTOs.
 list_checkpoints_for_team = list_team_scoped_checkpoints
@@ -1294,6 +1347,8 @@ __all__ = [
     "assert_scope_bindings_match",
     "build_checkpoint_binding_payload",
     "canonical_discussion_scope",
+    "checkpoint_store_has_rows",
+    "destroy_checkpoint_reset_stage",
     "discussion_scope_hash",
     "discussion_scope_identity",
     "validate_five_way_scope_binding",

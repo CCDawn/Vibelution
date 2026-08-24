@@ -739,6 +739,7 @@ def prepare_model_invocation_receipt_reset_stage(
             "authorityHash": authority_hash,
             "stores": cached_stores,
             "storeFingerprint": store_fingerprint,
+            "status": "staged",
         }
     return {
         "schemaVersion": RECEIPT_RESET_PORT_SCHEMA_VERSION,
@@ -933,6 +934,8 @@ def _receipt_mutate_stage(
             raise ReceiptResetPortError(
                 "receipt restore verification failed", code="receipt_restore_failed"
             )
+    with _RESET_LOCK:
+        cached["status"] = "purged" if operation == "purge" else "restored"
     return {
         "ok": True,
         "kind": RECEIPT_RESET_PORT_KIND,
@@ -978,6 +981,29 @@ def restore_model_invocation_receipt_reset_stage(
     )
 
 
+def destroy_model_invocation_receipt_reset_stage(
+    stage: Mapping[str, Any],
+    *,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    """Drop reset-owned receipt bytes after the enclosing reset succeeds."""
+
+    cached = _receipt_stage_for_operation(stage)
+    if reset_id is not None and str(reset_id).strip() != str(cached["resetId"]):
+        raise ReceiptResetPortError(
+            "receipt resetId does not match staged reset", code="receipt_stage_mismatch"
+        )
+    with _RESET_LOCK:
+        status = str(cached.get("status") or "staged")
+        if status not in {"purged", "destroyed"}:
+            raise ReceiptResetPortError(
+                "only a purged receipt stage can be finalized", code="receipt_stage_invalid"
+            )
+        cached["status"] = "destroyed"
+        cached["stores"] = []
+    return {**_receipt_stage_summary(stage), "operation": "destroy", "destroyed": True}
+
+
 # Compatibility aliases for the parent reset adapter's port wiring.
 list_receipts_for_team = list_team_scoped_model_invocation_receipts
 list_team_scoped_receipts = list_team_scoped_model_invocation_receipts
@@ -996,6 +1022,7 @@ __all__ = [
     "RECEIPT_RESET_PORT_KIND",
     "RECEIPT_RESET_PORT_SCHEMA_VERSION",
     "ReceiptResetPortError",
+    "destroy_model_invocation_receipt_reset_stage",
     "list_team_scoped_model_invocation_receipts",
     "prepare_model_invocation_receipt_reset_stage",
     "purge_model_invocation_receipt_reset_stage",
