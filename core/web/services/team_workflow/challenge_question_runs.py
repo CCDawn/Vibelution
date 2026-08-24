@@ -901,6 +901,59 @@ def derive_challenge_required_model_policy(model_ref: Any) -> dict[str, Any]:
     }
 
 
+def is_challenge_official_model_evidence_eligible(
+    policy: Any,
+    *,
+    provider_id: Any,
+    model_ref: Any = "",
+    model_id: Any = "",
+) -> bool:
+    """Return whether a server-owned route can mint official model evidence.
+
+    Execution is intentionally independent from this gate: the current Flash
+    route remains executable, but only a canonical Qwen policy with an
+    official DashScope/Bailian/Aliyun provider may enter the official ledger.
+    """
+    if not isinstance(policy, dict):
+        return False
+    if str(policy.get("family") or "").strip().casefold() != "qwen":
+        return False
+    if policy.get("requireOfficialProvider") is not True:
+        return False
+    try:
+        if canonical_model_policy(policy) != policy:
+            return False
+    except QuestionResultPackageError:
+        return False
+    normalized_provider = str(provider_id or "").strip().casefold()
+    if not normalized_provider:
+        return False
+    provider_is_official = any(
+        normalized_provider == marker
+        or normalized_provider.startswith(f"{marker}_")
+        or normalized_provider.startswith(f"{marker}-")
+        for marker in OFFICIAL_PROVIDERS
+    )
+    allowed_provider_ids = {
+        str(item or "").strip().casefold()
+        for item in policy.get("providerIds", [])
+    }
+    allowed_model_ids = {
+        str(item or "").strip().casefold()
+        for item in policy.get("modelIds", [])
+    }
+    model_candidates = {
+        str(model_ref or "").strip().casefold(),
+        str(model_id or "").strip().casefold(),
+    }
+    model_candidates.discard("")
+    return (
+        normalized_provider in allowed_provider_ids
+        and bool(model_candidates & allowed_model_ids)
+        and provider_is_official
+    )
+
+
 def bind_challenge_research_task_model(
     *,
     team_id: str,
@@ -924,16 +977,11 @@ def bind_challenge_research_task_model(
     provider_id = str(entry.get("provider_id") or "").strip() or model_ref.partition("/")[0]
     upstream_model_id = str(entry.get("upstream_id") or entry.get("model") or "").strip()
     policy = contract["requiredModelPolicy"]
-    allowed_provider_ids = {item.lower() for item in policy["providerIds"]}
-    allowed_model_ids = {item.lower() for item in policy["modelIds"]}
-    model_candidates = {model_ref.lower(), upstream_model_id.lower()}
-    provider_is_official = any(
-        marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS
-    )
-    official_evidence_eligible = (
-        provider_id.lower() in allowed_provider_ids
-        and bool(model_candidates & allowed_model_ids)
-        and (not policy["requireOfficialProvider"] or provider_is_official)
+    official_evidence_eligible = is_challenge_official_model_evidence_eligible(
+        policy,
+        provider_id=provider_id,
+        model_ref=model_ref,
+        model_id=upstream_model_id,
     )
     return {
         **contract,
@@ -976,11 +1024,18 @@ def register_challenge_task_model_evidence(
         if isinstance(contract.get("evidencePolicy"), dict)
         else {}
     )
-    if evidence_policy.get("officialEvidenceEligible") is False:
+    if evidence_policy.get("officialEvidenceEligible") is not True:
         return None
     if str(usage.get("source") or "").strip() in {"", "missing", "not_called", "not_called_preflight"}:
         return None
     effective = contract.get("effectiveRoute") if isinstance(contract.get("effectiveRoute"), dict) else {}
+    if not is_challenge_official_model_evidence_eligible(
+        contract.get("requiredModelPolicy"),
+        provider_id=effective.get("providerId"),
+        model_ref=effective.get("modelRef"),
+        model_id=effective.get("modelId"),
+    ):
+        return None
     usage_provider = str(usage.get("provider") or "").strip()
     usage_model = str(usage.get("model") or "").strip()
     usage_model_ref = str(usage.get("llmModelId") or "").strip()

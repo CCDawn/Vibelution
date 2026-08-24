@@ -266,6 +266,15 @@ def _challenge_task() -> dict:
                 "providerId": "dashscope_main",
                 "modelId": "qwen3.6-plus",
             },
+            "requiredModelPolicy": canonical_model_policy(
+                {
+                    "family": "qwen",
+                    "providerIds": ["dashscope_main"],
+                    "modelIds": ["qwen3.6-plus"],
+                    "requireOfficialProvider": True,
+                }
+            ),
+            "evidencePolicy": {"officialEvidenceEligible": True},
         },
     }
 
@@ -382,7 +391,7 @@ def test_task_model_evidence_requires_success_and_is_idempotent(tmp_path, monkey
     assert store["evidence"][0]["outputRef"] != task["result"]["outputRef"]
 
 
-def test_flash_task_route_records_exact_canonical_receipt(tmp_path, monkeypatch):
+def test_flash_task_route_cannot_record_official_canonical_receipt(tmp_path, monkeypatch):
     monkeypatch.setattr(challenge_question_runs, "_project_root", lambda: tmp_path)
     project_root = tmp_path / "project-sci-096"
     monkeypatch.setattr(
@@ -469,17 +478,8 @@ def test_flash_task_route_records_exact_canonical_receipt(tmp_path, monkeypatch)
         model_policy_sha256=policy_sha256,
     )
 
-    assert evidence is not None
-    assert evidence["schemaVersion"] == 2
-    assert evidence["providerId"] == "opencode_go"
-    assert evidence["modelId"] == "deepseek-v4-flash"
-    assert evidence["receiptId"] == "receipt-flash-generation"
-    store = json.loads(
-        (project_root / "official_model_evidence" / "index.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert store["receipts"] == [receipt.to_dict()]
+    assert evidence is None
+    assert not (project_root / "official_model_evidence" / "index.json").exists()
 
 
 def test_flash_task_policy_is_derived_and_bound_without_qwen_gate(
@@ -514,7 +514,7 @@ def test_flash_task_policy_is_derived_and_bound_without_qwen_gate(
         "modelIds": ["deepseek-v4-flash"],
         "requireOfficialProvider": False,
     }
-    assert contract["evidencePolicy"]["officialEvidenceEligible"] is True
+    assert contract["evidencePolicy"]["officialEvidenceEligible"] is False
 
 
 def test_formal_flash_task_policy_preserves_server_hash_authority(

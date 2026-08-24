@@ -36,6 +36,7 @@ from .task_bundle_lifecycle import (
     replace_agent_task_bundle_subtask,
     task_bundle_id,
 )
+from ..challenge_question_runs import is_challenge_official_model_evidence_eligible
 
 
 class AgentNodeExecutionError(ValueError):
@@ -214,6 +215,12 @@ def _challenge_task_contract(
             "formal project Agent task contract is incomplete",
             code="challenge_task_contract_incomplete",
         )
+    official_evidence_eligible = is_challenge_official_model_evidence_eligible(
+        required_policy,
+        provider_id=route.get("providerId"),
+        model_ref=route.get("modelRef"),
+        model_id=route.get("modelId"),
+    )
     return {
         "schemaVersion": 1,
         "questionId": question_id,
@@ -244,7 +251,7 @@ def _challenge_task_contract(
             "recordCanonicalSuccessOnly": True,
             "rawPayloadPersistence": "forbidden",
             "publishRequiredForProgramLedger": True,
-            "officialEvidenceEligible": True,
+            "officialEvidenceEligible": official_evidence_eligible,
         },
     }
 
