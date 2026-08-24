@@ -1219,6 +1219,96 @@ describe("runWorkbenchLifecycle", () => {
     });
   });
 
+  it("starts on a relocated port without waiting for a foreign preferred port", async () => {
+    let spawned = false;
+    const written: Record<string, unknown>[] = [];
+    const spawnImpl = vi.fn((command: string, args: string[]) => {
+      expect(command.toLowerCase()).toContain("python");
+      expect(args).toContain("8001");
+      spawned = true;
+      return fakeBackendChild(4242);
+    });
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "start",
+      command: { commandId: "cmd_foreign_port", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({ backendPort: 8000 }),
+      writeState: (state) => written.push(state),
+      ensureFrontend: async () => undefined,
+      connect: async (port) => port === 8000 || (port === 8001 && spawned),
+      fetchHealth: async (url) => {
+        const port = Number(new URL(url).port);
+        return {
+          status: 200,
+          json: async () => port === 8000
+            ? { status: "ok", routesReady: true, pid: 99, workspaceRoot: "D:/other" }
+            : { status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" }
+        };
+      },
+      pidAlive: () => false,
+      spawnImpl,
+      fileExists: (path) => path.endsWith("pythonw.exe"),
+      captureProcessIdentity: async ({ pid }) => ({
+        pid,
+        createTime: 1,
+        executable: "C:/Python/pythonw.exe"
+      })
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "start" });
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(written.at(-1)).toMatchObject({
+      backendPort: 8001,
+      port: 8001,
+      portRelocationNote: expect.stringContaining("another Vibelution project")
+    });
+  });
+
+  it("rejects a live unverified browser handle before graceful backend shutdown", async () => {
+    const gracefulShutdown = vi.fn(async () => ({
+      requested: true,
+      completed: true,
+      status: 202,
+      reason: "closed"
+    }));
+    const terminateProcessTree = vi.fn(async () => true);
+    let written: Record<string, unknown> = {};
+    await expect(executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "start",
+      command: { commandId: "cmd_unverified_browser", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/python.exe",
+        browserWindowPid: 9911
+      }),
+      writeState: (state) => {
+        written = state;
+      },
+      ensureFrontend: async () => undefined,
+      connect: async () => true,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => pid === 51 || pid === 9911,
+      terminateProcessTree,
+      gracefulShutdown
+    })).rejects.toThrow("unverified browser/window handles");
+
+    expect(gracefulShutdown).not.toHaveBeenCalled();
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(written).toMatchObject({
+      backendPid: 51,
+      browserWindowPid: 9911,
+      observedState: "failed"
+    });
+  });
+
   it("starts when a stale dead Runtime Manager PID has no identity", async () => {
     const { spawnImpl, input, written } = harness();
     const result = await executeMainLineWorkbench({

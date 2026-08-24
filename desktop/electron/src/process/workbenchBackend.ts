@@ -341,6 +341,27 @@ function stateWithoutReconciledBackendHandles(
   return sanitized;
 }
 
+function liveUnverifiedBrowserWindowHandles(
+  state: WorkbenchBackendState,
+  pidAlive: (pid: number) => boolean,
+  trustedPids: readonly number[] = []
+): number[] {
+  const trusted = new Set(trustedPids.map((pid) => Math.trunc(Number(pid))));
+  const handles = new Set<number>();
+  for (const key of [
+    "browserLaunchPid",
+    "browserWindowPid",
+    "workbenchBrowserLaunchPid",
+    "workbenchBrowserWindowPid"
+  ]) {
+    const pid = Math.trunc(Number(state[key] || 0));
+    if (Number.isFinite(pid) && pid > 0 && !trusted.has(pid) && pidAlive(pid)) {
+      handles.add(pid);
+    }
+  }
+  return [...handles].sort((left, right) => right - left);
+}
+
 export function readLauncherStateFile(path: string): WorkbenchBackendState {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -1645,6 +1666,16 @@ export async function executeMainLineWorkbench(
   const unverifiedHandles: number[] = [];
   let resolved: { port: number; note: string };
   try {
+    const liveUnverifiedBrowserHandles = liveUnverifiedBrowserWindowHandles(
+      previous,
+      input.pidAlive ?? knownPidIsAlive,
+      [...retainedBackendTreePids, ...retainedExtraPids, ...(input.ownedDirectPids ?? [])]
+    );
+    if (liveUnverifiedBrowserHandles.length > 0) {
+      throw new Error(
+        `Refusing to start while unverified browser/window handles remain: ${liveUnverifiedBrowserHandles.join(",")}`
+      );
+    }
     // Classify and, when necessary, gracefully retire the port occupant before
     // touching registered handles.  A backend HTTP 409 is an active-work
     // protection decision; ordinary restart must not kill its process tree
@@ -1665,7 +1696,7 @@ export async function executeMainLineWorkbench(
     });
     await retireRegisteredHandles({
       pids: retainedRegisteredHandles,
-      port: preferred,
+      port: resolved.port,
       host,
       signal: input.signal,
       pidAlive: input.pidAlive,
