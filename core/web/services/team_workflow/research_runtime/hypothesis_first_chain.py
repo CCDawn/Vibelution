@@ -680,7 +680,7 @@ def open_review_meeting_for_selection(
     _formal_candidate_id: str = "",
     _formal_candidate_order: int | None = None,
 ) -> dict[str, Any]:
-    """Open (or reuse) one hypothesis-review meeting for a selection record.
+    """Open (or reuse) one candidate-level review meeting per selection item.
 
     Participants derive from the team's linked chat room; the meeting id is
     deterministic per selection/round so replays reuse instead of duplicating.
@@ -713,12 +713,19 @@ def open_review_meeting_for_selection(
             "selection requires at least one selectedCandidateId"
         )
 
-    # A formal Challenge Cup run reviews each selected hypothesis in its own
-    # room.  The receipt is the server-owned formal-run signal; legacy DEV
-    # selections keep their existing single-meeting contract.  Recursive
-    # calls carry one explicit candidate so the meeting runtime can create the
-    # canonical candidate_review scope and hidden Child Sessions.
-    if receipt_authority is not None and not _formal_candidate_id:
+    # Every selected hypothesis owns a review meeting. Receipt authority
+    # constrains model invocation evidence; it must never decide whether a
+    # multi-candidate selection is fanned out. Otherwise a temporarily
+    # unavailable formal Ledger silently produces one combined meeting with an
+    # empty candidate link, while the UI correctly fails closed because it
+    # cannot assign that meeting to any candidate.
+    #
+    # Recursive calls carry exactly one candidate. When a server-authored
+    # workflow discussion scope is available, each child receives its own
+    # candidate_review scope and child sessions; older DEV paths still keep
+    # the same candidate-level meeting/link contract without inventing a
+    # workflow identity.
+    if not _formal_candidate_id:
         if previous_meeting_round_id:
             previous = meeting_rounds.get_meeting_round(
                 normalized_team_id, str(previous_meeting_round_id).strip()
@@ -732,31 +739,14 @@ def open_review_meeting_for_selection(
             if previous_candidate_id:
                 selected_candidate_ids = [previous_candidate_id]
 
-        from core.research.workflow.contracts.discussion_scope import (
-            WorkflowDiscussionScopeV1,
+        discussion_scope_base = _review_discussion_scope_base(
+            normalized_team_id,
+            question_id,
+            selected_candidate_ids,
+            receipt_authority=receipt_authority,
         )
-        from core.web.services.team_workflow.research_project_agent_sessions import (
-            resolve_research_project_identity,
-        )
-
-        project = resolve_research_project_identity(normalized_team_id)
-        research_project_id = str(project.get("projectId") or "").strip()
-        workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
-        if not research_project_id or not workflow_run_id:
-            raise HypothesisFirstChainError(
-                "formal hypothesis review requires research project and workflow run authority"
-            )
         opened_candidates: list[dict[str, Any]] = []
         for candidate_order, candidate_id in enumerate(selected_candidate_ids):
-            discussion_scope = WorkflowDiscussionScopeV1.review(
-                teamId=normalized_team_id,
-                researchProjectId=research_project_id,
-                workflowRunId=workflow_run_id,
-                workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
-                questionId=question_id,
-                selectionId=selection_id,
-                candidateId=candidate_id,
-            )
             candidate_meeting_id = (
                 f"hf-review-{selection_id}-"
                 f"{_stable_hash({'candidateId': candidate_id})[:10]}-"
@@ -766,11 +756,29 @@ def open_review_meeting_for_selection(
                 **selection_record,
                 "selectedCandidateIds": [candidate_id],
                 "candidateId": candidate_id,
-                "discussionScope": discussion_scope.to_dict(),
-                "workflowRunId": workflow_run_id,
-                "workflowNodeId": HYPOTHESIS_DESIGN_NODE_ID,
-                "researchProjectId": research_project_id,
             }
+            if discussion_scope_base is not None:
+                from core.research.workflow.contracts.discussion_scope import (
+                    WorkflowDiscussionScopeV1,
+                )
+
+                discussion_scope = WorkflowDiscussionScopeV1.review(
+                    teamId=normalized_team_id,
+                    researchProjectId=discussion_scope_base.researchProjectId,
+                    workflowRunId=discussion_scope_base.workflowRunId,
+                    workflowNodeId=discussion_scope_base.workflowNodeId,
+                    questionId=question_id,
+                    selectionId=selection_id,
+                    candidateId=candidate_id,
+                )
+                candidate_selection.update(
+                    {
+                        "discussionScope": discussion_scope.to_dict(),
+                        "workflowRunId": discussion_scope.workflowRunId,
+                        "workflowNodeId": discussion_scope.workflowNodeId,
+                        "researchProjectId": discussion_scope.researchProjectId,
+                    }
+                )
             opened_candidates.append(
                 open_review_meeting_for_selection(
                     normalized_team_id,
@@ -785,14 +793,23 @@ def open_review_meeting_for_selection(
                     _formal_candidate_id=candidate_id,
                     _formal_candidate_order=candidate_order,
                 )
-            )
+        )
         primary = opened_candidates[0]
+        if len(opened_candidates) == 1:
+            # Preserve the long-standing single-candidate status contract
+            # (for example ``opened``) while still recording its candidate
+            # identity in the meeting/link.
+            return {
+                **primary,
+                "reviewMeetings": opened_candidates,
+                "candidateCount": 1,
+            }
         return {
             **primary,
             "status": (
                 "reused"
                 if all(item.get("status") == "reused" for item in opened_candidates)
-                else "created"
+                else str(primary.get("status") or "opened")
             ),
             "reviewMeetings": opened_candidates,
             "candidateCount": len(opened_candidates),
@@ -918,6 +935,95 @@ def open_review_meeting_for_selection(
         "roundIndex": normalized_round_index,
         "link": link,
     }
+
+
+def _review_discussion_scope_base(
+    team_id: str,
+    question_id: str,
+    selected_candidate_ids: list[str],
+    *,
+    receipt_authority: Mapping[str, Any] | None,
+):
+    """Resolve a server-owned workflow identity for candidate review rooms.
+
+    The current formal Ledger remains the preferred authority. If it is
+    temporarily unavailable after a run was already created, reuse the scope
+    persisted on the generation meeting that produced this exact selected
+    candidate set. That meeting was server-written during run creation, so
+    this is not a client-controlled fallback. No scope is synthesized when
+    neither source is available: candidate fan-out still proceeds, but the
+    legacy meeting remains deliberately unscoped.
+    """
+
+    from core.research.workflow.contracts.discussion_scope import (
+        QUESTION_GENERATION_SCOPE_KIND,
+        WorkflowDiscussionScopeV1,
+        parse_discussion_scope,
+    )
+
+    if receipt_authority is not None:
+        from core.web.services.team_workflow.research_project_agent_sessions import (
+            resolve_research_project_identity,
+        )
+
+        project = resolve_research_project_identity(team_id)
+        research_project_id = str(project.get("projectId") or "").strip()
+        workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
+        if not research_project_id or not workflow_run_id:
+            raise HypothesisFirstChainError(
+                "formal hypothesis review requires research project and workflow run authority"
+            )
+        return WorkflowDiscussionScopeV1.generation(
+            teamId=team_id,
+            researchProjectId=research_project_id,
+            workflowRunId=workflow_run_id,
+            workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
+            questionId=question_id,
+        )
+
+    selected = set(selected_candidate_ids)
+    try:
+        candidates = list_hypothesis_candidates(team_id, question_id=question_id)[
+            "candidates"
+        ]
+    except Exception:  # noqa: BLE001 - unscoped legacy fallback remains valid
+        return None
+    source_meeting_ids = {
+        str(candidate.get("meetingRoundId") or "").strip()
+        for candidate in candidates
+        if isinstance(candidate, Mapping)
+        and str(candidate.get("candidateId") or "").strip() in selected
+        and str(candidate.get("meetingRoundId") or "").strip()
+    }
+    if len(source_meeting_ids) != 1:
+        return None
+    source_meeting_id = next(iter(source_meeting_ids))
+    source_meeting = next(
+        (
+            meeting
+            for meeting in _question_generation_meetings(team_id, question_id)
+            if str(meeting.get("meetingRoundId") or "").strip() == source_meeting_id
+        ),
+        None,
+    )
+    raw_scope = (
+        source_meeting.get("discussionScope")
+        if isinstance(source_meeting, Mapping)
+        else None
+    )
+    if not isinstance(raw_scope, Mapping):
+        return None
+    try:
+        scope = parse_discussion_scope(raw_scope)
+    except ContractValidationError:
+        return None
+    if (
+        scope.kind != QUESTION_GENERATION_SCOPE_KIND
+        or scope.teamId != team_id
+        or scope.questionId.upper() != question_id.upper()
+    ):
+        return None
+    return scope
 
 
 def _selection_id_from_meeting(meeting_round: Mapping[str, Any]) -> str:
@@ -1208,6 +1314,7 @@ def open_candidate_generation_meeting(
     agent_runner: Any = None,
     background: bool = True,
     _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
+    _discussion_scope: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open (or reuse) the round-0 candidate-generation discussion.
 
@@ -1311,6 +1418,31 @@ def open_candidate_generation_meeting(
                 "roomId": str(existing.get("linkedChatRoomId") or ""),
                 "chatRoomRoundIds": _normalized_str_list(existing.get("chatRoomRoundIds")),
             }
+    if _discussion_scope is None:
+        # A retry can be initiated after the creation request has completed.
+        # Carry forward the latest valid server-written generation scope so a
+        # transient retry does not lose the run/node identity needed later by
+        # candidate-level reviews.
+        from core.research.workflow.contracts.discussion_scope import (
+            QUESTION_GENERATION_SCOPE_KIND,
+            parse_discussion_scope,
+        )
+
+        for previous in reversed(meetings):
+            previous_scope = previous.get("discussionScope")
+            if not isinstance(previous_scope, Mapping):
+                continue
+            try:
+                parsed_scope = parse_discussion_scope(previous_scope)
+            except ContractValidationError:
+                continue
+            if (
+                parsed_scope.kind == QUESTION_GENERATION_SCOPE_KIND
+                and parsed_scope.teamId == normalized_team_id
+                and parsed_scope.questionId.upper() == normalized_question_id
+            ):
+                _discussion_scope = parsed_scope.to_dict()
+                break
     base_id = f"hf-candgen-{scope_hash[:16]}"
     if open_meeting is not None:
         meeting_round_id = str(open_meeting.get("meetingRoundId") or "")
@@ -1327,6 +1459,8 @@ def open_candidate_generation_meeting(
         "meetingRoundId": meeting_round_id,
         **participant_resolution,
     }
+    if isinstance(_discussion_scope, Mapping):
+        payload["discussionScope"] = dict(_discussion_scope)
     opened = meeting_runtime.open_candidate_generation_meeting(
         normalized_team_id,
         payload,

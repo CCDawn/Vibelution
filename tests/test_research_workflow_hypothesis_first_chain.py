@@ -404,6 +404,224 @@ def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
     assert len({payload["meetingRoundId"] for payload in opened_payloads}) == 2
 
 
+def test_selection_fans_out_per_candidate_without_receipt_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A temporarily unreadable Ledger cannot collapse candidate reviews."""
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+
+    team_id = "team-unscoped-fanout"
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            meetings.ResearchMeetingRoundNotFoundError("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_ensure_linked_room",
+        lambda value: ({"teamId": value}, "team-room"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_resolve_hypothesis_participants",
+        lambda *_args: {"participants": ["agent-a"]},
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    monkeypatch.setattr(
+        chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {"candidates": []},
+    )
+    opened_payloads: list[dict[str, object]] = []
+    recorded_links: list[dict[str, object]] = []
+
+    def fake_open(_team_id, payload, **_kwargs):
+        opened_payloads.append(dict(payload))
+        candidate_id = str(payload["candidateId"])
+        return {
+            "status": "created",
+            "meetingRound": {"meetingRoundId": payload["meetingRoundId"]},
+            "roomId": f"room-{candidate_id}",
+            "roundId": f"round-{candidate_id}",
+            "chatRoomRoundIds": [f"round-{candidate_id}"],
+        }
+
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", fake_open)
+    monkeypatch.setattr(
+        chain,
+        "_record_review_round_link",
+        lambda _team_id, **fields: recorded_links.append(dict(fields)) or dict(fields),
+    )
+
+    result = chain.open_review_meeting_for_selection(
+        team_id,
+        {**_selection_payload("agent-a"), "selectionId": "selection-unscoped-1"},
+        background=True,
+    )
+
+    assert result["candidateCount"] == 2
+    assert len(result["reviewMeetings"]) == 2
+    assert [payload["selectedCandidateIds"] for payload in opened_payloads] == [
+        ["hyp-a"],
+        ["hyp-b"],
+    ]
+    assert {payload["candidateId"] for payload in opened_payloads} == {"hyp-a", "hyp-b"}
+    assert all("discussionScope" not in payload for payload in opened_payloads)
+    assert [link["candidate_id"] for link in recorded_links] == ["hyp-a", "hyp-b"]
+
+
+def test_selection_reuses_server_generation_scope_when_receipt_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run-created generation scope retains candidate room identity on retry."""
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+
+    team_id = "team-scoped-fallback"
+    generation_scope = WorkflowDiscussionScopeV1.generation(
+        teamId=team_id,
+        researchProjectId="project-1",
+        workflowRunId="run-1",
+        workflowNodeId=chain.HYPOTHESIS_DESIGN_NODE_ID,
+        questionId=_QUESTION_ID,
+    )
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {
+            "candidates": [
+                {"candidateId": "hyp-a", "meetingRoundId": "generation-1"},
+                {"candidateId": "hyp-b", "meetingRoundId": "generation-1"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "_question_generation_meetings",
+        lambda *_args: [
+            {
+                "meetingRoundId": "generation-1",
+                "discussionScope": generation_scope.to_dict(),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            meetings.ResearchMeetingRoundNotFoundError("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_ensure_linked_room",
+        lambda value: ({"teamId": value}, "team-room"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_resolve_hypothesis_participants",
+        lambda *_args: {"participants": ["agent-a"]},
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    opened_payloads: list[dict[str, object]] = []
+
+    def fake_open(_team_id, payload, **_kwargs):
+        opened_payloads.append(dict(payload))
+        return {
+            "status": "created",
+            "meetingRound": {"meetingRoundId": payload["meetingRoundId"]},
+            "roomId": "room",
+            "roundId": "round",
+            "chatRoomRoundIds": ["round"],
+        }
+
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", fake_open)
+    monkeypatch.setattr(
+        chain,
+        "_record_review_round_link",
+        lambda _team_id, **fields: dict(fields),
+    )
+
+    chain.open_review_meeting_for_selection(
+        team_id,
+        {**_selection_payload("agent-a"), "selectionId": "selection-scoped-1"},
+        background=True,
+    )
+
+    scopes = [payload["discussionScope"] for payload in opened_payloads]
+    assert [scope["candidateId"] for scope in scopes] == ["hyp-a", "hyp-b"]
+    assert {scope["workflowRunId"] for scope in scopes} == {"run-1"}
+    assert {scope["researchProjectId"] for scope in scopes} == {"project-1"}
+
+
+def test_question_run_scopes_candidate_generation_before_receipt_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(chain, "needs_candidate_generation", lambda *_args: True)
+
+    def fake_open(_team_id, _question_id, **kwargs):
+        captured.update(kwargs)
+        return {"status": "opened", "meetingRound": {"meetingRoundId": "generation-1"}}
+
+    monkeypatch.setattr(chain, "open_candidate_generation_meeting", fake_open)
+    run_input = {
+        "teamId": "team-created-run",
+        "questionId": _QUESTION_ID,
+        "projectId": "project-created-run",
+        "researchObjectiveContract": {"hypothesisFirst": True},
+        "modelRoutingPolicy": {"modelPolicySha256": "a" * 64},
+    }
+    created_run = {
+        "teamId": "team-created-run",
+        "runId": "run-created-1",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-created-1",
+    }
+
+    opened = run_creation._auto_open_candidate_generation(
+        run_input,
+        created_run=created_run,
+    )
+
+    assert opened == {"status": "opened", "meetingRoundId": "generation-1"}
+    assert captured["_discussion_scope"] == {
+        "version": 1,
+        "kind": "question_generation",
+        "teamId": "team-created-run",
+        "researchProjectId": "project-created-run",
+        "workflowRunId": "run-created-1",
+        "workflowNodeId": chain.HYPOTHESIS_DESIGN_NODE_ID,
+        "questionId": _QUESTION_ID,
+    }
+
+
 def test_review_meeting_fan_in_waits_for_every_selected_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1498,10 +1716,14 @@ def test_selection_review_prompt_hydrates_canonical_candidate_content(
 
     assert recorded["reviewMeeting"]["status"] == "opened"
     assert prompts
-    assert all("canonical statement a" in prompt for prompt in prompts)
-    assert all("canonical mechanism a" in prompt for prompt in prompts)
-    assert all("canonical statement b" in prompt for prompt in prompts)
-    assert all("canonical mechanism b" in prompt for prompt in prompts)
+    prompts_for_a = [prompt for prompt in prompts if "canonical statement a" in prompt]
+    prompts_for_b = [prompt for prompt in prompts if "canonical statement b" in prompt]
+    assert prompts_for_a
+    assert prompts_for_b
+    assert all("canonical mechanism a" in prompt for prompt in prompts_for_a)
+    assert all("canonical statement b" not in prompt for prompt in prompts_for_a)
+    assert all("canonical mechanism b" in prompt for prompt in prompts_for_b)
+    assert all("canonical statement a" not in prompt for prompt in prompts_for_b)
 
 
 def _close_first_meeting_with_envelope(
@@ -1657,7 +1879,6 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             assert next_meeting["status"] in {"opened", "created", "reused"}
             second_round_meetings = _opened_review_meetings(next_meeting)
             assert second_round_meetings
-            second_meeting_id = second_round_meetings[0]["meetingRoundId"]
             assert {item["meetingRoundId"] for item in second_round_meetings}.isdisjoint(
                 {first_meeting_id, sibling_meeting_id}
             )
