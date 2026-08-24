@@ -96,6 +96,7 @@ import {
 } from "./process/workbenchLifecycle.js";
 import {
   ensureFrontendRelease,
+  mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
@@ -2894,9 +2895,40 @@ async function orchestrateLauncherLifecycle(
   const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
   const paths = createDesktopPathsForApp();
+  const startsWorkbench = supervisedOperation === "start"
+    || supervisedOperation === "restart"
+    || supervisedOperation === "rebuild-and-start";
+  let frontendReleaseChanged = false;
+  let unpackagedElectronRebuilt = false;
+
+  if (startsWorkbench && !app.isPackaged) {
+    // This is deliberately before every reuse decision.  The Python bridge owns
+    // the content-addressed release lock, staging validation and atomic pointer
+    // publication, while this Electron process owns the lifecycle decision.
+    const latest = await ensureLatestLauncher({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath
+    });
+    frontendReleaseChanged = latest.frontend?.skipped !== true;
+    unpackagedElectronRebuilt = latest.electron?.rebuilt === true;
+  } else if (startsWorkbench) {
+    const frontend = await ensureFrontendRelease({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath
+    });
+    // Missing freshness fields must not authorize a stale backend reuse.
+    frontendReleaseChanged = !frontend.skipped;
+  }
+
+  let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
-    if (!packagedShellStale && await mainLineBackendIsReusable(paths.workspaceRoot)) {
+    if (
+      !frontendReleaseChanged
+      && !unpackagedElectronRebuilt
+      && !packagedShellStale
+      && await mainLineBackendIsReusable(paths.workspaceRoot)
+    ) {
       const url = await refreshLiveWorkbenchUrl(paths);
       await openWorkbenchAtCurrentLauncherUrl(paths, launcherBootstrap, windowProvider, { workbenchUrl: url });
       scheduleLauncherStatusCliRefresh();
@@ -2912,10 +2944,16 @@ async function orchestrateLauncherLifecycle(
         message: "已打开工作台窗口。"
       };
     }
+    // A reachable but non-reusable backend may be serving an older immutable
+    // release.  Route it through restart instead of the destructive start path
+    // so the active-work guard can preserve an in-progress formal task.
+    if (await mainLineBackendIsReachable(paths.workspaceRoot)) {
+      lifecycleOperation = "restart";
+    }
   }
   const intentLease = launcherLifecycleSupervisor.beginIntent({
     instanceId: "main",
-    operation: supervisedOperation,
+    operation: lifecycleOperation,
     desiredState
   });
   if (app.isPackaged) {
@@ -2924,9 +2962,9 @@ async function orchestrateLauncherLifecycle(
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
-      if (shouldRefreshBeforeLifecycle(operation, { isPackaged: true, stale: status.stale })) {
+      if (shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, stale: status.stale })) {
         notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新后再执行…");
-        await scheduleCurrentDesktopShellRefresh(operation);
+        await scheduleCurrentDesktopShellRefresh(lifecycleOperation);
         if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
           return supersededLifecycleResult(operation);
         }
@@ -2957,7 +2995,7 @@ async function orchestrateLauncherLifecycle(
       pythonPath,
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-      operation: operation as WorkbenchLifecycleOperation,
+      operation: lifecycleOperation,
       signal: intentLease.signal
     }),
     reconcile: async () => {
@@ -2988,10 +3026,26 @@ async function orchestrateLauncherLifecycle(
   if (lease === null || !launcherLifecycleSupervisor.isCurrent(lease)) {
     return supersededLifecycleResult(operation, result.commandId);
   }
-  if (result.accepted && (operation === "start" || operation === "restart" || operation === "rebuild-and-start")) {
+  if (result.accepted && unpackagedElectronRebuilt) {
+    // The current process executed an old compiled Electron main.  Its backend
+    // has now been safely refreshed, so relaunch the shell before any window is
+    // opened from the stale process.  A rejected restart never reaches here.
+    app.relaunch();
+    shutdownApproved = true;
+    app.exit(0);
+    return {
+      ...result,
+      message: "已准备最新 Launcher，正在重新打开工作台。",
+      ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})
+    };
+  }
+  if (
+    result.accepted
+    && (lifecycleOperation === "start" || lifecycleOperation === "restart" || lifecycleOperation === "rebuild-and-start")
+  ) {
     const provider = windowProvider;
     if (provider !== null && result.commandId) {
-      const readyWaitMs = operation === "rebuild-and-start"
+      const readyWaitMs = lifecycleOperation === "rebuild-and-start"
         ? WORKBENCH_REBUILD_READY_WAIT_MS
         : WORKBENCH_START_READY_WAIT_MS;
       void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, lease, readyWaitMs)
@@ -3997,15 +4051,8 @@ async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
   }
   pendingOpenWorkbenchRequest = false;
   markWorkbenchOpenRequested();
-  const paths = createDesktopPathsForApp();
-  const url = launcherBootstrap !== null
-    ? await refreshLiveWorkbenchUrl(paths)
-    : resolveOrchestratedWorkbenchUrl();
   try {
     await startOrFocusWorkbenchFromProductEntry({
-      url,
-      waitForHttp: (opts) => waitForWorkbenchHttp(opts),
-      openOrFocus: (target) => provider.openOrFocusWorkbench(target),
       startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })
     });
   } finally {

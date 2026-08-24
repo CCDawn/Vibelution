@@ -888,13 +888,24 @@ describe("frontend build supervision", () => {
         "json"
       ]);
       expect(input.mutation).toBe(true);
-      return JSON.stringify({ ok: true });
+      return JSON.stringify({
+        ok: true,
+        skipped: false,
+        rebuilt: true,
+        buildKey: "build-key",
+        release: "C:/repo/web/.vibelution-builds/release-build-key"
+      });
     });
 
-    await ensureFrontendRelease({
+    await expect(ensureFrontendRelease({
       workspaceRoot: "C:/repo",
       pythonPath: "C:/repo/.venv/Scripts/python.exe",
       runBridge
+    })).resolves.toEqual({
+      skipped: false,
+      rebuilt: true,
+      buildKey: "build-key",
+      release: "C:/repo/web/.vibelution-builds/release-build-key"
     });
     expect(runBridge).toHaveBeenCalledOnce();
   });
