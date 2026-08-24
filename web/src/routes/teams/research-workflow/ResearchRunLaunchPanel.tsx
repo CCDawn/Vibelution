@@ -477,15 +477,12 @@ export function ResearchRunLaunchPanel(props: {
             : "The selected question matches multiple formal experiments; run creation is blocked."}
         </div>
       ) : null}
-      <details className={styles.techDetails}>
-        <summary>{isZh ? "调整上限" : "Adjust limits"}</summary>
-        <ResearchRunSafetyLimitPanel
-          budget={safetyBudget}
-          isDisabled={busy}
-          lang={lang}
-          onChange={setSafetyBudget}
-        />
-      </details>
+      <ResearchRunSafetyLimitPanel
+        budget={safetyBudget}
+        isDisabled={busy}
+        lang={lang}
+        onChange={setSafetyBudget}
+      />
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
       <details className={styles.techDetails}>
         <summary>{isZh ? "其他处理" : "Other actions"}</summary>

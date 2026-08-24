@@ -398,13 +398,17 @@ describe("ResearchRunLaunchPanel", () => {
       />,
     ));
 
+    const safetyToggles = Array.from(container.querySelectorAll("button"))
+      .filter((button) => button.textContent?.includes("调整上限"));
+    expect(safetyToggles).toHaveLength(1);
+    const safetyToggle = safetyToggles[0];
+    expect(safetyToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).toBeNull();
+
     const details = Array.from(container.querySelectorAll("details")) as HTMLDetailsElement[];
-    expect(details).toHaveLength(2);
-    const safetyDetails = details[0];
-    const otherDetails = details[1];
-    expect(safetyDetails.open).toBe(false);
+    expect(details).toHaveLength(1);
+    const otherDetails = details[0];
     expect(otherDetails.open).toBe(false);
-    expect(safetyDetails.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).toBeNull();
 
     const actionRegion = container.querySelector('[data-vui-region="launch-primary-action"]');
     expect(actionRegion?.querySelectorAll("button")).toHaveLength(1);
@@ -412,12 +416,9 @@ describe("ResearchRunLaunchPanel", () => {
     expect(actionRegion?.textContent).not.toContain("取消");
     expect(actionRegion?.textContent).not.toContain("查看失败运行");
 
-    await act(async () => (safetyDetails.querySelector("summary") as HTMLElement).click());
-    expect(safetyDetails.open).toBe(true);
-    const innerSafetyToggle = findButton(safetyDetails, "调整上限");
-    expect(innerSafetyToggle).toBeTruthy();
-    await act(async () => innerSafetyToggle!.click());
-    expect(safetyDetails.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).not.toBeNull();
+    await act(async () => safetyToggle.click());
+    expect(safetyToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).not.toBeNull();
 
     await act(async () => (otherDetails.querySelector("summary") as HTMLElement).click());
     expect(otherDetails.open).toBe(true);
