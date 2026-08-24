@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.discussion_scope import (
@@ -66,6 +66,8 @@ _OUTPUT_FIELDS = (
     "selectionId",
     "candidateId",
     "deepLink",
+    "returnTo",
+    "returnLabel",
     "status",
     "degradedReason",
 )
@@ -453,6 +455,8 @@ def _degraded(
         "selectionId": selection_id,
         "candidateId": candidate_id,
         "deepLink": "",
+        "returnTo": "",
+        "returnLabel": "",
         "status": STATUS_DEGRADED,
         "degradedReason": reason,
     }
@@ -463,10 +467,24 @@ def _ready(
     room_id: str,
     meeting_round_id: str,
 ) -> dict[str, Any]:
-    # Chat route selection owns the room query.  Keep this link intentionally
-    # small; meeting/scope identity remains in the anchor fetched by the page,
-    # rather than inventing a second URL protocol.
-    deep_link = f"/chat?room={quote(room_id, safe='')}"
+    # Keep the return route aligned with the existing workflow chat anchors:
+    # it is an internal path, and both layers use URLSearchParams/urlencode
+    # semantics instead of hand-built query escaping.
+    return_to = "/teams?" + urlencode(
+        {
+            "teamId": scope.teamId,
+            "researchView": "workflow",
+            "runId": scope.workflowRunId,
+            "node": scope.workflowNodeId,
+        }
+    )
+    deep_link = "/chat?" + urlencode(
+        {
+            "room": room_id,
+            "returnTo": return_to,
+            "returnLabel": "返回科研流程",
+        }
+    )
     return {
         "scope": scope.to_dict(),
         "scopeHash": scope.scope_hash,
@@ -476,6 +494,8 @@ def _ready(
         "selectionId": scope.selectionId,
         "candidateId": scope.candidateId,
         "deepLink": deep_link,
+        "returnTo": return_to,
+        "returnLabel": "返回科研流程",
         "status": STATUS_READY,
         "degradedReason": "",
     }

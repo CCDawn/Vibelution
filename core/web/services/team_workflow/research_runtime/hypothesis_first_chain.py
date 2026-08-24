@@ -3026,6 +3026,50 @@ def _question_template_baselines(team_id: str, question_id: str) -> list[dict[st
     ]
 
 
+def _project_chain_discussion_anchor(
+    meeting: Mapping[str, Any],
+    *,
+    selection_id: str = "",
+    candidate_id: str = "",
+) -> dict[str, Any]:
+    """Project one chain meeting through the canonical scoped-room guard.
+
+    The chain ledger owns meeting/candidate lineage, but it does not own room
+    identity.  Resolve only the room explicitly bound to this meeting and let
+    ``active_discussion_anchor`` validate its v1 scope and room config.  This
+    keeps chain state from promoting a sibling candidate's room when a binding
+    is absent or malformed.
+    """
+    from core.web.services import chat_room_service
+    from core.web.services.team_workflow.active_discussion_anchor import (
+        project_active_discussion_anchor,
+    )
+
+    meeting_id = str(meeting.get("meetingRoundId") or "").strip()
+    room_id = str(meeting.get("linkedChatRoomId") or "").strip()
+    room = None
+    if room_id:
+        try:
+            room = chat_room_service.get_chat_room_compact(room_id)
+        except Exception:  # noqa: BLE001 - unreadable room state degrades
+            room = None
+    projection: dict[str, Any] = {
+        "activeMeetingRoundId": meeting_id,
+    }
+    discussion_scope = meeting.get("discussionScope")
+    if isinstance(discussion_scope, Mapping):
+        projection["scope"] = dict(discussion_scope)
+    if selection_id:
+        projection["activeSelectionId"] = selection_id
+    if candidate_id:
+        projection["activeCandidateId"] = candidate_id
+    return project_active_discussion_anchor(
+        projection,
+        [meeting],
+        [room] if isinstance(room, Mapping) else [],
+    )
+
+
 def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
     """Aggregate the hypothesis-first chain state for one scoped question.
 
@@ -3138,24 +3182,11 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         active_link = active_candidate_links[0]
         active_meeting_id = str(active_link.get("meetingRoundId") or "").strip()
         active_meeting = meeting_by_id.get(active_meeting_id) or {}
-        discussion_scope = active_meeting.get("discussionScope")
-        discussion_scope_hash = str(
-            active_meeting.get("discussionScopeHash") or ""
-        ).strip()
-        active_room_id = str(active_meeting.get("linkedChatRoomId") or "").strip()
-        if (
-            isinstance(discussion_scope, Mapping)
-            and discussion_scope_hash
-            and active_room_id
-        ):
-            active_discussion_anchor = {
-                "scope": dict(discussion_scope),
-                "scopeHash": discussion_scope_hash,
-                "meetingRoundId": active_meeting_id,
-                "roomId": active_room_id,
-                "selectionId": str(active_link.get("selectionId") or "").strip(),
-                "candidateId": str(active_link.get("candidateId") or "").strip(),
-            }
+        active_discussion_anchor = _project_chain_discussion_anchor(
+            active_meeting,
+            selection_id=str(active_link.get("selectionId") or "").strip(),
+            candidate_id=str(active_link.get("candidateId") or "").strip(),
+        )
     pending_requests = [
         request for request in requests if str(request.get("status") or "") != "handed_off"
     ]

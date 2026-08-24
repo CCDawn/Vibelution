@@ -4,8 +4,8 @@ from core.research.workflow.contracts.discussion_scope import WorkflowDiscussion
 from core.web.services.team_workflow.active_discussion_anchor import (
     AMBIGUOUS_ACTIVE_CANDIDATE,
     MEETING_MISSING,
-    ROOM_SCOPE_MISMATCH,
     ROOM_CLOSED,
+    ROOM_SCOPE_MISMATCH,
     project_active_discussion_anchor,
 )
 
@@ -60,7 +60,15 @@ def test_projects_one_ready_anchor_from_matching_scoped_room() -> None:
     assert anchor["roomId"] == "room-h1"
     assert anchor["meetingRoundId"] == "meeting-h1"
     assert anchor["candidateId"] == "h1"
-    assert anchor["deepLink"] == "/chat?room=room-h1"
+    assert anchor["returnTo"] == (
+        "/teams?teamId=research-team&researchView=workflow&runId=run-1&node=hypothesis-review"
+    )
+    assert anchor["returnLabel"] == "返回科研流程"
+    assert anchor["deepLink"] == (
+        "/chat?room=room-h1&returnTo="
+        "%2Fteams%3FteamId%3Dresearch-team%26researchView%3Dworkflow%26runId%3Drun-1%26node%3Dhypothesis-review&"
+        "returnLabel=%E8%BF%94%E5%9B%9E%E7%A7%91%E7%A0%94%E6%B5%81%E7%A8%8B"
+    )
     assert anchor["degradedReason"] == ""
 
 
