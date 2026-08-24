@@ -2220,6 +2220,7 @@ def destroy_orphaned_purged_team_agent_session_reset_staging(
     expected_root_paths = {str(root) for root in staging_roots}
     expected_session_ids: set[str] | None = None
     workspace_moves: list[dict[str, Any]] | None = None
+    direct_session_ids: set[str] | None = None
     for staging_root in existing_roots:
         if not _team_agent_session_reset_staging_root_is_safe(
             staging_root,
@@ -2256,15 +2257,30 @@ def destroy_orphaned_purged_team_agent_session_reset_staging(
             for value in list(manifest.get("sessionIds") or [])
             if str(value or "").strip()
         }
+        manifest_direct_session_ids = {
+            str(session_id or "").strip()
+            for session_id in dict(manifest.get("directSessionIds") or {}).values()
+            if str(session_id or "").strip()
+        }
         moves = list(manifest.get("workspaceMoves") or [])
-        if not session_ids or any(not isinstance(move, dict) for move in moves):
+        if (
+            not session_ids
+            or not manifest_direct_session_ids
+            or not manifest_direct_session_ids.issubset(session_ids)
+            or any(not isinstance(move, dict) for move in moves)
+        ):
             raise TeamAgentSessionResetValidationError(
                 "Session reset destruction authority is incomplete."
             )
         if expected_session_ids is None:
             expected_session_ids = session_ids
             workspace_moves = moves
-        elif expected_session_ids != session_ids or workspace_moves != moves:
+            direct_session_ids = manifest_direct_session_ids
+        elif (
+            expected_session_ids != session_ids
+            or workspace_moves != moves
+            or direct_session_ids != manifest_direct_session_ids
+        ):
             raise TeamAgentSessionResetConflictError(
                 "Session reset staging manifests do not agree."
             )
@@ -2276,10 +2292,15 @@ def destroy_orphaned_purged_team_agent_session_reset_staging(
         for row in list(payload.get("conversations") or [])
         if isinstance(row, dict)
     }
-    if expected_session_ids is None or expected_session_ids & live_session_ids:
+    if (
+        expected_session_ids is None
+        or direct_session_ids is None
+        or expected_session_ids & live_session_ids
+    ):
         raise TeamAgentSessionResetConflictError(
             "Orphaned session staging cannot be destroyed while its sessions are live."
         )
+    _team_agent_session_reset_active_work(s, expected_session_ids)
 
     for move in workspace_moves or []:
         source = Path(str(move.get("source") or "")).resolve()
@@ -2290,10 +2311,22 @@ def destroy_orphaned_purged_team_agent_session_reset_staging(
             raise TeamAgentSessionResetValidationError(
                 "Session reset workspace destruction path is unsafe."
             )
-        if source.exists() or not staged.exists():
+        if not staged.exists():
             raise TeamAgentSessionResetConflictError(
-                "Orphaned session staging is incomplete or has already been restored."
+                "Orphaned session staging is incomplete."
             )
+        if source.exists():
+            if source.name not in direct_session_ids:
+                raise TeamAgentSessionResetConflictError(
+                    "Orphaned session staging has a non-direct workspace source."
+                )
+            if source.is_symlink() or bool(
+                getattr(s, "_path_is_reparse_point", lambda _path: False)(source)
+            ):
+                raise TeamAgentSessionResetValidationError(
+                    f"Session workspace source is a reparse point: {source}"
+                )
+            shutil.rmtree(_team_agent_session_reset_native_path(source))
         if staged.is_symlink() or bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(staged)):
             raise TeamAgentSessionResetValidationError(
                 f"Session workspace staging is a reparse point: {staged}"

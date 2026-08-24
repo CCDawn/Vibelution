@@ -313,6 +313,28 @@ def test_orphaned_purged_staging_can_only_be_destroyed_after_sessions_are_gone(m
         )
 
 
+def test_orphaned_purged_staging_removes_recreated_empty_direct_workspace(monkeypatch, tmp_path: Path) -> None:
+    service = _service_fixture(tmp_path)
+    monkeypatch.setattr(agent_sessions, "_service", lambda: service)
+
+    stage = agent_sessions.stage_team_agent_session_reset(
+        "research-team", ["agent-search"], "reset-orphaned-recreated-workspace"
+    )
+    agent_sessions.purge_team_agent_session_reset(
+        "research-team", "reset-orphaned-recreated-workspace", stage
+    )
+    source = Path(stage["workspaceMoves"][0]["source"])
+    source.mkdir(parents=True)
+    (source / "empty.json").write_text("{}", encoding="utf-8")
+
+    destroyed = agent_sessions.destroy_orphaned_purged_team_agent_session_reset_staging(
+        "research-team", "reset-orphaned-recreated-workspace"
+    )
+
+    assert destroyed["status"] == "destroyed"
+    assert not source.exists()
+
+
 def test_team_agent_session_reset_destroy_removes_recreated_empty_direct_session(monkeypatch, tmp_path: Path) -> None:
     service = _service_fixture(tmp_path)
     monkeypatch.setattr(agent_sessions, "_service", lambda: service)
