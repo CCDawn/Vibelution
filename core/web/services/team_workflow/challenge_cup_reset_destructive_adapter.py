@@ -186,8 +186,18 @@ class ChallengeCupLiveDestructiveAdapter:
         handles: dict[str, Any] = {}
         completed: list[str] = []
         temporary_store: WorkflowLedgerStore | None = None
-        authority: list[dict[str, str]] = []
-        receipt_authority: list[dict[str, str]] = []
+        # Artifact staging removes the canonical legacy run evidence from the
+        # active store.  Resolve all checkpoint/receipt scope authority before
+        # any owner moves its recoverable data into staging, then retain that
+        # exact proof in the stage for commit and compensation.
+        authority = _run_scope_authority(team_id)
+        receipt_authority = [
+            {"teamId": team_id, "questionId": item["questionId"], "workflowRunId": item["runId"]}
+            for item in authority
+            if item.get("questionId")
+        ]
+        handles["_scopeAuthority"] = authority
+        handles["_receiptScopeAuthority"] = receipt_authority
         try:
             handles["rooms"] = prepare_team_chat_room_reset(
                 team_id,
@@ -213,20 +223,12 @@ class ChallengeCupLiveDestructiveAdapter:
                 plan=plan,
             )
             completed.append("artifacts")
-            authority = _run_scope_authority(team_id)
-            handles["_scopeAuthority"] = authority
             handles["checkpoints"] = prepare_checkpoint_reset_stage(
                 team_id,
                 plan_id,
                 scope_authority=authority,
             )
             completed.append("checkpoints")
-            receipt_authority = [
-                {"teamId": team_id, "questionId": item["questionId"], "workflowRunId": item["runId"]}
-                for item in authority
-                if item.get("questionId")
-            ]
-            handles["_receiptScopeAuthority"] = receipt_authority
             handles["receipts"] = prepare_model_invocation_receipt_reset_stage(
                 team_id,
                 plan_id,
