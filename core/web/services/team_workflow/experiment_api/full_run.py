@@ -364,6 +364,11 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
 def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+        assert_writes_allowed,
+    )
+
+    assert_writes_allowed(normalized_team_id, operation="experiment_writeback")
     normalized_plan_id = s._normalize_required_id(plan_id, "Experiment plan id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}

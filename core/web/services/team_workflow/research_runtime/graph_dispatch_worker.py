@@ -302,6 +302,23 @@ class GraphDispatchWorker:
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)
         dispatch = GraphDispatch.from_payload(payload)
+        from .challenge_cup_maintenance_fence import (
+            ChallengeCupMaintenanceError,
+            assert_writes_allowed,
+        )
+
+        # A graph dispatch accepted before the fence belongs to the drain set;
+        # a dispatch created afterwards is deferred without invoking the graph
+        # or mutating its node attempt.
+        try:
+            assert_writes_allowed(
+                dispatch.team_id,
+                operation="workflow_dispatch",
+                created_at_ms=getattr(action, "created_at_ms", None),
+            )
+        except ChallengeCupMaintenanceError as exc:
+            self._defer_for_maintenance(action, str(exc))
+            return
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
             and dispatch.receipt is not None
@@ -361,6 +378,19 @@ class GraphDispatchWorker:
             latest = self._store.latest_attempt(dispatch.run_id, pending.node_id)
             needs_successor = latest is None or latest.attempt != pending.attempt
             pending = self._pending_with_node_binding(pending)
+
+        if pending is not None and needs_successor:
+            # The graph may have been entered by a pre-fence action, but its
+            # successor is a new dispatch and must not be created during the
+            # reset drain.
+            try:
+                assert_writes_allowed(
+                    dispatch.team_id,
+                    operation="workflow_dispatch_successor",
+                )
+            except ChallengeCupMaintenanceError as exc:
+                self._defer_for_maintenance(action, str(exc))
+                return
 
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
@@ -666,6 +696,30 @@ class GraphDispatchWorker:
             _ = result
 
         self._submit(mutate, force_flush=True).result(timeout=30)
+
+    def _defer_for_maintenance(self, action: Any, detail: str) -> None:
+        """Leave a leased dispatch pending while a governed reset drains.
+
+        This is intentionally not ``_mark_blocked``: the maintenance fence
+        must not turn an already-running research object into a failed run.
+        The next worker pass can resume it after the fence is released.
+        """
+
+        now_ms = self._now()
+        outbox_api.requeue_action(
+            self._store,
+            action.action_id,
+            self._owner,
+            now_ms,
+            retry_at_ms=now_ms + 60_000,
+            problem_json=json.dumps(
+                {
+                    "code": "challenge_cup_maintenance_active",
+                    "detail": "workflow dispatch deferred by Challenge Cup maintenance",
+                },
+                ensure_ascii=False,
+            ),
+        )
 
     def _precheck_readiness(self, dispatch: GraphDispatch, pending: Any):
         """Evaluate readiness for an auto-advanced successor OUTSIDE the writer
@@ -1528,6 +1582,20 @@ class GraphDispatchWorker:
                 continue
             pending = self._pending_with_node_binding(pending)
             readiness_hint = self._precheck_readiness(dispatch, pending)
+            from .challenge_cup_maintenance_fence import (
+                ChallengeCupMaintenanceError,
+                assert_writes_allowed,
+            )
+
+            try:
+                assert_writes_allowed(
+                    dispatch.team_id,
+                    operation="workflow_dispatch_successor",
+                )
+            except ChallengeCupMaintenanceError:
+                # Keep the pre-fence run visible to the reset drain; do not
+                # synthesize a successor while maintenance is active.
+                continue
             self._commit_successor_dispatch(
                 dispatch,
                 result,

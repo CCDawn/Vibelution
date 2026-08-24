@@ -22,6 +22,7 @@ from core.research.workflow.models import ActorKind
 
 from .binding_config import WorkflowBindingConfigStore
 from .checkpoint_lifecycle import prepare_initial_checkpoint
+from .challenge_cup_maintenance_fence import assert_writes_allowed
 from .formal_write_runtime import get_write_store
 from .paths import research_workflow_data_root
 from .question_launch import QuestionLaunchError, build_question_run_input
@@ -99,6 +100,10 @@ def create_question_run(
 ) -> dict[str, Any]:
     if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
+    # Check before resolving the catalog/project or opening the Ledger: those
+    # steps can persist Challenge Cup state and must not start after a governed
+    # reset has acquired its maintenance fence.
+    assert_writes_allowed(team_id, operation="question_launch")
     get_write_store()
     try:
         run_input = build_question_run_input(

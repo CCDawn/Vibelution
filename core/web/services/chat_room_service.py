@@ -891,6 +891,38 @@ def start_chat_room_round(
     if not normalized_topic:
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 
+    # The meeting runtime passes teamId in the round config.  Resolve it from
+    # the persisted room as a fallback for callers that only pass roomId; the
+    # read is deliberately before inflight acquisition or any round write.
+    supplied_config = config if isinstance(config, Mapping) else {}
+    supplied_team_id = str(
+        supplied_config.get("teamId")
+        or supplied_config.get("researchTeamId")
+        or ""
+    ).strip()
+    persisted_team_id = ""
+    if normalized_room_id:
+        existing_room = get_chat_room_detail(normalized_room_id)
+        existing_config = (
+            existing_room.get("config")
+            if isinstance(existing_room, Mapping)
+            and isinstance(existing_room.get("config"), Mapping)
+            else {}
+        )
+        persisted_team_id = str(
+            existing_config.get("teamId")
+            or existing_config.get("researchTeamId")
+            or ""
+        ).strip()
+    # A caller cannot evade a fenced research room by supplying a different
+    # teamId in the round payload; persisted room scope is authoritative.
+    maintenance_team_id = persisted_team_id or supplied_team_id
+    from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+        assert_writes_allowed,
+    )
+
+    assert_writes_allowed(maintenance_team_id, operation="chat_room_round_start")
+
     runner = agent_runner or _run_participant_agent
     if _model_invocation_receipt_authority is not None and not isinstance(
         _model_invocation_receipt_authority, Mapping
