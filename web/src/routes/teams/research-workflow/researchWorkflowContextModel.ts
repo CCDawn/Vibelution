@@ -4,6 +4,7 @@ import {
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import { RESEARCH_STAGE_TERMS } from "./researchTerminology";
 import type {
   ResearchWorkflowWorkspaceModel,
   ResearchWorkflowWorkspaceTask,
@@ -142,7 +143,7 @@ export type BuildResearchWorkflowContextInput = {
 
 const STAGES: Array<Pick<ResearchWorkflowStageSummary, "id" | "label" | "detail">> = [
   { id: "hypothesis_first", label: "假说先行", detail: "形成、选择并评审假说" },
-  { id: "knowledge_collection", label: "知识搜集", detail: "围绕收敛假说补充证据" },
+  { id: "knowledge_collection", label: RESEARCH_STAGE_TERMS.knowledge_collection.zh, detail: "围绕收敛假说补充证据" },
   { id: "experiment_design", label: "实验设计", detail: "形成并冻结可执行协议" },
   { id: "execution_iteration", label: "执行迭代", detail: "运行、评价并归档成果" },
 ];

@@ -2,6 +2,7 @@
  * F3 — pure stage action readiness + button labels for SC presentation.
  * Edit copy / disable rules here; keep the hook as wiring only.
  */
+import { RESEARCH_STAGE_TERMS } from "../research-workflow/researchTerminology";
 import { sourceCollectionActionReadinessOf } from "./actionChrome";
 import type { SourceCollectionActionReadiness } from "./stageProjection";
 
@@ -276,7 +277,7 @@ export function buildSourceCollectionActionReadinessBag(
   const completionActionDisabled = completionActionReadiness.disabled;
   const completionActionLabel = knowledgeIngestPending
     ? (lang === "zh" ? "一键完成中" : "Completing")
-    : (lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection");
+    : (lang === "zh" ? `一键完成${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Complete knowledge collection");
   const loopActionDisabled = loopActionReadiness.disabled;
   const loopActionLabel = startRunPending || knowledgeIngestPending
     ? (lang === "zh" ? "闭环执行中" : "Loop running")

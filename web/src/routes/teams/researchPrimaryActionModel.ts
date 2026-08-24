@@ -2,6 +2,7 @@
  * Overview CTA model: continue (primary) vs advance (secondary).
  * Primary always resumes the active stage; advance is explicit cross-stage.
  */
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
 import type { ResearchStagePhaseStatus } from "./source-collection/stageProjection";
 
@@ -170,7 +171,7 @@ function continueKnowledge(hasKnowledge: boolean): ResearchPrimaryAction {
   if (!hasKnowledge) {
     return {
       kind: "start_knowledge_collection",
-      labelZh: "开始知识搜集",
+      labelZh: `开始${RESEARCH_STAGE_TERMS.knowledge_collection.zh}`,
       labelEn: "Start knowledge collection",
       detailZh: "从资料搜索批次开始，建立本项目的证据基础。",
       detailEn: "Start with a source-collection batch to build project evidence.",
@@ -182,7 +183,7 @@ function continueKnowledge(hasKnowledge: boolean): ResearchPrimaryAction {
   }
   return {
     kind: "continue_knowledge_collection",
-    labelZh: "继续知识搜集",
+    labelZh: `继续${RESEARCH_STAGE_TERMS.knowledge_collection.zh}`,
     labelEn: "Continue knowledge collection",
     detailZh: "完善资料批次、提炼与入库；需要换阶段时请用「进入下一阶段」。",
     detailEn: "Finish source batches, extraction, and ingestion. Use advance to change stage.",
@@ -222,9 +223,9 @@ function continueIteration(): ResearchPrimaryAction {
 function advanceToExperiment(): ResearchPrimaryAction {
   return {
     kind: "start_experiment",
-    labelZh: "进入实验设计（离开知识搜集）",
+    labelZh: `进入实验设计（离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}）`,
     labelEn: "Enter experiment (leave collection)",
-    detailZh: "将离开知识搜集工作台，进入实验规划；可随时从顶栏阶段条返回。",
+    detailZh: `将离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}工作台，进入实验规划；可随时从顶栏阶段条返回。`,
     detailEn: "Leave knowledge collection and open experiment planning. Use the stage rail to return.",
     navigateView: "experiment",
     launchStageType: "experiment",
@@ -333,7 +334,7 @@ export function resolveResearchStageHandoff(
       toStage: "experiment",
       titleZh: "可进入下一阶段",
       titleEn: "Ready for next stage",
-      bodyZh: "资料阶段已有进度。需要时点次按钮进入实验设计（会离开知识搜集）。",
+      bodyZh: `资料阶段已有进度。需要时点次按钮进入实验设计（会离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}）。`,
       bodyEn: "Knowledge collection has progress. Use the secondary button to enter experiment design.",
       action: advance,
     };
@@ -379,7 +380,7 @@ export function researchAdvanceSuccessMessage(
 ): string {
   if (action.navigateView === "experiment") {
     return lang === "zh"
-      ? "已进入实验设计 · 顶栏阶段条可返回知识搜集"
+      ? `已进入实验设计 · 顶栏阶段条可返回${RESEARCH_STAGE_TERMS.knowledge_collection.zh}`
       : "Entered experiment design · use the stage rail to return";
   }
   if (action.navigateView === "iteration") {

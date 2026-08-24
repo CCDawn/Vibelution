@@ -12,7 +12,7 @@ describe("ResearchRunSafetyLimitPanel", () => {
     );
 
     expect(markup).toContain("运行安全上限");
-    expect(markup).toContain("知识搜集 阶段 token 上限");
+    expect(markup).toContain("资料搜集 阶段 token 上限");
     expect(markup).toContain("三阶段合计");
     expect(markup).toContain("运行时间（小时）");
     expect(markup).not.toContain("Agent 配额");

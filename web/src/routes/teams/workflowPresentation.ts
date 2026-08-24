@@ -1,4 +1,5 @@
 import { resolvePollingInterval } from "../../app/pollingPolicy";
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import { workflowIngestionStatusLabel } from "./source-collection/presentationModel";
 
 export const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
@@ -84,7 +85,7 @@ export function teamConversationStatusLabel(status: string, lang: "zh" | "en") {
 export function workflowStateLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
-    knowledge_collection: "知识搜集",
+    knowledge_collection: RESEARCH_STAGE_TERMS.knowledge_collection.zh,
     source_screening: "资料提炼复核",
     candidate_ingestion: "入库审核",
     team_memory_ready: "团队知识库已接入",

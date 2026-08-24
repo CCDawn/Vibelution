@@ -23,6 +23,7 @@ export default {
   nodeLabel: "min-w-0 flex-1 truncate [font-size:var(--vui-font-2xs)]",
   nodeStatus: "shrink-0 [font-size:10px] text-[var(--fg-tertiary)]",
   state: "grid min-h-40 content-center gap-2 px-3 py-6 text-center",
+  stateIcon: "mx-auto text-[var(--fg-tertiary)]",
   stateTitle: "m-0 [font-size:var(--vui-font-sm)] font-[720] text-[var(--fg-primary)]",
   stateDetail: "m-0 [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]",
   skeleton: "grid gap-2",

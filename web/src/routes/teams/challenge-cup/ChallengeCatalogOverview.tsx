@@ -8,6 +8,7 @@ import {
 } from "../../../api/teamExperiment";
 import {
   VButton,
+  VConfirmDialog,
   VDenseTable,
   VEmptyState,
   VListDetailPage,
@@ -25,6 +26,7 @@ import {
   catalogOverviewProgressPercent,
   catalogOverviewStageLabel,
   catalogOverviewStatusLabel,
+  failedQuestionIdsInPlan,
   visibleCatalogOverviewRows,
   type CatalogOverview,
   type CatalogOverviewAction,
@@ -266,6 +268,7 @@ export function ChallengeCatalogOverview({
   });
   const [filter, setFilter] = useState<CatalogOverviewFilter>("all");
   const [selectedId, setSelectedId] = useState("");
+  const [pendingRetry, setPendingRetry] = useState<{ planId: string; failedIds: string[] } | null>(null);
 
   const batchMutation = useMutation({
     mutationFn: (input: { planId: string; retryFailed: boolean }) =>
@@ -289,7 +292,12 @@ export function ChallengeCatalogOverview({
   const handleAction = (row: CatalogOverviewQuestion) => {
     const action: CatalogOverviewAction = row.action;
     if (isDevBatchCatalogAction(row, devBatchControlsEnabled) && action === "retry") {
-      batchMutation.mutate({ planId: row.planId, retryFailed: true });
+      // retryFailed is plan-scoped: confirm the full failed set before mutating
+      // so a per-row button never silently re-runs other questions.
+      const failedIds = isCatalogOverview(overviewQuery.data)
+        ? failedQuestionIdsInPlan(overviewQuery.data.questions, row.planId)
+        : [];
+      setPendingRetry({ planId: row.planId, failedIds });
       return;
     }
     if (isDevBatchCatalogAction(row, devBatchControlsEnabled) && action === "continue") {
@@ -332,17 +340,54 @@ export function ChallengeCatalogOverview({
   }
 
   return (
-    <ChallengeCatalogOverviewView
-      overview={overviewQuery.data}
-      lang={lang}
-      selectedId={selectedId}
-      filter={filter}
-      actionPending={devBatchControlsEnabled && batchMutation.isPending}
-      actionError={devBatchControlsEnabled ? batchErrorText : ""}
-      onSelect={setSelectedId}
-      onFilterChange={setFilter}
-      onAction={handleAction}
-      devBatchControlsEnabled={devBatchControlsEnabled}
-    />
+    <>
+      <ChallengeCatalogOverviewView
+        overview={overviewQuery.data}
+        lang={lang}
+        selectedId={selectedId}
+        filter={filter}
+        actionPending={devBatchControlsEnabled && batchMutation.isPending}
+        actionError={devBatchControlsEnabled ? batchErrorText : ""}
+        onSelect={setSelectedId}
+        onFilterChange={setFilter}
+        onAction={handleAction}
+        devBatchControlsEnabled={devBatchControlsEnabled}
+      />
+      <VConfirmDialog
+        open={pendingRetry !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingRetry(null);
+        }}
+        title={zh ? "重试该批次的全部失败题目？" : "Retry every failed question in this batch?"}
+        description={zh
+          ? "重试作用于整个批次：该批次中所有失败题目都会重新运行，不只是当前这一题。"
+          : "Retry is plan-scoped: every failed question in this batch re-runs, not only the current row."}
+        tone="danger"
+        confirmLabel={zh
+          ? `重试全部 ${pendingRetry?.failedIds.length ?? 0} 道失败题`
+          : `Retry all ${pendingRetry?.failedIds.length ?? 0} failed`}
+        cancelLabel={zh ? "取消" : "Cancel"}
+        confirmPending={batchMutation.isPending}
+        confirmDisabled={(pendingRetry?.failedIds.length ?? 0) === 0 || batchMutation.isPending}
+        onConfirm={() => {
+          const planId = pendingRetry?.planId;
+          setPendingRetry(null);
+          if (planId) {
+            batchMutation.mutate({ planId, retryFailed: true });
+          }
+        }}
+      >
+        <div>
+          <p>{zh ? "受影响题目：" : "Affected questions:"}</p>
+          <p>{(pendingRetry?.failedIds ?? []).slice(0, 12).join("、")
+            || (zh ? "（无失败题目）" : "(none)")}</p>
+          {(pendingRetry?.failedIds.length ?? 0) > 12 ? (
+            <p>{zh
+              ? `…以及其余 ${(pendingRetry?.failedIds.length ?? 0) - 12} 道`
+              : `…and ${(pendingRetry?.failedIds.length ?? 0) - 12} more`}</p>
+          ) : null}
+        </div>
+      </VConfirmDialog>
+    </>
   );
 }

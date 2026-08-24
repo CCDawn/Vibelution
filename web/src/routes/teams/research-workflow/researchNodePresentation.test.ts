@@ -4,7 +4,7 @@ import { researchActorLabel, researchStageLabel } from "./researchNodePresentati
 
 describe("research node presentation", () => {
   it("localizes workflow stage and actor values", () => {
-    expect(researchStageLabel("knowledge_collection")).toBe("知识搜集");
+    expect(researchStageLabel("knowledge_collection")).toBe("资料搜集");
     expect(researchActorLabel("agent")).toBe("Agent 执行");
   });
 

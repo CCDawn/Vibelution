@@ -1,6 +1,7 @@
 import { CircleDot, Eye } from "lucide-react";
 
 import { VNativeButton, VSurface } from "../../components/vui";
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import type { ResearchBoardColumn } from "./researchBoardModel";
 
 export type ResearchBoardKanbanProps = {
@@ -21,7 +22,7 @@ const pulseClass =
   "block animate-pulse rounded-md bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none";
 
 const SKELETON_COLUMNS: Array<{ id: ResearchBoardColumn["id"]; titleZh: string; titleEn: string }> = [
-  { id: "knowledge_collection", titleZh: "知识搜集", titleEn: "Knowledge" },
+  { id: "knowledge_collection", titleZh: RESEARCH_STAGE_TERMS.knowledge_collection.zh, titleEn: RESEARCH_STAGE_TERMS.knowledge_collection.en },
   { id: "experiment", titleZh: "实验设计", titleEn: "Experiment" },
   { id: "iteration", titleZh: "执行与迭代", titleEn: "Iteration" },
 ];

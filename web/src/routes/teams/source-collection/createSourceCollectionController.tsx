@@ -4,6 +4,7 @@
  */
 import type { ReactNode } from "react";
 
+import { RESEARCH_STAGE_TERMS } from "../research-workflow/researchTerminology";
 import { createSourceCollectionInjectRenderers } from "../teamSourceCollectionInjectRenderers";
 import { SourceCollectionComposer } from "../SourceCollectionComposer";
 import { SourceCollectionPresentationProvider } from "./SourceCollectionPresentationContext";
@@ -260,7 +261,7 @@ export function createSourceCollectionController(ctx: SourceCollectionController
                   ? "这个一级页只绑定 research-team，不会展示给普通团队。"
                   : "This workspace is bound to research-team and is hidden from ordinary teams.")
           }
-          commandAriaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
+          commandAriaLabel={lang === "zh" ? `${RESEARCH_STAGE_TERMS.knowledge_collection.zh}操作台` : "Knowledge collection command bar"}
           commandTone={chrome.sourceCollectionConsoleState}
           commandTitle={
             chrome.sourceCollectionSelectedRunTopic

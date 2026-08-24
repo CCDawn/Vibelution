@@ -20,7 +20,7 @@ describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
   it("uses lifecycle truth for completed knowledge collection", () => {
     expect(source).toContain("researchKnowledgeLifecycleStatusLabel");
     expect(source).toContain('stage1.status === "ready_for_hypothesis"');
-    expect(source).toContain("知识搜集已形成可用假设");
+    expect(source).toContain("资料搜集已形成可用假设");
   });
 
   it("explains the concrete evidence required after human review", () => {

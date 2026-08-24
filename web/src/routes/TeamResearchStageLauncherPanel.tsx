@@ -3,6 +3,7 @@
  * Wave 8H: extracted from TeamsRoute.tsx for domain componentization.
  * Presentation + local pure helpers; mutations/query objects injected by the route.
  */
+import { RESEARCH_STAGE_TERMS } from "./teams/research-workflow/researchTerminology";
 import { CheckCircle2, Eye, Link2, Play, RefreshCw, Settings2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -150,8 +151,8 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const phaseOrder: ResearchStageType[] = knowledgeExpansionWorkflowTeamSelected ? ["knowledge_collection"] : ["knowledge_collection", "experiment", "iteration"];
     const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string }> = {
       knowledge_collection: {
-        label: lang === "zh" ? "知识搜集" : "Knowledge",
-        primaryAction: lang === "zh" ? "开始知识搜集" : "Start knowledge",
+        label: lang === "zh" ? RESEARCH_STAGE_TERMS.knowledge_collection.zh : "Knowledge",
+        primaryAction: lang === "zh" ? `开始${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Start knowledge",
       },
       experiment: {
         label: lang === "zh" ? "实验设计" : "Experiment design",
@@ -172,7 +173,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
       ? knowledgeExpansionWorkflowTeamSelected
         ? (lang === "zh" ? "开始扩充" : "Start expansion")
-        : (lang === "zh" ? "开始知识搜集" : "Start knowledge")
+        : (lang === "zh" ? `开始${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Start knowledge")
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
           ? (lang === "zh" ? "搜索中" : "Searching")
@@ -511,7 +512,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       if (stageType === "knowledge_collection") {
         if (experimentLifecycleProjection?.stage1.status === "ready_for_hypothesis") {
           return lang === "zh"
-            ? "知识搜集已形成可用假设；可查看历史，或按新问题补充资料。"
+            ? "资料搜集已形成可用假设；可查看历史，或按新问题补充资料。"
             : "Knowledge collection produced usable hypotheses; review the history or collect more for a new question.";
         }
         if (!selectedSourceCollectionRun) {
@@ -542,7 +543,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         }
         return latestRound
           ? (lang === "zh" ? "可重新规划实验，或查看上一轮计划。" : "Replan or review the latest plan.")
-          : (lang === "zh" ? "知识搜集后，由用户决定启动实验规划。" : "Start experiment planning after collection.");
+          : (lang === "zh" ? "资料搜集后，由用户决定启动实验规划。" : "Start experiment planning after collection.");
       }
       if (experimentLifecycleProjection?.stage3.status === "accepted_for_writeup") {
         return lang === "zh"

@@ -7,6 +7,7 @@ import { buildResearchTimelineGroups } from "./researchWorkflowTimelineModel";
 import { ResearchWorkflowInsightsPanel } from "./ResearchWorkflowInsightsPanel";
 import { ResearchCriticalPathPanel } from "./ResearchCriticalPathPanel";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
+import { RUN_TIMELINE_TERM } from "./researchTerminology";
 import styles from "./ResearchRunTimeline.styles";
 
 export function ResearchRunTimeline(props: {
@@ -28,7 +29,7 @@ export function ResearchRunTimeline(props: {
       <ResearchCriticalPathPanel projection={props.projection} insights={props.insights} lang={lang} />
       <ResearchWorkflowInsightsPanel insights={props.insights} lang={lang} />
       <VSurface tone="panel" className={styles.surface}>
-        <VPanelHeader title={isZh ? "运行时间线" : "Run timeline"} headingLevel={3} />
+        <VPanelHeader title={isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en} headingLevel={3} />
         {groups.length ? (
           <ol className={styles.groups}>
             {groups.map((group) => (
