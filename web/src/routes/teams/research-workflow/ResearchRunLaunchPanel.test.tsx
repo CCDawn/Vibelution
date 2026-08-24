@@ -357,6 +357,165 @@ describe("ResearchRunLaunchPanel", () => {
     expect(markup).toContain("继续运行");
   });
 
+  it("keeps secondary controls and safety fields out of the primary action until disclosed", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [{
+          questionId: "SCI-003",
+          title: "Is the Riemann hypothesis true?",
+          scope: "mathematical_sciences",
+          domain: "mathematical_sciences",
+          catalogId: "science-125-questions-2021",
+          reviewRunId: "",
+          artifactSha256: "",
+          source: "catalog",
+          launchable: true,
+          checkpoint: {
+            runId: "run-failed",
+            status: "failed",
+            currentNodeId: "source_finding",
+            currentNodeLabel: "资料寻找",
+            completedCount: 0,
+            totalSteps: 16,
+            resumable: false,
+          },
+        }],
+        experiments: [],
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-003"
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+        onContinueRun={() => undefined}
+      />,
+    ));
+
+    const details = Array.from(container.querySelectorAll("details")) as HTMLDetailsElement[];
+    expect(details).toHaveLength(2);
+    const safetyDetails = details[0];
+    const otherDetails = details[1];
+    expect(safetyDetails.open).toBe(false);
+    expect(otherDetails.open).toBe(false);
+    expect(safetyDetails.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).toBeNull();
+
+    const actionRegion = container.querySelector('[data-vui-region="launch-primary-action"]');
+    expect(actionRegion?.querySelectorAll("button")).toHaveLength(1);
+    expect(actionRegion?.textContent).toContain("新建运行");
+    expect(actionRegion?.textContent).not.toContain("取消");
+    expect(actionRegion?.textContent).not.toContain("查看失败运行");
+
+    await act(async () => (safetyDetails.querySelector("summary") as HTMLElement).click());
+    expect(safetyDetails.open).toBe(true);
+    const innerSafetyToggle = findButton(safetyDetails, "调整上限");
+    expect(innerSafetyToggle).toBeTruthy();
+    await act(async () => innerSafetyToggle!.click());
+    expect(safetyDetails.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).not.toBeNull();
+
+    await act(async () => (otherDetails.querySelector("summary") as HTMLElement).click());
+    expect(otherDetails.open).toBe(true);
+    expect(findButton(otherDetails, "取消")).toBeTruthy();
+    expect(findButton(otherDetails, "查看失败运行")).toBeTruthy();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps one primary action across not-started and checkpoint states", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const scenarios = [
+      { status: "not_started", checkpoint: null, label: "开始实验" },
+      {
+        status: "resumable",
+        checkpoint: {
+          runId: "run-waiting",
+          status: "waiting_human",
+          currentNodeId: "protocol_design",
+          currentNodeLabel: "协议设计",
+          completedCount: 6,
+          totalSteps: 16,
+          resumable: true,
+        },
+        label: "继续运行",
+      },
+      {
+        status: "restartable",
+        checkpoint: {
+          runId: "run-failed",
+          status: "failed",
+          currentNodeId: "source_finding",
+          currentNodeLabel: "资料寻找",
+          completedCount: 0,
+          totalSteps: 16,
+          resumable: false,
+        },
+        label: "新建运行",
+      },
+      {
+        status: "completed",
+        checkpoint: {
+          runId: "run-completed",
+          status: "succeeded",
+          currentNodeId: "result_package",
+          currentNodeLabel: "结果封装",
+          completedCount: 16,
+          totalSteps: 16,
+          resumable: false,
+        },
+        label: "查看进展",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      Object.assign(queryState.current, {
+        data: launchOptions({
+          questions: [{
+            questionId: "SCI-003",
+            title: "Is the Riemann hypothesis true?",
+            scope: "mathematical_sciences",
+            domain: "mathematical_sciences",
+            catalogId: "science-125-questions-2021",
+            reviewRunId: "",
+            artifactSha256: "",
+            source: "catalog",
+            launchable: true,
+            checkpoint: scenario.checkpoint,
+          }],
+          experiments: [],
+        }),
+      });
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => root.render(
+        <ResearchRunLaunchPanel
+          teamId="team-1"
+          busy={false}
+          initialQuestionId="SCI-003"
+          onSubmit={async () => undefined}
+          onCancel={() => undefined}
+          onContinueRun={() => undefined}
+        />,
+      ));
+
+      const actionRegion = container.querySelector('[data-vui-region="launch-primary-action"]');
+      const buttons = actionRegion?.querySelectorAll("button") ?? [];
+      expect(buttons.length, scenario.status).toBeLessThanOrEqual(1);
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]?.textContent).toContain(scenario.label);
+
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it("shows checkpoint progress and continues the existing run", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const onContinueRun = vi.fn();
