@@ -1234,6 +1234,50 @@ describe("runWorkbenchLifecycle", () => {
     });
   });
 
+  it("does not re-persist reconciled backend handles when a later start preflight fails", async () => {
+    const { spawnImpl, input } = harness();
+    let written: Record<string, unknown> = {};
+    await expect(executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_reconcile_then_fail", type: "open", operation: "start", noBrowser: true },
+      spawnImpl,
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 123,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 123,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 123,
+        spawnExecutable: "C:/Python/python.exe",
+        browserWindowPid: 9911
+      }),
+      writeState: (state) => {
+        written = state;
+      },
+      connect: async () => false,
+      pidAlive: (pid) => pid === 9911
+    })).rejects.toThrow("unverified browser/window handles");
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written).toMatchObject({
+      desiredState: "closed",
+      observedState: "failed",
+      backendPid: 0,
+      backendLaunchPid: 0,
+      spawnPid: 0,
+      backendCreateTime: 0,
+      backendExecutable: "",
+      backendLaunchCreateTime: 0,
+      backendLaunchExecutable: "",
+      spawnCreateTime: 0,
+      spawnExecutable: "",
+      browserWindowPid: 9911
+    });
+  });
+
   it("persists a visible failure when an unverified Runtime Manager PID is still live", async () => {
     const { spawnImpl, input, written } = harness();
     await expect(executeMainLineWorkbench({
@@ -1307,9 +1351,8 @@ describe("runWorkbenchLifecycle", () => {
     expect(killed).toEqual([77, 76]);
   });
 
-  it("shutdown also retires the registered Runtime Manager daemon pid", async () => {
+  it("blocks shutdown before retiring handles when work is active", async () => {
     const killed: number[] = [];
-    const alive = new Set([51, 77]);
     const result = await executeMainLineWorkbench({
       workspaceRoot: "C:/repo",
       pythonPath: "C:/repo/.venv/Scripts/python.exe",
@@ -1318,21 +1361,15 @@ describe("runWorkbenchLifecycle", () => {
       readState: () => ({ backendPid: 51, backendPort: 8000 }),
       writeState: () => undefined,
       listActiveWork: () => [{ kind: "chat_turn", runId: "run-1", status: "running", sessionId: "s1" }],
-      pidAlive: (pid) => alive.has(pid),
-      killPid: (pid) => {
-        killed.push(pid);
-        alive.delete(pid);
-      },
-      connect: async () => false,
-      readDaemonPid: () => 77,
-      readDaemonIdentity: () => ({
-        pid: 77,
-        createTime: 1,
-        executable: "C:/repo/.venv/Scripts/pythonw.exe"
-      })
+      pidAlive: () => true,
+      killPid: (pid) => killed.push(pid),
     });
-    expect(result.accepted).toBe(true);
-    expect(killed).toEqual([77, 51]);
+    expect(result).toMatchObject({
+      accepted: false,
+      code: "active_work_blocked",
+      message: ACTIVE_WORK_BLOCK_MESSAGE_STOP
+    });
+    expect(killed).toEqual([]);
   });
 
   it("ordinary stop also retires the Runtime Manager daemon pid", async () => {

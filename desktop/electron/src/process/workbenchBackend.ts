@@ -316,6 +316,30 @@ function stateProcessIdentities(state: WorkbenchBackendState): Readonly<Record<s
   return identities;
 }
 
+function stateWithoutReconciledBackendHandles(
+  state: WorkbenchBackendState,
+  reconciledPids: ReadonlySet<number>
+): WorkbenchBackendState {
+  const sanitized = { ...state };
+  const clearIfReconciled = (
+    pidKey: string,
+    createTimeKey: string,
+    executableKey: string
+  ): void => {
+    const pid = Math.trunc(Number(state[pidKey] || 0));
+    if (!reconciledPids.has(pid)) {
+      return;
+    }
+    sanitized[pidKey] = 0;
+    sanitized[createTimeKey] = 0;
+    sanitized[executableKey] = "";
+  };
+  clearIfReconciled("backendPid", "backendCreateTime", "backendExecutable");
+  clearIfReconciled("backendLaunchPid", "backendLaunchCreateTime", "backendLaunchExecutable");
+  clearIfReconciled("spawnPid", "spawnCreateTime", "spawnExecutable");
+  return sanitized;
+}
+
 export function readLauncherStateFile(path: string): WorkbenchBackendState {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -1296,7 +1320,7 @@ export async function executeMainLineWorkbench(
   const commandId = input.command.commandId;
 
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
-    if (operation === "stop") {
+    if (operation === "stop" || operation === "shutdown") {
       const blocked = blockLifecycleIfActiveWork(
         "stop",
         (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
@@ -1425,7 +1449,7 @@ export async function executeMainLineWorkbench(
     if (!staleReclaim.reclaimed) {
       const message = `backend retirement remains unverified: ${staleReclaim.reason}`;
       writeState({
-        ...previous,
+        ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
         desiredState: "closed",
         observedState: "failed",
         phase: "failed",
@@ -1503,10 +1527,11 @@ export async function executeMainLineWorkbench(
   }
 
   const previous = readState();
+  let reconciledDeadPids: ReadonlySet<number> = new Set();
   const persistStartPreflightFailure = (error: unknown): void => {
     const detail = error instanceof Error ? error.message : String(error);
     writeState({
-      ...previous,
+      ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed",
       observedState: "failed",
       phase: "failed",
@@ -1568,7 +1593,7 @@ export async function executeMainLineWorkbench(
     pidAlive: input.pidAlive,
     connect: input.connect
   });
-  const reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
+  reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
   const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
   const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
   const retainedExtraPids = extraPids.filter((pid) => !reconciledDeadPids.has(pid));
@@ -1635,7 +1660,7 @@ export async function executeMainLineWorkbench(
   let backendIdentity: PythonProcessIdentity | null = null;
   const persistUnretiredStart = (message: string): void => {
     writeState({
-      ...previous,
+      ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed",
       observedState: "failed",
       phase: "failed",
