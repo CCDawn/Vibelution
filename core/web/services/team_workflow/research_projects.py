@@ -831,6 +831,76 @@ def restore_challenge_cup_experiment_state_reset(
         return {**_challenge_cup_workspace_stage_summary(cached), "operation": "restore", "restoredCount": len(moved)}
 
 
+def discard_restored_challenge_cup_experiment_state_reset(
+    team_id: str,
+    *,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Discard a fully restored, reset-owned workspace staging directory.
+
+    This is recovery cleanup, not reset finalization: it only accepts the
+    durable ``restored`` state after every allowlisted entry is back in its
+    canonical workspace, allowing the same preview plan to retry safely.
+    """
+
+    team = _challenge_cup_reset_value(team_id, field="teamId")
+    reset = _challenge_cup_reset_value(reset_id, field="resetId")
+    if team != CHALLENGE_CUP_RESET_TEAM_ID:
+        raise ResearchProjectError("Challenge Cup reset is restricted to research-team")
+    with _STORE_LOCK:
+        root = formal_team_workspace_root(team).resolve(strict=False)
+        staging_root = _challenge_cup_workspace_reset_root(team, reset)
+        if not staging_root.exists():
+            return {
+                "status": "absent",
+                "teamId": team,
+                "resetId": reset,
+                "stagingDestroyed": False,
+            }
+        if staging_root.is_symlink():
+            raise ResearchProjectError("Challenge Cup workspace recovery staging is unsafe")
+        manifest_path = staging_root / "manifest.json"
+        manifest = _read_json(manifest_path)
+        if (
+            manifest.get("kind") != "challenge_cup_workspace_reset"
+            or manifest.get("schemaVersion") != 1
+            or str(manifest.get("teamId") or "") != team
+            or str(manifest.get("resetId") or "") != reset
+            or str(manifest.get("status") or "") != "restored"
+        ):
+            raise ResearchProjectError("Challenge Cup workspace staging is not a verified restored reset")
+        entries = manifest.get("entries") if isinstance(manifest.get("entries"), list) else []
+        names = [str(entry.get("name") or "") for entry in entries if isinstance(entry, dict)]
+        if (
+            len(names) != len(entries)
+            or len(set(names)) != len(names)
+            or any(not name for name in names)
+            or not set(names).issubset(set(CHALLENGE_CUP_EXPERIMENT_STATE_ENTRIES))
+        ):
+            raise ResearchProjectError("Challenge Cup workspace recovery authority is invalid")
+        for name in names:
+            source = (root / name).resolve(strict=False)
+            staged = (staging_root / name).resolve(strict=False)
+            if not source.is_relative_to(root) or not staged.is_relative_to(staging_root):
+                raise ResearchProjectError("Challenge Cup workspace recovery path is unsafe")
+            if not source.exists() or staged.exists():
+                raise ResearchProjectError("Challenge Cup workspace was not fully restored")
+        unexpected = [path for path in staging_root.iterdir() if path.name != "manifest.json"]
+        if unexpected:
+            raise ResearchProjectError("Challenge Cup workspace staging still contains recoverable data")
+        shutil.rmtree(staging_root)
+        for stage_id, cached in list(_CHALLENGE_CUP_WORKSPACE_RESET_STAGES.items()):
+            if str(cached.get("teamId") or "") == team and str(cached.get("resetId") or "") == reset:
+                _CHALLENGE_CUP_WORKSPACE_RESET_STAGES.pop(stage_id, None)
+        return {
+            "status": "discarded",
+            "teamId": team,
+            "resetId": reset,
+            "entryCount": len(names),
+            "stagingDestroyed": True,
+        }
+
+
 def destroy_challenge_cup_experiment_state_reset(
     stage: dict[str, Any],
     *,

@@ -225,6 +225,20 @@ def test_team_agent_session_reset_stage_purge_restore_and_destroy(monkeypatch, t
     }
     assert (service._agent_session_workspace_roots()[0] / "session-search").exists()
 
+    discarded = agent_sessions.discard_restored_team_agent_session_reset_staging(
+        "research-team", "reset-session-1"
+    )
+    assert discarded["status"] == "discarded"
+    assert all(not Path(root).exists() for root in stage["stagingRoots"])
+
+    retried = agent_sessions.stage_team_agent_session_reset(
+        "research-team", ["agent-search", "agent-exec"], "reset-session-1"
+    )
+    agent_sessions.restore_team_agent_session_reset("research-team", "reset-session-1", retried)
+    agent_sessions.discard_restored_team_agent_session_reset_staging(
+        "research-team", "reset-session-1"
+    )
+
     second = agent_sessions.stage_team_agent_session_reset(
         "research-team", ["agent-search"], "reset-session-2"
     )

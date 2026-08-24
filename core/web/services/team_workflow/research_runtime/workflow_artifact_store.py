@@ -779,6 +779,56 @@ def restore_workflow_artifacts(
     return restore_workflow_artifact_reset(team_id, reset_id=reset_id, stage=stage)
 
 
+def discard_restored_workflow_artifact_reset(
+    team_id: str,
+    *,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Remove a verified-restored reset manifest before retrying that plan.
+
+    The reset service owns compensation.  Once this store proves that all of
+    the manifest's records are back in the active owner files, the manifest is
+    no longer recovery material and would otherwise make the same plan
+    permanently non-retryable.
+    """
+
+    team, reset = _reset_scope(team_id, reset_id)
+    with _LOCK:
+        stage_path = _reset_stage_path(team, reset)
+        existing = _read_reset_manifest(stage_path)
+        if existing is None:
+            return {
+                "status": "absent",
+                "teamId": team,
+                "resetId": reset,
+                "stagingDestroyed": False,
+            }
+        manifest = _validate_reset_manifest(existing, team_id=team, reset_id=reset)
+        if str(manifest.get("status") or "") != "restored":
+            raise WorkflowArtifactResetStateError(
+                "Only a verified restored artifact stage can be discarded."
+            )
+        expected_by_kind: dict[str, list[dict[str, Any]]] = {
+            kind: [] for kind in _SUPPORTED_KINDS
+        }
+        for entry in _manifest_records(manifest):
+            expected_by_kind[str(entry["kind"])].append(dict(entry["record"]))
+        expected = _flatten_rows(expected_by_kind)
+        actual = _flatten_rows(_active_rows_by_kind(team))
+        if actual != expected:
+            raise WorkflowArtifactResetConflictError(
+                "Active workflow artifacts no longer exactly match the restored reset manifest."
+            )
+        stage_path.unlink()
+        return {
+            "status": "discarded",
+            "teamId": team,
+            "resetId": reset,
+            "artifactCount": len(expected),
+            "stagingDestroyed": True,
+        }
+
+
 def destroy_workflow_artifact_reset(
     team_id: str,
     *,

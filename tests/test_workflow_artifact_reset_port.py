@@ -91,6 +91,14 @@ def test_restore_is_exact_and_idempotent_after_purge(monkeypatch, tmp_path) -> N
     with pytest.raises(WorkflowArtifactResetStateError):
         purge_workflow_artifact_reset("research-team", reset_id="reset-2", stage=staged)
 
+    discarded = workflow_artifact_store.discard_restored_workflow_artifact_reset(
+        "research-team", reset_id="reset-2"
+    )
+    assert discarded["status"] == "discarded"
+    assert not workflow_artifact_store._reset_stage_path("research-team", "reset-2").exists()
+    retried = prepare_workflow_artifact_reset("research-team", reset_id="reset-2")
+    assert retried["status"] == "staged"
+
 
 def test_stage_fails_closed_for_unowned_or_duplicate_rows(monkeypatch, tmp_path) -> None:
     _use_artifact_root(monkeypatch, tmp_path)

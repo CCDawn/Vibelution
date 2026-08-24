@@ -96,6 +96,23 @@ def test_restore_reuses_stage_scope_authority_instead_of_recalculating(monkeypat
     assert observed["receipts"] == stage["receiptScopeAuthority"]
 
 
+def test_restore_discards_verified_recovery_staging_before_retry(monkeypatch) -> None:
+    plan = _plan("s" * 64)
+    instance = adapter_module.ChallengeCupLiveDestructiveAdapter()
+    stage = _stage(plan["purgePlanId"])
+    instance._stages[plan["purgePlanId"]] = stage
+    calls: list[str] = []
+
+    monkeypatch.setattr(instance, "_restore_handles", lambda *_args, **_kwargs: calls.append("restore"))
+    monkeypatch.setattr(instance, "_discard_recovered_staging", lambda *_args, **_kwargs: calls.append("discard"))
+
+    restored = instance.restore("research-team", plan, {"planId": plan["purgePlanId"]})
+
+    assert restored["status"] == "restored"
+    assert calls == ["restore", "discard"]
+    assert plan["purgePlanId"] not in instance._stages
+
+
 def test_stage_captures_scope_authority_before_artifact_staging(monkeypatch) -> None:
     plan = _plan("r" * 64)
     instance = adapter_module.ChallengeCupLiveDestructiveAdapter()
@@ -115,6 +132,7 @@ def test_stage_captures_scope_authority_before_artifact_staging(monkeypatch) -> 
         "_run_scope_authority",
         lambda _team_id: order.append("authority") or authority,
     )
+    monkeypatch.setattr(instance, "_discard_recovered_staging", lambda *_args, **_kwargs: order.append("discard"))
     monkeypatch.setattr(chat_room_service, "prepare_team_chat_room_reset", lambda *_args, **_kwargs: {"stageId": "rooms"})
     monkeypatch.setattr(agent_sessions, "stage_team_agent_session_reset", lambda *_args, **_kwargs: {"stageId": "sessions"})
     monkeypatch.setattr(research_projects, "prepare_challenge_cup_experiment_state_reset", lambda *_args, **_kwargs: {"stageId": "workspace"})
@@ -131,4 +149,4 @@ def test_stage_captures_scope_authority_before_artifact_staging(monkeypatch) -> 
     staged = instance.stage("research-team", plan)
 
     assert staged["status"] == "staged"
-    assert order == ["authority", "artifacts"]
+    assert order == ["discard", "authority", "artifacts"]

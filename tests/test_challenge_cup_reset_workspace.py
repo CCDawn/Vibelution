@@ -32,6 +32,22 @@ def test_workspace_reset_moves_only_allowlisted_experiment_state(monkeypatch, tm
     assert (root / "candidate_store" / "legacy.json").is_file()
     assert (root / "research_projects" / "index.json").is_file()
 
+    discarded = research_projects.discard_restored_challenge_cup_experiment_state_reset(
+        "research-team", reset_id="reset-workspace-1"
+    )
+    assert discarded["status"] == "discarded"
+    assert not (root / ".challenge_cup_reset_staging" / "reset-workspace-1").exists()
+
+    retried = research_projects.prepare_challenge_cup_experiment_state_reset(
+        "research-team",
+        reset_id="reset-workspace-1",
+        entry_ids=["candidate_store", "research_projects"],
+    )
+    research_projects.restore_challenge_cup_experiment_state_reset(retried, reset_id="reset-workspace-1")
+    research_projects.discard_restored_challenge_cup_experiment_state_reset(
+        "research-team", reset_id="reset-workspace-1"
+    )
+
     second = research_projects.prepare_challenge_cup_experiment_state_reset(
         "research-team",
         reset_id="reset-workspace-2",
