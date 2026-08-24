@@ -924,24 +924,30 @@ def destroy_challenge_cup_experiment_state_reset(
 
 
 def _destroy_challenge_cup_workspace_staging(staging_root: Path) -> None:
-    """Retry one Windows transient child disappearance without widening scope."""
+    """Destroy a verified staging tree even when its Windows path is long."""
 
-    def ignore_missing_child(_function: Any, _path: str, error: BaseException) -> None:
-        if isinstance(error, FileNotFoundError):
-            return
-        raise error
+    target = _challenge_cup_workspace_reset_native_path(staging_root)
 
     for attempt in range(2):
         if not staging_root.exists():
             return
         try:
-            shutil.rmtree(staging_root, onexc=ignore_missing_child)
+            shutil.rmtree(target)
         except FileNotFoundError:
             if attempt:
                 raise
         if not staging_root.exists():
             return
     raise ResearchProjectError("Challenge Cup workspace staging cleanup is incomplete")
+
+
+def _challenge_cup_workspace_reset_native_path(path: Path) -> str:
+    """Use the Windows extended path syntax only for an already-validated root."""
+
+    value = str(path.resolve(strict=False))
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    return "\\\\?\\" + value
 
 
 def _challenge_cup_workspace_reset_path_is_reparse_point(path: Path) -> bool:

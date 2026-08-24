@@ -75,7 +75,7 @@ def test_orphaned_purged_workspace_staging_is_destroyed_with_one_transient_retry
     original_rmtree = research_projects.shutil.rmtree
     calls = 0
 
-    def transient_missing(path: Path, *args, **kwargs) -> None:
+    def transient_missing(path: str | Path, *args, **kwargs) -> None:
         nonlocal calls
         calls += 1
         if calls == 1:
