@@ -2460,11 +2460,11 @@ def _team_agent_session_reset_recreated_empty_direct_session_ids(
         row = rows_by_id.get(session_id)
         if not isinstance(row, dict):
             continue
+        has_messages = "messages" in row
         messages = row.get("messages")
         if (
             _team_agent_session_reset_agent_id(row) != expected_agent_id
-            or not isinstance(messages, list)
-            or messages
+            or (has_messages and (not isinstance(messages, list) or messages))
             or _team_agent_session_reset_parent_id(row)
             or _team_agent_session_reset_root_id(row)
             or _team_agent_session_reset_team_id(row)

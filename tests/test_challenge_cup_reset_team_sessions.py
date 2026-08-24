@@ -325,7 +325,6 @@ def test_team_agent_session_reset_destroy_removes_recreated_empty_direct_session
         {
             "conversation_id": "session-search",
             "agent_id": "agent-search",
-            "messages": [],
         }
     )
 
