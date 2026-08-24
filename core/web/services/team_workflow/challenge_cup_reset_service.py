@@ -479,6 +479,18 @@ def _adapter_method(adapter: Any, name: str):
     return method
 
 
+def _record_hash_input(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the semantic record view used by reset freshness checks.
+
+    ``updatedAt`` is refreshed by inventory readers while producing a bounded
+    observation and is therefore not an entity-version signal.  Creation and
+    completion timestamps remain part of the hash: they describe the record's
+    lifecycle state, just like its status, scope, owner, or content hash.
+    """
+
+    return {key: value for key, value in item.items() if key != "updatedAt"}
+
+
 def _compact_record(family: str, item: Any) -> dict[str, Any]:
     if isinstance(item, Mapping):
         compact = {
@@ -488,7 +500,7 @@ def _compact_record(family: str, item: Any) -> dict[str, Any]:
             "questionId": _text(_nested(item, "questionId", "question_id"), upper=True),
             "projectId": _text(_nested(item, "projectId", "researchProjectId")),
             "immutable": _truthy(_first(item, "immutable", "isImmutable")),
-            "recordHash": _stable_hash(item),
+            "recordHash": _stable_hash(_record_hash_input(item)),
         }
     else:
         compact = {

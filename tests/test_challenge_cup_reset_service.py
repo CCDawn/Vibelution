@@ -77,6 +77,22 @@ class _Reader:
         return self.payload
 
 
+class _RefreshingReader(_Reader):
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__(payload)
+        self._tick = 0
+
+    def read_inventory(self, team_id: str) -> dict[str, Any]:
+        self._tick += 1
+        for rows in self.payload["objects"].values():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict):
+                    row["updatedAt"] = f"observation-{self._tick}"
+        return super().read_inventory(team_id)
+
+
 class _Ports:
     def __init__(
         self,
@@ -168,6 +184,25 @@ def test_preview_is_deterministic_and_only_deletes_team_owned_runtime_objects() 
     # A preview never echoes private record bodies or transcript fields.
     assert "prompt" not in str(first)
     assert "transcript" not in str(first)
+
+
+def test_updated_at_observation_drift_keeps_plan_stable_but_semantic_drift_is_stale() -> None:
+    payload = _inventory()
+    reader = _RefreshingReader(payload)
+    service = ChallengeCupResetService(inventory_reader=reader)
+
+    first = service.preview().to_dict()
+    second = service.preview().to_dict()
+
+    assert second["purgePlanId"] == first["purgePlanId"]
+    assert second["inventoryHash"] == first["inventoryHash"]
+
+    payload["objects"]["rooms"][0]["status"] = "archived"
+    with pytest.raises(ResetPlanStaleError):
+        service.confirm(
+            purge_plan_id=first["purgePlanId"],
+            confirmation_phrase=CONFIRMATION_PHRASE,
+        )
 
 
 def test_active_work_and_unscoped_objects_fail_closed() -> None:
