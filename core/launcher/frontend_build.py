@@ -660,6 +660,36 @@ def _publish_staging_directory(staging: Path, release: Path) -> None:
             delay = min(delay * 2, _FRONTEND_PUBLISH_RETRY_MAX_DELAY_SECONDS)
 
 
+def _copy_staging_release(staging: Path, releases: Path, *, build_key: str) -> tuple[str, Path]:
+    """Copy a verified staging release to an unreferenced immutable entry."""
+    while True:
+        release_name = f"release-{build_key}-{uuid.uuid4().hex}"
+        release = releases / release_name
+        if release.exists():
+            continue
+        try:
+            shutil.copytree(staging, release)
+        except FileExistsError:
+            # Another writer won this random name before copytree created it.
+            continue
+        except Exception:
+            if release.exists():
+                shutil.rmtree(release, ignore_errors=True)
+            raise
+        else:
+            break
+    try:
+        validate_staging_release(release)
+        if not _is_complete_release(release, build_key=build_key):
+            raise RuntimeError("Copied frontend release failed validation.")
+        shutil.rmtree(staging)
+        return release_name, release
+    except Exception:
+        if release.exists():
+            shutil.rmtree(release, ignore_errors=True)
+        raise
+
+
 def publish_staging_release(project_root: Path | str, staging: Path, *, build_key: str, build_inputs_value: dict[str, Any]) -> dict[str, Any]:
     root = Path(project_root).resolve()
     validate_staging_release(staging)
@@ -683,7 +713,12 @@ def publish_staging_release(project_root: Path | str, staging: Path, *, build_ke
     if release.exists():
         shutil.rmtree(staging)
     else:
-        _publish_staging_directory(staging, release)
+        try:
+            _publish_staging_directory(staging, release)
+        except PermissionError as error:
+            if not _retryable_frontend_publish_error(error):
+                raise
+            release_name, release = _copy_staging_release(staging, frontend_releases_dir(root), build_key=build_key)
     pointer = {"schemaVersion": BUILD_SCHEMA_VERSION, "release": release_name, "buildKey": build_key, "publishedAt": time.time()}
     pointer_path = active_release_path(root)
     temporary = pointer_path.with_suffix(".tmp")
