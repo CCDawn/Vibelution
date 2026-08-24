@@ -83,8 +83,8 @@ def test_rebootstrap_accepts_catalog_id_for_sci_096(monkeypatch) -> None:
 
     assert result["status"] == "initialized"
     assert result["questionId"] == "SCI-096"
-    assert result["directSessionCount"] == len(adapter_module.RETAINED_AGENT_ROLE_KEYS)
-    assert ensure_calls == [f"agent-{index}" for index in range(len(adapter_module.RETAINED_AGENT_ROLE_KEYS))]
+    assert result["directSessionCount"] == 0
+    assert ensure_calls == []
 
 
 def test_destroy_staging_finalizes_each_port_without_rebootstrapping(monkeypatch) -> None:
@@ -101,6 +101,7 @@ def test_destroy_staging_finalizes_each_port_without_rebootstrapping(monkeypatch
     monkeypatch.setattr(research_projects, "destroy_challenge_cup_experiment_state_reset", lambda *_args, **_kwargs: calls.append("workspace") or {})
     monkeypatch.setattr(agent_sessions, "destroy_team_agent_session_reset", lambda *_args, **_kwargs: calls.append("sessions") or {})
     monkeypatch.setattr(chat_room_service, "destroy_team_chat_room_reset", lambda *_args, **_kwargs: calls.append("rooms") or {})
+    monkeypatch.setattr(instance, "_recreate_retained_agent_direct_sessions", lambda _plan: calls.append("direct_sessions") or ["session-new"])
     monkeypatch.setattr(challenge_cup_maintenance_fence, "release_fence", lambda *_args, **_kwargs: calls.append("fence") or {"status": "released"})
     monkeypatch.setattr(adapter_module, "_write_result", lambda _payload: calls.append("result"))
     monkeypatch.setattr(instance, "rebootstrap", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not rebootstrap")))
@@ -108,7 +109,7 @@ def test_destroy_staging_finalizes_each_port_without_rebootstrapping(monkeypatch
     result = instance.destroy_staging("research-team", plan, {"planId": plan["purgePlanId"]})
 
     assert result["destroyed"] is True
-    assert calls == ["ledger", "receipts", "checkpoints", "artifacts", "workspace", "sessions", "rooms", "result", "fence"]
+    assert calls == ["ledger", "receipts", "checkpoints", "artifacts", "workspace", "sessions", "rooms", "direct_sessions", "result", "fence"]
     assert stage["status"] == "destroyed"
 
 

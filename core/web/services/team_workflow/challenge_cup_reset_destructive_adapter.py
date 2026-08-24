@@ -341,7 +341,6 @@ class ChallengeCupLiveDestructiveAdapter:
     def rebootstrap(self, team_id: str, plan: Mapping[str, Any]) -> Mapping[str, Any]:
         self._assert_plan(team_id, plan)
         from core.research.competition.resources import load_science_question_catalog
-        from core.web.services import agent_directory_service, session_service
         from core.web.services.team_workflow.research_projects import ensure_challenge_question_project
 
         catalog = load_science_question_catalog()
@@ -368,6 +367,20 @@ class ChallengeCupLiveDestructiveAdapter:
             title=title,
             topic=title,
         )
+        return {
+            "projectId": str((project.get("project") or {}).get("projectId") or ""),
+            "questionId": GOLDEN_SAMPLE_QUESTION_ID,
+            "bootstrapId": GOLDEN_SAMPLE_BOOTSTRAP_ID,
+            "status": "initialized",
+            "directSessionCount": 0,
+            "counts": {key: 0 for key in ("plans", "runs", "results", "rooms", "checkpoints", "artifacts", "receipts", "candidates", "selections", "meetings", "rounds", "legacyParticipantBindings")},
+        }
+
+    def _recreate_retained_agent_direct_sessions(self, plan: Mapping[str, Any]) -> list[str]:
+        """Create fresh direct sessions only after the old session stage is gone."""
+
+        from core.web.services import agent_directory_service, session_service
+
         direct_sessions: list[str] = []
         for agent_id in _retained_agent_ids(plan):
             agent = agent_directory_service.get_agent(agent_id, include_archived=False)
@@ -385,14 +398,7 @@ class ChallengeCupLiveDestructiveAdapter:
             if not direct_session_id:
                 raise ChallengeCupDestructiveAdapterError("rebootstrap did not create a retained Agent direct session")
             direct_sessions.append(direct_session_id)
-        return {
-            "projectId": str((project.get("project") or {}).get("projectId") or ""),
-            "questionId": GOLDEN_SAMPLE_QUESTION_ID,
-            "bootstrapId": GOLDEN_SAMPLE_BOOTSTRAP_ID,
-            "status": "initialized",
-            "directSessionCount": len(direct_sessions),
-            "counts": {key: 0 for key in ("plans", "runs", "results", "rooms", "checkpoints", "artifacts", "receipts", "candidates", "selections", "meetings", "rounds", "legacyParticipantBindings")},
-        }
+        return direct_sessions
 
     def destroy_staging(self, team_id: str, plan: Mapping[str, Any], stage: Mapping[str, Any]) -> Mapping[str, Any]:
         self._assert_plan(team_id, plan)
@@ -428,6 +434,8 @@ class ChallengeCupLiveDestructiveAdapter:
                 "rooms": destroy_team_chat_room_reset(handles["rooms"], reset_id=current["planId"]),
             }
         )
+        direct_session_ids = self._recreate_retained_agent_direct_sessions(plan)
+        results["directSessions"] = {"createdCount": len(direct_session_ids)}
         result = {
             "schemaVersion": _RESULT_SCHEMA_VERSION,
             "kind": _RESULT_KIND,
