@@ -192,6 +192,7 @@ class ChallengeCupLiveDestructiveAdapter:
         # any owner moves its recoverable data into staging, then retain that
         # exact proof in the stage for commit and compensation.
         authority = _run_scope_authority(team_id)
+        receipt_ids = _plan_ids(plan, "receipts")
         receipt_authority = [
             {"teamId": team_id, "questionId": item["questionId"], "workflowRunId": item["runId"]}
             for item in authority
@@ -230,12 +231,13 @@ class ChallengeCupLiveDestructiveAdapter:
                 scope_authority=authority,
             )
             completed.append("checkpoints")
-            handles["receipts"] = prepare_model_invocation_receipt_reset_stage(
-                team_id,
-                plan_id,
-                scope_authority=receipt_authority,
-            )
-            completed.append("receipts")
+            if receipt_ids:
+                handles["receipts"] = prepare_model_invocation_receipt_reset_stage(
+                    team_id,
+                    plan_id,
+                    scope_authority=receipt_authority,
+                )
+                completed.append("receipts")
             store, temporary_store = self._ledger_store(workflow_ledger_path())
             handles["ledger"] = prepare_team_ledger_reset_stage(store, team_id, plan_id)
             completed.append("ledger")
@@ -292,9 +294,16 @@ class ChallengeCupLiveDestructiveAdapter:
                 "workspace": purge_challenge_cup_experiment_state_reset(handles["workspace"], reset_id=current["planId"]),
                 "artifacts": purge_workflow_artifact_reset(team_id, reset_id=current["planId"], stage=handles["artifacts"]),
                 "checkpoints": purge_checkpoint_reset_stage(handles["checkpoints"], scope_authority=authority, reset_id=current["planId"]),
-                "receipts": purge_model_invocation_receipt_reset_stage(handles["receipts"], scope_authority=receipt_authority, reset_id=current["planId"]),
-                "ledger": purge_team_ledger_reset_stage(store, handles["ledger"], reset_id=current["planId"]),
             }
+            if "receipts" in handles:
+                results["receipts"] = purge_model_invocation_receipt_reset_stage(
+                    handles["receipts"],
+                    scope_authority=receipt_authority,
+                    reset_id=current["planId"],
+                )
+            results["ledger"] = purge_team_ledger_reset_stage(
+                store, handles["ledger"], reset_id=current["planId"]
+            )
         finally:
             if temporary_store is not None:
                 temporary_store.close()
@@ -394,13 +403,20 @@ class ChallengeCupLiveDestructiveAdapter:
         handles = current["handles"]
         results = {
             "ledger": destroy_team_ledger_reset_stage(handles["ledger"], reset_id=current["planId"]),
-            "receipts": destroy_model_invocation_receipt_reset_stage(handles["receipts"], reset_id=current["planId"]),
-            "checkpoints": destroy_checkpoint_reset_stage(handles["checkpoints"], reset_id=current["planId"]),
-            "artifacts": destroy_workflow_artifact_reset(team_id, reset_id=current["planId"], stage=handles["artifacts"]),
-            "workspace": destroy_challenge_cup_experiment_state_reset(handles["workspace"], reset_id=current["planId"]),
-            "sessions": destroy_team_agent_session_reset(team_id, current["planId"], handles["sessions"]),
-            "rooms": destroy_team_chat_room_reset(handles["rooms"], reset_id=current["planId"]),
         }
+        if "receipts" in handles:
+            results["receipts"] = destroy_model_invocation_receipt_reset_stage(
+                handles["receipts"], reset_id=current["planId"]
+            )
+        results.update(
+            {
+                "checkpoints": destroy_checkpoint_reset_stage(handles["checkpoints"], reset_id=current["planId"]),
+                "artifacts": destroy_workflow_artifact_reset(team_id, reset_id=current["planId"], stage=handles["artifacts"]),
+                "workspace": destroy_challenge_cup_experiment_state_reset(handles["workspace"], reset_id=current["planId"]),
+                "sessions": destroy_team_agent_session_reset(team_id, current["planId"], handles["sessions"]),
+                "rooms": destroy_team_chat_room_reset(handles["rooms"], reset_id=current["planId"]),
+            }
+        )
         result = {
             "schemaVersion": _RESULT_SCHEMA_VERSION,
             "kind": _RESULT_KIND,

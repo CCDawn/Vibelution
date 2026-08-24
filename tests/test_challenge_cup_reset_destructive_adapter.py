@@ -29,22 +29,24 @@ def _plan(plan_id: str = "p" * 64) -> dict[str, Any]:
     }
 
 
-def _stage(plan_id: str) -> dict[str, Any]:
+def _stage(plan_id: str, *, with_receipts: bool = True) -> dict[str, Any]:
+    handles = {
+        "ledger": {"stageId": "ledger"},
+        "checkpoints": {"stageId": "checkpoints"},
+        "artifacts": {"stageId": "artifacts"},
+        "workspace": {"stageId": "workspace"},
+        "sessions": {"stageId": "sessions"},
+        "rooms": {"stageId": "rooms"},
+    }
+    if with_receipts:
+        handles["receipts"] = {"stageId": "receipts"}
     return {
         "planId": plan_id,
         "teamId": "research-team",
         "status": "purged",
         "scopeAuthority": [{"teamId": "research-team", "runId": "run-1", "threadId": "run-1"}],
         "receiptScopeAuthority": [{"teamId": "research-team", "questionId": "SCI-096", "workflowRunId": "run-1"}],
-        "handles": {
-            "ledger": {"stageId": "ledger"},
-            "receipts": {"stageId": "receipts"},
-            "checkpoints": {"stageId": "checkpoints"},
-            "artifacts": {"stageId": "artifacts"},
-            "workspace": {"stageId": "workspace"},
-            "sessions": {"stageId": "sessions"},
-            "rooms": {"stageId": "rooms"},
-        },
+        "handles": handles,
     }
 
 
@@ -142,11 +144,48 @@ def test_stage_captures_scope_authority_before_artifact_staging(monkeypatch) -> 
         lambda *_args, **_kwargs: order.append("artifacts") or {"stageId": "artifacts"},
     )
     monkeypatch.setattr(checkpoint_store, "prepare_checkpoint_reset_stage", lambda *_args, **_kwargs: {"stageId": "checkpoints"})
-    monkeypatch.setattr(model_invocation_receipt_registry, "prepare_model_invocation_receipt_reset_stage", lambda *_args, **_kwargs: {"stageId": "receipts"})
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "prepare_model_invocation_receipt_reset_stage",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("empty receipts must not stage")),
+    )
     monkeypatch.setattr(ledger, "prepare_team_ledger_reset_stage", lambda *_args, **_kwargs: {"stageId": "ledger"})
     monkeypatch.setattr(instance, "_ledger_store", lambda _path: (object(), None))
 
     staged = instance.stage("research-team", plan)
 
     assert staged["status"] == "staged"
+    assert "receipts" not in staged["ports"]
     assert order == ["discard", "authority", "artifacts"]
+
+
+def test_stage_requires_real_receipt_authority_when_receipts_are_planned(monkeypatch) -> None:
+    plan = _plan("t" * 64)
+    plan["deleteSet"] = {"receipts": ["receipt-1"]}
+    instance = adapter_module.ChallengeCupLiveDestructiveAdapter()
+    authority = [{"teamId": "research-team", "runId": "run-1", "questionId": "SCI-096"}]
+    observed: dict[str, Any] = {}
+
+    monkeypatch.setattr(adapter_module, "_run_scope_authority", lambda _team_id: authority)
+    monkeypatch.setattr(instance, "_discard_recovered_staging", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(chat_room_service, "prepare_team_chat_room_reset", lambda *_args, **_kwargs: {"stageId": "rooms"})
+    monkeypatch.setattr(agent_sessions, "stage_team_agent_session_reset", lambda *_args, **_kwargs: {"stageId": "sessions"})
+    monkeypatch.setattr(research_projects, "prepare_challenge_cup_experiment_state_reset", lambda *_args, **_kwargs: {"stageId": "workspace"})
+    monkeypatch.setattr(workflow_artifact_store, "prepare_workflow_artifact_reset", lambda *_args, **_kwargs: {"stageId": "artifacts"})
+    monkeypatch.setattr(checkpoint_store, "prepare_checkpoint_reset_stage", lambda *_args, **_kwargs: {"stageId": "checkpoints"})
+    def prepare_receipts(*_args, **kwargs):
+        observed["authority"] = kwargs["scope_authority"]
+        return {"stageId": "receipts"}
+
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "prepare_model_invocation_receipt_reset_stage",
+        prepare_receipts,
+    )
+    monkeypatch.setattr(ledger, "prepare_team_ledger_reset_stage", lambda *_args, **_kwargs: {"stageId": "ledger"})
+    monkeypatch.setattr(instance, "_ledger_store", lambda _path: (object(), None))
+
+    staged = instance.stage("research-team", plan)
+
+    assert "receipts" in staged["ports"]
+    assert observed["authority"] == [{"teamId": "research-team", "questionId": "SCI-096", "workflowRunId": "run-1"}]
