@@ -270,6 +270,74 @@ def _safe_record(
     return payload
 
 
+def _looks_challenge_scoped(item: Any) -> bool:
+    """Keep ambiguous Challenge-shaped records fail-closed, but not unrelated sessions.
+
+    The global Session inventory also contains ordinary personal and system
+    conversations with no team authority.  They must remain outside both the
+    target delete set and the other-team snapshot.  A row that advertises a
+    Challenge Cup / hypothesis / workflow scope is different: without a
+    provable team owner it remains in the bounded inventory so the reset
+    service blocks rather than silently overlooking target data.
+    """
+
+    if not isinstance(item, Mapping):
+        return False
+    source = _text(
+        _nested(
+            item,
+            "source",
+            "sourceKind",
+            "workflowKind",
+            "workflowId",
+            "teamKind",
+        ),
+        limit=240,
+    ).lower()
+    if any(token in source for token in ("challenge", "hypothesis", "research_workflow")):
+        return True
+    return bool(
+        _nested(
+            item,
+            "questionId",
+            "question_id",
+            "researchProjectId",
+            "research_project_id",
+            "workflowRunId",
+            "workflow_run_id",
+        )
+    )
+
+
+def _member_owned_team(item: Any, agent_team_by_id: Mapping[str, str]) -> str:
+    """Resolve Agent-derived ownership only from the current Team membership graph."""
+
+    if not isinstance(item, Mapping):
+        return ""
+    agent_id = _text(_nested(item, "agentId", "agent_id"))
+    if agent_id:
+        return _text(agent_team_by_id.get(agent_id))
+    return _owner(item, agent_team_by_id)
+
+
+def _reset_inventory_records(
+    rows: Sequence[Any],
+    *,
+    agent_team_by_id: Mapping[str, str],
+) -> list[Any]:
+    """Return only records with a proven owner or explicit Challenge scope."""
+
+    return [
+        item
+        for item in rows
+        if isinstance(item, Mapping)
+        and (
+            _member_owned_team(item, agent_team_by_id)
+            or _looks_challenge_scoped(item)
+        )
+    ]
+
+
 def _sentinel(family: str, reason: str) -> dict[str, Any]:
     return {
         "id": "",
@@ -483,10 +551,49 @@ class LiveChallengeCupInventoryReader:
                         agent_team.setdefault(agent_id, owner)
 
         safe_teams = [_safe_record(item, family="teams", owner_team_id=_text(_first(item, "teamId", "team_id", "id"))) for item in raw_teams]
-        safe_agents = [_safe_record(item, family="agents", agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in raw_agents]
-        safe_sessions = [_safe_record(item, family="sessions", agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in raw_sessions]
-        safe_rooms = [_safe_record(item, family="rooms", agent_team_by_id=agent_team, role_by_id=role_by_agent) for item in raw_rooms]
-        session_team = {_record_id(item): _owner(item, agent_team) for item in raw_sessions if isinstance(item, Mapping) and _record_id(item)}
+        scoped_agents = [
+            item
+            for item in raw_agents
+            if isinstance(item, Mapping)
+            and _text(_nested(item, "agentId", "agent_id")) in agent_team
+        ]
+        scoped_sessions = _reset_inventory_records(raw_sessions, agent_team_by_id=agent_team)
+        scoped_rooms = _reset_inventory_records(raw_rooms, agent_team_by_id=agent_team)
+        safe_agents = [
+            _safe_record(
+                item,
+                family="agents",
+                owner_team_id=_member_owned_team(item, agent_team),
+                agent_team_by_id=agent_team,
+                role_by_id=role_by_agent,
+            )
+            for item in scoped_agents
+        ]
+        safe_sessions = [
+            _safe_record(
+                item,
+                family="sessions",
+                owner_team_id=_member_owned_team(item, agent_team),
+                agent_team_by_id=agent_team,
+                role_by_id=role_by_agent,
+            )
+            for item in scoped_sessions
+        ]
+        safe_rooms = [
+            _safe_record(
+                item,
+                family="rooms",
+                owner_team_id=_member_owned_team(item, agent_team),
+                agent_team_by_id=agent_team,
+                role_by_id=role_by_agent,
+            )
+            for item in scoped_rooms
+        ]
+        session_team = {
+            _record_id(item): _member_owned_team(item, agent_team)
+            for item in scoped_sessions
+            if _record_id(item)
+        }
 
         all_team_ids = sorted(team_ids | {team_id})
         meetings: list[dict[str, Any]] = []
@@ -541,7 +648,7 @@ class LiveChallengeCupInventoryReader:
 
         rounds: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
-        for raw_room, room in zip(raw_rooms, safe_rooms):
+        for raw_room, room in zip(scoped_rooms, safe_rooms):
             if not isinstance(raw_room, Mapping):
                 continue
             owner = _text(room.get("teamId"))
@@ -561,7 +668,7 @@ class LiveChallengeCupInventoryReader:
             rounds.append(_sentinel("rounds", "room_round_authority_missing"))
             bindings.append(_sentinel("legacyParticipantBindings", "room_participant_authority_missing"))
 
-        active, active_ok = self._active(team_id, raw_rooms, runs, session_team)
+        active, active_ok = self._active(team_id, scoped_rooms, runs, session_team)
         protection, protection_ok = self._protection(
             team_id,
             team_ids,
@@ -611,9 +718,9 @@ class LiveChallengeCupInventoryReader:
         for raw in rows:
             item = raw if isinstance(raw, Mapping) else {"id": raw}
             session_id = _text(_first(item, "sessionId", "session_id"))
-            owner = _owner(item, {}) or _text(session_team.get(session_id))
+            owner = _text(session_team.get(session_id))
             status = _status(item)
-            if owner not in {"", team_id} or status not in ACTIVE_STATUSES:
+            if owner != team_id or status not in ACTIVE_STATUSES:
                 continue
             item_id = _text(
                 _first(
@@ -634,7 +741,7 @@ class LiveChallengeCupInventoryReader:
             if item_id:
                 active[(item_id, kind)] = {"id": item_id, "kind": kind, "status": status}
         for raw in raw_rooms:
-            if not isinstance(raw, Mapping) or _owner(raw, {}) not in {"", team_id}:
+            if not isinstance(raw, Mapping) or _owner(raw, {}) != team_id:
                 continue
             round_id = _text(_first(raw, "activeRoundId", "active_round_id"))
             if round_id and _status(raw) in ACTIVE_STATUSES:

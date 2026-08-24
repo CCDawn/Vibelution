@@ -24,6 +24,17 @@ from core.web.services.team_workflow.challenge_cup_reset_service import (
 )
 
 
+def test_retained_agent_roles_match_the_canonical_challenge_cup_contract() -> None:
+    assert RETAINED_AGENT_ROLE_KEYS == (
+        "challenge_cup_search",
+        "challenge_cup_extractor",
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_execution_steward",
+        "challenge_cup_experiment_revision",
+        "challenge_cup_evaluator",
+    )
+
+
 def _inventory(*, active_work: dict[str, Any] | None = None) -> dict[str, Any]:
     agents = [
         {"agentId": f"agent-{role}", "teamId": "research-team", "roleKey": role}

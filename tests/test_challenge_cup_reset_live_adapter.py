@@ -142,6 +142,31 @@ def test_active_work_is_derived_from_managed_snapshots() -> None:
     assert active["items"] == [{"id": "turn-1", "kind": "chat_turn", "status": "running"}]
 
 
+def test_unrelated_unscoped_sessions_are_protected_outside_reset_inventory() -> None:
+    ports = _ports()
+    original_list_sessions = ports.list_sessions
+
+    def list_sessions() -> list[dict[str, Any]]:
+        return [
+            *list(original_list_sessions()),
+            {
+                "id": "personal-session",
+                "agentId": "agent-not-in-any-team",
+                "status": "idle",
+            },
+        ]
+
+    reader = LiveChallengeCupInventoryReader(
+        ChallengeCupInventoryPorts(**{**ports.__dict__, "list_sessions": list_sessions})
+    )
+
+    preview = ChallengeCupResetService(inventory_reader=reader).preview().to_dict()
+
+    assert preview["safeToConfirm"] is True
+    assert preview["deleteSet"]["sessions"] == ["legacy-session"]
+    assert all(item.get("id") != "personal-session" for item in reader.read_inventory("research-team")["objects"]["sessions"])
+
+
 def test_missing_checkpoint_authority_is_fail_closed_without_sqlite_scan() -> None:
     reader = LiveChallengeCupInventoryReader(_ports(missing_checkpoints=True))
 
