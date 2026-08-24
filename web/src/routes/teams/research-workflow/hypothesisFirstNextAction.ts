@@ -21,7 +21,7 @@ import {
 import { getNodeAdapter } from "./nodeAdapterModel";
 import {
   buildHypothesisFirstReviewProjection,
-  currentProjectedReview,
+  currentActionableProjectedReview,
   type HypothesisFirstReviewProjection,
   type ProjectedReviewMeeting,
 } from "./hypothesisFirstMeetingProjection";
@@ -410,7 +410,7 @@ export function resolveHypothesisFirstNextAction(
     input.reviewRoundLinks,
     currentSelectionId,
   );
-  const reviewRound = currentProjectedReview(reviewProjection);
+  const reviewRound = currentActionableProjectedReview(reviewProjection);
   const review = reviewRound?.meeting ?? null;
   const request = latestRequest(input.collectionRequests);
   const terminal = Boolean(input.boundChatRoundsTerminal);

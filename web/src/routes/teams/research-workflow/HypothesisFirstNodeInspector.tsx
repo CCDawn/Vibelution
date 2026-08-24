@@ -37,6 +37,7 @@ import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import {
   buildHypothesisFirstReviewProjection,
   currentProjectedReview,
+  type ProjectedReviewMeeting,
 } from "./hypothesisFirstMeetingProjection";
 import {
   boundChatRoundsAreTerminal,
@@ -113,6 +114,17 @@ function pickReview(
   return currentProjectedReview(projection)?.meeting ?? null;
 }
 
+function checklistRoundIndex(
+  projection: ReturnType<typeof buildHypothesisFirstReviewProjection>,
+  currentTargetNodeId: string | null | undefined,
+  selectedNodeId: string,
+): number | null {
+  return projection.byNodeId.get(String(currentTargetNodeId ?? ""))?.roundIndex
+    ?? projection.byNodeId.get(selectedNodeId)?.roundIndex
+    ?? currentProjectedReview(projection)?.roundIndex
+    ?? null;
+}
+
 export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: string | null): boolean {
   // A missing target is not proof that this card owns the live command.
   // Fail closed so stale/history cards never expose write operations while
@@ -146,6 +158,11 @@ export function HypothesisFirstNodeInspector({
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
   const generation = pickGeneration(questionMeetings);
   const currentSelectionId = chain.selection?.selectionId || chain.chainState?.selectionId || "";
+  const reviewProjection = buildHypothesisFirstReviewProjection(
+    questionMeetings,
+    chain.reviewRoundLinks,
+    currentSelectionId,
+  );
   const review = pickReview(questionMeetings, nodeId, chain.reviewRoundLinks, currentSelectionId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
   const scopedRoomId = inspectorScopedRoomId(discussionModel, activeMeeting, questionId);
@@ -173,6 +190,11 @@ export function HypothesisFirstNodeInspector({
     collectionChildStatus,
     selectedNodeId: nodeId,
   });
+  const currentChecklistRoundIndex = checklistRoundIndex(
+    reviewProjection,
+    nextAction.targetNodeId,
+    nodeId,
+  );
   const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
   const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
@@ -275,6 +297,18 @@ export function HypothesisFirstNodeInspector({
             onNavigateToNode={onNavigateToNode}
             onOpenQuestion={onOpenQuestion}
           />
+          {(
+            nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID
+            || nodeId.startsWith("hf_meeting_")
+            || nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID
+          ) ? (
+            <ReviewCandidateChecklist
+              rounds={reviewProjection.rounds}
+              currentRoundIndex={currentChecklistRoundIndex}
+              lang={lang}
+              onNavigateToNode={onNavigateToNode}
+            />
+          ) : null}
           {nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID ? (
             <ReviewHistory meetings={reviewHistory} allMeetings={reviewMeetings} lang={lang} />
           ) : null}
@@ -311,13 +345,97 @@ export function HypothesisFirstNodeInspector({
   );
 }
 
+function reviewCandidateState(meeting: MeetingRoundRecord, lang: Language): {
+  kind: "confirmed" | "blocked" | "pending";
+  label: string;
+  tone: "neutral" | "warning" | "success";
+} {
+  if (meeting.status === "closed") {
+    return { kind: "confirmed", label: lang === "zh" ? "已确认" : "Confirmed", tone: "success" };
+  }
+  if (["failed", "blocked", "cancelled", "canceled"].includes(meeting.status)) {
+    return { kind: "blocked", label: lang === "zh" ? "已阻塞" : "Blocked", tone: "warning" };
+  }
+  return { kind: "pending", label: lang === "zh" ? "待确认" : "Pending", tone: "neutral" };
+}
+
+function ReviewCandidateChecklist({
+  rounds,
+  currentRoundIndex,
+  lang,
+  onNavigateToNode,
+}: {
+  rounds: readonly ProjectedReviewMeeting[];
+  currentRoundIndex: number | null;
+  lang: Language;
+  onNavigateToNode?: (nodeId: string) => void;
+}) {
+  const currentRounds = currentRoundIndex === null
+    ? []
+    : rounds.filter((round) => round.roundIndex === currentRoundIndex);
+  if (!currentRounds.length) return null;
+  const states = currentRounds.map((round) => reviewCandidateState(round.meeting, lang));
+  const confirmed = states.filter((state) => state.kind === "confirmed").length;
+  const blocked = states.filter((state) => state.kind === "blocked").length;
+  const pending = currentRounds.length - confirmed - blocked;
+  const isZh = lang === "zh";
+  return (
+    <section className={styles.candidateChecklist} aria-label={isZh ? "候选确认清单" : "Candidate confirmation checklist"} data-testid="candidate-confirmation-checklist">
+      <div className={styles.candidateChecklistSummary}>
+        <strong>{isZh ? "候选确认清单" : "Candidate confirmation checklist"}</strong>
+        <span>{isZh
+          ? `共 ${currentRounds.length} · 已确认 ${confirmed} · 待确认 ${pending}${blocked ? ` · 已阻塞 ${blocked}` : ""}`
+          : `${currentRounds.length} total · ${confirmed} confirmed · ${pending} pending${blocked ? ` · ${blocked} blocked` : ""}`}
+        </span>
+      </div>
+      <ol className={styles.candidateChecklistList}>
+        {currentRounds.map((round, index) => {
+          const state = states[index]!;
+          const identity = isZh ? `候选 ${round.candidateId}` : `Candidate ${round.candidateId}`;
+          return (
+            <li className={styles.candidateChecklistItem} key={round.nodeId}>
+              <div className={styles.candidateChecklistIdentity}>
+                <strong>{identity}</strong>
+                <span>{isZh ? `第 ${round.roundIndex} 轮` : `Round ${round.roundIndex}`}</span>
+              </div>
+              <VStatusChip tone={state.tone}>{state.label}</VStatusChip>
+              {onNavigateToNode ? (
+                <VButton
+                  type="button"
+                  variant={state.kind === "pending" ? "primary" : "ghost"}
+                  density="compact"
+                  onPress={() => onNavigateToNode(round.nodeId)}
+                >
+                  {isZh ? "进入对应会议" : "Open meeting"}
+                </VButton>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function inspectorTitle(nodeId: string, lang: Language): string {
   if (nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID) return lang === "zh" ? "候选假说生成" : "Candidate generation";
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) return lang === "zh" ? "假说选择" : "Hypothesis selection";
   if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID) return lang === "zh" ? "假说评审" : "Hypothesis review";
-  if (nodeId.startsWith("hf_meeting_")) return lang === "zh"
-    ? `第 ${nodeId.slice("hf_meeting_".length)} 轮讨论·评审`
-    : `Review discussion · round ${nodeId.slice("hf_meeting_".length)}`;
+  if (nodeId.startsWith("hf_meeting_")) {
+    const reviewTarget = nodeId.slice("hf_meeting_".length);
+    const separator = reviewTarget.indexOf("_");
+    const round = separator >= 0 ? reviewTarget.slice(0, separator) : reviewTarget;
+    const encodedCandidate = separator >= 0 ? reviewTarget.slice(separator + 1) : "";
+    let candidateId = encodedCandidate;
+    try {
+      candidateId = decodeURIComponent(encodedCandidate);
+    } catch {
+      // The id is display-only. Preserve the raw server token if it is malformed.
+    }
+    return lang === "zh"
+      ? `第 ${round} 轮讨论·${candidateId ? `候选 ${candidateId}` : "评审"}`
+      : `Review discussion · round ${round}${candidateId ? ` · candidate ${candidateId}` : ""}`;
+  }
   if (nodeId.startsWith("hf_collection_")) return lang === "zh" ? "资料搜集" : "Evidence collection";
   if (nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID) return lang === "zh" ? "资料补充" : "Evidence collection";
   if (nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID) return lang === "zh" ? "假说收敛门" : "Hypothesis convergence gate";

@@ -9,7 +9,9 @@ const REVIEW_NODE_PREFIX = "hf_meeting_";
 export type ProjectedReviewMeeting = {
   meeting: MeetingRoundRecord;
   nodeId: string;
+  selectionId: string;
   roundIndex: number;
+  candidateId: string;
   previousMeetingRoundId: string;
 };
 
@@ -27,6 +29,14 @@ function validRoundIndex(value: unknown): number | null {
 
 function normalizedId(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function reviewNodeId(roundIndex: number, candidateId: string): string {
+  return `${REVIEW_NODE_PREFIX}${roundIndex}_${encodeURIComponent(candidateId)}`;
+}
+
+function projectionKey(selectionId: string, roundIndex: number, candidateId: string): string {
+  return JSON.stringify([selectionId, roundIndex, candidateId]);
 }
 
 /**
@@ -65,13 +75,20 @@ export function buildHypothesisFirstReviewProjection(
       const meetingLinks = linksByMeetingId.get(meeting.meetingRoundId) ?? [];
       if (meetingLinks.length > 1) return null;
       const link = meetingLinks[0];
+      // A linked review round is candidate-specific. Never make an arbitrary
+      // choice when the backend cannot tell us which selected candidate owns it.
+      if (link && !normalizedId(link.candidateId)) return null;
       const roundIndex = validRoundIndex(link?.roundIndex)
         ?? validRoundIndex(meeting.roundIndex);
       if (roundIndex === null) return null;
+      const linkedSelectionId = normalizedId(link?.selectionId);
+      const candidateId = normalizedId(link?.candidateId) || `legacy:${meeting.meetingRoundId}`;
       return {
         meeting,
-        nodeId: `${REVIEW_NODE_PREFIX}${roundIndex}`,
+        selectionId: linkedSelectionId || normalizedId(meeting.selectionId) || "legacy",
+        nodeId: link ? reviewNodeId(roundIndex, candidateId) : `${REVIEW_NODE_PREFIX}${roundIndex}`,
         roundIndex,
+        candidateId,
         previousMeetingRoundId: String(
           link?.previousMeetingRoundId || meeting.previousMeetingRoundId || "",
         ),
@@ -79,14 +96,23 @@ export function buildHypothesisFirstReviewProjection(
     })
     .filter((round): round is ProjectedReviewMeeting => round !== null);
 
-  const countByRoundIndex = new Map<number, number>();
+  const countByProjectionKey = new Map<string, number>();
+  const countByNodeId = new Map<string, number>();
   for (const round of candidates) {
-    countByRoundIndex.set(round.roundIndex, (countByRoundIndex.get(round.roundIndex) ?? 0) + 1);
+    const key = projectionKey(round.selectionId, round.roundIndex, round.candidateId);
+    countByProjectionKey.set(key, (countByProjectionKey.get(key) ?? 0) + 1);
+    countByNodeId.set(round.nodeId, (countByNodeId.get(round.nodeId) ?? 0) + 1);
   }
   const rounds = candidates
-    .filter((round) => countByRoundIndex.get(round.roundIndex) === 1)
+    .filter((round) => countByProjectionKey.get(projectionKey(
+      round.selectionId,
+      round.roundIndex,
+      round.candidateId,
+    )) === 1 && countByNodeId.get(round.nodeId) === 1)
     .sort((left, right) => {
       if (left.roundIndex !== right.roundIndex) return left.roundIndex - right.roundIndex;
+      const byCandidate = left.candidateId.localeCompare(right.candidateId);
+      if (byCandidate !== 0) return byCandidate;
       return String(left.meeting.startedAt ?? "").localeCompare(String(right.meeting.startedAt ?? ""));
     });
   const byMeetingId = new Map(rounds.map((round) => [round.meeting.meetingRoundId, round]));
@@ -102,4 +128,12 @@ export function currentProjectedReview(
   projection: HypothesisFirstReviewProjection,
 ): ProjectedReviewMeeting | null {
   return projection.rounds[projection.rounds.length - 1] ?? null;
+}
+
+/** The next writable review is still server-authored; this only chooses a
+ * stable card for navigation while preserving every sibling in the projection. */
+export function currentActionableProjectedReview(
+  projection: HypothesisFirstReviewProjection,
+): ProjectedReviewMeeting | null {
+  return [...projection.rounds].reverse().find((round) => round.meeting.status !== "closed") ?? null;
 }

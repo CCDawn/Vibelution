@@ -406,6 +406,9 @@ export type ReviewRoundLinkRecord = {
   collectionRequestId: string;
   questionId: string;
   roundIndex: number;
+  /** Candidate-specific review lineage. Older records may omit it; UI treats
+   * a missing value on a linked review as unresolved rather than guessing. */
+  candidateId?: string;
   createdAt: string;
 };
 
