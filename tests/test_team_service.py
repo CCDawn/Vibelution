@@ -766,6 +766,19 @@ def test_challenge_cup_research_team_repair_detects_exact_projection_and_room_dr
     assert team_service.challenge_cup_research_team_agents_need_repair() is True
     team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
 
+    member = team["members"][0]
+    agent_directory_service.update_agent_instance(
+        member["agentId"], direct_session_id="session-recreated-after-reset"
+    )
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+    team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    assert next(
+        participant["sessionId"]
+        for participant in room["participants"]
+        if participant["agentId"] == member["agentId"]
+    ) == "session-recreated-after-reset"
+
     extra = agent_directory_service.create_agent_instance(
         display_name="无关第七人",
         direct_session_id="session-unrelated-seventh-participant",
