@@ -44,11 +44,11 @@ CONFIRMATION_PHRASE = "RESET research-team KEEP SCI-096"
 # a plan may become executable.
 RETAINED_AGENT_ROLE_KEYS: tuple[str, ...] = (
     "challenge_cup_search",
-    "extractor",
-    "knowledge_manager",
-    "execution_steward",
-    "experiment_revision",
-    "evaluator",
+    "challenge_cup_extractor",
+    "challenge_cup_knowledge_manager",
+    "challenge_cup_execution_steward",
+    "challenge_cup_experiment_revision",
+    "challenge_cup_evaluator",
 )
 
 RETAIN_ALLOWLIST: dict[str, Any] = {
