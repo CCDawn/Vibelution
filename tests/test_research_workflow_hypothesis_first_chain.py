@@ -34,6 +34,7 @@ from core.research.workflow.contracts import (
     WorkflowCommandKind,
     scope_hash_for,
 )
+from core.research.workflow.contracts.discussion_scope import parse_discussion_scope
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -608,7 +609,7 @@ def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
     ]
 
 
-def test_chain_state_projects_explicit_next_candidate_anchor(
+def test_chain_state_projects_first_open_candidate_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from core.web.services import team_service
@@ -626,6 +627,10 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
         "candidateId": "hyp-a",
     }
     scope_b = {**scope_a, "candidateId": "hyp-b"}
+    scope_hashes = {
+        "room-a": parse_discussion_scope(scope_a).scope_hash,
+        "room-b": parse_discussion_scope(scope_b).scope_hash,
+    }
     records = [
         {
             "recordKind": chain.REVIEW_ROUND_LINK_KIND,
@@ -648,6 +653,9 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
             "candidateOrder": 1,
         },
     ]
+    # Ledger insertion order is intentionally opposite to candidateOrder;
+    # chain_state must follow the explicit ordering key, not array position.
+    records.reverse()
     monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
     monkeypatch.setattr(chain, "_records", lambda _team_id: records)
     monkeypatch.setattr(
@@ -658,9 +666,9 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
                 "meetingRoundId": "meeting-a",
                 "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
                 "question": _QUESTION_ID,
-                "status": "closed",
+                "status": "open",
                 "discussionScope": scope_a,
-                "discussionScopeHash": "hash-a",
+                "discussionScopeHash": scope_hashes["room-a"],
                 "linkedChatRoomId": "room-a",
             },
             {
@@ -669,10 +677,22 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
                 "question": _QUESTION_ID,
                 "status": "open",
                 "discussionScope": scope_b,
-                "discussionScopeHash": "hash-b",
+                "discussionScopeHash": scope_hashes["room-b"],
                 "linkedChatRoomId": "room-b",
             },
         ],
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_compact",
+        lambda room_id: {
+            "roomId": room_id,
+            "status": "active",
+            "config": {
+                "discussionScope": scope_a if room_id == "room-a" else scope_b,
+                "scopeHash": scope_hashes[room_id],
+            },
+        },
     )
     monkeypatch.setattr(chain, "_question_hypothesis_rounds", lambda *_args: [])
     monkeypatch.setattr(chain, "_question_template_baselines", lambda *_args: [])
@@ -680,14 +700,17 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
 
     state = chain.chain_state(team_id, _QUESTION_ID)
 
-    assert state["activeDiscussionAnchor"] == {
-        "scope": scope_b,
-        "scopeHash": "hash-b",
-        "meetingRoundId": "meeting-b",
-        "roomId": "room-b",
-        "selectionId": "selection-1",
-        "candidateId": "hyp-b",
-    }
+    anchor = state["activeDiscussionAnchor"]
+    assert anchor["status"] == "ready"
+    assert anchor["scope"] == scope_a
+    assert anchor["scopeHash"] == scope_hashes["room-a"]
+    assert anchor["meetingRoundId"] == "meeting-a"
+    assert anchor["roomId"] == "room-a"
+    assert anchor["questionId"] == _QUESTION_ID
+    assert anchor["selectionId"] == "selection-1"
+    assert anchor["candidateId"] == "hyp-a"
+    assert "returnTo=" in anchor["deepLink"]
+    assert anchor["returnLabel"] == "返回科研流程"
 
 
 def _marker_runner(participant, prompt, context):
