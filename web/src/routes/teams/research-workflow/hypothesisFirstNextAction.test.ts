@@ -124,6 +124,7 @@ function reviewLink(
     collectionRequestId: "",
     questionId: "SCI-002",
     roundIndex,
+    candidateId: "cand-1",
     createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
     ...overrides,
   };
@@ -543,7 +544,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     });
 
     expect(next.stage).toBe("review_summarizing");
-    expect(next.targetNodeId).toBe("hf_meeting_5");
+    expect(next.targetNodeId).toBe("hf_meeting_5_cand-1");
     expect(next.meetingRoundId).toBe("r5");
   });
 
@@ -577,7 +578,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     });
 
     expect(next.stage).toBe("next_review");
-    expect(next.targetNodeId).toBe("hf_meeting_2");
+    expect(next.targetNodeId).toBe("hf_meeting_2_cand-1");
     expect(next.meetingRoundId).toBe("current-r2");
   });
 

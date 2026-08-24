@@ -25,6 +25,9 @@ const leafHarness = vi.hoisted(() => ({
 const hypothesisLeafHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
+const launchLeafHarness = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
 
 vi.mock("../teamLazyPanels", async () => {
   const actual = await vi.importActual<typeof import("../teamLazyPanels")>("../teamLazyPanels");
@@ -37,6 +40,10 @@ vi.mock("../teamLazyPanels", async () => {
     HypothesisFirstNodeInspector: (props: Record<string, unknown>) => {
       hypothesisLeafHarness.props = props;
       return <div data-testid="mock-hypothesis-first-node-inspector" />;
+    },
+    ResearchRunLaunchPanel: (props: Record<string, unknown>) => {
+      launchLeafHarness.props = props;
+      return <div data-testid="mock-research-run-launch-panel" />;
     },
   };
 });
@@ -327,6 +334,37 @@ describe("ResearchProcessInspectorPane current-task ownership", () => {
   it("returns from the archive to the semantic current task", () => {
     expect(researchArchiveReturnNodeId("hf_selection", "hf_meeting_4")).toBe("hf_review");
     expect(researchArchiveReturnNodeId("hf_collection", null)).toBe("hf_collection");
+  });
+});
+
+describe("ResearchProcessInspectorPane convergence launch", () => {
+  afterEach(() => {
+    launchLeafHarness.props = null;
+    document.body.innerHTML = "";
+  });
+
+  it("keeps formal run creation in the right-side inspector after convergence", async () => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", {
+        runId: "",
+        questionId: "Q-01",
+        selectedNodeId: "hf_convergence_gate",
+      }),
+      { kind: "idle" },
+      {
+        nextAction: {
+          stage: "converged",
+          targetNodeId: "hf_convergence_gate",
+          navigationLabel: "查看假说收敛",
+        },
+      },
+    );
+
+    expect(container.querySelector('[data-testid="mock-research-run-launch-panel"]')).not.toBeNull();
+    expect(launchLeafHarness.props?.initialQuestionId).toBe("Q-01");
+    await act(async () => root.unmount());
+    container.remove();
   });
 });
 

@@ -112,6 +112,7 @@ function scopeReviewLink(meetingRoundId: string, roundIndex: number) {
     collectionRequestId: "",
     questionId: "Q-01",
     roundIndex,
+    candidateId: "cand-1",
     createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
   };
 }
@@ -346,7 +347,7 @@ describe("HypothesisFirstNodeInspector", () => {
       <HypothesisFirstNodeInspector
         teamId="team-1"
         questionId="Q-01"
-        nodeId="hf_meeting_5"
+        nodeId="hf_meeting_5_cand-1"
         onOpenQuestion={() => {}}
       />,
     );
@@ -389,12 +390,56 @@ describe("HypothesisFirstNodeInspector", () => {
       <HypothesisFirstNodeInspector
         teamId="team-1"
         questionId="Q-01"
-        nodeId="hf_meeting_2"
+        nodeId="hf_meeting_2_cand-1"
         onOpenQuestion={() => {}}
       />,
     );
 
     expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("current-r2");
+  });
+
+  it("keeps every candidate confirmation visible after one sibling closes", () => {
+    const onNavigateToNode = vi.fn();
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        selectionId: "sel-1",
+        candidateCount: 2,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        selectionId: "sel-1",
+        selectedCandidateIds: ["cand-a", "cand-b"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r4-old", meetingType: "hypothesis_review", roundIndex: 4, status: "closed" }),
+        scopeMeeting({ meetingRoundId: "r5-a", meetingType: "hypothesis_review", roundIndex: 5, status: "closed" }),
+        scopeMeeting({ meetingRoundId: "r5-b", meetingType: "hypothesis_review", roundIndex: 5, status: "awaiting_approval" }),
+      ],
+      reviewRoundLinks: [
+        { ...scopeReviewLink("r4-old", 4), candidateId: "cand-old" },
+        { ...scopeReviewLink("r5-a", 5), candidateId: "cand-a" },
+        { ...scopeReviewLink("r5-b", 5), candidateId: "cand-b" },
+      ],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        onOpenQuestion={() => {}}
+        onNavigateToNode={onNavigateToNode}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).toContain("共 2 · 已确认 1 · 待确认 1");
+    expect(container.textContent).toContain("候选 cand-a");
+    expect(container.textContent).toContain("候选 cand-b");
+    expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).not.toContain("cand-old");
+    const candidateButtons = Array.from(container.querySelectorAll("button"))
+      .filter((button) => button.textContent === "进入对应会议");
+    act(() => {
+      candidateButtons[0]?.click();
+    });
+    expect(onNavigateToNode).toHaveBeenCalledWith("hf_meeting_5_cand-a");
   });
 
   it("does not let another question's later meeting mask the current r5 inspector", () => {

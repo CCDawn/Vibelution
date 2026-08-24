@@ -195,7 +195,15 @@ export function ResearchProcessInspectorPane(props: {
       />
     );
   }
-  if (scope.panel === "launch" || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)) {
+  const needsFormalRunAfterConvergence = scope.panel === "node"
+    && scope.selectedNodeId === "hf_convergence_gate"
+    && nextAction?.stage === "converged"
+    && !scope.runId;
+  if (
+    scope.panel === "launch"
+    || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)
+    || needsFormalRunAfterConvergence
+  ) {
     return (
       <ResearchRunLaunchPanel
         lang={lang}
