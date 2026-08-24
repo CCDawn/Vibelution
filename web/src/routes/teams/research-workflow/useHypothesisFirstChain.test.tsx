@@ -357,6 +357,17 @@ describe("question-scoped hypothesis polling", () => {
       requests: [requestRecord("req-1")],
     })).toBe(true);
   });
+
+  it("stops polling when a child run reports a terminal status", () => {
+    expect(shouldPollQuestionScopedChain({
+      questionId: "Q-01",
+      requests: [{ ...requestRecord("failed"), collectionRunStatus: "failed" }],
+    })).toBe(false);
+    expect(shouldPollQuestionScopedChain({
+      questionId: "Q-01",
+      requests: [{ ...requestRecord("completed"), collectionRunStatus: "completed" }],
+    })).toBe(false);
+  });
 });
 
 function Probe(props: {

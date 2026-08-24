@@ -20,6 +20,7 @@ import {
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
+import { collectionRequestNeedsPolling } from "./hypothesisFirstCollectionStatus";
 import type {
   CollectionRequestRecord,
   HypothesisFirstChainState,
@@ -82,11 +83,9 @@ function shouldPollCollections(
   state: HypothesisFirstChainState | undefined,
   requests: CollectionRequestRecord[] | undefined,
 ): boolean {
-  if (state?.collectionReady && state.pendingCollectionCount > 0) return true;
-  return (requests ?? []).some((request) => {
-    const status = String(request.status || "");
-    return status !== "handed_off" && !request.handoffRef;
-  });
+  const list = requests ?? [];
+  if (list.length > 0) return list.some(collectionRequestNeedsPolling);
+  return Boolean(state?.collectionReady && state.pendingCollectionCount > 0);
 }
 
 function normalizedQuestion(value: string | null | undefined): string {

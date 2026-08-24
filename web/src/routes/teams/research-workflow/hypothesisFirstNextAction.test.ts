@@ -364,6 +364,28 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(cont.commandLabel).toBe("继续搜集");
   });
 
+  it("uses the child-run terminal status when the request record is still pending", () => {
+    const failed = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "pending", collectionRunStatus: "failed" })],
+    });
+    expect(failed.stage).toBe("collection_recovery");
+    expect(failed.command).toBe("retry_collection");
+    expect(failed.recovery?.reason).toBe("资料搜集失败，请重试。");
+
+    const cont = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "pending", collectionRunStatus: "needs_continue" })],
+    });
+    expect(cont.stage).toBe("collection_recovery");
+    expect(cont.command).toBe("continue_collection");
+    expect(cont.commandLabel).toBe("继续搜集");
+  });
+
   it("retries handoff after the child run completed but the request is not handed off", () => {
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },

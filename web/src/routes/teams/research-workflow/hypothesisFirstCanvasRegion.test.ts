@@ -368,6 +368,21 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(region.showDownstreamPipeline).toBe(true);
   });
 
+  it("projects child-run failure even when the durable request remains pending", () => {
+    const region = regionOf({
+      selection: selection(),
+      meetings: [meeting(1, "closed", { digestRef: "digest-1" })],
+      collectionRequests: [request("req-1", "hf-review-sel-1-r1", {
+        status: "pending",
+        collectionRunStatus: "needs_continue",
+      })],
+      chainState: chainState({ meetingCount: 1, collectionRequestCount: 1, pendingCollectionCount: 1 }),
+    })!;
+    const collectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID)!;
+    expect(collectionNode.status).toBe("failed");
+    expect(collectionNode.description).toContain("需要恢复");
+  });
+
   it("keeps multiple closed rounds and handoffs inside the semantic cards", () => {
     const region = regionOf({
       selection: selection(),

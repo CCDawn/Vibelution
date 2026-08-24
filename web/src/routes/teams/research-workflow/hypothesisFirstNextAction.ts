@@ -25,6 +25,7 @@ import {
   type HypothesisFirstReviewProjection,
   type ProjectedReviewMeeting,
 } from "./hypothesisFirstMeetingProjection";
+import { effectiveCollectionRequestStatus } from "./hypothesisFirstCollectionStatus";
 
 export type HypothesisFirstStage =
   | "no_run"
@@ -262,7 +263,7 @@ function childStatus(
   request: CollectionRequestRecord | null,
   override?: string | null,
 ): string {
-  return String(override || request?.status || "").trim().toLowerCase();
+  return effectiveCollectionRequestStatus(request, override);
 }
 
 function latestRequest(
@@ -503,8 +504,10 @@ export function resolveHypothesisFirstNextAction(
     const status = childStatus(request, input.collectionChildStatus);
     const collectionRunId = String(request.collectionRunId || "").trim() || undefined;
     if (RECOVERY_CHILD.has(status)) {
-      const recoveryReason = request.status === "failed"
+      const recoveryReason = status === "failed" && request.status === "failed"
         ? "资料搜集启动失败，请重试。"
+        : status === "failed"
+          ? "资料搜集失败，请重试。"
         : "资料搜集未完成";
       return action({
         stage: "collection_recovery",

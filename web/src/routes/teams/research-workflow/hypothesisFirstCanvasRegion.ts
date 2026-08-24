@@ -25,6 +25,9 @@ import {
   buildEdgePathStates,
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
+import {
+  effectiveCollectionRequestStatus,
+} from "./hypothesisFirstCollectionStatus";
 
 export const HYPOTHESIS_FIRST_NODE_PREFIX = "hf_";
 export const HYPOTHESIS_FIRST_STAGE_ID = "hypothesis_first";
@@ -149,10 +152,11 @@ function collectionNodeStatus(request: CollectionRequestRecord): WorkflowNodeRun
   if (request.handoffRef || request.handedOffAt || request.status === "handed_off") {
     return "succeeded";
   }
-  if (request.status === "failed") {
+  const status = effectiveCollectionRequestStatus(request);
+  if (status === "failed" || status === "needs_continue" || status === "error" || status === "blocked") {
     return "failed";
   }
-  if (request.status === "running" || request.status === "collecting" || request.status === "in_progress") {
+  if (status === "running" || status === "collecting" || status === "in_progress" || status === "starting" || status === "dispatching") {
     return "running";
   }
   // Record-level statuses are pending / handed_off; unknown values stay pending.
@@ -161,9 +165,15 @@ function collectionNodeStatus(request: CollectionRequestRecord): WorkflowNodeRun
 
 function collectionNodeDescription(request: CollectionRequestRecord): string {
   const status = collectionNodeStatus(request);
+  const childStatus = effectiveCollectionRequestStatus(request);
   if (status === "succeeded") return "知识包已交接";
-  if (status === "failed") return "搜集子运行失败";
+  if (status === "failed") {
+    return childStatus === "needs_continue" ? "搜集子运行需要继续" : "搜集子运行失败";
+  }
   if (status === "running") return "搜集子运行在途";
+  if (childStatus === "completed" || childStatus === "succeeded" || childStatus === "handoff_pending") {
+    return "搜集已完成，等待交接";
+  }
   return request.collectionRunId ? "搜集子运行已触发，等待完成" : "等待搜集子运行";
 }
 
