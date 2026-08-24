@@ -22,6 +22,31 @@ def _evaluate(service, context, node_id):
     )
 
 
+def test_problem_understanding_ready_with_question() -> None:
+    service = _service()
+    context = FakeDomainContext()
+    context.bindings["problem_understanding"] = {
+        "snapshotId": "bs-problem",
+        "agentId": "agent-a",
+    }
+    context._question = {"questionId": "SCI-096", "snapshotHash": "q" * 64}
+    result = _evaluate(service, context, "problem_understanding")
+    assert result.ready is True
+
+
+def test_problem_understanding_missing_question_blocks() -> None:
+    service = _service()
+    context = FakeDomainContext()
+    context.bindings["problem_understanding"] = {
+        "snapshotId": "bs-problem",
+        "agentId": "agent-a",
+    }
+    context._question = None
+    result = _evaluate(service, context, "problem_understanding")
+    assert result.ready is False
+    assert any(b.code == "question_snapshot_missing" for b in result.blockers)
+
+
 def test_source_finding_ready_with_question() -> None:
     service = _service()
     context = FakeDomainContext()

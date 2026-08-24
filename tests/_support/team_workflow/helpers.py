@@ -1,5 +1,6 @@
 import json
 import ast
+import uuid
 from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,10 @@ from core.web.services import (
     team_workflow_orchestration_service,
 )
 from core.web.services.team_workflow import challenge_question_runs
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
+    write_problem_understanding_artifact,
+)
 from tools import team_knowledge_tools
 
 # Domain case modules intentionally omit module-level ``serial``.
@@ -80,6 +85,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _NoopBackgroundExecutor())
     # The official Challenge Cup dataset is operator-provided and intentionally
@@ -102,6 +108,65 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(challenge_question_runs, "_catalog_path", lambda: catalog_path)
+
+
+def _canonical_problem_understanding_for_test() -> dict[str, object]:
+    return {
+        "scope": "验证当前资料搜集阶段的受管测试行为。",
+        "subquestions": ["finding 阶段是否遵守当前测试声明的边界？"],
+        "assumptions": ["资料搜集运行已绑定当前工作流。"],
+        "known_unknowns": ["Agent 的实际资料结果尚未产生。"],
+        "human_gate": {
+            "required": True,
+            "decision": "approved",
+            "reviewer": "test-reviewer",
+            "decided_at": "2026-08-24T00:00:00Z",
+            "rationale": "测试已确认问题边界，可以进入 finding 阶段。",
+        },
+    }
+
+
+def _with_problem_understanding_scope(payload):
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    scope = dict(request_payload.get("scope") or {})
+    workflow_run_id = str(scope.get("workflowRunId") or "").strip()
+    if not workflow_run_id:
+        workflow_run_id = f"workflow-test-{uuid.uuid4().hex}"
+        scope["workflowRunId"] = workflow_run_id
+    request_payload["scope"] = scope
+    return request_payload, workflow_run_id
+
+
+def _write_test_problem_understanding(team_id, run_response, workflow_run_id):
+    source_run = run_response.get("run") if isinstance(run_response, dict) else {}
+    source_run_id = str((source_run or {}).get("runId") or "").strip()
+    assert source_run_id
+    write_problem_understanding_artifact(
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        node_run_id=f"node-problem-test-{uuid.uuid4().hex}",
+        problem_understanding=_canonical_problem_understanding_for_test(),
+    )
+    return run_response
+
+
+def _start_source_collection_run_with_problem_understanding(team_id, payload=None):
+    request_payload, workflow_run_id = _with_problem_understanding_scope(payload)
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team_id,
+        request_payload,
+    )
+    return _write_test_problem_understanding(team_id, response, workflow_run_id)
+
+
+def _start_research_stage_round_with_problem_understanding(team_id, payload=None):
+    request_payload, workflow_run_id = _with_problem_understanding_scope(payload)
+    response = team_workflow_orchestration_service.start_research_stage_round(
+        team_id,
+        request_payload,
+    )
+    return _write_test_problem_understanding(team_id, response, workflow_run_id)
 
 def _capture_workflow_events(monkeypatch):
     events = []

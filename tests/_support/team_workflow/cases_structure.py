@@ -258,7 +258,7 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",

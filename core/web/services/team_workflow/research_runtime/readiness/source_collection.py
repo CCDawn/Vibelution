@@ -1,4 +1,4 @@
-"""Source Collection readiness evaluators: source_finding / source_extraction."""
+"""Source Collection readiness evaluators for the knowledge-stage entry nodes."""
 
 from __future__ import annotations
 
@@ -18,6 +18,39 @@ from .common import (
 )
 
 
+def _question_snapshot_blockers(
+    *,
+    run: RunSnapshot,
+    context: DomainReadinessContext,
+) -> list[Any]:
+    snapshot = context.question_snapshot(
+        run.team_id, run.question_id, run_id=run.run_id
+    )
+    if snapshot is not None:
+        return []
+    return [
+        blocker(
+            "question_snapshot_missing",
+            "题目快照缺失",
+            "题目权威存储中没有可用的冻结题目快照",
+            remediation_kind=None,
+        )
+    ]
+
+
+def evaluate_problem_understanding(
+    *,
+    run: RunSnapshot,
+    node: WorkflowNodeSpec,
+    common: CommonReadinessResult,
+    context: DomainReadinessContext,
+) -> DomainVerdict:
+    return DomainVerdict(
+        blockers=tuple(_question_snapshot_blockers(run=run, context=context)),
+        revision_vector=common.domain_revision_vector,
+    )
+
+
 def evaluate_source_finding(
     *,
     run: RunSnapshot,
@@ -25,19 +58,7 @@ def evaluate_source_finding(
     common: CommonReadinessResult,
     context: DomainReadinessContext,
 ) -> DomainVerdict:
-    blockers: list[Any] = []
-    snapshot = context.question_snapshot(
-        run.team_id, run.question_id, run_id=run.run_id
-    )
-    if snapshot is None:
-        blockers.append(
-            blocker(
-                "question_snapshot_missing",
-                "题目快照缺失",
-                "题目权威存储中没有可用的冻结题目快照",
-                remediation_kind=None,
-            )
-        )
+    blockers = _question_snapshot_blockers(run=run, context=context)
     if hypothesis_first_run(context, run):
         state = hypothesis_first_chain_state(context, run)
         if not state.get("collectionReady"):

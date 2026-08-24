@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
+    write_problem_understanding_artifact,
+)
 from tests._support.team_workflow.helpers import *  # noqa: F403
 from tests.test_challenge_question_runs import _append_canonical_turn_output
 
@@ -34,6 +38,7 @@ def test_source_collection_summary_reuses_processing_status_for_projection(tmp_p
 
 def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
@@ -42,6 +47,7 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
+    workflow_run_id = "workflow-stage-summary-needs-continue"
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -50,9 +56,29 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
             "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
         },
     )
     run_id = run_response["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=run_id,
+        node_run_id="node-problem-stage-summary-needs-continue",
+        problem_understanding={
+            "scope": "验证资料搜集任务在中断后可以继续。",
+            "subquestions": ["finding 阶段是否保留可恢复的任务状态？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["恢复后的实际搜索结果尚未产生。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以进入 finding 阶段。",
+            },
+        },
+    )
     monkeypatch.setattr(
         session_service,
         "submit_session_message",
@@ -784,6 +810,7 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
 
 def test_seed_source_collection_agent_session_context_writes_and_dedupes_project_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     _use_fake_local_research_config(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
@@ -792,6 +819,7 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_project
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
 
+    workflow_run_id = "workflow-seed-agent-session-context"
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -801,17 +829,38 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_project
             "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
+        },
+    )
+    source_run_id = run_response["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        node_run_id="node-problem-seed-agent-session-context",
+        problem_understanding={
+            "scope": "验证资料搜集 Agent 会话上下文的创建与去重。",
+            "subquestions": ["同一 finding 上下文是否只写入一次？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["Agent 尚未返回资料结果。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以创建 finding 会话。",
+            },
         },
     )
 
     first = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
         team["teamId"],
-        run_response["run"]["runId"],
+        source_run_id,
         {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     second = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
         team["teamId"],
-        run_response["run"]["runId"],
+        source_run_id,
         {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
 
@@ -851,7 +900,7 @@ def test_start_source_collection_stage_session_task_submits_project_session_task
         name="挑战杯科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "脑启发路由",
@@ -1335,7 +1384,7 @@ def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, 
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "脑启发路由",
@@ -1412,7 +1461,7 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -1482,7 +1531,7 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -1589,7 +1638,7 @@ def test_source_collection_stage_session_task_writeback_materializes_source_reco
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -1678,7 +1727,7 @@ def test_source_collection_stage_session_task_writeback_rejects_leads_without_id
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -1976,7 +2025,7 @@ def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -2081,7 +2130,7 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
         name="挑战杯科研团队",
         members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -2738,7 +2787,7 @@ def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_p
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -2807,7 +2856,7 @@ def test_research_stage_status_reconciles_interrupted_stage_task_turn_journal(tm
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -4356,7 +4405,7 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
         name="挑战杯科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "神经预测编码资料提炼",
@@ -4848,7 +4897,7 @@ def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_s
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "predictive coding",
@@ -4992,7 +5041,7 @@ def test_source_collection_stage_task_after_turn_rejects_unrelated_new_turn(tmp_
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "predictive coding",
@@ -5053,7 +5102,7 @@ def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tm
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+    stage_response = _start_research_stage_round_with_problem_understanding(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
@@ -5325,7 +5374,7 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
         name="挑战杯科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "神经预测编码资料提炼",
@@ -7887,7 +7936,7 @@ def test_challenge_stage_task_uses_configured_agent_model_without_official_evide
         name="挑战杯科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "predictive coding",
@@ -8027,7 +8076,7 @@ def test_legacy_challenge_stage_task_recovers_policy_from_prompt_cache_snapshot(
         name="挑战杯科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "predictive coding",
@@ -8110,7 +8159,7 @@ def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, 
         name="挑战杯科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run_response = team_workflow_orchestration_service.start_source_collection_run(
+    run_response = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "predictive coding",
