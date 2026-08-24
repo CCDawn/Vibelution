@@ -1097,9 +1097,13 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
 def _isolate_research_projects_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(research_projects.team_service, "get_team", lambda _team_id: {})
     monkeypatch.setattr(research_projects.team_service, "assert_team_exists", lambda _team_id: None)
+    # Patch the formal workspace root: the activation store lives under
+    # formal_team_workspace_root/research_projects, not the DEV sandbox root.
+    # Using team_workspace_root here leaked test data into the live formal
+    # store and also made the gate read stale activation state.
     monkeypatch.setattr(
         research_projects,
-        "team_workspace_root",
+        "formal_team_workspace_root",
         lambda team_id: tmp_path / "teams" / str(team_id),
     )
     monkeypatch.setattr(research_projects, "_record_project_event", lambda *args, **kwargs: None)

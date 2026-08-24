@@ -285,11 +285,42 @@ function openReviewAfterHandoff(
   ) ?? null;
 }
 
+type HypothesisFirstSiblingProgress = {
+  order: number;
+  count: number;
+  pending: number;
+};
+
+function siblingProgress(
+  projection: HypothesisFirstReviewProjection,
+  current: ProjectedReviewMeeting,
+): HypothesisFirstSiblingProgress | undefined {
+  const siblings = projection.rounds.filter((round) =>
+    round.roundIndex === current.roundIndex
+  );
+  if (siblings.length <= 1) return undefined;
+  const currentIndex = siblings.findIndex((round) =>
+    round.meeting.meetingRoundId === current.meeting.meetingRoundId
+  );
+  return {
+    order: Math.max(0, currentIndex) + 1,
+    count: siblings.length,
+    pending: siblings.filter((round) => round.meeting.status !== "closed").length,
+  };
+}
+
+function siblingPrefix(progress: HypothesisFirstSiblingProgress | undefined): string {
+  return progress && progress.count > 1
+    ? `候选 ${progress.order}/${progress.count} · `
+    : "";
+}
+
 function meetingStage(
   kind: "generation" | "review",
   meeting: MeetingRoundRecord,
   terminal: boolean,
   reviewNodeId?: string,
+  sibling?: HypothesisFirstSiblingProgress,
 ): HypothesisFirstNextAction {
   const generation = kind === "generation";
   const nodeId = generation ? HYPOTHESIS_FIRST_GENERATION_NODE_ID : reviewNodeId;
@@ -321,7 +352,7 @@ function meetingStage(
       commandLabel: generation ? "整理候选清单" : "整理本轮结论",
       statusMessage: generation
         ? "团队讨论已结束，系统正在整理候选清单"
-        : "本轮评审已结束，系统正在整理结论",
+        : `${siblingPrefix(sibling)}本轮评审已结束，系统正在整理结论`,
       meetingRoundId: roundId,
     });
   }
@@ -363,13 +394,18 @@ function meetingStage(
       });
     }
     const disabledReason = reviewDigestConfirmBlocker(meeting.digestDraft);
+    const remaining = sibling && sibling.count > 1
+      ? Math.max(0, sibling.pending - 1)
+      : 0;
     return action({
       stage: "review_awaiting_approval",
       targetNodeId: nodeId,
       navigationLabel: "前往确认本轮",
       command: "approve_review_digest",
       commandLabel: "确认并结束本轮",
-      commandDetail: "归档本轮评审纪要，流程将自动继续下一步",
+      commandDetail: remaining > 0
+        ? `归档本候选的评审纪要；确认后还需关闭其余 ${remaining} 个候选的评审`
+        : "归档本轮评审纪要，流程将自动继续下一步",
       disabledReason,
       meetingRoundId: roundId,
     });
@@ -437,7 +473,13 @@ export function resolveHypothesisFirstNextAction(
         meetingRoundId: activeReview.meetingRoundId,
       });
     }
-    return meetingStage("review", activeReview, terminal, reviewRound.nodeId);
+    return meetingStage(
+      "review",
+      activeReview,
+      terminal,
+      reviewRound.nodeId,
+      siblingProgress(reviewProjection, reviewRound),
+    );
   }
 
   const unresolvedActiveReview = meetings.find(
@@ -582,7 +624,13 @@ export function resolveHypothesisFirstNextAction(
           meetingRoundId: next.meeting.meetingRoundId,
         });
       }
-      return meetingStage("review", next.meeting, terminal, next.nodeId);
+      return meetingStage(
+        "review",
+        next.meeting,
+        terminal,
+        next.nodeId,
+        siblingProgress(reviewProjection, next),
+      );
     }
   }
 

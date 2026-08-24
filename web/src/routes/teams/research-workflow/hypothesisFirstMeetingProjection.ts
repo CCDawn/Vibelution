@@ -12,6 +12,7 @@ export type ProjectedReviewMeeting = {
   selectionId: string;
   roundIndex: number;
   candidateId: string;
+  candidateOrder: number;
   previousMeetingRoundId: string;
 };
 
@@ -37,6 +38,13 @@ function reviewNodeId(roundIndex: number, candidateId: string): string {
 
 function projectionKey(selectionId: string, roundIndex: number, candidateId: string): string {
   return JSON.stringify([selectionId, roundIndex, candidateId]);
+}
+
+function candidateOrder(link: ReviewRoundLinkRecord | undefined): number {
+  const value = link?.candidateOrder;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : Number.MAX_SAFE_INTEGER;
 }
 
 /**
@@ -89,6 +97,7 @@ export function buildHypothesisFirstReviewProjection(
         nodeId: link ? reviewNodeId(roundIndex, candidateId) : `${REVIEW_NODE_PREFIX}${roundIndex}`,
         roundIndex,
         candidateId,
+        candidateOrder: candidateOrder(link),
         previousMeetingRoundId: String(
           link?.previousMeetingRoundId || meeting.previousMeetingRoundId || "",
         ),
@@ -111,6 +120,9 @@ export function buildHypothesisFirstReviewProjection(
     )) === 1 && countByNodeId.get(round.nodeId) === 1)
     .sort((left, right) => {
       if (left.roundIndex !== right.roundIndex) return left.roundIndex - right.roundIndex;
+      if (left.candidateOrder !== right.candidateOrder) {
+        return left.candidateOrder - right.candidateOrder;
+      }
       const byCandidate = left.candidateId.localeCompare(right.candidateId);
       if (byCandidate !== 0) return byCandidate;
       return String(left.meeting.startedAt ?? "").localeCompare(String(right.meeting.startedAt ?? ""));

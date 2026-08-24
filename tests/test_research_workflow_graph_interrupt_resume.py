@@ -1,4 +1,4 @@
-"""T4 RED: formal runner — interrupt/resume over all 16 nodes, deterministic
+"""T4 RED: formal runner — interrupt/resume over all 17 nodes, deterministic
 actionIds across checkpoint restarts, no side effects before interrupt."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ def test_start_dispatch_interrupts_with_pending_action(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         handled = harness.worker.run_once()
         assert handled == 1
         pending = harness.latest_adapter_pending()
@@ -25,12 +25,12 @@ def test_start_dispatch_interrupts_with_pending_action(tmp_path: Path) -> None:
         import json
 
         payload = json.loads(pending.payload_json)
-        assert payload["nodeId"] == "source_finding"
+        assert payload["nodeId"] == "problem_understanding"
         assert payload["actorKind"] == "agent"
         assert payload["actionKind"] == "start_agent_task"
-        assert payload["actionId"] == action_id_for("run-test", "source_finding", 1)
+        assert payload["actionId"] == action_id_for("run-test", "problem_understanding", 1)
         assert pending.idempotency_key == f"adapter:{payload['actionId']}"
-        attempt = harness.commands.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.commands.store.latest_attempt("run-test", "problem_understanding")
         assert attempt is not None and attempt.status == "dispatching"
         assert attempt.pending_action_id == payload["actionId"]
     finally:
@@ -41,7 +41,7 @@ def test_checkpoint_restart_yields_same_action_id(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         harness.worker.run_once()
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
@@ -52,7 +52,7 @@ def test_checkpoint_restart_yields_same_action_id(tmp_path: Path) -> None:
         values = snapshot["values"]
         from core.research.workflow.challenge_cup_runtime import build_pending_action
 
-        pending = build_pending_action(values, "source_finding")
+        pending = build_pending_action(values, "problem_understanding")
         import json
 
         assert pending.action_id == json.loads(first_pending.payload_json)["actionId"]
@@ -60,11 +60,11 @@ def test_checkpoint_restart_yields_same_action_id(tmp_path: Path) -> None:
         harness.close()
 
 
-def test_full_16_node_walk_interrupts_every_node(tmp_path: Path) -> None:
+def test_full_17_node_walk_interrupts_every_node(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         seen: list[str] = []
         last_action: str | None = None
         for _ in range(40):
@@ -104,7 +104,7 @@ def test_resume_requires_matching_action_id(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         harness.worker.run_once()
         pending = harness.latest_adapter_pending()
         import json
@@ -112,14 +112,14 @@ def test_resume_requires_matching_action_id(tmp_path: Path) -> None:
         payload = json.loads(pending.payload_json)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="problem_understanding",
             attempt=1,
             action_id="act-wrong-identity",
         )
         harness.worker.run_once()
         # 身份不匹配的 receipt 使节点失败而不是前进。
         attempts = harness.commands.store.list_attempts("run-test")
-        assert {attempt.node_id for attempt in attempts} == {"source_finding"}
+        assert {attempt.node_id for attempt in attempts} == {"problem_understanding"}
     finally:
         harness.close()
 
@@ -131,8 +131,8 @@ def test_node_fn_has_no_side_effect_before_interrupt(tmp_path: Path) -> None:
         dispatch = GraphDispatch(
             action_id="act-driver",
             run_id="run-test",
-            node_run_id="nr-run-test-source_finding-a1",
-            node_id="source_finding",
+            node_run_id="nr-run-test-problem_understanding-a1",
+            node_id="problem_understanding",
             attempt=1,
             dispatch_kind="start",
             input_snapshot_hash="a" * 64,

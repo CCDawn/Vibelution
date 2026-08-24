@@ -1965,9 +1965,12 @@ def _review_meeting_fan_in_group(
 
 
 def _build_round_candidates(
-    team_id: str, meeting_round: Mapping[str, Any]
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    *,
+    candidate_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Assemble review inputs for the candidates discussed in one meeting.
+    """Assemble review inputs for explicit candidates or one meeting's refs.
 
     The authoritative source is the approved v2 question artifact (the same
     read path HF-1 selection validation uses): ``statement`` maps to the
@@ -1977,11 +1980,16 @@ def _build_round_candidates(
     """
     from core.web.services.team_workflow.research_runtime import question_launch
 
-    candidate_ids = [
-        ref.split(":", 1)[1].strip()
-        for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
-        if ref.startswith("hypothesis_candidate:") and ref.split(":", 1)[1].strip()
-    ]
+    normalized_candidate_ids = (
+        _normalized_str_list(candidate_ids)
+        if candidate_ids is not None
+        else [
+            ref.split(":", 1)[1].strip()
+            for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
+            if ref.startswith("hypothesis_candidate:")
+            and ref.split(":", 1)[1].strip()
+        ]
+    )
     question_id = str(meeting_round.get("question") or "").strip()
     detail = question_launch._approved_details(team_id).get(question_id.upper())
     if detail is None:
@@ -2009,7 +2017,7 @@ def _build_round_candidates(
             str(item.get("hypothesis_id") or "").strip(): item for item in hypotheses
         }
     candidates: list[dict[str, Any]] = []
-    for candidate_id in candidate_ids:
+    for candidate_id in normalized_candidate_ids:
         artifact = artifact_by_id.get(candidate_id) or {}
         candidate: dict[str, Any] = {
             "candidateId": candidate_id,
@@ -2088,11 +2096,21 @@ def _generate_hypothesis_round(
             raise HypothesisFirstChainError(
                 "fan-in meetings belong to different workflow runs"
             )
-        candidates = [
-            candidate
-            for bound_meeting in bound_meetings
-            for candidate in _build_round_candidates(team_id, bound_meeting)
-        ]
+        selected_candidate_ids = _normalized_str_list(
+            selection.get("selectedCandidateIds")
+        )
+        if not selected_candidate_ids:
+            raise HypothesisFirstChainError("selection has no selected candidates")
+        # Candidate-scoped follow-up meetings may review only the hypothesis
+        # that requested new evidence.  The generated HypothesisRound remains
+        # a selection-level comparison, so its candidate authority must stay
+        # the full ordered selection while meetingRefs preserve exactly which
+        # scoped discussions supplied this round's evidence.
+        candidates = _build_round_candidates(
+            team_id,
+            primary_meeting,
+            candidate_ids=selected_candidate_ids,
+        )
         round_index = int(fan_in.get("roundIndex") or 1)
         round_payload: dict[str, Any] = {"candidates": candidates}
         if len(meeting_round_ids) > 1:

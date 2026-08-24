@@ -28,7 +28,12 @@ function meeting(id: string, startedAt: string): MeetingRoundRecord {
   };
 }
 
-function link(id: string, roundIndex: number, candidateId = `cand-${id}`): ReviewRoundLinkRecord {
+function link(
+  id: string,
+  roundIndex: number,
+  candidateId = `cand-${id}`,
+  candidateOrder?: number,
+): ReviewRoundLinkRecord {
   return {
     schemaVersion: 1,
     recordKind: "hypothesis_first_review_round_link",
@@ -40,6 +45,7 @@ function link(id: string, roundIndex: number, candidateId = `cand-${id}`): Revie
     questionId: "SCI-001",
     roundIndex,
     candidateId,
+    candidateOrder,
     createdAt: `2026-08-20T0${roundIndex}:00:01Z`,
   };
 }
@@ -68,13 +74,14 @@ describe("buildHypothesisFirstReviewProjection", () => {
   it("keeps two candidates in the same round with stable distinct node ids", () => {
     const projection = buildHypothesisFirstReviewProjection(
       [meeting("r5-a", "2026-08-20T05:00:00Z"), meeting("r5-b", "2026-08-20T05:01:00Z")],
-      [link("r5-a", 5, "cand-a"), link("r5-b", 5, "cand-b")],
+      [link("r5-a", 5, "cand-a", 1), link("r5-b", 5, "cand-b", 0)],
     );
 
     expect(projection.rounds.map((round) => round.nodeId)).toEqual([
-      "hf_meeting_5_cand-a",
       "hf_meeting_5_cand-b",
+      "hf_meeting_5_cand-a",
     ]);
+    expect(projection.rounds.map((round) => round.candidateOrder)).toEqual([0, 1]);
     expect(projection.byNodeId.get("hf_meeting_5_cand-a")?.meeting.meetingRoundId).toBe("r5-a");
     expect(projection.byNodeId.get("hf_meeting_5_cand-b")?.meeting.meetingRoundId).toBe("r5-b");
     expect(projection.unresolvedMeetingIds).toEqual([]);

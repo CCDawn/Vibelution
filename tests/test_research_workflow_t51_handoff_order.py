@@ -118,8 +118,7 @@ def test_handoff_accepted_before_successor_readiness(tmp_path: Path) -> None:
     try:
         harness.seed()
         _seed_bindings(harness)
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
@@ -198,8 +197,7 @@ def test_crash_between_handoff_accept_and_successor_is_recoverable(tmp_path: Pat
     try:
         harness.seed()
         _seed_bindings(harness)
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
         _consume_adapter(harness, first_pending.action_id)

@@ -324,6 +324,32 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.commandLabel).toBe("确认并结束本轮");
   });
 
+  it("shows how many sibling candidate reviews remain before fan-in", () => {
+    const digestDraft = {
+      summary: "候选评审结论",
+      contentHash: "digest-hash",
+      agreements: ["候选仍值得验证"],
+      evidenceRequests: [],
+    };
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection({ selectedCandidateIds: ["cand-a", "cand-b"] }),
+      chainState: chain({ selectionId: "sel-1", candidateCount: 2 }),
+      meetings: [
+        meeting({ meetingRoundId: "mtg-a", status: "awaiting_approval", digestDraft }),
+        meeting({ meetingRoundId: "mtg-b", status: "awaiting_approval", digestDraft }),
+      ],
+      reviewRoundLinks: [
+        reviewLink("mtg-a", 1, { candidateId: "cand-a", candidateOrder: 0 }),
+        reviewLink("mtg-b", 1, { candidateId: "cand-b", candidateOrder: 1 }),
+      ],
+    });
+
+    expect(next.stage).toBe("review_awaiting_approval");
+    expect(next.meetingRoundId).toBe("mtg-b");
+    expect(next.commandDetail).toContain("其余 1 个候选");
+  });
+
   it("shows 资料搜集中 after a child run is bound", () => {
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },

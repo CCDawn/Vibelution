@@ -138,8 +138,13 @@ export function summarizeHypothesisReviewMeetings(
   const reviewMeetings = sortMeetings(
     meetings.filter((meeting) => meeting.meetingType === HYPOTHESIS_REVIEW_MEETING_TYPE),
   );
+  const effectiveRoundKeys = new Set(
+    reviewMeetings
+      .filter((meeting) => !isHypothesisReviewRetryAttempt(meeting))
+      .map((meeting) => meeting.roundIndex ?? `legacy:${meeting.meetingRoundId}`),
+  );
   return {
-    effectiveRounds: reviewMeetings.filter((meeting) => !isHypothesisReviewRetryAttempt(meeting)).length,
+    effectiveRounds: effectiveRoundKeys.size,
     retryAttempts: reviewMeetings.filter(isHypothesisReviewRetryAttempt).length,
     latestRound: reviewMeetings.reduce(
       (max, meeting, index) => Math.max(max, meeting.roundIndex ?? index + 1),

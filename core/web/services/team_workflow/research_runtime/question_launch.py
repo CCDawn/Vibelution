@@ -404,6 +404,15 @@ def activate_experiment_campaign(
             "Experiment campaign activation requires explicit confirmation.",
             code="experiment_activation_confirmation_required",
         )
+    # Enforce the DEV authorization gate BEFORE the idempotent short-circuit:
+    # an already-active campaign must not bypass the gate when authorization
+    # has since been revoked (reset / maintenance fence), otherwise re-activation
+    # silently succeeds while the platform is not allowed to grant it.
+    if not _dev_authorization_ready(team_id):
+        raise QuestionLaunchError(
+            "Experiment activation requires completed DEV fixtures and RESEARCH_AUTHORIZATION_REQUIRED.",
+            code="experiment_activation_not_allowed",
+        )
     existing = get_theme_activation(team_id, record["themeId"])
     if (
         bool(existing)
@@ -411,11 +420,6 @@ def activate_experiment_campaign(
         and _text(existing.get("campaignId")) == record["campaignId"]
     ):
         return {"experimentId": normalized_experiment_id, **dict(existing)}
-    if not _dev_authorization_ready(team_id):
-        raise QuestionLaunchError(
-            "Experiment activation requires completed DEV fixtures and RESEARCH_AUTHORIZATION_REQUIRED.",
-            code="experiment_activation_not_allowed",
-        )
     from core.web.services.team_workflow.research_scope import (
         ResearchScopeError,
         activate_research_campaign,

@@ -51,6 +51,9 @@ from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain as chain,
 )
 from core.web.services.team_workflow.research_runtime import question_launch
+from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+    reset_formal_write_runtime_for_tests,
+)
 from core.web.services.team_workflow.research_runtime.command_service import (
     NodeNotReadyError,
 )
@@ -102,6 +105,7 @@ class _InlineExecutor:
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    reset_formal_write_runtime_for_tests()
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(selections, "PROJECT_ROOT", tmp_path)
@@ -281,16 +285,8 @@ def _patch_approved_question(
     }
     monkeypatch.setattr(
         question_launch,
-        "challenge_question_run_summary",
-        lambda _team_id: {
-            "completedQuestionIds": [_QUESTION_ID],
-            "completedQuestionResults": [dict(detail["record"])],
-        },
-    )
-    monkeypatch.setattr(
-        question_launch,
-        "get_challenge_question_run_detail",
-        lambda _team_id, requested, *, run_id="": detail,
+        "_approved_details",
+        lambda _team_id: {_QUESTION_ID.upper(): detail},
     )
 
 
@@ -1274,7 +1270,7 @@ def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
         },
         "stopPolicy": {},
         "environmentSnapshotRef": "env-1",
-        "modelRoutingPolicy": {},
+        "modelRoutingPolicy": {"modelPolicySha256": "d" * 64},
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
@@ -1454,8 +1450,19 @@ def _open_first_meeting(team_id: str, agent_ids: list[str]) -> dict:
     )
     assert recorded["status"] == "created"
     review = recorded["reviewMeeting"]
-    assert review["status"] == "opened"
+    assert review["status"] in {"opened", "created", "reused"}, review
     return recorded
+
+
+def _opened_review_meetings(review: dict) -> list[dict]:
+    siblings = list(review.get("reviewMeetings") or [])
+    if siblings:
+        return [dict(item["meetingRound"]) for item in siblings]
+    return [dict(review["meetingRound"])]
+
+
+def _review_meetings(recorded: dict) -> list[dict]:
+    return _opened_review_meetings(recorded["reviewMeeting"])
 
 
 def test_selection_review_prompt_hydrates_canonical_candidate_content(
@@ -1533,8 +1540,11 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             recorded = _open_first_meeting(team_id, agent_ids)
             review = recorded["reviewMeeting"]
             assert review["discussion"]["background"] is True
-            meeting = review["meetingRound"]
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            meeting = first_round_meetings[0]
             first_meeting_id = meeting["meetingRoundId"]
+            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
             assert meeting["meetingType"] == "hypothesis_review"
             assert meeting["linkedChatRoomId"] == review["roomId"]
             assert meeting["chatRoomRoundIds"] == [review["roundId"]]
@@ -1551,11 +1561,15 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
 
             # 3. Closing with a searchEnvelope decision triggers stage-1
             #    collection through the facade exactly once.
-            closed = _close_first_meeting_with_envelope(
+            closed_first = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            assert closed["meetingRound"]["status"] == "closed"
-            requests = closed["collection"]["requests"]
+            assert closed_first["meetingRound"]["status"] == "closed"
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+            requests = closed_first["collection"]["requests"]
             assert len(requests) == 1
             request = requests[0]
             assert request["status"] == "pending"
@@ -1569,6 +1583,19 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 "spike train coding",
             ]
 
+            # The logical round fans out to both selected candidates. Fan-in
+            # happens only after the second sibling is confirmed.
+            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                sibling_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed["meetingRound"]["status"] == "closed"
+            assert closed["collection"]["requests"] == []
+            assert len(collection_calls) == 1
+
             # 3b. The closure auto-generates a closed HypothesisRound through
             #     the HF-3 executor: meetingRefs point back to this meeting and
             #     the first round's lineage terminates at the question candidates.
@@ -1581,7 +1608,7 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 item["id"]
                 for item in first_round["meetingRefs"]
                 if item["kind"] == "meeting_round"
-            } == {first_meeting_id}
+            } == {first_meeting_id, sibling_meeting_id}
             assert {
                 item["id"] for item in first_round["lineage"] if item["kind"] == "candidate"
             } == {"hyp-a", "hyp-b"}
@@ -1627,16 +1654,22 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             assert handoff["request"]["status"] == "handed_off"
             assert handoff["request"]["handoffRef"] == "knowledge_package:pkg-1"
             next_meeting = handoff["nextMeeting"]
-            assert next_meeting["status"] == "opened"
-            second_meeting_id = next_meeting["meetingRound"]["meetingRoundId"]
-            assert second_meeting_id != first_meeting_id
+            assert next_meeting["status"] in {"opened", "created", "reused"}
+            second_round_meetings = _opened_review_meetings(next_meeting)
+            assert second_round_meetings
+            second_meeting_id = second_round_meetings[0]["meetingRoundId"]
+            assert {item["meetingRoundId"] for item in second_round_meetings}.isdisjoint(
+                {first_meeting_id, sibling_meeting_id}
+            )
             assert next_meeting["roundIndex"] == 2
 
             links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-            assert [link["roundIndex"] for link in links] == [1, 2]
+            assert [link["roundIndex"] for link in links] == [1, 1] + [
+                2
+            ] * len(second_round_meetings)
             assert links[0]["meetingRoundId"] == first_meeting_id
-            assert links[1]["previousMeetingRoundId"] == first_meeting_id
-            assert links[1]["collectionRequestId"] == request["requestId"]
+            assert links[2]["previousMeetingRoundId"] == first_meeting_id
+            assert links[2]["collectionRequestId"] == request["requestId"]
 
             design = _evaluate(runtime, team_id, "hypothesis_design")
             design_codes = _blocker_codes(design)
@@ -1651,13 +1684,17 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             # 6. Second discussion closes without new evidence requests; the
             #    closure auto-generates the next HypothesisRound whose lineage
             #    links back to the first round; a frozen baseline appears.
-            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed_second = chain.close_review_meeting(
-                team_id,
-                second_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
+            closed_second = None
+            for second_round_meeting in second_round_meetings:
+                meeting_id = second_round_meeting["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                closed_second = chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                )
+            assert closed_second is not None
             assert closed_second["collection"]["requests"] == []
             assert len(collection_calls) == 1
             generated_second = closed_second["hypothesisRound"]
@@ -1669,7 +1706,7 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 item["id"]
                 for item in second_round["meetingRefs"]
                 if item["kind"] == "meeting_round"
-            } == {second_meeting_id}
+            } == {item["meetingRoundId"] for item in second_round_meetings}
             assert [
                 item["id"] for item in second_round["lineage"] if item["kind"] == "round"
             ] == [first_round["roundId"]]
@@ -1763,19 +1800,34 @@ def test_unconverged_round_blocks_hypothesis_design(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-            closed = _close_first_meeting_with_envelope(
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            first_meeting_id = first_round_meetings[0]["meetingRoundId"]
+            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
+            closed_first = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            request = closed["collection"]["requests"][0]
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+            closed_sibling = chain.close_review_meeting(
+                team_id,
+                sibling_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed_sibling["hypothesisRound"]["status"] == "created"
+            request = closed_first["collection"]["requests"][0]
             handoff = chain.record_collection_handoff(
                 team_id,
                 request["requestId"],
                 runtime=runtime,
                 agent_runner=_marker_runner,
             )
-            second_meeting_id = handoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
-            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
+            second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            assert second_round_meetings
             # MetaReview does NOT accept: the auto-generated round stays
             # unconverged and hypothesis_design remains blocked.
             rejected_metareview = lambda context, candidates, pairwise, pareto: {
@@ -1784,13 +1836,22 @@ def test_unconverged_round_blocks_hypothesis_design(
                 "riskNotes": "hyp-b 泛化证据待补",
                 "accepted": False,
             }
-            closed_second = chain.close_review_meeting(
-                team_id,
-                second_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-                metareview_runner=rejected_metareview,
-            )
+            closed_second = None
+            for index, second_round_meeting in enumerate(second_round_meetings):
+                meeting_id = second_round_meeting["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                closed_second = chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                    metareview_runner=(
+                        rejected_metareview
+                        if index == len(second_round_meetings) - 1
+                        else None
+                    ),
+                )
+            assert closed_second is not None
             generated_second = closed_second["hypothesisRound"]
             assert generated_second["status"] == "created"
             assert generated_second["round"]["status"] == "closed"
@@ -1910,7 +1971,10 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
             selection_id = recorded["selection"]["selectionId"]
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            first_meeting_id = first_round_meetings[0]["meetingRoundId"]
+            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
 
             # Re-recording the same selection reuses everything (recovery from
             # a crash between selection persistence and meeting opening).
@@ -1926,12 +1990,23 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 == first_meeting_id
             )
 
-            closed = _close_first_meeting_with_envelope(
+            closed_first = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            request = closed["collection"]["requests"][0]
-            first_round_id = closed["hypothesisRound"]["round"]["roundId"]
-            assert closed["hypothesisRound"]["status"] == "created"
+            request = closed_first["collection"]["requests"][0]
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+            closed_sibling = chain.close_review_meeting(
+                team_id,
+                sibling_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            first_round_id = closed_sibling["hypothesisRound"]["round"]["roundId"]
+            assert closed_sibling["hypothesisRound"]["status"] == "created"
 
             # Re-closing with the identical payload replays the closure and
             # must not duplicate the collection request, the facade call, or
@@ -1959,7 +2034,8 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 runtime=runtime,
                 agent_runner=_marker_runner,
             )
-            second_meeting_id = handoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
+            second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            second_meeting_id = second_round_meetings[0]["meetingRoundId"]
 
             # Repeating the handoff is a no-op: no new meeting, no new link.
             rehandoff = chain.record_collection_handoff(
@@ -1975,7 +2051,7 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 == second_meeting_id
             )
             links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-            assert len(links) == 2
+            assert len(links) == 2 + len(second_round_meetings)
 
             # Chain state survives a fresh read (no in-memory state).
             state = chain.chain_state(team_id, _QUESTION_ID)
@@ -1985,7 +2061,7 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
             assert state["collectionRequestCount"] == 1
             assert state["pendingCollectionCount"] == 0
             assert state["collectionReady"] is True
-            assert state["meetingCount"] == 2
+            assert state["meetingCount"] == 2 + len(second_round_meetings)
             assert state["hypothesisRoundCount"] == 1
     finally:
         runtime.close()
@@ -2012,12 +2088,31 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+            sibling_meetings = _review_meetings(recorded)
+            assert len(sibling_meetings) == 2
+            first_meeting_id = sibling_meetings[0]["meetingRoundId"]
+            second_meeting_id = sibling_meetings[1]["meetingRoundId"]
             _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
+            closed_first = chain.close_review_meeting(
                 team_id,
                 first_meeting_id,
                 _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+
+            assert closed_first["meetingRound"]["status"] == "closed"
+            assert len(closed_first["collection"]["requests"]) == 1
+            assert len(collection_calls) == 1
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+
+            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                second_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
                 runtime=runtime,
             )
 
@@ -2025,7 +2120,6 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
             # generation reports a structured failure (fail-closed via the
             # readiness layer, never a rollback of the closed fact).
             assert closed["meetingRound"]["status"] == "closed"
-            assert len(closed["collection"]["requests"]) == 1
             assert len(collection_calls) == 1
             hypothesis_round = closed["hypothesisRound"]
             assert hypothesis_round["status"] == "failed"
@@ -2393,16 +2487,18 @@ def test_converged_chain_without_evidence_requests_is_collection_ready(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-
-            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
-                team_id,
-                first_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            assert closed["meetingRound"]["status"] == "closed"
+            sibling_meetings = _review_meetings(recorded)
+            assert len(sibling_meetings) == 2
+            for sibling in sibling_meetings:
+                meeting_id = sibling["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                closed = chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                )
+                assert closed["meetingRound"]["status"] == "closed"
 
             state = chain.chain_state(team_id, _QUESTION_ID)
             assert state["hypothesisConverged"] is True
