@@ -974,6 +974,48 @@ describe("clearWorkbenchLauncherRuntimeState", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("clears main-line ports after a verified stop before writing closed state", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-main-line-runtime-clear-"));
+    const previousProjectsHome = process.env.VIBELUTION_PROJECTS_HOME;
+    try {
+      process.env.VIBELUTION_PROJECTS_HOME = join(dir, "projects");
+      mkdirSync(join(dir, ".vibelution"), { recursive: true });
+      writeFileSync(join(dir, ".vibelution", "project.json"), JSON.stringify({ projectId: "project-main-clear" }), "utf8");
+      const runtimeDir = join(dir, ".runtime", "launcher");
+      const canonicalRuntimeDir = join(resolveCanonicalRuntimeHome(dir) || "", "launcher");
+      mkdirSync(runtimeDir, { recursive: true });
+      mkdirSync(canonicalRuntimeDir, { recursive: true });
+      const ports = [join(runtimeDir, "ports.json"), join(canonicalRuntimeDir, "ports.json")];
+      ports.forEach((path) => writeFileSync(path, JSON.stringify({ backendPort: 8012 }), "utf8"));
+      let written: Record<string, unknown> = {};
+
+      const result = await executeMainLineWorkbench({
+        workspaceRoot: dir,
+        pythonPath: "C:/repo/.venv/Scripts/python.exe",
+        operation: "stop",
+        command: { commandId: "cmd_clear_ports", type: "close", operation: "stop", noBrowser: true },
+        readState: () => ({ backendPort: 8012 }),
+        writeState: (state) => {
+          written = state;
+        },
+        listActiveWork: () => [],
+        connect: async () => false,
+        pidAlive: () => false,
+      });
+
+      expect(result).toMatchObject({ accepted: true, operation: "stop" });
+      expect(ports.every((path) => !existsSync(path))).toBe(true);
+      expect(written).toMatchObject({ observedState: "closed", backendPid: 0 });
+    } finally {
+      if (previousProjectsHome === undefined) {
+        delete process.env.VIBELUTION_PROJECTS_HOME;
+      } else {
+        process.env.VIBELUTION_PROJECTS_HOME = previousProjectsHome;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("frontend build supervision", () => {

@@ -1536,6 +1536,7 @@ export async function executeMainLineWorkbench(
         : ""
     ].filter(Boolean);
     const lifecycleWarning = lifecycleWarnings.join("; ");
+    clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
     writeState({
       ...previous,
       desiredState: "closed",

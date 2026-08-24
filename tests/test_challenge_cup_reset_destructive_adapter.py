@@ -94,3 +94,41 @@ def test_restore_reuses_stage_scope_authority_instead_of_recalculating(monkeypat
 
     assert observed["checkpoints"] == stage["scopeAuthority"]
     assert observed["receipts"] == stage["receiptScopeAuthority"]
+
+
+def test_stage_captures_scope_authority_before_artifact_staging(monkeypatch) -> None:
+    plan = _plan("r" * 64)
+    instance = adapter_module.ChallengeCupLiveDestructiveAdapter()
+    order: list[str] = []
+    authority = [
+        {
+            "teamId": "research-team",
+            "runId": "thread-run-legacy",
+            "threadId": "thread-run-legacy",
+            "scopeHash": "",
+            "questionId": "",
+            "projectId": "",
+        }
+    ]
+    monkeypatch.setattr(
+        adapter_module,
+        "_run_scope_authority",
+        lambda _team_id: order.append("authority") or authority,
+    )
+    monkeypatch.setattr(chat_room_service, "prepare_team_chat_room_reset", lambda *_args, **_kwargs: {"stageId": "rooms"})
+    monkeypatch.setattr(agent_sessions, "stage_team_agent_session_reset", lambda *_args, **_kwargs: {"stageId": "sessions"})
+    monkeypatch.setattr(research_projects, "prepare_challenge_cup_experiment_state_reset", lambda *_args, **_kwargs: {"stageId": "workspace"})
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "prepare_workflow_artifact_reset",
+        lambda *_args, **_kwargs: order.append("artifacts") or {"stageId": "artifacts"},
+    )
+    monkeypatch.setattr(checkpoint_store, "prepare_checkpoint_reset_stage", lambda *_args, **_kwargs: {"stageId": "checkpoints"})
+    monkeypatch.setattr(model_invocation_receipt_registry, "prepare_model_invocation_receipt_reset_stage", lambda *_args, **_kwargs: {"stageId": "receipts"})
+    monkeypatch.setattr(ledger, "prepare_team_ledger_reset_stage", lambda *_args, **_kwargs: {"stageId": "ledger"})
+    monkeypatch.setattr(instance, "_ledger_store", lambda _path: (object(), None))
+
+    staged = instance.stage("research-team", plan)
+
+    assert staged["status"] == "staged"
+    assert order == ["authority", "artifacts"]

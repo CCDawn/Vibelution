@@ -744,8 +744,16 @@ def test_stop_launcher_uses_state_owned_pid_when_workspace_matches(monkeypatch, 
         "sessionRole": "launcher_control_surface",
         "launcherBackendPid": 111,
         "launcherBackendLaunchPid": 111,
+        "launcherBackendCreateTime": 1.0,
+        "launcherBackendExecutable": r"C:\\Python\\pythonw.exe",
+        "launcherBackendLaunchCreateTime": 1.0,
+        "launcherBackendLaunchExecutable": r"C:\\Python\\pythonw.exe",
         "launcherBrowserWindowPid": 222,
         "launcherBrowserLaunchPid": 222,
+        "launcherBrowserWindowCreateTime": 2.0,
+        "launcherBrowserWindowExecutable": r"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        "launcherBrowserLaunchCreateTime": 2.0,
+        "launcherBrowserLaunchExecutable": r"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
         "launcherControlPort": 8765,
         "runtimeProjectRoot": str(tmp_path),
         "browserManaged": True,
@@ -758,6 +766,7 @@ def test_stop_launcher_uses_state_owned_pid_when_workspace_matches(monkeypatch, 
     monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
     monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
     monkeypatch.setattr(bridge, "_wait_for_launcher_control_stopped", lambda port: True)
+    monkeypatch.setattr(bridge, "inspect_process_identity", lambda expected: {"status": "match", "reason": "identity_match"})
 
     result = bridge.main(
         [
@@ -778,6 +787,82 @@ def test_stop_launcher_uses_state_owned_pid_when_workspace_matches(monkeypatch, 
     assert payload["terminatedPids"] == [111, 222]
     assert terminated == [111, 222]
     assert saved_states[-1]["launcherBackendPid"] == 0
+
+
+def test_stop_launcher_state_owned_pid_rejects_reused_process_identity(monkeypatch, capsys, tmp_path):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBackendCreateTime": 1.0,
+        "launcherBackendExecutable": r"C:\\Python\\pythonw.exe",
+        "launcherBackendLaunchCreateTime": 1.0,
+        "launcherBackendLaunchExecutable": r"C:\\Python\\pythonw.exe",
+        "launcherControlPort": 8765,
+        "runtimeProjectRoot": str(tmp_path),
+    }
+    terminated: list[int] = []
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: pytest.fail("mismatched identity must retain state"))
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        bridge,
+        "inspect_process_identity",
+        lambda expected: {"status": "mismatch", "reason": "create_time_mismatch"},
+    )
+
+    result = bridge.main(
+        [
+            "--action",
+            "stop-launcher",
+            "--output",
+            "json",
+            "--use-state-owned-backend-pid",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "skipped"
+    assert payload["reason"] == "state_owned_process_identity_mismatch"
+    assert terminated == []
+
+
+def test_save_launcher_state_captures_pid_create_time_and_executable(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    saved_states: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        bridge,
+        "capture_process_identity",
+        lambda pid: {
+            "pid": pid,
+            "createTime": float(pid),
+            "executable": rf"C:\\managed\\{pid}.exe",
+        },
+    )
+    monkeypatch.setattr(bridge, "_write_state", lambda state: saved_states.append(dict(state)))
+
+    bridge._save_launcher_state(
+        {},
+        port=8765,
+        backend_pid=111,
+        browser_pid=222,
+        current_signature="sig",
+        python_exe=r"C:\\Python\\python.exe",
+    )
+
+    persisted = saved_states[-1]
+    assert persisted["launcherBackendCreateTime"] == 111.0
+    assert persisted["launcherBackendExecutable"] == r"C:\\managed\\111.exe"
+    assert persisted["launcherBackendLaunchCreateTime"] == 111.0
+    assert persisted["launcherBrowserWindowCreateTime"] == 222.0
+    assert persisted["launcherBrowserLaunchExecutable"] == r"C:\\managed\\222.exe"
 
 
 def test_stop_launcher_state_owned_pid_skips_workspace_mismatch(monkeypatch, capsys, tmp_path):

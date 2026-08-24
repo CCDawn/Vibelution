@@ -13,10 +13,13 @@ from core.web.services.team_workflow.challenge_cup_reset_live_adapter import (
     ChallengeCupInventoryPorts,
     LiveChallengeCupInventoryReader,
 )
+from core.web.services.team_workflow import challenge_cup_reset_live_adapter as live_adapter
 from core.web.services.team_workflow.challenge_cup_reset_service import (
     RETAINED_AGENT_ROLE_KEYS,
     ChallengeCupResetService,
 )
+from core.research.workflow import checkpoint_store
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 
 
 def _ports(*, missing_checkpoints: bool = False) -> ChallengeCupInventoryPorts:
@@ -180,3 +183,32 @@ def test_missing_checkpoint_authority_is_fail_closed_without_sqlite_scan() -> No
     assert authority["families"]["checkpoints"] is False
     assert preview["safeToConfirm"] is False
     assert any(item["code"] == "object_id_missing" for item in preview["blockers"])
+
+
+def test_legacy_checkpoint_scope_requires_a_matching_team_artifact(monkeypatch) -> None:
+    monkeypatch.setattr(live_adapter, "_list_runs", lambda _team_id: {"runs": []})
+    monkeypatch.setattr(
+        checkpoint_store,
+        "list_checkpoint_thread_ids",
+        lambda: ["thread-run-legacy"],
+    )
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "list_workflow_artifacts",
+        lambda team_id, *, kind: [
+            {"teamId": team_id, "workflowRunId": "run-legacy"}
+        ]
+        if kind == "protocol_draft"
+        else [],
+    )
+
+    assert live_adapter._run_scope_rows("research-team") == [
+        {
+            "teamId": "research-team",
+            "runId": "thread-run-legacy",
+            "threadId": "thread-run-legacy",
+            "scopeHash": "",
+            "questionId": "",
+            "projectId": "",
+        }
+    ]

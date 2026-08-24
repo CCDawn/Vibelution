@@ -933,6 +933,58 @@ def checkpoint_store_has_rows(
         connection.close()
 
 
+def list_checkpoint_thread_ids(
+    checkpoint_path: Path | str | None = None,
+) -> list[str]:
+    """Return only persisted checkpoint thread identities for authority joins.
+
+    This is intentionally narrower than the readback API: callers receive no
+    checkpoint payload, metadata, writes, or inferred team binding.  A reset
+    may use these identities only when another canonical owner proves the
+    matching thread scope.
+    """
+
+    path = _reset_path(checkpoint_path)
+    if not path.exists():
+        return []
+    connection = _checkpoint_open_connection(path, read_only=True)
+    try:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "checkpoints" not in tables:
+            if tables:
+                raise CheckpointResetPortError(
+                    "checkpoint store schema is incomplete", code="checkpoint_store_corrupt"
+                )
+            return []
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(checkpoints)").fetchall()
+        }
+        if "thread_id" not in columns:
+            raise CheckpointResetPortError(
+                "checkpoint store schema is unsupported", code="checkpoint_store_corrupt"
+            )
+        return [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
+            ).fetchall()
+            if str(row[0])
+        ]
+    except sqlite3.Error as exc:
+        raise CheckpointResetPortError(
+            "checkpoint thread identities cannot be read",
+            code="checkpoint_store_unavailable",
+        ) from exc
+    finally:
+        connection.close()
+
+
 def _checkpoint_target_rows(
     rows: Iterable[Mapping[str, Any]], team_id: str
 ) -> list[dict[str, Any]]:
@@ -1362,6 +1414,7 @@ __all__ = [
     "CHECKPOINT_RESET_PORT_SCHEMA_VERSION",
     "CheckpointResetPortError",
     "list_team_scoped_checkpoints",
+    "list_checkpoint_thread_ids",
     "prepare_checkpoint_reset_stage",
     "purge_checkpoint_reset_stage",
     "restore_checkpoint_reset_stage",

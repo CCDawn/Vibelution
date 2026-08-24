@@ -8,6 +8,11 @@ from core.runtime_manager import daemon
 
 def test_electron_owns_main_line_queue_when_marker_pid_is_alive(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(daemon, "RUNTIME_MANAGER_DIR", tmp_path)
+    monkeypatch.setattr(
+        daemon,
+        "capture_process_identity",
+        lambda pid: {"pid": pid, "createTime": 1_724_147_199.0, "executable": r"C:\\Vibelution\\Vibelution.exe"},
+    )
     assert daemon.electron_owns_main_line_queue() is False
     assert daemon.should_run_workbench_idle_reconcile() is True
 
@@ -16,7 +21,8 @@ def test_electron_owns_main_line_queue_when_marker_pid_is_alive(tmp_path, monkey
             {
                 "schemaVersion": 1,
                 "owner": "electron",
-                "pid": os.getpid(),
+                "pid": 4242,
+                "executable": r"C:\\Vibelution\\Vibelution.exe",
                 "updatedAt": "2026-08-20T10:00:00Z",
             }
         ),
@@ -28,11 +34,7 @@ def test_electron_owns_main_line_queue_when_marker_pid_is_alive(tmp_path, monkey
 
 def test_electron_owns_main_line_queue_ignores_dead_or_invalid_marker(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(daemon, "RUNTIME_MANAGER_DIR", tmp_path)
-
-    def _dead_pid(_pid: int, _signal: int) -> None:
-        raise OSError("dead")
-
-    monkeypatch.setattr(daemon.os, "kill", _dead_pid)
+    monkeypatch.setattr(daemon, "capture_process_identity", lambda pid: {})
     (tmp_path / daemon.MAIN_LINE_QUEUE_OWNER_FILE).write_text(
         json.dumps({"schemaVersion": 1, "owner": "electron", "pid": 4242}),
         encoding="utf-8",
@@ -46,14 +48,44 @@ def test_electron_owns_main_line_queue_ignores_dead_or_invalid_marker(tmp_path, 
     assert daemon.should_run_workbench_idle_reconcile() is True
 
 
-def test_should_execute_workbench_queue_command_skips_when_electron_owns(tmp_path, monkeypatch) -> None:
+def test_electron_owns_main_line_queue_rejects_pid_reused_after_marker(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(daemon, "RUNTIME_MANAGER_DIR", tmp_path)
     (tmp_path / daemon.MAIN_LINE_QUEUE_OWNER_FILE).write_text(
         json.dumps(
             {
                 "schemaVersion": 1,
                 "owner": "electron",
-                "pid": os.getpid(),
+                "pid": 4242,
+                "executable": r"C:\\Vibelution\\Vibelution.exe",
+                "updatedAt": "2026-08-20T10:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        daemon,
+        "capture_process_identity",
+        lambda pid: {"pid": pid, "createTime": 1_787_220_001.0, "executable": r"C:\\Vibelution\\Vibelution.exe"},
+    )
+
+    assert daemon.electron_owns_main_line_queue() is False
+    assert daemon.should_run_workbench_idle_reconcile() is True
+
+
+def test_should_execute_workbench_queue_command_skips_when_electron_owns(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(daemon, "RUNTIME_MANAGER_DIR", tmp_path)
+    monkeypatch.setattr(
+        daemon,
+        "capture_process_identity",
+        lambda pid: {"pid": pid, "createTime": 1_724_147_199.0, "executable": r"C:\\Vibelution\\Vibelution.exe"},
+    )
+    (tmp_path / daemon.MAIN_LINE_QUEUE_OWNER_FILE).write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "owner": "electron",
+                "pid": 4242,
+                "executable": r"C:\\Vibelution\\Vibelution.exe",
                 "updatedAt": "2026-08-20T10:00:00Z",
             }
         ),
