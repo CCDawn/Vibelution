@@ -7,7 +7,10 @@ five-way scope comparison.
 
 from __future__ import annotations
 
-from core.research.workflow.challenge_cup_runtime import GraphDispatch
+from core.research.workflow.challenge_cup_runtime import (
+    GraphDispatch,
+    _validate_state_scope_binding,
+)
 from core.research.workflow.checkpoint_store import (
     ScopeBindingMismatch,
     assert_scope_bindings_match,
@@ -104,3 +107,39 @@ def test_direct_session_is_rejected_for_formal_participant_binding() -> None:
         assert exc.code == "scope_binding_mismatch"
     else:  # pragma: no cover - protects the fail-closed contract
         raise AssertionError("direct Session binding must be rejected")
+
+
+def test_formal_graph_checkpoint_requires_all_five_authorities() -> None:
+    scope = canonical_discussion_scope(_scope())
+    try:
+        _validate_state_scope_binding(
+            {
+                "scope_binding_required": True,
+                "discussion_scope": scope,
+                "discussion_scope_hash": scope["scopeHash"],
+            }
+        )
+    except ScopeBindingMismatch as exc:
+        assert exc.code == "scope_binding_mismatch"
+        assert exc.field == "businessCheckpoint.scope"
+    else:  # pragma: no cover - formal graphs must never resume partially bound
+        raise AssertionError("a formal checkpoint without five authorities must block")
+
+
+def test_formal_graph_checkpoint_accepts_matching_five_authorities() -> None:
+    scope = canonical_discussion_scope(_scope())
+    authority = {"scope": scope}
+    participant = {"scope": {**scope, "agentId": "agent-a"}}
+    result = _validate_state_scope_binding(
+        {
+            "scope_binding_required": True,
+            "discussion_scope": scope,
+            "discussion_scope_hash": scope["scopeHash"],
+            "business_checkpoint_ref": authority,
+            "meeting_ref": authority,
+            "room_ref": authority,
+            "participant_binding_refs": [participant],
+        }
+    )
+    assert result is not None
+    assert result["scopeHash"] == scope["scopeHash"]

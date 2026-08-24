@@ -1860,6 +1860,110 @@ def _process_collection_decisions(
 # closure -> HypothesisRound generation (HF-3 executor entry point)
 
 
+def _review_meeting_fan_in_group(
+    team_id: str, meeting_round: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Resolve the ordered selection/round group for one candidate meeting."""
+    from core.web.services.team_workflow import hypothesis_selection as selections
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_round_id = str(meeting_round.get("meetingRoundId") or "").strip()
+    links = list_review_round_links(team_id).get("links") or []
+    current_link = next(
+        (
+            dict(item)
+            for item in links
+            if str(item.get("meetingRoundId") or "").strip() == meeting_round_id
+        ),
+        {},
+    )
+    candidate_id = str(current_link.get("candidateId") or "").strip()
+    if not candidate_id:
+        return {
+            "status": "ready",
+            "selectionId": _selection_id_from_meeting(meeting_round),
+            "roundIndex": int(current_link.get("roundIndex") or 1),
+            "meetings": [dict(meeting_round)],
+        }
+
+    selection_id = str(current_link.get("selectionId") or "").strip()
+    round_index = int(current_link.get("roundIndex") or 1)
+    if not selection_id:
+        raise HypothesisFirstChainError("candidate review link has no selectionId")
+    selection = selections.get_hypothesis_selection(team_id, selection_id)["selection"]
+    selected_candidate_ids = _normalized_str_list(
+        selection.get("selectedCandidateIds")
+    )
+    if not selected_candidate_ids:
+        raise HypothesisFirstChainError("selection has no selected candidates")
+
+    group_links = [
+        dict(item)
+        for item in links
+        if str(item.get("selectionId") or "").strip() == selection_id
+        and int(item.get("roundIndex") or 1) == round_index
+        and str(item.get("candidateId") or "").strip()
+    ]
+    by_candidate = {
+        str(item.get("candidateId") or "").strip(): item for item in group_links
+    }
+    if len(by_candidate) != len(group_links):
+        raise HypothesisFirstChainError(
+            "candidate review group contains duplicate candidate bindings"
+        )
+    expected_candidate_ids = (
+        selected_candidate_ids
+        if round_index == 1
+        else [
+            str(item.get("candidateId") or "").strip()
+            for item in sorted(
+                group_links,
+                key=lambda item: (
+                    int(item.get("candidateOrder") or 0),
+                    str(item.get("meetingRoundId") or ""),
+                ),
+            )
+        ]
+    )
+    missing_candidate_ids = [
+        item for item in expected_candidate_ids if item not in by_candidate
+    ]
+    ordered_links = [
+        by_candidate[item] for item in expected_candidate_ids if item in by_candidate
+    ]
+    meetings = [
+        meeting_rounds.get_meeting_round(
+            team_id, str(item.get("meetingRoundId") or "").strip()
+        )["meetingRound"]
+        for item in ordered_links
+    ]
+    pending_meeting_ids = [
+        str(item.get("meetingRoundId") or "").strip()
+        for item in meetings
+        if str(item.get("status") or "") != "closed"
+    ]
+    if missing_candidate_ids or pending_meeting_ids:
+        return {
+            "status": "waiting_for_sibling_reviews",
+            "selectionId": selection_id,
+            "roundIndex": round_index,
+            "closed": False,
+            "missingCandidateIds": missing_candidate_ids,
+            "pendingMeetingRoundIds": pending_meeting_ids,
+            "closedMeetingRoundIds": [
+                str(item.get("meetingRoundId") or "").strip()
+                for item in meetings
+                if str(item.get("status") or "") == "closed"
+            ],
+        }
+    return {
+        "status": "ready",
+        "selectionId": selection_id,
+        "roundIndex": round_index,
+        "meetings": meetings,
+    }
+
+
 def _build_round_candidates(
     team_id: str, meeting_round: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
@@ -1928,7 +2032,7 @@ def _generate_hypothesis_round(
     pareto_runner: Any = None,
     metareview_runner: Any = None,
 ) -> dict[str, Any]:
-    """Best-effort HypothesisRound generation after one review closure.
+    """Best-effort selection-level HypothesisRound fan-in after closure.
 
     Mirrors the auto-open failure semantics: the closed meeting is an
     append-only fact, so a generation failure is reported structurally and
@@ -1942,8 +2046,22 @@ def _generate_hypothesis_round(
             hypothesis_selection as selections,
         )
 
-        meeting_round_id = str(meeting_round.get("meetingRoundId") or "").strip()
-        selection_id = _selection_id_from_meeting(meeting_round)
+        fan_in = _review_meeting_fan_in_group(team_id, meeting_round)
+        if fan_in.get("status") != "ready":
+            return fan_in
+        bound_meetings = [
+            dict(item)
+            for item in list(fan_in.get("meetings") or [])
+            if isinstance(item, Mapping)
+        ]
+        if not bound_meetings:
+            raise HypothesisFirstChainError("review fan-in resolved no meetings")
+        primary_meeting = bound_meetings[0]
+        meeting_round_ids = [
+            str(item.get("meetingRoundId") or "").strip() for item in bound_meetings
+        ]
+        meeting_round_id = meeting_round_ids[0]
+        selection_id = str(fan_in.get("selectionId") or "").strip()
         if not selection_id:
             raise HypothesisFirstChainError(
                 "meeting carries no hypothesis_selection ref"
@@ -1951,19 +2069,45 @@ def _generate_hypothesis_round(
         selection = selections.get_hypothesis_selection(team_id, selection_id)[
             "selection"
         ]
-        if str(selection.get("scopeHash") or "") != str(
-            meeting_round.get("scopeHash") or ""
-        ) or str(selection.get("questionId") or "").upper() != str(
-            meeting_round.get("question") or ""
-        ).upper():
+        for bound_meeting in bound_meetings:
+            if str(selection.get("scopeHash") or "") != str(
+                bound_meeting.get("scopeHash") or ""
+            ) or str(selection.get("questionId") or "").upper() != str(
+                bound_meeting.get("question") or ""
+            ).upper():
+                raise HypothesisFirstChainError(
+                    "selection scope/question does not match the meeting scope"
+                )
+        workflow_run_ids = {
+            str((item.get("discussionScope") or {}).get("workflowRunId") or "").strip()
+            for item in bound_meetings
+            if isinstance(item.get("discussionScope"), Mapping)
+            and str((item.get("discussionScope") or {}).get("workflowRunId") or "").strip()
+        }
+        if len(workflow_run_ids) > 1:
             raise HypothesisFirstChainError(
-                "selection scope/question does not match the meeting scope"
+                "fan-in meetings belong to different workflow runs"
             )
-        candidates = _build_round_candidates(team_id, meeting_round)
+        candidates = [
+            candidate
+            for bound_meeting in bound_meetings
+            for candidate in _build_round_candidates(team_id, bound_meeting)
+        ]
+        round_index = int(fan_in.get("roundIndex") or 1)
+        round_payload: dict[str, Any] = {"candidates": candidates}
+        if len(meeting_round_ids) > 1:
+            round_payload.update(
+                {
+                    "meetingRoundIds": meeting_round_ids,
+                    "roundId": (
+                        f"hround-{_stable_hash({'selectionId': selection_id, 'roundIndex': round_index, 'scopeHash': selection.get('scopeHash')})[:12]}"
+                    ),
+                }
+            )
         result = hypothesis_rounds.generate_hypothesis_round_from_meeting(
             team_id,
             meeting_round_id,
-            {"candidates": candidates},
+            round_payload,
             reflection_runner=reflection_runner,
             pairwise_runner=pairwise_runner,
             pareto_runner=pareto_runner,
@@ -1982,26 +2126,34 @@ def _generate_hypothesis_round(
             )
 
             receipt_authority = (
-                dict(meeting_round.get("modelInvocationReceiptAuthority"))
-                if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+                dict(primary_meeting.get("modelInvocationReceiptAuthority"))
+                if isinstance(primary_meeting.get("modelInvocationReceiptAuthority"), Mapping)
                 else None
             )
             workflow_run_id = str(
                 (receipt_authority or {}).get("workflowRunId")
-                or meeting_round.get("workflowRunId")
+                or primary_meeting.get("workflowRunId")
                 or ""
             ).strip()
             node_run_id = str(
-                meeting_round.get("nodeRunId")
+                primary_meeting.get("nodeRunId")
                 or (receipt_authority or {}).get("nodeRunId")
                 or ""
             ).strip()
             input_refs = [
-                *_normalized_str_list(meeting_round.get("inputArtifactRefs")),
-                *_normalized_str_list(meeting_round.get("discussionItemRefs")),
+                *[
+                    ref
+                    for bound_meeting in bound_meetings
+                    for ref in _normalized_str_list(bound_meeting.get("inputArtifactRefs"))
+                ],
+                *[
+                    ref
+                    for bound_meeting in bound_meetings
+                    for ref in _normalized_str_list(bound_meeting.get("discussionItemRefs"))
+                ],
             ]
             input_snapshot_hash = str(
-                meeting_round.get("inputSnapshotHash")
+                primary_meeting.get("inputSnapshotHash")
                 or round_record.get("inputSnapshotHash")
                 or (receipt_authority or {}).get("inputSnapshotHash")
                 or ""
@@ -2010,7 +2162,7 @@ def _generate_hypothesis_round(
                 team_id=team_id,
                 workflow_run_id=workflow_run_id,
                 node_run_id=node_run_id,
-                question_id=str(meeting_round.get("question") or ""),
+                question_id=str(primary_meeting.get("question") or ""),
                 selection_id=selection_id,
                 review_round_id=str(round_record.get("roundId") or ""),
                 input_refs=input_refs,
@@ -2020,7 +2172,7 @@ def _generate_hypothesis_round(
                 workflow_authority=receipt_authority,
                 source_collection_run_id=str(
                     (receipt_authority or {}).get("sourceCollectionRunId")
-                    or meeting_round.get("sourceCollectionRunId")
+                    or primary_meeting.get("sourceCollectionRunId")
                     or workflow_run_id
                 ).strip(),
             )
@@ -2593,7 +2745,11 @@ def close_review_meeting(
         metareview_runner=metareview_runner,
     )
     resume = None
-    if runtime is not None:
+    if (
+        runtime is not None
+        and str(hypothesis_round.get("status") or "")
+        != "waiting_for_sibling_reviews"
+    ):
         resume = resume_parent_runs(
             normalized_team_id,
             question_id=str(closed_record.get("question") or ""),

@@ -407,6 +407,207 @@ def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
     assert len({payload["meetingRoundId"] for payload in opened_payloads}) == 2
 
 
+def test_review_meeting_fan_in_waits_for_every_selected_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+
+    team_id = "team-fan-in"
+    links = [
+        {
+            "meetingRoundId": "meeting-a",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+        },
+        {
+            "meetingRoundId": "meeting-b",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-b",
+            "candidateOrder": 1,
+        },
+    ]
+    meeting_by_id = {
+        "meeting-a": {"meetingRoundId": "meeting-a", "status": "closed"},
+        "meeting-b": {"meetingRoundId": "meeting-b", "status": "open"},
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        chain,
+        "list_review_round_links",
+        lambda *_args, **_kwargs: {"links": links},
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args: {
+            "selection": {"selectedCandidateIds": ["hyp-a", "hyp-b"]}
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meeting_by_id[meeting_id]},
+    )
+
+    waiting = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-a"]
+    )
+    assert waiting["status"] == "waiting_for_sibling_reviews"
+    assert waiting["pendingMeetingRoundIds"] == ["meeting-b"]
+
+    meeting_by_id["meeting-b"] = {
+        "meetingRoundId": "meeting-b",
+        "status": "closed",
+    }
+    ready = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-b"]
+    )
+    assert ready["status"] == "ready"
+    assert [item["meetingRoundId"] for item in ready["meetings"]] == [
+        "meeting-a",
+        "meeting-b",
+    ]
+
+
+def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import (
+        hypothesis_review_executor,
+        research_memory_context,
+    )
+
+    team_id = "team-round-fan-in"
+    scope = _scope_fields("agent-coordinator")
+    scope_hash = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    meeting_by_id = {
+        candidate_id: {
+            **scope,
+            "scopeHash": scope_hash,
+            "meetingRoundId": meeting_id,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+            "digestId": f"digest-{candidate_id}",
+            "decisionRefs": [f"decision-{candidate_id}"],
+            "discussionItemRefs": [f"hypothesis_candidate:{candidate_id}"],
+            "participants": ["agent-coordinator"],
+            "participantRoleIds": ["coordinator"],
+            "closedBy": "agent-coordinator",
+        }
+        for candidate_id, meeting_id in (
+            ("hyp-a", "meeting-a"),
+            ("hyp-b", "meeting-b"),
+        )
+    }
+    meetings_by_id = {
+        item["meetingRoundId"]: item for item in meeting_by_id.values()
+    }
+    digest_rows = [
+        {
+            "digestId": f"digest-{candidate_id}",
+            "summary": candidate_id,
+            "sourceMessageRefs": [f"message:{candidate_id}"],
+            "contentHash": f"hash-{candidate_id}",
+        }
+        for candidate_id in ("hyp-a", "hyp-b")
+    ]
+    decision_rows = [
+        {
+            "decisionId": f"decision-{candidate_id}",
+            "decision": "approve",
+            "candidateRefs": [candidate_id],
+            "evidenceRefs": [f"message:{candidate_id}"],
+        }
+        for candidate_id in ("hyp-a", "hyp-b")
+    ]
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meetings_by_id[meeting_id]},
+    )
+    monkeypatch.setattr(meetings, "_digests_path", lambda _team_id: Path("digests"))
+    monkeypatch.setattr(meetings, "_decisions_path", lambda _team_id: Path("decisions"))
+    monkeypatch.setattr(
+        meetings,
+        "_read_jsonl",
+        lambda path: digest_rows if str(path) == "digests" else decision_rows,
+    )
+    captured_context: dict[str, object] = {}
+
+    def fake_context(**kwargs):
+        captured_context.update(kwargs)
+        return {"contextId": "context-fan-in"}
+
+    monkeypatch.setattr(
+        research_memory_context, "build_hypothesis_review_context", fake_context
+    )
+    monkeypatch.setattr(
+        hypothesis_review_executor,
+        "execute_hypothesis_review",
+        lambda *_args, **_kwargs: {
+            "candidates": [],
+            "pairwiseComparisons": [],
+            "pareto": {"paretoFrontCandidateIds": []},
+            "metaReview": {
+                "accepted": False,
+                "recommendationCandidateId": "hyp-a",
+            },
+            "reviewContextId": "context-fan-in",
+            "positionSeed": "seed",
+            "roles": {},
+        },
+    )
+    monkeypatch.setattr(hrounds, "_read_jsonl", lambda _path: [])
+    monkeypatch.setattr(
+        hrounds,
+        "create_hypothesis_round",
+        lambda _team_id, payload: {"status": "created", "round": payload},
+    )
+
+    result = hrounds.generate_hypothesis_round_from_meeting(
+        team_id,
+        "meeting-a",
+        {
+            "meetingRoundIds": ["meeting-a", "meeting-b"],
+            "candidates": [
+                {
+                    "candidateId": candidate_id,
+                    "claim": f"claim-{candidate_id}",
+                    "rationale": f"why-{candidate_id}",
+                }
+                for candidate_id in ("hyp-a", "hyp-b")
+            ],
+        },
+    )
+
+    assert [
+        item["id"]
+        for item in result["round"]["meetingRefs"]
+        if item["kind"] == "meeting_round"
+    ] == ["meeting-a", "meeting-b"]
+    assert [
+        item["candidateId"] for item in captured_context["candidates"]
+    ] == ["hyp-a", "hyp-b"]
+    assert captured_context["digest"]["sourceMessageRefs"] == [
+        "message:hyp-a",
+        "message:hyp-b",
+    ]
+
+
 def test_chain_state_projects_explicit_next_candidate_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

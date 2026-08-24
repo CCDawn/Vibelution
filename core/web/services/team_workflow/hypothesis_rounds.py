@@ -339,7 +339,7 @@ def generate_hypothesis_round_from_meeting(
     pareto_runner: Any = None,
     metareview_runner: Any = None,
 ) -> dict[str, Any]:
-    """Generate a closed HypothesisRound from one closed hypothesis_review meeting.
+    """Generate one closed HypothesisRound after its bound review meetings close.
 
     The meeting must be a closed ``hypothesis_review`` round whose digest v2
     carries the ``sourceMessageRefs`` evidence trail and whose closure
@@ -347,8 +347,11 @@ def generate_hypothesis_round_from_meeting(
     ``hypothesis_review_executor`` over the bounded review context built by
     ``research_memory_context``; any missing dimension, comparison, Pareto
     classification, or recommendation fails closed before persistence.
-    Re-running with the same meeting and scope reuses the existing round
-    (append-only idempotency).
+    ``payload.meetingRoundIds`` enables the formal candidate-review fan-in:
+    every listed meeting remains an independent authority, while their bounded
+    digests and decisions are combined only for the review executor. Re-running
+    the same ordered group and scope reuses the existing round (append-only
+    idempotency).
     """
 
     from core.web.services.team_service import assert_team_exists
@@ -363,55 +366,85 @@ def generate_hypothesis_round_from_meeting(
     meeting_id = str(meeting_round_id or request.get("meetingRoundId") or "").strip()
     if not meeting_id:
         raise ResearchHypothesisRoundError("meetingRoundId is required")
-    meeting = _meeting_rounds.get_meeting_round(normalized_team_id, meeting_id)["meetingRound"]
-    if str(meeting.get("meetingType") or "") != "hypothesis_review":
+    requested_meeting_ids = _normalized_str_list(request.get("meetingRoundIds"))
+    meeting_ids = requested_meeting_ids or [meeting_id]
+    if meeting_id not in meeting_ids:
         raise ResearchHypothesisRoundError(
-            "hypothesis round generation requires a hypothesis_review meeting",
+            "meetingRoundId must be included in meetingRoundIds",
         )
-    if str(meeting.get("status") or "") != "closed":
-        raise ResearchHypothesisRoundError(
-            "hypothesis round generation requires a closed meeting",
-        )
-    digest_id = str(meeting.get("digestId") or "").strip()
-    decision_ids = _normalized_str_list(meeting.get("decisionRefs"))
-    if not digest_id or not decision_ids:
-        raise ResearchHypothesisRoundError(
-            "closed meeting is missing digestId or decisionRefs",
-        )
+    if len(set(meeting_ids)) != len(meeting_ids):
+        raise ResearchHypothesisRoundError("meetingRoundIds contains duplicates")
 
-    # Package-internal read of the meeting stores, matching the meeting_runtime
-    # precedent; hypothesis_rounds never writes those stores.
-    digest = _meeting_rounds._latest_by_id(
-        _meeting_rounds._read_jsonl(_meeting_rounds._digests_path(normalized_team_id)),
-        "digestId",
-        digest_id,
+    # Package-internal read of the meeting stores, matching meeting_runtime.
+    # This is a read-only fan-in projection; all source meetings/digests remain
+    # canonical and are referenced individually on the resulting round.
+    digest_records = _meeting_rounds._read_jsonl(
+        _meeting_rounds._digests_path(normalized_team_id)
     )
-    if digest is None:
-        raise ResearchHypothesisRoundError(
-            f"meeting digest {digest_id} does not resolve",
-        )
-    source_refs = _normalized_str_list(digest.get("sourceMessageRefs"))
-    if not source_refs:
-        raise ResearchHypothesisRoundError(
-            "hypothesis round generation requires a digest v2 with sourceMessageRefs",
-        )
     decision_records = _meeting_rounds._read_jsonl(
         _meeting_rounds._decisions_path(normalized_team_id)
     )
+    meetings: list[dict[str, Any]] = []
+    digests: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
-    for decision_id in decision_ids:
-        record = _meeting_rounds._latest_by_id(decision_records, "decisionId", decision_id)
-        if record is None:
+    meeting_decision_ids: list[list[str]] = []
+    for bound_meeting_id in meeting_ids:
+        bound_meeting = _meeting_rounds.get_meeting_round(
+            normalized_team_id, bound_meeting_id
+        )["meetingRound"]
+        if str(bound_meeting.get("meetingType") or "") != "hypothesis_review":
             raise ResearchHypothesisRoundError(
-                f"decision record {decision_id} does not resolve",
+                "hypothesis round generation requires hypothesis_review meetings",
             )
-        decisions.append(record)
+        if str(bound_meeting.get("status") or "") != "closed":
+            raise ResearchHypothesisRoundError(
+                f"hypothesis round generation requires closed meeting {bound_meeting_id}",
+            )
+        digest_id = str(bound_meeting.get("digestId") or "").strip()
+        decision_ids = _normalized_str_list(bound_meeting.get("decisionRefs"))
+        if not digest_id or not decision_ids:
+            raise ResearchHypothesisRoundError(
+                f"closed meeting {bound_meeting_id} is missing digestId or decisionRefs",
+            )
+        digest = _meeting_rounds._latest_by_id(digest_records, "digestId", digest_id)
+        if digest is None:
+            raise ResearchHypothesisRoundError(
+                f"meeting digest {digest_id} does not resolve",
+            )
+        if not _normalized_str_list(digest.get("sourceMessageRefs")):
+            raise ResearchHypothesisRoundError(
+                "hypothesis round generation requires digest v2 sourceMessageRefs",
+            )
+        resolved_decisions: list[dict[str, Any]] = []
+        for decision_id in decision_ids:
+            record = _meeting_rounds._latest_by_id(
+                decision_records, "decisionId", decision_id
+            )
+            if record is None:
+                raise ResearchHypothesisRoundError(
+                    f"decision record {decision_id} does not resolve",
+                )
+            resolved_decisions.append(record)
+        meetings.append(dict(bound_meeting))
+        digests.append(dict(digest))
+        decisions.extend(resolved_decisions)
+        meeting_decision_ids.append(decision_ids)
 
-    selected_ids = [
-        item.split(":", 1)[1].strip()
-        for item in _normalized_str_list(meeting.get("discussionItemRefs"))
-        if item.startswith("hypothesis_candidate:") and item.split(":", 1)[1].strip()
-    ]
+    meeting = meetings[0]
+
+    selected_ids: list[str] = []
+    for bound_meeting in meetings:
+        for item in _normalized_str_list(bound_meeting.get("discussionItemRefs")):
+            if not item.startswith("hypothesis_candidate:"):
+                continue
+            candidate_id = item.split(":", 1)[1].strip()
+            if not candidate_id:
+                continue
+            if candidate_id in selected_ids:
+                raise ResearchHypothesisRoundError(
+                    f"candidate {candidate_id} is bound to multiple review meetings",
+                )
+            selected_ids.append(candidate_id)
     candidate_inputs = [
         dict(item)
         for item in list(request.get("candidates") or [])
@@ -469,12 +502,24 @@ def generate_hypothesis_round_from_meeting(
         }
     )
     scope_hash = scope["scopeHash"]
-    if scope_hash != str(meeting.get("scopeHash") or ""):
-        raise ResearchHypothesisRoundError(
-            "meeting scope hash mismatch; refusing to generate a hypothesis round",
-        )
+    for bound_meeting in meetings:
+        if scope_hash != str(bound_meeting.get("scopeHash") or ""):
+            raise ResearchHypothesisRoundError(
+                "meeting scope hash mismatch; refusing to generate a hypothesis round",
+            )
+        if str(bound_meeting.get("question") or "").upper() != str(
+            meeting.get("question") or ""
+        ).upper():
+            raise ResearchHypothesisRoundError(
+                "fan-in meetings must belong to the same question",
+            )
+    round_seed = (
+        {"meetingRoundIds": meeting_ids, "scopeHash": scope_hash}
+        if requested_meeting_ids
+        else {"meetingRoundId": meeting_id, "scopeHash": scope_hash}
+    )
     round_id = str(request.get("roundId") or "").strip() or (
-        f"hround-{_stable_hash({'meetingRoundId': meeting_id, 'scopeHash': scope_hash})[:12]}"
+        f"hround-{_stable_hash(round_seed)[:12]}"
     )
 
     closed_prior_rounds = [
@@ -516,9 +561,57 @@ def generate_hypothesis_round_from_meeting(
     else:
         lineage.extend({"kind": "candidate", "id": candidate_id} for candidate_id in ordered_ids)
 
+    aggregate_meeting_id = (
+        meeting_id
+        if len(meeting_ids) == 1
+        else f"meeting-fanin-{_stable_hash({'meetingRoundIds': meeting_ids})[:12]}"
+    )
+    aggregate_digest_id = (
+        str(digests[0].get("digestId") or "")
+        if len(digests) == 1
+        else f"digest-fanin-{_stable_hash({'digestIds': [item.get('digestId') for item in digests]})[:12]}"
+    )
+
+    def _merged_digest_list(field: str) -> list[Any]:
+        return [entry for digest in digests for entry in list(digest.get(field) or [])]
+
+    aggregate_digest = {
+        "digestId": aggregate_digest_id,
+        "summary": "\n\n".join(
+            str(item.get("summary") or "").strip() for item in digests
+        ).strip(),
+        "agendaSummary": "\n\n".join(
+            str(item.get("agendaSummary") or "").strip() for item in digests
+        ).strip(),
+        "agreements": _merged_digest_list("agreements"),
+        "disagreements": _merged_digest_list("disagreements"),
+        "actionItems": _merged_digest_list("actionItems"),
+        "risks": _merged_digest_list("risks"),
+        "knowledgeCandidates": _merged_digest_list("knowledgeCandidates"),
+        "sourceMessageRefs": [
+            ref
+            for digest in digests
+            for ref in _normalized_str_list(digest.get("sourceMessageRefs"))
+        ],
+        "contentHash": _stable_hash(
+            {
+                "digestIds": [item.get("digestId") for item in digests],
+                "contentHashes": [item.get("contentHash") for item in digests],
+            }
+        ),
+    }
+    aggregate_meeting = {
+        **meeting,
+        "meetingRoundId": aggregate_meeting_id,
+        "discussionItemRefs": [
+            ref
+            for bound_meeting in meetings
+            for ref in _normalized_str_list(bound_meeting.get("discussionItemRefs"))
+        ],
+    }
     context = research_memory_context.build_hypothesis_review_context(
-        meeting_round=meeting,
-        digest=digest,
+        meeting_round=aggregate_meeting,
+        digest=aggregate_digest,
         decisions=decisions,
         candidates=candidates,
         prior_round=prior_round,
@@ -534,11 +627,23 @@ def generate_hypothesis_round_from_meeting(
         reviewer_assignments={"metareview": coordinator_agent},
         position_seed=str(request.get("positionSeed") or "").strip(),
     )
-    meeting_refs = [
-        {"kind": "meeting_round", "id": meeting_id},
-        {"kind": "meeting_digest", "id": digest_id},
-        *[{"kind": "decision_record", "id": decision_id} for decision_id in decision_ids],
-    ]
+    meeting_refs: list[dict[str, str]] = []
+    for bound_meeting, digest, decision_ids in zip(
+        meetings, digests, meeting_decision_ids
+    ):
+        meeting_refs.extend(
+            [
+                {
+                    "kind": "meeting_round",
+                    "id": str(bound_meeting.get("meetingRoundId") or ""),
+                },
+                {"kind": "meeting_digest", "id": str(digest.get("digestId") or "")},
+                *[
+                    {"kind": "decision_record", "id": decision_id}
+                    for decision_id in decision_ids
+                ],
+            ]
+        )
     result = create_hypothesis_round(
         normalized_team_id,
         {

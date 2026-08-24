@@ -35,6 +35,7 @@ from core.research.workflow.iteration_decisions import (
 from core.research.workflow.models import ActorKind
 from core.research.workflow.checkpoint_store import (
     ScopeBindingMismatch,
+    assert_five_way_scope_binding,
     build_checkpoint_binding_payload,
     canonical_discussion_scope,
 )
@@ -294,10 +295,15 @@ def _validate_state_scope_binding(
     old shared session.
     """
 
-    required = bool(state.get("scope_binding_required")) or bool(
-        dispatch is not None and dispatch.scope_binding_required
-    )
     persisted = _state_discussion_scope(state)
+    # A persisted Discussion Scope is itself evidence that this is a formal
+    # scoped run.  Do not let a partially-written/legacy checkpoint bypass
+    # the five-way gate merely because its boolean marker is absent.
+    required = (
+        bool(state.get("scope_binding_required"))
+        or bool(dispatch is not None and dispatch.scope_binding_required)
+        or persisted is not None
+    )
     if not required and persisted is None:
         return None
     if persisted is None:
@@ -323,6 +329,20 @@ def _validate_state_scope_binding(
             field="workflowCheckpoint.scopeHash",
             expected_scope_hash=expected_hash,
             observed_scope_hash=state_hash,
+        )
+    # A formal Challenge Cup graph is resumable only when all five durable
+    # authorities still point at the same discussion scope.  The checkpoint
+    # stores metadata-only refs for these authorities; validate those refs
+    # through the canonical facade instead of treating their presence as
+    # proof of a binding.  Legacy unscoped graph runs keep the old behavior.
+    if required:
+        assert_five_way_scope_binding(
+            workflow_checkpoint={"scope": persisted},
+            business_checkpoint=state.get("business_checkpoint_ref"),
+            meeting=state.get("meeting_ref"),
+            room=state.get("room_ref"),
+            participant_sessions=state.get("participant_binding_refs") or (),
+            expected_scope=persisted,
         )
     return persisted
 
@@ -628,6 +648,10 @@ class ChallengeCupGraphCoordinator:
             "checkpoint_version": 1,
         }
         state.update(_scope_update_for_dispatch(dispatch))
+        # Validate before the first graph write as well as after every read.
+        # This keeps an incomplete formal binding from creating a resumable
+        # checkpoint that can only be discovered after the graph has moved.
+        _validate_state_scope_binding(state, dispatch)
         if dispatch.binding_snapshot_id:
             state["binding_snapshot_id"] = dispatch.binding_snapshot_id
         if dispatch.budget_policy_hash:
