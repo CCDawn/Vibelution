@@ -917,10 +917,100 @@ def destroy_challenge_cup_experiment_state_reset(
         if staging_root != expected:
             raise ResearchProjectError("Challenge Cup workspace staging path changed")
         if staging_root.exists():
-            shutil.rmtree(staging_root)
+            _destroy_challenge_cup_workspace_staging(staging_root)
         cached["status"] = "destroyed"
         cached["entries"] = []
         return _challenge_cup_workspace_stage_summary(cached)
+
+
+def _destroy_challenge_cup_workspace_staging(staging_root: Path) -> None:
+    """Retry one Windows transient child disappearance without widening scope."""
+
+    for attempt in range(2):
+        if not staging_root.exists():
+            return
+        try:
+            shutil.rmtree(staging_root)
+            return
+        except FileNotFoundError:
+            if not staging_root.exists() or attempt:
+                if staging_root.exists():
+                    raise
+                return
+    raise ResearchProjectError("Challenge Cup workspace staging cleanup is incomplete")
+
+
+def _challenge_cup_workspace_reset_path_is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+    except OSError:
+        return False
+    return bool(attributes & 0x400)
+
+
+def destroy_orphaned_purged_challenge_cup_experiment_state_reset_staging(
+    team_id: str,
+    *,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Finalize a durable purged workspace stage whose coordinator is gone."""
+
+    team = _challenge_cup_reset_value(team_id, field="teamId")
+    reset = _challenge_cup_reset_value(reset_id, field="resetId")
+    if team != CHALLENGE_CUP_RESET_TEAM_ID:
+        raise ResearchProjectError("Challenge Cup reset is restricted to research-team")
+    with _STORE_LOCK:
+        root = formal_team_workspace_root(team).resolve(strict=False)
+        staging_root = _challenge_cup_workspace_reset_root(team, reset)
+        if not staging_root.exists():
+            return {
+                "status": "absent",
+                "teamId": team,
+                "resetId": reset,
+                "stagingDestroyed": False,
+            }
+        if staging_root.is_symlink() or _challenge_cup_workspace_reset_path_is_reparse_point(staging_root):
+            raise ResearchProjectError("Challenge Cup workspace orphaned staging is unsafe")
+        manifest = _read_json(staging_root / "manifest.json")
+        if (
+            manifest.get("kind") != "challenge_cup_workspace_reset"
+            or manifest.get("schemaVersion") != 1
+            or str(manifest.get("teamId") or "") != team
+            or str(manifest.get("resetId") or "") != reset
+            or str(manifest.get("status") or "") != "purged"
+            or Path(str(manifest.get("stagingRoot") or "")).resolve(strict=False) != staging_root
+        ):
+            raise ResearchProjectError("Challenge Cup workspace staging is not a verified purged reset")
+        entries = manifest.get("entries") if isinstance(manifest.get("entries"), list) else []
+        names = [str(entry.get("name") or "") for entry in entries if isinstance(entry, dict)]
+        if (
+            len(names) != len(entries)
+            or len(set(names)) != len(names)
+            or any(not name for name in names)
+            or not set(names).issubset(set(CHALLENGE_CUP_EXPERIMENT_STATE_ENTRIES))
+        ):
+            raise ResearchProjectError("Challenge Cup workspace orphaned staging authority is invalid")
+        expected_entries = {"manifest.json", *names}
+        if any(path.name not in expected_entries for path in staging_root.iterdir()):
+            raise ResearchProjectError("Challenge Cup workspace orphaned staging contains unexpected data")
+        for name in names:
+            staged = (staging_root / name).resolve(strict=False)
+            if not staged.is_relative_to(staging_root) or (
+                staged.exists()
+                and (staged.is_symlink() or _challenge_cup_workspace_reset_path_is_reparse_point(staged))
+            ):
+                raise ResearchProjectError("Challenge Cup workspace orphaned staging path is unsafe")
+        _destroy_challenge_cup_workspace_staging(staging_root)
+        for stage_id, cached in list(_CHALLENGE_CUP_WORKSPACE_RESET_STAGES.items()):
+            if str(cached.get("teamId") or "") == team and str(cached.get("resetId") or "") == reset:
+                _CHALLENGE_CUP_WORKSPACE_RESET_STAGES.pop(stage_id, None)
+        return {
+            "status": "destroyed",
+            "teamId": team,
+            "resetId": reset,
+            "entryCount": len(names),
+            "stagingDestroyed": True,
+        }
 
 
 def _record_project_event(event_name: str, team_id: str, project_id: str) -> None:

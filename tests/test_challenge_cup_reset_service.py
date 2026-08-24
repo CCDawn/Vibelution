@@ -78,10 +78,17 @@ class _Reader:
 
 
 class _Ports:
-    def __init__(self, *, bootstrap_ok: bool = True, bootstrap_raises: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        bootstrap_ok: bool = True,
+        bootstrap_raises: bool = False,
+        destroy_raises: bool = False,
+    ) -> None:
         self.calls: list[str] = []
         self.bootstrap_ok = bootstrap_ok
         self.bootstrap_raises = bootstrap_raises
+        self.destroy_raises = destroy_raises
 
     def lookup_completed(self, purge_plan_id: str) -> None:
         self.calls.append("LOOKUP")
@@ -136,6 +143,8 @@ class _Ports:
 
     def destroy_staging(self, team_id: str, plan: dict[str, Any], stage: dict[str, Any]) -> dict[str, Any]:
         self.calls.append("DESTROY_STAGING")
+        if self.destroy_raises:
+            raise FileNotFoundError("staging child vanished")
         return {"destroyed": True}
 
 
@@ -262,3 +271,21 @@ def test_rebootstrap_exception_preserves_purged_state_without_restore() -> None:
     assert result["stagingDestroyed"] is False
     assert ports.calls == ["LOOKUP", "FENCE", "DRAIN", "STAGE", "COMMIT", "VERIFY_ZERO", "REBOOTSTRAP"]
     assert result["steps"][-1] == {"step": "REBOOTSTRAP", "status": "blocked", "error": "RuntimeError"}
+
+
+def test_finalization_exception_preserves_purged_state_without_restore() -> None:
+    ports = _Ports(destroy_raises=True)
+    service = ChallengeCupResetService(inventory_reader=_Reader(_inventory()), destructive_adapter=ports)
+    preview = service.preview().to_dict()
+
+    result = service.execute(
+        purge_plan_id=preview["purgePlanId"],
+        confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+
+    assert result["status"] == "needs_finalize"
+    assert result["stagingDestroyed"] is False
+    assert ports.calls == [
+        "LOOKUP", "FENCE", "DRAIN", "STAGE", "COMMIT", "VERIFY_ZERO", "REBOOTSTRAP", "DESTROY_STAGING"
+    ]
+    assert result["steps"][-1] == {"step": "DESTROY_STAGING", "status": "blocked", "error": "FileNotFoundError"}

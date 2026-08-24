@@ -60,3 +60,33 @@ def test_workspace_reset_moves_only_allowlisted_experiment_state(monkeypatch, tm
     assert finalized["status"] == "destroyed"
     assert not (root / "candidate_store").exists()
     assert (root / "canvas" / "keep.json").is_file()
+
+
+def test_orphaned_purged_workspace_staging_is_destroyed_with_one_transient_retry(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "research-team"
+    (root / "candidate_store").mkdir(parents=True)
+    (root / "candidate_store" / "legacy.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(research_projects, "formal_team_workspace_root", lambda _team_id: root)
+
+    stage = research_projects.prepare_challenge_cup_experiment_state_reset(
+        "research-team", reset_id="reset-workspace-orphaned", entry_ids=["candidate_store"]
+    )
+    research_projects.purge_challenge_cup_experiment_state_reset(stage, reset_id="reset-workspace-orphaned")
+    original_rmtree = research_projects.shutil.rmtree
+    calls = 0
+
+    def transient_missing(path: Path, *args, **kwargs) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise FileNotFoundError("staging child vanished")
+        original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(research_projects.shutil, "rmtree", transient_missing)
+    finalized = research_projects.destroy_orphaned_purged_challenge_cup_experiment_state_reset_staging(
+        "research-team", reset_id="reset-workspace-orphaned"
+    )
+
+    assert finalized["status"] == "destroyed"
+    assert calls == 2
+    assert not (root / ".challenge_cup_reset_staging" / "reset-workspace-orphaned").exists()

@@ -901,9 +901,32 @@ class ChallengeCupResetService:
                 {"step": "REBOOTSTRAP", "status": "succeeded", "result": _clone_json(bootstrap_result)}
             )
 
-            destroy_result = _adapter_method(adapter, "destroy_staging")(
-                normalized_team_id, plan, stage_result
-            )
+            try:
+                destroy_result = _adapter_method(adapter, "destroy_staging")(
+                    normalized_team_id, plan, stage_result
+                )
+            except Exception as exc:
+                # Finalization may be partially complete across independent
+                # owners.  Once it starts, restoring would resurrect only a
+                # subset of the reset and violate the committed empty state.
+                steps.append(
+                    {
+                        "step": "DESTROY_STAGING",
+                        "status": "blocked",
+                        "error": type(exc).__name__,
+                    }
+                )
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "operation": RESET_OPERATION,
+                    "status": "needs_finalize",
+                    "teamId": normalized_team_id,
+                    "purgePlanId": plan_id,
+                    "inventoryHash": preview.inventory_hash,
+                    "steps": steps,
+                    "stagingDestroyed": False,
+                    "irreversible": True,
+                }
             steps.append(
                 {"step": "DESTROY_STAGING", "status": "succeeded", "result": _clone_json(destroy_result)}
             )
