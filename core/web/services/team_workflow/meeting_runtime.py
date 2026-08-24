@@ -44,6 +44,9 @@ from core.research.workflow.contracts.discussion_scope import (
     session_scope_key,
 )
 from core.web.services.team_workflow import meeting_rounds
+from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+    assert_writes_allowed,
+)
 
 DEFAULT_MAX_MESSAGES = 40
 MAX_SELECTED_CANDIDATES = 16
@@ -977,6 +980,9 @@ def open_hypothesis_review_meeting(
     Reopening with an identical payload reuses the existing meeting and its
     bound discussion round instead of starting a duplicate.
     """
+    # This must run before linked-room/session resolution: both can create
+    # durable Challenge Cup objects when the reset fence is active.
+    assert_writes_allowed(team_id, operation="meeting_open")
     from core.web.services import chat_room_service
 
     request = dict(payload) if isinstance(payload, Mapping) else {}
@@ -1129,6 +1135,7 @@ def open_candidate_generation_meeting(
     is deterministic per scope/question so replays reuse instead of
     duplicating.
     """
+    assert_writes_allowed(team_id, operation="meeting_open")
     from core.web.services import chat_room_service
 
     request = dict(payload) if isinstance(payload, Mapping) else {}
@@ -1385,6 +1392,9 @@ def _run_meeting_discussion_impl(
             stop_reason = "converged"
             break
         discussion_round_index = len(bound_round_ids) + 1
+        # Existing meetings may drain, but they cannot create another room
+        # round after maintenance starts.
+        assert_writes_allowed(normalized_team_id, operation="meeting_round_start")
         result = chat_room_service.start_chat_room_round(
             room_id,
             _follow_up_topic(discussion_round_index),

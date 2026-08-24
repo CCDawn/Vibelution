@@ -202,6 +202,13 @@ def challenge_cup_experiment_writeback_tool(
     """Write experiment ledger records without executing training or smoke runners."""
 
     try:
+        from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+            assert_writes_allowed,
+        )
+
+        # Keep the canonical Agent tool fail-closed before task binding or any
+        # experiment/project writeback is attempted.
+        assert_writes_allowed(team_id, operation="experiment_writeback")
         from core.web.services import team_workflow_orchestration_service as workflow_service
 
         normalized_operation = _text(operation)

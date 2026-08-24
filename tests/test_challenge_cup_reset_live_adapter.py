@@ -91,6 +91,8 @@ def _ports(*, missing_checkpoints: bool = False) -> ChallengeCupInventoryPorts:
         list_artifacts=list_artifacts,
         list_checkpoints=None if missing_checkpoints else (lambda team_id: []),
         list_receipts=lambda team_id: [],
+        list_projects=lambda team_id: {"projects": []},
+        list_workspace_state=lambda team_id: [],
         list_active_session_work=lambda: [],
         load_catalog=lambda: {"catalog_id": "science-125-questions-2021", "question_count": 125, "sha256": "catalog-hash"},
         load_program=lambda: {"contractVersion": "2.2.0", "coreBehaviorHash": "program-hash"},
@@ -140,6 +142,31 @@ def test_active_work_is_derived_from_managed_snapshots() -> None:
     assert active["authorityPresent"] is True
     assert active["activeCount"] == 1
     assert active["items"] == [{"id": "turn-1", "kind": "chat_turn", "status": "running"}]
+
+
+def test_unrelated_unscoped_sessions_are_protected_outside_reset_inventory() -> None:
+    ports = _ports()
+    original_list_sessions = ports.list_sessions
+
+    def list_sessions() -> list[dict[str, Any]]:
+        return [
+            *list(original_list_sessions()),
+            {
+                "id": "personal-session",
+                "agentId": "agent-not-in-any-team",
+                "status": "idle",
+            },
+        ]
+
+    reader = LiveChallengeCupInventoryReader(
+        ChallengeCupInventoryPorts(**{**ports.__dict__, "list_sessions": list_sessions})
+    )
+
+    preview = ChallengeCupResetService(inventory_reader=reader).preview().to_dict()
+
+    assert preview["safeToConfirm"] is True
+    assert preview["deleteSet"]["sessions"] == ["legacy-session"]
+    assert all(item.get("id") != "personal-session" for item in reader.read_inventory("research-team")["objects"]["sessions"])
 
 
 def test_missing_checkpoint_authority_is_fail_closed_without_sqlite_scan() -> None:

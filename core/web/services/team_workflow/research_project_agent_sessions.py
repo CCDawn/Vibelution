@@ -664,6 +664,14 @@ def resolve_research_project_agent_session(
     """
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    # Session resolution can create a canonical root or hidden Child Session;
+    # refuse that new binding before reading/writing the registry when a
+    # governed Challenge Cup reset is draining.
+    from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+        assert_writes_allowed,
+    )
+
+    assert_writes_allowed(normalized_team_id, operation="session_binding")
     normalized_project_id = s._normalize_required_id(
         research_project_id,
         "Research project id is required.",
