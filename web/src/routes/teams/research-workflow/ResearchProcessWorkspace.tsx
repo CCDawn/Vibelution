@@ -3,7 +3,12 @@ import { useCallback, useMemo, type ReactNode } from "react";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VButton, VCanvasWorkbenchPage } from "../../../components/vui";
-import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
+import {
+  buildHypothesisFirstCanvasRegion,
+  hypothesisFirstSemanticNodeId,
+  isHypothesisReviewRetryAttempt,
+  summarizeHypothesisReviewMeetings,
+} from "./hypothesisFirstCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
@@ -258,6 +263,17 @@ export function ResearchProcessWorkspace({
       recovery: null,
     };
   }, [hypothesisFirstChain.scopeMismatch, nextAction]);
+  const semanticSelectedNodeId = hypothesisFirstSemanticNodeId(location.selectedNodeId);
+  const prospectiveCurrentTaskNodeId = runState.snapshot?.currentTask?.nodeId
+    ?? safeNextAction.targetNodeId;
+  const semanticProspectiveCurrentTaskNodeId = hypothesisFirstSemanticNodeId(
+    prospectiveCurrentTaskNodeId,
+  );
+  const workspaceSelectedNodeId = location.panel === "node"
+    && semanticSelectedNodeId
+    && semanticSelectedNodeId === semanticProspectiveCurrentTaskNodeId
+    ? prospectiveCurrentTaskNodeId
+    : location.selectedNodeId;
   const displayError =
     commands.error
     || formalCommand.commandError
@@ -276,7 +292,7 @@ export function ResearchProcessWorkspace({
     snapshot: runState.snapshot,
     commandOffers: runState.commandOffers,
     legacyNextAction: safeNextAction,
-    selectedNodeId: location.selectedNodeId,
+    selectedNodeId: workspaceSelectedNodeId,
     panel: location.panel,
     loading: !hypothesisFirstReady || (!runState.projection && !displayError),
     error: displayError,
@@ -287,7 +303,7 @@ export function ResearchProcessWorkspace({
     hypothesisFirstReady,
     location.panel,
     location.runId,
-    location.selectedNodeId,
+    workspaceSelectedNodeId,
     runState.commandOffers,
     runState.projection,
     runState.run?.runVersion,
@@ -330,6 +346,63 @@ export function ResearchProcessWorkspace({
         recovery: null,
       }
     : safeNextAction;
+  const semanticCurrentTaskNodeId = hypothesisFirstSemanticNodeId(
+    workspaceNavigationAction.targetNodeId,
+  );
+  const archiveOpen = location.panel === "question";
+  const scopedReviewMeetings = useMemo(() => hypothesisFirstChain.meetings
+    .filter((meeting) => (
+      meeting.meetingType === "hypothesis_review"
+      && (!chainQuestionId
+        || meeting.question.trim().toUpperCase() === chainQuestionId.trim().toUpperCase())
+    ))
+    .sort((left, right) => (left.roundIndex ?? 0) - (right.roundIndex ?? 0)), [
+    chainQuestionId,
+    hypothesisFirstChain.meetings,
+  ]);
+  const reviewSummary = useMemo(
+    () => summarizeHypothesisReviewMeetings(scopedReviewMeetings),
+    [scopedReviewMeetings],
+  );
+  const reviewHistory = useMemo(() => {
+    const effectiveMeetings = scopedReviewMeetings.filter(
+      (meeting) => !isHypothesisReviewRetryAttempt(meeting),
+    );
+    return effectiveMeetings.map((meeting, index) => {
+      const round = meeting.roundIndex ?? index + 1;
+      const previousRound = index > 0
+        ? (effectiveMeetings[index - 1]?.roundIndex ?? index)
+        : 0;
+      return {
+        id: meeting.meetingRoundId,
+        round,
+        status: meeting.status,
+        digestAvailable: Boolean(meeting.digestId || meeting.digestRef),
+        retryAttempts: scopedReviewMeetings.filter((candidate) => {
+          const candidateRound = candidate.roundIndex ?? 0;
+          return isHypothesisReviewRetryAttempt(candidate)
+            && candidateRound > previousRound
+            && candidateRound < round;
+        }).length,
+      };
+    });
+  }, [scopedReviewMeetings]);
+  const archiveSummary = useMemo(() => ({
+    selectedHypotheses: hypothesisFirstChain.selection?.selectedCandidateIds.length,
+    effectiveReviews: reviewSummary.effectiveRounds,
+    retryAttempts: reviewSummary.retryAttempts,
+    collectionRequests: hypothesisFirstChain.collectionRequests.filter((request) => (
+      !chainQuestionId
+      || String(request.questionId ?? "").trim().toUpperCase() === chainQuestionId.trim().toUpperCase()
+    )).length,
+    reviewHistory,
+  }), [
+    chainQuestionId,
+    hypothesisFirstChain.collectionRequests,
+    hypothesisFirstChain.selection?.selectedCandidateIds.length,
+    reviewHistory,
+    reviewSummary,
+  ]);
   const workflowContext = useMemo(() => buildResearchWorkflowContext({
     teamId,
     workflowId: CHALLENGE_CUP_WORKFLOW_ID,
@@ -395,7 +468,9 @@ export function ResearchProcessWorkspace({
   useResearchProcessAutofocus({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: hypothesisFirstReady ? workflowContext.currentTask?.targetNodeId ?? null : null,
+    nextTarget: hypothesisFirstReady
+      ? hypothesisFirstSemanticNodeId(workflowContext.currentTask?.targetNodeId)
+      : null,
     replaceParams: location.replaceParams,
   });
 
@@ -447,6 +522,7 @@ export function ResearchProcessWorkspace({
       }}
       nextAction={workspaceNavigationAction}
       primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
+      archiveSummary={archiveSummary}
     />
   ) : null;
 
@@ -458,7 +534,7 @@ export function ResearchProcessWorkspace({
         workflowActive={workflowActive && hypothesisFirstReady}
         onSelectExperiment={selectExperiment}
         onOpenPanel={(panel) => location.openPanel(panel)}
-        onNavigateNode={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
+        onNavigateNode={(nodeId) => location.replaceParams({ node: hypothesisFirstSemanticNodeId(nodeId) ?? nodeId, panel: "node" })}
       />
       <VCanvasWorkbenchPage
         data-vui="research-process-workspace"
@@ -495,8 +571,8 @@ export function ResearchProcessWorkspace({
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
-              hypothesisFirstReady && workspaceNavigationAction.targetNodeId
-                ? () => location.replaceParams({ node: workspaceNavigationAction.targetNodeId, panel: "node" })
+              hypothesisFirstReady && semanticCurrentTaskNodeId
+                ? () => location.replaceParams({ node: semanticCurrentTaskNodeId, panel: "node" })
                 : undefined
             }
           />
@@ -511,7 +587,7 @@ export function ResearchProcessWorkspace({
           rail: { label: "研究阶段" },
           inspector: { label: "当前任务" },
         }}
-        rail={(
+        rail={archiveOpen ? null : (
           <div className={styles.stageNavigator}>
             <ResearchWorkflowStageNavigator
               lang={lang}
@@ -520,17 +596,21 @@ export function ResearchProcessWorkspace({
             />
           </div>
         )}
-        canvas={
+        canvas={archiveOpen ? (
+          <div className={styles.archive} data-vui="research-question-archive-canvas">
+            {inspectorPane}
+          </div>
+        ) : (
           <ResearchWorkflowCanvasPane
             graph={graph}
             selectedNodeId={location.selectedNodeId}
             runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
-            currentTaskNodeId={workflowContext.currentTask?.targetNodeId}
+            currentTaskNodeId={semanticCurrentTaskNodeId}
             error={displayError}
             onSelectNode={location.selectNode}
           />
-        }
-        inspector={(
+        )}
+        inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
             footer={formalPrimaryAction ? (
@@ -573,8 +653,8 @@ export function ResearchProcessWorkspace({
             onRetryDispatch={formalPrimaryAction ? undefined : retryDispatch}
             retryPending={commandBusy}
             onReturnCurrentTask={
-              workflowContext.currentTask?.targetNodeId
-                ? () => location.replaceParams({ node: workflowContext.currentTask?.targetNodeId, panel: "node" })
+              semanticCurrentTaskNodeId
+                ? () => location.replaceParams({ node: semanticCurrentTaskNodeId, panel: "node" })
                 : undefined
             }
           >

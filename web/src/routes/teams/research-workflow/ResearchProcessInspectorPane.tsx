@@ -25,7 +25,10 @@ import {
   ResearchRunTimeline,
   ResearchTeamPanel,
 } from "../teamLazyPanels";
-import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
+import {
+  hypothesisFirstSemanticNodeId,
+  isHypothesisFirstCanvasNode,
+} from "./hypothesisFirstCanvasRegion";
 import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
@@ -45,9 +48,17 @@ export function ownsResearchCurrentTask(
   selectedNodeId: string | null | undefined,
   currentTaskNodeId: string | null | undefined,
 ): boolean {
-  const selected = selectedNodeId?.trim();
-  const current = currentTaskNodeId?.trim();
+  const selected = hypothesisFirstSemanticNodeId(selectedNodeId);
+  const current = hypothesisFirstSemanticNodeId(currentTaskNodeId);
   return Boolean(selected && current && selected === current);
+}
+
+export function researchArchiveReturnNodeId(
+  selectedNodeId: string | null | undefined,
+  currentTaskNodeId: string | null | undefined,
+): string | null {
+  return hypothesisFirstSemanticNodeId(currentTaskNodeId)
+    ?? hypothesisFirstSemanticNodeId(selectedNodeId);
 }
 
 export function ResearchProcessInspectorPane(props: {
@@ -81,6 +92,19 @@ export function ResearchProcessInspectorPane(props: {
   collectionRecoveryBusy?: boolean;
   collectionRecoveryError?: string | null;
   primaryActionOwnedByWorkspace?: boolean;
+  archiveSummary?: {
+    selectedHypotheses?: number;
+    effectiveReviews: number;
+    retryAttempts: number;
+    collectionRequests: number;
+    reviewHistory?: Array<{
+      id: string;
+      round: number;
+      status: string;
+      digestAvailable: boolean;
+      retryAttempts: number;
+    }>;
+  };
 }) {
   const {
     scope,
@@ -119,6 +143,10 @@ export function ResearchProcessInspectorPane(props: {
         />
       );
     }
+    const returnNodeId = researchArchiveReturnNodeId(
+      scope.selectedNodeId,
+      nextAction?.targetNodeId,
+    );
     return (
       <div className={styles.question} data-vui="research-question-archive">
         <ChallengeQuestionDetailPanel
@@ -129,8 +157,10 @@ export function ResearchProcessInspectorPane(props: {
           onSelectRunId={setSelectedQuestionRunId}
           isLoading={questionDetail.isPending}
           errorMessage={questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
-          onClose={() => actions.replaceParams({ panel: "progress" })}
-          onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
+          onClose={() => actions.replaceParams({ panel: "node", node: returnNodeId })}
+          onNavigateToNode={(nodeId) => actions.replaceParams({ node: hypothesisFirstSemanticNodeId(nodeId) ?? nodeId, panel: "node" })}
+          readOnlyArchive
+          archiveSummary={props.archiveSummary}
         />
       </div>
     );
@@ -234,7 +264,7 @@ export function ResearchProcessInspectorPane(props: {
       }
       onNavigateHypothesis={
         nextAction?.targetNodeId
-          ? () => actions.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
+          ? () => actions.replaceParams({ node: hypothesisFirstSemanticNodeId(nextAction.targetNodeId), panel: "node" })
           : undefined
       }
       collectionRecoveryRequestId={

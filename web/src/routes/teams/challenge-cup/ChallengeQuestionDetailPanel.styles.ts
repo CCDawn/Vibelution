@@ -2,6 +2,15 @@ const styles: Record<string, string> = {
   // The panel lives inside the 300–520px inspector pane, so all multi-column
   // grids below respond to the container (@container), never the viewport.
   workspace: "@container grid gap-4 text-[var(--fg-primary)]",
+  archiveWorkspace: "h-full min-h-0 overflow-auto bg-[var(--surface-canvas)] p-4 sm:p-6",
+  archiveMetrics: "w-full [&>div]:min-w-[140px] [&>div]:flex-1",
+  archiveGrid: "grid items-start gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]",
+  archiveError: "grid min-h-60 content-center justify-items-start gap-4 bg-[var(--surface-canvas)] p-5 sm:p-8",
+  archiveTimeline: "m-0 grid list-none gap-2 p-0",
+  archiveTimelineItem: "grid grid-cols-[10px_minmax(0,1fr)] items-start gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
+  archiveTimelineMarker: "mt-1.5 size-2 rounded-full bg-[var(--accent-cool)]",
+  archiveTimelineTopline: "flex flex-wrap items-center justify-between gap-2",
+  archiveTimelineDetail: "mt-1 [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)]",
   runSwitcher:
     "flex items-center gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_select]:max-w-44",
   header:
@@ -11,6 +20,7 @@ const styles: Record<string, string> = {
   eyebrow: "[font-size:var(--vui-font-2xs)] font-[650] tracking-[0.02em] text-[var(--fg-secondary)]",
   anchorNav:
     "grid grid-cols-2 gap-1.5 @min-[430px]:grid-cols-4 [&_a]:flex [&_a]:min-w-0 [&_a]:items-center [&_a]:gap-[7px] [&_a]:rounded-[var(--vui-radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-surface-panel)] [&_a]:px-2.5 [&_a]:py-[9px] [&_a]:[font-size:var(--vui-font-2xs)] [&_a]:text-inherit [&_a]:no-underline [&_span]:grid [&_span]:h-5 [&_span]:w-5 [&_span]:shrink-0 [&_span]:place-items-center [&_span]:rounded-full [&_span]:bg-[var(--vui-surface-inset)] [&_span]:text-[var(--fg-secondary)]",
+  archiveHint: "m-0 [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)]",
   section:
     "grid scroll-mt-5 gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-4 [&_h3]:m-0 [&_h4]:m-0 [&_p]:m-0",
   sectionHeading:
@@ -35,6 +45,12 @@ const styles: Record<string, string> = {
   twoColumn: "grid grid-cols-1 gap-2.5",
   hypothesisCard:
     "grid gap-2.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_h4]:[font-size:var(--vui-font-sm)] [&_h4]:leading-[1.45] [&_dl]:m-0 [&_dl]:grid [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-[3px] [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:text-[var(--fg-secondary)] [&_dd]:m-0",
+  hypothesisSummaryList: "grid gap-2",
+  hypothesisSummaryCard: "overflow-hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)]",
+  hypothesisToggle: "flex w-full items-start justify-between gap-3 px-3 py-3 text-left whitespace-normal hover:bg-[var(--vui-surface-inset)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]",
+  hypothesisToggleCopy: "flex min-w-0 flex-1 flex-wrap items-start gap-2 [font-size:var(--vui-font-sm)] leading-5",
+  hypothesisIndex: "inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--vui-surface-inset)] [font-size:var(--vui-font-2xs)] font-semibold text-[var(--fg-tertiary)]",
+  hypothesisSummaryDetail: "border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] px-4 py-3 [&_dl]:m-0 [&_dl]:grid [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-1 [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:font-semibold [&_dt]:text-[var(--fg-tertiary)] [&_dd]:m-0 [&_dd]:[font-size:var(--vui-font-sm)] [&_dd]:leading-6 [&_dd]:text-[var(--fg-secondary)]",
   reviewGroups:
     "grid gap-[9px] [&>article]:grid [&>article]:gap-2 [&>article]:rounded-[var(--vui-radius-panel-soft)] [&>article]:border [&>article]:border-[var(--vui-border-subtle)] [&>article]:bg-[var(--vui-surface-card)] [&>article]:p-3",
   reviewGrid:

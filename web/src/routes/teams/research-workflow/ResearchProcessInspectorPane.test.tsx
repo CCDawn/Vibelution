@@ -10,12 +10,15 @@ import { queryKeys } from "../../../api/queryKeys";
 import type { AgentConfigWorkspaceAgent } from "../../../api/types";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
-import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
+import {
+  ownsResearchCurrentTask,
+  researchArchiveReturnNodeId,
+  ResearchProcessInspectorPane,
+} from "./ResearchProcessInspectorPane";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import type { NodeDetailState } from "./useNodeDetailState";
 
 type InspectorProps = ComponentProps<typeof ResearchProcessInspectorPane>;
-import { ownsResearchCurrentTask } from "./ResearchProcessInspectorPane";
 
 const BINDINGS: EffectiveAgentBinding[] = [
   { nodeId: "source_finding", roleKey: "source_finder", agentId: "agent-finder", resolvedFrom: "workflow_default" },
@@ -261,9 +264,15 @@ describe("ResearchProcessInspectorPane agents panel language", () => {
 });
 
 describe("ResearchProcessInspectorPane current-task ownership", () => {
-  it("keeps selected history separate from the current task", () => {
+  it("compares ledger attempts through their stable semantic canvas node", () => {
     expect(ownsResearchCurrentTask("hf_selection", "hf_meeting_1")).toBe(false);
-    expect(ownsResearchCurrentTask("hf_meeting_1", "hf_meeting_1")).toBe(true);
+    expect(ownsResearchCurrentTask("hf_review", "hf_meeting_1")).toBe(true);
+    expect(ownsResearchCurrentTask("hf_collection", "source_finding")).toBe(true);
     expect(ownsResearchCurrentTask("source_finding", null)).toBe(false);
+  });
+
+  it("returns from the archive to the semantic current task", () => {
+    expect(researchArchiveReturnNodeId("hf_selection", "hf_meeting_4")).toBe("hf_review");
+    expect(researchArchiveReturnNodeId("hf_collection", null)).toBe("hf_collection");
   });
 });
