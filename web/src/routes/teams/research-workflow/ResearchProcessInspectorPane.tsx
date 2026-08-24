@@ -38,6 +38,7 @@ import type { CommandOffer } from "../../../api/types/research-workflow/commands
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { handoffsForNode } from "./researchNodeHandoffModel";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import type { NodeDetailState } from "./useNodeDetailState";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchProcessInspectorPane.styles";
@@ -88,6 +89,7 @@ export function ResearchProcessInspectorPane(props: {
     submitOffer: (offer: import("../../../api/types/research-workflow/commands").CommandOffer) => Promise<void>;
   };
   nextAction?: HypothesisFirstNextAction;
+  discussionModel?: ScopedDiscussionModel;
   onRecoverCollection?: (requestId: string) => Promise<void>;
   collectionRecoveryBusy?: boolean;
   collectionRecoveryError?: string | null;
@@ -111,6 +113,7 @@ export function ResearchProcessInspectorPane(props: {
     state,
     actions,
     nextAction,
+    discussionModel,
     onRecoverCollection,
     collectionRecoveryBusy = false,
     collectionRecoveryError = null,
@@ -206,6 +209,7 @@ export function ResearchProcessInspectorPane(props: {
         questionId={scope.questionId || state.run?.questionId || ""}
         nodeId={scope.selectedNodeId}
         runId={scope.runId}
+        discussionModel={discussionModel}
         collectionChildStatus={collectionChildStatus}
         onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
         onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}

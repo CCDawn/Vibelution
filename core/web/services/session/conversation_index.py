@@ -1327,6 +1327,25 @@ def create_chat_session(
             }
             if scope:
                 normalized_experiment_binding["scope"] = scope
+        from .discussion_scope_binding import (
+            DiscussionScopeBindingError,
+            normalize_discussion_scope_binding,
+        )
+
+        try:
+            normalized_experiment_binding.update(
+                normalize_discussion_scope_binding(
+                    raw_experiment_binding,
+                    team_id=normalized_experiment_binding["teamId"],
+                    research_project_id=normalized_experiment_binding["researchProjectId"],
+                    workflow_run_id=workflow_run_id,
+                    workflow_node_id=workflow_node_id,
+                    selection_id=selection_id,
+                    candidate_id=candidate_id,
+                )
+            )
+        except DiscussionScopeBindingError as exc:
+            raise s.SessionValidationError(str(exc)) from exc
     binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
     if binding_agent_id and binding_agent_id != normalized_agent_id:
         raise s.SessionValidationError("Experiment binding Agent id does not match the bound Agent.")

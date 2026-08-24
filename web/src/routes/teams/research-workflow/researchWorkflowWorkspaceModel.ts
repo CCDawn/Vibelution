@@ -197,7 +197,7 @@ function scopeConflict(
   requested: ResearchWorkflowWorkspaceScope,
   snapshot: ResearchWorkflowSnapshot | null,
 ): boolean {
-  if (!snapshot) return false;
+  if (!snapshot?.run) return false;
   const run = snapshot.run;
   const pairs: Array<[unknown, unknown, boolean]> = [
     [requested.teamId, run.teamId, false],

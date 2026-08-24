@@ -323,6 +323,8 @@ def _auto_open_review_meeting(
             "chatRoomRoundIds": list(opened.get("chatRoomRoundIds") or []),
             "discussion": dict(opened.get("discussion") or {}),
             "roundIndex": int(opened.get("roundIndex") or 1),
+            "reviewMeetings": list(opened.get("reviewMeetings") or []),
+            "candidateCount": int(opened.get("candidateCount") or 0),
         }
     except Exception as exc:  # selection fact stays; report the side effect
         return {

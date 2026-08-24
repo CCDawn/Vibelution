@@ -6,6 +6,7 @@ import {
 } from "../../../components/vui";
 import type { ResearchWorkflowLaunchOption } from "../../../api/researchWorkflow";
 import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 
 /**
  * Ctrl+K command palette for the research workspace (Linear/VS Code pattern).
@@ -21,6 +22,9 @@ export function ResearchCommandPalette(props: {
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: "team" | "progress") => void;
   onNavigateNode: (nodeId: string) => void;
+  /** Ready anchors navigate to their server-owned scoped room. */
+  discussionModel?: ScopedDiscussionModel | null;
+  onNavigateDiscussion?: (deepLink: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -38,12 +42,27 @@ export function ResearchCommandPalette(props: {
   const items = useMemo<VCommandPaletteItem[]>(() => {
     const commands: VCommandPaletteItem[] = [];
     if (props.workflowActive && props.nextAction.targetNodeId) {
+      const scopedDiscussionReady = props.discussionModel?.status === "ready"
+        && Boolean(props.discussionModel.deepLink)
+        && Boolean(props.onNavigateDiscussion);
       commands.push({
         id: "cmd:current-task",
         group: "命令",
         label: props.nextAction.navigationLabel || "前往当前任务",
-        detail: props.nextAction.commandLabel || props.nextAction.statusMessage || undefined,
-        onRun: () => props.onNavigateNode(props.nextAction.targetNodeId || ""),
+        detail: scopedDiscussionReady
+          ? props.nextAction.commandLabel || props.nextAction.statusMessage || undefined
+          : props.discussionModel?.status === "degraded"
+            ? "讨论房间暂不可用；点击后定位到当前流程步骤"
+            : props.nextAction.commandLabel || props.nextAction.statusMessage || undefined,
+        onRun: () => {
+          if (scopedDiscussionReady) {
+            props.onNavigateDiscussion?.(props.discussionModel?.deepLink || "");
+            return;
+          }
+          // A missing/degraded anchor keeps the existing node navigation. It
+          // must never fall back to the team's linkedChatRoomId.
+          props.onNavigateNode(props.nextAction.targetNodeId || "");
+        },
       });
     }
     commands.push({

@@ -33,6 +33,11 @@ from core.research.workflow.iteration_decisions import (
     route_target_for_decision,
 )
 from core.research.workflow.models import ActorKind
+from core.research.workflow.checkpoint_store import (
+    ScopeBindingMismatch,
+    build_checkpoint_binding_payload,
+    canonical_discussion_scope,
+)
 
 
 def merge_node_attempts(
@@ -70,6 +75,18 @@ class ChallengeCupGraphState(TypedDict, total=False):
     session_scope: dict[str, Any]
     selection_id: str
     candidate_id: str
+    # Discussion scope is the multi-agent room identity.  It intentionally
+    # stays separate from ``session_scope`` (which includes agentId).
+    discussion_scope: dict[str, Any]
+    discussion_scope_ref: Any
+    discussion_scope_hash: str
+    room_ref: Any
+    meeting_ref: Any
+    business_checkpoint_ref: Any
+    participant_binding_refs: list[Any]
+    scope_binding_required: bool
+    scope_binding_status: str
+    scope_binding_problem: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -87,10 +104,37 @@ class GraphDispatch:
     budget_policy_hash: str = ""
     receipt: ExecutionReceipt | None = None
     state_update: Mapping[str, Any] | None = None
+    # Optional v1 Discussion Scope binding.  All fields are metadata-only;
+    # transcripts remain in the scoped Child Session ledger.
+    discussion_scope: Mapping[str, Any] | None = None
+    scope_ref: Any = None
+    scope_hash: str = ""
+    room_ref: Any = None
+    meeting_ref: Any = None
+    business_checkpoint_ref: Any = None
+    participant_binding_refs: tuple[Any, ...] = ()
+    scope_binding_required: bool = False
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> GraphDispatch:
         receipt_payload = payload.get("receipt")
+        binding = payload.get("scopeBinding")
+        binding = binding if isinstance(binding, Mapping) else {}
+        discussion_scope = (
+            payload.get("discussionScope")
+            or binding.get("scope")
+            or payload.get("discussion_scope")
+        )
+        if not isinstance(discussion_scope, Mapping):
+            discussion_scope = None
+        participant_refs = (
+            payload.get("participantBindingRefs")
+            or binding.get("participantBindingRefs")
+            or payload.get("participant_binding_refs")
+            or ()
+        )
+        if not isinstance(participant_refs, (list, tuple)):
+            participant_refs = ()
         return cls(
             action_id=str(payload.get("actionId") or ""),
             run_id=str(payload.get("runId") or ""),
@@ -105,6 +149,31 @@ class GraphDispatch:
             budget_policy_hash=str(payload.get("budgetPolicyHash") or ""),
             receipt=ExecutionReceipt.from_dict(receipt_payload) if receipt_payload else None,
             state_update=dict(payload.get("stateUpdate") or {}),
+            discussion_scope=dict(discussion_scope) if discussion_scope else None,
+            scope_ref=(
+                payload.get("scopeRef")
+                or binding.get("scopeRef")
+                or payload.get("scope_ref")
+            ),
+            scope_hash=str(
+                payload.get("scopeHash")
+                or binding.get("scopeHash")
+                or payload.get("scope_hash")
+                or ""
+            ),
+            room_ref=payload.get("roomRef") or binding.get("roomRef"),
+            meeting_ref=payload.get("meetingRef") or binding.get("meetingRef"),
+            business_checkpoint_ref=(
+                payload.get("businessCheckpointRef")
+                or binding.get("businessCheckpointRef")
+            ),
+            participant_binding_refs=tuple(participant_refs),
+            scope_binding_required=bool(
+                payload.get("scopeBindingRequired")
+                or payload.get("challengeCupScoped")
+                or binding.get("required")
+                or discussion_scope
+            ),
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -126,6 +195,20 @@ class GraphDispatch:
             payload["receipt"] = self.receipt.to_dict()
         if self.state_update:
             payload["stateUpdate"] = dict(self.state_update)
+        if self.discussion_scope:
+            binding = build_checkpoint_binding_payload(
+                self.discussion_scope,
+                scope_ref=self.scope_ref,
+                room_ref=self.room_ref,
+                meeting_ref=self.meeting_ref,
+                business_checkpoint_ref=self.business_checkpoint_ref,
+                participant_binding_refs=self.participant_binding_refs,
+            )
+            payload["scopeBinding"] = binding
+            payload["discussionScope"] = dict(binding["scope"])
+            payload["scopeHash"] = str(binding["scopeHash"])
+        if self.scope_binding_required:
+            payload["scopeBindingRequired"] = True
         return payload
 
 
@@ -146,6 +229,106 @@ class GraphDispatchResult:
             "checkpointId": self.checkpoint_id,
             "completed": self.completed,
         }
+
+
+def _dispatch_scope_state(dispatch: GraphDispatch) -> dict[str, Any]:
+    """Convert a dispatch's optional binding into checkpoint-safe channels."""
+
+    if dispatch.discussion_scope is None:
+        if dispatch.scope_binding_required:
+            raise ScopeBindingMismatch(
+                "formal challenge dispatch is missing discussion scope",
+                field="discussionScope",
+            )
+        return {}
+    binding = build_checkpoint_binding_payload(
+        dispatch.discussion_scope,
+        scope_ref=dispatch.scope_ref,
+        room_ref=dispatch.room_ref,
+        meeting_ref=dispatch.meeting_ref,
+        business_checkpoint_ref=dispatch.business_checkpoint_ref,
+        participant_binding_refs=dispatch.participant_binding_refs,
+    )
+    supplied_hash = str(dispatch.scope_hash or "").strip().lower()
+    expected_hash = str(binding["scopeHash"])
+    if supplied_hash and supplied_hash != expected_hash:
+        raise ScopeBindingMismatch(
+            "dispatch scope hash does not match its identity",
+            field="scopeHash",
+            expected_scope_hash=expected_hash,
+            observed_scope_hash=supplied_hash,
+        )
+    return {
+        "discussion_scope": dict(binding["scope"]),
+        "discussion_scope_ref": binding.get("scopeRef"),
+        "discussion_scope_hash": expected_hash,
+        "room_ref": binding.get("roomRef"),
+        "meeting_ref": binding.get("meetingRef"),
+        "business_checkpoint_ref": binding.get("businessCheckpointRef"),
+        "participant_binding_refs": list(binding.get("participantBindingRefs") or []),
+        "scope_binding_required": True,
+        "scope_binding_status": "bound",
+    }
+
+
+def _state_discussion_scope(state: Mapping[str, Any]) -> dict[str, Any] | None:
+    raw = state.get("discussion_scope")
+    if not isinstance(raw, Mapping):
+        raw = state.get("discussionScope")
+    if not isinstance(raw, Mapping):
+        return None
+    # The graph stores the identity and hash in separate channels so the scope
+    # object remains the canonical V1 payload (additionalProperties=false).
+    return canonical_discussion_scope(raw, require_hash=False)
+
+
+def _validate_state_scope_binding(
+    state: Mapping[str, Any],
+    dispatch: GraphDispatch | None = None,
+) -> dict[str, Any] | None:
+    """Validate the graph-side binding without advancing the graph.
+
+    Legacy runs have no ``scope_binding_required`` channel and remain
+    compatible.  Once a formal dispatch has a Discussion Scope, a missing or
+    changed persisted scope is a hard mismatch rather than a fallback to the
+    old shared session.
+    """
+
+    required = bool(state.get("scope_binding_required")) or bool(
+        dispatch is not None and dispatch.scope_binding_required
+    )
+    persisted = _state_discussion_scope(state)
+    if not required and persisted is None:
+        return None
+    if persisted is None:
+        raise ScopeBindingMismatch(
+            "workflow checkpoint discussion scope is missing",
+            field="workflowCheckpoint.discussionScope",
+        )
+    if dispatch is not None and dispatch.discussion_scope is not None:
+        incoming = canonical_discussion_scope(dispatch.discussion_scope, require_hash=False)
+        incoming_hash = str(incoming["scopeHash"])
+        if incoming_hash != str(persisted["scopeHash"]):
+            raise ScopeBindingMismatch(
+                "dispatch and workflow checkpoint scopes differ",
+                field="workflowCheckpoint.scope",
+                expected_scope_hash=str(persisted["scopeHash"]),
+                observed_scope_hash=incoming_hash,
+            )
+    expected_hash = str(persisted["scopeHash"])
+    state_hash = str(state.get("discussion_scope_hash") or "").strip().lower()
+    if state_hash and state_hash != expected_hash:
+        raise ScopeBindingMismatch(
+            "workflow checkpoint scopeHash does not match its scope",
+            field="workflowCheckpoint.scopeHash",
+            expected_scope_hash=expected_hash,
+            observed_scope_hash=state_hash,
+        )
+    return persisted
+
+
+def _scope_update_for_dispatch(dispatch: GraphDispatch) -> dict[str, Any]:
+    return _dispatch_scope_state(dispatch)
 
 
 def action_id_for(run_id: str, node_id: str, attempt: int) -> str:
@@ -379,6 +562,7 @@ def _retry_update(dispatch: GraphDispatch) -> dict[str, Any]:
         update["input_snapshot_hash"] = dispatch.input_snapshot_hash
     if dispatch.state_update:
         update.update(dict(dispatch.state_update))
+    update.update(_scope_update_for_dispatch(dispatch))
     return update
 
 
@@ -399,6 +583,7 @@ def _enter_update(dispatch: GraphDispatch) -> dict[str, Any]:
             if key in {"run_id", "team_id", "input_snapshot_hash"}:
                 continue
             update[key] = value
+    update.update(_scope_update_for_dispatch(dispatch))
     return update
 
 
@@ -442,6 +627,7 @@ class ChallengeCupGraphCoordinator:
             "node_attempts": {dispatch.node_id: dispatch.attempt},
             "checkpoint_version": 1,
         }
+        state.update(_scope_update_for_dispatch(dispatch))
         if dispatch.binding_snapshot_id:
             state["binding_snapshot_id"] = dispatch.binding_snapshot_id
         if dispatch.budget_policy_hash:
@@ -489,6 +675,8 @@ class ChallengeCupGraphCoordinator:
         """
         thread = self._config(dispatch.run_id)
         self._ensure_readable(graph, dispatch.run_id)
+        current = self._read_state(graph, thread, heal=True)
+        _validate_state_scope_binding(dict(current.values or {}), dispatch)
         try:
             graph.update_state(thread, None, as_node=END)
         except Exception as exc:
@@ -517,6 +705,10 @@ class ChallengeCupGraphCoordinator:
         new frozen attempt (never update_state(as_node))."""
         graph, stack = self._compile()
         try:
+            _validate_state_scope_binding(
+                dict(self._read_state(graph, self._config(dispatch.run_id), heal=True).values or {}),
+                dispatch,
+            )
             result = graph.invoke(
                 Command(
                     goto=dispatch.node_id,
@@ -542,9 +734,11 @@ class ChallengeCupGraphCoordinator:
         graph, stack = self._compile()
         try:
             config = self._config(dispatch.run_id)
+            persisted_state = self._read_state(graph, config, heal=True)
+            _validate_state_scope_binding(dict(persisted_state.values or {}), dispatch)
             receipt_payload = dispatch.receipt.to_dict()
             resume_value: Any = _resume_value_for_state(
-                self._read_state(graph, config, heal=True),
+                persisted_state,
                 node_id=dispatch.node_id,
                 receipt_payload=receipt_payload,
             )
@@ -581,6 +775,7 @@ class ChallengeCupGraphCoordinator:
         try:
             config = self._config(dispatch.run_id)
             state = self._read_state(graph, config, heal=True)
+            _validate_state_scope_binding(dict(state.values or {}), dispatch)
             interrupted_nodes = {
                 str(item.value.get("nodeId") or "")
                 for task in state.tasks
@@ -611,6 +806,7 @@ class ChallengeCupGraphCoordinator:
                 replay_values["team_id"] = dispatch.team_id
             if dispatch.input_snapshot_hash:
                 replay_values["input_snapshot_hash"] = dispatch.input_snapshot_hash
+            replay_values.update(_scope_update_for_dispatch(dispatch))
             replay_config = graph.update_state(
                 state.config,
                 replay_values,
@@ -624,6 +820,7 @@ class ChallengeCupGraphCoordinator:
         graph, stack = self._compile()
         try:
             state = self._read_state(graph, self._config(run_id), heal=True)
+            _validate_state_scope_binding(dict(state.values or {}))
             pending = _pending_from_state(state)
             return {
                 "checkpointId": _checkpoint_id_of(state),
@@ -658,6 +855,7 @@ class ChallengeCupGraphCoordinator:
             existing = graph.get_state(child_config)
             existing_checkpoint_id = _checkpoint_id_of(existing)
             if (existing.values or {}) and existing_checkpoint_id:
+                _validate_state_scope_binding(dict(existing.values or {}))
                 # Crash-replay idempotency: fork I/O succeeded but Ledger ack
                 # may have failed; same child_run_id with matching resume is OK.
                 existing_next = [str(node_id) for node_id in existing.next or ()]
@@ -677,9 +875,21 @@ class ChallengeCupGraphCoordinator:
             inherited = dict(source_state.values or {})
             if not inherited:
                 raise RuntimeError("source checkpoint contains no state")
+            _validate_state_scope_binding(inherited)
             # thread_id == runId 契约：child 线程的 run_id 必须指向 child run。
             inherited["run_id"] = child_thread_id
             inherited.update(dict(state_patch or {}))
+            if isinstance((state_patch or {}).get("discussion_scope"), Mapping):
+                inherited["discussion_scope"] = dict(
+                    canonical_discussion_scope(
+                        (state_patch or {})["discussion_scope"], require_hash=False
+                    )
+                )
+                inherited["discussion_scope_hash"] = str(
+                    inherited["discussion_scope"]["scopeHash"]
+                )
+                inherited["scope_binding_required"] = True
+            _validate_state_scope_binding(inherited)
             saved = graph.update_state(
                 child_config,
                 inherited,
@@ -704,6 +914,7 @@ class ChallengeCupGraphCoordinator:
         graph: Any,
     ) -> GraphDispatchResult:
         state = self._read_state(graph, self._config(dispatch.run_id))
+        _validate_state_scope_binding(dict(state.values or {}), dispatch)
         values = dict(state.values or {})
         next_node_ids = tuple(str(node_id) for node_id in state.next or ())
         pending = _pending_from_state(state)

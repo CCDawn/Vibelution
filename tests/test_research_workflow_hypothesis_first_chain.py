@@ -317,6 +317,178 @@ def _selection_payload(agent_id: str, **overrides):
     return payload
 
 
+def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+    from core.web.services.team_workflow import research_project_agent_sessions
+
+    team_id = "team-formal-fanout"
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args: {
+            "workflowRunId": "run-formal-1",
+            "teamId": team_id,
+            "questionId": _QUESTION_ID,
+        },
+    )
+    monkeypatch.setattr(
+        research_project_agent_sessions,
+        "resolve_research_project_identity",
+        lambda *_args: {"projectId": "project-formal-1"},
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            meetings.ResearchMeetingRoundNotFoundError("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_ensure_linked_room",
+        lambda value: ({"teamId": value}, "team-room"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_resolve_hypothesis_participants",
+        lambda *_args: {"participants": ["agent-a"]},
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    opened_payloads: list[dict[str, object]] = []
+
+    def fake_open(_team_id, payload, **_kwargs):
+        opened_payloads.append(dict(payload))
+        meeting_id = str(payload["meetingRoundId"])
+        return {
+            "status": "created",
+            "meetingRound": {
+                "meetingRoundId": meeting_id,
+                "discussionScope": dict(payload["discussionScope"]),
+                "discussionScopeHash": "hash",
+                "linkedChatRoomId": f"room-{payload['candidateId']}",
+            },
+            "roomId": f"room-{payload['candidateId']}",
+            "roundId": f"round-{payload['candidateId']}",
+            "chatRoomRoundIds": [f"round-{payload['candidateId']}"],
+        }
+
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", fake_open)
+    monkeypatch.setattr(
+        chain,
+        "_record_review_round_link",
+        lambda _team_id, **fields: dict(fields),
+    )
+
+    result = chain.open_review_meeting_for_selection(
+        team_id,
+        {
+            **_selection_payload("agent-a"),
+            "selectionId": "selection-formal-1",
+        },
+        background=True,
+    )
+
+    assert result["candidateCount"] == 2
+    assert len(result["reviewMeetings"]) == 2
+    assert [payload["selectedCandidateIds"] for payload in opened_payloads] == [
+        ["hyp-a"],
+        ["hyp-b"],
+    ]
+    assert {
+        payload["discussionScope"]["candidateId"] for payload in opened_payloads
+    } == {"hyp-a", "hyp-b"}
+    assert len({payload["meetingRoundId"] for payload in opened_payloads}) == 2
+
+
+def test_chain_state_projects_explicit_next_candidate_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+
+    team_id = "team-anchor"
+    scope_a = {
+        "version": 1,
+        "kind": "candidate_review",
+        "teamId": team_id,
+        "researchProjectId": "project-1",
+        "workflowRunId": "run-1",
+        "workflowNodeId": "hypothesis_design",
+        "questionId": _QUESTION_ID,
+        "selectionId": "selection-1",
+        "candidateId": "hyp-a",
+    }
+    scope_b = {**scope_a, "candidateId": "hyp-b"}
+    records = [
+        {
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": "link-a",
+            "selectionId": "selection-1",
+            "meetingRoundId": "meeting-a",
+            "questionId": _QUESTION_ID,
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+        },
+        {
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": "link-b",
+            "selectionId": "selection-1",
+            "meetingRoundId": "meeting-b",
+            "questionId": _QUESTION_ID,
+            "roundIndex": 1,
+            "candidateId": "hyp-b",
+            "candidateOrder": 1,
+        },
+    ]
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(chain, "_records", lambda _team_id: records)
+    monkeypatch.setattr(
+        chain,
+        "_question_meetings",
+        lambda *_args: [
+            {
+                "meetingRoundId": "meeting-a",
+                "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+                "question": _QUESTION_ID,
+                "status": "closed",
+                "discussionScope": scope_a,
+                "discussionScopeHash": "hash-a",
+                "linkedChatRoomId": "room-a",
+            },
+            {
+                "meetingRoundId": "meeting-b",
+                "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+                "question": _QUESTION_ID,
+                "status": "open",
+                "discussionScope": scope_b,
+                "discussionScopeHash": "hash-b",
+                "linkedChatRoomId": "room-b",
+            },
+        ],
+    )
+    monkeypatch.setattr(chain, "_question_hypothesis_rounds", lambda *_args: [])
+    monkeypatch.setattr(chain, "_question_template_baselines", lambda *_args: [])
+    monkeypatch.setattr(chain, "_question_generation_meetings", lambda *_args: [])
+
+    state = chain.chain_state(team_id, _QUESTION_ID)
+
+    assert state["activeDiscussionAnchor"] == {
+        "scope": scope_b,
+        "scopeHash": "hash-b",
+        "meetingRoundId": "meeting-b",
+        "roomId": "room-b",
+        "selectionId": "selection-1",
+        "candidateId": "hyp-b",
+    }
+
+
 def _marker_runner(participant, prompt, context):
     """Round 1 carries the DEV fixture markers; follow-up critique rounds pass."""
     if "批评与修订" in str(prompt):

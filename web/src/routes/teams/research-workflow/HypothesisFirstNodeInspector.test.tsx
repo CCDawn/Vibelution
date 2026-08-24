@@ -23,7 +23,9 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 }));
 
 import { recordCollectionHandoff } from "../../../api/hypothesisFirst";
+import { fetchChatRoomDetail } from "../../../api/chat";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
+const mockedFetchChatRoomDetail = vi.mocked(fetchChatRoomDetail);
 
 vi.mock("./HypothesisFirstMeetingOps", () => ({
   HypothesisFirstMeetingOps: (props: {
@@ -161,6 +163,86 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("候选假说生成");
     expect(container.textContent).toContain("生成候选假说");
     expect(container.textContent).not.toContain("前往候选生成");
+  });
+
+  it("loads only the server-authored scoped room and never the meeting fallback room", async () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        discussionModel={{
+          status: "ready",
+          degradedReason: "",
+          scope: {
+            version: 1,
+            kind: "question_generation",
+            teamId: "team-1",
+            researchProjectId: "project-1",
+            workflowRunId: "run-1",
+            workflowNodeId: "hf_generation",
+            questionId: "Q-01",
+          },
+          scopeHash: "scope-hash",
+          roomId: "scoped-room-1",
+          meetingRoundId: "hf-gen-1",
+          questionId: "Q-01",
+          selectionId: "",
+          candidateId: "",
+          query: { kind: "room", room: "scoped-room-1" },
+          search: "?room=scoped-room-1",
+          deepLink: "/chat?room=scoped-room-1",
+          selectedRoundId: "",
+        }}
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const queriedRoomIds = mockedFetchChatRoomDetail.mock.calls.map(([roomId]) => roomId);
+    expect(queriedRoomIds).toContain("scoped-room-1");
+    expect(queriedRoomIds).not.toContain("team-public-room");
+  });
+
+  it("does not read any room when the canonical anchor is degraded", async () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        discussionModel={{
+          status: "degraded",
+          degradedReason: "active_discussion_room_missing",
+          scope: null,
+          scopeHash: "",
+          roomId: "",
+          meetingRoundId: "",
+          questionId: "Q-01",
+          selectionId: "",
+          candidateId: "",
+          query: null,
+          search: "",
+          deepLink: "",
+          selectedRoundId: "",
+        }}
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockedFetchChatRoomDetail).not.toHaveBeenCalled();
   });
 
   it("renders the empty inspector state in English without Chinese chrome", () => {

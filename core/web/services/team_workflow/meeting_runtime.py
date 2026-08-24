@@ -36,6 +36,13 @@ from core.research.workflow.contracts import (
     ContractValidationError,
     sha256_hex,
 )
+from core.research.workflow.contracts.discussion_scope import (
+    CANDIDATE_REVIEW_SCOPE_KIND,
+    QUESTION_GENERATION_SCOPE_KIND,
+    WorkflowDiscussionScopeV1,
+    parse_discussion_scope,
+    session_scope_key,
+)
 from core.web.services.team_workflow import meeting_rounds
 
 DEFAULT_MAX_MESSAGES = 40
@@ -114,6 +121,7 @@ _ROLE_METADATA_FIELDS = (
 _DISCUSSION_DRIVER = threading.local()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
+_SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
 
 
 @contextmanager
@@ -217,6 +225,298 @@ def _ensure_linked_room(team_id: str) -> tuple[dict[str, Any], str]:
             "Team linked chat room is missing; sync the team chat room first."
         )
     return team, room_id
+
+
+def _discussion_scope_candidate(request: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Return an explicitly supplied v1 discussion scope, if present.
+
+    The legacy hypothesis-first payload has a ``scope`` made of the six
+    meeting fields (program/theme/...).  It must not be mistaken for the v1
+    room identity.  Formal workflow callers instead send the canonical scope
+    directly or under a checkpoint ``scopeBinding`` envelope.
+    """
+
+    for key in ("discussionScope", "activeDiscussionScope", "workflowScope"):
+        value = request.get(key)
+        if isinstance(value, Mapping):
+            return value
+    binding = request.get("scopeBinding")
+    if isinstance(binding, Mapping):
+        for key in ("discussionScope", "scope"):
+            value = binding.get(key)
+            if isinstance(value, Mapping):
+                return value
+    value = request.get("discussion_scope")
+    return value if isinstance(value, Mapping) else None
+
+
+def _discussion_scope_for_request(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    question_id: str,
+    meeting_type: str,
+    selection: Mapping[str, Any] | None = None,
+) -> WorkflowDiscussionScopeV1 | None:
+    """Resolve the formal room scope without changing the legacy DEV path.
+
+    A scope is enabled only by an explicit v1 envelope or by the complete
+    workflowRunId/workflowNodeId/researchProjectId tuple.  A receipt alone is
+    deliberately insufficient: it identifies a model invocation, not the
+    discussion node that owns a room.
+    """
+
+    request_scope = _discussion_scope_candidate(request)
+    raw_kind = str(request_scope.get("kind") or "").strip() if request_scope else ""
+    raw_version = request_scope.get("version") if request_scope else None
+    # ``researchProjectId`` may already be present on a legacy payload for
+    # project routing. It becomes a formal-room signal only together with the
+    # workflow node/run identity (or an explicit v1 envelope).
+    has_scope_signal = bool(request_scope) or any(
+        str(request.get(key) or "").strip()
+        for key in ("workflowRunId", "workflowNodeId")
+    )
+    if not has_scope_signal:
+        return None
+
+    selection_payload = selection or {}
+    selected_candidate_ids = _normalized_str_list(
+        selection_payload.get("selectedCandidateIds")
+    )
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_team_id = str(team_id or "").strip()
+
+    if request_scope is not None and (
+        raw_kind in {QUESTION_GENERATION_SCOPE_KIND, CANDIDATE_REVIEW_SCOPE_KIND}
+        or raw_version == 1
+    ):
+        try:
+            scope = parse_discussion_scope(request_scope)
+        except ContractValidationError as exc:
+            raise ResearchMeetingRuntimeError(
+                f"formal discussion scope is invalid: {exc}"
+            ) from exc
+    else:
+        workflow_run_id = str(
+            request.get("workflowRunId") or request.get("workflow_run_id") or ""
+        ).strip()
+        workflow_node_id = str(
+            request.get("workflowNodeId") or request.get("workflow_node_id") or ""
+        ).strip()
+        research_project_id = str(
+            request.get("researchProjectId")
+            or request.get("research_project_id")
+            or ""
+        ).strip()
+        if workflow_run_id and workflow_node_id and not research_project_id:
+            from core.web.services.team_workflow.research_project_agent_sessions import (
+                resolve_research_project_identity,
+            )
+
+            try:
+                project = resolve_research_project_identity(normalized_team_id)
+            except Exception as exc:  # noqa: BLE001 - retain fail-closed domain error
+                raise ResearchMeetingRuntimeError(
+                    "formal discussion scope requires a resolvable research project"
+                ) from exc
+            research_project_id = str(project.get("projectId") or "").strip()
+        if not (workflow_run_id and workflow_node_id and research_project_id):
+            raise ResearchMeetingRuntimeError(
+                "formal discussion scope requires workflowRunId, workflowNodeId and researchProjectId"
+            )
+        selection_id = str(selection_payload.get("selectionId") or "").strip()
+        candidate_id = str(
+            request.get("candidateId")
+            or request.get("candidate_id")
+            or ""
+        ).strip()
+        if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+            scope = WorkflowDiscussionScopeV1.generation(
+                teamId=normalized_team_id,
+                researchProjectId=research_project_id,
+                workflowRunId=workflow_run_id,
+                workflowNodeId=workflow_node_id,
+                questionId=normalized_question_id,
+            )
+        else:
+            if not candidate_id and len(selected_candidate_ids) == 1:
+                candidate_id = selected_candidate_ids[0]
+            if not selection_id or not candidate_id:
+                raise ResearchMeetingRuntimeError(
+                    "formal hypothesis review scope requires selectionId and one candidateId"
+                )
+            scope = WorkflowDiscussionScopeV1.review(
+                teamId=normalized_team_id,
+                researchProjectId=research_project_id,
+                workflowRunId=workflow_run_id,
+                workflowNodeId=workflow_node_id,
+                questionId=normalized_question_id,
+                selectionId=selection_id,
+                candidateId=candidate_id,
+            )
+
+    if scope.teamId != normalized_team_id or scope.questionId.upper() != normalized_question_id:
+        raise ResearchMeetingRuntimeError(
+            "formal discussion scope does not match the meeting team or question"
+        )
+    if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+        if scope.kind != QUESTION_GENERATION_SCOPE_KIND:
+            raise ResearchMeetingRuntimeError(
+                "candidate generation requires a question_generation discussion scope"
+            )
+    elif scope.kind != CANDIDATE_REVIEW_SCOPE_KIND:
+        raise ResearchMeetingRuntimeError(
+            "hypothesis review requires a candidate_review discussion scope"
+        )
+    try:
+        scope.validate_candidate_membership(
+            selected_candidate_ids if scope.is_candidate_review else None
+        )
+    except ContractValidationError as exc:
+        raise ResearchMeetingRuntimeError(str(exc)) from exc
+    return scope
+
+
+def _resolve_scoped_meeting_room(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    base_room_id: str,
+    scope: WorkflowDiscussionScopeV1 | None,
+    participant_resolution: Mapping[str, Any],
+    meeting_type: str,
+    selected_candidate_ids: Sequence[str] = (),
+) -> tuple[str, WorkflowDiscussionScopeV1 | None]:
+    """Bind role-resolved Agents to hidden Child Sessions and one room."""
+
+    if scope is None:
+        return base_room_id, None
+
+    from core.web.services.team_workflow.discussion_room_runtime import (
+        resolve_scoped_discussion_room,
+    )
+    from core.web.services.team_workflow.research_project_agent_sessions import (
+        resolve_research_project_agent_session,
+    )
+
+    role_snapshot = [
+        dict(item)
+        for item in list(participant_resolution.get("participantRoleSnapshot") or [])
+        if isinstance(item, Mapping)
+    ]
+    role_by_agent_id = {
+        str(item.get("agentId") or "").strip(): item
+        for item in role_snapshot
+        if str(item.get("agentId") or "").strip()
+    }
+    if set(role_by_agent_id) != set(
+        str(item or "").strip()
+        for item in list(participant_resolution.get("participants") or [])
+        if str(item or "").strip()
+    ):
+        raise ResearchMeetingRuntimeError(
+            "formal discussion participant role snapshot is incomplete"
+        )
+
+    created_from_task_id = str(
+        request.get("createdFromTaskId")
+        or request.get("taskId")
+        or request.get("workflowTaskId")
+        or ""
+    ).strip()
+    selected = list(selected_candidate_ids or [])
+    bindings: list[dict[str, Any]] = []
+    for agent_id in participant_resolution.get("participants") or []:
+        normalized_agent_id = str(agent_id or "").strip()
+        role = role_by_agent_id[normalized_agent_id]
+        resolved = resolve_research_project_agent_session(
+            team_id,
+            research_project_id=scope.researchProjectId,
+            agent_id=normalized_agent_id,
+            role_key=str(role.get("roleId") or "").strip(),
+            role_label=str(role.get("observedRole") or "").strip(),
+            created_from_task_id=created_from_task_id,
+            workflow_run_id=scope.workflowRunId,
+            workflow_node_id=scope.workflowNodeId,
+            discussion_scope=scope,
+            selected_candidate_ids=selected if scope.is_candidate_review else None,
+            question_id=scope.questionId,
+        )
+        session_id = str(resolved.get("sessionId") or "").strip()
+        if not session_id or str(resolved.get("sessionKind") or "").lower() != "child":
+            raise ResearchMeetingRuntimeError(
+                "formal discussion participant did not resolve to a hidden Child Session"
+            )
+        bindings.append(
+            {
+                "agentId": normalized_agent_id,
+                "sessionId": session_id,
+                "discussionScope": scope.to_dict(),
+                "discussionScopeHash": scope.scope_hash,
+                "discussionSessionScopeKey": session_scope_key(scope, normalized_agent_id),
+            }
+        )
+
+    title_suffix = (
+        f" | {scope.candidateId}" if scope.is_candidate_review else " | 候选生成"
+    )
+    room = resolve_scoped_discussion_room(
+        scope,
+        bindings,
+        title=f"{scope.questionId}{title_suffix}",
+    )
+    room_id = str(room.get("roomId") or "").strip()
+    if not room_id:
+        raise ResearchMeetingRuntimeError("formal discussion room resolver returned no roomId")
+    return room_id, scope
+
+
+def _persist_discussion_scope_projection(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    scope: WorkflowDiscussionScopeV1 | None,
+) -> dict[str, Any]:
+    """Persist the v1 scope beside the legacy MeetingRound contract.
+
+    ``MeetingRound`` predates the v1 discussion identity and intentionally
+    ignores unknown projection fields.  Append the validated projection using
+    its owning append helper so reads of ``meeting_rounds.jsonl`` retain the
+    exact room scope without altering the public DTO.
+    """
+
+    record = dict(meeting_round)
+    if scope is None:
+        return record
+    existing_scope = record.get("discussionScope")
+    if existing_scope is not None:
+        try:
+            existing = parse_discussion_scope(existing_scope)
+        except ContractValidationError as exc:
+            raise ResearchMeetingRuntimeError(
+                "existing meeting has an invalid discussion scope"
+            ) from exc
+        if existing.key != scope.key or str(record.get("discussionScopeHash") or "").lower() != scope.scope_hash:
+            raise ResearchMeetingRuntimeError(
+                "existing meeting is bound to a different discussion scope"
+            )
+        return record
+    record.update(
+        {
+            "discussionScope": scope.to_dict(),
+            "discussionScopeHash": scope.scope_hash,
+            "scopeAuthority": _SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+            "researchProjectId": scope.researchProjectId,
+            "workflowRunId": scope.workflowRunId,
+            "workflowNodeId": scope.workflowNodeId,
+        }
+    )
+    return meeting_rounds.persist_meeting_discussion_scope(
+        str(team_id or "").strip(),
+        str(record.get("meetingRoundId") or "").strip(),
+        discussion_scope=scope.to_dict(),
+        discussion_scope_hash=scope.scope_hash,
+        scope_authority=_SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+    )
 
 
 def _role_owner_index() -> dict[str, str]:
@@ -532,6 +832,10 @@ def _round_config(
     discussion_round_index: int,
     team_id: str = "",
 ) -> dict[str, Any]:
+    discussion_scope = meeting_round.get("discussionScope")
+    discussion_scope_hash = str(
+        meeting_round.get("discussionScopeHash") or ""
+    ).strip().lower()
     return {
         "source": MEETING_SOURCE,
         "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
@@ -539,7 +843,20 @@ def _round_config(
         "meetingStage": str(meeting_round.get("stage") or ""),
         "meetingRoundType": str(meeting_round.get("roundType") or ""),
         "selectionId": str(selection.get("selectionId") or ""),
-        "scopeHash": str(meeting_round.get("scopeHash") or ""),
+        # The legacy MeetingRound scopeHash is retained for compatibility. A
+        # formal room has its own canonical v1 hash and must not be overwritten
+        # by the legacy six-field meeting hash when the round config is merged.
+        "scopeHash": discussion_scope_hash
+        or str(meeting_round.get("scopeHash") or ""),
+        **(
+            {
+                "scopeAuthority": _SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+                "discussionScope": dict(discussion_scope),
+                "discussionScopeHash": discussion_scope_hash,
+            }
+            if isinstance(discussion_scope, Mapping)
+            else {}
+        ),
         **{field: str(meeting_round.get(field) or "") for field in _SCOPE_FIELDS},
         "agentId": str(meeting_round.get("agentId") or ""),
         "mode": str(meeting_round.get("mode") or ""),
@@ -664,15 +981,34 @@ def open_hypothesis_review_meeting(
 
     request = dict(payload) if isinstance(payload, Mapping) else {}
     selection = _validated_selection(request)
-    team, room_id = _ensure_linked_room(str(team_id or "").strip())
+    team, base_room_id = _ensure_linked_room(str(team_id or "").strip())
     receipt_authority = _normalized_model_invocation_receipt_authority(
         _model_invocation_receipt_authority,
         team_id=team["teamId"],
         question_id=str(selection.get("questionId") or ""),
     )
     participant_resolution = _validated_participant_resolution(
-        team["teamId"], room_id, "hypothesis_review", request
+        team["teamId"], base_room_id, "hypothesis_review", request
     )
+    discussion_scope = _discussion_scope_for_request(
+        team["teamId"],
+        request,
+        question_id=str(selection.get("questionId") or ""),
+        meeting_type="hypothesis_review",
+        selection=selection,
+    )
+    room_id, discussion_scope = _resolve_scoped_meeting_room(
+        team["teamId"],
+        request,
+        base_room_id=base_room_id,
+        scope=discussion_scope,
+        participant_resolution=participant_resolution,
+        meeting_type="hypothesis_review",
+        selected_candidate_ids=selection["selectedCandidateIds"],
+    )
+    effective_selection = dict(selection)
+    if discussion_scope is not None and discussion_scope.is_candidate_review:
+        effective_selection["selectedCandidateIds"] = [discussion_scope.candidateId]
 
     agenda = _normalized_str_list(request.get("agenda")) or list(_DEFAULT_AGENDA)
     agenda_questions = _normalized_str_list(request.get("agendaQuestions")) or list(
@@ -701,7 +1037,7 @@ def open_hypothesis_review_meeting(
             "roundType": str(request.get("roundType") or "decision_gate").strip().lower(),
             "discussionItemRefs": [
                 f"hypothesis_candidate:{candidate_id}"
-                for candidate_id in selection["selectedCandidateIds"]
+                for candidate_id in effective_selection["selectedCandidateIds"]
             ],
             "inputArtifactRefs": [
                 f"hypothesis_selection:{selection['selectionId']}",
@@ -718,7 +1054,9 @@ def open_hypothesis_review_meeting(
             ),
         },
     )
-    meeting_round = created["meetingRound"]
+    meeting_round = _persist_discussion_scope_projection(
+        team["teamId"], created["meetingRound"], discussion_scope
+    )
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     if created["status"] == "reused":
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
@@ -735,14 +1073,17 @@ def open_hypothesis_review_meeting(
             }
 
     topic = str(request.get("topic") or "").strip() or _opening_topic(
-        meeting_round_id, selection, agenda, candidate_contexts
+        meeting_round_id, effective_selection, agenda, candidate_contexts
     )
     result = chat_room_service.start_chat_room_round(
         room_id,
         topic,
         purpose="meeting",
         config=_round_config(
-            meeting_round, selection, discussion_round_index=1, team_id=str(team_id or "")
+            meeting_round,
+            effective_selection,
+            discussion_round_index=1,
+            team_id=str(team_id or ""),
         ),
         agent_runner=agent_runner,
         background=background,
@@ -796,14 +1137,28 @@ def open_candidate_generation_meeting(
         raise ContractValidationError(
             "opening a candidate generation meeting requires a questionId"
         )
-    team, room_id = _ensure_linked_room(str(team_id or "").strip())
+    team, base_room_id = _ensure_linked_room(str(team_id or "").strip())
     receipt_authority = _normalized_model_invocation_receipt_authority(
         _model_invocation_receipt_authority,
         team_id=team["teamId"],
         question_id=question_id,
     )
     participant_resolution = _validated_participant_resolution(
-        team["teamId"], room_id, CANDIDATE_GENERATION_MEETING_TYPE, request
+        team["teamId"], base_room_id, CANDIDATE_GENERATION_MEETING_TYPE, request
+    )
+    discussion_scope = _discussion_scope_for_request(
+        team["teamId"],
+        request,
+        question_id=question_id,
+        meeting_type=CANDIDATE_GENERATION_MEETING_TYPE,
+    )
+    room_id, discussion_scope = _resolve_scoped_meeting_room(
+        team["teamId"],
+        request,
+        base_room_id=base_room_id,
+        scope=discussion_scope,
+        participant_resolution=participant_resolution,
+        meeting_type=CANDIDATE_GENERATION_MEETING_TYPE,
     )
 
     agenda = _normalized_str_list(request.get("agenda")) or list(_GENERATION_AGENDA)
@@ -846,7 +1201,9 @@ def open_candidate_generation_meeting(
             ),
         },
     )
-    meeting_round = created["meetingRound"]
+    meeting_round = _persist_discussion_scope_projection(
+        team["teamId"], created["meetingRound"], discussion_scope
+    )
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     if created["status"] == "reused":
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))

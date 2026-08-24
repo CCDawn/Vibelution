@@ -613,6 +613,8 @@ def _record_review_round_link(
     question_id: str,
     round_index: int,
     round_budget: int = DEFAULT_ROUND_BUDGET,
+    candidate_id: str = "",
+    candidate_order: int | None = None,
 ) -> dict[str, Any]:
     link_id = f"hf-link-{_stable_hash({'meetingRoundId': meeting_round_id, 'roundIndex': round_index})[:16]}"
     record = {
@@ -628,6 +630,10 @@ def _record_review_round_link(
         # Persist the effective budget so chain_state reads the raised limit
         # (links written before this field fall back to the default).
         "roundBudget": int(round_budget or DEFAULT_ROUND_BUDGET),
+        "candidateId": str(candidate_id or "").strip(),
+        "candidateOrder": (
+            int(candidate_order) if candidate_order is not None else None
+        ),
         "createdAt": _utc_now(),
     }
     with _LOCK:
@@ -638,10 +644,18 @@ def _record_review_round_link(
             meeting_round_id,
         )
         if existing is not None:
-            for key in ("previousMeetingRoundId", "collectionRequestId", "selectionId", "roundIndex", "roundBudget"):
+            for key in (
+                "previousMeetingRoundId",
+                "collectionRequestId",
+                "selectionId",
+                "roundIndex",
+                "roundBudget",
+                "candidateId",
+                "candidateOrder",
+            ):
                 existing_value = existing.get(key)
                 # Links written before roundBudget existed replay fine.
-                if key == "roundBudget" and existing_value is None:
+                if key in {"roundBudget", "candidateId", "candidateOrder"} and existing_value is None:
                     continue
                 if existing_value != record.get(key):
                     raise HypothesisFirstChainError(
@@ -663,6 +677,8 @@ def open_review_meeting_for_selection(
     collection_request_id: str = "",
     meeting_round_id: str = "",
     round_budget: int = DEFAULT_ROUND_BUDGET,
+    _formal_candidate_id: str = "",
+    _formal_candidate_order: int | None = None,
 ) -> dict[str, Any]:
     """Open (or reuse) one hypothesis-review meeting for a selection record.
 
@@ -689,6 +705,99 @@ def open_review_meeting_for_selection(
         question_id,
     )
     normalized_round_index = max(1, int(round_index or 1))
+    selected_candidate_ids = _normalized_str_list(
+        selection_record.get("selectedCandidateIds")
+    )
+    if not selected_candidate_ids:
+        raise ContractValidationError(
+            "selection requires at least one selectedCandidateId"
+        )
+
+    # A formal Challenge Cup run reviews each selected hypothesis in its own
+    # room.  The receipt is the server-owned formal-run signal; legacy DEV
+    # selections keep their existing single-meeting contract.  Recursive
+    # calls carry one explicit candidate so the meeting runtime can create the
+    # canonical candidate_review scope and hidden Child Sessions.
+    if receipt_authority is not None and not _formal_candidate_id:
+        if previous_meeting_round_id:
+            previous = meeting_rounds.get_meeting_round(
+                normalized_team_id, str(previous_meeting_round_id).strip()
+            )["meetingRound"]
+            previous_scope = previous.get("discussionScope")
+            previous_candidate_id = (
+                str(previous_scope.get("candidateId") or "").strip()
+                if isinstance(previous_scope, Mapping)
+                else ""
+            )
+            if previous_candidate_id:
+                selected_candidate_ids = [previous_candidate_id]
+
+        from core.research.workflow.contracts.discussion_scope import (
+            WorkflowDiscussionScopeV1,
+        )
+        from core.web.services.team_workflow.research_project_agent_sessions import (
+            resolve_research_project_identity,
+        )
+
+        project = resolve_research_project_identity(normalized_team_id)
+        research_project_id = str(project.get("projectId") or "").strip()
+        workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
+        if not research_project_id or not workflow_run_id:
+            raise HypothesisFirstChainError(
+                "formal hypothesis review requires research project and workflow run authority"
+            )
+        opened_candidates: list[dict[str, Any]] = []
+        for candidate_order, candidate_id in enumerate(selected_candidate_ids):
+            discussion_scope = WorkflowDiscussionScopeV1.review(
+                teamId=normalized_team_id,
+                researchProjectId=research_project_id,
+                workflowRunId=workflow_run_id,
+                workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
+                questionId=question_id,
+                selectionId=selection_id,
+                candidateId=candidate_id,
+            )
+            candidate_meeting_id = (
+                f"hf-review-{selection_id}-"
+                f"{_stable_hash({'candidateId': candidate_id})[:10]}-"
+                f"r{normalized_round_index}"
+            )
+            candidate_selection = {
+                **selection_record,
+                "selectedCandidateIds": [candidate_id],
+                "candidateId": candidate_id,
+                "discussionScope": discussion_scope.to_dict(),
+                "workflowRunId": workflow_run_id,
+                "workflowNodeId": HYPOTHESIS_DESIGN_NODE_ID,
+                "researchProjectId": research_project_id,
+            }
+            opened_candidates.append(
+                open_review_meeting_for_selection(
+                    normalized_team_id,
+                    candidate_selection,
+                    agent_runner=agent_runner,
+                    background=background,
+                    round_index=normalized_round_index,
+                    previous_meeting_round_id=previous_meeting_round_id,
+                    collection_request_id=collection_request_id,
+                    meeting_round_id=candidate_meeting_id,
+                    round_budget=round_budget,
+                    _formal_candidate_id=candidate_id,
+                    _formal_candidate_order=candidate_order,
+                )
+            )
+        primary = opened_candidates[0]
+        return {
+            **primary,
+            "status": (
+                "reused"
+                if all(item.get("status") == "reused" for item in opened_candidates)
+                else "created"
+            ),
+            "reviewMeetings": opened_candidates,
+            "candidateCount": len(opened_candidates),
+        }
+
     normalized_meeting_round_id = (
         str(meeting_round_id or "").strip()
         or f"hf-review-{selection_id}-r{normalized_round_index}"
@@ -723,6 +832,8 @@ def open_review_meeting_for_selection(
             question_id=question_id,
             round_index=normalized_round_index,
             round_budget=round_budget,
+            candidate_id=_formal_candidate_id,
+            candidate_order=_formal_candidate_order,
         )
         bound_round_ids = _normalized_str_list(existing_round.get("chatRoomRoundIds"))
         return {
@@ -749,7 +860,16 @@ def open_review_meeting_for_selection(
 
     payload: dict[str, Any] = {
         key: selection_record.get(key)
-        for key in (*_SCOPE_FIELDS, "agentId", "mode")
+        for key in (
+            *_SCOPE_FIELDS,
+            "agentId",
+            "mode",
+            "discussionScope",
+            "workflowRunId",
+            "workflowNodeId",
+            "researchProjectId",
+            "candidateId",
+        )
         if selection_record.get(key) is not None
     }
     payload.update(
@@ -790,6 +910,8 @@ def open_review_meeting_for_selection(
         question_id=question_id,
         round_index=normalized_round_index,
         round_budget=round_budget,
+        candidate_id=_formal_candidate_id,
+        candidate_order=_formal_candidate_order,
     )
     return {
         **opened,
@@ -2842,6 +2964,42 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
             or str(meeting.get("meetingRoundId") or "") in current_selection_meeting_ids
         )
     ]
+    active_discussion_anchor: dict[str, Any] | None = None
+    active_candidate_links = sorted(
+        (
+            link
+            for link in selection_links
+            if str(link.get("candidateId") or "").strip()
+            and str(link.get("meetingRoundId") or "").strip() in open_meeting_ids
+        ),
+        key=lambda item: (
+            int(item.get("roundIndex") or 0),
+            int(item.get("candidateOrder") or 0),
+            str(item.get("createdAt") or ""),
+        ),
+    )
+    if active_candidate_links:
+        active_link = active_candidate_links[0]
+        active_meeting_id = str(active_link.get("meetingRoundId") or "").strip()
+        active_meeting = meeting_by_id.get(active_meeting_id) or {}
+        discussion_scope = active_meeting.get("discussionScope")
+        discussion_scope_hash = str(
+            active_meeting.get("discussionScopeHash") or ""
+        ).strip()
+        active_room_id = str(active_meeting.get("linkedChatRoomId") or "").strip()
+        if (
+            isinstance(discussion_scope, Mapping)
+            and discussion_scope_hash
+            and active_room_id
+        ):
+            active_discussion_anchor = {
+                "scope": dict(discussion_scope),
+                "scopeHash": discussion_scope_hash,
+                "meetingRoundId": active_meeting_id,
+                "roomId": active_room_id,
+                "selectionId": str(active_link.get("selectionId") or "").strip(),
+                "candidateId": str(active_link.get("candidateId") or "").strip(),
+            }
     pending_requests = [
         request for request in requests if str(request.get("status") or "") != "handed_off"
     ]
@@ -2946,4 +3104,5 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         "candidateCount": len(candidates),
         "generationMeetingId": str(generation_meeting.get("meetingRoundId") or ""),
         "generationMeetingStatus": str(generation_meeting.get("status") or ""),
+        "activeDiscussionAnchor": active_discussion_anchor,
     }

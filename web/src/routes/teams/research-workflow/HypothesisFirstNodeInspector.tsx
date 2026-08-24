@@ -46,6 +46,7 @@ import {
 } from "./hypothesisFirstNextAction";
 import { invalidateHypothesisFirstQueries, useHypothesisFirstChain } from "./useHypothesisFirstChain";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import styles from "./HypothesisFirstNodeInspector.styles";
 
 type Language = "zh" | "en";
@@ -60,7 +61,30 @@ export type HypothesisFirstNodeInspectorProps = {
   collectionChildStatus?: string | null;
   onNavigateToNode?: (nodeId: string) => void;
   onRetryCollection?: () => Promise<void>;
+  discussionModel?: ScopedDiscussionModel;
 };
+
+export function inspectorScopedRoomId(
+  discussionModel: ScopedDiscussionModel | undefined,
+  meeting: MeetingRoundRecord | null,
+  questionId: string,
+): string {
+  if (
+    !discussionModel
+    || discussionModel.status !== "ready"
+    || !discussionModel.roomId
+    || !discussionModel.meetingRoundId
+    || discussionModel.questionId !== questionId
+    || discussionModel.scope?.questionId !== questionId
+    || discussionModel.meetingRoundId !== meeting?.meetingRoundId
+  ) {
+    return "";
+  }
+  const expectedMeetingType = discussionModel.scope?.kind === "question_generation"
+    ? "hypothesis_candidate_generation"
+    : "hypothesis_review";
+  return meeting.meetingType === expectedMeetingType ? discussionModel.roomId : "";
+}
 
 function pickGeneration(meetings: ReturnType<typeof useHypothesisFirstChain>["meetings"]) {
   const sorted = [...meetings]
@@ -113,6 +137,7 @@ export function HypothesisFirstNodeInspector({
   collectionChildStatus = null,
   onNavigateToNode,
   onRetryCollection,
+  discussionModel,
 }: HypothesisFirstNodeInspectorProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -123,11 +148,12 @@ export function HypothesisFirstNodeInspector({
   const currentSelectionId = chain.selection?.selectionId || chain.chainState?.selectionId || "";
   const review = pickReview(questionMeetings, nodeId, chain.reviewRoundLinks, currentSelectionId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
+  const scopedRoomId = inspectorScopedRoomId(discussionModel, activeMeeting, questionId);
   const pageVisible = usePageVisibility();
   const roomQuery = useQuery({
-    queryKey: queryKeys.chatRoom(activeMeeting?.linkedChatRoomId || ""),
-    queryFn: ({ signal }) => fetchChatRoomDetail(activeMeeting?.linkedChatRoomId || "", { signal }),
-    enabled: Boolean(activeMeeting?.linkedChatRoomId) && activeMeeting?.status === "open",
+    queryKey: queryKeys.chatRoom(scopedRoomId),
+    queryFn: ({ signal }) => fetchChatRoomDetail(scopedRoomId, { signal }),
+    enabled: Boolean(scopedRoomId) && activeMeeting?.status === "open",
     refetchInterval: activeMeeting?.status === "open"
       ? resolvePollingInterval(pageVisible, 4_000)
       : false,

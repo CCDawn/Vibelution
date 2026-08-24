@@ -9,6 +9,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from core.research.workflow.contracts.discussion_scope import (
+    WorkflowDiscussionScopeV1,
+    parse_discussion_scope,
+    session_scope_key,
+)
 from core.research.workflow.contracts.session_scope import (
     ContractValidationError,
     WorkflowSessionScopeV3,
@@ -95,6 +100,36 @@ def _positive_int(value: Any, *, default: int = 1) -> int:
         return max(1, int(value or default))
     except (TypeError, ValueError):
         return max(1, default)
+
+
+def _normalize_discussion_scope(
+    value: Any,
+) -> WorkflowDiscussionScopeV1 | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        return parse_discussion_scope(value)
+    except ContractValidationError:
+        return None
+
+
+def _attempt_matches_discussion_scope(
+    attempt: Mapping[str, Any] | None,
+    expected: WorkflowDiscussionScopeV1 | None,
+) -> bool:
+    """Return false for missing, malformed, or cross-question bindings."""
+
+    if expected is None:
+        return True
+    if not isinstance(attempt, Mapping):
+        return False
+    actual = _normalize_discussion_scope(attempt.get("discussionScope"))
+    return bool(
+        actual is not None
+        and actual.key == expected.key
+        and _text(attempt.get("discussionScopeHash"), limit=64)
+        == expected.scope_hash
+    )
 
 
 def research_project_agent_role_label(
@@ -212,6 +247,17 @@ def _normalize_attempt(value: dict[str, Any]) -> dict[str, Any]:
         normalized_scope.pop("attempt", None)
         if normalized_scope:
             normalized["scope"] = normalized_scope
+    discussion_scope = _normalize_discussion_scope(value.get("discussionScope"))
+    if discussion_scope is not None:
+        normalized["discussionScope"] = discussion_scope.to_dict()
+        normalized["discussionScopeHash"] = discussion_scope.scope_hash
+    elif isinstance(value.get("discussionScope"), Mapping):
+        # Preserve malformed input for the fail-closed matcher instead of
+        # silently converting it into an unscoped attempt.
+        normalized["discussionScope"] = dict(value["discussionScope"])
+        normalized["discussionScopeHash"] = _text(
+            value.get("discussionScopeHash"), limit=64
+        )
     return normalized
 
 
@@ -220,6 +266,28 @@ def _session_binding(conversation: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(binding, dict):
         binding = conversation.get("experimentBinding")
     return binding if isinstance(binding, dict) else {}
+
+
+def _detail_matches_discussion_scope(
+    detail: Mapping[str, Any] | None,
+    expected: WorkflowDiscussionScopeV1 | None,
+) -> bool:
+    if expected is None:
+        return True
+    if not isinstance(detail, Mapping):
+        return False
+    binding = detail.get("experimentBinding")
+    if not isinstance(binding, Mapping):
+        binding = detail.get("experiment_binding")
+    if not isinstance(binding, Mapping):
+        return False
+    actual = _normalize_discussion_scope(binding.get("discussionScope"))
+    return bool(
+        actual is not None
+        and actual.key == expected.key
+        and _text(binding.get("discussionScopeHash"), limit=64)
+        == expected.scope_hash
+    )
 
 
 def _canonical_root_detail_matches_session(
@@ -263,6 +331,7 @@ def _recover_agent_attempts(
     workflow_node_id: str = "",
     selection_id: str = "",
     candidate_id: str = "",
+    discussion_scope: WorkflowDiscussionScopeV1 | None = None,
 ) -> list[dict[str, Any]]:
     """Recover a missing registry from durable session bindings."""
     s = _service()
@@ -292,6 +361,19 @@ def _recover_agent_attempts(
             != workflow_node_id
         ):
             continue
+        if discussion_scope is not None:
+            persisted_discussion_scope = _normalize_discussion_scope(
+                binding.get("discussionScope")
+            )
+            if (
+                persisted_discussion_scope is None
+                or persisted_discussion_scope.key != discussion_scope.key
+                or _text(binding.get("discussionScopeHash"), limit=64)
+                != discussion_scope.scope_hash
+            ):
+                # A legacy session without the complete discussion binding is
+                # not safe to recover for a question-scoped resolver.
+                continue
         binding_selection_id = _text(binding.get("selectionId"))
         binding_candidate_id = _text(binding.get("candidateId"))
         if selection_id or candidate_id:
@@ -300,6 +382,17 @@ def _recover_agent_attempts(
                 or binding_candidate_id != candidate_id
             ):
                 continue
+        elif binding_selection_id or binding_candidate_id:
+            # A generation discussion and a node root must never recover a
+            # candidate child as their own physical Session.
+            continue
+
+        if discussion_scope is not None or selection_id or candidate_id:
+            # Every formal discussion scope is represented by a hidden Child
+            # Session.  Generation scopes do not carry selection/candidate
+            # ids, so keying this check only off those ids would incorrectly
+            # discard their durable children and create duplicates after a
+            # registry rebuild.
             session_kind = _text(
                 conversation.get("sessionKind") or conversation.get("session_kind"),
                 limit=40,
@@ -321,10 +414,6 @@ def _recover_agent_attempts(
             )
             if not parent_session_id or parent_session_id != root_session_id:
                 continue
-        elif binding_selection_id or binding_candidate_id:
-            # A node root must never recover a candidate child as its own
-            # session when the registry is rebuilt from durable bindings.
-            continue
         elif not _canonical_root_detail_matches_session(conversation, session_id):
             # Durable recovery must not turn a hidden child/supervised session
             # or a malformed lineage row into the formal node root.
@@ -345,6 +434,8 @@ def _recover_agent_attempts(
                     "selectionId": selection_id,
                     "candidateId": candidate_id,
                     "scope": binding.get("scope"),
+                    "discussionScope": binding.get("discussionScope"),
+                    "discussionScopeHash": binding.get("discussionScopeHash"),
                 }
             )
         )
@@ -365,8 +456,15 @@ def _agent_record(
     workflow_node_id: str = "",
     selection_id: str = "",
     candidate_id: str = "",
+    discussion_scope: WorkflowDiscussionScopeV1 | None = None,
 ) -> tuple[dict[str, Any], bool]:
-    if workflow_run_id and workflow_node_id and selection_id and candidate_id:
+    if discussion_scope is not None and discussion_scope.is_candidate_review:
+        records = registry.setdefault("workflowCandidates", {})
+        record_key = session_scope_key(discussion_scope, agent_id)
+    elif discussion_scope is not None:
+        records = registry.setdefault("workflowNodes", {})
+        record_key = session_scope_key(discussion_scope, agent_id)
+    elif workflow_run_id and workflow_node_id and selection_id and candidate_id:
         records = registry.setdefault("workflowCandidates", {})
         record_key = WorkflowSessionScopeV3.candidate(
             teamId=team_id,
@@ -402,6 +500,7 @@ def _agent_record(
             workflow_node_id=workflow_node_id,
             selection_id=selection_id,
             candidate_id=candidate_id,
+            discussion_scope=discussion_scope,
         )
     attempts.sort(
         key=lambda item: (int(item["attempt"]), item["createdAt"], item["sessionId"])
@@ -418,6 +517,9 @@ def _agent_record(
     if selection_id and candidate_id:
         record["selectionId"] = selection_id
         record["candidateId"] = candidate_id
+    if discussion_scope is not None:
+        record["discussionScope"] = discussion_scope.to_dict()
+        record["discussionScopeHash"] = discussion_scope.scope_hash
     changed = raw_record != record
     records[record_key] = record
     return record, changed
@@ -449,6 +551,7 @@ def _binding_payload(
     selection_id: str = "",
     candidate_id: str = "",
     scope: WorkflowSessionScopeV3 | None = None,
+    discussion_scope: WorkflowDiscussionScopeV1 | None = None,
     recovery_reason: str = "",
 ) -> dict[str, Any]:
     """Return the allowlisted, path/secret-free binding stored with a session."""
@@ -475,6 +578,9 @@ def _binding_payload(
         binding["candidateId"] = _text(candidate_id)
     if scope is not None:
         binding["scope"] = scope.to_dict()
+    if discussion_scope is not None:
+        binding["discussionScope"] = discussion_scope.to_dict()
+        binding["discussionScopeHash"] = discussion_scope.scope_hash
     return binding
 
 
@@ -486,6 +592,7 @@ def _result_payload(
     session_created: bool,
     detail: dict[str, Any] | None = None,
     scope: WorkflowSessionScopeV3 | None = None,
+    discussion_scope: WorkflowDiscussionScopeV1 | None = None,
     parent_session_id: str = "",
 ) -> dict[str, Any]:
     session_id = _text(attempt.get("sessionId"))
@@ -505,6 +612,10 @@ def _result_payload(
     if scope is not None:
         result["scope"] = scope.to_dict()
         result["scopeKey"] = scope.key
+    if discussion_scope is not None:
+        result["discussionScope"] = discussion_scope.to_dict()
+        result["discussionScopeKey"] = discussion_scope.key
+        result["discussionScopeHash"] = discussion_scope.scope_hash
     if isinstance(detail, dict):
         result["sessionKind"] = _text(detail.get("sessionKind"), limit=40) or (
             "child" if scope is not None and scope.is_candidate else "main"
@@ -539,13 +650,17 @@ def resolve_research_project_agent_session(
     candidate_id: str = "",
     scope: WorkflowSessionScopeV3 | Mapping[str, Any] | None = None,
     selected_candidate_ids: list[str] | None = None,
+    discussion_scope: WorkflowDiscussionScopeV1 | Mapping[str, Any] | None = None,
+    question_id: str = "",
 ) -> dict[str, Any]:
     """Resolve a flat, node-root, or candidate-scoped Agent session.
 
     ``workflowRunId`` + ``workflowNodeId`` identify the node root.  Adding
     ``selectionId`` + ``candidateId`` switches the logical scope to a hidden
-    child session whose parent is that node root.  The legacy node arguments
-    remain accepted so existing stage callers keep their v2 behavior.
+    child session whose parent is that node root.  Challenge Cup callers can
+    additionally provide a ``WorkflowDiscussionScopeV1``; in that mode the
+    question identity is part of the registry key and legacy/direct sessions
+    are never considered a recovery candidate.
     """
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -554,12 +669,42 @@ def resolve_research_project_agent_session(
         "Research project id is required.",
     )
     normalized_agent_id = s._normalize_required_id(agent_id, "Agent id is required.")
+
+    requested_workflow_run_id = _text(workflow_run_id)
+    requested_workflow_node_id = _text(workflow_node_id, limit=80)
+    requested_selection_id = _text(selection_id)
+    requested_candidate_id = _text(candidate_id)
+    normalized_discussion_scope: WorkflowDiscussionScopeV1 | None = None
+    normalized_session_scope: WorkflowSessionScopeV3 | None = None
+
+    # ``scope`` predates Discussion Scope V1.  Accepting a V1 mapping through
+    # the same argument keeps the resolver convenient while making the
+    # transition explicit; a V3 mapping continues down the legacy-compatible
+    # path below.
+    if isinstance(scope, WorkflowDiscussionScopeV1):
+        discussion_scope = scope
+        scope = None
+    elif isinstance(scope, Mapping):
+        raw_scope_kind = _text(scope.get("kind"), limit=80)
+        raw_scope_version = scope.get("version")
+        if raw_scope_kind in {"question_generation", "candidate_review"} or raw_scope_version == 1:
+            discussion_scope = scope
+            scope = None
+    if discussion_scope is not None:
+        try:
+            normalized_discussion_scope = parse_discussion_scope(discussion_scope)
+        except ContractValidationError as exc:
+            raise ResearchProjectAgentSessionError(
+                f"Invalid discussion scope: {exc}"
+            ) from exc
+
     if scope is not None:
         normalized_scope = (
             scope
             if isinstance(scope, WorkflowSessionScopeV3)
             else WorkflowSessionScopeV3.from_mapping(scope)
         )
+        normalized_session_scope = normalized_scope
         if (
             normalized_scope.teamId != normalized_team_id
             or normalized_scope.researchProjectId != normalized_project_id
@@ -576,6 +721,91 @@ def resolve_research_project_agent_session(
     normalized_workflow_node_id = _text(workflow_node_id, limit=80)
     normalized_selection_id = _text(selection_id)
     normalized_candidate_id = _text(candidate_id)
+
+    if normalized_discussion_scope is not None:
+        if (
+            normalized_discussion_scope.teamId != normalized_team_id
+            or normalized_discussion_scope.researchProjectId != normalized_project_id
+        ):
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope identity does not match the resolver owner."
+            )
+        if normalized_session_scope is not None and (
+            normalized_session_scope.workflowRunId
+            != normalized_discussion_scope.workflowRunId
+            or normalized_session_scope.workflowNodeId
+            != normalized_discussion_scope.workflowNodeId
+            or normalized_session_scope.selectionId
+            != normalized_discussion_scope.selectionId
+            or normalized_session_scope.candidateId
+            != normalized_discussion_scope.candidateId
+        ):
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope does not match the v3 session scope."
+            )
+        if requested_workflow_run_id and requested_workflow_run_id != normalized_discussion_scope.workflowRunId:
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope workflowRunId does not match the resolver request."
+            )
+        if requested_workflow_node_id and requested_workflow_node_id != normalized_discussion_scope.workflowNodeId:
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope workflowNodeId does not match the resolver request."
+            )
+        if question_id and _text(question_id) != normalized_discussion_scope.questionId:
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope questionId does not match the resolver request."
+            )
+        if requested_selection_id and requested_selection_id != normalized_discussion_scope.selectionId:
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope selectionId does not match the resolver request."
+            )
+        if requested_candidate_id and requested_candidate_id != normalized_discussion_scope.candidateId:
+            raise ResearchProjectAgentSessionError(
+                "Discussion scope candidateId does not match the resolver request."
+            )
+        normalized_workflow_run_id = normalized_discussion_scope.workflowRunId
+        normalized_workflow_node_id = normalized_discussion_scope.workflowNodeId
+        normalized_selection_id = normalized_discussion_scope.selectionId
+        normalized_candidate_id = normalized_discussion_scope.candidateId
+        try:
+            normalized_discussion_scope.validate_candidate_membership(
+                selected_candidate_ids
+            )
+        except ContractValidationError as exc:
+            raise ResearchProjectAgentSessionError(str(exc)) from exc
+    elif question_id:
+        # A question id without a canonical V1 envelope is accepted only as a
+        # constructor shorthand; it still produces the same strict contract.
+        if not requested_workflow_run_id or not requested_workflow_node_id:
+            raise ResearchProjectAgentSessionError(
+                "Question-scoped sessions require workflowRunId and workflowNodeId."
+            )
+        try:
+            normalized_discussion_scope = (
+                WorkflowDiscussionScopeV1.review(
+                    teamId=normalized_team_id,
+                    researchProjectId=normalized_project_id,
+                    workflowRunId=requested_workflow_run_id,
+                    workflowNodeId=requested_workflow_node_id,
+                    questionId=_text(question_id),
+                    selectionId=requested_selection_id,
+                    candidateId=requested_candidate_id,
+                )
+                if requested_selection_id or requested_candidate_id
+                else WorkflowDiscussionScopeV1.generation(
+                    teamId=normalized_team_id,
+                    researchProjectId=normalized_project_id,
+                    workflowRunId=requested_workflow_run_id,
+                    workflowNodeId=requested_workflow_node_id,
+                    questionId=_text(question_id),
+                )
+            )
+            normalized_discussion_scope.validate_candidate_membership(
+                selected_candidate_ids
+            )
+        except ContractValidationError as exc:
+            raise ResearchProjectAgentSessionError(str(exc)) from exc
+
     if bool(normalized_workflow_run_id) != bool(normalized_workflow_node_id):
         raise ResearchProjectAgentSessionError(
             "Formal workflow sessions require both workflowRunId and workflowNodeId."
@@ -644,6 +874,22 @@ def resolve_research_project_agent_session(
             recover_missing_session=recover_missing_session,
             root_scope=root_scope,
             candidate_scope=candidate_scope,
+            discussion_scope=normalized_discussion_scope,
+        )
+    if normalized_discussion_scope is not None:
+        return _resolve_generation_discussion_session(
+            team_id=normalized_team_id,
+            research_project_id=normalized_project_id,
+            agent_id=normalized_agent_id,
+            project=project,
+            role_key=normalized_role_key,
+            role_label=normalized_role_label,
+            created_from_task_id=created_from_task_id,
+            formal_retry=formal_retry,
+            previous_task=previous,
+            recover_missing_session=recover_missing_session,
+            root_scope=root_scope,
+            discussion_scope=normalized_discussion_scope,
         )
 
     with _REGISTRY_LOCK:
@@ -656,8 +902,15 @@ def resolve_research_project_agent_session(
             role_key=normalized_role_key,
             workflow_run_id=normalized_workflow_run_id,
             workflow_node_id=normalized_workflow_node_id,
+            discussion_scope=normalized_discussion_scope,
         )
         current = record["attempts"][-1] if record["attempts"] else None
+        if current is not None and normalized_discussion_scope is not None and not _attempt_matches_discussion_scope(
+            current, normalized_discussion_scope
+        ):
+            raise ResearchProjectAgentSessionError(
+                "Project Agent session binding does not match the canonical discussion scope."
+            )
         if current is not None and not formal_retry:
             detail = s.session_service.get_session_detail(current["sessionId"])
             if not isinstance(detail, dict):
@@ -675,6 +928,12 @@ def resolve_research_project_agent_session(
                 raise ResearchProjectAgentSessionError(
                     "Project Agent session registry points to a non-canonical root session: "
                     f"{current['sessionId']}. Child/supervised or mismatched-lineage sessions cannot be used as a node root."
+                )
+            elif not _detail_matches_discussion_scope(
+                detail, normalized_discussion_scope
+            ):
+                raise ResearchProjectAgentSessionError(
+                    "Project Agent root Session is missing or mismatched with the canonical discussion scope."
                 )
             else:
                 if recovered:
@@ -696,6 +955,7 @@ def resolve_research_project_agent_session(
                     session_created=False,
                     detail=detail,
                     scope=root_scope,
+                    discussion_scope=normalized_discussion_scope,
                 )
 
         if current is not None and formal_retry and not missing_session_recovery:
@@ -732,6 +992,7 @@ def resolve_research_project_agent_session(
             workflow_run_id=normalized_workflow_run_id,
             workflow_node_id=normalized_workflow_node_id,
             scope=root_scope,
+            discussion_scope=normalized_discussion_scope,
             recovery_reason=(
                 "missing_canonical_session" if missing_session_recovery else ""
             ),
@@ -771,6 +1032,9 @@ def resolve_research_project_agent_session(
             != normalized_workflow_run_id
             or _text(canonical_binding.get("workflowNodeId"), limit=80)
             != normalized_workflow_node_id
+            or not _detail_matches_discussion_scope(
+                canonical_detail, normalized_discussion_scope
+            )
         ):
             raise ResearchProjectAgentSessionError(
                 "New project Agent session is missing from the canonical session index; "
@@ -788,6 +1052,16 @@ def resolve_research_project_agent_session(
                 "workflowRunId": normalized_workflow_run_id,
                 "workflowNodeId": normalized_workflow_node_id,
                 "scope": root_scope.to_dict() if root_scope is not None else None,
+                "discussionScope": (
+                    normalized_discussion_scope.to_dict()
+                    if normalized_discussion_scope is not None
+                    else None
+                ),
+                "discussionScopeHash": (
+                    normalized_discussion_scope.scope_hash
+                    if normalized_discussion_scope is not None
+                    else ""
+                ),
                 "recoveryReason": (
                     "missing_canonical_session" if missing_session_recovery else ""
                 ),
@@ -809,7 +1083,213 @@ def resolve_research_project_agent_session(
             session_created=True,
             detail=canonical_detail,
             scope=root_scope,
+            discussion_scope=normalized_discussion_scope,
         )
+
+
+def _resolve_generation_discussion_session(
+    *,
+    team_id: str,
+    research_project_id: str,
+    agent_id: str,
+    project: dict[str, Any],
+    role_key: str,
+    role_label: str,
+    created_from_task_id: str,
+    formal_retry: bool,
+    previous_task: dict[str, Any],
+    recover_missing_session: bool,
+    root_scope: WorkflowSessionScopeV3,
+    discussion_scope: WorkflowDiscussionScopeV1,
+) -> dict[str, Any]:
+    """Resolve a question-generation hidden Child Session under the node root."""
+
+    s = _service()
+    root_result = resolve_research_project_agent_session(
+        team_id,
+        research_project_id=research_project_id,
+        agent_id=agent_id,
+        role_key=role_key,
+        role_label=role_label,
+        created_from_task_id=created_from_task_id,
+        recover_missing_session=recover_missing_session,
+        workflow_run_id=root_scope.workflowRunId,
+        workflow_node_id=root_scope.workflowNodeId,
+    )
+    root_session_id = _text(root_result.get("sessionId"))
+    if not root_session_id:
+        raise ResearchProjectAgentSessionError(
+            "Question discussion requires a canonical node root session."
+        )
+
+    missing_session_recovery = False
+    with _REGISTRY_LOCK:
+        registry = _read_registry(team_id, research_project_id)
+        record, recovered = _agent_record(
+            registry,
+            team_id=team_id,
+            research_project_id=research_project_id,
+            agent_id=agent_id,
+            role_key=role_key,
+            workflow_run_id=discussion_scope.workflowRunId,
+            workflow_node_id=discussion_scope.workflowNodeId,
+            discussion_scope=discussion_scope,
+        )
+        current = record["attempts"][-1] if record["attempts"] else None
+        if current is not None and not _attempt_matches_discussion_scope(
+            current, discussion_scope
+        ):
+            raise ResearchProjectAgentSessionError(
+                "Question discussion Session binding does not match its canonical scope."
+            )
+        if current is not None and not formal_retry:
+            detail = s.session_service.get_session_detail(current["sessionId"])
+            if not _discussion_child_detail_matches_scope(
+                detail,
+                scope=discussion_scope,
+                root_session_id=root_session_id,
+                agent_id=agent_id,
+            ):
+                if not recover_missing_session:
+                    raise ResearchProjectAgentSessionError(
+                        "Question discussion registry points to a missing or mismatched Child Session."
+                    )
+                formal_retry = True
+                missing_session_recovery = True
+            else:
+                if recovered:
+                    _write_registry(team_id, research_project_id, registry)
+                return _result_payload(
+                    project=project,
+                    attempt=current,
+                    session_title=_text(detail.get("title"), limit=120),
+                    session_created=False,
+                    detail=detail,
+                    scope=root_scope,
+                    discussion_scope=discussion_scope,
+                    parent_session_id=root_session_id,
+                )
+
+        if current is not None and formal_retry and not missing_session_recovery:
+            previous_status = _text(previous_task.get("status"), limit=80).lower()
+            if previous_status in ACTIVE_TASK_STATUSES:
+                raise ResearchProjectAgentSessionError(
+                    "Formal retry cannot replace an active question discussion Session."
+                )
+            if previous_status not in TERMINAL_TASK_STATUSES:
+                raise ResearchProjectAgentSessionError(
+                    "Formal retry requires a terminal question discussion task."
+                )
+            if _text(previous_task.get("sessionId")) != current["sessionId"]:
+                raise ResearchProjectAgentSessionError(
+                    "Formal retry must reference the current question discussion Session."
+                )
+
+        attempt_number = int(current["attempt"]) + 1 if current is not None else 1
+        retry_of_session_id = current["sessionId"] if current is not None else ""
+        title = _candidate_session_title(
+            project["name"], role_label, discussion_scope.questionId, attempt_number
+        )
+        created_at = s.utc_now_iso()
+        binding = _binding_payload(
+            team_id=team_id,
+            research_project_id=research_project_id,
+            experiment_name=project["name"],
+            agent_id=agent_id,
+            role_key=role_key,
+            role_label=role_label,
+            attempt=attempt_number,
+            retry_of_session_id=retry_of_session_id,
+            created_from_task_id=created_from_task_id,
+            created_at=created_at,
+            workflow_run_id=root_scope.workflowRunId,
+            workflow_node_id=root_scope.workflowNodeId,
+            scope=root_scope,
+            discussion_scope=discussion_scope,
+            recovery_reason=(
+                "missing_canonical_session" if missing_session_recovery else ""
+            ),
+        )
+        child_result = s.session_service.create_child_session(
+            root_session_id,
+            user_request=f"独立处理题目 {discussion_scope.questionId} 的候选生成",
+            task_title=title,
+            split_reason="workflow_question_discussion_scope_v1",
+            auto_start=False,
+            switch_to_child=False,
+            source="research_project_agent_session",
+            experiment_binding=binding,
+        )
+        created_session_id = _text(child_result.get("childSessionId"))
+        canonical_detail = (
+            s.session_service.get_session_detail(created_session_id)
+            if created_session_id
+            else None
+        )
+        if not _discussion_child_detail_matches_scope(
+            canonical_detail,
+            scope=discussion_scope,
+            root_session_id=root_session_id,
+            agent_id=agent_id,
+        ):
+            raise ResearchProjectAgentSessionError(
+                "New question discussion Session is missing its canonical hidden scope."
+            )
+        attempt = _normalize_attempt(
+            {
+                "sessionId": created_session_id,
+                "agentId": agent_id,
+                "roleKey": role_key,
+                "attempt": attempt_number,
+                "retryOfSessionId": retry_of_session_id,
+                "createdFromTaskId": created_from_task_id,
+                "createdAt": created_at,
+                "workflowRunId": root_scope.workflowRunId,
+                "workflowNodeId": root_scope.workflowNodeId,
+                "scope": root_scope.to_dict(),
+                "discussionScope": discussion_scope.to_dict(),
+                "discussionScopeHash": discussion_scope.scope_hash,
+                "recoveryReason": (
+                    "missing_canonical_session" if missing_session_recovery else ""
+                ),
+            }
+        )
+        record["roleKey"] = role_key
+        record["attempts"].append(attempt)
+        record["currentAttempt"] = attempt_number
+        _write_registry(team_id, research_project_id, registry)
+        s.lock_research_project_name(
+            team_id, research_project_id, reason="first_experiment_session"
+        )
+        return _result_payload(
+            project=project,
+            attempt=attempt,
+            session_title=title,
+            session_created=True,
+            detail=canonical_detail,
+            scope=root_scope,
+            discussion_scope=discussion_scope,
+            parent_session_id=root_session_id,
+        )
+
+
+def _discussion_child_detail_matches_scope(
+    detail: Mapping[str, Any] | None,
+    *,
+    scope: WorkflowDiscussionScopeV1,
+    root_session_id: str,
+    agent_id: str,
+) -> bool:
+    if not isinstance(detail, Mapping):
+        return False
+    return bool(
+        _text(detail.get("agentId")) == _text(agent_id)
+        and _text(detail.get("sessionKind"), limit=40).lower() == "child"
+        and detail.get("hiddenFromIndex") is True
+        and _text(detail.get("parentSessionId")) == root_session_id
+        and _text(detail.get("rootSessionId")) == root_session_id
+        and _detail_matches_discussion_scope(detail, scope)
+    )
 
 
 def _candidate_session_title(
@@ -903,6 +1383,7 @@ def _resolve_candidate_session(
     recover_missing_session: bool,
     root_scope: WorkflowSessionScopeV3,
     candidate_scope: WorkflowSessionScopeV3,
+    discussion_scope: WorkflowDiscussionScopeV1 | None = None,
 ) -> dict[str, Any]:
     """Resolve one candidate child without ever falling back to the root."""
 
@@ -937,15 +1418,22 @@ def _resolve_candidate_session(
             workflow_node_id=candidate_scope.workflowNodeId,
             selection_id=candidate_scope.selectionId,
             candidate_id=candidate_scope.candidateId,
+            discussion_scope=discussion_scope,
         )
         current = record["attempts"][-1] if record["attempts"] else None
+        if current is not None and discussion_scope is not None and not _attempt_matches_discussion_scope(
+            current, discussion_scope
+        ):
+            raise ResearchProjectAgentSessionError(
+                "Project Agent candidate session binding does not match the canonical discussion scope."
+            )
         if current is not None and not formal_retry:
             detail = s.session_service.get_session_detail(current["sessionId"])
             if not _candidate_detail_matches_scope(
                 detail,
                 scope=candidate_scope,
                 root_session_id=root_session_id,
-            ):
+            ) or not _detail_matches_discussion_scope(detail, discussion_scope):
                 if not recover_missing_session:
                     raise ResearchProjectAgentSessionError(
                         "Project Agent candidate session registry points to a missing or mismatched canonical session: "
@@ -970,6 +1458,7 @@ def _resolve_candidate_session(
                     session_created=False,
                     detail=projected,
                     scope=candidate_scope,
+                    discussion_scope=discussion_scope,
                     parent_session_id=root_session_id,
                 )
 
@@ -1014,6 +1503,7 @@ def _resolve_candidate_session(
             selection_id=candidate_scope.selectionId,
             candidate_id=candidate_scope.candidateId,
             scope=candidate_scope,
+            discussion_scope=discussion_scope,
             recovery_reason=(
                 "missing_canonical_session" if missing_session_recovery else ""
             ),
@@ -1038,7 +1528,7 @@ def _resolve_candidate_session(
             canonical_detail,
             scope=candidate_scope,
             root_session_id=root_session_id,
-        ):
+        ) or not _detail_matches_discussion_scope(canonical_detail, discussion_scope):
             raise ResearchProjectAgentSessionError(
                 "New candidate project Agent session is missing its canonical hidden child scope; "
                 "the registry was not updated."
@@ -1057,6 +1547,16 @@ def _resolve_candidate_session(
                 "selectionId": candidate_scope.selectionId,
                 "candidateId": candidate_scope.candidateId,
                 "scope": candidate_scope.to_dict(),
+                "discussionScope": (
+                    discussion_scope.to_dict()
+                    if discussion_scope is not None
+                    else None
+                ),
+                "discussionScopeHash": (
+                    discussion_scope.scope_hash
+                    if discussion_scope is not None
+                    else ""
+                ),
                 "recoveryReason": (
                     "missing_canonical_session" if missing_session_recovery else ""
                 ),
@@ -1079,5 +1579,6 @@ def _resolve_candidate_session(
             session_created=True,
             detail=projected,
             scope=candidate_scope,
+            discussion_scope=discussion_scope,
             parent_session_id=root_session_id,
         )
