@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
+import { isFetchAbortError } from "../../api/client";
 import type { ChatRoomDetail, ChatRoomStreamEvent } from "../../api/types";
+import { consumeChatRoomEventStream } from "./chatRoomEventStream";
 
 export type UseGroupRoomStreamOptions = {
   activeGroupRoomId: string | null | undefined;
@@ -10,7 +12,7 @@ export type UseGroupRoomStreamOptions = {
 };
 
 /**
- * Sole owner of the group chat-room EventSource.
+ * Sole owner of the authenticated group chat-room event stream.
  * Do not open a second /api/chat-rooms/:id/events connection elsewhere.
  */
 export function useGroupRoomStream({
@@ -23,7 +25,7 @@ export function useGroupRoomStream({
   const groupStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (!groupStreamShouldConnect || typeof EventSource === "undefined") {
+    if (!groupStreamShouldConnect || typeof AbortController === "undefined") {
       setGroupStreamConnected(false);
       return;
     }
@@ -34,14 +36,16 @@ export function useGroupRoomStream({
       setGroupStreamConnected(false);
       return;
     }
-    const stream = new EventSource(`/api/chat-rooms/${streamRoomId}/events`);
     // The backend publishes a full room detail snapshot on every speaker state
     // transition; coalesce bursts the same way the direct session stream does
     // (350ms) so a running round does not parse+write the whole room cache per
     // event.
     const MIN_APPLY_INTERVAL_MS = 350;
+    const RECONNECT_DELAY_MS = 1_000;
     let pendingDetail: ChatRoomDetail | null = null;
     let applyTimer: number | null = null;
+    let reconnectTimer: number | null = null;
+    let streamController: AbortController | null = null;
 
     function flushPendingDetail() {
       if (applyTimer !== null) {
@@ -66,7 +70,7 @@ export function useGroupRoomStream({
       }, MIN_APPLY_INTERVAL_MS);
     }
 
-    stream.onopen = () => {
+    function handleOpen() {
       if (!disposed) {
         setGroupStreamConnected(true);
         groupStreamErrorLoggedRef.current[streamRoomId] = false;
@@ -80,31 +84,29 @@ export function useGroupRoomStream({
           },
         });
       }
-    };
+    }
 
-    stream.onerror = () => {
-      if (!disposed) {
-        setGroupStreamConnected(false);
-        if (!groupStreamErrorLoggedRef.current[streamRoomId]) {
-          groupStreamErrorLoggedRef.current[streamRoomId] = true;
-          postBrowserTelemetry({
-            phase: "chat_room_stream",
-            eventCode: "browser.chat_room_stream.error",
-            message: "Chat room detail stream reported an error.",
-            level: "warning",
-            fields: {
-              roomId: streamRoomId,
-              readyState: stream.readyState,
-            },
-          });
-        }
+    function reportStreamError() {
+      setGroupStreamConnected(false);
+      if (!groupStreamErrorLoggedRef.current[streamRoomId]) {
+        groupStreamErrorLoggedRef.current[streamRoomId] = true;
+        postBrowserTelemetry({
+          phase: "chat_room_stream",
+          eventCode: "browser.chat_room_stream.error",
+          message: "Chat room detail stream reported an error.",
+          level: "warning",
+          fields: {
+            roomId: streamRoomId,
+            transport: "fetch",
+          },
+        });
       }
-    };
+    }
 
-    function handleChatRoomDetail(event: MessageEvent<string>) {
+    function handleChatRoomDetail(data: string) {
       let payload: ChatRoomStreamEvent;
       try {
-        payload = JSON.parse(event.data) as ChatRoomStreamEvent;
+        payload = JSON.parse(data) as ChatRoomStreamEvent;
       } catch {
         if (!groupStreamPayloadErrorLoggedRef.current[streamRoomId]) {
           groupStreamPayloadErrorLoggedRef.current[streamRoomId] = true;
@@ -115,7 +117,7 @@ export function useGroupRoomStream({
             level: "warning",
             fields: {
               roomId: streamRoomId,
-              payloadLength: event.data.length,
+              payloadLength: data.length,
             },
           });
         }
@@ -128,22 +130,63 @@ export function useGroupRoomStream({
       scheduleChatRoomDetail(payload.detail);
     }
 
-    stream.addEventListener("chat_room_detail", handleChatRoomDetail as EventListener);
+    function scheduleReconnect() {
+      if (disposed || reconnectTimer !== null) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        void connect();
+      }, RECONNECT_DELAY_MS);
+    }
+
+    async function connect() {
+      if (disposed) return;
+      const controller = new AbortController();
+      streamController = controller;
+      try {
+        await consumeChatRoomEventStream({
+          roomId: streamRoomId,
+          signal: controller.signal,
+          onOpen: handleOpen,
+          onFrame: (frame) => {
+            if (frame.event === "chat_room_detail") {
+              handleChatRoomDetail(frame.data);
+            }
+          },
+        });
+        if (!disposed) {
+          setGroupStreamConnected(false);
+          scheduleReconnect();
+        }
+      } catch (error) {
+        if (!disposed && !isFetchAbortError(error)) {
+          reportStreamError();
+          scheduleReconnect();
+        }
+      } finally {
+        if (streamController === controller) {
+          streamController = null;
+        }
+      }
+    }
+
+    void connect();
 
     return () => {
-      const readyStateBeforeClose = stream.readyState;
       disposed = true;
       flushPendingDetail();
       setGroupStreamConnected(false);
-      stream.removeEventListener("chat_room_detail", handleChatRoomDetail as EventListener);
-      stream.close();
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      streamController?.abort();
       postBrowserTelemetry({
         phase: "chat_room_stream",
         eventCode: "browser.chat_room_stream.closed",
         message: "Chat room detail stream closed.",
         fields: {
           roomId: streamRoomId,
-          readyState: readyStateBeforeClose,
+          transport: "fetch",
         },
       });
     };

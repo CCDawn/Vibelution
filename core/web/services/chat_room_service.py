@@ -4625,9 +4625,14 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
 
     if _chat_room_lock_owned_by_current_thread():
         return []
-    reconciled: list[dict[str, Any]] = []
     store = _work_run_store()
     reconciled_at = utc_now_iso()
+
+    # WorkRun reads can touch a separate persistent store.  Take a small room
+    # snapshot first, then resolve the WorkRun state without holding the room
+    # mutex.  Holding this mutex across that I/O blocks detail, stop, and room
+    # recovery requests behind one slow reconciliation read.
+    active_rounds: list[tuple[str, str]] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         for room in list(state.get("rooms") or []):
@@ -4642,57 +4647,98 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
             previous_status = str(round_payload.get("status") or "").strip().lower()
             if previous_status not in RUNNING_ROUND_STATUSES:
                 continue
-            work_run = store.load_snapshot(RUN_KIND, round_id)
-            final_status = _terminal_chat_room_status_from_work_run(work_run)
-            reconciliation_source = "terminal_work_run"
-            if not final_status and not _chat_room_round_has_process_control(round_id):
-                final_status = "stopped"
-                reconciliation_source = "missing_process_controller"
-            if not final_status:
-                continue
-            finished_at = (
-                reconciled_at
-                if reconciliation_source == "missing_process_controller"
-                else str((work_run or {}).get("finishedAt") or (work_run or {}).get("updatedAt") or reconciled_at).strip()
-            )
-            reason = (
-                text_for(
-                    get_web_language(),
-                    zh="后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
-                    en="The backend process restarted, so the chat room round without a current process controller was closed.",
-                )
-                if reconciliation_source == "missing_process_controller"
-                else _chat_room_reconciliation_reason(work_run or {}, final_status=final_status)
-            )
-            message_count = len(list(round_payload.get("messages") or []))
-            speaker_count = len(list(round_payload.get("speakerOrder") or []))
-            round_payload["status"] = final_status
-            round_payload["summary"] = (
-                _stopped_round_summary(reason, message_count=message_count, speaker_count=speaker_count)
-                if final_status == "stopped"
-                else reason
-            )
-            round_payload["updatedAt"] = finished_at
-            round_payload["finishedAt"] = finished_at
-            room["status"] = "ready" if final_status in {"completed", "partial", "stopped"} else "failed"
-            room["activeRoundId"] = ""
-            room["updatedAt"] = finished_at
-            reconciled.append(
+            active_rounds.append((str(room.get("roomId") or "").strip(), round_id))
+
+    candidates: list[dict[str, Any]] = []
+    for room_id, round_id in active_rounds:
+        if not room_id:
+            continue
+        work_run = store.load_snapshot(RUN_KIND, round_id)
+        final_status = _terminal_chat_room_status_from_work_run(work_run)
+        reconciliation_source = "terminal_work_run"
+        if not final_status and not _chat_room_round_has_process_control(round_id):
+            final_status = "stopped"
+            reconciliation_source = "missing_process_controller"
+        if final_status:
+            candidates.append(
                 {
-                    "room": dict(room),
-                    "round": dict(round_payload),
-                    "previousStatus": previous_status,
+                    "roomId": room_id,
+                    "roundId": round_id,
+                    "workRun": dict(work_run) if isinstance(work_run, Mapping) else {},
                     "finalStatus": final_status,
                     "reconciliationSource": reconciliation_source,
-                    "workRunStatus": str((work_run or {}).get("status") or "").strip(),
-                    "runtimeStatus": str((work_run or {}).get("runtimeStatus") or "").strip(),
-                    "messageCount": message_count,
-                    "speakerCount": speaker_count,
-                    "persistWorkRun": not _terminal_chat_room_status_from_work_run(work_run),
                 }
             )
-        if reconciled:
-            _store().save(state)
+
+    reconciled: list[dict[str, Any]] = []
+    if candidates:
+        with _CHAT_ROOM_LOCK:
+            state = _store().load()
+            for candidate in candidates:
+                room = _find_room(state, str(candidate["roomId"]))
+                round_id = str(candidate["roundId"])
+                if not isinstance(room, dict) or str(room.get("activeRoundId") or "").strip() != round_id:
+                    continue
+                round_payload = _find_round(room, round_id)
+                if not isinstance(round_payload, dict):
+                    continue
+                previous_status = str(round_payload.get("status") or "").strip().lower()
+                if previous_status not in RUNNING_ROUND_STATUSES:
+                    continue
+                # A user stop can create a process control record while this
+                # reconciliation is resolving its WorkRun snapshot.  Do not
+                # replace that live, user-owned stop with an orphan recovery.
+                if (
+                    candidate["reconciliationSource"] == "missing_process_controller"
+                    and _chat_room_round_has_process_control(round_id)
+                ):
+                    continue
+                work_run = candidate["workRun"]
+                final_status = str(candidate["finalStatus"])
+                reconciliation_source = str(candidate["reconciliationSource"])
+                finished_at = (
+                    reconciled_at
+                    if reconciliation_source == "missing_process_controller"
+                    else str(work_run.get("finishedAt") or work_run.get("updatedAt") or reconciled_at).strip()
+                )
+                reason = (
+                    text_for(
+                        get_web_language(),
+                        zh="后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
+                        en="The backend process restarted, so the chat room round without a current process controller was closed.",
+                    )
+                    if reconciliation_source == "missing_process_controller"
+                    else _chat_room_reconciliation_reason(work_run, final_status=final_status)
+                )
+                message_count = len(list(round_payload.get("messages") or []))
+                speaker_count = len(list(round_payload.get("speakerOrder") or []))
+                round_payload["status"] = final_status
+                round_payload["summary"] = (
+                    _stopped_round_summary(reason, message_count=message_count, speaker_count=speaker_count)
+                    if final_status == "stopped"
+                    else reason
+                )
+                round_payload["updatedAt"] = finished_at
+                round_payload["finishedAt"] = finished_at
+                room["status"] = "ready" if final_status in {"completed", "partial", "stopped"} else "failed"
+                room["activeRoundId"] = ""
+                room["updatedAt"] = finished_at
+                reconciled.append(
+                    {
+                        "room": dict(room),
+                        "round": dict(round_payload),
+                        "previousStatus": previous_status,
+                        "finalStatus": final_status,
+                        "reconciliationSource": reconciliation_source,
+                        "workRunStatus": str(work_run.get("status") or "").strip(),
+                        "runtimeStatus": str(work_run.get("runtimeStatus") or "").strip(),
+                        "messageCount": message_count,
+                        "speakerCount": speaker_count,
+                        "persistWorkRun": not _terminal_chat_room_status_from_work_run(work_run),
+                    }
+                )
+            if reconciled:
+                _store().save(state)
 
     for item in reconciled:
         if item["persistWorkRun"]:
@@ -4986,6 +5032,7 @@ def _fail_chat_room_round(
         zh=f"群聊后台轮次失败：{type(exc).__name__}: {exc}",
         en=f"Chat room background round failed: {type(exc).__name__}: {exc}",
     )
+    already_terminal = False
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         live_room = _find_room(state, room_id)
@@ -4995,17 +5042,21 @@ def _fail_chat_room_round(
         if target_round is None:
             target_round = round_payload
         if str(target_round.get("status") or "").strip().lower() not in RUNNING_ROUND_STATUSES:
-            _publish_chat_room_detail_snapshot(room_id)
-            return
-        target_round["status"] = "failed"
-        target_round["summary"] = summary
-        target_round["updatedAt"] = failed_at
-        target_round["finishedAt"] = failed_at
-        live_room["status"] = "failed"
-        live_room["activeRoundId"] = ""
-        live_room["updatedAt"] = failed_at
-        if _find_room(state, room_id) is not None:
-            _store().save(state)
+            already_terminal = True
+        else:
+            target_round["status"] = "failed"
+            target_round["summary"] = summary
+            target_round["updatedAt"] = failed_at
+            target_round["finishedAt"] = failed_at
+            live_room["status"] = "failed"
+            live_room["activeRoundId"] = ""
+            live_room["updatedAt"] = failed_at
+            if _find_room(state, room_id) is not None:
+                _store().save(state)
+
+    if already_terminal:
+        _publish_chat_room_detail_snapshot(room_id)
+        return
 
     _persist_chat_room_work_run(live_room, target_round, status="failed", summary=summary)
     _sync_stopped_round_to_sessions_if_needed(live_room, target_round)

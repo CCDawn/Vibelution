@@ -1061,6 +1061,92 @@ def test_chat_room_participant_index_releases_singleflight_after_builder_error(m
     chat_room_service._clear_participant_refresh_index_cache()
 
 
+def test_reconciliation_does_not_hold_room_lock_while_loading_work_run(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="对账不阻塞停止",
+        participant_session_ids=["session-alpha"],
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = "running"
+    stored_room["activeRoundId"] = "round-running"
+    stored_room["rounds"] = [{
+        "roundId": "round-running",
+        "status": "running",
+        "messages": [],
+        "speakerOrder": ["session-session-alpha"],
+        "startedAt": "2026-08-24T00:00:00+00:00",
+        "updatedAt": "2026-08-24T00:00:00+00:00",
+    }]
+    chat_room_service._store().save(state)
+
+    work_run_read_started = threading.Event()
+    release_work_run_read = threading.Event()
+
+    class SlowWorkRunStore:
+        def load_snapshot(self, _run_kind, _round_id):
+            work_run_read_started.set()
+            assert release_work_run_read.wait(timeout=2)
+            return {}
+
+        def persist_snapshot(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(chat_room_service, "_work_run_store", lambda: SlowWorkRunStore())
+    monkeypatch.setattr(chat_room_service, "_publish_chat_room_detail_snapshot", lambda _room_id: None)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(chat_room_service._reconcile_chat_room_round_state)
+        try:
+            assert work_run_read_started.wait(timeout=1)
+            stopped = chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest reconciliation stop")
+            assert stopped["status"] == "stopping"
+        finally:
+            release_work_run_read.set()
+        assert future.result(timeout=2) == []
+
+
+def test_terminal_round_failure_publishes_after_releasing_room_lock(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="终态失败通知",
+        participant_session_ids=["session-alpha"],
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    terminal_round = {
+        "roundId": "round-terminal",
+        "status": "stopped",
+        "messages": [],
+        "speakerOrder": [],
+    }
+    stored_room["rounds"] = [terminal_round]
+    chat_room_service._store().save(state)
+    published: list[str] = []
+
+    def publish_after_unlock(room_id: str):
+        assert not chat_room_service._chat_room_lock_owned_by_current_thread()
+        published.append(room_id)
+
+    monkeypatch.setattr(chat_room_service, "_publish_chat_room_detail_snapshot", publish_after_unlock)
+
+    chat_room_service._fail_chat_room_round(
+        room["roomId"],
+        "round-terminal",
+        stored_room,
+        terminal_round,
+        RuntimeError("already terminal"),
+        lang="zh",
+    )
+
+    assert published == [room["roomId"]]
+
+
 def test_chat_room_refresh_rebinds_participant_to_current_agent_direct_session(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1392,13 +1478,13 @@ def test_start_chat_room_round_revalidates_participant_snapshot_before_persist(t
     refresh_calls = 0
     real_refresh = chat_room_service._refresh_chat_room_round_participants
 
-    def blocking_first_refresh(participants):
+    def blocking_first_refresh(participants, **kwargs):
         nonlocal refresh_calls
         refresh_calls += 1
         if refresh_calls == 1:
             first_refresh_started.set()
             assert release_first_refresh.wait(timeout=5)
-        return real_refresh(participants)
+        return real_refresh(participants, **kwargs)
 
     monkeypatch.setattr(
         chat_room_service,
@@ -1468,14 +1554,14 @@ def test_start_chat_room_round_aborts_after_bounded_participant_snapshot_retries
     monkeypatch.setattr(session_service, "get_session_detail", tracked_get_session_detail)
     monkeypatch.setattr(session_service, "list_sessions", tracked_list_sessions)
 
-    def blocking_refresh(participants):
+    def blocking_refresh(participants, **kwargs):
         nonlocal refresh_calls
         attempt = refresh_calls
         refresh_calls += 1
         assert attempt < len(refresh_releases)
         refresh_started.set()
         assert refresh_releases[attempt].wait(timeout=5)
-        return real_refresh(participants)
+        return real_refresh(participants, **kwargs)
 
     monkeypatch.setattr(
         chat_room_service,
