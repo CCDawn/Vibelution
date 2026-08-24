@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 from core.web.services import code_freshness
 
 
-def _write_snapshot(tmp_path: Path, *, head: str, branch: str = "main", started_at: str = "2026-08-09T00:35:54+00:00") -> None:
+def _write_snapshot(
+    tmp_path: Path,
+    *,
+    head: str,
+    branch: str = "main",
+    started_at: str = "2026-08-09T00:35:54+00:00",
+    dirty_status: str = "",
+) -> None:
     path = code_freshness.running_code_fingerprint_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -18,6 +26,8 @@ def _write_snapshot(tmp_path: Path, *, head: str, branch: str = "main", started_
                 "projectRoot": str(tmp_path),
                 "runningHead": head,
                 "runningBranch": branch,
+                "dirty": bool(dirty_status),
+                "dirtyTreeDigest": hashlib.sha256(dirty_status.encode("utf-8")).hexdigest(),
                 "startedAt": started_at,
                 "source": "test",
             }
@@ -81,7 +91,13 @@ def test_resolve_backend_current_when_snapshot_matches_disk(tmp_path: Path, monk
     monkeypatch.setattr(
         code_freshness,
         "_capture_git_text",
-        lambda root, args: "c269dafb9" if args[:2] == ["rev-parse", "HEAD"] else "main",
+        lambda root, args: (
+            "c269dafb9"
+            if args[:2] == ["rev-parse", "HEAD"]
+            else "main"
+            if args[:2] == ["branch", "--show-current"]
+            else ""
+        ),
     )
     result = code_freshness.resolve_backend_freshness(project_root=tmp_path)
     assert result["available"] is True
@@ -109,6 +125,45 @@ def test_resolve_backend_behind_reports_count(tmp_path: Path, monkeypatch) -> No
     assert result["behind"] is True
     assert result["behindCount"] == 3
     assert any(args[:3] == ["rev-list", "--count", "oldhead000000..newhead000000"] for args in calls)
+
+
+def test_resolve_backend_behind_when_dirty_tree_digest_changes(tmp_path: Path, monkeypatch) -> None:
+    _write_snapshot(tmp_path, head="same-head")
+
+    def fake_git(root, args):
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return "same-head"
+        if args[:2] == ["branch", "--show-current"]:
+            return "main"
+        if args[:2] == ["status", "--porcelain=v1"]:
+            return " M core/web/app.py"
+        return ""
+
+    monkeypatch.setattr(code_freshness, "_capture_git_text", fake_git)
+    result = code_freshness.resolve_backend_freshness(project_root=tmp_path)
+
+    assert result["available"] is True
+    assert result["behind"] is True
+    assert result["behindCount"] is None
+
+
+def test_resolve_backend_missing_dirty_digest_is_unknown(tmp_path: Path, monkeypatch) -> None:
+    path = code_freshness.running_code_fingerprint_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"schemaVersion": 1, "runningHead": "same-head", "runningBranch": "main"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        code_freshness,
+        "_capture_git_text",
+        lambda root, args: "same-head" if args[:2] == ["rev-parse", "HEAD"] else "",
+    )
+
+    result = code_freshness.resolve_backend_freshness(project_root=tmp_path)
+
+    assert result["available"] is False
+    assert result["reason"] == "running_fingerprint_missing_dirty_digest"
 
 
 def test_resolve_backend_missing_snapshot_is_unknown(tmp_path: Path, monkeypatch) -> None:

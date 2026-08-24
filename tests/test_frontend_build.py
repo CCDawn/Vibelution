@@ -138,6 +138,59 @@ def test_publish_switches_only_after_complete_staging_release(monkeypatch: pytes
     assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
 
 
+def test_gc_frontend_releases_preserves_active_serving_and_recent_entries(tmp_path: Path) -> None:
+    now = time.time()
+    active = _release(tmp_path, "release-active", key="active")
+    serving = _release(tmp_path, "release-serving", key="serving")
+    removable = _release(tmp_path, "release-removable", key="removable")
+    recent = _release(tmp_path, "release-recent", key="recent")
+    _activate(tmp_path, active.name, key="active")
+    fingerprint_path = tmp_path / ".runtime" / "running-code-fingerprint.json"
+    fingerprint_path.parent.mkdir(parents=True, exist_ok=True)
+    fingerprint_path.write_text(
+        json.dumps({"schemaVersion": 1, "servingFrontendRelease": serving.name}),
+        encoding="utf-8",
+    )
+    os.utime(active, (now - 10_000, now - 10_000))
+    os.utime(serving, (now - 10_000, now - 10_000))
+    os.utime(removable, (now - 10_000, now - 10_000))
+    os.utime(recent, (now - 10, now - 10))
+
+    result = frontend_build.gc_frontend_releases(
+        tmp_path,
+        now=now,
+        release_retention_seconds=3600,
+        keep_release_count=0,
+    )
+
+    assert active.is_dir()
+    assert serving.is_dir()
+    assert not removable.exists()
+    assert recent.is_dir()
+    assert removable.name in result["removed"]
+    assert active.name in result["skipped"]
+    assert serving.name in result["skipped"]
+
+
+def test_gc_frontend_releases_removes_only_expired_staging_directories(tmp_path: Path) -> None:
+    now = time.time()
+    old_stage = frontend_build.create_staging_release(tmp_path)
+    fresh_stage = frontend_build.create_staging_release(tmp_path)
+    os.utime(old_stage, (now - 7200, now - 7200))
+
+    result = frontend_build.gc_frontend_releases(
+        tmp_path,
+        now=now,
+        stage_retention_seconds=3600,
+        keep_release_count=0,
+    )
+
+    assert not old_stage.exists()
+    assert fresh_stage.is_dir()
+    assert old_stage.name in result["removed"]
+    assert fresh_stage.name in result["skipped"]
+
+
 def test_damaged_matching_release_is_not_reactivated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _write_project(tmp_path)
     _stub_build_identity(monkeypatch)

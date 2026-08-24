@@ -36,6 +36,27 @@ def _isolate_live_desktop_session(monkeypatch):
     monkeypatch.setattr(desktop_session_store, "latest_active_window_provider_projection", lambda **_kwargs: {})
 
 
+@pytest.fixture(autouse=True)
+def _stub_frontend_build_preflight(monkeypatch):
+    """Keep open-workbench unit cases from invoking the real Node toolchain.
+
+    The production path validates/builds the content-addressed release before
+    every open.  These lifecycle tests already mock process/window behavior;
+    the builder contract is covered by ``test_frontend_build.py``.
+    """
+
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id, *, force=False, project_root=None: {
+            "ok": True,
+            "skipped": True,
+            "rebuilt": False,
+            "completedSteps": [],
+        },
+    )
+
+
 def _repeat_last(items):
     values = list(items)
     iterator = iter(values)
@@ -6775,6 +6796,7 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     assert result["ok"] is True
     assert result["message"] == "Workbench opened."
     assert opened == {"no_browser": False}
+    assert result["lifecycleTimingsMs"]["frontendBuildPreflight"]["skipped"] is True
     assert result["lifecycleTimingsMs"]["launcherStartup"] == {
         "startupTraceId": "launcher-startup-test",
         "outcome": "succeeded",

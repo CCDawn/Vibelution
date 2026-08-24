@@ -101,6 +101,7 @@ import {
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
+import { inspectWorkbenchServingVersion } from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
 import {
@@ -2923,10 +2924,17 @@ async function orchestrateLauncherLifecycle(
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
+    const servingVersion = !frontendReleaseChanged && !unpackagedElectronRebuilt && !packagedShellStale
+      ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot })
+      : { ok: false, reason: "release_or_shell_changed" };
+    if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
+      console.warn(`main-line backend reuse rejected: ${servingVersion.reason}`);
+    }
     if (
       !frontendReleaseChanged
       && !unpackagedElectronRebuilt
       && !packagedShellStale
+      && servingVersion.ok
       && await mainLineBackendIsReusable(paths.workspaceRoot)
     ) {
       const url = await refreshLiveWorkbenchUrl(paths);

@@ -48,6 +48,9 @@ _VITE_ENV_PREFIX = "VITE_"
 _AUDIT_INPUT_NAMES = frozenset(("sourceCommit", "frontendTree"))
 _TRANSIENT_INPUT_NAMES = frozenset(("productionInputStateDigest",))
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
+FRONTEND_RELEASE_RETENTION_SECONDS = 7 * 24 * 60 * 60
+FRONTEND_STAGE_RETENTION_SECONDS = 60 * 60
+FRONTEND_RELEASE_KEEP_COUNT = 5
 
 
 def frontend_releases_dir(project_root: Path | str) -> Path:
@@ -409,6 +412,105 @@ def create_staging_release(project_root: Path | str) -> Path:
     return path
 
 
+def gc_frontend_releases(
+    project_root: Path | str,
+    *,
+    now: float | None = None,
+    release_retention_seconds: float = FRONTEND_RELEASE_RETENTION_SECONDS,
+    stage_retention_seconds: float = FRONTEND_STAGE_RETENTION_SECONDS,
+    keep_release_count: int = FRONTEND_RELEASE_KEEP_COUNT,
+) -> dict[str, Any]:
+    """Bound frontend build storage without deleting a live serving release.
+
+    ``active.json`` and the running backend fingerprint are both treated as
+    leases.  A release is eligible only when it is old enough, outside the
+    recent keep window, and not named by either lease.  Staging directories
+    are disposable only after the grace period, so a concurrent build gets a
+    full window to publish or clean itself up.
+    """
+
+    root = Path(project_root).resolve()
+    releases_dir = frontend_releases_dir(root)
+    if not releases_dir.is_dir():
+        return {"removed": [], "skipped": [], "active": "", "serving": ""}
+    current_time = time.time() if now is None else float(now)
+
+    def safe_mtime_ns(path: Path) -> int:
+        # A concurrent cleanup/build may remove an entry between directory
+        # enumeration and sorting.  Treat that entry as oldest instead of
+        # allowing a harmless GC race to fail the publish path.
+        try:
+            return int(path.stat().st_mtime_ns)
+        except OSError:
+            return -1
+
+    active_release = ""
+    try:
+        pointer = json.loads(active_release_path(root).read_text(encoding="utf-8"))
+        if isinstance(pointer, dict):
+            active_release = str(pointer.get("release") or "").strip()
+    except (OSError, ValueError, TypeError):
+        pass
+    serving_release = ""
+    try:
+        fingerprint = json.loads((root / ".runtime" / "running-code-fingerprint.json").read_text(encoding="utf-8"))
+        if isinstance(fingerprint, dict):
+            serving_release = str(fingerprint.get("servingFrontendRelease") or "").strip()
+    except (OSError, ValueError, TypeError):
+        pass
+
+    try:
+        release_children = list(releases_dir.iterdir())
+    except OSError:
+        return {"removed": [], "skipped": [], "active": active_release, "serving": serving_release}
+    release_entries = sorted(
+        (path for path in release_children if path.is_dir() and path.name.startswith("release-")),
+        key=safe_mtime_ns,
+        reverse=True,
+    )
+    keep_names = {name for name in (active_release, serving_release) if name}
+    keep_names.update(path.name for path in release_entries[: max(0, int(keep_release_count))])
+    removed: list[str] = []
+    skipped: list[str] = []
+    for path in release_entries:
+        if path.name in keep_names:
+            skipped.append(path.name)
+            continue
+        try:
+            age = max(0.0, current_time - path.stat().st_mtime)
+        except OSError:
+            skipped.append(path.name)
+            continue
+        if age < max(0.0, float(release_retention_seconds)):
+            skipped.append(path.name)
+            continue
+        try:
+            shutil.rmtree(path)
+            removed.append(path.name)
+        except OSError:
+            skipped.append(path.name)
+
+    stage_paths = sorted(
+        (path for path in release_children if path.is_dir() and path.name.startswith("stage-")),
+        key=lambda path: path.name,
+    )
+    for path in stage_paths:
+        try:
+            age = max(0.0, current_time - path.stat().st_mtime)
+        except OSError:
+            skipped.append(path.name)
+            continue
+        if age < max(0.0, float(stage_retention_seconds)):
+            skipped.append(path.name)
+            continue
+        try:
+            shutil.rmtree(path)
+            removed.append(path.name)
+        except OSError:
+            skipped.append(path.name)
+    return {"removed": removed, "skipped": skipped, "active": active_release, "serving": serving_release}
+
+
 def validate_staging_release(path: Path) -> None:
     _validate_release_assets(path)
 
@@ -442,7 +544,8 @@ def publish_staging_release(project_root: Path | str, staging: Path, *, build_ke
     temporary = pointer_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(pointer, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temporary, pointer_path)
-    return {"release": str(release), "provenance": provenance}
+    gc = gc_frontend_releases(root)
+    return {"release": str(release), "provenance": provenance, "gc": gc}
 
 
 def _node_command() -> str:
@@ -592,5 +695,6 @@ def ensure_frontend_build(
             "buildInputs": final["buildInputs"],
             "dist": published["release"],
             "provenance": published["provenance"],
+            "gc": published.get("gc") or {},
             "outputs": outputs,
         }

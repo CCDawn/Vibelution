@@ -48,7 +48,13 @@ def _web_dist() -> Path:
 def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:
     """Mount SPA index + catch-all after API routers so /api/* is not swallowed."""
 
-    dist = web_dist if web_dist is not None else _web_dist()
+    pinned_dist = str(getattr(app.state, "serving_frontend_dist", "") or "").strip()
+    # A process-created app may be instantiated before a build exists (and
+    # tests intentionally provide a temporary dist through ``_web_dist``).
+    # Only pin an actually published directory; an absent fallback must not
+    # mask the normal resolver or make the SPA appear blank.
+    pinned_path = Path(pinned_dist) if pinned_dist else None
+    dist = web_dist if web_dist is not None else (pinned_path if pinned_path and pinned_path.is_dir() else _web_dist())
 
     @app.get("/", include_in_schema=False)
     def index(request: Request):

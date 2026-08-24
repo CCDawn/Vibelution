@@ -3441,10 +3441,14 @@ class RuntimeManagerDaemon:
         no_browser = bool(args.get("noBrowser"))
         force_frontend_rebuild = bool(args.get("forceFrontendRebuild"))
         allow_dirty_launch = force_frontend_rebuild or bool(args.get("allowDirty"))
-        if force_frontend_rebuild:
-            # Rebuild before any already-open short-circuit so tray "rebuild and start"
-            # always refreshes static assets even when the workbench is already healthy.
-            _preflight_frontend_build_for_restart(command_id, force=True)
+        # Every ordinary open validates the content-addressed frontend release
+        # before considering the already-open fast path.  The shared builder
+        # skips work when the active BuildKey is current, and publishes a new
+        # immutable release before any new backend is launched otherwise.
+        build_preflight = _preflight_frontend_build_for_restart(
+            command_id,
+            force=force_frontend_rebuild,
+        )
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
         observation = _observe_workbench_for_open(workbench) if should_probe_before_launch else {}
         if (
@@ -3517,7 +3521,12 @@ class RuntimeManagerDaemon:
                     last_reason=str(workbench.get("lastReason") or args.get("reason") or "already_open"),
                     last_source=str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
                 )
-                return self._finish_command(command_id, ok=True, message="Workbench is already open.")
+                return self._finish_command(
+                    command_id,
+                    ok=True,
+                    message="Workbench is already open.",
+                    result_data={"buildPreflight": build_preflight},
+                )
             # Fall through to open_workbench() below.
 
         workbench.update(
@@ -3547,6 +3556,7 @@ class RuntimeManagerDaemon:
             },
         )
         lifecycle_timings_ms: dict[str, Any] = {}
+        lifecycle_timings_ms["frontendBuildPreflight"] = build_preflight
         if bool(observation.get("backendPortOwnerResidual")):
             cleanup_started = time.monotonic()
             cleanup_result = self._cleanup_residual_workbench_processes()
