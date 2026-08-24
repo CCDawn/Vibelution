@@ -5,6 +5,7 @@ import {
   CircleDot,
   Clock3,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import type { ResearchWorkflowProgress } from "../../../api/types/research-workflow/core";
 import {
@@ -270,6 +271,13 @@ export function ResearchWorkflowStageNavigator({
 }) {
   const zh = lang === "zh";
   const summary = model.summary;
+  const preferredStageId = model.stages.find((stage) => (
+    stage.status === "current" || stage.status === "blocked"
+  ))?.id ?? model.stages[0]?.id ?? "";
+  const [expandedStageId, setExpandedStageId] = useState(preferredStageId);
+  useEffect(() => {
+    setExpandedStageId(preferredStageId);
+  }, [preferredStageId]);
   return (
     <VSurface
       as="section"
@@ -283,18 +291,13 @@ export function ResearchWorkflowStageNavigator({
     >
       <header className={styles.header}>
         <div className={styles.headingRow}>
-          <h2 className={styles.title}>{zh ? "流程进度" : "Workflow progress"}</h2>
-          <VStatusChip tone={summary.blockedNodes > 0 ? "danger" : "neutral"}>
-            {summary.blockedNodes > 0 ? (
+          <h2 className={styles.title}>{zh ? "进度" : "Progress"}</h2>
+          <span className={styles.compactProgress}>{summary.completedNodes}/{summary.totalNodes}</span>
+          {summary.blockedNodes > 0 ? (
+            <VStatusChip tone="danger">
               <span className={styles.statusContent}><AlertTriangle size={12} aria-hidden="true" />{zh ? `${summary.blockedNodes} 项阻塞` : `${summary.blockedNodes} blocked`}</span>
-            ) : (zh ? "无阻塞" : "No blockers")}
-          </VStatusChip>
-        </div>
-        <div className={styles.summaryGrid} data-testid="stage-navigator-summary">
-          <span className={styles.summaryItem}><span className={styles.summaryLabel}>{zh ? "阶段" : "Stage"}</span><strong className={styles.summaryValue}>{summary.currentStage}/{summary.totalStages}</strong></span>
-          <span className={styles.summaryItem}><span className={styles.summaryLabel}>{zh ? "节点" : "Nodes"}</span><strong className={styles.summaryValue}>{summary.completedNodes}/{summary.totalNodes}</strong></span>
-          <span className={styles.summaryItem}><span className={styles.summaryLabel}>{zh ? "阻塞" : "Blocked"}</span><strong className={styles.summaryValue}>{summary.blockedNodes}</strong></span>
-          <span className={styles.summaryItem}><span className={styles.summaryLabel}>{zh ? "整体" : "Overall"}</span><strong className={styles.summaryValue}>{summary.percent}%</strong></span>
+            </VStatusChip>
+          ) : null}
         </div>
         <div className={styles.progressTrack} role="progressbar" aria-label={zh ? "整体进度" : "Overall progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={summary.percent}>
           <div className={styles.progressFill} style={{ width: `${summary.percent}%` }} />
@@ -316,6 +319,7 @@ export function ResearchWorkflowStageNavigator({
             {model.stages.map((stage) => {
               const presentation = statusPresentation(stage.status, zh);
               const StageIcon = presentation.icon;
+              const expanded = expandedStageId === stage.id;
               return (
                 <li key={stage.id} className={styles.stage} data-stage-status={stage.status}>
                   <VButton
@@ -324,16 +328,19 @@ export function ResearchWorkflowStageNavigator({
                     variant="secondary"
                     className={styles.stageButton}
                     aria-current={stage.status === "current" ? "step" : undefined}
-                    isDisabled={!stage.targetNodeId}
-                    disabledReason={zh ? "该阶段没有可定位节点" : "No navigable node in this stage"}
-                    onClick={() => stage.targetNodeId && onNavigateNode(stage.targetNodeId)}
+                    aria-expanded={expanded}
+                    isDisabled={stage.nodes.length === 0}
+                    disabledReason={zh ? "该阶段没有任务" : "No tasks in this stage"}
+                    onClick={() => setExpandedStageId((current) => current === stage.id ? "" : stage.id)}
                   >
                     <span className={styles.stageButtonBody}>
                       <span className={styles.stageTopLine}><span className={styles.stageLabel}>{stage.label}</span><span className={styles.stageCount}>{stage.completed}/{stage.total}</span></span>
-                      <VStatusChip tone={presentation.tone}><span className={styles.statusContent}><StageIcon size={12} aria-hidden="true" />{presentation.label}</span></VStatusChip>
+                      {stage.status !== "upcoming" ? (
+                        <VStatusChip tone={presentation.tone}><span className={styles.statusContent}><StageIcon size={12} aria-hidden="true" />{presentation.label}</span></VStatusChip>
+                      ) : null}
                     </span>
                   </VButton>
-                  {stage.nodes.length ? (
+                  {expanded && stage.nodes.length ? (
                     <div className={styles.nodes} aria-label={zh ? `${stage.label}节点` : `${stage.label} nodes`}>
                       {stage.nodes.map((node) => {
                         const nodePresentation = statusPresentation(node.status, zh);
@@ -345,12 +352,12 @@ export function ResearchWorkflowStageNavigator({
                             contentLayout="plain"
                             variant="ghost"
                             className={styles.nodeButton}
+                            aria-label={`${node.label} · ${nodePresentation.label}`}
                             aria-current={node.status === "current" ? "step" : undefined}
                             onClick={() => onNavigateNode(node.id)}
                           >
                             <NodeIcon size={12} aria-hidden="true" />
                             <span className={styles.nodeLabel}>{node.label}</span>
-                            <span className={styles.nodeStatus}>{nodePresentation.label}</span>
                           </VButton>
                         );
                       })}

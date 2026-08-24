@@ -108,6 +108,8 @@ export type ShadcnWorkflowCanvasProps = {
   layoutMode?: WorkflowCanvasLayoutMode;
   /** Secondary navigation overview for extendable production canvases. */
   showMiniMap?: boolean;
+  /** Keep frequent navigation controls visible while grouping manual layout actions. */
+  compactControls?: boolean;
 };
 
 type MeasuredNodeProps = {
@@ -251,6 +253,7 @@ function WorkflowCanvasInner({
   showLegend = true,
   layoutMode = "stage-columns",
   showMiniMap = false,
+  compactControls = false,
 }: ShadcnWorkflowCanvasProps) {
   const rf = useReactFlow();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -966,6 +969,7 @@ function WorkflowCanvasInner({
           <WorkflowCanvasControls
             runtimeCurrentNodeIds={runtimeCurrentNodeIds}
             onFitAll={fitAll}
+            manualLayoutPresentation={compactControls ? "menu" : "inline"}
             manualLayout={manualLayoutEnabled ? {
               canUndo: manualHistory.length > 0,
               locked: manualLayoutLocked,

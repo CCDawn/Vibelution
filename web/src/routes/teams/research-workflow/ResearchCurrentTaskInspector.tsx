@@ -10,9 +10,9 @@ import styles from "./ResearchCurrentTaskInspector.styles";
 const STATUS_LABEL: Record<ResearchWorkflowTaskStatus, string> = {
   not_started: "未开始",
   running: "进行中",
-  waiting_system: "系统处理中",
-  waiting_user: "等待你确认",
-  recoverable_error: "可以恢复",
+  waiting_system: "处理中",
+  waiting_user: "待确认",
+  recoverable_error: "可恢复",
   blocked: "已阻塞",
   never_started: "从未启动",
   failed_to_dispatch: "启动失败",
@@ -104,35 +104,28 @@ export function ResearchCurrentTaskInspector({
       data-task-status={task.status}
     >
       <header className={styles.header} data-vui-region="current-task-header">
-        <div className={styles.eyebrow}>{historyMode ? "历史回顾 · 只读" : "当前任务 · 唯一操作面"}</div>
         <div className={styles.titleRow}>
           <h2 className={styles.title}>{task.title}</h2>
           <VStatusChip tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</VStatusChip>
         </div>
+      </header>
+      <div className={styles.body} data-vui-region="current-task-body">
         <div
           aria-live={liveRole(task.status) === "alert" ? "assertive" : "polite"}
           className={styles.detail}
           role={liveRole(task.status)}
         >
-          {task.detail}
+          {historyMode ? `归档记录 · 当前仍是“${task.title}”` : task.detail}
         </div>
-        {task.progress ? <div className={styles.progress}>{task.progress.label}</div> : null}
-        {historyMode ? (
-          <div className={styles.historyNotice}>
-            <div className={styles.historyCopy}>
-              你正在查看历史节点。流程当前任务仍是“{task.title}”，历史内容不会改变流程进度。
-            </div>
-            <VButton type="button" density="compact" variant="secondary" onClick={onReturnCurrentTask}>
-              返回当前任务
-            </VButton>
-          </div>
-        ) : null}
-      </header>
-      <div className={styles.body} data-vui-region="current-task-body">
+        {task.progress && !historyMode ? <div className={styles.progress}>{task.progress.label}</div> : null}
         {children}
       </div>
       <footer className={styles.footer} data-vui-region="current-task-action">
-        {!historyMode ? (
+        {historyMode ? (
+          <VButton type="button" variant="primary" className={styles.primaryAction} onClick={onReturnCurrentTask}>
+            返回当前任务
+          </VButton>
+        ) : (
           <>
             {task.retryAction && onRetryDispatch ? (
               <VButton
@@ -147,7 +140,7 @@ export function ResearchCurrentTaskInspector({
             ) : null}
             {footer}
           </>
-        ) : null}
+        )}
       </footer>
     </section>
   );

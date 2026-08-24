@@ -621,4 +621,37 @@ describe("WorkflowCanvasControls standalone (P1-1)", () => {
     expect(onFitAll).toHaveBeenCalledTimes(1);
     expect(fakeInstance.fitView).not.toHaveBeenCalled();
   });
+
+  it("keeps navigation controls visible while grouping manual layout actions in one menu", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <WorkflowCanvasControls
+          runtimeCurrentNodeIds={["source_extraction"]}
+          manualLayoutPresentation="menu"
+          manualLayout={{
+            canUndo: true,
+            locked: false,
+            onAutoArrange: vi.fn(),
+            onUndo: vi.fn(),
+            onToggleLock: vi.fn(),
+          }}
+        />,
+      );
+    });
+
+    for (const label of ["放大画布", "缩小画布", "适应全部", "定位当前工作", "布局操作"]) {
+      expect(container.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+    }
+    expect(container.querySelector('[aria-label="自动整理画布"]')).toBeNull();
+    expect(container.querySelector('[aria-label="撤销布局调整"]')).toBeNull();
+    expect(container.querySelector('[aria-label="锁定布局"]')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+  });
 });

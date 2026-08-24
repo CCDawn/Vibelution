@@ -286,6 +286,12 @@ export function ResearchRunLaunchPanel(props: {
   useEffect(() => {
     writeResearchRunLaunchDraft(teamId, { questionId, query, safetyBudget });
   }, [teamId, questionId, query, safetyBudget]);
+  useEffect(() => {
+    const explicitQuestionId = initialQuestionId?.trim() ?? "";
+    if (!explicitQuestionId) return;
+    setQuestionId(explicitQuestionId);
+    setError(null);
+  }, [initialQuestionId, teamId]);
   const launchOptionsKey = queryKeys.researchWorkflowLaunchOptions(
     CHALLENGE_CUP_WORKFLOW_ID,
     teamId,
@@ -478,7 +484,7 @@ export function ResearchRunLaunchPanel(props: {
         onChange={setSafetyBudget}
       />
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
-      <div className={styles.actions}>
+      <div className={styles.actions} data-vui-region="launch-primary-action">
         <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>{isZh ? "取消" : "Cancel"}</VButton>
         {restartableCheckpoint && onContinueRun ? (
           <VButton

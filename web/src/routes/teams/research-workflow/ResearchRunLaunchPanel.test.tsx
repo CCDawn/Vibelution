@@ -830,6 +830,38 @@ describe("ResearchRunLaunchPanel session draft", () => {
     expect(markup).not.toContain("SCI-003 · Is the Riemann hypothesis true?");
   });
 
+  it("tracks a new explicit deep-link question while the launch panel stays mounted", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [launchQuestion("SCI-003"), launchQuestion("SCI-007")],
+        experiments: [],
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const renderQuestion = (initialQuestionId: string) => (
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId={initialQuestionId}
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />
+    );
+
+    await act(async () => root.render(renderQuestion("SCI-003")));
+    expect(container.textContent).toContain("SCI-003 · SCI-003 question");
+
+    await act(async () => root.render(renderQuestion("SCI-007")));
+    expect(container.textContent).toContain("SCI-007 · SCI-007 question");
+    expect(container.textContent).not.toContain("SCI-003 · SCI-003 question");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("persists selection changes into the per-team draft", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const container = document.createElement("div");

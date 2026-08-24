@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import {
   VButton,
+  VDropdownMenu,
   VSelect,
   VStatusChip,
-  VTabs,
   VToolbar,
 } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
@@ -131,39 +131,18 @@ export function ResearchWorkflowToolbar(props: {
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
-  const workflowActive = props.workflowActive ?? Boolean(props.runId);
   const selectedQuestionId = props.identity?.questionId || null;
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
     : (isZh ? "尚未选择实验" : "No experiment selected");
-  const phase = researchWorkflowPhase(
-    props.navigationLabel,
-    props.runtimeCurrentNodeIds,
-    props.formalRuntimeActive,
-    props.nextActionStage,
-  );
-  const detailsPanel = (
-    props.panel === "question"
-    || props.panel === "agents"
-    || props.panel === "timeline"
-    || props.panel === "evidence"
-    || props.panel === "team"
-    || props.panel === "progress"
-    || props.panel === "launch"
-  ) ? props.panel : null;
-  // Navigation tabs for the inspector pane: views only. Workflow mutations
-  // stay in the fixed current-task inspector so users always advance in one place.
-  const detailTabs = [
-    { id: "progress", label: isZh ? "题目进度" : "Progress" },
-    { id: "question", label: isZh ? "题目档案" : "Question archive" },
-    { id: "team", label: isZh ? "成员与讨论" : "Members" },
-    { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph" },
-    { id: "agents", label: "Agent" },
-    { id: "timeline", label: isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en },
+  const detailItems = [
+    { id: "progress", label: isZh ? "题目进度" : "Progress", onSelect: () => props.onOpenPanel("progress") },
+    { id: "question", label: isZh ? "题目档案" : "Question archive", onSelect: () => props.onOpenPanel("question") },
+    { id: "team", label: isZh ? "成员与讨论" : "Members", onSelect: () => props.onOpenPanel("team") },
+    { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph", onSelect: () => props.onOpenPanel("evidence") },
+    { id: "agents", label: "Agent", onSelect: () => props.onOpenPanel("agents") },
+    { id: "timeline", label: isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en, onSelect: () => props.onOpenPanel("timeline") },
   ];
-  const activeDetailTab = detailTabs.some((tab) => tab.id === detailsPanel)
-    ? String(detailsPanel ?? "")
-    : undefined;
   return (
     <VToolbar ariaLabel={isZh ? "科研流程" : "Research workflow"} wrap={false} className={styles.root}>
       <div className={styles.context}>
@@ -189,31 +168,13 @@ export function ResearchWorkflowToolbar(props: {
             <span className={styles.empty}>{emptySwitcherLabel}</span>
           )}
         </div>
-        {workflowActive ? (
-          <div className={styles.phase} data-vui="research-workflow-phase">
-            {phase.stageZh && phase.currentNodeZh
-              ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
-              : phase.step === 3 && props.chainRound && props.chainRound.current > 0
-                ? (isZh
-                  ? `假说评审 · 第 ${Math.min(props.chainRound.current, props.chainRound.budget)}/${props.chainRound.budget} 轮`
-                  : `Hypothesis review · round ${Math.min(props.chainRound.current, props.chainRound.budget)}/${props.chainRound.budget}`)
-              : phase.step
-                ? (isZh ? `假说准备 · ${phase.step}/5` : "Hypothesis prep · " + phase.step + "/5")
-                : (isZh ? phase.zh : phase.en)}
-          </div>
-        ) : null}
       </div>
       <div className={styles.actions}>
-        <VTabs
-          density="compact"
-          className={styles.details}
-          listClassName="flex-nowrap overflow-x-auto"
-          aria-label={isZh ? "检查器视图" : "Inspector views"}
-          items={detailTabs}
-          value={activeDetailTab}
-          onValueChange={(key) => {
-            props.onOpenPanel(key as ResearchProcessPanel);
-          }}
+        <VDropdownMenu
+          aria-label={isZh ? "查看只读信息" : "View read-only information"}
+          align="end"
+          items={detailItems}
+          trigger={<VButton type="button" density="compact" variant="secondary">{isZh ? "查看" : "View"}</VButton>}
         />
         {props.onOpenTeamCommunication ? (
           <VButton
@@ -223,31 +184,7 @@ export function ResearchWorkflowToolbar(props: {
             onClick={props.onOpenTeamCommunication}
             data-testid="research-open-team-communication"
           >
-            {isZh ? "团队沟通" : "Team communication"}
-          </VButton>
-        ) : null}
-        {workflowActive && props.atCurrentTask ? (
-          // Position indicator, not a dead button: a disabled ghost labeled
-          // 当前任务 reads as broken while adding no action (audit #7).
-          <VStatusChip tone="accent" className={styles.trailing}>
-            {isZh ? "当前任务" : "Current task"}
-          </VStatusChip>
-        ) : null}
-        {workflowActive && !props.atCurrentTask ? (
-          <VButton
-            type="button"
-            density="compact"
-            variant="secondary"
-            className={styles.trailing}
-            isDisabled={!props.onNavigateCurrent}
-            disabledReason={
-              !props.onNavigateCurrent
-                ? (isZh ? "当前任务导航尚未准备好，请稍后重试" : "Current-task navigation is not ready; try again shortly")
-                : undefined
-            }
-            onClick={props.onNavigateCurrent}
-          >
-            {isZh ? "定位当前任务" : "Locate current task"}
+            {isZh ? "协作" : "Collaborate"}
           </VButton>
         ) : null}
         {props.scopeMismatch && props.statusMessage ? (

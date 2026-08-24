@@ -10,6 +10,8 @@ import {
   ResearchWorkflowStageNavigator,
 } from "./ResearchWorkflowStageNavigator";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const graph: WorkflowLayoutInput = {
   stages: [
     { stageId: "hypothesis_first", label: "假说先行", nodeIds: ["hf_generation"], stageTone: "done", progress: { completed: 2, total: 2 } },
@@ -100,7 +102,7 @@ describe("ResearchWorkflowStageNavigator", () => {
     document.body.innerHTML = "";
   });
 
-  it("shows unified summary, exposes blocked text and only navigates by node callback", async () => {
+  it("keeps progress compact, expands the current stage, and only navigates from a node", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -108,15 +110,24 @@ describe("ResearchWorkflowStageNavigator", () => {
     const model = buildResearchWorkflowStageNavigatorModel({ graph, progress: formalProgress() });
     await act(async () => root?.render(<ResearchWorkflowStageNavigator lang="zh" model={model} onNavigateNode={onNavigateNode} />));
 
-    expect(container.querySelector('[data-testid="stage-navigator-summary"]')?.textContent).toContain("阶段2/4节点1/3阻塞1整体33%");
-    expect(container.textContent).toContain("已阻塞");
+    expect(container.querySelector("header")?.textContent).toContain("进度1/3");
+    expect(container.querySelector("header")?.textContent).toContain("1 项阻塞");
+    expect(container.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("33");
+    expect(container.querySelector('[data-testid="stage-navigator-summary"]')).toBeNull();
     expect(container.querySelector('li[data-stage-status="blocked"] svg')).not.toBeNull();
+    expect(container.querySelector('[aria-label="知识搜集节点"]')).not.toBeNull();
     const knowledgeStage = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("知识搜集0/2"));
     await act(async () => knowledgeStage?.click());
+    expect(onNavigateNode).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="知识搜集节点"]')).toBeNull();
+    await act(async () => knowledgeStage?.click());
     const sourceNode = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("资料发现"));
     await act(async () => sourceNode?.click());
-    expect(onNavigateNode.mock.calls).toEqual([["source_review"], ["source_finding"]]);
+    expect(onNavigateNode).toHaveBeenCalledOnce();
+    expect(onNavigateNode).toHaveBeenCalledWith("source_finding");
+    expect(sourceNode?.getAttribute("aria-label")).toBe("资料发现 · 已阻塞");
+    expect(sourceNode?.textContent).toBe("资料发现");
     const disabledStage = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("成果交付"));
     expect(disabledStage?.hasAttribute("disabled")).toBe(true);
   });

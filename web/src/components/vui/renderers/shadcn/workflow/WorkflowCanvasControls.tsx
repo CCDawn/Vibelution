@@ -1,12 +1,14 @@
 import { useReactFlow } from "@xyflow/react";
-import { Focus, LayoutDashboard, Lock, Maximize2, Minus, Plus, Undo2, Unlock } from "lucide-react";
+import { Focus, LayoutDashboard, Lock, Maximize2, Minus, MoreHorizontal, Plus, Undo2, Unlock } from "lucide-react";
 
+import { ShadcnDropdownMenu } from "../ShadcnDropdownMenu";
 import { resolveWorkflowNodeFocusCenter } from "./workflowSelectionFocus";
 
 export type WorkflowCanvasControlsProps = {
   runtimeCurrentNodeIds?: string[];
   onFitAll?: () => void;
   onFocusCurrent?: () => void;
+  manualLayoutPresentation?: "inline" | "menu";
   manualLayout?: {
     canUndo: boolean;
     locked: boolean;
@@ -20,6 +22,7 @@ export function WorkflowCanvasControls({
   runtimeCurrentNodeIds = [],
   onFitAll,
   onFocusCurrent,
+  manualLayoutPresentation = "inline",
   manualLayout,
 }: WorkflowCanvasControlsProps) {
   const { zoomIn, zoomOut, fitView, setCenter, getNode } = useReactFlow();
@@ -76,7 +79,31 @@ export function WorkflowCanvasControls({
       >
         <Focus className="h-4 w-4" aria-hidden />
       </button>
-      {manualLayout ? (
+      {manualLayout && manualLayoutPresentation === "menu" ? (
+        <>
+          <span className="mx-0.5 my-1 w-px bg-[var(--vui-border-subtle)]" aria-hidden />
+          <ShadcnDropdownMenu
+            aria-label="布局操作"
+            side="top"
+            align="start"
+            items={[
+              { id: "auto-arrange", label: "自动整理", icon: <LayoutDashboard className="h-4 w-4" />, onSelect: manualLayout.onAutoArrange },
+              { id: "undo", label: "撤销布局调整", icon: <Undo2 className="h-4 w-4" />, disabled: !manualLayout.canUndo, onSelect: manualLayout.onUndo },
+              {
+                id: "lock",
+                label: manualLayout.locked ? "解锁布局" : "锁定布局",
+                icon: manualLayout.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />,
+                onSelect: manualLayout.onToggleLock,
+              },
+            ]}
+            trigger={(
+              <button type="button" className={btn} aria-label="布局操作" title="布局">
+                <MoreHorizontal className="h-4 w-4" aria-hidden />
+              </button>
+            )}
+          />
+        </>
+      ) : manualLayout ? (
         <>
           <span className="mx-0.5 my-1 w-px bg-[var(--vui-border-subtle)]" aria-hidden />
           <button

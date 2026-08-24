@@ -6,8 +6,6 @@ export default {
   switcher:
     "w-[min(20rem,70vw)] min-w-[10rem] shrink-0 xl:min-w-0 xl:flex-1 xl:basis-[10rem] xl:max-w-[24rem] [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
   empty: "block min-w-0 truncate [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
-  phase: "min-w-max shrink-0 truncate [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] xl:min-w-0 xl:shrink",
   actions: "flex w-full min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden xl:ms-auto xl:w-auto xl:shrink-0 xl:justify-end",
-  details: "min-w-0 shrink-0",
   trailing: "min-w-0 max-w-[16rem] shrink-0",
 } as const;
