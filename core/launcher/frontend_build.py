@@ -54,6 +54,9 @@ FRONTEND_STAGE_RETENTION_SECONDS = 60 * 60
 FRONTEND_RELEASE_KEEP_COUNT = 5
 SERVING_FRONTEND_LEASES_DIR_NAME = "serving-frontend-leases"
 SERVING_FRONTEND_LEASE_SCHEMA_VERSION = 1
+FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS = 5.0
+_FRONTEND_PUBLISH_RETRY_INITIAL_DELAY_SECONDS = 0.05
+_FRONTEND_PUBLISH_RETRY_MAX_DELAY_SECONDS = 0.25
 
 
 def frontend_releases_dir(project_root: Path | str) -> Path:
@@ -637,6 +640,26 @@ def validate_staging_release(path: Path) -> None:
     _validate_release_assets(path)
 
 
+def _retryable_frontend_publish_error(error: PermissionError) -> bool:
+    """Return whether Windows reported a transient sharing/access conflict."""
+    return getattr(error, "winerror", None) in {None, 5, 32}
+
+
+def _publish_staging_directory(staging: Path, release: Path) -> None:
+    """Atomically publish a completed staging directory without a fallback path."""
+    deadline = time.monotonic() + FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS
+    delay = _FRONTEND_PUBLISH_RETRY_INITIAL_DELAY_SECONDS
+    while True:
+        try:
+            os.replace(staging, release)
+            return
+        except PermissionError as exc:
+            if not _retryable_frontend_publish_error(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, _FRONTEND_PUBLISH_RETRY_MAX_DELAY_SECONDS)
+
+
 def publish_staging_release(project_root: Path | str, staging: Path, *, build_key: str, build_inputs_value: dict[str, Any]) -> dict[str, Any]:
     root = Path(project_root).resolve()
     validate_staging_release(staging)
@@ -660,7 +683,7 @@ def publish_staging_release(project_root: Path | str, staging: Path, *, build_ke
     if release.exists():
         shutil.rmtree(staging)
     else:
-        os.replace(staging, release)
+        _publish_staging_directory(staging, release)
     pointer = {"schemaVersion": BUILD_SCHEMA_VERSION, "release": release_name, "buildKey": build_key, "publishedAt": time.time()}
     pointer_path = active_release_path(root)
     temporary = pointer_path.with_suffix(".tmp")
