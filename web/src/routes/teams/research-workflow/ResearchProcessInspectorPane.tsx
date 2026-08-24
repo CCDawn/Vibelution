@@ -94,6 +94,8 @@ export function ResearchProcessInspectorPane(props: {
   collectionRecoveryBusy?: boolean;
   collectionRecoveryError?: string | null;
   primaryActionOwnedByWorkspace?: boolean;
+  /** Stale launch URLs must not create a second mutation surface. */
+  allowLaunchPanel?: boolean;
   archiveSummary?: {
     selectedHypotheses?: number;
     effectiveReviews: number;
@@ -117,6 +119,7 @@ export function ResearchProcessInspectorPane(props: {
     onRecoverCollection,
     collectionRecoveryBusy = false,
     collectionRecoveryError = null,
+    allowLaunchPanel = true,
   } = props;
   const { lang: shellLang } = useShellI18n();
   const lang = props.lang ?? shellLang;
@@ -131,6 +134,11 @@ export function ResearchProcessInspectorPane(props: {
     enabled: Boolean(scope.teamId && scope.questionId && scope.panel === "question"),
     staleTime: 60_000,
   });
+
+  const collectionRecoveryOwnsCurrentTask = Boolean(
+    nextAction?.collectionRequestId
+    && (nextAction.command === "retry_collection" || nextAction.command === "continue_collection"),
+  );
 
   if (scope.panel === "progress") {
     return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
@@ -170,6 +178,22 @@ export function ResearchProcessInspectorPane(props: {
   }
   if (scope.panel === "agents") {
     return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang={lang} />;
+  }
+  if (scope.panel === "launch" && collectionRecoveryOwnsCurrentTask) {
+    return (
+      <ResearchCenteredEmptyState
+        title={isZh ? "资料补充需要处理" : "Evidence collection needs attention"}
+        hint={nextAction?.recovery?.reason || nextAction?.statusMessage}
+      />
+    );
+  }
+  if (scope.panel === "launch" && !allowLaunchPanel) {
+    return (
+      <ResearchCenteredEmptyState
+        title={isZh ? "当前任务已接管操作" : "The current task owns the action"}
+        hint={isZh ? "请从右侧当前任务继续，启动入口已隐藏。" : "Continue from the current-task panel; the launch entry is hidden."}
+      />
+    );
   }
   if (scope.panel === "launch" || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)) {
     return (

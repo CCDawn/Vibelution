@@ -484,7 +484,8 @@ export function ResearchRunLaunchPanel(props: {
         onChange={setSafetyBudget}
       />
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
-      <div className={styles.actions} data-vui-region="launch-primary-action">
+      <details className={styles.techDetails}>
+        <summary>{isZh ? "其他处理" : "Other actions"}</summary>
         <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>{isZh ? "取消" : "Cancel"}</VButton>
         {restartableCheckpoint && onContinueRun ? (
           <VButton
@@ -499,6 +500,8 @@ export function ResearchRunLaunchPanel(props: {
             {isZh ? "查看失败运行" : "View failed run"}
           </VButton>
         ) : null}
+      </details>
+      <div className={styles.actions} data-vui-region="launch-primary-action">
         {(!selectedExperiment || selectedExperiment.launchable) && !experimentMatchAmbiguous ? <VButton
           isPending={busy}
           isDisabled={!selectedQuestion || isLaunchBlockedByExperiment(experiments, questionId)}

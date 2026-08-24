@@ -148,6 +148,7 @@ vi.mock("./ResearchProcessInspectorPane", () => ({
   ResearchProcessInspectorPane: (props: {
     scope: { panel: string };
     archiveSummary?: unknown;
+    allowLaunchPanel?: boolean;
     onRecoverCollection?: (requestId: string) => Promise<void>;
     collectionRecoveryBusy?: boolean;
     collectionRecoveryError?: string | null;
@@ -156,6 +157,7 @@ vi.mock("./ResearchProcessInspectorPane", () => ({
     <div
       data-testid="research-process-inspector-pane"
       data-panel={props.scope.panel}
+      data-allow-launch-panel={props.allowLaunchPanel == null ? undefined : String(props.allowLaunchPanel)}
       data-has-archive-summary={String(Boolean(props.archiveSummary))}
       data-has-collection-recovery={String(Boolean(props.onRecoverCollection))}
       data-collection-recovery-busy={String(Boolean(props.collectionRecoveryBusy))}
@@ -292,6 +294,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.runState.run = null;
     harness.runState.projection = null;
     harness.runState.snapshot = null;
+    (harness.runState as { resyncRequired?: boolean }).resyncRequired = false;
     harness.runState.commandOffers = [];
     harness.commands.error = null;
     harness.commands.busy = false;
@@ -307,6 +310,29 @@ describe("ResearchProcessWorkspace", () => {
     harness.chain.recoveryBusy = false;
     harness.chain.recoveryError = null;
   });
+
+  function configureCollectionRecoveryLaunch() {
+    harness.location.panel = "launch";
+    harness.location.questionId = "SCI-004";
+    harness.chain.questionId = "SCI-004";
+    harness.chain.selection = {
+      questionId: "SCI-004",
+      selectionId: "selection-1",
+      selectedCandidateIds: ["candidate-1"],
+    } as never;
+    harness.chain.collectionRequests = [{
+      requestId: "collection-request-1",
+      questionId: "SCI-004",
+      status: "failed",
+      collectionRunId: "",
+      handoffRef: "",
+      createdAt: "2026-08-24T00:00:00Z",
+    }] as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+  }
 
   it("shows the canvas loading state while no projection is available", async () => {
     const rendered = await renderWorkspace();
@@ -657,7 +683,7 @@ describe("ResearchProcessWorkspace", () => {
       expectedRunVersion: 1,
       payload: { taskId: "human-1", decision: "accept" },
     };
-    harness.location.panel = "node";
+    harness.location.panel = "launch";
     harness.location.runId = "run-created";
     harness.location.questionId = "SCI-004";
     harness.location.selectedNodeId = "knowledge_handoff";
@@ -716,6 +742,8 @@ describe("ResearchProcessWorkspace", () => {
     root = rendered.root;
 
     expect(rendered.container.querySelector('[data-task-status="waiting_user"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-allow-launch-panel"))
+      .toBe("false");
     const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
     const submit = Array.from(footer?.querySelectorAll("button") ?? []).find((button) => (
       button.textContent?.includes("确认知识包交接")
@@ -724,6 +752,30 @@ describe("ResearchProcessWorkspace", () => {
     await act(async () => submit?.click());
     expect(harness.commands.submitOffer).toHaveBeenCalledTimes(1);
     expect(harness.commands.submitOffer).toHaveBeenCalledWith(formalOffer);
+  });
+
+  it("does not let a stale launch URL replace an active hypothesis task", async () => {
+    harness.location.panel = "launch";
+    harness.location.questionId = "SCI-004";
+    harness.chain.questionId = "SCI-004";
+    harness.chain.chainState = {
+      questionId: "SCI-004",
+      candidateCount: 0,
+      hypothesisConverged: false,
+    } as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const inspector = rendered.container.querySelector('[data-testid="research-process-inspector-pane"]');
+    expect(inspector?.getAttribute("data-allow-launch-panel")).toBe("false");
+    expect(rendered.container.textContent).toContain("生成候选假说");
+    expect(rendered.container.textContent).not.toContain("开始实验");
+    expect(harness.commands.submitRun).not.toHaveBeenCalled();
   });
 
   it("keeps collection recovery actionable in the fixed current-task footer", async () => {
@@ -759,14 +811,68 @@ describe("ResearchProcessWorkspace", () => {
       button.textContent?.includes("重试搜集")
     ));
     expect(retry).toBeTruthy();
+    expect(Array.from(footer?.querySelectorAll("button") ?? []).filter((button) => (
+      button.textContent?.includes("重试搜集")
+    ))).toHaveLength(1);
     const inspector = rendered.container.querySelector('[data-testid="research-process-inspector-pane"]');
-    expect(inspector?.getAttribute("data-has-collection-recovery")).toBe("true");
+    expect(inspector?.getAttribute("data-has-collection-recovery")).toBe("false");
     expect(inspector?.getAttribute("data-collection-recovery-busy")).toBe("false");
-    expect(inspector?.getAttribute("data-collection-recovery-error")).toBe("worker unavailable");
+    expect(inspector?.getAttribute("data-collection-recovery-error")).toBeNull();
     expect(footer?.querySelector('[role="alert"]')?.textContent).toContain("worker unavailable");
     await act(async () => retry?.click());
     expect(harness.chain.recoverCollection).toHaveBeenCalledTimes(1);
     expect(harness.chain.recoverCollection).toHaveBeenCalledWith("collection-request-1");
+  });
+
+  it("hides collection recovery actions while the current-task scope is not ready", async () => {
+    const cases: Array<{
+      label: string;
+      prepare: () => void;
+      reset: () => void;
+    }> = [
+      {
+        label: "loading",
+        prepare: () => {
+          harness.chain.loading = true;
+        },
+        reset: () => {
+          harness.chain.loading = false;
+        },
+      },
+      {
+        label: "resync",
+        prepare: () => {
+          (harness.runState as { resyncRequired?: boolean }).resyncRequired = true;
+        },
+        reset: () => {
+          (harness.runState as { resyncRequired?: boolean }).resyncRequired = false;
+        },
+      },
+      {
+        label: "error",
+        prepare: () => {
+          harness.chain.error = "worker unavailable";
+        },
+        reset: () => {
+          harness.chain.error = null;
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      configureCollectionRecoveryLaunch();
+      testCase.prepare();
+      const rendered = await renderWorkspace();
+      root = rendered.root;
+
+      const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
+      expect(footer?.querySelectorAll("button"), testCase.label).toHaveLength(0);
+
+      await act(async () => root?.unmount());
+      root = null;
+      document.body.innerHTML = "";
+      testCase.reset();
+    }
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {

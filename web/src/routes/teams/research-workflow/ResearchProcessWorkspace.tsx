@@ -37,7 +37,10 @@ import {
 } from "./ResearchWorkflowStageNavigator";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
-import { buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
+import {
+  allowsResearchRunLaunch,
+  buildResearchWorkflowWorkspaceModel,
+} from "./researchWorkflowWorkspaceModel";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
@@ -583,12 +586,18 @@ export function ResearchProcessWorkspace({
     selectedNodeId: location.selectedNodeId,
     nextTarget: workflowContext.currentTask?.targetNodeId,
   });
+  const currentTaskActionsReady = workspaceModel.loadState === "ready"
+    && !workspaceModel.scopeMismatch
+    && !workspaceModel.resyncRequired;
   const atCurrentTask = Boolean(
     workflowActive && (workflowContext.view.selectedIsCurrentTask || formalWritesPaused),
   );
   const formalPrimaryAction = workspaceModel.primaryAction;
+  const visibleFormalPrimaryAction = currentTaskActionsReady ? formalPrimaryAction : null;
   const currentTaskCommand = workflowContext.currentTask?.commandAction;
-  const collectionRecoveryAction = workspaceModel.source === "hypothesis_first"
+  const allowLaunchPanel = allowsResearchRunLaunch(workspaceModel);
+  const collectionRecoveryAction = currentTaskActionsReady
+    && workspaceModel.source === "hypothesis_first"
     && workflowContext.currentTask?.collectionRequestId
     && (currentTaskCommand?.command === "retry_collection"
       || currentTaskCommand?.command === "continue_collection")
@@ -598,7 +607,7 @@ export function ResearchProcessWorkspace({
       }
     : null;
 
-  const inspectorPane = showInspector ? (
+  const inspectorPane = showInspector && (currentTaskActionsReady || location.panel === "question") ? (
     <ResearchProcessInspectorPane
       scope={{
         teamId,
@@ -626,9 +635,20 @@ export function ResearchProcessWorkspace({
       }}
       nextAction={workspaceNavigationAction}
       discussionModel={scopedDiscussionModel}
-      onRecoverCollection={hypothesisFirstChain.recoverCollection}
-      collectionRecoveryBusy={hypothesisFirstChain.recoveryBusy}
-      collectionRecoveryError={hypothesisFirstChain.recoveryError}
+      onRecoverCollection={collectionRecoveryAction
+        ? undefined
+        : currentTaskActionsReady
+          ? hypothesisFirstChain.recoverCollection
+          : undefined}
+      collectionRecoveryBusy={collectionRecoveryAction
+        ? undefined
+        : currentTaskActionsReady && hypothesisFirstChain.recoveryBusy}
+      collectionRecoveryError={collectionRecoveryAction
+        ? undefined
+        : currentTaskActionsReady
+          ? hypothesisFirstChain.recoveryError
+          : null}
+      allowLaunchPanel={allowLaunchPanel}
       primaryActionOwnedByWorkspace={workspaceModel.source === "formal_runtime"}
       archiveSummary={archiveSummary}
     />
@@ -723,7 +743,7 @@ export function ResearchProcessWorkspace({
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
-            footer={formalPrimaryAction ? (
+            footer={visibleFormalPrimaryAction ? (
               <VButton
                 type="button"
                 variant="primary"
@@ -731,10 +751,11 @@ export function ResearchProcessWorkspace({
                 isDisabled={commandBusy}
                 onClick={() => {
                   if (commandBusy) return;
+                  if (!visibleFormalPrimaryAction || !formalPrimaryAction) return;
                   void commands.submitOffer(formalPrimaryAction.offer).catch(() => undefined);
                 }}
               >
-                {formalPrimaryAction.offer.label}
+                {visibleFormalPrimaryAction.offer.label}
               </VButton>
             ) : collectionRecoveryAction ? (
               <>
@@ -760,7 +781,7 @@ export function ResearchProcessWorkspace({
                 ) : null}
               </>
             ) : undefined}
-            onRetryDispatch={formalPrimaryAction ? undefined : retryDispatch}
+            onRetryDispatch={visibleFormalPrimaryAction || collectionRecoveryAction || !currentTaskActionsReady ? undefined : retryDispatch}
             retryPending={commandBusy}
             onReturnCurrentTask={
               semanticCurrentTaskNodeId

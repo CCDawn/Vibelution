@@ -8,6 +8,7 @@ import type {
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
+  allowsResearchRunLaunch,
   buildResearchWorkflowWorkspaceModel,
   mergeResearchWorkflowWorkspaceSnapshot,
   type ResearchWorkflowWorkspaceModelInput,
@@ -249,6 +250,49 @@ describe("researchWorkflowWorkspaceModel", () => {
     }));
     expect(route.source).toBe("route");
     expect(route.currentTask?.source).toBe("route");
+  });
+
+  it("only allows the launch surface for route/no_run tasks", () => {
+    const formal = buildResearchWorkflowWorkspaceModel(baseInput());
+    expect(allowsResearchRunLaunch(formal)).toBe(false);
+
+    const formalPending = buildResearchWorkflowWorkspaceModel(baseInput({ snapshot: null }));
+    expect(formalPending.source).toBe("formal_runtime");
+    expect(formalPending.currentTask).toBeNull();
+    expect(allowsResearchRunLaunch(formalPending)).toBe(false);
+
+    const hypothesis = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: null,
+      scope: { ...baseInput().scope, questionId: "SCI-001", runId: null, runVersion: null },
+      legacyNextAction: {
+        stage: "selection_required",
+        targetNodeId: "hf_selection",
+        navigationLabel: "前往假说选择",
+        command: "record_selection",
+        commandLabel: "记录选择并开启评审",
+      },
+    }));
+    expect(allowsResearchRunLaunch(hypothesis)).toBe(false);
+
+    const noRun = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: null,
+      scope: { ...baseInput().scope, questionId: "SCI-001", runId: null, runVersion: null },
+      legacyNextAction: {
+        stage: "no_run",
+        targetNodeId: null,
+        navigationLabel: "选择题目开始研究",
+        command: "create_run",
+        commandLabel: "选择题目开始研究",
+      },
+    }));
+    expect(allowsResearchRunLaunch(noRun)).toBe(true);
+
+    const route = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: null,
+      scope: { ...baseInput().scope, questionId: null, runId: null, runVersion: null },
+      legacyNextAction: null,
+    }));
+    expect(allowsResearchRunLaunch(route)).toBe(true);
   });
 
   it("rejects scope conflicts and keeps history selection separate", () => {

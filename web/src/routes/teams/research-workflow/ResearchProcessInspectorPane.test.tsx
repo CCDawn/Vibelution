@@ -22,6 +22,9 @@ import type { NodeDetailState } from "./useNodeDetailState";
 const leafHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
+const hypothesisLeafHarness = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
 
 vi.mock("../teamLazyPanels", async () => {
   const actual = await vi.importActual<typeof import("../teamLazyPanels")>("../teamLazyPanels");
@@ -30,6 +33,10 @@ vi.mock("../teamLazyPanels", async () => {
     ResearchProcessNodeInspector: (props: Record<string, unknown>) => {
       leafHarness.props = props;
       return <div data-testid="mock-research-process-node-inspector" />;
+    },
+    HypothesisFirstNodeInspector: (props: Record<string, unknown>) => {
+      hypothesisLeafHarness.props = props;
+      return <div data-testid="mock-hypothesis-first-node-inspector" />;
     },
   };
 });
@@ -201,6 +208,7 @@ async function renderInspectorLeaf(
   language: "zh" | "en",
   scope: InspectorProps["scope"],
   nodeDetail: NodeDetailState = { kind: "idle" },
+  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection" | "allowLaunchPanel">> = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -216,6 +224,7 @@ async function renderInspectorLeaf(
             scope={scope}
             state={makeInspectorState(nodeDetail)}
             actions={makeInspectorActions()}
+            {...extras}
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -324,6 +333,7 @@ describe("ResearchProcessInspectorPane current-task ownership", () => {
 describe("ResearchProcessInspectorPane collection recovery wiring", () => {
   afterEach(() => {
     leafHarness.props = null;
+    hypothesisLeafHarness.props = null;
     document.body.innerHTML = "";
   });
 
@@ -368,6 +378,100 @@ describe("ResearchProcessInspectorPane collection recovery wiring", () => {
     expect(leafHarness.props?.onRecoverCollection).toBe(onRecoverCollection);
     expect(leafHarness.props?.collectionRecoveryBusy).toBe(true);
     expect(leafHarness.props?.collectionRecoveryError).toBe("worker unavailable");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("keeps collection recovery mutation out of source and hypothesis leaves without an owner callback", async () => {
+    const nextAction = {
+      stage: "collection_recovery" as const,
+      targetNodeId: "source_finding",
+      navigationLabel: "前往资料搜集",
+      command: "retry_collection" as const,
+      collectionRequestId: "collection-request-1",
+    };
+    const source = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", { selectedNodeId: "source_finding" }),
+      makeReadyNodeDetail(),
+      { nextAction },
+    );
+
+    expect(leafHarness.props?.onRecoverCollection).toBeUndefined();
+    expect(leafHarness.props?.collectionRecoveryBusy).toBe(false);
+    expect(leafHarness.props?.collectionRecoveryError).toBeNull();
+    await act(async () => source.root.unmount());
+    source.container.remove();
+
+    const hypothesis = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", { selectedNodeId: "hf_collection" }),
+      { kind: "idle" },
+      { nextAction },
+    );
+
+    expect(hypothesisLeafHarness.props?.onRetryCollection).toBeUndefined();
+    await act(async () => hypothesis.root.unmount());
+    hypothesis.container.remove();
+  });
+
+  it("hides launch actions when the URL is stale during collection recovery", async () => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("launch", { runId: "", selectedNodeId: null, questionId: "SCI-004" }),
+      { kind: "idle" },
+      {
+        nextAction: {
+          stage: "collection_recovery",
+          targetNodeId: "source_finding",
+          navigationLabel: "前往资料搜集",
+          command: "retry_collection",
+          commandLabel: "重试搜集",
+          collectionRequestId: "collection-request-1",
+          recovery: {
+            command: "retry_collection",
+            label: "重试搜集",
+            reason: "资料搜集失败，请重试。",
+          },
+        },
+        onRecoverCollection: async () => undefined,
+      },
+    );
+
+    expect(container.textContent).toContain("资料补充需要处理");
+    expect(container.textContent).not.toContain("取消");
+    expect(container.textContent).not.toContain("开始实验");
+    expect(container.textContent).not.toContain("重试搜集");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it.each([
+    ["formal runtime", undefined],
+    ["hypothesis-first", {
+      stage: "selection_required" as const,
+      targetNodeId: "hf_selection",
+      navigationLabel: "前往假说选择",
+      command: "record_selection" as const,
+      commandLabel: "记录选择并开启评审",
+    }],
+  ])("hides the launch actions from a stale URL when %s owns the task", async (_label, nextAction) => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("launch", { runId: "run-1", selectedNodeId: null, questionId: "SCI-004" }),
+      { kind: "idle" },
+      { nextAction, allowLaunchPanel: false },
+    );
+
+    expect(container.textContent).toContain("当前任务已接管操作");
+    expect(container.textContent).not.toContain("开始实验");
+    expect(container.textContent).not.toContain("新建运行");
 
     await act(async () => {
       root.unmount();
