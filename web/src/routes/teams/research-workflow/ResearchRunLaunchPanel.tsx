@@ -269,10 +269,20 @@ export function ResearchRunLaunchPanel(props: {
   busy: boolean;
   initialQuestionId?: string;
   onSubmit: (input: CreateResearchWorkflowRunInput) => Promise<void>;
+  /** Fresh catalog questions enter the canonical hypothesis-first flow. */
+  onStartHypothesis?: (questionId: string) => void;
   onCancel: () => void;
   onContinueRun?: (input: { runId: string; nodeId: string; questionId: string }) => void;
 }) {
-  const { teamId, busy, initialQuestionId, onSubmit, onCancel, onContinueRun } = props;
+  const {
+    teamId,
+    busy,
+    initialQuestionId,
+    onSubmit,
+    onStartHypothesis,
+    onCancel,
+    onContinueRun,
+  } = props;
   const lang = props.lang ?? "zh";
   const isZh = lang === "zh";
   // Per-team session draft restores the form after panel switches; an explicit
@@ -310,6 +320,7 @@ export function ResearchRunLaunchPanel(props: {
   const experimentMatchAmbiguous = matchingExperiments.length > 1;
   const checkpoint = selectedQuestion?.checkpoint ?? null;
   const restartableCheckpoint = isRestartableCheckpoint(checkpoint);
+  const startsHypothesisFirst = Boolean(onStartHypothesis && selectedQuestion && !checkpoint);
   const filteredQuestions = useMemo(
     () => questions.filter((question) => questionMatchesQuery(question, query)),
     [questions, query],
@@ -370,7 +381,9 @@ export function ResearchRunLaunchPanel(props: {
     return <VStateSurface tone="empty" title={isZh ? "暂无题目目录" : "No question catalog yet"} fill className={styles.state} />;
   }
 
-  const primaryLabel = checkpoint
+  const primaryLabel = startsHypothesisFirst
+    ? (isZh ? "开始假说研究" : "Start hypothesis research")
+    : checkpoint
     ? (checkpoint.resumable
       ? (isZh ? "继续运行" : "Continue run")
       : restartableCheckpoint
@@ -450,9 +463,13 @@ export function ResearchRunLaunchPanel(props: {
             </div>
           ) : (
             <p className={styles.questionScope}>
-              {isZh
-                ? "尚无运行记录，开始后会从资料寻找进入流程并保存 checkpoint。"
-                : "No run exists yet. Starting will enter the workflow at source finding and save a checkpoint."}
+              {startsHypothesisFirst
+                ? (isZh
+                  ? "尚未开始；先生成并评审候选假说，收敛后才创建正式研究运行。"
+                  : "Not started; generate and review candidate hypotheses first, then create the formal run after convergence.")
+                : (isZh
+                  ? "尚无运行记录，开始后会从资料寻找进入流程并保存 checkpoint。"
+                  : "No run exists yet. Starting will enter the workflow at source finding and save a checkpoint.")}
             </p>
           )}
         </VSurface>
@@ -477,12 +494,14 @@ export function ResearchRunLaunchPanel(props: {
             : "The selected question matches multiple formal experiments; run creation is blocked."}
         </div>
       ) : null}
-      <ResearchRunSafetyLimitPanel
-        budget={safetyBudget}
-        isDisabled={busy}
-        lang={lang}
-        onChange={setSafetyBudget}
-      />
+      {!startsHypothesisFirst ? (
+        <ResearchRunSafetyLimitPanel
+          budget={safetyBudget}
+          isDisabled={busy}
+          lang={lang}
+          onChange={setSafetyBudget}
+        />
+      ) : null}
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
       <details className={styles.techDetails}>
         <summary>{isZh ? "其他处理" : "Other actions"}</summary>
@@ -517,6 +536,11 @@ export function ResearchRunLaunchPanel(props: {
             }
             if (checkpoint?.resumable && !onContinueRun) {
               setError(isZh ? "当前运行无法在此面板继续，请从运行列表打开。" : "This run cannot continue here; open it from the run list.");
+              return;
+            }
+            if (!checkpoint && onStartHypothesis) {
+              clearResearchRunLaunchDraft(teamId);
+              onStartHypothesis(questionId);
               return;
             }
             if (restartableCheckpoint || !checkpoint) {

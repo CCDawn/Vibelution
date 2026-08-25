@@ -17,6 +17,7 @@ from core.research.workflow.contracts import (
     CommandRequest,
     WorkflowCommandKind,
 )
+from core.web.services.team_workflow import challenge_question_runs
 from core.web.services.team_workflow.research_runtime.command_service import (
     CommandForbiddenError,
     WorkflowCommandError,
@@ -119,6 +120,99 @@ def test_fork_revision_requires_from_node_and_reason(tmp_path: Path) -> None:
         harness.close()
 
 
+def test_succeeded_run_rejects_forged_post_approval_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(status="succeeded")
+        monkeypatch.setattr(
+            challenge_question_runs,
+            "get_challenge_question_run_detail",
+            lambda *_args, **_kwargs: {
+                "record": {
+                    "recordId": "SCI-096:other-run",
+                    "questionId": "SCI-096",
+                    "runId": "other-run",
+                    "status": "needs_revision",
+                    "humanGates": {
+                        "decisions": {"H4_external_output": "revision_requested"}
+                    },
+                }
+            },
+        )
+
+        with pytest.raises(WorkflowCommandError, match="未授权"):
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.FORK_REVISION,
+                    expected_run_version=1,
+                    idempotency_key="ui:forged-post-approval",
+                    payload={
+                        "fromNodeId": "hypothesis_design",
+                        "reason": "forged terminal fork",
+                        "checkpointId": "ckpt-parent-1",
+                        "postApprovalRevision": True,
+                        "outputRecordId": "SCI-096:run-test",
+                    },
+                )
+            )
+    finally:
+        harness.close()
+
+
+def test_succeeded_run_accepts_durable_revision_requested_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(status="succeeded")
+        monkeypatch.setattr(
+            challenge_question_runs,
+            "get_challenge_question_run_detail",
+            lambda *_args, **_kwargs: {
+                "record": {
+                    "recordId": "SCI-096:run-test",
+                    "questionId": "SCI-096",
+                    "runId": "run-test",
+                    "status": "needs_revision",
+                    "humanGates": {
+                        "decisions": {"H4_external_output": "revision_requested"}
+                    },
+                }
+            },
+        )
+
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.FORK_REVISION,
+                expected_run_version=1,
+                idempotency_key="ui:authorized-post-approval",
+                payload={
+                    "fromNodeId": "hypothesis_design",
+                    "reason": "revise after H1-H4 review",
+                    "checkpointId": "ckpt-parent-1",
+                    "postApprovalRevision": True,
+                    "outputRecordId": "SCI-096:run-test",
+                },
+            )
+        )
+
+        assert receipt.status == "accepted"
+        child_rows = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT parent_run_id FROM workflow_runs WHERE parent_run_id = ?",
+                ("run-test",),
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert child_rows == [("run-test",)]
+    finally:
+        harness.close()
+
+
 def test_high_impact_command_requires_operator_identity(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
@@ -176,7 +270,10 @@ def test_high_impact_command_requires_operator_identity(tmp_path: Path) -> None:
             requested_by=ActorRef("operator", "operator-1"),
             requested_at_ms=request.requested_at_ms,
         )
-        from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+        from core.web.services.team_workflow.research_runtime.operator_authorization import (
+            server_operator_scope,
+        )
+
         with server_operator_scope("operator-1", roles=("operator",)):
             receipt = harness.command_service.submit(ok)
         assert receipt.status == "accepted"

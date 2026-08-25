@@ -545,12 +545,20 @@ def _records(team_id: str) -> list[dict[str, Any]]:
 
 
 @contextmanager
-def hypothesis_first_scope_lock(team_id: str):
-    """Serialize one question command across the chain-owned JSONL stores.
+def hypothesis_first_scope_lock(team_id: str, question_id: str):
+    """Serialize one question command across all V2 command workers.
 
-    The V2 state is a coarse cross-surface CAS.  This lock is the local
-    orchestration boundary for its synchronous facts: a command re-reads the
-    state and applies its owning mutation while the same team scope is held.
+    The V2 state is a coarse cross-surface CAS.  The JSONL services already
+    serialize their individual appends across processes, but that is not wide
+    enough for the command's read/re-authorize/side-effect sequence: two
+    backend workers could both validate the same state version before either
+    owning mutation became visible.  The separate scope lock closes that
+    window for every V2 command, including the delivery retry whose expensive
+    orchestration must happen after the claim and before the terminal event.
+
+    This intentionally uses a lock file distinct from the chain JSONL lock.
+    Command handlers may append to that JSONL while this scope is held, and a
+    nested acquisition of the same OS file lock is not portable on Windows.
     Late workflow/runtime completions still carry their own meeting/request
     identity and are validated by the owning service.
     """
@@ -560,8 +568,23 @@ def hypothesis_first_scope_lock(team_id: str):
         hypothesis_selection,
         meeting_rounds,
     )
+    from core.web.services.team_workflow.storage_durability import (
+        inter_process_lock,
+    )
 
-    with _LOCK, hypothesis_selection._LOCK, meeting_rounds._LOCK, hypothesis_rounds._LOCK:
+    # Keep this separate from ``hypothesis_first_chain.jsonl.lock``: command
+    # handlers append through ``append_jsonl_locked`` while the scope is held.
+    scope_key = _stable_hash({"questionId": str(question_id or "").strip().upper()})[:24]
+    scope_lock = _storage_path(team_id).with_name(
+        f"hypothesis_first_v2_scope_{scope_key}"
+    )
+    with (
+        inter_process_lock(scope_lock, timeout_s=120.0),
+        _LOCK,
+        hypothesis_selection._LOCK,
+        meeting_rounds._LOCK,
+        hypothesis_rounds._LOCK,
+    ):
         yield
 
 
@@ -971,7 +994,7 @@ def execute_v2_command(
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
-    with hypothesis_first_scope_lock(normalized_team_id):
+    with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
         snapshot = assert_expected_state_version(
             normalized_team_id,
             normalized_question_id,

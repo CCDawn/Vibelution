@@ -1923,7 +1923,15 @@ def project_state_from_records(
         or formal_runs
         or program_output
     )
-    if formal_phase is not None:
+    # A formal run only becomes phase-authoritative after hypothesis
+    # convergence.  Older clients could create the run as a container before
+    # generation; letting that legacy fact win here hides the generation and
+    # review actions required to ever reach convergence.
+    if formal_phase is not None and (
+        converged
+        or formal_phase in {"program_delivery", "completed"}
+        or formal_runtime.get("lineageDisposition") == "conflicted"
+    ):
         current_phase = formal_phase
     elif converged:
         current_phase = "formal_runtime"

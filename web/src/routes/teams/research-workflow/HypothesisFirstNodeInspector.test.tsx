@@ -13,6 +13,7 @@ import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst"
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const selectionListProps = vi.hoisted(() => vi.fn());
+const reviewFormProps = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../api/chat", () => ({
   fetchChatRoomDetail: vi.fn().mockResolvedValue({ rounds: [] }),
@@ -21,6 +22,8 @@ vi.mock("../../../api/chat", () => ({
 vi.mock("../../../api/hypothesisFirst", () => ({
   recordCollectionHandoff: vi.fn().mockResolvedValue({}),
   openHypothesisCandidateGeneration: vi.fn().mockResolvedValue({}),
+  executeHypothesisFirstCommand: vi.fn().mockResolvedValue({ result: {} }),
+  isHypothesisFirstCommandStateConflict: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("../../../api/challengeQuestionRuns", () => ({
@@ -28,15 +31,20 @@ vi.mock("../../../api/challengeQuestionRuns", () => ({
 }));
 
 vi.mock("../challenge-cup/ChallengeQuestionReviewForm", () => ({
-  ChallengeQuestionReviewForm: (props: { detail: { selectedRunId: string } }) => (
-    <div data-testid="program-review-form">review:{props.detail.selectedRunId}</div>
-  ),
+  ChallengeQuestionReviewForm: (props: { detail: { selectedRunId: string }; allowLegacyMutation?: boolean }) => {
+    reviewFormProps(props);
+    return <div data-testid="program-review-form">review:{props.detail.selectedRunId}</div>;
+  },
 }));
 
-import { recordCollectionHandoff } from "../../../api/hypothesisFirst";
+import {
+  executeHypothesisFirstCommand,
+  recordCollectionHandoff,
+} from "../../../api/hypothesisFirst";
 import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
+const mockedExecuteCommand = vi.mocked(executeHypothesisFirstCommand);
 const mockedFetchChatRoomDetail = vi.mocked(fetchChatRoomDetail);
 const mockedGetChallengeQuestionRunDetail = vi.mocked(getChallengeQuestionRunDetail);
 
@@ -668,7 +676,10 @@ describe("HypothesisFirstNodeInspector", () => {
     );
     expect(container.textContent).toContain("假说选择");
     expect(container.querySelector('[data-testid="selection-list"]')?.textContent).toContain("记录选择并开启评审");
-    expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ compact: true }));
+    expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      compact: true,
+      allowLegacyMutation: true,
+    }));
     expect(container.textContent).toContain("打开题目档案");
   });
 
@@ -977,6 +988,95 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[role="status"]')).toBeTruthy();
   });
 
+  it("opens the created formal run from the signed convergence command result", async () => {
+    const phase = {
+      lifecycle: "completed",
+      outcome: "succeeded",
+      actionability: "terminal",
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    } as const;
+    const action = {
+      kind: "command",
+      actionId: "create-formal-run:round-1",
+      label: "创建正式研究运行",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "formal_runtime",
+      targetNodeId: "formal_runtime",
+      command: "create_formal_run",
+      payload: { questionId: "Q-01", hypothesisRoundId: "round-1" },
+      inputSchemaRef: null,
+      idempotencyKey: "hf2:create-formal-run:round-1",
+      expectedStateVersion: "hf2-state:before-create",
+      requiresConfirmation: false,
+      confirmationText: null,
+    } as const;
+    mockedExecuteCommand.mockResolvedValueOnce({
+      schemaVersion: 2,
+      teamId: "team-1",
+      questionId: "Q-01",
+      command: "create_formal_run",
+      actionId: action.actionId,
+      idempotencyKey: action.idempotencyKey,
+      acceptedStateVersion: action.expectedStateVersion,
+      result: { runId: "run-formal-1", activeNodeId: "problem_understanding" },
+    });
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "formal_runtime",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: { ...phase, accepted: true, latestHypothesisRoundId: "round-1", roundIndex: 1, roundBudget: 3 },
+        formalRuntime: {
+          lifecycle: "not_started",
+          outcome: "none",
+          actionability: "available",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          runId: null,
+          runVersion: null,
+          runStatus: "not_started",
+          completionKind: null,
+          lineageDisposition: "none",
+          isCurrentRevision: false,
+          parentRunId: null,
+          childRunIds: [],
+          currentNodeIds: [],
+        },
+        allowedActions: [action],
+        problems: [],
+      } as HypothesisFirstStateV2,
+    }));
+    const onFormalRunCreated = vi.fn();
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        onOpenQuestion={() => {}}
+        onFormalRunCreated={onFormalRunCreated}
+      />,
+    );
+
+    const button = [...container.querySelectorAll("button")]
+      .find((item) => item.textContent?.includes("创建正式研究运行"));
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(onFormalRunCreated).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", action);
+    expect(onFormalRunCreated).toHaveBeenCalledWith({
+      runId: "run-formal-1",
+      nodeId: "problem_understanding",
+      questionId: "Q-01",
+    });
+  });
+
   it("keeps future-node inspectors scoped and routes back to the actual current step", async () => {
     mockedChain.mockReturnValue(chainData({
       meetings: [scopeMeeting({ status: "open" })],
@@ -1035,6 +1135,9 @@ describe("HypothesisFirstNodeInspector", () => {
     });
     expect(mockedGetChallengeQuestionRunDetail).toHaveBeenCalledWith("team-1", "Q-01", "run-output-1");
     expect(container.querySelector('[data-testid="program-review-form"]')?.textContent).toContain("run-output-1");
+    expect(reviewFormProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      allowLegacyMutation: false,
+    }));
   });
 
   it("shows the canonical program delivery problem instead of falling back upstream", () => {

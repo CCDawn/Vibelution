@@ -343,7 +343,7 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     document.body.innerHTML = "";
   });
 
-  it("keeps formal run creation in the right-side inspector after convergence", async () => {
+  it("keeps formal run creation on the canonical hypothesis inspector after convergence", async () => {
     const { container, root } = await renderInspectorLeaf(
       "zh",
       makeInspectorScope("node", {
@@ -361,8 +361,55 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
       },
     );
 
+    expect(container.querySelector('[data-testid="mock-hypothesis-first-node-inspector"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="mock-research-run-launch-panel"]')).toBeNull();
+    expect(hypothesisLeafHarness.props?.questionId).toBe("Q-01");
+    expect(hypothesisLeafHarness.props?.nodeId).toBe("hf_convergence_gate");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("routes a catalog cold start into hypothesis generation instead of creating a formal run", async () => {
+    const replaceParams = vi.fn();
+    const submitRun = vi.fn(async () => undefined);
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("launch", {
+        runId: "",
+        questionId: "",
+        selectedNodeId: null,
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter>
+            <ResearchProcessInspectorPane
+              scope={makeInspectorScope("launch", { runId: "", questionId: "", selectedNodeId: null })}
+              state={makeInspectorState()}
+              actions={{
+                ...makeInspectorActions(),
+                replaceParams,
+                submitRun,
+              }}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+
     expect(container.querySelector('[data-testid="mock-research-run-launch-panel"]')).not.toBeNull();
-    expect(launchLeafHarness.props?.initialQuestionId).toBe("Q-01");
+    const onStartHypothesis = launchLeafHarness.props?.onStartHypothesis as ((questionId: string) => void) | undefined;
+    expect(onStartHypothesis).toBeTypeOf("function");
+    onStartHypothesis?.("SCI-001");
+    expect(replaceParams).toHaveBeenCalledWith({
+      questionId: "SCI-001",
+      node: "hf_generation",
+      panel: "node",
+    });
+    expect(submitRun).not.toHaveBeenCalled();
+
     await act(async () => root.unmount());
     container.remove();
   });

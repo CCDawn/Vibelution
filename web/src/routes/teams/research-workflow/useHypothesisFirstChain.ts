@@ -319,8 +319,10 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
       if (canonicalAction?.kind === "command"
         && (canonicalAction.command === "retry_collection" || canonicalAction.command === "continue_collection")) {
         await executeHypothesisFirstCommand(teamId, questionId, canonicalAction);
-      } else {
+      } else if (v2EndpointUnavailable) {
         await recoverCollectionRequest(teamId, normalizedRequestId);
+      } else {
+        throw new Error("canonical_action_unavailable");
       }
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
     } catch (error) {
@@ -333,7 +335,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     } finally {
       setRecoveryBusy(false);
     }
-  }, [questionId, queryClient, recoveryBusy, stateV2Query.data, teamId]);
+  }, [questionId, queryClient, recoveryBusy, stateV2Query.data, teamId, v2EndpointUnavailable]);
 
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from core.research.workflow.contracts import (
@@ -800,10 +800,8 @@ class WorkflowCommandService:
             raise RunNotFoundError(request.run_id)
         if parent.status in ("failed", "cancelled", "archived"):
             raise WorkflowCommandError("failed/cancelled/archived run 不能 fork revision")
-        if parent.status == "succeeded" and request.payload.get("postApprovalRevision") is not True:
-            raise WorkflowCommandError(
-                "succeeded run 只能通过正式审核修订入口 fork revision"
-            )
+        if parent.status == "succeeded":
+            self._assert_post_approval_revision_authorized(parent, request.payload)
 
         now_ms = self._clock()
         command_id = new_id("cmd")
@@ -872,6 +870,60 @@ class WorkflowCommandService:
         )
         uow.after_commit(self._wake_worker)
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
+
+    @staticmethod
+    def _assert_post_approval_revision_authorized(
+        parent: Any,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Authorize a terminal-run fork from durable Challenge review state.
+
+        ``postApprovalRevision`` is only a declaration used by the internal V2
+        adapter; it is never authority because the legacy formal command route
+        can carry arbitrary payload fields.  The registered output and its
+        H1-H4 decisions are the server-owned authorization source.
+        """
+
+        output_record_id = str(payload.get("outputRecordId") or "").strip()
+        if payload.get("postApprovalRevision") is not True or not output_record_id:
+            raise WorkflowCommandError(
+                "succeeded run 只能通过正式审核修订入口 fork revision"
+            )
+        from core.web.services.team_workflow.challenge_question_runs import (
+            get_challenge_question_run_detail,
+        )
+
+        try:
+            detail = get_challenge_question_run_detail(
+                str(parent.team_id or ""),
+                str(parent.question_id or ""),
+                run_id=str(parent.run_id or ""),
+            )
+        except (TypeError, ValueError) as exc:
+            raise WorkflowCommandError(
+                "正式审核修订授权记录不可用"
+            ) from exc
+        record = detail.get("record") if isinstance(detail, Mapping) else None
+        record = record if isinstance(record, Mapping) else {}
+        gates = record.get("humanGates")
+        gates = gates if isinstance(gates, Mapping) else {}
+        decisions = gates.get("decisions")
+        decisions = decisions if isinstance(decisions, Mapping) else {}
+        authorized = (
+            str(record.get("recordId") or "") == output_record_id
+            and str(record.get("questionId") or "").strip().upper()
+            == str(parent.question_id or "").strip().upper()
+            and str(record.get("runId") or "") == str(parent.run_id or "")
+            and str(record.get("status") or "") == "needs_revision"
+            and any(
+                str(decision or "") == "revision_requested"
+                for decision in decisions.values()
+            )
+        )
+        if not authorized:
+            raise WorkflowCommandError(
+                "正式审核未授权当前 succeeded run 创建修订"
+            )
 
     def _create_revision_fork(
         self,

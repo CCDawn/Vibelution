@@ -133,9 +133,8 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
     case "create_formal_revision": return "create_formal_revision";
     case "reconcile_formal_run": return "reconcile_formal_run";
     case "retry_review_dispatch": return "retry_review_dispatch";
-    case "resume_discussion":
-    case "stop_discussion":
-      return undefined;
+    case "resume_discussion": return "resume_discussion";
+    case "stop_discussion": return "stop_discussion";
   }
 }
 

@@ -726,7 +726,9 @@ fan-in 只在以下条件全部满足时写 hypothesis round：
 
 - `formalRuntime.lifecycle=not_started`；
 - `currentPhase=formal_runtime`；
-- `allowedActions` 必须包含 `create_formal_run`，直接接现有启动面板能力。
+- `allowedActions` 必须包含 `create_formal_run`；右栏从该 action 原样提交 `actionId / idempotencyKey / expectedStateVersion / hypothesisRoundId`，不得复用无 CAS 的旧 `createRun` 表单提交。
+
+官方目录冷启动时，目录面板只负责选择题目并进入 generation initial，不得提前创建正式 run。历史数据若已存在“收敛前 formal run”，仍在 queued/running/waiting_human 的 run 不能抢占 generation/review/convergence 的当前阶段或过滤其动作；只有 accepted convergence 后，formal runtime 才取得当前阶段权威。两个保守例外必须继续 fail closed：已出现多个互斥 formal lineage leaf 时停在 `formal_runtime`，已经 succeeded 并进入结果交付的 run 停在 `program_delivery`，两者都不得伪装成可重新冷启动。
 
 正式运行 wire status 统一为：
 
@@ -757,8 +759,8 @@ formal run `succeeded` 后进入 `program_delivery`，复用现有 delivery orch
 canonical projector 按以下顺序选择用户当前应该处理的阶段：
 
 1. scope 格式、team 与官方目录题号先按 §5.1 校验；非法/不存在直接返回 422/404，不构造正常空快照；
-2. current formal run 为 queued/running/waiting_human/blocked/reconciliation/failed 且仍需处理：`formal_runtime`；
-3. current formal run 已 succeeded，但结果包、delivery、program handoff 或 H1–H4 尚未成功终结：`program_delivery`；
+2. formal lineage 存在多个互斥 current leaf：`formal_runtime` blocked；或已 accepted convergence 且 current formal run 为 queued/running/waiting_human/blocked/reconciliation/failed：`formal_runtime`；
+3. current formal run 已 succeeded，但结果包、delivery、program handoff 或 H1–H4 尚未成功终结：`program_delivery`；该已发生的下游事实即使来自历史提前 run 也不得回退；
 4. program delivery 与 H1–H4 全部 approved：`completed`；
 5. 已收敛但尚无 current formal run：`formal_runtime`；
 6. 当前 collection 有未完成 child/handoff：`collection`；
@@ -902,6 +904,7 @@ flowchart LR
 - 所有按钮都使用快照下发的 `expectedStateVersion`；
 - `stateVersion` 是跨表面统一的 coarse CAS，不是多个 JSONL/store 之间凭空出现的全局 ACID 事务；每个 command 仍必须在 owning lock/transaction 内重读并验证 `resetId + command-specific lineage identity + terminal/lease/idempotency`；
 - team/question orchestration command 使用同一 scope coordinator lock 包住“二次读取 → 比较 → 写本命令事实/outbox”；不能安全纳入同一锁的异步 late completion 通过精确 attempt/selection/run identity fail closed，不得只比较之前读取的版本字符串；
+- 当前单机多 worker 部署以 project data root 内的 question-scoped OS 文件锁实现该 coordinator；它只证明共享同一本地数据根的跨进程互斥。未来若扩为多主机/非共享文件系统部署，必须迁移到数据库事务、租约或等价的分布式幂等 claim，不能把本机文件锁当作分布式锁；
 - 409 后自动刷新一次，并把用户留在同一逻辑阶段；
 - 若动作仍存在，可提示“状态已更新，请再次确认”；不得自动执行需要人工确认的动作；
 - 切换 questionId 时旧 query、旧 action 和旧 mutation 结果全部按 scope fencing 丢弃。

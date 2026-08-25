@@ -314,6 +314,41 @@ describe("ResearchRunLaunchPanel", () => {
     expect(markup).not.toContain("激活正式 Campaign");
   });
 
+  it("starts hypothesis research without creating a formal run for a fresh catalog question", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const onSubmit = vi.fn(async () => undefined);
+    const onStartHypothesis = vi.fn();
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [launchQuestion("SCI-001")],
+        experiments: [],
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-001"
+        onSubmit={onSubmit}
+        onStartHypothesis={onStartHypothesis}
+        onCancel={() => undefined}
+      />,
+    ));
+
+    expect(container.textContent).toContain("收敛后才创建正式研究运行");
+    expect(findButton(container, "开始假说研究")).toBeTruthy();
+    expect(container.querySelector('[aria-label="资料搜集 阶段 token 上限"]')).toBeNull();
+    await act(async () => findButton(container, "开始假说研究")!.click());
+    expect(onStartHypothesis).toHaveBeenCalledWith("SCI-001");
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("shows the selected question checkpoint immediately", () => {
     Object.assign(queryState.current, {
       data: launchOptions({

@@ -66,6 +66,11 @@ export type HypothesisFirstNodeInspectorProps = {
   onOpenQuestion: (questionId: string) => void;
   collectionChildStatus?: string | null;
   onNavigateToNode?: (nodeId: string) => void;
+  onFormalRunCreated?: (input: {
+    runId: string;
+    nodeId: string;
+    questionId: string;
+  }) => void;
   onRetryCollection?: () => Promise<void>;
   discussionModel?: ScopedDiscussionModel;
 };
@@ -153,6 +158,7 @@ export function HypothesisFirstNodeInspector({
   onOpenQuestion,
   collectionChildStatus = null,
   onNavigateToNode,
+  onFormalRunCreated,
   onRetryCollection,
   discussionModel,
 }: HypothesisFirstNodeInspectorProps) {
@@ -317,6 +323,7 @@ export function HypothesisFirstNodeInspector({
             stageSummary={stageSummary}
             onRetryCollection={onRetryCollection}
             onNavigateToNode={onNavigateToNode}
+            onFormalRunCreated={onFormalRunCreated}
             onOpenQuestion={onOpenQuestion}
             stateV2={chain.stateV2}
           />
@@ -486,6 +493,7 @@ function InspectorBody(props: {
   stageSummary?: { rounds: number; retries: number; kept: number } | null;
   onRetryCollection?: () => Promise<void>;
   onNavigateToNode?: (nodeId: string) => void;
+  onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
   onOpenQuestion: (questionId: string) => void;
   stateV2?: HypothesisFirstStateV2 | null;
 }) {
@@ -524,6 +532,7 @@ function InspectorBody(props: {
           label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
           lang={lang}
           canonicalAction={nextAction.canonicalAction}
+          allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
         />
       );
     }
@@ -547,6 +556,7 @@ function InspectorBody(props: {
         label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
         lang={lang}
         canonicalAction={nextAction.canonicalAction}
+        allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
       />
     );
   }
@@ -560,6 +570,7 @@ function InspectorBody(props: {
         canonicalAction={nextAction.canonicalAction?.command === "record_selection"
           ? nextAction.canonicalAction
           : undefined}
+        allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
       />
     );
   }
@@ -679,6 +690,7 @@ function InspectorBody(props: {
           canonicalAction={nextAction.canonicalAction?.command === "record_program_review"
             ? nextAction.canonicalAction
             : undefined}
+          allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
         />
       );
     }
@@ -721,6 +733,7 @@ function InspectorBody(props: {
               questionId={questionId}
               action={nextAction.canonicalAction}
               lang={lang}
+              onFormalRunCreated={props.onFormalRunCreated}
             />
           ) : null}
       </div>
@@ -811,6 +824,7 @@ function CanonicalCommandButton(props: {
   questionId: string;
   action: CommandAction;
   lang: Language;
+  onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation<unknown, Error, void>({
@@ -819,11 +833,28 @@ function CanonicalCommandButton(props: {
       props.questionId,
       props.action,
     ),
-    onSuccess: () => invalidateHypothesisFirstQueries(
-      queryClient,
-      props.teamId,
-      props.questionId,
-    ),
+    onSuccess: (response) => {
+      invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      if (props.action.command !== "create_formal_run" || !props.onFormalRunCreated) {
+        return;
+      }
+      const result = typeof response === "object" && response !== null && "result" in response
+        ? (response as { result?: unknown }).result
+        : null;
+      const created = typeof result === "object" && result !== null
+        ? result as Record<string, unknown>
+        : null;
+      const runId = typeof created?.runId === "string" ? created.runId : "";
+      if (runId) {
+        props.onFormalRunCreated({
+          runId,
+          nodeId: typeof created?.activeNodeId === "string" && created.activeNodeId
+            ? created.activeNodeId
+            : "source_finding",
+          questionId: props.questionId,
+        });
+      }
+    },
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
         invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
@@ -973,13 +1004,20 @@ function OpenGenerationButton(props: {
   label: string;
   lang: Language;
   canonicalAction?: HypothesisFirstNextAction["canonicalAction"];
+  allowLegacyMutation: boolean;
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation<unknown, Error, void>({
-    mutationFn: () => props.canonicalAction
-      && (props.canonicalAction.command === "open_generation" || props.canonicalAction.command === "retry_generation")
-      ? executeHypothesisFirstCommand(props.teamId, props.questionId, props.canonicalAction)
-      : openHypothesisCandidateGeneration(props.teamId, props.questionId),
+    mutationFn: () => {
+      if (props.canonicalAction
+        && (props.canonicalAction.command === "open_generation" || props.canonicalAction.command === "retry_generation")) {
+        return executeHypothesisFirstCommand(props.teamId, props.questionId, props.canonicalAction);
+      }
+      if (props.allowLegacyMutation) {
+        return openHypothesisCandidateGeneration(props.teamId, props.questionId);
+      }
+      return Promise.reject(new Error("canonical_action_unavailable"));
+    },
     onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
@@ -1002,6 +1040,10 @@ function OpenGenerationButton(props: {
         variant="primary"
         density="compact"
         isPending={mutation.isPending}
+        isDisabled={!props.allowLegacyMutation && !props.canonicalAction}
+        disabledReason={!props.allowLegacyMutation && !props.canonicalAction
+          ? (props.lang === "zh" ? "当前状态没有可执行的已签名操作，请刷新状态" : "No signed action is available for the current state; refresh it")
+          : undefined}
         onPress={() => mutation.mutate()}
       >
         {props.label}
@@ -1025,15 +1067,21 @@ function CollectionTaskBody(props: {
     && Boolean(requestId)
     && Boolean(collectionRunId);
   const handoff = useMutation<unknown, Error, void>({
-    mutationFn: () => props.nextAction.canonicalAction?.command === "handoff_collection"
-      ? executeHypothesisFirstCommand(
+    mutationFn: () => {
+      if (props.nextAction.canonicalAction?.command === "handoff_collection") {
+        return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
           props.nextAction.canonicalAction,
-        )
-      : recordCollectionHandoff(props.teamId, requestId, {
+        );
+      }
+      if (props.nextAction.stateSource !== "v2_canonical") {
+        return recordCollectionHandoff(props.teamId, requestId, {
           handoffRef: `source_collection_run:${collectionRunId}`,
-        }),
+        });
+      }
+      return Promise.reject(new Error("canonical_action_unavailable"));
+    },
     onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {

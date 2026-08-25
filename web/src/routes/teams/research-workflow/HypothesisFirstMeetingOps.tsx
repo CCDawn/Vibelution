@@ -68,12 +68,22 @@ export function HypothesisFirstMeetingOps(props: {
 
   const invalidate = () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
   const canonicalAction = props.nextAction.canonicalAction;
+  const allowLegacyMutation = props.nextAction.stateSource !== "v2_canonical";
+  const canonicalActionUnavailable = () => Promise.reject(new Error("canonical_action_unavailable"));
   const refreshOnConflict = (error: unknown) => {
     if (isHypothesisFirstCommandStateConflict(error)) invalidate();
   };
 
-  const draftMutation = useMutation({
-    mutationFn: () => draftMeetingSummary(props.teamId, props.meetingRoundId, { actor: "operator", force: false }),
+  const draftMutation = useMutation<unknown, Error, void>({
+    mutationFn: () => {
+      if (canonicalAction?.command === "regenerate_summary") {
+        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+      }
+      if (allowLegacyMutation) {
+        return draftMeetingSummary(props.teamId, props.meetingRoundId, { actor: "operator", force: false });
+      }
+      return canonicalActionUnavailable();
+    },
     onSuccess: invalidate,
   });
   const autoDraftedMeetingIds = useRef(new Set<string>());
@@ -122,6 +132,7 @@ export function HypothesisFirstMeetingOps(props: {
           { decision: "accepted" },
         ).then((receipt) => receipt.result as Awaited<ReturnType<typeof approveHypothesisDigest>>);
       }
+      if (!allowLegacyMutation) return canonicalActionUnavailable();
       const hash = roundQuery.data?.meetingRound?.digestDraft?.contentHash || "";
       return approveHypothesisDigest(props.teamId, props.meetingRoundId, {
         closedBy: "operator",
@@ -182,29 +193,44 @@ export function HypothesisFirstMeetingOps(props: {
     },
   });
   const rejectMutation = useMutation<unknown, Error, void>({
-    mutationFn: () => canonicalAction?.command === "approve_summary"
-      ? executeHypothesisFirstCommand(
+    mutationFn: () => {
+      if (canonicalAction?.command === "approve_summary") {
+        return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
           canonicalAction,
           { decision: "rejected" },
-        )
-      : rejectMeetingDigestDraft(props.teamId, props.meetingRoundId, { actor: "operator" }),
+        );
+      }
+      if (allowLegacyMutation) {
+        return rejectMeetingDigestDraft(props.teamId, props.meetingRoundId, { actor: "operator" });
+      }
+      return canonicalActionUnavailable();
+    },
     onSuccess: () => {
       setApproveBlockedReason(null);
       invalidate();
       // Reject clears the draft server-side but never re-summarizes; kick the
       // draft immediately so the round does not sit in summarizing with no
-      // available action.
-      draftMutation.mutate();
+      // available action. The V2 adapter already performs that regeneration
+      // atomically with the signed command, so do not dispatch it twice.
+      if (canonicalAction?.command !== "approve_summary") {
+        draftMutation.mutate();
+      }
     },
     onError: refreshOnConflict,
   });
   const generationMutation = useMutation<unknown, Error, void>({
-    mutationFn: () => canonicalAction
-      && (canonicalAction.command === "open_generation" || canonicalAction.command === "retry_generation")
-      ? executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction)
-      : openHypothesisCandidateGeneration(props.teamId, props.questionId),
+    mutationFn: () => {
+      if (canonicalAction
+        && (canonicalAction.command === "open_generation" || canonicalAction.command === "retry_generation")) {
+        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+      }
+      if (allowLegacyMutation) {
+        return openHypothesisCandidateGeneration(props.teamId, props.questionId);
+      }
+      return canonicalActionUnavailable();
+    },
     onSuccess: invalidate,
     onError: refreshOnConflict,
   });
@@ -229,13 +255,22 @@ export function HypothesisFirstMeetingOps(props: {
       invalidate();
     },
   });
-  const reopenReviewMutation = useMutation({
-    mutationFn: () => reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId),
+  const reopenReviewMutation = useMutation<unknown, Error, void>({
+    mutationFn: () => {
+      if (canonicalAction && ["retry_review_dispatch", "resume_discussion", "stop_discussion"].includes(canonicalAction.command)) {
+        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+      }
+      if (allowLegacyMutation) return reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId);
+      return canonicalActionUnavailable();
+    },
     onSuccess: (payload) => {
+      const openStatus = payload && typeof payload === "object" && "openStatus" in payload
+        ? String(payload.openStatus || "")
+        : "";
       // Reopening burns the failed round first; if the budget gate then denies
       // the replacement round, say so instead of letting the meeting vanish.
       setReopenBlockedReason(
-        payload?.openStatus === "budget_exhausted"
+        openStatus === "budget_exhausted"
           ? (isZh
             ? "失败轮已作废，但轮次预算已耗尽，无法开启新的评审轮；请在假说收敛卡提升预算并发起新一轮评审。"
             : "The failed round was voided, but the round budget is exhausted; increase the budget on the convergence card to open another review round.")
@@ -249,11 +284,17 @@ export function HypothesisFirstMeetingOps(props: {
     && Boolean(props.nextAction.collectionRequestId)
     && Boolean(collectionRunId);
   const handoffMutation = useMutation<unknown, Error, void>({
-    mutationFn: () => canonicalAction?.command === "handoff_collection"
-      ? executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction)
-      : recordCollectionHandoff(props.teamId, props.nextAction.collectionRequestId || "", {
+    mutationFn: () => {
+      if (canonicalAction?.command === "handoff_collection") {
+        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+      }
+      if (allowLegacyMutation) {
+        return recordCollectionHandoff(props.teamId, props.nextAction.collectionRequestId || "", {
           handoffRef: `source_collection_run:${collectionRunId}`,
-        }),
+        });
+      }
+      return canonicalActionUnavailable();
+    },
     onSuccess: invalidate,
     onError: refreshOnConflict,
   });
@@ -274,7 +315,7 @@ export function HypothesisFirstMeetingOps(props: {
   const autoDraftFailed = commandEnabled
     && props.nextAction.command === "draft_summary"
     && draftMutation.isError;
-  const command = interruptedCandidateDiscussion
+  const legacyCommand = interruptedCandidateDiscussion
     ? "open_generation"
     : failedCandidateDiscussion
     ? "open_generation"
@@ -283,7 +324,10 @@ export function HypothesisFirstMeetingOps(props: {
     : autoDraftFailed
       ? "retry_draft_summary"
     : (commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined);
-  const commandLabel = interruptedCandidateDiscussion
+  const command = allowLegacyMutation
+    ? legacyCommand
+    : (commandEnabled && canonicalAction ? props.nextAction.command : undefined);
+  const legacyCommandLabel = interruptedCandidateDiscussion
     ? (isZh ? "重试启动候选讨论" : "Retry candidate discussion")
     : failedCandidateDiscussion
     ? (isZh ? "重新发起候选讨论" : "Reopen candidate discussion")
@@ -294,6 +338,9 @@ export function HypothesisFirstMeetingOps(props: {
         ? (isZh ? "重试整理候选清单" : "Retry candidate list summary")
         : (isZh ? "重试整理本轮结论" : "Retry round summary"))
     : (commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined);
+  const commandLabel = allowLegacyMutation
+    ? legacyCommandLabel
+    : (commandEnabled && canonicalAction ? props.nextAction.commandLabel : undefined);
   const commandDetail = failedCandidateDiscussion || failedReviewDiscussion
     ? (isZh ? "放弃本轮失败尝试，以同一批假说开启下一轮" : "Discard the failed attempt and open the next round with the same hypotheses")
     : autoDraftFailed
@@ -344,6 +391,10 @@ export function HypothesisFirstMeetingOps(props: {
       reopenReviewMutation.mutate();
       return;
     }
+    if (next === "retry_review_dispatch" || next === "resume_discussion" || next === "stop_discussion") {
+      reopenReviewMutation.mutate();
+      return;
+    }
     if (next === "retry_handoff") {
       if (canHandoff) handoffMutation.mutate();
       return;
@@ -362,6 +413,7 @@ export function HypothesisFirstMeetingOps(props: {
     && command !== "human_adjudication",
   );
   const showReject = commandEnabled
+    && (allowLegacyMutation || canonicalAction?.command === "approve_summary")
     && (props.nextAction.stage === "review_awaiting_approval" || props.nextAction.stage === "generation_awaiting_approval");
   const actionBar = (showPrimaryCommand || showReject) ? (
     <div className={styles.actions} data-testid="meeting-round-actions">
@@ -414,7 +466,7 @@ export function HypothesisFirstMeetingOps(props: {
           label={isZh ? "本轮结论未被确认" : "Round conclusion was not confirmed"}
           summary={approveBlockedReason}
           data-testid="approve-blocked-reason"
-          actions={commandEnabled && (roundStatus === "awaiting_approval") ? (
+          actions={allowLegacyMutation && commandEnabled && (roundStatus === "awaiting_approval") ? (
             <VButton
               type="button"
               variant="ghost"

@@ -63,6 +63,8 @@ export type HypothesisFirstCommand =
   | "retry_collection"
   | "continue_collection"
   | "retry_handoff"
+  | "resume_discussion"
+  | "stop_discussion"
   | "open_next_review"
   | "human_adjudication"
   | "retry_review_dispatch"

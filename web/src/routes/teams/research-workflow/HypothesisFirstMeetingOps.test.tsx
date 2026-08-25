@@ -24,6 +24,7 @@ import {
   approveHypothesisDigest,
   closeReviewMeeting,
   draftMeetingSummary,
+  executeHypothesisFirstCommand,
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
   openHypothesisCandidateGeneration,
@@ -35,6 +36,7 @@ import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mockedDraftMeetingSummary = vi.mocked(draftMeetingSummary);
+const mockedExecuteCommand = vi.mocked(executeHypothesisFirstCommand);
 const mockedFetchMeetingRound = vi.mocked(fetchMeetingRound);
 const mockedFetchMessages = vi.mocked(fetchMeetingRoundSourceMessages);
 const mockedOpenGeneration = vi.mocked(openHypothesisCandidateGeneration);
@@ -175,6 +177,72 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     });
     expect(container.textContent).toContain("本轮结论未被确认");
     expect(container.textContent).toContain("证据请求缺少有效搜集关键词");
+  });
+
+  it("does not regenerate the digest twice after a canonical rejection", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    render({
+      ...AUTO_ACTION,
+      stage: "review_awaiting_approval",
+      command: "approve_review_digest",
+      commandLabel: "确认并结束本轮",
+      canonicalAction: {
+        kind: "command",
+        actionId: "approve-summary:candidate-1",
+        label: "确认候选纪要",
+        enabled: true,
+        disabledReason: null,
+        targetPhase: "review",
+        targetNodeId: "hf_review",
+        command: "approve_summary",
+        payload: { meetingRoundId: "meeting-1" },
+        inputSchemaRef: "hypothesis-first/approve-summary/v1",
+        idempotencyKey: "hf2:approve-summary:candidate-1",
+        expectedStateVersion: "hf2-action:origin:current",
+        requiresConfirmation: false,
+        confirmationText: null,
+      },
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("退回重新整理"));
+      const reject = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("退回重新整理"));
+      reject?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+  });
+
+  it("does not expose legacy approval writes when canonical state has no signed action", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    render({
+      ...AUTO_ACTION,
+      stateSource: "v2_canonical",
+      stage: "review_awaiting_approval",
+      command: "approve_review_digest",
+      commandLabel: "确认并结束本轮",
+      canonicalAction: undefined,
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("meeting-1"));
+    });
+
+    expect([...container.querySelectorAll("button")]
+      .some((button) => button.textContent?.includes("确认并结束本轮"))).toBe(false);
+    expect([...container.querySelectorAll("button")]
+      .some((button) => button.textContent?.includes("退回重新整理"))).toBe(false);
+    expect(approveHypothesisDigest).not.toHaveBeenCalled();
   });
 
   it("surfaces close-correction failures and disables competing actions while closing", async () => {

@@ -26,6 +26,7 @@ import {
   ResearchTeamPanel,
 } from "../teamLazyPanels";
 import {
+  HYPOTHESIS_FIRST_GENERATION_NODE_ID,
   hypothesisFirstSemanticNodeId,
   isHypothesisFirstCanvasNode,
 } from "./hypothesisFirstCanvasRegion";
@@ -195,14 +196,9 @@ export function ResearchProcessInspectorPane(props: {
       />
     );
   }
-  const needsFormalRunAfterConvergence = scope.panel === "node"
-    && scope.selectedNodeId === "hf_convergence_gate"
-    && nextAction?.stage === "converged"
-    && !scope.runId;
   if (
     scope.panel === "launch"
     || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)
-    || needsFormalRunAfterConvergence
   ) {
     return (
       <ResearchRunLaunchPanel
@@ -211,6 +207,11 @@ export function ResearchProcessInspectorPane(props: {
         busy={state.busy}
         initialQuestionId={scope.questionId}
         onSubmit={actions.submitRun}
+        onStartHypothesis={(questionId) => actions.replaceParams({
+          questionId,
+          node: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+          panel: "node",
+        })}
         onCancel={() => actions.replaceParams({ panel: "node" })}
         onContinueRun={({ runId, nodeId, questionId }) => actions.replaceParams({
           runId,
@@ -245,6 +246,12 @@ export function ResearchProcessInspectorPane(props: {
         collectionChildStatus={collectionChildStatus}
         onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
         onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
+        onFormalRunCreated={({ runId, nodeId, questionId }) => actions.replaceParams({
+          runId,
+          node: nodeId,
+          questionId,
+          panel: "node",
+        })}
         onRetryCollection={
           onRecoverCollection && nextAction?.collectionRequestId
             ? () => onRecoverCollection(nextAction.collectionRequestId || "")

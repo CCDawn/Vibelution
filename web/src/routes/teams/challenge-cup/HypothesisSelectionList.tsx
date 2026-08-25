@@ -34,6 +34,7 @@ export type HypothesisSelectionListProps = {
   compact?: boolean;
   hideSubmit?: boolean;
   canonicalAction?: Extract<CommandAction, { command: "record_selection" }>;
+  allowLegacyMutation?: boolean;
 };
 
 function sameIdSet(left: string[], right: string[]): boolean {
@@ -49,6 +50,7 @@ export function HypothesisSelectionList({
   compact = false,
   hideSubmit = false,
   canonicalAction,
+  allowLegacyMutation = true,
 }: HypothesisSelectionListProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -75,11 +77,15 @@ export function HypothesisSelectionList({
   }, [serverBaseline]);
 
   const recordMutation = useMutation<unknown, Error, HypothesisSelectionRecordPayload>({
-    mutationFn: (input: HypothesisSelectionRecordPayload) => canonicalAction
-      ? executeHypothesisFirstCommand(teamId, questionId, canonicalAction, {
+    mutationFn: (input: HypothesisSelectionRecordPayload) => {
+      if (canonicalAction) {
+        return executeHypothesisFirstCommand(teamId, questionId, canonicalAction, {
           candidateIds: input.selectedCandidateIds,
-        })
-      : recordHypothesisSelection(teamId, input),
+        });
+      }
+      if (allowLegacyMutation) return recordHypothesisSelection(teamId, input);
+      return Promise.reject(new Error("canonical_action_unavailable"));
+    },
     onSuccess: () => {
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
     },
@@ -138,6 +144,7 @@ export function HypothesisSelectionList({
 
   const latestSelection = context.latestSelection;
   const dirty = !sameIdSet(selectedIds, serverBaseline);
+  const mutationAuthorized = Boolean(canonicalAction) || allowLegacyMutation;
   const withinBounds =
     selectedIds.length >= HYPOTHESIS_SELECTION_MIN &&
     selectedIds.length <= HYPOTHESIS_SELECTION_MAX;
@@ -353,11 +360,13 @@ export function HypothesisSelectionList({
                 ? (isZh
                   ? `选择数量需在 ${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX} 之间`
                   : `Select between ${HYPOTHESIS_SELECTION_MIN} and ${HYPOTHESIS_SELECTION_MAX}`)
+                : !mutationAuthorized
+                  ? (isZh ? "当前状态没有可执行的已签名操作，请刷新状态" : "No signed action is available for the current state; refresh it")
                 : !dirty
                   ? (isZh ? "选择未发生变化" : "Selection unchanged")
                   : undefined
             }
-            isDisabled={!withinBounds || !dirty}
+            isDisabled={!withinBounds || !dirty || !mutationAuthorized}
             isPending={recordMutation.isPending}
             onPress={submitSelection}
             variant="primary"

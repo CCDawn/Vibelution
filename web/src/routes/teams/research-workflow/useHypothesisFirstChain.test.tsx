@@ -13,12 +13,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
+  executeHypothesisFirstCommand,
   fetchCollectionRequests,
   fetchHypothesisFirstChainState,
   fetchHypothesisFirstStateV2,
   fetchHypothesisSelections,
   fetchMeetingRounds,
   fetchReviewRoundLinks,
+  recoverCollectionRequest,
 } from "../../../api/hypothesisFirst";
 import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 import {
@@ -30,6 +32,7 @@ import {
 } from "./useHypothesisFirstChain";
 
 vi.mock("../../../api/hypothesisFirst", () => ({
+  executeHypothesisFirstCommand: vi.fn(),
   fetchHypothesisFirstChainState: vi.fn(),
   fetchHypothesisFirstStateV2: vi.fn(),
   isHypothesisFirstStateV2EndpointUnavailable: (error: unknown) => {
@@ -46,15 +49,19 @@ vi.mock("../../../api/hypothesisFirst", () => ({
   fetchMeetingRounds: vi.fn(),
   fetchCollectionRequests: vi.fn(),
   fetchReviewRoundLinks: vi.fn(),
+  recoverCollectionRequest: vi.fn(),
+  isHypothesisFirstCommandStateConflict: vi.fn().mockReturnValue(false),
 }));
 
 const mocked = {
+  executeCommand: vi.mocked(executeHypothesisFirstCommand),
   chainState: vi.mocked(fetchHypothesisFirstChainState),
   stateV2: vi.mocked(fetchHypothesisFirstStateV2),
   selections: vi.mocked(fetchHypothesisSelections),
   meetings: vi.mocked(fetchMeetingRounds),
   requests: vi.mocked(fetchCollectionRequests),
   links: vi.mocked(fetchReviewRoundLinks),
+  recoverCollection: vi.mocked(recoverCollectionRequest),
 };
 
 const scope = {
@@ -396,6 +403,21 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.chainState).toBeNull();
     expect(latest!.error).toBe("Invalid hypothesis-first state V2 response");
     expect(mocked.chainState).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of using the legacy recovery mutation when V2 has no signed action", async () => {
+    mockAllResolved();
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    await act(async () => {
+      await latest!.recoverCollection("req-1");
+    });
+
+    expect(mocked.executeCommand).not.toHaveBeenCalled();
+    expect(mocked.recoverCollection).not.toHaveBeenCalled();
+    expect(latest!.recoveryError).toBe("canonical_action_unavailable");
   });
 
   it("invalidates hypothesis-first queries (debounced) when the run event sequence advances", async () => {

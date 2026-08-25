@@ -116,6 +116,7 @@ export function ChallengeQuestionReviewForm(props: {
   detail: ChallengeQuestionRunDetailPayload;
   lang?: "zh" | "en";
   canonicalAction?: Extract<CommandAction, { command: "record_program_review" }>;
+  allowLegacyMutation?: boolean;
 }) {
   const { detail } = props;
   const isZh = props.lang !== "en";
@@ -145,8 +146,8 @@ export function ChallengeQuestionReviewForm(props: {
         rationale: rationale.trim(),
         decisions,
       };
-      return props.canonicalAction
-        ? executeHypothesisFirstCommand(
+      if (props.canonicalAction) {
+        return executeHypothesisFirstCommand(
             detail.teamId,
             detail.questionId,
             props.canonicalAction,
@@ -155,13 +156,17 @@ export function ChallengeQuestionReviewForm(props: {
               rationale: string;
               decisions: Record<GateKey, GateDecision>;
             },
-          )
-        : reviewChallengeQuestionRun(
+          );
+      }
+      if (props.allowLegacyMutation !== false) {
+        return reviewChallengeQuestionRun(
             detail.teamId,
             detail.questionId,
             detail.selectedRunId,
             input,
           );
+      }
+      return Promise.reject(new Error("canonical_action_unavailable"));
     },
     onSuccess: async () => {
       try {
@@ -218,6 +223,7 @@ export function ChallengeQuestionReviewForm(props: {
     && !mutation.isPending
     && !isSubmitted
     && officialCallReady;
+  const mutationAuthorized = Boolean(props.canonicalAction) || props.allowLegacyMutation !== false;
 
   return (
     <VSurface tone="card" className={css.reviewForm} data-vui="question-review-form">
@@ -285,9 +291,11 @@ export function ChallengeQuestionReviewForm(props: {
           type="button"
           variant="primary"
           isPending={mutation.isPending}
-          isDisabled={!canSubmit}
+          isDisabled={!canSubmit || !mutationAuthorized}
           disabledReason={isSubmitted
             ? (isZh ? "审核结论已提交" : "Review already submitted")
+            : !mutationAuthorized
+              ? (isZh ? "当前状态没有可执行的已签名操作，请刷新状态" : "No signed action is available for the current state; refresh it")
             : !officialCallReady
             ? (isZh
               ? "该 run 尚未满足官方模型调用门（证据需先发布到团队级），提交会被拒绝"

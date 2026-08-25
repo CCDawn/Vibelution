@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+import time
 from contextlib import nullcontext
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, Request, Response
@@ -644,6 +648,40 @@ def test_converged_chain_does_not_offer_duplicate_formal_run() -> None:
     )
 
 
+def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "legacy-container-run",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "running",
+                    "runVersion": 1,
+                    "activeNodeId": "problem_understanding",
+                    "createdAt": "2026-08-25T00:01:00Z",
+                }
+            ],
+        )
+    )
+
+    assert state.currentPhase == "generation"
+    assert state.formalRuntime.runId == "legacy-container-run"
+    assert any(
+        action.kind == "command" and action.command == "open_generation"
+        for action in state.allowedActions
+    )
+
+
 @pytest.mark.parametrize(
     ("round_index", "expected_command"),
     [(1, "open_next_review"), (3, "human_adjudication")],
@@ -1247,6 +1285,106 @@ def test_scope_cas_rejects_stale_state_version(monkeypatch: pytest.MonkeyPatch) 
     assert raised.value.code == "state_version_conflict"
     assert raised.value.expected == "hf2-action:stale:old"
     assert raised.value.actual == "hf2-action:actual:new"
+
+
+def test_v2_scope_lock_serializes_cross_process_claim_and_side_effect(
+    tmp_path: Path,
+) -> None:
+    """Two workers sharing one old snapshot may enter a V2 side effect once."""
+
+    root = str(Path(__file__).resolve().parents[1])
+    claim = tmp_path / "claim.txt"
+    active = tmp_path / "side-effect-active.txt"
+    overlap = tmp_path / "side-effect-overlap.txt"
+    start = tmp_path / "start.txt"
+    worker_script = f"""
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, {root!r})
+from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
+from core.web.services import team_service
+from core.web.services.team_workflow.research_runtime import hypothesis_first_state_v2
+
+chain.PROJECT_ROOT = Path({str(tmp_path)!r})
+claim = Path({str(claim)!r})
+active = Path({str(active)!r})
+overlap = Path({str(overlap)!r})
+start = Path({str(start)!r})
+result = Path(sys.argv[1])
+ready = result.with_suffix(".ready")
+team_service.assert_team_exists = lambda team_id: team_id
+hypothesis_first_state_v2.project_hypothesis_first_state_v2 = lambda *_args, **_kwargs: {{
+    "stateVersion": "hf2-action:old-snapshot",
+    "allowedActions": [{{
+        "kind": "command",
+        "actionId": "retry-program-handoff",
+        "command": "retry_program_handoff",
+        "payload": {{"runId": "run-1"}},
+        "enabled": True,
+        "idempotencyKey": "hf2:retry-program-handoff:old-snapshot",
+    }}],
+}}
+def fake_retry(_team_id, *, run_id, idempotency_key):
+    assert run_id == "run-1"
+    assert idempotency_key == "hf2:retry-program-handoff:old-snapshot"
+    if claim.exists():
+        return {{"status": "reused"}}
+    if active.exists():
+        overlap.write_text("overlap", encoding="utf-8")
+        return {{"status": "overlap"}}
+    active.write_text("active", encoding="utf-8")
+    try:
+        # Hold the protected side-effect window open long enough that a
+        # concurrently released worker would observe ``active`` without the
+        # inter-process scope lock.
+        time.sleep(0.5)
+        claim.write_text("claimed", encoding="utf-8")
+        return {{"status": "created"}}
+    finally:
+        active.unlink(missing_ok=True)
+chain._retry_program_delivery = fake_retry
+ready.write_text("ready", encoding="utf-8")
+while not start.exists():
+    time.sleep(0.01)
+response = chain.execute_v2_command(
+    "team-1",
+    {{
+        "actionId": "retry-program-handoff",
+        "idempotencyKey": "hf2:retry-program-handoff:old-snapshot",
+        "expectedStateVersion": "hf2-action:old-snapshot",
+        "command": "retry_program_handoff",
+        "payload": {{"runId": "run-1"}},
+    }},
+    question_id="SCI-001",
+)
+result.write_text(str(response["result"]["status"]), encoding="utf-8")
+"""
+
+    result_paths = [tmp_path / f"result-{index}.txt" for index in range(2)]
+    workers = [
+        subprocess.Popen(
+            [sys.executable, "-c", worker_script, str(result_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        for result_path in result_paths
+    ]
+    ready_paths = [path.with_suffix(".ready") for path in result_paths]
+    deadline = time.monotonic() + 10
+    while not all(path.exists() for path in ready_paths):
+        assert time.monotonic() < deadline, "workers did not reach the start barrier"
+        time.sleep(0.01)
+    start.write_text("start", encoding="utf-8")
+    for worker in workers:
+        _, stderr = worker.communicate(timeout=30)
+        assert worker.returncode == 0, stderr.decode("utf-8", "replace")
+
+    outcomes = [path.read_text(encoding="utf-8") for path in result_paths]
+    assert outcomes.count("created") == 1
+    assert outcomes.count("reused") == 1
+    assert not overlap.exists()
 
 
 def test_v2_command_route_maps_stale_version_to_409(
