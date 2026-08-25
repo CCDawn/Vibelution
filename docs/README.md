@@ -57,6 +57,7 @@
 
 | 草案 | 说明 |
 | --- | --- |
+| [plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md](plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED：挑战杯规范化流程状态 V2、服务端动作、兼容迁移与真实链路闭环验收 |
 | [plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved：挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
 | [plans/2026-08-21-research-workflow-three-pane-current-task-redesign.md](plans/2026-08-21-research-workflow-three-pane-current-task-redesign.md) | USER-APPROVED：科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
 | [plans/2026-08-20-physical-retirement-of-python-lifecycle.md](plans/2026-08-20-physical-retirement-of-python-lifecycle.md) | ACTIVE：Python lifecycle 退役代码物理清理；批次 D 仍未完成 |
