@@ -203,7 +203,7 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
             "e_kc_hypothesis",
             "knowledge_handoff",
             "hypothesis_design",
-            "Knowledge Package",
+            "知识包",
             GateKind.KNOWLEDGE_PACKAGE,
             ("knowledge_package",),
             requiresHumanAccept=True,

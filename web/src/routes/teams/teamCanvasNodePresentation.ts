@@ -64,9 +64,18 @@ export function canvasNodeAgentLine(
   lang: "zh" | "en",
 ) {
   const name = String(displayName || "").trim()
-    || String(node.agentName || "").trim()
-    || String(node.agentCode || "").trim();
-  return name || canvasNodeStatusLabel(node, lang);
+    || String(node.agentName || "").trim();
+  if (name) {
+    return name;
+  }
+  // agentCode 是机器标识（如 agent-20260722-220511-556053），不直接透出；
+  // 已绑定但无名称时显示"未命名 + 短后缀"，未绑定时走本地化状态。
+  const code = String(node.agentCode || "").trim();
+  if (node.agentId && code) {
+    const suffix = code.slice(-4);
+    return lang === "zh" ? `未命名 Agent ${suffix}` : `Unnamed agent ${suffix}`;
+  }
+  return canvasNodeStatusLabel(node, lang);
 }
 
 export type CanvasNodeRoleBadgeStyles = Record<CanvasNodeRoleBadgeKind, string> & {

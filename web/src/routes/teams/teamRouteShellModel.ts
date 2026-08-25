@@ -60,6 +60,31 @@ export function researchStageStartFeedbackText(payload: ResearchStageRoundStartP
   return `Entered ${label} round ${payload.stageRound.roundNumber}`;
 }
 
+// 挑战杯六 Agent 角色（challenge_cup_*）与旧九人角色（迁移期只读兼容）的中文映射。
+// 未命中映射的英文枚举一律本地化为"未知角色"，避免技术标识直接透出给用户。
+const NODE_ROLE_ZH: Record<string, string> = {
+  challenge_cup_coordinator: "科研协调",
+  challenge_cup_search: "搜索",
+  challenge_cup_extractor: "提炼",
+  challenge_cup_knowledge_manager: "知识管理",
+  challenge_cup_execution_steward: "执行",
+  challenge_cup_experiment_revision: "实验修订",
+  challenge_cup_evaluator: "评估",
+  // 旧九人角色（六 Agent 迁移完成前的兼容层）
+  source_finder: "搜索",
+  source_extractor: "提炼",
+  source_relation_mapper: "关系整理",
+  source_ingestor: "入库",
+  experiment_planner: "实验规划",
+  experiment_ledger: "实验证据",
+  iteration_planner: "迭代决策",
+  iteration_versioning: "版本治理",
+  knowledge_steward: "知识管家",
+  research_owner: "研究负责人",
+  formal_runner: "受控运行",
+  package_builder: "结果打包",
+};
+
 export function teamNodeFunctionLabel(node: TeamCanvasNode, displayLabel: string | undefined, lang: "zh" | "en") {
   const role = String(node.role || "").trim();
   const purpose = String(node.purpose || "").trim();
@@ -72,6 +97,12 @@ export function teamNodeFunctionLabel(node: TeamCanvasNode, displayLabel: string
   }
   if (key.includes("capability") || key.includes("steward") || key.includes("能力管家") || key.includes("管家")) {
     return lang === "zh" ? "能力管家" : "Capability steward";
+  }
+  if (lang === "zh") {
+    const mapped = NODE_ROLE_ZH[role.toLowerCase()] ?? NODE_ROLE_ZH[purpose.toLowerCase()];
+    if (mapped) {
+      return mapped;
+    }
   }
   if (purpose) {
     return purpose;
