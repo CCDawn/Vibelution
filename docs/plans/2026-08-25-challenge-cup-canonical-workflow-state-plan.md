@@ -265,6 +265,7 @@ type ActionCommand =
   | "retry_collection"
   | "continue_collection"
   | "handoff_collection"
+  | "open_next_review"
   | "human_adjudication"
   | "create_formal_run"
   | "reconcile_formal_run"
@@ -284,6 +285,7 @@ type ActionPayloadByCommand = {
   retry_collection: { requestId: string; childRunId: string | null };
   continue_collection: { requestId: string; childRunId: string };
   handoff_collection: { requestId: string; childRunId: string };
+  open_next_review: { previousMeetingRoundId: string; roundBudget: number };
   human_adjudication: { hypothesisRoundId: string };
   create_formal_run: { questionId: string; hypothesisRoundId: string };
   reconcile_formal_run: { runId: string };
@@ -468,6 +470,7 @@ type HypothesisFirstStateV2 = {
     source: "question_reset_audit" | "origin";
   };
   isInitial: boolean;
+  awaitingHumanCount: number;
   currentPhase: HypothesisFirstPhase;
   overall: PhaseState;
   generation: PhaseState & {
@@ -713,6 +716,7 @@ fan-in 只在以下条件全部满足时写 hypothesis round：
 - 尚未形成完整 round：`not_started`；
 - 等待候选评审 fan-in：`queued` 或 `waiting_human`；
 - MetaReview accepted、无新请求且无 pending handoff：`completed+succeeded`；
+- MetaReview 未接受且仍有预算：`waiting_human+none`，提供 `open_next_review`，对当前 selection 的全部候选重新 fan-out；
 - 预算耗尽未收敛：`completed+exhausted`，提供 `human_adjudication`；
 - 数据缺失或 lineage 冲突：`actionability=blocked` + problem。
 

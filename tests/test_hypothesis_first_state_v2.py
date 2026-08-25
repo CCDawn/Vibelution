@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from copy import deepcopy
 
 import pytest
+from fastapi import HTTPException, Request, Response
 from pydantic import ValidationError
 
+from core.web.routes.team_workflows import hypothesis_first as hypothesis_first_routes
 from core.web.routes.team_workflows.hypothesis_first_state_models import (
+    CollectionChildRunPayload,
+    HypothesisFirstCommandRequest,
     HypothesisFirstStateV2,
     PhaseState,
+)
+from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
+    finalize_state_versions,
+    project_state_from_records,
 )
 
 
@@ -48,6 +57,7 @@ def _initial_snapshot() -> dict[str, object]:
             "source": "origin",
         },
         "isInitial": True,
+        "awaitingHumanCount": 0,
         "currentPhase": "generation",
         "overall": _phase(actionability="available"),
         "generation": {
@@ -290,3 +300,1385 @@ def test_program_human_gate_keys_are_exact_and_approved_count_is_recomputed() ->
 
     with pytest.raises(ValidationError):
         HypothesisFirstStateV2.model_validate(payload)
+
+
+def test_top_level_completed_requires_all_h1_h4_gates_approved() -> None:
+    payload = _initial_snapshot()
+    payload["isInitial"] = False
+    payload["currentPhase"] = "completed"
+    payload["overall"] = _phase(
+        lifecycle="completed",
+        outcome="succeeded",
+        actionability="terminal",
+    )
+    payload["programDelivery"].update(
+        {
+            **_phase(
+                lifecycle="completed",
+                outcome="succeeded",
+                actionability="terminal",
+            ),
+            "deliveryStatus": "succeeded",
+            "handoffStatus": "registered",
+            "humanReviewStatus": "approved",
+        }
+    )
+
+    with pytest.raises(ValidationError, match="all H1-H4 gates approved"):
+        HypothesisFirstStateV2.model_validate(payload)
+
+
+def test_record_projection_distinguishes_initial_from_empty_generation() -> None:
+    initial = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[],
+        selection_records=[],
+        meeting_records=[],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+    ))
+    empty = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[],
+        selection_records=[],
+        meeting_records=[
+            {
+                "meetingRoundId": "generation-1",
+                "meetingType": "hypothesis_candidate_generation",
+                "question": "SCI-001",
+                "status": "closed",
+                "createdAt": "2026-08-25T00:00:00Z",
+                "updatedAt": "2026-08-25T00:05:00Z",
+            }
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+    ))
+
+    assert initial.isInitial is True
+    assert initial.generation.lifecycle == "not_started"
+    assert empty.isInitial is False
+    assert empty.generation.lifecycle == "completed"
+    assert empty.generation.outcome == "empty"
+    assert empty.stateVersion != initial.stateVersion
+
+
+def test_generation_attempt_projects_queued_without_generation_missing() -> None:
+    queued = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-001",
+                    "meetingRoundId": "meeting-1",
+                    "lifecycle": "queued",
+                    "outcome": "none",
+                    "queuedAt": "2026-08-25T00:00:00Z",
+                    "startedAt": "",
+                    "heartbeatAt": "",
+                    "finishedAt": "",
+                    "supersedesAttemptId": "",
+                    "updatedAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert queued.isInitial is False
+    assert queued.currentPhase == "generation"
+    assert queued.generation.lifecycle == "queued"
+    assert queued.generation.actionability == "waiting_system"
+    assert queued.generation.attempt is not None
+    assert queued.generation.attempt.attemptId == "attempt-1"
+    assert all(problem.code != "generation_missing" for problem in queued.problems)
+
+
+def test_same_round_index_keeps_each_candidate_in_review_aggregate() -> None:
+    state = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": candidate_id,
+                "questionId": "SCI-001",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+            for candidate_id in ("candidate-a", "candidate-b")
+        ]
+        + [
+            {
+                "recordKind": "review_round_link",
+                "linkId": f"link-{candidate_id}",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": candidate_id,
+                "candidateOrder": order,
+                "roundIndex": 1,
+                "meetingRoundId": f"meeting-{candidate_id}",
+                "createdAt": "2026-08-25T00:02:00Z",
+            }
+            for order, candidate_id in enumerate(("candidate-a", "candidate-b"))
+        ],
+        selection_records=[
+            {
+                "selectionId": "selection-1",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a", "candidate-b"],
+                "createdAt": "2026-08-25T00:01:00Z",
+            }
+        ],
+        meeting_records=[
+            {
+                "meetingRoundId": f"meeting-{candidate_id}",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "selectionId": "selection-1",
+                "status": "awaiting_approval",
+                "linkedChatRoomId": f"room-{candidate_id}",
+                "createdAt": "2026-08-25T00:03:00Z",
+            }
+            for candidate_id in ("candidate-a", "candidate-b")
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+        return_to="/teams/team-1/research?question=SCI-001",
+    ))
+
+    assert state.currentPhase == "review"
+    assert state.review.aggregate.total == 2
+    assert state.review.aggregate.pending == 2
+    assert state.awaitingHumanCount == 2
+    assert [item.candidateId for item in state.review.candidates] == [
+        "candidate-a",
+        "candidate-b",
+    ]
+
+
+def test_succeeded_formal_run_with_missing_delivery_stays_program_delivery_blocked() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-1",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 7,
+                    "completionKind": "completed",
+                    "parentRunId": None,
+                    "createdAt": "2026-08-25T00:00:00Z",
+                    "updatedAt": "2026-08-25T01:00:00Z",
+                }
+            ],
+            formal_snapshots={"run-1": {"deliveryStatus": None}},
+        )
+    )
+
+    assert state.currentPhase == "program_delivery"
+    assert state.formalRuntime.lifecycle == "completed"
+    assert state.formalRuntime.outcome == "succeeded"
+    assert state.formalRuntime.runStatus == "succeeded"
+    assert state.programDelivery.actionability == "blocked"
+    assert any(
+        problem.code == "formal_result_package_missing" for problem in state.problems
+    )
+
+
+def test_branched_parent_preserves_succeeded_authority() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-parent",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 8,
+                    "completionKind": "branched_revision",
+                    "parentRunId": None,
+                    "childRunIds": ["run-child"],
+                    "createdAt": "2026-08-25T00:00:00Z",
+                    "updatedAt": "2026-08-25T01:00:00Z",
+                }
+            ],
+        )
+    )
+
+    assert state.formalRuntime.lifecycle == "completed"
+    assert state.formalRuntime.outcome == "succeeded"
+    assert state.formalRuntime.lineageDisposition == "branched_parent"
+    assert state.formalRuntime.isCurrentRevision is False
+    assert state.formalRuntime.childRunIds == ["run-child"]
+
+
+def test_conflicting_current_formal_revisions_block_downstream_delivery_actions() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": run_id,
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 2,
+                    "updatedAt": updated_at,
+                }
+                for run_id, updated_at in (
+                    ("run-a", "2026-08-25T00:00:00Z"),
+                    ("run-b", "2026-08-25T01:00:00Z"),
+                )
+            ],
+            formal_snapshots={
+                "run-a": {"deliveryStatus": "succeeded"},
+                "run-b": {"deliveryStatus": "succeeded"},
+            },
+            program_output={
+                "record": {
+                    "recordId": "output-b",
+                    "runId": "run-b",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "semanticValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                    "humanGates": {"decisions": {}},
+                }
+            },
+        )
+    )
+
+    assert state.currentPhase == "formal_runtime"
+    assert state.formalRuntime.lineageDisposition == "conflicted"
+    assert state.formalRuntime.actionability == "blocked"
+    assert any(problem.code == "formal_run_lineage_conflict" for problem in state.problems)
+    assert state.allowedActions == []
+
+
+def test_converged_chain_does_not_offer_duplicate_formal_run() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[
+                {
+                    "roundId": "round-1",
+                    "question": "SCI-001",
+                    "roundIndex": 1,
+                    "status": "closed",
+                    "metaReview": {"accepted": True},
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+            formal_runs=[
+                {
+                    "runId": "run-1",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "running",
+                    "runVersion": 1,
+                    "createdAt": "2026-08-25T00:01:00Z",
+                }
+            ],
+        )
+    )
+
+    assert state.currentPhase == "formal_runtime"
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "succeeded"
+    assert not any(
+        action.kind == "command" and action.command == "create_formal_run"
+        for action in state.allowedActions
+    )
+
+
+@pytest.mark.parametrize(
+    ("round_index", "expected_command"),
+    [(1, "open_next_review"), (3, "human_adjudication")],
+)
+def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
+    round_index: int,
+    expected_command: str,
+) -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": f"link-{round_index}",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": round_index,
+                    "roundBudget": 3,
+                    "meetingRoundId": f"review-{round_index}",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": f"review-{round_index}",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[
+                {
+                    "roundId": f"round-{round_index}",
+                    "question": "SCI-001",
+                    "roundIndex": round_index,
+                    "status": "closed",
+                    "metaReview": {"accepted": False},
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+        )
+    )
+
+    commands = {
+        action.command: action
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert state.currentPhase == "convergence"
+    assert expected_command in commands
+    assert ({"open_next_review", "human_adjudication"} - {expected_command}).isdisjoint(
+        commands
+    )
+    if expected_command == "open_next_review":
+        action = commands[expected_command]
+        assert action.payload.previousMeetingRoundId == f"review-{round_index}"
+        assert action.payload.roundBudget == 3
+        assert state.convergence.lifecycle == "waiting_human"
+        assert state.convergence.outcome == "none"
+    else:
+        assert state.convergence.lifecycle == "completed"
+        assert state.convergence.outcome == "exhausted"
+
+
+def test_rejected_human_adjudication_is_terminal_and_not_reoffered() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-3",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 3,
+                    "roundBudget": 3,
+                    "meetingRoundId": "review-3",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "human_adjudication",
+                    "adjudicationId": "adjudication-1",
+                    "hypothesisRoundId": "round-3",
+                    "decision": "rejected",
+                    "questionId": "SCI-001",
+                    "updatedAt": "2026-08-25T00:05:00Z",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-3",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[
+                {
+                    "roundId": "round-3",
+                    "question": "SCI-001",
+                    "roundIndex": 3,
+                    "status": "closed",
+                    "metaReview": {"accepted": False},
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+        )
+    )
+
+    assert state.currentPhase == "convergence"
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "rejected"
+    assert state.convergence.actionability == "terminal"
+    assert not any(action.kind == "command" for action in state.allowedActions)
+
+
+def test_program_output_waits_for_exact_h1_h4_review() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-1",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 7,
+                    "completionKind": "completed",
+                    "parentRunId": None,
+                }
+            ],
+            formal_snapshots={
+                "run-1": {
+                    "deliveryStatus": "succeeded",
+                    "artifactSummary": {
+                        "finalArtifactLocator": "artifact://delivery/run-1"
+                    },
+                }
+            },
+            program_output={
+                "record": {
+                    "recordId": "output-1",
+                    "runId": "run-1",
+                    "status": "validated",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "semanticValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                    "humanGates": {
+                        "decisions": {
+                            "H1_problem_understanding": "pending",
+                            "H2_hypothesis_selection": "pending",
+                            "H3_research_plan": "pending",
+                            "H4_external_output": "pending",
+                        },
+                        "approvedCount": 0,
+                    },
+                }
+            },
+        )
+    )
+
+    assert state.currentPhase == "program_delivery"
+    assert state.programDelivery.lifecycle == "waiting_human"
+    assert state.programDelivery.humanReviewStatus == "waiting_human"
+    assert any(
+        action.kind == "command" and action.command == "record_program_review"
+        for action in state.allowedActions
+    )
+
+
+def test_program_output_validation_failure_blocks_human_review() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-1",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 7,
+                    "completionKind": "completed",
+                }
+            ],
+            formal_snapshots={"run-1": {"deliveryStatus": "succeeded"}},
+            program_output={
+                "record": {
+                    "recordId": "output-1",
+                    "runId": "run-1",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "failed",
+                        "semanticValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                    "humanGates": {"decisions": {}},
+                }
+            },
+        )
+    )
+
+    assert state.currentPhase == "program_delivery"
+    assert state.programDelivery.actionability == "blocked"
+    assert state.programDelivery.humanReviewStatus == "not_started"
+    assert any(
+        problem.code == "program_candidate_validation_failed"
+        for problem in state.problems
+    )
+    assert not any(
+        action.kind == "command" and action.command == "record_program_review"
+        for action in state.allowedActions
+    )
+
+
+def test_revision_requested_keeps_create_revision_action_in_program_phase() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-1",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 7,
+                    "completionKind": "completed",
+                }
+            ],
+            formal_snapshots={"run-1": {"deliveryStatus": "succeeded"}},
+            program_output={
+                "record": {
+                    "recordId": "output-1",
+                    "runId": "run-1",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "semanticValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                    "humanGates": {
+                        "decisions": {
+                            "H1_problem_understanding": "approved",
+                            "H2_hypothesis_selection": "revision_requested",
+                            "H3_research_plan": "approved",
+                            "H4_external_output": "approved",
+                        }
+                    },
+                }
+            },
+        )
+    )
+
+    actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "create_formal_revision"
+    ]
+    assert state.currentPhase == "program_delivery"
+    assert len(actions) == 1
+    assert actions[0].targetPhase == "program_delivery"
+
+
+def test_imported_program_output_is_visible_without_a_formal_run() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            program_output={
+                "record": {
+                    "recordId": "SCI-001:manual-run",
+                    "questionId": "SCI-001",
+                    "runId": "manual-run",
+                    "registeredAt": "2026-08-25T00:00:00Z",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "semanticValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                    "humanGates": {
+                        "decisions": {
+                            "H1_problem_understanding": "pending",
+                            "H2_hypothesis_selection": "pending",
+                            "H3_research_plan": "pending",
+                            "H4_external_output": "pending",
+                        }
+                    },
+                }
+            },
+        )
+    )
+
+    assert state.isInitial is False
+    assert state.currentPhase == "program_delivery"
+    assert state.programDelivery.outputRunId == "manual-run"
+    assert state.programDelivery.humanReviewStatus == "waiting_human"
+    assert any(
+        action.kind == "command" and action.command == "record_program_review"
+        for action in state.allowedActions
+    )
+
+
+def test_default_review_return_route_uses_the_canonical_team_workspace_url() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "questionId": "SCI-001",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "questionId": "SCI-001",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "roundIndex": 1,
+                    "meetingRoundId": "meeting-1",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "meeting-1",
+                    "meetingType": "hypothesis_review",
+                    "status": "awaiting_approval",
+                    "linkedChatRoomId": "room-1",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    anchor = state.review.candidates[0].discussionAnchor
+    assert anchor is not None
+    assert anchor.returnTo == (
+        "/teams?teamId=team-1&researchView=workflow&"
+        "workflowId=challenge-cup-research&questionId=SCI-001&panel=node"
+    )
+    assert "returnTo=%2Fteams%3FteamId%3Dteam-1" in str(anchor.deepLink)
+
+
+def test_generation_waiting_human_exposes_approval_and_room_navigation() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[
+                {
+                    "meetingRoundId": "generation-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-001",
+                    "status": "awaiting_approval",
+                    "linkedChatRoomId": "room-generation",
+                    "digestDraft": {"contentHash": "digest-hash"},
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            return_to="/teams?teamId=team-1&researchView=workflow",
+        )
+    )
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    navigation = [
+        action
+        for action in state.allowedActions
+        if action.kind == "navigation"
+    ]
+    assert "approve_summary" in commands
+    assert len(navigation) == 1
+    assert navigation[0].navigation.meetingRoundId == "generation-1"
+    assert navigation[0].navigation.returnTo.startswith("/teams?")
+
+
+def test_stalled_review_exposes_precise_discussion_recovery_actions() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "blocked",
+                    "stalledReason": "discussion driver stopped",
+                    "linkedChatRoomId": "room-review",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert {"resume_discussion", "stop_discussion", "regenerate_summary"} <= commands
+
+
+def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> None:
+    failed = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-failed",
+                    "questionId": "SCI-001",
+                    "status": "active",
+                    "collectionRunId": "child-failed",
+                    "collectionRunStatus": "failed",
+                    "searchEnvelope": {"keywords": ["water"]},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    assert any(
+        action.kind == "command"
+        and action.command == "retry_collection"
+        and action.payload.requestId == "request-failed"
+        for action in failed.allowedActions
+    )
+
+    completed = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-completed",
+                    "questionId": "SCI-001",
+                    "status": "active",
+                    "collectionRunId": "child-completed",
+                    "collectionRunStatus": "succeeded",
+                    "searchEnvelope": {"keywords": ["water"]},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    assert any(
+        action.kind == "command"
+        and action.command == "handoff_collection"
+        and action.payload.requestId == "request-completed"
+        for action in completed.allowedActions
+    )
+
+
+def test_scope_cas_rejects_stale_state_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: {"stateVersion": "hf2-action:actual:new"},
+    )
+
+    with pytest.raises(hypothesis_first_chain.StateVersionConflictError) as raised:
+        hypothesis_first_chain.assert_expected_state_version(
+            "team-1", "SCI-001", "hf2-action:stale:old"
+        )
+
+    assert raised.value.code == "state_version_conflict"
+    assert raised.value.expected == "hf2-action:stale:old"
+    assert raised.value.actual == "hf2-action:actual:new"
+
+
+def test_v2_command_route_maps_stale_version_to_409(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conflict = hypothesis_first_routes.hypothesis_first_chain.StateVersionConflictError(
+        expected="hf2-action:stale:old",
+        actual="hf2-action:actual:new",
+        snapshot_path="/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2?questionId=SCI-001",
+    )
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_chain,
+        "execute_v2_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(conflict),
+    )
+    monkeypatch.setattr(
+        hypothesis_first_routes,
+        "server_operator_scope_from_http",
+        lambda _request: nullcontext(),
+    )
+    payload = HypothesisFirstCommandRequest.model_validate(
+        {
+            "actionId": "open-generation",
+            "idempotencyKey": "hf2:open-generation:test",
+            "expectedStateVersion": "hf2-action:stale:old",
+            "payload": {"questionId": "SCI-001"},
+        }
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        hypothesis_first_routes.team_workflow_hypothesis_first_command(
+            "team-1",
+            payload,
+            Request({"type": "http", "method": "POST", "path": "/"}),
+            question_id="SCI-001",
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "state_version_conflict"
+    assert raised.value.detail["actualStateVersion"] == "hf2-action:actual:new"
+
+
+def test_v2_command_route_maps_invalid_control_auth_to_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(_request):
+        raise PermissionError("command_forbidden")
+
+    monkeypatch.setattr(
+        hypothesis_first_routes,
+        "server_operator_scope_from_http",
+        forbidden,
+    )
+    payload = HypothesisFirstCommandRequest.model_validate(
+        {
+            "actionId": "open-generation",
+            "idempotencyKey": "hf2:open-generation:test",
+            "expectedStateVersion": "hf2-action:origin:test",
+            "payload": {"questionId": "SCI-001"},
+        }
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        hypothesis_first_routes.team_workflow_hypothesis_first_command(
+            "team-1",
+            payload,
+            Request({"type": "http", "method": "POST", "path": "/"}),
+            question_id="SCI-001",
+        )
+
+    assert raised.value.status_code == 403
+    assert raised.value.detail["code"] == "command_forbidden"
+
+
+def test_command_request_keeps_handoff_payload_identity() -> None:
+    request = HypothesisFirstCommandRequest.model_validate(
+        {
+            "actionId": "handoff-collection:request-1",
+            "idempotencyKey": "hf2:handoff-collection:request-1",
+            "expectedStateVersion": "hf2-action:origin:test",
+            "payload": {"requestId": "request-1", "childRunId": "child-1"},
+        }
+    )
+
+    assert type(request.payload) is CollectionChildRunPayload
+
+
+def test_production_projector_reads_formal_and_program_authorities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    monkeypatch.setattr(
+        "core.web.services.team_service.assert_team_exists",
+        lambda team_id: team_id,
+    )
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        lambda *_args: {
+            "targetMeetingIds": [],
+            "targetRoundIds": [],
+            "chainRecords": [],
+            "selectionRecords": [],
+            "meetingRecords": [],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [],
+        },
+    )
+
+    class QueryService:
+        def list_runs(self, **_kwargs):
+            return {
+                "runs": [
+                    {
+                        "runId": "run-1",
+                        "teamId": "team-1",
+                        "questionId": "SCI-001",
+                        "status": "succeeded",
+                        "runVersion": 2,
+                    }
+                ]
+            }
+
+        def get_snapshot(self, **_kwargs):
+            return {
+                "deliveryStatus": "succeeded",
+                "artifactSummary": {
+                    "finalArtifactLocator": "artifact://delivery/run-1"
+                },
+            }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: QueryService(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: {
+            "record": {
+                "recordId": "SCI-001:run-1",
+                "questionId": "SCI-001",
+                "runId": "run-1",
+                "humanGates": {
+                    "decisions": {
+                        "H1_problem_understanding": "pending",
+                        "H2_hypothesis_selection": "pending",
+                        "H3_research_plan": "pending",
+                        "H4_external_output": "pending",
+                    }
+                },
+            }
+        },
+    )
+
+    state = HypothesisFirstStateV2.model_validate(
+        state_module.project_hypothesis_first_state_v2("team-1", "SCI-001")
+    )
+
+    assert state.formalRuntime.runId == "run-1"
+    assert state.currentPhase == "program_delivery"
+    assert state.programDelivery.outputRunId == "run-1"
+
+
+def test_v2_route_maps_unavailable_authority_to_structured_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+
+    def unavailable(*_args, **_kwargs):
+        raise state_module.HypothesisFirstStateSourceError("formal ledger unavailable")
+
+    monkeypatch.setattr(state_module, "project_hypothesis_first_state_v2", unavailable)
+
+    with pytest.raises(HTTPException) as raised:
+        hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+            "team-1",
+            Response(),
+            question_id="SCI-001",
+            if_none_match=None,
+            include_source_cursor=False,
+        )
+
+    assert raised.value.status_code == 503
+    assert raised.value.detail["code"] == "state_source_unavailable"
+
+
+def test_telemetry_changes_representation_version_without_changing_state_version() -> None:
+    first = _initial_snapshot()
+    first["computedAt"] = "2026-08-25T00:00:00Z"
+    second = deepcopy(first)
+    second["computedAt"] = "2026-08-25T00:00:05Z"
+    second["generation"]["updatedAt"] = "2026-08-25T00:00:05Z"
+
+    first_versioned = finalize_state_versions(first, reset_id="origin")
+    second_versioned = finalize_state_versions(second, reset_id="origin")
+
+    assert first_versioned["stateVersion"] == second_versioned["stateVersion"]
+    assert (
+        first_versioned["representationVersion"]
+        != second_versioned["representationVersion"]
+    )
+
+
+def test_question_source_replay_cache_is_bound_to_durable_file_cursors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    state_module.clear_hypothesis_first_state_v2_cache()
+    signature = [("chain.jsonl", 10, 100)]
+    reads = 0
+
+    def read_snapshot(*_args):
+        nonlocal reads
+        reads += 1
+        return {
+            "chainRecords": [
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "questionId": f"SCI-{index + 100:03d}",
+                    "candidateId": f"unrelated-{index}",
+                }
+                for index in range(10_000)
+            ]
+            + [
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "questionId": "SCI-001",
+                    "candidateId": f"candidate-{reads}",
+                }
+            ],
+            "selectionRecords": [],
+            "meetingRecords": [],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [],
+            "targetMeetingIds": set(),
+            "targetRoundIds": set(),
+        }
+
+    monkeypatch.setattr(
+        state_module,
+        "_question_snapshot_signature",
+        lambda _team_id: tuple(signature),
+    )
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        read_snapshot,
+    )
+
+    first = state_module._cached_question_reset_snapshot("team-1", "SCI-001")
+    first["chainRecords"].append({"mutated": True})
+    second = state_module._cached_question_reset_snapshot("team-1", "SCI-001")
+    assert reads == 1
+    assert second["chainRecords"] == [
+        {
+            "recordKind": "hypothesis_candidate",
+            "questionId": "SCI-001",
+            "candidateId": "candidate-1",
+        }
+    ]
+
+    signature[0] = ("chain.jsonl", 11, 101)
+    third = state_module._cached_question_reset_snapshot("team-1", "SCI-001")
+    assert reads == 2
+    assert third["chainRecords"][0]["candidateId"] == "candidate-2"
+    state_module.clear_hypothesis_first_state_v2_cache()
+
+
+def test_v2_route_uses_representation_version_for_etag(monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshot = finalize_state_versions(_initial_snapshot(), reset_id="origin")
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    response = Response()
+
+    result = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        response,
+        question_id="SCI-001",
+        if_none_match=None,
+        include_source_cursor=False,
+    )
+
+    assert result == snapshot
+    assert response.headers["etag"] == f'"{snapshot["representationVersion"]}"'
+
+    not_modified = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        Response(),
+        question_id="SCI-001",
+        if_none_match=f'"{snapshot["representationVersion"]}"',
+        include_source_cursor=False,
+    )
+    assert isinstance(not_modified, Response)
+    assert not_modified.status_code == 304
+
+
+def test_v2_diagnostic_route_is_no_store_and_never_returns_304(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = finalize_state_versions(_initial_snapshot(), reset_id="origin")
+    snapshot["sourceCursor"] = {"chain": "cursor-1"}
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    response = Response()
+
+    result = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        response,
+        question_id="SCI-001",
+        if_none_match=f'"{snapshot["representationVersion"]}"',
+        include_source_cursor=True,
+    )
+
+    assert result == snapshot
+    assert response.headers["cache-control"] == "no-store"
+    assert "etag" not in response.headers
+
+
+def test_generation_attempt_does_not_hide_awaiting_human_meeting() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-001",
+                    "meetingRoundId": "generation-1",
+                    "lifecycle": "running",
+                    "outcome": "none",
+                }
+            ],
+            selection_records=[],
+            meeting_records=[
+                {
+                    "meetingRoundId": "generation-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-001",
+                    "status": "awaiting_approval",
+                    "linkedChatRoomId": "room-generation",
+                    "digestDraft": {"contentHash": "digest-hash"},
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.generation.lifecycle == "waiting_human"
+    assert state.generation.actionability == "waiting_user"
+
+
+def test_reset_audit_without_business_facts_is_initial() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary={
+                "resetId": "reset-1",
+                "resetAt": "2026-08-25T00:00:00Z",
+            },
+            chain_records=[
+                {
+                    "recordKind": "question_reset_audit",
+                    "questionId": "SCI-001",
+                    "resetId": "reset-1",
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.isInitial is True
+    assert state.currentPhase == "generation"
+
+
+def test_program_delivery_needs_context_exposes_only_retry_handoff() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[
+                {
+                    "runId": "run-1",
+                    "teamId": "team-1",
+                    "questionId": "SCI-001",
+                    "status": "succeeded",
+                    "runVersion": 1,
+                }
+            ],
+            formal_snapshots={
+                "run-1": {
+                    "deliveryStatus": "blocked",
+                    "artifactSummary": {
+                        "finalArtifactLocator": "artifact://delivery/run-1"
+                    },
+                    "programCandidateHandoff": {"status": "NEEDS_CONTEXT"},
+                }
+            },
+        )
+    )
+
+    assert state.currentPhase == "program_delivery"
+    assert state.programDelivery.deliveryStatus == "blocked"
+    assert state.programDelivery.handoffStatus == "needs_context"
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert commands == {"retry_program_handoff"}
+    assert "open_generation" not in commands

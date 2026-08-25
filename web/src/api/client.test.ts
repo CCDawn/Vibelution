@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchJson,
   fetchWithControl,
+  isFetchJsonHttpError,
   isFetchAbortError,
   resetControlTokenForTests,
   setFetchJsonFailureReporter,
@@ -211,6 +212,35 @@ describe("fetchJson control token", () => {
         failureKind: "http",
       },
     ]);
+  });
+
+  it("exposes HTTP status and stable problem code without changing the message", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ detail: { code: "catalog_question_unknown", message: "unknown question" } }),
+        text: async () => "",
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = fetchJson("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2");
+    await expect(result).rejects.toMatchObject({
+      status: 404,
+      code: "catalog_question_unknown",
+    });
+    await expect(result).rejects.toThrow(JSON.stringify({
+      detail: { code: "catalog_question_unknown", message: "unknown question" },
+    }));
+    await expect(result).rejects.toSatisfy((error: unknown) => isFetchJsonHttpError(error));
   });
 
   it("refreshes a rotated control token and retries the guarded request once", async () => {

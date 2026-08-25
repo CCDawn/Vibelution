@@ -409,6 +409,24 @@ function presentationFor(action: HypothesisFirstNextAction): TaskPresentation {
             authority: "hypothesis_first",
           };
     }
+    case "program_delivery":
+      return {
+        stage: "hypothesis_first",
+        step: "formal_runtime",
+        status: action.disabledReason ? "blocked" : "waiting_user",
+        title: action.disabledReason ? "正式结果交付需要处理" : "审核正式研究结果",
+        detail: action.disabledReason || action.statusMessage || "正式研究结果已登记，等待完成 H1–H4 审核。",
+        authority: "hypothesis_first",
+      };
+    case "completed":
+      return {
+        stage: "hypothesis_first",
+        step: "formal_runtime",
+        status: "completed",
+        title: "挑战杯研究流程已闭环",
+        detail: action.statusMessage || "正式研究结果和 H1–H4 审核均已完成。",
+        authority: "hypothesis_first",
+      };
     case "blocked":
       return {
         stage: "hypothesis_first",

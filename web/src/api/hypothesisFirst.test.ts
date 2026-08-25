@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { FetchJsonHttpError } from "./client";
+import { isHypothesisFirstStateV2EndpointUnavailable } from "./hypothesisFirst";
 import apiSource from "./hypothesisFirst.ts?raw";
 import typesSource from "./types/hypothesisFirst.ts?raw";
 import selectionPanelSource from "../routes/teams/challenge-cup/HypothesisSelectionPanel.tsx?raw";
@@ -9,6 +11,21 @@ import meetingOpsSource from "../routes/teams/research-workflow/HypothesisFirstM
 import selectionListSource from "../routes/teams/challenge-cup/HypothesisSelectionList.tsx?raw";
 
 describe("hypothesis-first API", () => {
+  it("falls back only for an absent route, not a domain 404", () => {
+    expect(isHypothesisFirstStateV2EndpointUnavailable(new FetchJsonHttpError(
+      JSON.stringify({ detail: "Not Found" }),
+      { status: 404, details: { detail: "Not Found" } },
+    ))).toBe(true);
+    expect(isHypothesisFirstStateV2EndpointUnavailable(new FetchJsonHttpError(
+      JSON.stringify({ detail: { code: "catalog_question_unknown" } }),
+      {
+        status: 404,
+        code: "catalog_question_unknown",
+        details: { detail: { code: "catalog_question_unknown" } },
+      },
+    ))).toBe(false);
+  });
+
   it("owns the hypothesis-first selection transports", () => {
     expect(apiSource).toContain("export function recordHypothesisSelection");
     expect(apiSource).toContain("export function fetchHypothesisSelections");
@@ -37,6 +54,8 @@ describe("hypothesis-first API", () => {
   it("owns the hypothesis-round and chain transports", () => {
     expect(apiSource).toContain("export function fetchHypothesisRounds");
     expect(apiSource).toContain("export function fetchHypothesisFirstChainState");
+    expect(apiSource).toContain("export function fetchHypothesisFirstStateV2");
+    expect(apiSource).toContain("export function executeHypothesisFirstCommand");
     expect(apiSource).toContain("export function fetchCollectionRequests");
     expect(apiSource).toContain("export function fetchReviewRoundLinks");
     expect(apiSource).toContain("export function closeHypothesisReviewMeeting");
@@ -46,6 +65,8 @@ describe("hypothesis-first API", () => {
     expect(apiSource).toContain("/recover");
     expect(apiSource).toContain("/hypothesis-rounds");
     expect(apiSource).toContain("/hypothesis-first/chain/state");
+    expect(apiSource).toContain("/hypothesis-first/chain/state-v2");
+    expect(apiSource).toContain("/hypothesis-first/chain/commands");
   });
 
   it("publishes typed DTOs for the flow records", () => {

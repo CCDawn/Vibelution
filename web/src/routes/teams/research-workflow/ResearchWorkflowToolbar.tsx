@@ -121,6 +121,8 @@ export function ResearchWorkflowToolbar(props: {
   atCurrentTask?: boolean;
   /** Review-round progress for the hypothesis-first chain (K of budget). */
   chainRound?: { current: number; budget: number } | null;
+  /** Canonical count of human work items for the selected question. */
+  awaitingHumanCount?: number;
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
@@ -170,6 +172,21 @@ export function ResearchWorkflowToolbar(props: {
         </div>
       </div>
       <div className={styles.actions}>
+        {(props.awaitingHumanCount ?? 0) > 0 ? (
+          <VButton
+            type="button"
+            density="compact"
+            variant="secondary"
+            onClick={props.onNavigateCurrent}
+            isDisabled={!props.onNavigateCurrent}
+            disabledReason={props.onNavigateCurrent ? undefined : (isZh ? "当前任务尚未就绪" : "The current task is not ready")}
+            data-testid="research-awaiting-human-badge"
+          >
+            {isZh
+              ? `待人工处理 ${props.awaitingHumanCount}`
+              : `${props.awaitingHumanCount} awaiting human`}
+          </VButton>
+        ) : null}
         <VDropdownMenu
           aria-label={isZh ? "查看只读信息" : "View read-only information"}
           align="end"

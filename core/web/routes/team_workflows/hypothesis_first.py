@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, NoReturn
 
-from fastapi import Query, status
+from fastapi import Header, HTTPException, Query, Request, Response, status
 
 from core.research.workflow.contracts import ContractValidationError, scope_hash_for
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
@@ -27,6 +27,10 @@ from core.web.services.team_workflow.challenge_question_runs import (
 )
 from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain,
+    hypothesis_first_state_v2,
+)
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    server_operator_scope_from_http,
 )
 from core.web.services.team_workflow.research_runtime.runtime_factory import (
     production_workflow_runtime,
@@ -69,6 +73,10 @@ from .hypothesis_first_models import (
     ReviewReopenPayload,
     ReviewRoundLinkListResponse,
     SelectionContextResponse,
+)
+from .hypothesis_first_state_models import (
+    HypothesisFirstCommandRequest,
+    HypothesisFirstStateV2,
 )
 
 _HYPOTHESIS_FIRST_WORKFLOW = "hypothesis_first"
@@ -137,7 +145,13 @@ def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
     """Map service exceptions to HTTP errors with route-error diagnostics."""
     if isinstance(exc, TeamNotFoundError):
         status_code = 404
-    elif isinstance(exc, hypothesis_first_chain.StaleDigestError):
+    elif isinstance(
+        exc,
+        (
+            hypothesis_first_chain.StateVersionConflictError,
+            hypothesis_first_chain.StaleDigestError,
+        ),
+    ):
         status_code = 409
     elif isinstance(
         exc,
@@ -652,6 +666,107 @@ def team_workflow_hypothesis_first_chain_state(
         return hypothesis_first_chain.chain_state(team_id, question_id)
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.state", team_id, exc)
+
+
+def _etag_matches(if_none_match: str | None, representation_version: str) -> bool:
+    for token in str(if_none_match or "").split(","):
+        normalized = token.strip()
+        if normalized.startswith("W/"):
+            normalized = normalized[2:].strip()
+        if normalized.strip('"') == representation_version:
+            return True
+    return False
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/state-v2",
+    response_model=HypothesisFirstStateV2,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_chain_state_v2(
+    team_id: str,
+    response: Response,
+    question_id: str = Query(..., alias="questionId", min_length=1, max_length=200),
+    if_none_match: str | None = Header(None, alias="If-None-Match"),
+    include_source_cursor: bool = Query(False, alias="includeSourceCursor"),
+) -> dict | Response:
+    try:
+        snapshot = hypothesis_first_state_v2.project_hypothesis_first_state_v2(
+            team_id,
+            question_id,
+            include_source_cursor=include_source_cursor,
+        )
+    except hypothesis_first_state_v2.HypothesisFirstStateScopeError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except hypothesis_first_state_v2.HypothesisFirstStateSourceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.state_v2", team_id, exc)
+
+    representation_version = str(snapshot["representationVersion"])
+    if include_source_cursor:
+        response.headers["Cache-Control"] = "no-store"
+        return snapshot
+    etag = f'"{representation_version}"'
+    if _etag_matches(if_none_match, representation_version):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, must-revalidate"
+    return snapshot
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/commands",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_command(
+    team_id: str,
+    payload: HypothesisFirstCommandRequest,
+    http_request: Request,
+    question_id: str = Query("", alias="questionId", max_length=200),
+) -> dict:
+    """Execute one server-authorized V2 command with scope-lock CAS.
+
+    The command is re-authorized from the latest V2 ``allowedActions`` inside
+    the owning orchestration lock.  Clients send only the action envelope and
+    declaration input; labels and target metadata are never trusted.
+    """
+
+    try:
+        with server_operator_scope_from_http(http_request):
+            return hypothesis_first_chain.execute_v2_command(
+                team_id,
+                payload.model_dump(),
+                question_id=question_id,
+            )
+    except hypothesis_first_chain.StateVersionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "expectedStateVersion": exc.expected,
+                "actualStateVersion": exc.actual,
+                "snapshotUrl": exc.snapshot_path,
+            },
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "command_forbidden",
+                "message": str(exc) or "command_forbidden",
+            },
+        ) from exc
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.command", team_id, exc)
 
 
 @router.get(

@@ -8,23 +8,28 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
+import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 import {
+  executeHypothesisFirstCommand,
+  isHypothesisFirstCommandStateConflict,
   openHypothesisCandidateGeneration,
   openNextHypothesisReviewRound,
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
+import type { CommandAction, HypothesisFirstStateV2, MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import {
   VButton,
   VEmptyState,
   VErrorSummary,
+  VInput,
   VStateRow,
   VStateSurface,
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
 import { HypothesisSelectionList } from "../challenge-cup/HypothesisSelectionList";
+import { ChallengeQuestionReviewForm } from "../challenge-cup/ChallengeQuestionReviewForm";
 import {
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
   HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
@@ -37,7 +42,6 @@ import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import {
   buildHypothesisFirstReviewProjection,
   currentProjectedReview,
-  type ProjectedReviewMeeting,
 } from "./hypothesisFirstMeetingProjection";
 import {
   boundChatRoundsAreTerminal,
@@ -45,6 +49,7 @@ import {
   resolveHypothesisFirstNextAction,
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
+import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
 import { invalidateHypothesisFirstQueries, useHypothesisFirstChain } from "./useHypothesisFirstChain";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
@@ -175,7 +180,14 @@ export function HypothesisFirstNodeInspector({
       ? resolvePollingInterval(pageVisible, 4_000)
       : false,
   });
-  const nextAction = resolveHypothesisFirstNextAction({
+  const selectedProjectedReview = reviewProjection.byNodeId.get(nodeId)
+    ?? (activeMeeting ? reviewProjection.byMeetingId.get(activeMeeting.meetingRoundId) : undefined);
+  const nextAction = chain.stateV2
+    ? resolveHypothesisFirstNextActionFromV2(chain.stateV2, {
+        preferredCandidateId: selectedProjectedReview?.candidateId,
+        preferredMeetingRoundId: activeMeeting?.meetingRoundId,
+      })
+    : resolveHypothesisFirstNextAction({
     run: { runId: runId || (questionId ? "present" : "") },
     chainState: chain.chainState,
     meetings: questionMeetings,
@@ -189,12 +201,22 @@ export function HypothesisFirstNodeInspector({
     }),
     collectionChildStatus,
     selectedNodeId: nodeId,
-  });
+    });
   const currentChecklistRoundIndex = checklistRoundIndex(
     reviewProjection,
     nextAction.targetNodeId,
     nodeId,
   );
+  const canonicalChecklistRows = chain.stateV2?.review.candidates.map((candidate) => ({
+    candidateId: candidate.candidateId,
+    roundIndex: candidate.roundIndex,
+    nodeId: `hf_meeting_${candidate.roundIndex}_${encodeURIComponent(candidate.candidateId)}`,
+    kind: candidate.lifecycle === "completed"
+      ? "confirmed" as const
+      : candidate.lifecycle === "failed" || candidate.actionability === "blocked"
+        ? "blocked" as const
+        : "pending" as const,
+  })) ?? null;
   const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
   const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
@@ -296,6 +318,7 @@ export function HypothesisFirstNodeInspector({
             onRetryCollection={onRetryCollection}
             onNavigateToNode={onNavigateToNode}
             onOpenQuestion={onOpenQuestion}
+            stateV2={chain.stateV2}
           />
           {(
             nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID
@@ -303,8 +326,13 @@ export function HypothesisFirstNodeInspector({
             || nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID
           ) ? (
             <ReviewCandidateChecklist
-              rounds={reviewProjection.rounds}
-              currentRoundIndex={currentChecklistRoundIndex}
+              rows={canonicalChecklistRows ?? reviewProjection.rounds.map((round) => ({
+                candidateId: round.candidateId,
+                roundIndex: round.roundIndex,
+                nodeId: round.nodeId,
+                kind: reviewCandidateState(round.meeting),
+              }))}
+              currentRoundIndex={chain.stateV2?.review.activeRoundIndex ?? currentChecklistRoundIndex}
               lang={lang}
               onNavigateToNode={onNavigateToNode}
             />
@@ -345,38 +373,38 @@ export function HypothesisFirstNodeInspector({
   );
 }
 
-function reviewCandidateState(meeting: MeetingRoundRecord, lang: Language): {
-  kind: "confirmed" | "blocked" | "pending";
-  label: string;
-  tone: "neutral" | "warning" | "success";
-} {
+function reviewCandidateState(meeting: MeetingRoundRecord): "confirmed" | "blocked" | "pending" {
   if (meeting.status === "closed") {
-    return { kind: "confirmed", label: lang === "zh" ? "已确认" : "Confirmed", tone: "success" };
+    return "confirmed";
   }
   if (["failed", "blocked", "cancelled", "canceled"].includes(meeting.status)) {
-    return { kind: "blocked", label: lang === "zh" ? "已阻塞" : "Blocked", tone: "warning" };
+    return "blocked";
   }
-  return { kind: "pending", label: lang === "zh" ? "待确认" : "Pending", tone: "neutral" };
+  return "pending";
 }
 
 function ReviewCandidateChecklist({
-  rounds,
+  rows,
   currentRoundIndex,
   lang,
   onNavigateToNode,
 }: {
-  rounds: readonly ProjectedReviewMeeting[];
+  rows: readonly {
+    candidateId: string;
+    roundIndex: number;
+    nodeId: string;
+    kind: "confirmed" | "blocked" | "pending";
+  }[];
   currentRoundIndex: number | null;
   lang: Language;
   onNavigateToNode?: (nodeId: string) => void;
 }) {
   const currentRounds = currentRoundIndex === null
     ? []
-    : rounds.filter((round) => round.roundIndex === currentRoundIndex);
+    : rows.filter((round) => round.roundIndex === currentRoundIndex);
   if (!currentRounds.length) return null;
-  const states = currentRounds.map((round) => reviewCandidateState(round.meeting, lang));
-  const confirmed = states.filter((state) => state.kind === "confirmed").length;
-  const blocked = states.filter((state) => state.kind === "blocked").length;
+  const confirmed = currentRounds.filter((state) => state.kind === "confirmed").length;
+  const blocked = currentRounds.filter((state) => state.kind === "blocked").length;
   const pending = currentRounds.length - confirmed - blocked;
   const isZh = lang === "zh";
   return (
@@ -390,19 +418,25 @@ function ReviewCandidateChecklist({
       </div>
       <ol className={styles.candidateChecklistList}>
         {currentRounds.map((round, index) => {
-          const state = states[index]!;
+          const state = round.kind;
           const identity = isZh ? `候选 ${round.candidateId}` : `Candidate ${round.candidateId}`;
+          const label = state === "confirmed"
+            ? (isZh ? "已确认" : "Confirmed")
+            : state === "blocked"
+              ? (isZh ? "已阻塞" : "Blocked")
+              : (isZh ? "待确认" : "Pending");
+          const tone = state === "confirmed" ? "success" : state === "blocked" ? "warning" : "neutral";
           return (
             <li className={styles.candidateChecklistItem} key={round.nodeId}>
               <div className={styles.candidateChecklistIdentity}>
                 <strong>{identity}</strong>
                 <span>{isZh ? `第 ${round.roundIndex} 轮` : `Round ${round.roundIndex}`}</span>
               </div>
-              <VStatusChip tone={state.tone}>{state.label}</VStatusChip>
+              <VStatusChip tone={tone}>{label}</VStatusChip>
               {onNavigateToNode ? (
                 <VButton
                   type="button"
-                  variant={state.kind === "pending" ? "primary" : "ghost"}
+                  variant={state === "pending" ? "primary" : "ghost"}
                   density="compact"
                   onPress={() => onNavigateToNode(round.nodeId)}
                 >
@@ -453,9 +487,20 @@ function InspectorBody(props: {
   onRetryCollection?: () => Promise<void>;
   onNavigateToNode?: (nodeId: string) => void;
   onOpenQuestion: (questionId: string) => void;
+  stateV2?: HypothesisFirstStateV2 | null;
 }) {
   const { nodeId, nextAction, teamId, questionId, liveMeetingRoundId, lang } = props;
   const isZh = lang === "zh";
+  const outputRunId = props.stateV2?.programDelivery?.outputRunId || "";
+  const programDeliveryQuery = useQuery({
+    queryKey: queryKeys.challengeQuestionRunDetail(teamId, questionId, outputRunId),
+    queryFn: () => getChallengeQuestionRunDetail(teamId, questionId, outputRunId),
+    enabled: Boolean(
+      outputRunId
+      && (props.stateV2?.currentPhase === "program_delivery" || props.stateV2?.currentPhase === "completed"),
+    ),
+    staleTime: 30_000,
+  });
   if (nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID) {
     if (nextAction.stage === "selection_required") {
       return (
@@ -478,6 +523,7 @@ function InspectorBody(props: {
           questionId={questionId}
           label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
           lang={lang}
+          canonicalAction={nextAction.canonicalAction}
         />
       );
     }
@@ -500,11 +546,22 @@ function InspectorBody(props: {
         questionId={questionId}
         label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
         lang={lang}
+        canonicalAction={nextAction.canonicalAction}
       />
     );
   }
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
-    return <HypothesisSelectionList teamId={teamId} questionId={questionId} compact lang={lang} />;
+    return (
+      <HypothesisSelectionList
+        teamId={teamId}
+        questionId={questionId}
+        compact
+        lang={lang}
+        canonicalAction={nextAction.canonicalAction?.command === "record_selection"
+          ? nextAction.canonicalAction
+          : undefined}
+      />
+    );
   }
   if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID || nodeId.startsWith("hf_meeting_")) {
     if (!liveMeetingRoundId && !nextAction.meetingRoundId) {
@@ -540,6 +597,91 @@ function InspectorBody(props: {
   }
   if (nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID) {
     const summary = props.stageSummary;
+    const programDelivery = props.stateV2?.programDelivery;
+    if (props.stateV2?.currentPhase === "completed") {
+      return (
+        <div className={styles.task} data-testid="challenge-cup-workflow-completed">
+          <VStateRow tone="success">
+            {isZh ? "挑战杯研究流程已闭环" : "Challenge Cup research workflow completed"}
+          </VStateRow>
+          <p className={styles.status}>
+            {isZh
+              ? "正式研究结果已登记，H1–H4 四项审核全部通过。"
+              : "The formal result is registered and all H1-H4 gates are approved."}
+          </p>
+        </div>
+      );
+    }
+    if (props.stateV2?.currentPhase === "program_delivery") {
+      if (programDelivery?.actionability === "blocked") {
+        return (
+          <VStateSurface
+            tone="error"
+            density="compact"
+            title={isZh ? "正式结果交付需要处理" : "Formal result delivery needs attention"}
+          >
+            <p>{programDelivery.problems[0]?.message || nextAction.disabledReason || nextAction.statusMessage}</p>
+            {nextAction.canonicalAction ? (
+              <CanonicalCommandButton
+                teamId={teamId}
+                questionId={questionId}
+                action={nextAction.canonicalAction}
+                lang={lang}
+              />
+            ) : null}
+          </VStateSurface>
+        );
+      }
+      if (nextAction.canonicalAction?.command === "create_formal_revision") {
+        return (
+          <div className={styles.task}>
+            <VStateRow tone="warning">
+              {isZh ? "H1–H4 审核要求修订正式研究结果。" : "The H1-H4 review requested a formal research revision."}
+            </VStateRow>
+            <CanonicalCommandButton
+              teamId={teamId}
+              questionId={questionId}
+              action={nextAction.canonicalAction}
+              lang={lang}
+            />
+          </div>
+        );
+      }
+      if (!outputRunId) {
+        return (
+          <VStateSurface
+            tone="error"
+            density="compact"
+            title={isZh ? "缺少待审核结果标识" : "Review output identifier is missing"}
+          >
+            <p>{isZh ? "结果已进入交付阶段，但尚未绑定可审核的 outputRunId。" : "Delivery has started without a reviewable outputRunId."}</p>
+          </VStateSurface>
+        );
+      }
+      if (programDeliveryQuery.isLoading) {
+        return <VStateSurface tone="loading" density="compact" title={isZh ? "读取正式结果审核信息" : "Loading formal result review"} />;
+      }
+      if (programDeliveryQuery.isError || !programDeliveryQuery.data) {
+        return (
+          <VStateSurface
+            tone="error"
+            density="compact"
+            title={isZh ? "正式结果审核信息加载失败" : "Formal result review failed to load"}
+          >
+            <p>{programDeliveryQuery.error instanceof Error ? programDeliveryQuery.error.message : "challenge_question_run_detail_unavailable"}</p>
+          </VStateSurface>
+        );
+      }
+      return (
+        <ChallengeQuestionReviewForm
+          detail={programDeliveryQuery.data}
+          lang={lang}
+          canonicalAction={nextAction.canonicalAction?.command === "record_program_review"
+            ? nextAction.canonicalAction
+            : undefined}
+        />
+      );
+    }
     return (
       <div className={styles.task}>
         <VStateRow tone={nextAction.stage === "converged" ? "success" : "warning"}>
@@ -558,24 +700,29 @@ function InspectorBody(props: {
         {nextAction.stage === "converged" && nextAction.commandDetail ? (
           <p className={styles.status}>{nextAction.commandDetail}</p>
         ) : null}
-        {nextAction.command === "human_adjudication" ? (
-          <div className={styles.task}>
+        {nextAction.command === "human_adjudication"
+          && nextAction.canonicalAction?.command === "human_adjudication" ? (
+            <HumanAdjudicationAction
+              teamId={teamId}
+              questionId={questionId}
+              action={nextAction.canonicalAction}
+              lang={lang}
+            />
+          ) : nextAction.command === "human_adjudication" ? (
             <NextReviewRoundButton
               teamId={teamId}
               questionId={questionId}
               meetingRoundId={liveMeetingRoundId}
               lang={lang}
             />
-            <VButton
-              type="button"
-              variant="ghost"
-              density="compact"
-              onClick={() => props.onOpenQuestion(questionId)}
-            >
-              {isZh ? "打开题目档案" : "Open question archive"}
-            </VButton>
-          </div>
-        ) : null}
+          ) : nextAction.canonicalAction ? (
+            <CanonicalCommandButton
+              teamId={teamId}
+              questionId={questionId}
+              action={nextAction.canonicalAction}
+              lang={lang}
+            />
+          ) : null}
       </div>
     );
   }
@@ -659,6 +806,126 @@ function meetingHasDigestForHistory(meeting: MeetingRoundRecord): boolean {
   return Boolean(meeting.digestId || meeting.digestRef);
 }
 
+function CanonicalCommandButton(props: {
+  teamId: string;
+  questionId: string;
+  action: CommandAction;
+  lang: Language;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation<unknown, Error, void>({
+    mutationFn: () => executeHypothesisFirstCommand(
+      props.teamId,
+      props.questionId,
+      props.action,
+    ),
+    onSuccess: () => invalidateHypothesisFirstQueries(
+      queryClient,
+      props.teamId,
+      props.questionId,
+    ),
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      }
+    },
+  });
+  return (
+    <div className={styles.task} data-testid={`canonical-command-${props.action.command}`}>
+      {mutation.isError ? (
+        <VErrorSummary
+          label={props.lang === "zh" ? "操作未完成" : "Action could not finish"}
+          summary={isHypothesisFirstCommandStateConflict(mutation.error)
+            ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+            : mutation.error.message}
+        />
+      ) : null}
+      <VButton
+        type="button"
+        variant="primary"
+        density="compact"
+        isPending={mutation.isPending}
+        isDisabled={!props.action.enabled}
+        disabledReason={props.action.disabledReason || undefined}
+        onPress={() => mutation.mutate()}
+      >
+        {props.action.label}
+      </VButton>
+    </div>
+  );
+}
+
+function HumanAdjudicationAction(props: {
+  teamId: string;
+  questionId: string;
+  action: Extract<CommandAction, { command: "human_adjudication" }>;
+  lang: Language;
+}) {
+  const queryClient = useQueryClient();
+  const [rationale, setRationale] = useState("");
+  const mutation = useMutation<unknown, Error, "accepted" | "rejected">({
+    mutationFn: (decision) => executeHypothesisFirstCommand(
+      props.teamId,
+      props.questionId,
+      props.action,
+      { decision, rationale: rationale.trim() },
+    ),
+    onSuccess: () => invalidateHypothesisFirstQueries(
+      queryClient,
+      props.teamId,
+      props.questionId,
+    ),
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      }
+    },
+  });
+  const isZh = props.lang === "zh";
+  return (
+    <div className={styles.task} data-testid="human-adjudication-action">
+      <VInput
+        aria-label={isZh ? "人工裁决理由" : "Adjudication rationale"}
+        value={rationale}
+        onChange={(event) => setRationale(event.currentTarget.value)}
+        placeholder={isZh ? "说明接受或拒绝当前收敛结果的理由" : "Explain why this convergence result is accepted or rejected"}
+        isDisabled={mutation.isPending}
+      />
+      {mutation.isError ? (
+        <VErrorSummary
+          label={isZh ? "人工裁决未提交" : "Adjudication was not submitted"}
+          summary={isHypothesisFirstCommandStateConflict(mutation.error)
+            ? (isZh ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+            : mutation.error.message}
+        />
+      ) : null}
+      <div className={styles.secondary}>
+        <VButton
+          type="button"
+          variant="primary"
+          density="compact"
+          isPending={mutation.isPending}
+          isDisabled={!rationale.trim()}
+          disabledReason={!rationale.trim() ? (isZh ? "请先填写裁决理由" : "Enter a rationale first") : undefined}
+          onPress={() => mutation.mutate("accepted")}
+        >
+          {isZh ? "接受当前收敛结果" : "Accept convergence"}
+        </VButton>
+        <VButton
+          type="button"
+          variant="ghost"
+          density="compact"
+          isPending={mutation.isPending}
+          isDisabled={!rationale.trim()}
+          onPress={() => mutation.mutate("rejected")}
+        >
+          {isZh ? "拒绝当前收敛结果" : "Reject convergence"}
+        </VButton>
+      </div>
+    </div>
+  );
+}
+
 function NextReviewRoundButton(props: { teamId: string; questionId: string; meetingRoundId: string; lang: Language }) {
   const queryClient = useQueryClient();
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
@@ -700,18 +967,34 @@ function NextReviewRoundButton(props: { teamId: string; questionId: string; meet
   );
 }
 
-function OpenGenerationButton(props: { teamId: string; questionId: string; label: string; lang: Language }) {
+function OpenGenerationButton(props: {
+  teamId: string;
+  questionId: string;
+  label: string;
+  lang: Language;
+  canonicalAction?: HypothesisFirstNextAction["canonicalAction"];
+}) {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: () => openHypothesisCandidateGeneration(props.teamId, props.questionId),
+  const mutation = useMutation<unknown, Error, void>({
+    mutationFn: () => props.canonicalAction
+      && (props.canonicalAction.command === "open_generation" || props.canonicalAction.command === "retry_generation")
+      ? executeHypothesisFirstCommand(props.teamId, props.questionId, props.canonicalAction)
+      : openHypothesisCandidateGeneration(props.teamId, props.questionId),
     onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      }
+    },
   });
   return (
     <div className={styles.task}>
       {mutation.isError ? (
         <VErrorSummary
           label={props.lang === "zh" ? "候选生成失败" : "Candidate generation failed"}
-          summary={mutation.error instanceof Error ? mutation.error.message : "open_candidate_generation_failed"}
+          summary={isHypothesisFirstCommandStateConflict(mutation.error)
+            ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+            : mutation.error instanceof Error ? mutation.error.message : "open_candidate_generation_failed"}
         />
       ) : null}
       <VButton
@@ -741,11 +1024,22 @@ function CollectionTaskBody(props: {
   const canHandoff = props.nextAction.command === "retry_handoff"
     && Boolean(requestId)
     && Boolean(collectionRunId);
-  const handoff = useMutation({
-    mutationFn: () => recordCollectionHandoff(props.teamId, requestId, {
-      handoffRef: `source_collection_run:${collectionRunId}`,
-    }),
+  const handoff = useMutation<unknown, Error, void>({
+    mutationFn: () => props.nextAction.canonicalAction?.command === "handoff_collection"
+      ? executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          props.nextAction.canonicalAction,
+        )
+      : recordCollectionHandoff(props.teamId, requestId, {
+          handoffRef: `source_collection_run:${collectionRunId}`,
+        }),
     onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      }
+    },
   });
   return (
     <div className={styles.task}>
@@ -757,7 +1051,9 @@ function CollectionTaskBody(props: {
       {handoff.isError ? (
         <VErrorSummary
           label={isZh ? "交接失败" : "Handoff failed"}
-          summary={handoff.error instanceof Error ? handoff.error.message : "handoff_failed"}
+          summary={isHypothesisFirstCommandStateConflict(handoff.error)
+            ? (isZh ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+            : handoff.error instanceof Error ? handoff.error.message : "handoff_failed"}
         />
       ) : null}
       {props.nextAction.command === "retry_handoff" && canHandoff ? (

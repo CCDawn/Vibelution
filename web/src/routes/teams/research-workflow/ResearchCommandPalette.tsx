@@ -42,8 +42,10 @@ export function ResearchCommandPalette(props: {
   const items = useMemo<VCommandPaletteItem[]>(() => {
     const commands: VCommandPaletteItem[] = [];
     if (props.workflowActive && props.nextAction.targetNodeId) {
-      const scopedDiscussionReady = props.discussionModel?.status === "ready"
-        && Boolean(props.discussionModel.deepLink)
+      const canonicalDeepLink = props.nextAction.navigationDeepLink || "";
+      const scopedDiscussionDeepLink = canonicalDeepLink || props.discussionModel?.deepLink || "";
+      const scopedDiscussionReady = Boolean(canonicalDeepLink || props.discussionModel?.status === "ready")
+        && Boolean(scopedDiscussionDeepLink)
         && Boolean(props.onNavigateDiscussion);
       commands.push({
         id: "cmd:current-task",
@@ -56,7 +58,7 @@ export function ResearchCommandPalette(props: {
             : props.nextAction.commandLabel || props.nextAction.statusMessage || undefined,
         onRun: () => {
           if (scopedDiscussionReady) {
-            props.onNavigateDiscussion?.(props.discussionModel?.deepLink || "");
+            props.onNavigateDiscussion?.(scopedDiscussionDeepLink);
             return;
           }
           // A missing/degraded anchor keeps the existing node navigation. It

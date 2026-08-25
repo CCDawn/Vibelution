@@ -6,8 +6,10 @@ import {
   approveHypothesisDigest,
   closeReviewMeeting,
   draftMeetingSummary,
+  executeHypothesisFirstCommand,
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
+  isHypothesisFirstCommandStateConflict,
   openHypothesisCandidateGeneration,
   recordCollectionHandoff,
   rejectMeetingDigestDraft,
@@ -65,6 +67,10 @@ export function HypothesisFirstMeetingOps(props: {
   });
 
   const invalidate = () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+  const canonicalAction = props.nextAction.canonicalAction;
+  const refreshOnConflict = (error: unknown) => {
+    if (isHypothesisFirstCommandStateConflict(error)) invalidate();
+  };
 
   const draftMutation = useMutation({
     mutationFn: () => draftMeetingSummary(props.teamId, props.meetingRoundId, { actor: "operator", force: false }),
@@ -108,6 +114,14 @@ export function HypothesisFirstMeetingOps(props: {
   const [approveBlockedReason, setApproveBlockedReason] = useState<string | null>(null);
   const approveMutation = useMutation({
     mutationFn: () => {
+      if (canonicalAction?.command === "approve_summary") {
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          canonicalAction,
+          { decision: "accepted" },
+        ).then((receipt) => receipt.result as Awaited<ReturnType<typeof approveHypothesisDigest>>);
+      }
       const hash = roundQuery.data?.meetingRound?.digestDraft?.contentHash || "";
       return approveHypothesisDigest(props.teamId, props.meetingRoundId, {
         closedBy: "operator",
@@ -152,6 +166,7 @@ export function HypothesisFirstMeetingOps(props: {
       }
     },
     onError: (error) => {
+      refreshOnConflict(error);
       // A stale digest hash means another page updated the draft; refetch so
       // the cached contentHash catches up instead of retrying the old one.
       if (error instanceof Error && /stale/i.test(error.message)) {
@@ -166,8 +181,15 @@ export function HypothesisFirstMeetingOps(props: {
       }
     },
   });
-  const rejectMutation = useMutation({
-    mutationFn: () => rejectMeetingDigestDraft(props.teamId, props.meetingRoundId, { actor: "operator" }),
+  const rejectMutation = useMutation<unknown, Error, void>({
+    mutationFn: () => canonicalAction?.command === "approve_summary"
+      ? executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          canonicalAction,
+          { decision: "rejected" },
+        )
+      : rejectMeetingDigestDraft(props.teamId, props.meetingRoundId, { actor: "operator" }),
     onSuccess: () => {
       setApproveBlockedReason(null);
       invalidate();
@@ -176,10 +198,15 @@ export function HypothesisFirstMeetingOps(props: {
       // available action.
       draftMutation.mutate();
     },
+    onError: refreshOnConflict,
   });
-  const generationMutation = useMutation({
-    mutationFn: () => openHypothesisCandidateGeneration(props.teamId, props.questionId),
+  const generationMutation = useMutation<unknown, Error, void>({
+    mutationFn: () => canonicalAction
+      && (canonicalAction.command === "open_generation" || canonicalAction.command === "retry_generation")
+      ? executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction)
+      : openHypothesisCandidateGeneration(props.teamId, props.questionId),
     onSuccess: invalidate,
+    onError: refreshOnConflict,
   });
   const [reopenBlockedReason, setReopenBlockedReason] = useState<string | null>(null);
   const [droppedRequestNotice, setDroppedRequestNotice] = useState<string | null>(null);
@@ -221,11 +248,14 @@ export function HypothesisFirstMeetingOps(props: {
   const canHandoff = props.nextAction.command === "retry_handoff"
     && Boolean(props.nextAction.collectionRequestId)
     && Boolean(collectionRunId);
-  const handoffMutation = useMutation({
-    mutationFn: () => recordCollectionHandoff(props.teamId, props.nextAction.collectionRequestId || "", {
-      handoffRef: `source_collection_run:${collectionRunId}`,
-    }),
+  const handoffMutation = useMutation<unknown, Error, void>({
+    mutationFn: () => canonicalAction?.command === "handoff_collection"
+      ? executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction)
+      : recordCollectionHandoff(props.teamId, props.nextAction.collectionRequestId || "", {
+          handoffRef: `source_collection_run:${collectionRunId}`,
+        }),
     onSuccess: invalidate,
+    onError: refreshOnConflict,
   });
 
   if (roundQuery.isPending) {
@@ -374,7 +404,9 @@ export function HypothesisFirstMeetingOps(props: {
       {error ? (
         <VErrorSummary
           label={isZh ? "操作未完成" : "Action could not finish"}
-          summary={error instanceof Error ? error.message : String(error)}
+          summary={isHypothesisFirstCommandStateConflict(error)
+            ? (isZh ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+            : error instanceof Error ? error.message : String(error)}
         />
       ) : null}
       {approveBlockedReason ? (

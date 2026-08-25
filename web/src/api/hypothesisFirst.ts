@@ -6,13 +6,17 @@
  * functions from here — never `fetchJson` or raw URL literals.
  */
 
-import { fetchJson } from "./client";
+import { fetchJson, isFetchJsonHttpError } from "./client";
 import type {
+  ActionCommand,
+  ActionInputByCommand,
   CandidateEvidenceTrailResponse,
+  CommandAction,
   CloseReviewMeetingResponse,
   CollectionHandoffResponse,
   CollectionRequestListResponse,
   HypothesisFirstChainState,
+  HypothesisFirstStateV2,
   HypothesisRoundGetResponse,
   HypothesisRoundListResponse,
   HypothesisSelectionContext,
@@ -48,6 +52,28 @@ function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {
 
 function questionQuery(questionId: string): string {
   return questionId ? `?questionId=${encodeURIComponent(questionId)}` : "";
+}
+
+const V2_ENDPOINT_UNAVAILABLE_CODES = new Set([
+  "endpoint_not_found",
+  "endpoint_unavailable",
+  "contract_not_supported",
+  "route_not_found",
+]);
+
+/** Only infrastructure-level absence permits the compatibility V1 read. */
+export function isHypothesisFirstStateV2EndpointUnavailable(error: unknown): boolean {
+  if (!isFetchJsonHttpError(error)) return false;
+  const details = isRecord(error.details) ? error.details : null;
+  const defaultRouteNotFound = details?.detail === "Not Found";
+  return error.status === 501
+    || (
+      error.status === 404
+      && (
+        V2_ENDPOINT_UNAVAILABLE_CODES.has(String(error.code || ""))
+        || (error.code === null && defaultRouteNotFound)
+      )
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +330,100 @@ export function fetchHypothesisFirstChainState(
     `${teamPrefix(teamId)}/hypothesis-first/chain/state${questionQuery(questionId)}`,
     { signal: options?.signal },
   );
+}
+
+/** Canonical workflow state snapshot. V1 chain state remains available below for compatibility. */
+export function fetchHypothesisFirstStateV2(
+  teamId: string,
+  questionId: string,
+  options?: { signal?: AbortSignal; includeSourceCursor?: boolean },
+): Promise<HypothesisFirstStateV2> {
+  const includeSourceCursor = options?.includeSourceCursor ? "&includeSourceCursor=true" : "";
+  return fetchJson<unknown>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/state-v2${questionQuery(questionId)}${includeSourceCursor}`,
+    { signal: options?.signal },
+  ).then((payload) => parseHypothesisFirstStateV2(payload));
+}
+
+export type HypothesisFirstCommandExecutionResponse = {
+  schemaVersion: 2;
+  teamId: string;
+  questionId: string;
+  command: CommandAction["command"];
+  actionId: string;
+  idempotencyKey: string;
+  acceptedStateVersion: string;
+  result: unknown;
+};
+
+export function isHypothesisFirstCommandStateConflict(error: unknown): boolean {
+  return isFetchJsonHttpError(error)
+    && error.status === 409
+    && error.code === "state_version_conflict";
+}
+
+/** Submit an action exactly as authorized by the canonical V2 snapshot. */
+export function executeHypothesisFirstCommand<C extends ActionCommand>(
+  teamId: string,
+  questionId: string,
+  action: Extract<CommandAction, { command: C }>,
+  input?: C extends keyof ActionInputByCommand ? ActionInputByCommand[C] : never,
+): Promise<HypothesisFirstCommandExecutionResponse> {
+  return writeJson<HypothesisFirstCommandExecutionResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/commands${questionQuery(questionId)}`,
+    "POST",
+    {
+      actionId: action.actionId,
+      idempotencyKey: action.idempotencyKey,
+      expectedStateVersion: action.expectedStateVersion,
+      payload: action.payload,
+      ...(input === undefined ? {} : { input }),
+    },
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Lightweight runtime boundary: malformed V2 must stay an error, never V1 initial state. */
+function parseHypothesisFirstStateV2(payload: unknown): HypothesisFirstStateV2 {
+  if (!isRecord(payload)) {
+    throw new Error("Invalid hypothesis-first state V2 response");
+  }
+  const phaseNames = [
+    "overall",
+    "generation",
+    "selection",
+    "review",
+    "collection",
+    "convergence",
+    "formalRuntime",
+    "programDelivery",
+  ];
+  const valid = payload.schemaVersion === 2
+    && payload.contract === "hypothesis-first-state/v2"
+    && typeof payload.teamId === "string"
+    && typeof payload.questionId === "string"
+    && typeof payload.stateVersion === "string"
+    && typeof payload.representationVersion === "string"
+    && typeof payload.awaitingHumanCount === "number"
+    && phaseNames.every((name) => isRecord(payload[name]))
+    && isRecord(payload.review)
+    && Array.isArray(payload.review.candidates)
+    && isRecord(payload.review.aggregate)
+    && isRecord(payload.collection)
+    && Array.isArray(payload.collection.requests)
+    && isRecord(payload.collection.aggregate)
+    && isRecord(payload.selection)
+    && isRecord(payload.generation)
+    && isRecord(payload.convergence)
+    && Array.isArray(payload.allowedActions)
+    && Array.isArray(payload.problems);
+  if (!valid) {
+    throw new Error("Invalid hypothesis-first state V2 response");
+  }
+  return payload as unknown as HypothesisFirstStateV2;
 }
 
 export function fetchCollectionRequests(

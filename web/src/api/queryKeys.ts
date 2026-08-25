@@ -80,6 +80,8 @@ export const queryKeys = {
     ["teams", teamId, "hypothesis-first", "selections", questionId] as const,
   hypothesisFirstChainState: (teamId: string, questionId: string) =>
     ["teams", teamId, "hypothesis-first", "chain", "state", questionId] as const,
+  hypothesisFirstChainStateV2: (teamId: string, questionId: string) =>
+    ["teams", teamId, "hypothesis-first", "chain", "state-v2", questionId] as const,
   teamMeetingRounds: (teamId: string) =>
     ["teams", teamId, "meeting-rounds"] as const,
   teamMeetingRound: (teamId: string, meetingRoundId: string) =>

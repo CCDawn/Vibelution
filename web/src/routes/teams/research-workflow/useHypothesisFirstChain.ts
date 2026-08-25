@@ -11,12 +11,16 @@ import { useCallback, useEffect, useState } from "react";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  executeHypothesisFirstCommand,
   fetchCollectionRequests,
   fetchHypothesisFirstChainState,
+  fetchHypothesisFirstStateV2,
   fetchHypothesisSelections,
   fetchMeetingRounds,
+  isHypothesisFirstCommandStateConflict,
   recoverCollectionRequest,
   fetchReviewRoundLinks,
+  isHypothesisFirstStateV2EndpointUnavailable,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
@@ -24,6 +28,7 @@ import { collectionRequestNeedsPolling } from "./hypothesisFirstCollectionStatus
 import type {
   CollectionRequestRecord,
   HypothesisFirstChainState,
+  HypothesisFirstStateV2,
   HypothesisSelectionRecord,
   MeetingRoundRecord,
   ReviewRoundLinkRecord,
@@ -49,6 +54,10 @@ export type HypothesisFirstChainData = {
   questionId: string;
   /** True when a question-keyed payload declares a different question. */
   scopeMismatch: boolean;
+  /** Canonical server snapshot when the V2 endpoint is available. */
+  stateV2: HypothesisFirstStateV2 | null;
+  /** Explicitly tells consumers whether the read is canonical or compatibility data. */
+  stateSource: "v2_canonical" | "v1_legacy";
   chainState: HypothesisFirstChainState | null;
   /** Latest selection for the question (server already filters by questionId). */
   selection: HypothesisSelectionRecord | null;
@@ -97,6 +106,62 @@ function recordMatchesQuestion(value: string | null | undefined, questionId: str
   return Boolean(recordQuestion && recordQuestion === questionId);
 }
 
+function isTerminalLifecycle(value: string | null | undefined): boolean {
+  return ["completed", "failed", "cancelled", "superseded"].includes(String(value || ""));
+}
+
+/**
+ * Keep the existing HFC-3 return shape usable while the route consumers move
+ * to `stateV2`. This is a compatibility adapter only; it does not decide the
+ * current phase or create actions.
+ */
+function legacyChainStateFromV2(state: HypothesisFirstStateV2): HypothesisFirstChainState {
+  const candidateMeetings = state.review.candidates
+    .map((candidate) => candidate.meetingRoundId)
+    .filter((meetingId): meetingId is string => Boolean(meetingId));
+  const firstMeetingId = state.generation.generationMeetingId
+    || candidateMeetings[0]
+    || "";
+  const reviewCompleted = isTerminalLifecycle(state.review.lifecycle)
+    && state.review.lifecycle === "completed";
+  const collectionRequests = state.collection.requests.length;
+  const collectionReady = state.collection.lifecycle === "completed"
+    && state.collection.outcome === "succeeded";
+  const latestHypothesisRoundId = state.convergence.latestHypothesisRoundId || "";
+  return {
+    schemaVersion: 1,
+    teamId: state.teamId,
+    questionId: state.questionId,
+    selectionId: state.selection.selectionId || "",
+    meetingCount: state.review.aggregate.total,
+    firstMeetingId,
+    firstMeetingClosed: reviewCompleted,
+    openMeetingIds: candidateMeetings.filter((meetingId) => (
+      !state.review.candidates.find((candidate) => candidate.meetingRoundId === meetingId
+        && isTerminalLifecycle(candidate.lifecycle))
+    )),
+    collectionRequests: [],
+    collectionRequestCount: collectionRequests,
+    pendingCollectionCount: state.collection.aggregate.pending,
+    collectionReady,
+    hypothesisRoundCount: latestHypothesisRoundId ? 1 : 0,
+    latestHypothesisRoundId,
+    hypothesisConverged: state.convergence.accepted,
+    convergenceDetail: state.convergence.problems[0]?.message || "",
+    roundBudget: state.convergence.roundBudget,
+    budgetExhausted: state.convergence.outcome === "exhausted",
+    templateBaselineExists: false,
+    templateBaselineIds: [],
+    candidateCount: state.generation.candidateCount,
+    generationMeetingId: state.generation.generationMeetingId || undefined,
+    generationMeetingStatus: state.generation.lifecycle,
+  };
+}
+
+function errorMessage(error: unknown): string | null {
+  return error instanceof Error ? error.message : error ? String(error) : null;
+}
+
 export function shouldPollQuestionScopedChain(input: {
   questionId: string;
   state?: HypothesisFirstChainState;
@@ -112,6 +177,34 @@ export function shouldPollQuestionScopedChain(input: {
   return shouldPollCollections(state, requests);
 }
 
+export function shouldPollHypothesisFirstStateV2(state: HypothesisFirstStateV2 | undefined): boolean {
+  if (!state) return false;
+  const isLive = (phase: { lifecycle: string; actionability: string }) => (
+    phase.lifecycle === "queued"
+    || phase.lifecycle === "running"
+    || phase.actionability === "executing"
+    || phase.actionability === "waiting_system"
+  );
+  if ([
+    state.generation,
+    state.review,
+    state.collection,
+    state.formalRuntime,
+    state.programDelivery,
+  ].some(isLive)) return true;
+  if (state.review.candidates.some((candidate) => (
+    isLive(candidate)
+    || isLive(candidate.discussion)
+    || isLive(candidate.summarization)
+  ))) return true;
+  return state.collection.requests.some((request) => (
+    isLive(request)
+    || isLive(request.childRun)
+    || isLive(request.handoff)
+    || request.sources.some(isLive)
+  ));
+}
+
 export function useHypothesisFirstChain(teamId: string, questionId: string): HypothesisFirstChainData {
   const requestedQuestionId = normalizedQuestion(questionId);
   const enabled = Boolean(teamId.trim() && requestedQuestionId);
@@ -119,10 +212,31 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
   const queryClient = useQueryClient();
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const chainState = useQuery({
+  const stateV2Query = useQuery({
+    queryKey: queryKeys.hypothesisFirstChainStateV2(teamId, questionId),
+    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(teamId, questionId, { signal }),
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+    refetchInterval: (query) => {
+      const state = query.state.data;
+      return state
+        ? resolvePollingInterval(
+          pageVisible,
+          shouldPollHypothesisFirstStateV2(state)
+            ? BOUNDED_POLL_MS
+            : false,
+        )
+        : false;
+    },
+  });
+  const v2EndpointUnavailable = isHypothesisFirstStateV2EndpointUnavailable(stateV2Query.error);
+  const legacyChainStateQuery = useQuery({
     queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
     queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
-    enabled,
+    enabled: enabled && v2EndpointUnavailable,
+    retry: false,
     refetchInterval: (query) =>
       shouldPollQuestionScopedChain({
         questionId: requestedQuestionId,
@@ -173,9 +287,23 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
         String(item.createdAt ?? "") > String(latest.createdAt ?? "") ? item : latest)
     : null;
 
-  const firstError = [chainState, selections, meetings, requests, links]
-    .map((query) => query.error)
-    .find(Boolean);
+  const canonicalState = stateV2Query.data ?? null;
+  const stateSource: "v2_canonical" | "v1_legacy" = canonicalState
+    ? "v2_canonical"
+    : legacyChainStateQuery.data
+      ? "v1_legacy"
+      : "v2_canonical";
+  const chainState = canonicalState
+    ? legacyChainStateFromV2(canonicalState)
+    : (legacyChainStateQuery.data ?? null);
+  const firstError = [
+    stateV2Query.error && !v2EndpointUnavailable ? stateV2Query.error : null,
+    legacyChainStateQuery.error,
+    selections.error,
+    meetings.error,
+    requests.error,
+    links.error,
+  ].find(Boolean);
 
   const recoverCollection = useCallback(async (requestId: string) => {
     const normalizedRequestId = requestId.trim();
@@ -183,14 +311,29 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     setRecoveryBusy(true);
     setRecoveryError(null);
     try {
-      await recoverCollectionRequest(teamId, normalizedRequestId);
+      const canonicalAction = stateV2Query.data?.allowedActions.find((action) => (
+        action.kind === "command"
+        && (action.command === "retry_collection" || action.command === "continue_collection")
+        && action.payload.requestId === normalizedRequestId
+      ));
+      if (canonicalAction?.kind === "command"
+        && (canonicalAction.command === "retry_collection" || canonicalAction.command === "continue_collection")) {
+        await executeHypothesisFirstCommand(teamId, questionId, canonicalAction);
+      } else {
+        await recoverCollectionRequest(teamId, normalizedRequestId);
+      }
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
     } catch (error) {
-      setRecoveryError(error instanceof Error ? error.message : String(error));
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+        setRecoveryError("状态已更新，请重新确认。");
+      } else {
+        setRecoveryError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       setRecoveryBusy(false);
     }
-  }, [questionId, queryClient, recoveryBusy, teamId]);
+  }, [questionId, queryClient, recoveryBusy, stateV2Query.data, teamId]);
 
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,
@@ -216,7 +359,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
   const scopedRequests = (requests.data?.requests ?? EMPTY_REQUESTS).filter((request) => (
     recordMatchesQuestion(request.questionId, requestedQuestionId)
   ));
-  const resolvedChainQuestionId = normalizedQuestion(chainState.data?.questionId);
+  const resolvedChainQuestionId = normalizedQuestion(chainState?.questionId);
   const scopeMismatch = Boolean(
     enabled
     && resolvedChainQuestionId
@@ -226,13 +369,17 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     questionScopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}`,
     questionId: requestedQuestionId,
     scopeMismatch,
-    chainState: scopeMismatch ? null : (chainState.data ?? null),
+    stateV2: scopeMismatch ? null : canonicalState,
+    stateSource,
+    chainState: scopeMismatch ? null : chainState,
     selection,
     meetings: decoratedMeetings,
     collectionRequests: scopedRequests,
     reviewRoundLinks: scopedLinks,
-    loading: enabled && [chainState, selections, meetings, requests, links].some((query) => query.isPending),
-    error: firstError instanceof Error ? firstError.message : firstError ? String(firstError) : null,
+    loading: enabled && [stateV2Query, selections, meetings, requests, links]
+      .some((query) => query.isPending)
+      || (enabled && v2EndpointUnavailable && legacyChainStateQuery.isPending),
+    error: errorMessage(firstError),
     recoveryBusy,
     recoveryError,
     recoverCollection,

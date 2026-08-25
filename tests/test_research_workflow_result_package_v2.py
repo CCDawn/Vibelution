@@ -92,8 +92,30 @@ def test_v2_producer_embeds_one_schema_valid_pending_candidate(monkeypatch) -> N
         "projection_version": "1.0-review.1",
         "blockers": ["human_review_pending"],
     }
-    assert package["citationChecks"] == []
+    assert package["citationChecks"]
+    assert {
+        item["sourceUrl"]
+        for item in package["citationChecks"]
+        if item.get("status") == "passed"
+    } == {item["source_url"] for item in output["evidence"]}
+    assert all(item["evidenceId"] for item in package["citationChecks"])
     assert package["packageId"].startswith("rrp-v2:run-sci-096:sci-096:")
+
+
+def test_citation_checks_preserve_unverified_evidence_as_failed() -> None:
+    output = _output(96)
+    evidence = deepcopy(output["evidence"])
+    evidence[0]["verification_status"] = "unverified"
+
+    checks = result_package_v2._citation_checks(evidence)
+
+    assert checks[0] == {
+        "evidenceId": evidence[0]["evidence_id"],
+        "sourceUrl": evidence[0]["source_url"],
+        "verificationStatus": "unverified",
+        "status": "failed",
+    }
+    assert all(item["status"] == "passed" for item in checks[1:])
 
 
 def test_v2_producer_fails_closed_without_canonical_final_summary(monkeypatch) -> None:

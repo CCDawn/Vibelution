@@ -21,13 +21,17 @@ from typing import Any
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
 
+from .artifact_readback_registry import build_canonical_ref
 from .delivery_orchestration import (
+    DELIVERY_ARTIFACT_KIND,
     DELIVERY_OUTBOX_KIND,
     DeliveryOrchestrationError,
     build_delivery_event,
     run_delivery_orchestration,
     run_status_allows_delivery,
 )
+from .human_gate_artifacts import canonical_sha256
+from .workflow_artifact_store import put_workflow_artifact
 
 DEFAULT_DELIVERY_LEASE_MS = 30_000
 MAX_DELIVERY_ATTEMPTS = 3
@@ -144,6 +148,83 @@ class DeliveryOrchestrationWorker:
 
         self._submit(mutate, force_flush=True).result(timeout=30)
 
+    @staticmethod
+    def _authority_run_id(run: Any) -> str:
+        try:
+            snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+        except (TypeError, ValueError):
+            snapshot = {}
+        if isinstance(snapshot, dict):
+            source = str(snapshot.get("sourceCollectionRunId") or "").strip()
+            if source:
+                return source
+        return str(getattr(run, "run_id", "") or "").strip()
+
+    def _persist_failure_artifact(
+        self,
+        action: Any,
+        *,
+        run: Any,
+        outcome: dict[str, Any],
+    ) -> dict[str, str]:
+        """Persist a projection-safe terminal artifact for pre-artifact failures."""
+
+        team_id = str(getattr(run, "team_id", "") or "").strip()
+        workflow_run_id = str(getattr(run, "run_id", "") or "").strip()
+        authority_run_id = self._authority_run_id(run)
+        failure = {
+            "code": str(outcome.get("code") or "delivery_failed"),
+            "step": str(outcome.get("failedStep") or "orchestration"),
+            "detail": str(outcome.get("detail") or ""),
+        }
+        payload = {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "workflowRunId": workflow_run_id,
+            "sourceCollectionRunId": authority_run_id,
+            "deliveryStatus": "failed",
+            "trigger": {
+                "nodeId": "result_package",
+                "completionKind": str(getattr(run, "completion_kind", "") or ""),
+                "terminalReason": str(getattr(run, "terminal_reason", "") or ""),
+            },
+            "steps": {"failure": failure},
+            "formalBlockers": [
+                str(item) for item in outcome.get("formalBlockers") or []
+            ],
+            "programCandidateHandoff": dict(
+                outcome.get("programCandidateHandoff") or {}
+            ),
+            "diagnostics": [str(item) for item in outcome.get("diagnostics") or []],
+            "failure": failure,
+        }
+        record = put_workflow_artifact(
+            team_id,
+            kind=DELIVERY_ARTIFACT_KIND,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            payload=payload,
+            artifact_identity=f"{action.action_id}:failure",
+        )
+        envelope = {
+            "teamId": team_id,
+            "kind": DELIVERY_ARTIFACT_KIND,
+            "workflowRunId": workflow_run_id,
+            "sourceCollectionRunId": authority_run_id,
+            "payload": payload,
+        }
+        content_hash = canonical_sha256(envelope)
+        return {
+            "artifactRef": build_canonical_ref(
+                kind=DELIVERY_ARTIFACT_KIND,
+                team_id=team_id,
+                authority_run_id=authority_run_id,
+                content_hash=content_hash,
+            ),
+            "artifactContentHash": content_hash,
+            "artifactRecordId": str(record.get("recordId") or ""),
+        }
+
     def _fail(self, action: Any, *, now_ms: int, problem: dict[str, str]) -> None:
         def mutate(uow):
             uow.repository.fail_outbox(
@@ -165,6 +246,19 @@ class DeliveryOrchestrationWorker:
     ) -> None:
         """One tx: settle the outbox action + append the terminal event."""
         status = str(outcome.get("status") or "failed")
+        if status == "failed":
+            try:
+                outcome.update(
+                    self._persist_failure_artifact(action, run=run, outcome=outcome)
+                )
+            except Exception as exc:  # noqa: BLE001 - event settlement must survive artifact I/O
+                diagnostics = [
+                    str(item) for item in outcome.get("diagnostics") or []
+                ]
+                diagnostics.append(
+                    f"delivery_failure_artifact_unavailable:{type(exc).__name__}:{exc}"
+                )
+                outcome["diagnostics"] = list(dict.fromkeys(diagnostics))
 
         def mutate(uow):
             if status == "failed":

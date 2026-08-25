@@ -5,6 +5,8 @@
  * The two surfaces must never share the same button copy for navigate vs write.
  */
 import type {
+  ActionCommand,
+  CommandAction,
   CollectionRequestRecord,
   HypothesisFirstChainState,
   HypothesisSelectionRecord,
@@ -45,6 +47,8 @@ export type HypothesisFirstStage =
   | "next_review"
   | "converged"
   | "budget_exhausted"
+  | "program_delivery"
+  | "completed"
   | "blocked";
 
 export type HypothesisFirstCommand =
@@ -59,7 +63,13 @@ export type HypothesisFirstCommand =
   | "retry_collection"
   | "continue_collection"
   | "retry_handoff"
-  | "human_adjudication";
+  | "open_next_review"
+  | "human_adjudication"
+  | "retry_review_dispatch"
+  | "reconcile_formal_run"
+  | "retry_program_handoff"
+  | "record_program_review"
+  | "create_formal_revision";
 
 export type HypothesisFirstRecovery = {
   command: HypothesisFirstCommand;
@@ -82,6 +92,12 @@ export type HypothesisFirstNextAction = {
   meetingRoundId?: string;
   collectionRequestId?: string;
   collectionRunId?: string;
+  stateSource?: "v2_canonical" | "v1_legacy";
+  canonicalActionId?: string;
+  canonicalAction?: CommandAction;
+  canonicalCommand?: ActionCommand;
+  expectedStateVersion?: string;
+  navigationDeepLink?: string;
 };
 
 export type HypothesisFirstNextActionInput = {

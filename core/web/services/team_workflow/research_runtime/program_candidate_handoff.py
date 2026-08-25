@@ -91,6 +91,26 @@ def _first_present(container: dict[str, Any], keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _first_mapping_from_layers(
+    layers: tuple[dict[str, Any], ...], keys: tuple[str, ...]
+) -> dict[str, Any] | None:
+    for layer in layers:
+        value = _first_object(layer, keys)
+        if value is not None:
+            return value
+    return None
+
+
+def _first_value_from_layers(
+    layers: tuple[dict[str, Any], ...], keys: tuple[str, ...]
+) -> Any:
+    for layer in layers:
+        value = _first_present(layer, keys)
+        if value is not None and value != "":
+            return deepcopy(value)
+    return None
+
+
 def _missing_context(
     *,
     team_id: str,
@@ -355,8 +375,10 @@ def handoff_result_package_to_challenge_program(
     citation_checks = _first_present(payload, _CITATION_CHECK_KEYS)
     if citation_checks is None:
         citation_checks = _first_present(package, _CITATION_CHECK_KEYS)
-    if not isinstance(citation_checks, list) or any(
-        not isinstance(item, dict) for item in citation_checks
+    if (
+        not isinstance(citation_checks, list)
+        or not citation_checks
+        or any(not isinstance(item, dict) for item in citation_checks)
     ):
         return _missing_context(
             team_id=team,
@@ -369,19 +391,103 @@ def handoff_result_package_to_challenge_program(
         )
 
     try:
+        authority_layers = (payload, package)
+        canonical_result_package = _first_mapping_from_layers(
+            authority_layers,
+            ("resultPackage", "result_package", "canonicalResultPackage"),
+        )
+        registration_payload: dict[str, Any] = {
+            "output": output,
+            "citationChecks": deepcopy(citation_checks),
+            "registeredBy": str(registered_by or "").strip()
+            or "research_result_package_bridge",
+            "sourceResultPackageHash": package_hash,
+        }
+        if canonical_result_package is not None:
+            registration_payload["resultPackage"] = canonical_result_package
+
+        receipt_values = _first_value_from_layers(
+            tuple(
+                layer
+                for layer in (
+                    *authority_layers,
+                    canonical_result_package or {},
+                )
+                if isinstance(layer, dict)
+            ),
+            (
+                "packageReceipts",
+                "modelInvocationReceipts",
+                "model_invocation_receipts",
+                "receipts",
+            ),
+        )
+        if isinstance(receipt_values, (dict, list)) and receipt_values:
+            registration_payload["modelInvocationReceipts"] = receipt_values
+
+        model_policy = _first_mapping_from_layers(
+            tuple(
+                layer
+                for layer in (
+                    *authority_layers,
+                    canonical_result_package or {},
+                )
+                if isinstance(layer, dict)
+            ),
+            ("modelPolicy", "model_policy"),
+        )
+        if model_policy is not None:
+            registration_payload["modelPolicy"] = model_policy
+        authorized_policy = _first_value_from_layers(
+            tuple(
+                layer
+                for layer in (
+                    *authority_layers,
+                    canonical_result_package or {},
+                )
+                if isinstance(layer, dict)
+            ),
+            (
+                "authorizedModelPolicySha256",
+                "authorized_model_policy_sha256",
+                "expectedModelPolicySha256",
+                "expected_model_policy_sha256",
+            ),
+        )
+        if authorized_policy is None and model_policy is not None:
+            authorized_policy = model_policy.get("policySha256") or model_policy.get(
+                "policy_sha256"
+            )
+        if authorized_policy:
+            registration_payload["authorizedModelPolicySha256"] = str(authorized_policy)
+        official_model_call = _first_value_from_layers(
+            authority_layers,
+            ("officialModelCall", "official_model_call"),
+        )
+        if official_model_call is not None:
+            registration_payload["officialModelCall"] = bool(official_model_call)
+
         registered = challenge_question_runs.register_challenge_question_output(
             team,
-            {
-                "output": output,
-                "citationChecks": deepcopy(citation_checks),
-                "registeredBy": str(registered_by or "").strip()
-                or "research_result_package_bridge",
-                "sourceResultPackageHash": package_hash,
-            },
+            registration_payload,
         )
     except ValueError as exc:
         raise ProgramCandidateHandoffContractError(str(exc)) from exc
     record = registered.get("record") if isinstance(registered, dict) else {}
+    validation = record.get("validation") if isinstance(record, dict) else {}
+    validation = validation if isinstance(validation, dict) else {}
+    receipt_refs = (
+        deepcopy(record.get("modelInvocationReceiptRefs"))
+        if isinstance(record, dict)
+        and isinstance(record.get("modelInvocationReceiptRefs"), dict)
+        else {}
+    )
+    receipt_status = str(validation.get("modelInvocationReceipts") or "")
+    result_package = (
+        deepcopy(record.get("resultPackage"))
+        if isinstance(record, dict) and isinstance(record.get("resultPackage"), dict)
+        else deepcopy(registration_payload.get("resultPackage"))
+    )
     response = {
         "status": HANDOFF_STATUS_IDEMPOTENT
         if registered.get("idempotent")
@@ -396,6 +502,10 @@ def handoff_result_package_to_challenge_program(
         "recordId": str(record.get("recordId") or ""),
         "reviewStatus": str(record.get("status") or ""),
         "humanGates": deepcopy(record.get("humanGates") or {}),
+        "resultPackage": result_package,
+        "officialModelCall": validation.get("officialModelCall") is True,
+        "receipts": receipt_refs,
+        "receiptStatus": receipt_status,
     }
     return response
 

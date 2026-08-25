@@ -798,8 +798,12 @@ class WorkflowCommandService:
         parent = uow.repository.get_run(request.run_id)
         if parent is None:
             raise RunNotFoundError(request.run_id)
-        if parent.status in ("succeeded", "failed", "cancelled", "archived"):
-            raise WorkflowCommandError("terminal run 不能 fork revision")
+        if parent.status in ("failed", "cancelled", "archived"):
+            raise WorkflowCommandError("failed/cancelled/archived run 不能 fork revision")
+        if parent.status == "succeeded" and request.payload.get("postApprovalRevision") is not True:
+            raise WorkflowCommandError(
+                "succeeded run 只能通过正式审核修订入口 fork revision"
+            )
 
         now_ms = self._clock()
         command_id = new_id("cmd")

@@ -2,8 +2,12 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../../api/queryKeys";
+import {
+  executeHypothesisFirstCommand,
+  isHypothesisFirstCommandStateConflict,
+} from "../../../api/hypothesisFirst";
 import { reviewChallengeQuestionRun } from "../../../api/teamExperiment";
-import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
+import type { ChallengeQuestionRunDetailPayload, CommandAction } from "../../../api/types";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   VButton,
@@ -111,6 +115,7 @@ function formatDecidedAt(value: string, isZh: boolean): string {
 export function ChallengeQuestionReviewForm(props: {
   detail: ChallengeQuestionRunDetailPayload;
   lang?: "zh" | "en";
+  canonicalAction?: Extract<CommandAction, { command: "record_program_review" }>;
 }) {
   const { detail } = props;
   const isZh = props.lang !== "en";
@@ -134,12 +139,30 @@ export function ChallengeQuestionReviewForm(props: {
   const isSubmitted = submittedReviewKey === reviewKey;
 
   const mutation = useMutation({
-    mutationFn: () =>
-      reviewChallengeQuestionRun(detail.teamId, detail.questionId, detail.selectedRunId, {
+    mutationFn: () => {
+      const input = {
         reviewer: reviewer.trim(),
         rationale: rationale.trim(),
         decisions,
-      }),
+      };
+      return props.canonicalAction
+        ? executeHypothesisFirstCommand(
+            detail.teamId,
+            detail.questionId,
+            props.canonicalAction,
+            input as {
+              reviewer: string;
+              rationale: string;
+              decisions: Record<GateKey, GateDecision>;
+            },
+          )
+        : reviewChallengeQuestionRun(
+            detail.teamId,
+            detail.questionId,
+            detail.selectedRunId,
+            input,
+          );
+    },
     onSuccess: async () => {
       try {
         globalThis.localStorage?.setItem(REVIEWER_STORAGE_KEY, reviewer.trim());
@@ -153,8 +176,18 @@ export function ChallengeQuestionReviewForm(props: {
         queryKey: queryKeys.challengeQuestionRunDetail(detail.teamId, detail.questionId),
       });
       await queryClient.invalidateQueries({
+        queryKey: queryKeys.hypothesisFirstChainStateV2(detail.teamId, detail.questionId),
+      });
+      await queryClient.invalidateQueries({
         queryKey: queryKeys.researchWorkflowLaunchOptions(CHALLENGE_CUP_WORKFLOW_ID, detail.teamId),
       });
+    },
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.hypothesisFirstChainStateV2(detail.teamId, detail.questionId),
+        });
+      }
     },
   });
 
@@ -242,7 +275,9 @@ export function ChallengeQuestionReviewForm(props: {
       </label>
       {mutation.isError ? (
         <div role="alert" className={css.missingLine}>
-          {mutation.error instanceof Error ? mutation.error.message : (isZh ? "提交失败，请重试" : "Submit failed; please retry")}
+          {isHypothesisFirstCommandStateConflict(mutation.error)
+            ? (isZh ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+            : mutation.error instanceof Error ? mutation.error.message : (isZh ? "提交失败，请重试" : "Submit failed; please retry")}
         </div>
       ) : null}
       <div>

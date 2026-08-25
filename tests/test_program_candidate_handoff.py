@@ -118,3 +118,78 @@ def test_complete_v2_authority_registers_review_required_and_replays_idempotentl
             team_id="research-team",
             workflow_run_id="workflow-sci-096",
         )
+
+
+def test_handoff_forwards_canonical_package_and_receipt_authority(
+    tmp_path, monkeypatch
+):
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    output["run"]["run_id"] = "workflow-sci-096"
+    canonical_package = {
+        "schema_version": 2,
+        "package_id": "qrp-v2-workflow-sci-096",
+        "canonical_sha256": "c" * 64,
+        "model_policy": {"policySha256": "d" * 64},
+        "model_invocation_receipts": {
+            "generation": {"receiptId": "receipt-generation"},
+            "review": {"receiptId": "receipt-review"},
+            "revision": {"receiptId": "receipt-revision"},
+        },
+    }
+    artifact = _package(output=output)
+    artifact["package"]["resultPackage"] = canonical_package
+    artifact["package"]["officialModelCall"] = True
+    artifact["package"]["modelInvocationReceipts"] = list(
+        canonical_package["model_invocation_receipts"].values()
+    )
+    artifact["package"]["authorizedModelPolicySha256"] = "d" * 64
+    monkeypatch.setattr(
+        program_candidate_handoff,
+        "load_scoped_artifact_payload",
+        lambda *args, **kwargs: {
+            "teamId": "research-team",
+            "workflowRunId": "workflow-sci-096",
+            "sourceCollectionRunId": "workflow-sci-096",
+            "payload": artifact,
+        },
+    )
+    captured: dict = {}
+
+    def _register(_team_id, payload):
+        captured.update(deepcopy(payload))
+        return {
+            "idempotent": False,
+            "record": {
+                "recordId": "SCI-096:workflow-sci-096",
+                "status": "review_required",
+                "outputSha256": "e" * 64,
+                "humanGates": {},
+                "validation": {
+                    "officialModelCall": True,
+                    "modelInvocationReceipts": "passed",
+                },
+                "resultPackage": {
+                    "canonicalHash": "c" * 64,
+                    "idempotencyKey": "qrp-key",
+                },
+            },
+        }
+
+    monkeypatch.setattr(
+        challenge_question_runs, "register_challenge_question_output", _register
+    )
+
+    result = program_candidate_handoff.handoff_result_package_to_challenge_program(
+        team_id="research-team",
+        workflow_run_id="workflow-sci-096",
+    )
+
+    assert captured["resultPackage"] == canonical_package
+    assert captured["modelInvocationReceipts"] == list(
+        canonical_package["model_invocation_receipts"].values()
+    )
+    assert captured["authorizedModelPolicySha256"] == "d" * 64
+    assert result["resultPackage"]["canonicalHash"] == "c" * 64
+    assert result["officialModelCall"] is True
+    assert result["receiptStatus"] == "passed"

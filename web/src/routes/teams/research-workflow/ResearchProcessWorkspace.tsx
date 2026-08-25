@@ -18,6 +18,7 @@ import {
   meetingsForHypothesisFirstQuestion,
   resolveHypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
+import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
 import {
   buildExperimentChromeIdentity,
   buildExperimentSwitchOptions,
@@ -141,9 +142,9 @@ export function ResearchProcessWorkspace({
     [activeDiscussionAnchor],
   );
   const navigateToDiscussion = useCallback((deepLink: string) => {
-    if (!deepLink || scopedDiscussionModel.status !== "ready") return;
+    if (!deepLink.startsWith("/chat?")) return;
     navigate(deepLink);
-  }, [navigate, scopedDiscussionModel.status]);
+  }, [navigate]);
   const nodeDetail = useNodeDetailState(
     teamId,
     location.runId,
@@ -256,7 +257,11 @@ export function ResearchProcessWorkspace({
 
   const formalRuntimeActive = Boolean(
     runState.snapshot?.run?.runId === location.runId && location.runId
-  ) || Boolean(hypothesisFirstChain.chainState?.hypothesisConverged);
+  ) || Boolean(
+    hypothesisFirstChain.stateV2?.formalRuntime.runId
+    || hypothesisFirstChain.stateV2?.convergence.accepted
+    || hypothesisFirstChain.chainState?.hypothesisConverged
+  );
   const formalRuntimeCurrentNodeIds = formalRuntimeActive
     ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)
     : EMPTY_RUNTIME_NODE_IDS;
@@ -265,6 +270,7 @@ export function ResearchProcessWorkspace({
   // from location.runId: the latter must remain the real run id.
   const workflowActive = Boolean(
     location.runId
+    || hypothesisFirstChain.stateV2
     || hypothesisFirstChain.chainState
     || hypothesisFirstChain.selection
     || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
@@ -277,7 +283,9 @@ export function ResearchProcessWorkspace({
     ? null
     : (runState.projection?.run.nodeRuns.source_finding?.status ?? null);
 
-  const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
+  const nextAction = useMemo(() => hypothesisFirstChain.stateV2
+    ? resolveHypothesisFirstNextActionFromV2(hypothesisFirstChain.stateV2)
+    : resolveHypothesisFirstNextAction({
     run: runState.run
       ? {
           runId: runState.run.runId,
@@ -293,7 +301,8 @@ export function ResearchProcessWorkspace({
     collectionRequests: hypothesisFirstChain.collectionRequests,
     collectionChildStatus,
     selectedNodeId: location.selectedNodeId,
-  }), [
+    }), [
+    hypothesisFirstChain.stateV2,
     hypothesisFirstChain.chainState,
     hypothesisFirstChain.collectionRequests,
     hypothesisFirstChain.meetings,
@@ -326,6 +335,8 @@ export function ResearchProcessWorkspace({
   const hypothesisFirstOwnsCurrentTask = !hypothesisFirstChain.scopeMismatch
     && safeNextAction.stage !== "converged"
     && Boolean(
+      hypothesisFirstChain.stateV2
+      ||
       hypothesisFirstChain.chainState
       || hypothesisFirstChain.selection
       || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
@@ -697,6 +708,7 @@ export function ResearchProcessWorkspace({
                   }
                 : null
             }
+            awaitingHumanCount={hypothesisFirstChain.stateV2?.awaitingHumanCount ?? 0}
             runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}

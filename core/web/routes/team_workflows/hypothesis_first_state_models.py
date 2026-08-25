@@ -7,10 +7,9 @@ Business facts remain owned by their existing stores and services.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 WorkflowLifecycle = Literal[
     "not_started",
@@ -61,6 +60,7 @@ ActionCommand = Literal[
     "retry_collection",
     "continue_collection",
     "handoff_collection",
+    "open_next_review",
     "human_adjudication",
     "create_formal_run",
     "reconcile_formal_run",
@@ -192,6 +192,11 @@ class HumanAdjudicationPayload(StrictWireModel):
     hypothesisRoundId: str = Field(..., min_length=1)
 
 
+class OpenNextReviewPayload(StrictWireModel):
+    previousMeetingRoundId: str = Field(..., min_length=1)
+    roundBudget: int = Field(..., ge=1, le=5)
+
+
 class CreateFormalRunPayload(QuestionActionPayload):
     hypothesisRoundId: str = Field(..., min_length=1)
 
@@ -220,6 +225,7 @@ ActionPayload = (
     | MeetingActionPayload
     | RetryCollectionPayload
     | CollectionChildRunPayload
+    | OpenNextReviewPayload
     | HumanAdjudicationPayload
     | CreateFormalRunPayload
     | RunActionPayload
@@ -240,6 +246,7 @@ _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
     "retry_collection": RetryCollectionPayload,
     "continue_collection": CollectionChildRunPayload,
     "handoff_collection": CollectionChildRunPayload,
+    "open_next_review": OpenNextReviewPayload,
     "human_adjudication": HumanAdjudicationPayload,
     "create_formal_run": CreateFormalRunPayload,
     "reconcile_formal_run": RunActionPayload,
@@ -258,6 +265,20 @@ class CommandAction(ActionCommon):
     expectedStateVersion: str = Field(..., pattern=r"^hf2-action:")
     requiresConfirmation: bool
     confirmationText: str | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_payload_for_command(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        command = value.get("command")
+        expected_type = _ACTION_PAYLOAD_TYPES.get(command)
+        if expected_type is None:
+            return value
+        return {
+            **value,
+            "payload": expected_type.model_validate(value.get("payload")),
+        }
 
     @model_validator(mode="after")
     def _validate_payload_for_command(self) -> CommandAction:
@@ -340,6 +361,30 @@ class HypothesisFirstCommandRequest(StrictWireModel):
     expectedStateVersion: str = Field(..., pattern=r"^hf2-action:")
     payload: ActionPayload
     input: ActionInput | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_payload_from_action_id(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        action_id = str(value.get("actionId") or "")
+        command = next(
+            (
+                candidate
+                for candidate in _ACTION_PAYLOAD_TYPES
+                if action_id == candidate.replace("_", "-")
+                or action_id.startswith(candidate.replace("_", "-") + ":")
+            ),
+            None,
+        )
+        if command is None:
+            return value
+        return {
+            **value,
+            "payload": _ACTION_PAYLOAD_TYPES[command].model_validate(
+                value.get("payload")
+            ),
+        }
 
 
 class ReviewCandidateState(PhaseState):
@@ -558,6 +603,7 @@ class HypothesisFirstStateV2(StrictWireModel):
     scope: OfficialCatalogScope
     resetBoundary: ResetBoundary
     isInitial: bool
+    awaitingHumanCount: int = Field(..., ge=0)
     currentPhase: HypothesisFirstPhase
     overall: PhaseState
     generation: GenerationState
@@ -580,10 +626,23 @@ class HypothesisFirstStateV2(StrictWireModel):
                 raise ValueError("initial state must be in generation phase")
             if self.generation.lifecycle != "not_started":
                 raise ValueError("initial generation must be not_started")
+        if self.currentPhase == "completed" and (
+                self.overall.lifecycle != "completed"
+                or self.overall.outcome != "succeeded"
+                or self.programDelivery.lifecycle != "completed"
+                or self.programDelivery.outcome != "succeeded"
+                or self.programDelivery.humanReviewStatus != "approved"
+                or self.programDelivery.approvedGateCount != 4
+        ):
+            raise ValueError(
+                "completed workflow requires delivery succeeded and all H1-H4 gates approved"
+            )
         for action in self.allowedActions:
-            if isinstance(action, CommandAction):
-                if action.expectedStateVersion != self.stateVersion:
-                    raise ValueError(
-                        "command expectedStateVersion must equal snapshot stateVersion"
-                    )
+            if (
+                isinstance(action, CommandAction)
+                and action.expectedStateVersion != self.stateVersion
+            ):
+                raise ValueError(
+                    "command expectedStateVersion must equal snapshot stateVersion"
+                )
         return self

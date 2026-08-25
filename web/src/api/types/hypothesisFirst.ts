@@ -527,6 +527,7 @@ export type ActionCommand =
   | "retry_collection"
   | "continue_collection"
   | "handoff_collection"
+  | "open_next_review"
   | "human_adjudication"
   | "create_formal_run"
   | "reconcile_formal_run"
@@ -546,6 +547,7 @@ export type ActionPayloadByCommand = {
   retry_collection: { requestId: string; childRunId: string | null };
   continue_collection: { requestId: string; childRunId: string };
   handoff_collection: { requestId: string; childRunId: string };
+  open_next_review: { previousMeetingRoundId: string; roundBudget: number };
   human_adjudication: { hypothesisRoundId: string };
   create_formal_run: { questionId: string; hypothesisRoundId: string };
   reconcile_formal_run: { runId: string };
@@ -726,6 +728,7 @@ export type HypothesisFirstStateV2 = {
     source: "question_reset_audit" | "origin";
   };
   isInitial: boolean;
+  awaitingHumanCount: number;
   currentPhase: HypothesisFirstPhase;
   overall: PhaseState;
   generation: PhaseState & {

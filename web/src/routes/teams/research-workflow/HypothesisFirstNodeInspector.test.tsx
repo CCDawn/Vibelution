@@ -9,6 +9,7 @@ import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const selectionListProps = vi.hoisted(() => vi.fn());
@@ -22,10 +23,22 @@ vi.mock("../../../api/hypothesisFirst", () => ({
   openHypothesisCandidateGeneration: vi.fn().mockResolvedValue({}),
 }));
 
+vi.mock("../../../api/challengeQuestionRuns", () => ({
+  getChallengeQuestionRunDetail: vi.fn(),
+}));
+
+vi.mock("../challenge-cup/ChallengeQuestionReviewForm", () => ({
+  ChallengeQuestionReviewForm: (props: { detail: { selectedRunId: string } }) => (
+    <div data-testid="program-review-form">review:{props.detail.selectedRunId}</div>
+  ),
+}));
+
 import { recordCollectionHandoff } from "../../../api/hypothesisFirst";
 import { fetchChatRoomDetail } from "../../../api/chat";
+import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
 const mockedFetchChatRoomDetail = vi.mocked(fetchChatRoomDetail);
+const mockedGetChallengeQuestionRunDetail = vi.mocked(getChallengeQuestionRunDetail);
 
 vi.mock("./HypothesisFirstMeetingOps", () => ({
   HypothesisFirstMeetingOps: (props: {
@@ -115,6 +128,48 @@ function scopeReviewLink(meetingRoundId: string, roundIndex: number) {
     candidateId: "cand-1",
     createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
   };
+}
+
+function programState(
+  currentPhase: "program_delivery" | "completed",
+  overrides: Partial<HypothesisFirstStateV2["programDelivery"]> = {},
+): HypothesisFirstStateV2 {
+  return {
+    currentPhase,
+    generation: { generationMeetingId: null },
+    review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+    collection: { requests: [] },
+    allowedActions: [],
+    problems: [],
+    programDelivery: {
+      lifecycle: currentPhase === "completed" ? "completed" : "waiting_human",
+      outcome: currentPhase === "completed" ? "succeeded" : "none",
+      actionability: currentPhase === "completed" ? "terminal" : "waiting_user",
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+      deliveryStatus: "succeeded",
+      deliveryArtifactRef: "artifact:delivery-1",
+      handoffStatus: "registered",
+      outputRecordId: "record-1",
+      outputRunId: "run-output-1",
+      humanReviewStatus: currentPhase === "completed" ? "approved" : "waiting_human",
+      humanGates: {
+        decisions: {
+          H1_problem_understanding: currentPhase === "completed" ? "approved" : "pending",
+          H2_hypothesis_selection: currentPhase === "completed" ? "approved" : "pending",
+          H3_research_plan: currentPhase === "completed" ? "approved" : "pending",
+          H4_external_output: currentPhase === "completed" ? "approved" : "pending",
+        },
+        reviewer: null,
+        rationale: null,
+        decidedAt: null,
+      },
+      approvedGateCount: currentPhase === "completed" ? 4 : 0,
+      requiredGateCount: 4,
+      ...overrides,
+    },
+  } as HypothesisFirstStateV2;
 }
 
 let container: HTMLDivElement;
@@ -440,6 +495,63 @@ describe("HypothesisFirstNodeInspector", () => {
       candidateButtons[0]?.click();
     });
     expect(onNavigateToNode).toHaveBeenCalledWith("hf_meeting_5_cand-a");
+  });
+
+  it("renders the candidate checklist directly from canonical V2 without legacy meeting projection", () => {
+    const basePhase = {
+      lifecycle: "waiting_human" as const,
+      outcome: "none" as const,
+      actionability: "waiting_user" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    };
+    const candidate = (candidateId: string, completed: boolean) => ({
+      ...basePhase,
+      lifecycle: completed ? "completed" as const : "waiting_human" as const,
+      outcome: completed ? "succeeded" as const : "none" as const,
+      actionability: completed ? "terminal" as const : "waiting_user" as const,
+      candidateId,
+      candidateOrder: candidateId === "cand-a" ? 1 : 2,
+      selectionId: "selection-v2",
+      roundIndex: 5,
+      meetingRoundId: `meeting-${candidateId}`,
+      discussionAnchor: null,
+      discussion: { ...basePhase, lifecycle: "completed" as const, outcome: "succeeded" as const, actionability: "terminal" as const },
+      summarization: { ...basePhase, lifecycle: "completed" as const, outcome: "succeeded" as const, actionability: "terminal" as const },
+      approval: completed
+        ? { ...basePhase, lifecycle: "completed" as const, outcome: "succeeded" as const, actionability: "terminal" as const }
+        : basePhase,
+    });
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "review",
+        generation: { generationMeetingId: null },
+        review: {
+          ...basePhase,
+          activeRoundIndex: 5,
+          aggregate: { total: 2, completed: 1, pending: 1, failed: 0, blocked: 0 },
+          candidates: [candidate("cand-a", true), candidate("cand-b", false)],
+        },
+        collection: { requests: [] },
+        allowedActions: [],
+        problems: [],
+      } as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        onOpenQuestion={() => {}}
+        onNavigateToNode={() => {}}
+      />,
+    );
+    const checklist = container.querySelector('[data-testid="candidate-confirmation-checklist"]');
+    expect(checklist?.textContent).toContain("候选 cand-a");
+    expect(checklist?.textContent).toContain("候选 cand-b");
+    expect(checklist?.textContent).toContain("共 2 · 已确认 1 · 待确认 1");
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toContain("meeting-cand-b");
   });
 
   it("does not let another question's later meeting mask the current r5 inspector", () => {
@@ -905,5 +1017,66 @@ describe("HypothesisFirstNodeInspector", () => {
       />,
     );
     expect(container.textContent).toContain("加载假说先行任务");
+  });
+
+  it("loads the registered output and renders H1-H4 review in program delivery", async () => {
+    mockedGetChallengeQuestionRunDetail.mockResolvedValue({ selectedRunId: "run-output-1" } as never);
+    mockedChain.mockReturnValue(chainData({ stateV2: programState("program_delivery") }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    });
+    expect(mockedGetChallengeQuestionRunDetail).toHaveBeenCalledWith("team-1", "Q-01", "run-output-1");
+    expect(container.querySelector('[data-testid="program-review-form"]')?.textContent).toContain("run-output-1");
+  });
+
+  it("shows the canonical program delivery problem instead of falling back upstream", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: programState("program_delivery", {
+        actionability: "blocked",
+        lifecycle: "failed",
+        problems: [{
+          code: "program_candidate_handoff_needs_context",
+          category: "dependency",
+          severity: "error",
+          message: "正式结果缺少交付上下文",
+          recoverable: true,
+          sourceKind: "delivery",
+          sourceId: "run-output-1",
+          detectedAt: "2026-08-25T00:00:00Z",
+        }],
+      }),
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("正式结果缺少交付上下文");
+    expect(container.querySelector('[data-testid="program-review-form"]')).toBeNull();
+  });
+
+  it("shows a terminal closure after all four program gates are approved", () => {
+    mockedChain.mockReturnValue(chainData({ stateV2: programState("completed") }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-testid="challenge-cup-workflow-completed"]')).toBeTruthy();
+    expect(container.textContent).toContain("H1–H4 四项审核全部通过");
   });
 });

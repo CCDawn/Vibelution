@@ -29,7 +29,9 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,8 @@ MAX_ROUND_BUDGET = 5
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"
+GENERATION_ATTEMPT_KIND = "generation_attempt"
+HUMAN_ADJUDICATION_KIND = "human_adjudication"
 QUESTION_RESET_AUDIT_KIND = "question_reset_audit"
 REQUEST_EVIDENCE_DECISION = "request_new_evidence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
@@ -83,6 +87,21 @@ class StaleDigestError(HypothesisFirstChainError):
         self.code = "stale_digest"
         self.expected = expected
         self.actual = actual
+
+
+class StateVersionConflictError(HypothesisFirstChainError):
+    """Raised when a V2 command was issued against an obsolete snapshot."""
+
+    code = "state_version_conflict"
+    status_code = 409
+
+    def __init__(self, *, expected: str, actual: str, snapshot_path: str = "") -> None:
+        super().__init__(
+            "流程状态已更新，请刷新当前题目后重新确认。"
+        )
+        self.expected = expected
+        self.actual = actual
+        self.snapshot_path = snapshot_path
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +544,661 @@ def _records(team_id: str) -> list[dict[str, Any]]:
         return _read_jsonl(_storage_path(team_id))
 
 
+@contextmanager
+def hypothesis_first_scope_lock(team_id: str):
+    """Serialize one question command across the chain-owned JSONL stores.
+
+    The V2 state is a coarse cross-surface CAS.  This lock is the local
+    orchestration boundary for its synchronous facts: a command re-reads the
+    state and applies its owning mutation while the same team scope is held.
+    Late workflow/runtime completions still carry their own meeting/request
+    identity and are validated by the owning service.
+    """
+
+    from core.web.services.team_workflow import (
+        hypothesis_rounds,
+        hypothesis_selection,
+        meeting_rounds,
+    )
+
+    with _LOCK, hypothesis_selection._LOCK, meeting_rounds._LOCK, hypothesis_rounds._LOCK:
+        yield
+
+
+def assert_expected_state_version(
+    team_id: str,
+    question_id: str,
+    expected_state_version: str,
+) -> dict[str, Any]:
+    """Re-read V2 inside the caller's scope lock and enforce coarse CAS."""
+
+    expected = str(expected_state_version or "").strip()
+    if not expected:
+        raise ContractValidationError("expectedStateVersion is required")
+    from .hypothesis_first_state_v2 import project_hypothesis_first_state_v2
+
+    snapshot = project_hypothesis_first_state_v2(team_id, question_id)
+    actual = str(snapshot.get("stateVersion") or "").strip()
+    if not actual or actual != expected:
+        raise StateVersionConflictError(
+            expected=expected,
+            actual=actual,
+            snapshot_path=(
+                "/teams/"
+                + str(team_id)
+                + "/workflow-orchestration/hypothesis-first/chain/state-v2?questionId="
+                + str(question_id)
+            ),
+        )
+    return snapshot
+
+
+def _command_question_id(
+    team_id: str,
+    command: str,
+    payload: Mapping[str, Any],
+    question_id: str = "",
+) -> str:
+    """Resolve the question fence without trusting client labels."""
+
+    explicit = str(question_id or payload.get("questionId") or "").strip().upper()
+    if explicit:
+        return explicit
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_id = str(payload.get("meetingRoundId") or "").strip()
+    if meeting_id:
+        meeting = meeting_rounds.get_meeting_round(team_id, meeting_id)["meetingRound"]
+        resolved = str(meeting.get("question") or "").strip().upper()
+        if resolved:
+            return resolved
+    request_id = str(payload.get("requestId") or "").strip()
+    if request_id:
+        request = _latest_by_id(
+            _collection_requests(_records(team_id)), "requestId", request_id
+        )
+        resolved = str((request or {}).get("questionId") or "").strip().upper()
+        if resolved:
+            return resolved
+    selection_id = str(payload.get("selectionId") or "").strip()
+    if selection_id:
+        from core.web.services.team_workflow import hypothesis_selection
+
+        selection = hypothesis_selection.get_hypothesis_selection(team_id, selection_id)[
+            "selection"
+        ]
+        resolved = str(selection.get("questionId") or "").strip().upper()
+        if resolved:
+            return resolved
+    raise ContractValidationError(
+        f"{command} requires a questionId or a question-scoped identity"
+    )
+
+
+def _find_allowed_command(
+    snapshot: Mapping[str, Any],
+    *,
+    action_id: str,
+    command: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Re-authorize a command against the freshly projected action list."""
+
+    for action in list(snapshot.get("allowedActions") or []):
+        if not isinstance(action, Mapping) or action.get("kind") != "command":
+            continue
+        if str(action.get("actionId") or "") != action_id:
+            continue
+        if str(action.get("command") or "") != command:
+            continue
+        if dict(action.get("payload") or {}) != dict(payload):
+            continue
+        if action.get("enabled") is not True:
+            break
+        return dict(action)
+    raise HypothesisFirstChainError(
+        f"command is no longer allowed for the current hypothesis-first state: {command}"
+    )
+
+
+def retry_review_dispatch(
+    team_id: str,
+    selection_id: str,
+    candidate_ids: list[str],
+) -> dict[str, Any]:
+    """Re-open only the failed candidate review meetings for one selection."""
+
+    from core.web.services.team_workflow import hypothesis_selection
+
+    normalized_selection_id = str(selection_id or "").strip()
+    requested = [str(item or "").strip() for item in candidate_ids if str(item or "").strip()]
+    if not normalized_selection_id or not requested:
+        raise ContractValidationError("selectionId and candidateIds are required")
+    selection = hypothesis_selection.get_hypothesis_selection(
+        team_id, normalized_selection_id
+    )["selection"]
+    selected = [
+        str(item or "").strip()
+        for item in list(selection.get("selectedCandidateIds") or [])
+        if str(item or "").strip() in requested
+    ]
+    if not selected:
+        raise HypothesisFirstChainError(
+            "retry_review_dispatch candidates are not part of the current selection"
+        )
+    current_links = [
+        item
+        for item in _review_round_links(_records(team_id))
+        if str(item.get("selectionId") or "") == normalized_selection_id
+    ]
+    round_index = max((int(item.get("roundIndex") or 0) for item in current_links), default=1)
+    retry_selection = {**selection, "selectedCandidateIds": selected}
+    return open_review_meeting_for_selection(
+        team_id,
+        retry_selection,
+        round_index=round_index,
+        background=True,
+    )
+
+
+def record_human_adjudication(
+    team_id: str,
+    *,
+    question_id: str,
+    hypothesis_round_id: str,
+    decision: str,
+    rationale: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Append the missing human authority for an exhausted convergence gate."""
+
+    from core.web.services.team_workflow import hypothesis_rounds
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_round_id = str(hypothesis_round_id or "").strip()
+    normalized_decision = str(decision or "").strip().lower()
+    normalized_rationale = str(rationale or "").strip()
+    if normalized_decision not in {"accepted", "rejected"}:
+        raise ContractValidationError(
+            "human_adjudication decision must be accepted or rejected"
+        )
+    if not normalized_rationale:
+        raise ContractValidationError("human_adjudication rationale is required")
+    round_record = hypothesis_rounds.get_hypothesis_round(
+        team_id, normalized_round_id
+    )["round"]
+    if str(round_record.get("status") or "").strip().lower() != "closed":
+        raise HypothesisFirstChainError(
+            "human adjudication requires a closed hypothesis round"
+        )
+    question_rounds = _question_hypothesis_rounds(team_id, normalized_question_id)
+    if not question_rounds or str(question_rounds[-1].get("roundId") or "") != normalized_round_id:
+        raise HypothesisFirstChainError(
+            "human adjudication must target the current hypothesis round"
+        )
+    identity = str(idempotency_key or "").strip()
+    with _LOCK:
+        records = _read_jsonl(_storage_path(team_id))
+        existing = next(
+            (
+                item
+                for item in reversed(records)
+                if item.get("recordKind") == HUMAN_ADJUDICATION_KIND
+                and str(item.get("idempotencyKey") or "") == identity
+            ),
+            None,
+        )
+        if existing is not None:
+            if (
+                str(existing.get("hypothesisRoundId") or "") != normalized_round_id
+                or str(existing.get("decision") or "") != normalized_decision
+                or str(existing.get("rationale") or "") != normalized_rationale
+            ):
+                raise HypothesisFirstChainError(
+                    "human adjudication idempotency key is bound to different input"
+                )
+            return {"status": "reused", "adjudication": existing}
+        now = _utc_now()
+        record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "recordKind": HUMAN_ADJUDICATION_KIND,
+            "adjudicationId": f"hf-adjudication-{_stable_hash({'key': identity})[:16]}",
+            "idempotencyKey": identity,
+            "questionId": normalized_question_id,
+            "hypothesisRoundId": normalized_round_id,
+            "decision": normalized_decision,
+            "rationale": normalized_rationale,
+            "decidedBy": _OPERATOR_AGENT_ID,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        _append_jsonl(_storage_path(team_id), record)
+    return {"status": "created", "adjudication": record}
+
+
+def _submit_formal_v2_command(
+    team_id: str,
+    *,
+    run_id: str,
+    command: str,
+    idempotency_key: str,
+    output_record_id: str = "",
+) -> dict[str, Any]:
+    """Adapt a canonical hypothesis-first action to the formal command SSOT."""
+
+    from core.research.workflow.contracts import (
+        ActorRef,
+        CommandRequest,
+        WorkflowCommandKind,
+    )
+
+    from .formal_read_runtime import get_query_service
+    from .ids import new_id
+    from .operator_authorization import current_server_operator
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        raise HypothesisFirstChainError("formal workflow runtime is unavailable")
+    run = runtime.store.get_run(str(run_id or "").strip())
+    if run is None or str(run.team_id or "") != team_id:
+        raise HypothesisFirstChainError("formal workflow run is unavailable in this team")
+    try:
+        kind = WorkflowCommandKind(command)
+    except ValueError as exc:
+        raise HypothesisFirstChainError(f"unsupported formal command: {command}") from exc
+    payload: dict[str, Any] = {}
+    node_id: str | None = None
+    if kind is WorkflowCommandKind.FORK_REVISION:
+        snapshot = get_query_service().get_snapshot(team_id=team_id, run_id=run.run_id)
+        snapshot_payload = snapshot.to_dict() if hasattr(snapshot, "to_dict") else snapshot
+        offers = (
+            list(snapshot_payload.get("commandOffers") or [])
+            if isinstance(snapshot_payload, Mapping)
+            else []
+        )
+        offer = next(
+            (
+                item
+                for item in offers
+                if isinstance(item, Mapping)
+                and str(item.get("command") or "") == "fork_revision"
+                and item.get("available") is True
+            ),
+            None,
+        )
+        if offer is None:
+            raise HypothesisFirstChainError(
+                "formal revision checkpoint is unavailable"
+            )
+        offered_payload = offer.get("payload")
+        offered_payload = dict(offered_payload) if isinstance(offered_payload, Mapping) else {}
+        checkpoint_id = str(offered_payload.get("checkpointId") or "").strip()
+        if not checkpoint_id:
+            raise HypothesisFirstChainError(
+                "formal revision checkpoint is unavailable"
+            )
+        node_id = "hypothesis_design"
+        payload = {
+            **offered_payload,
+            "fromNodeId": node_id,
+            "checkpointId": checkpoint_id,
+            "reason": f"Challenge Program review requested revision ({output_record_id})",
+            "postApprovalRevision": True,
+            "outputRecordId": output_record_id,
+        }
+    operator = current_server_operator()
+    actor_id = str(operator.operator_id).strip() if operator is not None else ""
+    try:
+        receipt = runtime.command_service.submit(
+            CommandRequest(
+                command_id=new_id("cmd"),
+                run_id=run.run_id,
+                team_id=team_id,
+                command=kind,
+                node_id=node_id,
+                expected_run_version=int(run.run_version),
+                idempotency_key=idempotency_key,
+                payload=payload,
+                requested_by=ActorRef("user", actor_id or "operator"),
+                requested_at_ms=int(time.time() * 1000),
+            )
+        )
+    except Exception as exc:
+        raise HypothesisFirstChainError(str(exc)) from exc
+    return receipt.to_dict()
+
+
+def _retry_program_delivery(
+    team_id: str,
+    *,
+    run_id: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Re-run delivery and append a fresh authoritative terminal event."""
+
+    from .delivery_orchestration import (
+        build_delivery_event,
+        run_delivery_orchestration,
+    )
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        raise HypothesisFirstChainError("formal workflow runtime is unavailable")
+    run = runtime.store.get_run(str(run_id or "").strip())
+    if run is None or str(run.team_id or "") != team_id:
+        raise HypothesisFirstChainError("formal workflow run is unavailable in this team")
+    existing = next(
+        (
+            event
+            for event in reversed(runtime.store.list_events(run.run_id, 0, 1000))
+            if str(getattr(event, "correlation_id", "") or "") == idempotency_key
+        ),
+        None,
+    )
+    if existing is not None:
+        return {
+            "status": "reused",
+            "runId": run.run_id,
+            "eventId": str(getattr(existing, "event_id", "") or ""),
+        }
+    now_ms = int(time.time() * 1000)
+    try:
+        outcome = run_delivery_orchestration(
+            runtime.store,
+            run_id=run.run_id,
+            now_ms=now_ms,
+        )
+    except Exception as exc:
+        raise HypothesisFirstChainError(str(exc)) from exc
+
+    def mutate(uow: Any) -> dict[str, Any]:
+        current = uow.repository.get_run(run.run_id)
+        if current is None:
+            raise HypothesisFirstChainError("formal workflow run disappeared")
+        sequence = uow.repository.advance_last_sequence(run.run_id, 1, now_ms)
+        if sequence is None:
+            raise HypothesisFirstChainError("formal delivery event sequence conflict")
+        event = build_delivery_event(
+            run=current,
+            sequence=sequence,
+            outcome=outcome,
+            actor_id="operator:v2-program-delivery",
+            correlation_id=idempotency_key,
+            now_ms=now_ms,
+        )
+        uow.repository.insert_event(event)
+        return {
+            "status": str(outcome.get("status") or ""),
+            "runId": run.run_id,
+            "eventId": event.event_id,
+            "artifactRef": str(outcome.get("artifactRef") or ""),
+            "programCandidateHandoff": dict(
+                outcome.get("programCandidateHandoff") or {}
+            ),
+        }
+
+    return runtime.store.submit(mutate, force_flush=True).result(timeout=30)
+
+
+def execute_v2_command(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    question_id: str = "",
+) -> dict[str, Any]:
+    """Execute one V2 command under scope-lock reauthorization and CAS.
+
+    This is deliberately a small compatibility envelope over existing owning
+    services.  It does not duplicate their facts or invent a second ledger;
+    each branch calls the existing idempotent mutation and returns its result.
+    """
+
+    action_id = str(request.get("actionId") or "").strip()
+    idempotency_key = str(request.get("idempotencyKey") or "").strip()
+    expected = str(request.get("expectedStateVersion") or "").strip()
+    command = str(request.get("command") or "").strip()
+    payload = request.get("payload")
+    payload = dict(payload) if isinstance(payload, Mapping) else {}
+    action_input = request.get("input")
+    action_input = dict(action_input) if isinstance(action_input, Mapping) else {}
+    if not action_id or not idempotency_key:
+        raise ContractValidationError("actionId and idempotencyKey are required")
+    normalized_question_id = _command_question_id(
+        team_id, command, payload, question_id=question_id
+    )
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    with hypothesis_first_scope_lock(normalized_team_id):
+        snapshot = assert_expected_state_version(
+            normalized_team_id,
+            normalized_question_id,
+            expected,
+        )
+        if not command:
+            matching_actions = [
+                item
+                for item in list(snapshot.get("allowedActions") or [])
+                if isinstance(item, Mapping)
+                and item.get("kind") == "command"
+                and str(item.get("actionId") or "") == action_id
+                and dict(item.get("payload") or {}) == payload
+            ]
+            command = (
+                str(matching_actions[0].get("command") or "")
+                if matching_actions
+                else ""
+            )
+        if not command:
+            raise HypothesisFirstChainError(
+                "command action is not authorized by the current state"
+            )
+        action = _find_allowed_command(
+            snapshot,
+            action_id=action_id,
+            command=command,
+            payload=payload,
+        )
+        # Replays must retain the exact action identity and payload.  Existing
+        # owning services provide the durable idempotency behavior; this
+        # envelope prevents a different payload from reusing the same key.
+        if str(action.get("idempotencyKey") or "") != idempotency_key:
+            raise HypothesisFirstChainError(
+                "idempotencyKey does not match the server-authorized action"
+            )
+        from core.web.services.team_workflow import meeting_rounds, meeting_runtime
+
+        if command in {"open_generation", "retry_generation"}:
+            result = open_candidate_generation_meeting(
+                normalized_team_id,
+                normalized_question_id,
+            )
+        elif command == "record_selection":
+            from core.web.services.team_workflow import hypothesis_selection
+
+            selected_candidate_ids = [
+                str(item or "").strip()
+                for item in list(action_input.get("candidateIds") or [])
+                if str(item or "").strip()
+            ]
+            if not selected_candidate_ids:
+                raise ContractValidationError(
+                    "record_selection requires input.candidateIds"
+                )
+            selection_payload = {
+                **_question_scope_envelope(
+                    normalized_team_id,
+                    normalized_question_id,
+                ),
+                "questionId": normalized_question_id,
+                "selectedCandidateIds": selected_candidate_ids,
+                "decidedBy": _OPERATOR_AGENT_ID,
+            }
+            result = hypothesis_selection.record_hypothesis_selection(
+                normalized_team_id,
+                selection_payload,
+                background=True,
+            )
+        elif command == "approve_summary":
+            meeting_id = str(payload.get("meetingRoundId") or "").strip()
+            decision = str(action_input.get("decision") or "accepted").strip().lower()
+            if decision == "accepted":
+                meeting = meeting_rounds.get_meeting_round(
+                    normalized_team_id, meeting_id
+                )["meetingRound"]
+                draft = meeting.get("digestDraft")
+                content_hash = str(
+                    (draft or {}).get("contentHash") if isinstance(draft, Mapping) else ""
+                ).strip()
+                result = approve_meeting_digest(
+                    normalized_team_id,
+                    meeting_id,
+                    closed_by="operator",
+                    expected_digest_content_hash=content_hash,
+                )
+            elif decision in {"rejected", "revised"}:
+                meeting_rounds.reject_meeting_digest_draft(
+                    normalized_team_id,
+                    meeting_id,
+                    actor="operator",
+                    reason=f"v2:{decision}",
+                )
+                result = meeting_runtime.prepare_meeting_summary_draft(
+                    normalized_team_id,
+                    meeting_id,
+                    actor="operator",
+                    force=True,
+                )
+            else:
+                raise ContractValidationError(
+                    "approve_summary input.decision is invalid"
+                )
+        elif command == "resume_discussion":
+            result = meeting_runtime.schedule_meeting_discussion(
+                normalized_team_id,
+                str(payload.get("meetingRoundId") or ""),
+            )
+        elif command == "stop_discussion":
+            result = meeting_rounds.supersede_empty_discussion_meeting(
+                normalized_team_id,
+                str(payload.get("meetingRoundId") or ""),
+                actor="operator:v2-stop-discussion",
+            )
+        elif command == "regenerate_summary":
+            result = meeting_runtime.prepare_meeting_summary_draft(
+                normalized_team_id,
+                str(payload.get("meetingRoundId") or ""),
+                actor="operator",
+                force=True,
+            )
+        elif command == "retry_review_dispatch":
+            result = retry_review_dispatch(
+                normalized_team_id,
+                str(payload.get("selectionId") or ""),
+                [str(item) for item in list(payload.get("candidateIds") or [])],
+            )
+        elif command in {"retry_collection", "continue_collection"}:
+            result = recover_collection_request(
+                normalized_team_id,
+                str(payload.get("requestId") or ""),
+            )
+        elif command == "handoff_collection":
+            result = record_collection_handoff(
+                normalized_team_id,
+                str(payload.get("requestId") or ""),
+                handoff_ref=f"v2:{idempotency_key}",
+            )
+        elif command == "open_next_review":
+            result = open_next_review_meeting(
+                normalized_team_id,
+                previous_meeting_round_id=str(
+                    payload.get("previousMeetingRoundId") or ""
+                ),
+                budget=payload.get("roundBudget"),
+                fan_out_selection=True,
+            )
+        elif command == "record_program_review":
+            from core.web.services.team_workflow.challenge_question_runs import (
+                review_challenge_question_output,
+            )
+
+            if not action_input:
+                raise ContractValidationError(
+                    "record_program_review requires reviewer, rationale and decisions"
+                )
+            result = review_challenge_question_output(
+                normalized_team_id,
+                normalized_question_id,
+                str(payload.get("outputRunId") or ""),
+                action_input,
+            )
+        elif command == "human_adjudication":
+            result = record_human_adjudication(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                hypothesis_round_id=str(payload.get("hypothesisRoundId") or ""),
+                decision=str(action_input.get("decision") or ""),
+                rationale=str(action_input.get("rationale") or ""),
+                idempotency_key=idempotency_key,
+            )
+        elif command == "create_formal_run":
+            from .run_creation import create_question_run
+
+            result = create_question_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                team_id=normalized_team_id,
+                question_id=normalized_question_id,
+                safety_limits={
+                    "stageTokens": {
+                        "knowledge_collection": 250_000,
+                        "experiment_design": 250_000,
+                        "execution_iteration": 250_000,
+                    },
+                    "toolCalls": 300,
+                    "wallClockSeconds": 21_600,
+                    "maxRetries": 2,
+                },
+                idempotency_key=idempotency_key,
+            )
+        elif command == "reconcile_formal_run":
+            result = _submit_formal_v2_command(
+                normalized_team_id,
+                run_id=str(payload.get("runId") or ""),
+                command="reconcile_run",
+                idempotency_key=idempotency_key,
+            )
+        elif command == "retry_program_handoff":
+            result = _retry_program_delivery(
+                normalized_team_id,
+                run_id=str(payload.get("runId") or ""),
+                idempotency_key=idempotency_key,
+            )
+        elif command == "create_formal_revision":
+            result = _submit_formal_v2_command(
+                normalized_team_id,
+                run_id=str(payload.get("runId") or ""),
+                command="fork_revision",
+                idempotency_key=idempotency_key,
+                output_record_id=str(payload.get("outputRecordId") or ""),
+            )
+        else:
+            raise HypothesisFirstChainError(
+                f"V2 command {command} has no owning mutation adapter yet"
+            )
+        return {
+            "schemaVersion": 2,
+            "teamId": normalized_team_id,
+            "questionId": normalized_question_id,
+            "command": command,
+            "actionId": action_id,
+            "idempotencyKey": idempotency_key,
+            "acceptedStateVersion": expected,
+            "result": result,
+        }
+
+
 def _collection_requests(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for record in records:
@@ -541,6 +1215,135 @@ def _review_round_links(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         latest[str(record.get("linkId") or "")] = record
     return sorted(latest.values(), key=lambda item: int(item.get("roundIndex") or 0))
+
+
+def _generation_attempts(
+    records: list[dict[str, Any]], question_id: str = ""
+) -> list[dict[str, Any]]:
+    normalized_question_id = str(question_id or "").strip().upper()
+    latest: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if str(record.get("recordKind") or "") != GENERATION_ATTEMPT_KIND:
+            continue
+        if (
+            normalized_question_id
+            and str(record.get("questionId") or "").strip().upper()
+            != normalized_question_id
+        ):
+            continue
+        attempt_id = str(record.get("attemptId") or "").strip()
+        if attempt_id:
+            latest[attempt_id] = record
+    return sorted(
+        latest.values(),
+        key=lambda item: (
+            int(item.get("attemptNumber") or 0),
+            str(item.get("updatedAt") or item.get("createdAt") or ""),
+        ),
+    )
+
+
+def list_generation_attempts(
+    team_id: str, *, question_id: str = ""
+) -> dict[str, Any]:
+    """List durable generation attempts, latest state per attempt."""
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    attempts = _generation_attempts(_records(normalized_team_id), question_id)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "questionId": str(question_id or "").strip().upper(),
+        "attemptCount": len(attempts),
+        "attempts": attempts,
+    }
+
+
+def _append_generation_attempt_state(
+    team_id: str,
+    *,
+    question_id: str,
+    attempt_id: str,
+    attempt_number: int,
+    meeting_round_id: str,
+    lifecycle: str,
+    outcome: str = "none",
+    supersedes_attempt_id: str = "",
+    error: str = "",
+) -> dict[str, Any]:
+    now = _utc_now()
+    with _LOCK:
+        records = _read_jsonl(_storage_path(team_id))
+        previous = next(
+            (
+                item
+                for item in reversed(records)
+                if item.get("recordKind") == GENERATION_ATTEMPT_KIND
+                and str(item.get("attemptId") or "") == attempt_id
+            ),
+            {},
+        )
+        queued_at = str(previous.get("queuedAt") or "") or now
+        started_at = str(previous.get("startedAt") or "") or (
+            now if lifecycle in {"running", "waiting_human", "completed", "failed"} else ""
+        )
+        finished_at = (
+            now
+            if lifecycle in {"completed", "failed", "cancelled", "superseded"}
+            else ""
+        )
+        record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "recordKind": GENERATION_ATTEMPT_KIND,
+            "attemptId": attempt_id,
+            "attemptNumber": attempt_number,
+            "idempotencyKey": f"hf2:generation:{team_id}:{question_id}:{attempt_number}",
+            "questionId": question_id,
+            "meetingRoundId": meeting_round_id,
+            "lifecycle": lifecycle,
+            "outcome": outcome,
+            "queuedAt": queued_at,
+            "startedAt": started_at,
+            "heartbeatAt": now if lifecycle == "running" else str(previous.get("heartbeatAt") or ""),
+            "finishedAt": finished_at,
+            "supersedesAttemptId": supersedes_attempt_id,
+            "error": error,
+            "createdAt": str(previous.get("createdAt") or "") or now,
+            "updatedAt": now,
+        }
+        _append_jsonl(_storage_path(team_id), record)
+    return record
+
+
+def _finish_generation_attempt_for_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    outcome: str,
+) -> dict[str, Any] | None:
+    with _LOCK:
+        attempts = _generation_attempts(_read_jsonl(_storage_path(team_id)))
+    current = next(
+        (
+            item
+            for item in reversed(attempts)
+            if str(item.get("meetingRoundId") or "") == meeting_round_id
+        ),
+        None,
+    )
+    if current is None:
+        return None
+    return _append_generation_attempt_state(
+        team_id,
+        question_id=str(current.get("questionId") or ""),
+        attempt_id=str(current.get("attemptId") or ""),
+        attempt_number=int(current.get("attemptNumber") or 1),
+        meeting_round_id=meeting_round_id,
+        lifecycle="completed",
+        outcome=outcome,
+        supersedes_attempt_id=str(current.get("supersedesAttemptId") or ""),
+    )
 
 
 def list_collection_requests(team_id: str, *, question_id: str = "") -> dict[str, Any]:
@@ -677,6 +1480,7 @@ def open_review_meeting_for_selection(
     collection_request_id: str = "",
     meeting_round_id: str = "",
     round_budget: int = DEFAULT_ROUND_BUDGET,
+    fan_out_selection: bool = False,
     _formal_candidate_id: str = "",
     _formal_candidate_order: int | None = None,
 ) -> dict[str, Any]:
@@ -726,7 +1530,7 @@ def open_review_meeting_for_selection(
     # the same candidate-level meeting/link contract without inventing a
     # workflow identity.
     if not _formal_candidate_id:
-        if previous_meeting_round_id:
+        if previous_meeting_round_id and not fan_out_selection:
             previous = meeting_rounds.get_meeting_round(
                 normalized_team_id, str(previous_meeting_round_id).strip()
             )["meetingRound"]
@@ -790,6 +1594,7 @@ def open_review_meeting_for_selection(
                     collection_request_id=collection_request_id,
                     meeting_round_id=candidate_meeting_id,
                     round_budget=round_budget,
+                    fan_out_selection=fan_out_selection,
                     _formal_candidate_id=candidate_id,
                     _formal_candidate_order=candidate_order,
                 )
@@ -1335,6 +2140,11 @@ def _append_generation_candidates(
             _append_jsonl(_storage_path(team_id), record)
             existing_by_id[candidate_id] = record
             appended.append(record)
+    _finish_generation_attempt_for_meeting(
+        team_id,
+        meeting_round_id,
+        outcome="succeeded" if appended else "empty",
+    )
     return appended
 
 
@@ -1390,6 +2200,30 @@ def open_candidate_generation_meeting(
             normalized_team_id,
             str(open_meeting.get("meetingRoundId") or ""),
         )
+        failed_meeting_id = str(open_meeting.get("meetingRoundId") or "")
+        with _LOCK:
+            failed_attempts = _generation_attempts(
+                _read_jsonl(_storage_path(normalized_team_id)),
+                normalized_question_id,
+            )
+        failed_attempt = next(
+            (
+                item
+                for item in reversed(failed_attempts)
+                if str(item.get("meetingRoundId") or "") == failed_meeting_id
+            ),
+            None,
+        )
+        if failed_attempt is not None:
+            _append_generation_attempt_state(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                attempt_id=str(failed_attempt.get("attemptId") or ""),
+                attempt_number=int(failed_attempt.get("attemptNumber") or 1),
+                meeting_round_id=failed_meeting_id,
+                lifecycle="failed",
+                error="discussion_has_no_completed_messages",
+            )
         meetings = _question_generation_meetings(
             normalized_team_id, normalized_question_id
         )
@@ -1480,7 +2314,48 @@ def open_candidate_generation_meeting(
     else:
         attempt = len(meetings) + 1
         meeting_round_id = base_id if attempt == 1 else f"{base_id}-a{attempt}"
-    _team, room_id = meeting_runtime._ensure_linked_room(normalized_team_id)
+    with _LOCK:
+        previous_attempts = _generation_attempts(
+            _read_jsonl(_storage_path(normalized_team_id)),
+            normalized_question_id,
+        )
+    attempt_number = max(
+        [int(item.get("attemptNumber") or 0) for item in previous_attempts]
+        + [len(meetings) + 1]
+    )
+    previous_attempt_id = (
+        str(previous_attempts[-1].get("attemptId") or "")
+        if previous_attempts
+        else ""
+    )
+    attempt_id = f"hf2-generation-{_stable_hash({'teamId': normalized_team_id, 'questionId': normalized_question_id, 'attemptNumber': attempt_number})[:20]}"
+    if previous_attempt_id == attempt_id:
+        previous_attempt_id = str(
+            previous_attempts[-1].get("supersedesAttemptId") or ""
+        )
+    _append_generation_attempt_state(
+        normalized_team_id,
+        question_id=normalized_question_id,
+        attempt_id=attempt_id,
+        attempt_number=attempt_number,
+        meeting_round_id=meeting_round_id,
+        lifecycle="queued",
+        supersedes_attempt_id=previous_attempt_id,
+    )
+    try:
+        _team, room_id = meeting_runtime._ensure_linked_room(normalized_team_id)
+    except Exception as exc:
+        _append_generation_attempt_state(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            meeting_round_id=meeting_round_id,
+            lifecycle="failed",
+            supersedes_attempt_id=previous_attempt_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
     participant_resolution = _resolve_hypothesis_participants(
         normalized_team_id, room_id, CANDIDATE_GENERATION_MEETING_TYPE
     )
@@ -1492,16 +2367,39 @@ def open_candidate_generation_meeting(
     }
     if isinstance(_discussion_scope, Mapping):
         payload["discussionScope"] = dict(_discussion_scope)
-    opened = meeting_runtime.open_candidate_generation_meeting(
+    try:
+        opened = meeting_runtime.open_candidate_generation_meeting(
+            normalized_team_id,
+            payload,
+            agent_runner=agent_runner,
+            background=background,
+            _model_invocation_receipt_authority=_model_invocation_receipt_authority,
+        )
+    except Exception as exc:
+        _append_generation_attempt_state(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            meeting_round_id=meeting_round_id,
+            lifecycle="failed",
+            supersedes_attempt_id=previous_attempt_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    _append_generation_attempt_state(
         normalized_team_id,
-        payload,
-        agent_runner=agent_runner,
-        background=background,
-        _model_invocation_receipt_authority=_model_invocation_receipt_authority,
+        question_id=normalized_question_id,
+        attempt_id=attempt_id,
+        attempt_number=attempt_number,
+        meeting_round_id=meeting_round_id,
+        lifecycle="running",
+        supersedes_attempt_id=previous_attempt_id,
     )
     return {
         **opened,
         "questionId": normalized_question_id,
+        "generationAttemptId": attempt_id,
     }
 
 
@@ -1550,8 +2448,7 @@ def _heal_generation_candidates(team_id: str, closed_meeting: Mapping[str, Any])
     proposals = _generation_proposals_from_digest(digest)
     if not proposals:
         proposals = _generation_proposals_from_messages(closed_meeting)
-    if proposals:
-        _append_generation_candidates(team_id, closed_meeting, proposals)
+    _append_generation_candidates(team_id, closed_meeting, proposals)
 
 
 def _close_generation_meeting(
@@ -1690,6 +2587,7 @@ def open_next_review_meeting(
     agent_runner: Any = None,
     background: bool = True,
     budget: Any = None,
+    fan_out_selection: bool = False,
 ) -> dict[str, Any]:
     """Open the next review round after knowledge back-fill, budget-gated.
 
@@ -1766,6 +2664,7 @@ def open_next_review_meeting(
         previous_meeting_round_id=previous_id,
         collection_request_id=normalized_request_id,
         round_budget=effective_budget,
+        fan_out_selection=fan_out_selection,
     )
 
 
@@ -2460,7 +3359,9 @@ def _recover_collection_request_locked(
     """
     from core.web.services import team_service
     from core.web.services.team_workflow.source_collection import facade
-    from core.web.services.team_workflow.source_collection import runs as source_collection_runs
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_request_id = str(request_id or "").strip()

@@ -15,19 +15,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchCollectionRequests,
   fetchHypothesisFirstChainState,
+  fetchHypothesisFirstStateV2,
   fetchHypothesisSelections,
   fetchMeetingRounds,
   fetchReviewRoundLinks,
 } from "../../../api/hypothesisFirst";
+import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 import {
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
   shouldPollQuestionScopedChain,
+  shouldPollHypothesisFirstStateV2,
   type HypothesisFirstChainData,
 } from "./useHypothesisFirstChain";
 
 vi.mock("../../../api/hypothesisFirst", () => ({
   fetchHypothesisFirstChainState: vi.fn(),
+  fetchHypothesisFirstStateV2: vi.fn(),
+  isHypothesisFirstStateV2EndpointUnavailable: (error: unknown) => {
+    if (!error || typeof error !== "object") return false;
+    const candidate = error as { status?: number; code?: string };
+    return candidate.status === 501
+      || (
+        candidate.status === 404
+        && ["endpoint_not_found", "endpoint_unavailable", "contract_not_supported", "route_not_found"]
+          .includes(String(candidate.code || ""))
+      );
+  },
   fetchHypothesisSelections: vi.fn(),
   fetchMeetingRounds: vi.fn(),
   fetchCollectionRequests: vi.fn(),
@@ -36,6 +50,7 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 
 const mocked = {
   chainState: vi.mocked(fetchHypothesisFirstChainState),
+  stateV2: vi.mocked(fetchHypothesisFirstStateV2),
   selections: vi.mocked(fetchHypothesisSelections),
   meetings: vi.mocked(fetchMeetingRounds),
   requests: vi.mocked(fetchCollectionRequests),
@@ -74,6 +89,33 @@ function chainStatePayload() {
     budgetExhausted: false,
     templateBaselineExists: false,
     templateBaselineIds: [],
+  };
+}
+
+function stateV2Payload(): HypothesisFirstStateV2 {
+  return {
+    schemaVersion: 2,
+    contract: "hypothesis-first-state/v2" as const,
+    teamId: "team-1",
+    questionId: "Q-01",
+    stateVersion: "hf2-action:reset-1:state-1",
+    representationVersion: "hf2-repr:reset-1:repr-1",
+    computedAt: "2026-08-25T00:00:00Z",
+    scope: { questionInOfficialCatalog: true, catalogId: "challenge-cup", catalogSha256: "sha" },
+    resetBoundary: { resetId: "origin", resetAt: null, source: "origin" as const },
+    isInitial: false,
+    awaitingHumanCount: 1,
+    currentPhase: "review" as const,
+    overall: { lifecycle: "running" as const, outcome: "none" as const, actionability: "waiting_human" as const, attempt: null, updatedAt: null, problems: [] },
+    generation: { lifecycle: "completed" as const, outcome: "succeeded" as const, actionability: "terminal" as const, attempt: null, updatedAt: null, problems: [], generationMeetingId: "gen-1", candidateCount: 1, candidateIds: ["cand-1"] },
+    selection: { lifecycle: "completed" as const, outcome: "succeeded" as const, actionability: "terminal" as const, attempt: null, updatedAt: null, problems: [], selectionId: "sel-2", selectedCandidateIds: ["cand-1"] },
+    review: { lifecycle: "waiting_human" as const, outcome: "none" as const, actionability: "waiting_user" as const, attempt: null, updatedAt: null, problems: [], activeRoundIndex: 1, aggregate: { total: 1, completed: 0, pending: 1, failed: 0, blocked: 0 }, candidates: [] },
+    collection: { lifecycle: "not_started" as const, outcome: "none" as const, actionability: "idle" as const, attempt: null, updatedAt: null, problems: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 }, requests: [] },
+    convergence: { lifecycle: "not_started" as const, outcome: "none" as const, actionability: "idle" as const, attempt: null, updatedAt: null, problems: [], latestHypothesisRoundId: null, accepted: false, roundIndex: 0, roundBudget: 3 },
+    formalRuntime: { lifecycle: "not_started" as const, outcome: "none" as const, actionability: "idle" as const, attempt: null, updatedAt: null, problems: [], runId: null, runVersion: null, runStatus: null, completionKind: null, lineageDisposition: null, isCurrentRevision: false, parentRunId: null, childRunIds: [], currentNodeIds: [] },
+    programDelivery: { lifecycle: "not_started" as const, outcome: "none" as const, actionability: "idle" as const, attempt: null, updatedAt: null, problems: [], deliveryStatus: "not_started" as const, deliveryArtifactRef: null, handoffStatus: "not_started" as const, outputRecordId: null, outputRunId: null, humanReviewStatus: "not_started" as const, humanGates: { decisions: { H1_problem_understanding: "pending" as const, H2_hypothesis_selection: "pending" as const, H3_research_plan: "pending" as const, H4_external_output: "pending" as const }, reviewer: null, rationale: null, decidedAt: null }, approvedGateCount: 0, requiredGateCount: 4 },
+    allowedActions: [],
+    problems: [],
   };
 }
 
@@ -146,6 +188,7 @@ function linkRecord() {
 
 function mockAllResolved() {
   mocked.chainState.mockResolvedValue(chainStatePayload());
+  mocked.stateV2.mockResolvedValue(stateV2Payload());
   mocked.selections.mockResolvedValue({
     schemaVersion: 1,
     teamId: "team-1",
@@ -241,11 +284,14 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.questionId).toBe("Q-01");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState?.questionId).toBe("Q-01");
+    expect(latest!.stateV2?.contract).toBe("hypothesis-first-state/v2");
+    expect(latest!.stateSource).toBe("v2_canonical");
     expect(latest!.selection?.selectionId).toBe("sel-2");
     expect(latest!.meetings.map((meeting) => meeting.meetingRoundId)).toEqual(["hf-review-sel-2-r1"]);
     expect(latest!.collectionRequests.map((request) => request.requestId)).toEqual(["req-1"]);
     expect(latest!.reviewRoundLinks.map((link) => link.linkId)).toEqual(["hf-link-2"]);
-    expect(mocked.chainState).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
+    expect(mocked.stateV2).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
+    expect(mocked.chainState).not.toHaveBeenCalled();
     expect(mocked.requests).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
   });
 
@@ -276,7 +322,7 @@ describe("useHypothesisFirstChain", () => {
 
   it("fails closed when a question-keyed chain payload belongs to another question", async () => {
     mockAllResolved();
-    mocked.chainState.mockResolvedValue({ ...chainStatePayload(), questionId: "Q-02" });
+    mocked.stateV2.mockResolvedValue({ ...stateV2Payload(), questionId: "Q-02" });
     let latest: HypothesisFirstChainData | null = null;
     render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
     await flushQueries();
@@ -287,12 +333,69 @@ describe("useHypothesisFirstChain", () => {
 
   it("surfaces the first query error", async () => {
     mockAllResolved();
-    mocked.chainState.mockRejectedValue(new Error("chain unavailable"));
+    mocked.stateV2.mockRejectedValue(new Error("chain unavailable"));
     let latest: HypothesisFirstChainData | null = null;
     render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
     await flushQueries();
 
     expect(latest!.error).toBe("chain unavailable");
+    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(mocked.chainState).not.toHaveBeenCalled();
+  });
+
+  it("falls back to V1 only when V2 endpoint is unavailable", async () => {
+    mockAllResolved();
+    mocked.stateV2.mockRejectedValue(Object.assign(new Error("route missing"), {
+      status: 404,
+      code: "endpoint_not_found",
+    }));
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.stateSource).toBe("v1_legacy");
+    expect(latest!.stateV2).toBeNull();
+    expect(latest!.chainState?.questionId).toBe("Q-01");
+    expect(mocked.chainState).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
+  });
+
+  it("does not fallback a domain 404 or a V2 500 into legacy initial state", async () => {
+    mockAllResolved();
+    mocked.stateV2.mockRejectedValue(Object.assign(new Error("catalog question unknown"), {
+      status: 404,
+      code: "catalog_question_unknown",
+    }));
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.chainState).toBeNull();
+    expect(latest!.error).toBe("catalog question unknown");
+    expect(mocked.chainState).not.toHaveBeenCalled();
+
+    mocked.stateV2.mockReset();
+    mocked.stateV2.mockRejectedValue(Object.assign(new Error("server failed"), { status: 500, code: "internal_error" }));
+    latest = null;
+    render(<Probe teamId="team-1" questionId="Q-02" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.chainState).toBeNull();
+    expect(mocked.chainState).not.toHaveBeenCalledWith("team-1", "Q-02", expect.anything());
+  });
+
+  it("does not fallback a malformed V2 DTO into legacy initial state", async () => {
+    mockAllResolved();
+    mocked.stateV2.mockRejectedValue(new Error("Invalid hypothesis-first state V2 response"));
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.stateV2).toBeNull();
+    expect(latest!.chainState).toBeNull();
+    expect(latest!.error).toBe("Invalid hypothesis-first state V2 response");
+    expect(mocked.chainState).not.toHaveBeenCalled();
   });
 
   it("invalidates hypothesis-first queries (debounced) when the run event sequence advances", async () => {
@@ -335,6 +438,26 @@ describe("useHypothesisFirstChain", () => {
 });
 
 describe("question-scoped hypothesis polling", () => {
+  it("polls every canonical system-owned live phase and stops at human review", () => {
+    const generation = stateV2Payload();
+    generation.currentPhase = "generation";
+    generation.generation.lifecycle = "running";
+    generation.generation.actionability = "waiting_system";
+    expect(shouldPollHypothesisFirstStateV2(generation)).toBe(true);
+
+    const review = stateV2Payload();
+    review.review.lifecycle = "waiting_human";
+    review.review.actionability = "waiting_user";
+    review.review.candidates = [];
+    expect(shouldPollHypothesisFirstStateV2(review)).toBe(false);
+
+    const delivery = stateV2Payload();
+    delivery.currentPhase = "program_delivery";
+    delivery.programDelivery.lifecycle = "running";
+    delivery.programDelivery.actionability = "waiting_system";
+    expect(shouldPollHypothesisFirstStateV2(delivery)).toBe(true);
+  });
+
   it("does not poll a chain payload from another question", () => {
     expect(shouldPollQuestionScopedChain({
       questionId: "Q-01",

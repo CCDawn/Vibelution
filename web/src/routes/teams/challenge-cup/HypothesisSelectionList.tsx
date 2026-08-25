@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  executeHypothesisFirstCommand,
   fetchCandidateEvidenceTrail,
   fetchHypothesisSelectionContext,
+  isHypothesisFirstCommandStateConflict,
   recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import type {
+  CommandAction,
   HypothesisSelectionContext,
   HypothesisSelectionRecordPayload,
 } from "../../../api/types";
@@ -30,6 +33,7 @@ export type HypothesisSelectionListProps = {
   lang?: "zh" | "en";
   compact?: boolean;
   hideSubmit?: boolean;
+  canonicalAction?: Extract<CommandAction, { command: "record_selection" }>;
 };
 
 function sameIdSet(left: string[], right: string[]): boolean {
@@ -44,6 +48,7 @@ export function HypothesisSelectionList({
   lang = "zh",
   compact = false,
   hideSubmit = false,
+  canonicalAction,
 }: HypothesisSelectionListProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -69,11 +74,19 @@ export function HypothesisSelectionList({
     setSelectedIds([...serverBaseline]);
   }, [serverBaseline]);
 
-  const recordMutation = useMutation({
-    mutationFn: (input: HypothesisSelectionRecordPayload) =>
-      recordHypothesisSelection(teamId, input),
+  const recordMutation = useMutation<unknown, Error, HypothesisSelectionRecordPayload>({
+    mutationFn: (input: HypothesisSelectionRecordPayload) => canonicalAction
+      ? executeHypothesisFirstCommand(teamId, questionId, canonicalAction, {
+          candidateIds: input.selectedCandidateIds,
+        })
+      : recordHypothesisSelection(teamId, input),
     onSuccess: () => {
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+    },
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+      }
     },
   });
 
@@ -320,7 +333,9 @@ export function HypothesisSelectionList({
         <VErrorSummary
           label={isZh ? "选择记录失败" : "Failed to record selection"}
           summary={
-            recordMutation.error instanceof Error
+            isHypothesisFirstCommandStateConflict(recordMutation.error)
+              ? (isZh ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+              : recordMutation.error instanceof Error
               ? recordMutation.error.message
               : "record_hypothesis_selection_failed"
           }

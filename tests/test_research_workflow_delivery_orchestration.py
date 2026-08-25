@@ -400,6 +400,21 @@ def test_permanent_program_candidate_contract_error_is_not_retried(harness, monk
     assert row is not None and row["status"] == "failed" and row["attempts"] == 1
     assert worker.run_once() == 0
 
+    envelope = load_scoped_artifact_payload(
+        DELIVERY_ARTIFACT_KIND,
+        team_id="research-team",
+        authority_run_id=run_id,
+        workflow_run_id=run_id,
+    )
+    assert envelope is not None
+    durable = envelope["payload"]
+    assert durable["deliveryStatus"] == "failed"
+    assert durable["failure"] == {
+        "code": "program_candidate_handoff_contract",
+        "step": "program_candidate_handoff",
+        "detail": "immutable source result package binding changed",
+    }
+
 
 def test_delivery_fail_closed_when_program_state_unreadable(
     harness, monkeypatch: pytest.MonkeyPatch

@@ -2297,6 +2297,34 @@ def test_round_budget_exhaustion_requires_manual_decision(
         )
 
 
+def test_canonical_next_review_round_fans_out_the_full_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    _fake_collection_runs(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    recorded = _open_first_meeting(team_id, agent_ids)
+    first_round = _review_meetings(recorded)
+    assert len(first_round) == 2
+
+    opened = chain.open_next_review_meeting(
+        team_id,
+        previous_meeting_round_id=first_round[0]["meetingRoundId"],
+        budget=3,
+        fan_out_selection=True,
+        agent_runner=_marker_runner,
+    )
+
+    second_round = list(opened.get("reviewMeetings") or [])
+    assert len(second_round) == 2
+    assert {
+        str((item.get("link") or {}).get("candidateId") or "")
+        for item in second_round
+    } == {"hyp-a", "hyp-b"}
+
+
 def test_interruption_recovery_preserves_rounds_and_idempotency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2511,6 +2539,12 @@ def test_candidate_generation_cold_start_registers_ledger_candidates(
         meeting = opened["meetingRound"]
         assert meeting["meetingType"] == "hypothesis_candidate_generation"
         meeting_round_id = meeting["meetingRoundId"]
+        active_attempt = chain.list_generation_attempts(
+            team_id, question_id=_QUESTION_ID
+        )["attempts"][-1]
+        assert active_attempt["lifecycle"] == "running"
+        assert active_attempt["outcome"] == "none"
+        assert active_attempt["meetingRoundId"] == meeting_round_id
 
         # Reopening while open reuses the same discussion (deterministic id).
         reused = chain.open_candidate_generation_meeting(
@@ -2527,6 +2561,12 @@ def test_candidate_generation_cold_start_registers_ledger_candidates(
         )
         assert closed["meetingRound"]["status"] == "closed"
         assert closed["candidateCount"] == 2
+        completed_attempt = chain.list_generation_attempts(
+            team_id, question_id=_QUESTION_ID
+        )["attempts"][-1]
+        assert completed_attempt["attemptId"] == active_attempt["attemptId"]
+        assert completed_attempt["lifecycle"] == "completed"
+        assert completed_attempt["outcome"] == "succeeded"
         statements = {item["statement"] for item in closed["candidates"]}
         assert "睡眠剥夺通过腺苷积累损害记忆巩固" in statements
         assert "睡眠剥夺通过突触稳态失衡损害记忆巩固" in statements

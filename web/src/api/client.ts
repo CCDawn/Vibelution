@@ -18,6 +18,43 @@ export type FetchJsonFailureReport = {
   failureKind: "http" | "network";
 };
 
+export type FetchJsonHttpErrorOptions = {
+  status: number;
+  code?: string | null;
+  details?: unknown;
+};
+
+/**
+ * Structured failure for a JSON HTTP response.
+ *
+ * Callers may use the status and server problem code to distinguish an
+ * unavailable route from a domain failure. The message remains the same
+ * human-readable text used by the legacy transport callers.
+ */
+export class FetchJsonHttpError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly details: unknown;
+
+  constructor(message: string, options: FetchJsonHttpErrorOptions) {
+    super(message);
+    this.name = "FetchJsonHttpError";
+    this.status = options.status;
+    this.code = options.code ?? null;
+    this.details = options.details;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export function isFetchJsonHttpError(error: unknown): error is FetchJsonHttpError {
+  return error instanceof FetchJsonHttpError
+    || (
+      error instanceof Error
+      && typeof (error as Error & { status?: unknown }).status === "number"
+      && (error as Error & { code?: unknown }).code !== undefined
+    );
+}
+
 export function resetControlTokenForTests() {
   controlTokenPromises.clear();
 }
@@ -204,11 +241,11 @@ export async function fetchWithControl(input: string, init?: RequestInit): Promi
   };
 
   let response = await performFetch();
-  let parsedFailureMessage: string | null = null;
+  let parsedFailureDetails: FailureDetails | null = null;
 
   if (!response.ok && response.status === 403 && controlOrigin !== null) {
-    parsedFailureMessage = await readFailureMessage(response);
-    if (parsedFailureMessage === INVALID_CONTROL_TOKEN_DETAIL) {
+    parsedFailureDetails = await readFailureDetails(response);
+    if (parsedFailureDetails.message === INVALID_CONTROL_TOKEN_DETAIL) {
       clearControlToken(controlOrigin);
       const refreshedControl = await getControlToken(controlOrigin);
       if (controlHeaderName) {
@@ -217,12 +254,13 @@ export async function fetchWithControl(input: string, init?: RequestInit): Promi
       controlHeaderName = refreshedControl.header;
       headers.set(refreshedControl.header, refreshedControl.token);
       response = await performFetch();
-      parsedFailureMessage = null;
+      parsedFailureDetails = null;
     }
   }
 
   if (!response.ok) {
-    const message = parsedFailureMessage ?? await readFailureMessage(response);
+    const details = parsedFailureDetails ?? await readFailureDetails(response);
+    const message = details.message;
     if (
       response.status === 403
       && controlOrigin !== null
@@ -238,7 +276,14 @@ export async function fetchWithControl(input: string, init?: RequestInit): Promi
       message: message || `Request failed: ${response.status}`,
       failureKind: "http",
     });
-    throw new Error(message || `Request failed: ${response.status}`);
+    throw new FetchJsonHttpError(
+      message || `Request failed: ${response.status}`,
+      {
+        status: response.status,
+        code: details.code,
+        details: details.payload,
+      },
+    );
   }
 
   return response;
@@ -249,25 +294,41 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   return (await response.json()) as T;
 }
 
-async function readFailureMessage(response: Response): Promise<string> {
+type FailureDetails = {
+  message: string;
+  code: string | null;
+  payload: unknown;
+};
+
+async function readFailureDetails(response: Response): Promise<FailureDetails> {
   const contentType = response.headers.get("content-type") ?? "";
   let message = "";
+  let code: string | null = null;
+  let payload: unknown;
+  let attemptedJsonRead = false;
   if (contentType.includes("application/json")) {
+    attemptedJsonRead = true;
     try {
-      const payload = (await response.json()) as { detail?: unknown; message?: unknown };
-      if (typeof payload.detail === "string") {
-        message = payload.detail;
-      } else if (payload.detail && typeof payload.detail === "object") {
-        message = JSON.stringify({ detail: payload.detail });
-      } else if (typeof payload.message === "string") {
-        message = payload.message;
+      payload = await response.json();
+      const body = payload as { detail?: unknown; message?: unknown; code?: unknown };
+      if (typeof body.detail === "string") {
+        message = body.detail;
+        code = typeof body.code === "string" ? body.code : null;
+      } else if (body.detail && typeof body.detail === "object") {
+        const detail = body.detail as { code?: unknown };
+        code = typeof detail.code === "string" ? detail.code : null;
+        message = JSON.stringify({ detail: body.detail });
+      } else if (typeof body.message === "string") {
+        message = body.message;
+        code = typeof body.code === "string" ? body.code : null;
       }
     } catch {
       message = "";
+      payload = undefined;
     }
   }
-  if (!message) {
+  if (!message && !attemptedJsonRead) {
     message = await response.text();
   }
-  return message;
+  return { message, code, payload };
 }

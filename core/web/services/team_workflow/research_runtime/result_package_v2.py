@@ -51,6 +51,14 @@ def _mapping(value: Any) -> dict[str, Any]:
     return deepcopy(dict(value)) if isinstance(value, Mapping) else {}
 
 
+def _first_mapping(container: Mapping[str, Any], *keys: str) -> dict[str, Any] | None:
+    for key in keys:
+        value = container.get(key)
+        if isinstance(value, Mapping) and value:
+            return deepcopy(dict(value))
+    return None
+
+
 def _list_of_mappings(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
@@ -372,6 +380,59 @@ def _evidence(
     ]
 
 
+def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Build the citation receipts consumed by the Challenge Program gate.
+
+    Citation validation is intentionally derived from the canonical evidence
+    rows, rather than being an empty placeholder or a client-supplied pass
+    flag.  Each check binds one evidence id to the exact source URL and
+    verification status that the v2 output exposes.  Only canonical evidence
+    verification states that establish a check (metadata, full text, or human
+    verification) are marked as passed; all other states fail closed.  The
+    status is a projection of the canonical verification authority, not a new
+    validation authority.  The downstream validator still applies the evidence
+    quality thresholds (authoritative and challenge/boundary counts).
+    """
+
+    passed_verification_statuses = {
+        "metadata_checked",
+        "full_text_checked",
+        "human_verified",
+    }
+    checks: list[dict[str, Any]] = []
+    for item in evidence:
+        evidence_id = _require_text(
+            item.get("evidence_id") or item.get("evidenceId"),
+            "citation.evidence_id",
+        )
+        source_url = _require_text(
+            item.get("source_url") or item.get("sourceUrl"),
+            "citation.source_url",
+        )
+        verification_status = _require_text(
+            _pick(item, "verification_status", "verificationStatus"),
+            "citation.verification_status",
+        )
+        checks.append(
+            {
+                "evidenceId": evidence_id,
+                "sourceUrl": source_url,
+                "verificationStatus": verification_status,
+                "status": (
+                    "passed"
+                    if verification_status.casefold() in passed_verification_statuses
+                    else "failed"
+                ),
+            }
+        )
+    if not checks:
+        raise ResultPackageV2Error(
+            "canonical evidence has no citation receipts",
+            code="challenge_v2_citations_missing",
+        )
+    return checks
+
+
 def _hypotheses(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     direct = _list_of_mappings(payload.get("hypotheses"))
     if direct:
@@ -472,6 +533,99 @@ def _output_sha256(output: Mapping[str, Any]) -> str:
     audit = hashable.setdefault("audit", {})
     audit["output_sha256"] = "0" * 64
     return canonical_sha256(hashable)
+
+
+def _looks_like_canonical_result_package(value: Mapping[str, Any]) -> bool:
+    """Avoid forwarding a thin result-package metadata projection as a package."""
+
+    has_schema = value.get("schema_version") is not None or value.get("schemaVersion") is not None
+    has_policy = value.get("model_policy") is not None or value.get("modelPolicy") is not None
+    has_receipts = (
+        value.get("model_invocation_receipts") is not None
+        or value.get("modelInvocationReceipts") is not None
+    )
+    has_business_content = any(
+        value.get(key) is not None
+        for key in (
+            "hypotheses",
+            "dimension_reviews",
+            "dimensionReviews",
+            "selection",
+            "research_plan",
+            "researchPlan",
+        )
+    )
+    return bool(has_schema and has_policy and has_receipts and has_business_content)
+
+
+def _copy_package_authorities(
+    package_core: dict[str, Any],
+    *,
+    generic_package: Mapping[str, Any],
+    record: Mapping[str, Any],
+) -> None:
+    """Keep trusted package/receipt authority available at the handoff boundary."""
+
+    canonical_package = _first_mapping(
+        generic_package,
+        "resultPackage",
+        "result_package",
+        "canonicalResultPackage",
+    )
+    if canonical_package is not None and not _looks_like_canonical_result_package(
+        canonical_package
+    ):
+        canonical_package = None
+    if canonical_package is None:
+        candidate = _first_mapping(record, "resultPackage", "result_package")
+        if candidate is not None and _looks_like_canonical_result_package(candidate):
+            canonical_package = candidate
+    if canonical_package is not None:
+        package_core["resultPackage"] = canonical_package
+
+    layers: tuple[Mapping[str, Any], ...] = (
+        canonical_package or {},
+        generic_package,
+        record,
+    )
+    aliases: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("officialModelCall", ("officialModelCall", "official_model_call")),
+        (
+            "modelInvocationReceipts",
+            ("modelInvocationReceipts", "model_invocation_receipts", "receipts"),
+        ),
+        ("modelPolicy", ("modelPolicy", "model_policy")),
+        (
+            "authorizedModelPolicySha256",
+            (
+                "authorizedModelPolicySha256",
+                "authorized_model_policy_sha256",
+                "expectedModelPolicySha256",
+                "expected_model_policy_sha256",
+            ),
+        ),
+        (
+            "inputSnapshotSha256",
+            ("inputSnapshotSha256", "input_snapshot_sha256", "inputSnapshotHash"),
+        ),
+    )
+    for target, names in aliases:
+        for layer in layers:
+            value = _pick(layer, *names)
+            if value is None or value == "":
+                continue
+            package_core[target] = deepcopy(value)
+            break
+
+    if "modelPolicy" not in package_core and canonical_package is not None:
+        policy = _first_mapping(canonical_package, "modelPolicy", "model_policy")
+        if policy is not None:
+            package_core["modelPolicy"] = policy
+    if "authorizedModelPolicySha256" not in package_core:
+        policy = _mapping(package_core.get("modelPolicy"))
+        policy_hash = _text(policy.get("policySha256") or policy.get("policy_sha256"))
+        if policy_hash:
+            package_core["authorizedModelPolicySha256"] = policy_hash
 
 
 def build_challenge_result_package_v2(
@@ -640,8 +794,13 @@ def build_challenge_result_package_v2(
         {
             "questionId": question_id,
             "challengeQuestionOutput": output,
-            "citationChecks": [],
+            "citationChecks": _citation_checks(evidence),
         }
+    )
+    _copy_package_authorities(
+        package_core,
+        generic_package=generic_package,
+        record=record,
     )
     content_hash = canonical_sha256(package_core)
     return {
