@@ -3,7 +3,7 @@
 > - **Status**：USER-REQUESTED / ACTIVE PLAN
 > - **Plan mode**：TASK_GRAPH
 > - **日期**：2026-08-25
-> - **基线快照**：本地 `main@67642ca829e9a0f8d37578a774d4253a8bc95122`；实施任务开始前必须刷新当前 `HEAD`、active claim 与相关并行改动
+> - **基线快照**：本地 `main@a0dafb02edf0d60840a096d18d32857d305a9c09`；实施任务开始前必须刷新当前 `HEAD`、active claim 与相关并行改动
 > - **计划范围**：题目登记 → 候选生成 → 假说选择 → 候选评审扇出/汇合 → 资料搜集/交接 → 假说收敛 → 正式研究运行 → 结果闭环的规范化状态、动作与前后端契约
 > - **本轮授权边界**：只落盘计划，不修改业务代码、不启动或重启产品运行时、不迁移用户数据、不 push/PR
 > - **权威边界**：本计划低于 `AGENTS.md`、`docs/standards/`、ADR 与 owning module README；状态投影不是第二写入者
