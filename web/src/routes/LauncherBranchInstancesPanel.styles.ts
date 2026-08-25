@@ -21,9 +21,6 @@ const styles = {
   tabHint: "m-0 min-w-0 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
   tabHeaderActions: "flex min-w-0 flex-wrap items-center gap-1.5",
   globalEmpty: "mt-1.5",
-  toolbar:
-    "mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
-  toolbarActions: "flex min-w-0 flex-wrap items-center gap-1.5",
   pager: "inline-flex min-w-0 items-center gap-1.5",
   rangeLabel: "min-w-0 truncate text-[var(--fg-muted)]",
   notice: "min-w-0 flex-auto truncate text-[var(--fg-secondary)]",
@@ -33,10 +30,6 @@ const styles = {
   branchName: "font-medium text-[var(--fg-primary)]",
   actionCell: "z-[1] min-w-0 bg-vui-surface-row",
   actionButtons: "flex !flex-nowrap items-center justify-end gap-1",
-  maintenanceFold:
-    "mt-2 max-h-[min(42%,22rem)] shrink-0 overflow-hidden rounded-md border border-vui-border-subtle bg-vui-surface-row [&[open]]:flex [&[open]]:flex-col [&>summary]:flex [&>summary]:shrink-0 [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:items-center [&>summary]:justify-between [&>summary]:gap-2 [&>summary]:px-2 [&>summary]:py-1.5 [&>summary]:[font-size:var(--vui-font-xs)] [&>summary]:font-medium [&>summary]:text-vui-fg-secondary",
-  maintenanceBody:
-    "min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-vui-border-subtle px-1 pb-1.5 [scrollbar-gutter:stable]",
   confirmList: "m-0 flex list-none flex-col gap-2 p-0 text-left",
   confirmItem: "min-w-0 rounded-md border border-[var(--border-soft)] bg-[var(--vui-surface-row)] px-2 py-1.5",
   confirmName: "m-0 text-[var(--fg-primary)]",

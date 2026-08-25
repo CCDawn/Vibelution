@@ -9,9 +9,9 @@ import {
 } from "./nodeAdapterModel";
 
 describe("nodeAdapterModel", () => {
-  it("covers all fifteen fixed nodes exactly once", () => {
+  it("covers all seventeen fixed nodes exactly once", () => {
     const adapters = listNodeAdapters();
-    expect(adapters).toHaveLength(15);
+    expect(adapters).toHaveLength(17);
     expect(adapters.map((a) => a.nodeId).sort()).toEqual([...CHALLENGE_CUP_NODE_IDS].sort());
   });
 
@@ -68,9 +68,9 @@ describe("nodeAdapterModel", () => {
   });
 
   it("groups three stages", () => {
-    expect(adaptersForStage("knowledge_collection")).toHaveLength(5);
+    expect(adaptersForStage("knowledge_collection")).toHaveLength(6);
     expect(adaptersForStage("experiment_design")).toHaveLength(5);
-    expect(adaptersForStage("execution_iteration")).toHaveLength(5);
+    expect(adaptersForStage("execution_iteration")).toHaveLength(6);
   });
 
   it("does not invent adapters for unknown nodes", () => {

@@ -43,12 +43,12 @@ def _inventory(*, active_work: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "teamId": "research-team",
         "objects": {
-            "teams": [{"teamId": "research-team"}],
+            "teams": [{"teamId": "research-team", "observationOnlyFields": ["updatedAt"]}],
             "agents": agents,
             "catalog": [{"catalogId": "science-125", "immutable": True}],
             "program": [{"programId": "competition-program-v2", "immutable": True}],
             "policy": [{"policyId": "full-catalog-v1", "immutable": True}],
-            "rooms": [{"roomId": "legacy-room", "teamId": "research-team"}],
+            "rooms": [{"roomId": "legacy-room", "teamId": "research-team", "observationOnlyFields": ["updatedAt"]}],
             "projects": [{"projectId": "legacy-project", "teamId": "research-team"}],
             "workflowRuns": [{"runId": "legacy-run", "teamId": "research-team"}],
             "sessions": [
@@ -75,6 +75,23 @@ class _Reader:
     def read_inventory(self, team_id: str) -> dict[str, Any]:
         assert team_id == "research-team"
         return self.payload
+
+
+class _RefreshingReader(_Reader):
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__(payload)
+        self._tick = 0
+
+    def read_inventory(self, team_id: str) -> dict[str, Any]:
+        self._tick += 1
+        for family in ("teams", "rooms"):
+            rows = self.payload["objects"].get(family)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict):
+                    row["updatedAt"] = f"observation-{self._tick}"
+        return super().read_inventory(team_id)
 
 
 class _Ports:
@@ -168,6 +185,38 @@ def test_preview_is_deterministic_and_only_deletes_team_owned_runtime_objects() 
     # A preview never echoes private record bodies or transcript fields.
     assert "prompt" not in str(first)
     assert "transcript" not in str(first)
+
+
+def test_updated_at_observation_drift_keeps_plan_stable_but_semantic_drift_is_stale() -> None:
+    payload = _inventory()
+    reader = _RefreshingReader(payload)
+    service = ChallengeCupResetService(inventory_reader=reader)
+
+    first = service.preview().to_dict()
+    second = service.preview().to_dict()
+
+    assert second["purgePlanId"] == first["purgePlanId"]
+    assert second["inventoryHash"] == first["inventoryHash"]
+
+    payload["objects"]["rooms"][0]["status"] = "archived"
+    with pytest.raises(ResetPlanStaleError):
+        service.confirm(
+            purge_plan_id=first["purgePlanId"],
+            confirmation_phrase=CONFIRMATION_PHRASE,
+        )
+
+
+def test_undeclared_updated_at_drift_is_stale() -> None:
+    payload = _inventory()
+    service = ChallengeCupResetService(inventory_reader=_Reader(payload))
+    first = service.preview().to_dict()
+
+    payload["objects"]["projects"][0]["updatedAt"] = "semantic-version-2"
+    with pytest.raises(ResetPlanStaleError):
+        service.confirm(
+            purge_plan_id=first["purgePlanId"],
+            confirmation_phrase=CONFIRMATION_PHRASE,
+        )
 
 
 def test_active_work_and_unscoped_objects_fail_closed() -> None:

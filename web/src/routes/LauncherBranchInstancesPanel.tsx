@@ -160,7 +160,6 @@ export function LauncherBranchInstancesPanel({
         attentionHint: "启动失败或卡住，关闭后回到可启动，不会删除 worktree",
         startable: "可启动",
         startableHint: "已具备 worktree，当前没有运行信号",
-        maintenance: "维护与清理",
         controlWindow: "Launcher 控制窗口",
         online: "在线",
         reading: "读取中",
@@ -222,7 +221,6 @@ export function LauncherBranchInstancesPanel({
         attentionHint: "Failed or stuck instances. Close returns them to Ready to start without deleting the worktree",
         startable: "Ready to start",
         startableHint: "Checked-out worktrees with no active runtime signal",
-        maintenance: "Maintenance and cleanup",
         controlWindow: "Launcher control window",
         online: "Online",
         reading: "Reading",
@@ -281,7 +279,6 @@ export function LauncherBranchInstancesPanel({
   const [filters, setFilters] = useState<InstanceListFilters>({});
   const [allPage, setAllPage] = useState(1);
   const [startablePage, setStartablePage] = useState(1);
-  const [maintenancePage, setMaintenancePage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<string[] | null>(null);
   const [batchStopIds, setBatchStopIds] = useState<string[] | null>(null);
@@ -310,10 +307,10 @@ export function LauncherBranchInstancesPanel({
   );
   const grouped = useMemo(() => groupBranchInstances(visibleItems, pendingOperation), [pendingOperation, visibleItems]);
   const allItems = useMemo(
-    () => [...grouped.running, ...grouped.attention, ...grouped.startable],
+    () => [...grouped.running, ...grouped.attention, ...grouped.startable, ...grouped.maintenance],
     [grouped],
   );
-  const maintenanceItems = useMemo(() => visibleItems.filter(isCleanupEligible), [visibleItems]);
+  const eligibleItems = useMemo(() => visibleItems.filter(isCleanupEligible), [visibleItems]);
   const pagedAll = useMemo(
     () => paginateItems(allItems, allPage, BRANCH_INSTANCE_PAGE_SIZE),
     [allItems, allPage],
@@ -321,10 +318,6 @@ export function LauncherBranchInstancesPanel({
   const pagedStartable = useMemo(
     () => paginateItems(grouped.startable, startablePage, BRANCH_INSTANCE_PAGE_SIZE),
     [grouped.startable, startablePage],
-  );
-  const pagedMaintenance = useMemo(
-    () => paginateItems(maintenanceItems, maintenancePage, BRANCH_INSTANCE_PAGE_SIZE),
-    [maintenanceItems, maintenancePage],
   );
 
   useEffect(() => {
@@ -337,11 +330,6 @@ export function LauncherBranchInstancesPanel({
       setStartablePage(pagedStartable.page);
     }
   }, [pagedStartable.page, startablePage]);
-  useEffect(() => {
-    if (pagedMaintenance.page !== maintenancePage) {
-      setMaintenancePage(pagedMaintenance.page);
-    }
-  }, [maintenancePage, pagedMaintenance.page]);
   useEffect(() => {
     const guards = openClickGuardsRef.current;
     for (const id of [...guards]) {
@@ -369,11 +357,7 @@ export function LauncherBranchInstancesPanel({
     if (startableIndex >= 0) {
       setStartablePage(Math.floor(startableIndex / BRANCH_INSTANCE_PAGE_SIZE) + 1);
     }
-    const maintenanceIndex = maintenanceItems.findIndex((item) => item.id === selectedId);
-    if (maintenanceIndex >= 0) {
-      setMaintenancePage(Math.floor(maintenanceIndex / BRANCH_INSTANCE_PAGE_SIZE) + 1);
-    }
-  }, [allItems, grouped.startable, maintenanceItems, selectedId]);
+  }, [allItems, grouped.startable, selectedId]);
 
   const kindById = useMemo(() => {
     const map = new Map<string, "running" | "attention" | "startable">();
@@ -390,8 +374,8 @@ export function LauncherBranchInstancesPanel({
   }, [grouped]);
 
   const knownIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
-  const cleanupSelected = selectedIds.filter((id) => knownIds.has(id) && maintenanceItems.some((item) => item.id === id));
-  const pageEligible = pagedMaintenance.items;
+  const cleanupSelected = selectedIds.filter((id) => knownIds.has(id) && eligibleItems.some((item) => item.id === id));
+  const pageEligible = pagedAll.items.filter(isCleanupEligible);
   const pageSelectedCount = pageEligible.filter((item) => cleanupSelected.includes(item.id)).length;
   const allPageSelected = pageEligible.length > 0 && pageSelectedCount === pageEligible.length;
   const pendingItems = pendingIds ? annotatedItems.filter((item) => pendingIds.includes(item.id)) : [];
@@ -558,6 +542,17 @@ export function LauncherBranchInstancesPanel({
             onPress={() => onLifecycle?.(item.id, "force-stop")}
           />
         ) : null}
+        {isCleanupEligible(item) ? (
+          <VButton
+            type="button"
+            variant="danger"
+            density="compact"
+            isDisabled={cleanupMutation.isPending || startingOrRestarting || stopBusy}
+            onPress={() => askCleanup([item.id])}
+          >
+            {labels.cleanup}
+          </VButton>
+        ) : null}
       </VActionGroup>
     );
   };
@@ -690,13 +685,41 @@ export function LauncherBranchInstancesPanel({
       id: "actions",
       header: labels.actions,
       align: "right",
-      width: 170,
+      width: 226,
       minWidth: 150,
       truncate: false,
       className: styles.actionCell,
       render: renderLifecycleActions,
     },
   ];
+
+  const selectColumn: VDenseTableColumn<LauncherBranchInstance> = {
+    id: "select",
+    header: (
+      <VCheckbox
+        aria-label={labels.selectPage}
+        isSelected={allPageSelected}
+        isDisabled={pageEligible.length === 0}
+        onChange={togglePage}
+      />
+    ),
+    align: "center",
+    width: 36,
+    minWidth: 36,
+    resizable: false,
+    truncate: false,
+    className: styles.selectCell,
+    render: (item: LauncherBranchInstance) =>
+      isCleanupEligible(item) ? (
+        <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+          <VCheckbox
+            aria-label={`${labels.cleanup} ${item.shortName || item.branch || item.id}`}
+            isSelected={cleanupSelected.includes(item.id)}
+            onChange={(next) => toggleSelected(item, next)}
+          />
+        </span>
+      ) : null,
+  };
 
   return (
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
@@ -753,6 +776,11 @@ export function LauncherBranchInstancesPanel({
             >
               {labels.filterUnmerged}
             </VButton>
+            {notice ? (
+              <span className={noticeTone === "error" ? styles.noticeError : styles.notice} role="status">
+                {notice}
+              </span>
+            ) : null}
           </VToolbar>
 
           <VTabs
@@ -782,6 +810,18 @@ export function LauncherBranchInstancesPanel({
               <div className={styles.tabHeader}>
                 <p className={styles.tabHint}>{activeHint}</p>
                 <div className={styles.tabHeaderActions}>
+                  {activeTab === "all" ? (
+                    <VButton
+                      type="button"
+                      variant="danger"
+                      density="compact"
+                      isDisabled={cleanupSelected.length === 0 || cleanupMutation.isPending}
+                      onPress={() => askCleanup(cleanupSelected)}
+                    >
+                      {labels.cleanupSelected}
+                      {cleanupSelected.length > 0 ? ` (${cleanupSelected.length})` : ""}
+                    </VButton>
+                  ) : null}
                   {activeTab === "running" ? (
                     <VButton
                       type="button"
@@ -833,144 +873,11 @@ export function LauncherBranchInstancesPanel({
                   selected: item.id === selectedId,
                   tone: runtimeTone(instanceRuntimeState(item, pendingOperation)),
                 })}
-                columns={primaryColumns}
+                columns={activeTab === "all" ? [selectColumn, ...primaryColumns] : primaryColumns}
               />
             </div>
           )}
 
-          <details className={styles.maintenanceFold}>
-            <summary>
-              <span>{labels.maintenance}</span>
-              <strong>{maintenanceItems.length}</strong>
-            </summary>
-            <div className={styles.maintenanceBody}>
-              <div className={styles.toolbar}>
-                <div className={styles.toolbarActions}>
-                  <VButton
-                    type="button"
-                    variant="danger"
-                    density="compact"
-                    isDisabled={cleanupSelected.length === 0 || cleanupMutation.isPending}
-                    onPress={() => askCleanup(cleanupSelected)}
-                  >
-                    {labels.cleanupSelected}
-                    {cleanupSelected.length > 0 ? ` (${cleanupSelected.length})` : ""}
-                  </VButton>
-                  {notice ? <span className={noticeTone === "error" ? styles.noticeError : styles.notice}>{notice}</span> : null}
-                </div>
-                <SectionPager
-                  ariaLabel={labels.maintenance}
-                  page={pagedMaintenance.page}
-                  pageCount={pagedMaintenance.pageCount}
-                  start={pagedMaintenance.start}
-                  end={pagedMaintenance.end}
-                  total={maintenanceItems.length}
-                  previousLabel={labels.previous}
-                  nextLabel={labels.next}
-                  onPrevious={() => setMaintenancePage((current) => current - 1)}
-                  onNext={() => setMaintenancePage((current) => current + 1)}
-                />
-              </div>
-              <VDenseTable
-                ariaLabel={labels.maintenance}
-                className={styles.statusTable}
-                resizable
-                rows={pagedMaintenance.items}
-                getRowKey={(item) => item.id}
-                onRowClick={(item) => onSelect(item.id)}
-                getRowState={(item) => ({ selected: item.id === selectedId, tone: item.dirty ? "warning" : "neutral" })}
-                columns={[
-                  {
-                    id: "select",
-                    header: (
-                      <VCheckbox
-                        aria-label={labels.selectPage}
-                        isSelected={allPageSelected}
-                        isDisabled={pageEligible.length === 0}
-                        onChange={togglePage}
-                      />
-                    ),
-                    align: "center",
-                    width: 36,
-                    minWidth: 36,
-                    resizable: false,
-                    truncate: false,
-                    className: styles.selectCell,
-                    render: (item: LauncherBranchInstance) => (
-                      <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                        <VCheckbox
-                          aria-label={`${labels.cleanup} ${item.shortName || item.branch || item.id}`}
-                          isSelected={cleanupSelected.includes(item.id)}
-                          onChange={(next) => toggleSelected(item, next)}
-                        />
-                      </span>
-                    ),
-                  },
-                  {
-                    id: "branch",
-                    header: copy.branchColumn,
-                    width: 240,
-                    minWidth: 130,
-                    render: (item: LauncherBranchInstance) => <span className={styles.branchName}>{item.shortName || item.branch || item.id}</span>,
-                  },
-                  {
-                    id: "state",
-                    header: copy.instanceState,
-                    width: 138,
-                    minWidth: 100,
-                    render: (item: LauncherBranchInstance) => {
-                      const state = instanceRuntimeState(item, pendingOperation);
-                      return (
-                        <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
-                          <VStatusChip tone={runtimeTone(state)}>
-                            {instanceRuntimeStateLabel(state, zh)}
-                          </VStatusChip>
-                        </LauncherBranchStatusHelp>
-                      );
-                    },
-                  },
-                  {
-                    id: "git",
-                    header: labels.git,
-                    width: 180,
-                    minWidth: 110,
-                    render: (item: LauncherBranchInstance) => {
-                      const state = instanceRuntimeState(item, pendingOperation);
-                      return (
-                        <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="git">
-                          <span>{formatGitStatus(item, zh)}</span>
-                        </LauncherBranchStatusHelp>
-                      );
-                    },
-                  },
-                  {
-                    id: "path",
-                    header: copy.instancePath,
-                    width: 320,
-                    minWidth: 160,
-                    fill: true,
-                    render: (item: LauncherBranchInstance) => item.displayPath || item.path || "-",
-                  },
-                  {
-                    id: "actions",
-                    header: labels.actions,
-                    align: "right",
-                    width: 92,
-                    minWidth: 76,
-                    truncate: false,
-                    className: styles.actionCell,
-                    render: (item: LauncherBranchInstance) => (
-                      <span className={styles.actionButtons} onClick={(event) => event.stopPropagation()}>
-                        <VButton type="button" variant="danger" density="compact" isDisabled={cleanupMutation.isPending} onPress={() => askCleanup([item.id])}>
-                          {labels.cleanup}
-                        </VButton>
-                      </span>
-                    ),
-                  },
-                ]}
-              />
-            </div>
-          </details>
         </div>
       )}
 

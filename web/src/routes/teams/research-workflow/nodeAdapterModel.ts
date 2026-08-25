@@ -41,6 +41,16 @@ export const WIRED_COMMANDS = ["accept_handoff", "reject_handoff", "revise"] as 
 
 const ADAPTERS: NodeAdapterSpec[] = [
   {
+    nodeId: "problem_understanding",
+    stageId: "knowledge_collection",
+    label: "问题理解",
+    labelEn: "Problem understanding",
+    actorKind: "agent",
+    slot: "knowledge_ops",
+    commands: ["start_agent_task", "open_session"],
+    replaces: "researchView=knowledge_collection&collectionStage=problem_understanding",
+  },
+  {
     nodeId: "source_finding",
     stageId: "knowledge_collection",
     label: "资料寻找",
@@ -169,6 +179,16 @@ const ADAPTERS: NodeAdapterSpec[] = [
     slot: "iteration_ops",
     commands: ["start_agent_task", "open_session"],
     replaces: "iteration_decision task",
+  },
+  {
+    nodeId: "version_governance",
+    stageId: "execution_iteration",
+    label: "版本治理",
+    labelEn: "Version governance",
+    actorKind: "agent",
+    slot: "iteration_ops",
+    commands: ["start_agent_task", "open_session"],
+    replaces: "researchView=version_governance",
   },
   {
     nodeId: "candidate_promotion",

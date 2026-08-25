@@ -254,8 +254,9 @@ export type NodeHandoffRecord = {
   humanTaskId?: string;
 };
 
-/** Canonical Challenge Cup fixed node ids (v1 topology). */
+/** Canonical Challenge Cup fixed node ids (v1 topology, must mirror core/research/workflow/definition.py). */
 export const CHALLENGE_CUP_NODE_IDS = [
+  "problem_understanding",
   "source_finding",
   "source_extraction",
   "evidence_relations",
@@ -269,6 +270,7 @@ export const CHALLENGE_CUP_NODE_IDS = [
   "controlled_run",
   "result_evaluation",
   "iteration_decision",
+  "version_governance",
   "candidate_promotion",
   "result_package",
 ] as const;
