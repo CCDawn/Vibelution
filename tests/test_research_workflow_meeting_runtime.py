@@ -794,6 +794,101 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
         )
 
 
+def test_background_discussion_scheduler_deduplicates_one_ready_meeting(monkeypatch):
+    class DeferredExecutor:
+        def __init__(self):
+            self.submissions: list[tuple[object, tuple[object, ...]]] = []
+
+        def submit(self, callback, *args):
+            self.submissions.append((callback, args))
+            return object()
+
+    team_id = "team-scheduled-discussion"
+    meeting_id = "meeting-scheduled-discussion"
+    executor = DeferredExecutor()
+    meeting = {
+        "meetingRoundId": meeting_id,
+        "status": "open",
+        "chatRoomRoundIds": ["room-round-1"],
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args: {"meetingRound": dict(meeting)},
+    )
+    monkeypatch.setattr(meetings, "running_bound_round_ids", lambda *_args: [])
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_latest_bound_round_messages",
+        lambda *_args: [{"status": "completed"}],
+    )
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+    monkeypatch.setattr(
+        meeting_runtime,
+        "run_meeting_discussion",
+        lambda *_args, **_kwargs: {"stopReason": "converged"},
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_record_meeting_discussion_driver_event",
+        lambda *_args, **_kwargs: None,
+    )
+    key = (team_id, meeting_id)
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        meeting_runtime._MEETING_DISCUSSION_JOBS.discard(key)
+    try:
+        first = meeting_runtime.schedule_meeting_discussion(team_id, meeting_id)
+        duplicate = meeting_runtime.schedule_meeting_discussion(team_id, meeting_id)
+
+        assert first["status"] == "scheduled"
+        assert duplicate["status"] == "already_scheduled"
+        assert len(executor.submissions) == 1
+
+        callback, args = executor.submissions[0]
+        callback(*args)
+        with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+            assert key not in meeting_runtime._MEETING_DISCUSSION_JOBS
+    finally:
+        with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+            meeting_runtime._MEETING_DISCUSSION_JOBS.discard(key)
+
+
+def test_auto_drive_hook_queues_discussion_instead_of_drafting(monkeypatch):
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        meeting_runtime,
+        "schedule_meeting_discussion",
+        lambda team_id, meeting_id: captured.update(
+            {"teamId": team_id, "meetingRoundId": meeting_id}
+        )
+        or {"status": "scheduled", "meetingRoundId": meeting_id},
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "maybe_auto_draft_meeting",
+        lambda *_args, **_kwargs: pytest.fail("auto-drive must not draft after round one"),
+    )
+
+    result = meeting_runtime.maybe_auto_draft_after_chat_round(
+        {"roomId": "room-auto-drive", "config": {"teamId": "team-auto-drive"}},
+        {
+            "roundId": "round-auto-drive",
+            "config": {
+                "teamId": "team-auto-drive",
+                "meetingRoundId": "meeting-auto-drive",
+                "autoDriveDiscussion": True,
+            },
+        },
+    )
+
+    assert result == {"status": "scheduled", "meetingRoundId": "meeting-auto-drive"}
+    assert captured == {
+        "teamId": "team-auto-drive",
+        "meetingRoundId": "meeting-auto-drive",
+    }
+
+
 def test_discussion_driver_stops_at_round_budget(tmp_path, monkeypatch):
     team_id, agents, opened = _open_meeting(tmp_path, monkeypatch, runner=_content_runner)
 

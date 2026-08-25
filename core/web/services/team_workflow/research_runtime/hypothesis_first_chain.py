@@ -793,7 +793,36 @@ def open_review_meeting_for_selection(
                     _formal_candidate_id=candidate_id,
                     _formal_candidate_order=candidate_order,
                 )
-        )
+            )
+        discussion_drivers: list[dict[str, Any]] = []
+        if background and agent_runner is None:
+            for opened in opened_candidates:
+                meeting = (
+                    opened.get("meetingRound")
+                    if isinstance(opened.get("meetingRound"), Mapping)
+                    else {}
+                )
+                candidate_meeting_id = str(
+                    meeting.get("meetingRoundId") or ""
+                ).strip()
+                if not candidate_meeting_id:
+                    continue
+                try:
+                    discussion_drivers.append(
+                        meeting_runtime.schedule_meeting_discussion(
+                            normalized_team_id,
+                            candidate_meeting_id,
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001 - selection fact remains replayable
+                    discussion_drivers.append(
+                        {
+                            "status": "failed",
+                            "meetingRoundId": candidate_meeting_id,
+                            "errorType": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    )
         primary = opened_candidates[0]
         if len(opened_candidates) == 1:
             # Preserve the long-standing single-candidate status contract
@@ -803,6 +832,7 @@ def open_review_meeting_for_selection(
                 **primary,
                 "reviewMeetings": opened_candidates,
                 "candidateCount": 1,
+                "discussionDrivers": discussion_drivers,
             }
         return {
             **primary,
@@ -813,6 +843,7 @@ def open_review_meeting_for_selection(
             ),
             "reviewMeetings": opened_candidates,
             "candidateCount": len(opened_candidates),
+            "discussionDrivers": discussion_drivers,
         }
 
     normalized_meeting_round_id = (

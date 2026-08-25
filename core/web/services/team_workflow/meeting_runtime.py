@@ -14,15 +14,16 @@ from the bound room messages (deterministic DEV fixture drafter by default;
 a real Coordinator model drafter can be injected through ``drafter``) and
 moves the meeting to ``awaiting_approval`` for the human closure gate.
 
-Only hypothesis-first ``hypothesis_review`` rounds are auto-opened here;
-stage coordination elsewhere stays ``manual_only``.  The discussion driver is
-synchronous (DEV/fixture path); asynchronous production wiring belongs to the
-orchestration batch.  No real model is called unless the caller injects one.
+Only hypothesis-first discussion rounds are auto-opened here; stage
+coordination elsewhere stays ``manual_only``. The discussion driver remains
+synchronous for DEV/fixture callers, while production's default chat runner
+queues its post-opening rounds on a bounded in-process executor.
 """
 
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -122,6 +123,12 @@ _ROLE_METADATA_FIELDS = (
     "challengeCupTeamRole",
 )
 _DISCUSSION_DRIVER = threading.local()
+_MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="hypothesis-meeting",
+)
+_MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()
+_MEETING_DISCUSSION_JOBS: set[tuple[str, str]] = set()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
 _SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
@@ -972,6 +979,7 @@ def _round_config(
     *,
     discussion_round_index: int,
     team_id: str = "",
+    auto_drive_discussion: bool = False,
 ) -> dict[str, Any]:
     discussion_scope = meeting_round.get("discussionScope")
     discussion_scope_hash = str(
@@ -1003,6 +1011,10 @@ def _round_config(
         "mode": str(meeting_round.get("mode") or ""),
         "teamId": str(team_id or meeting_round.get("teamId") or "").strip(),
         "discussionRoundIndex": discussion_round_index,
+        # Only production's default runner opts into the background driver.
+        # Fixture/custom runners deliberately keep the synchronous contract so
+        # callers can inspect and control every discussion round themselves.
+        "autoDriveDiscussion": bool(auto_drive_discussion),
         "agenda": list(meeting_round.get("agenda") or []),
         "agendaQuestions": list(meeting_round.get("agendaQuestions") or []),
         "agendaRules": list(meeting_round.get("agendaRules") or []),
@@ -1228,6 +1240,7 @@ def open_hypothesis_review_meeting(
             effective_selection,
             discussion_round_index=1,
             team_id=str(team_id or ""),
+            auto_drive_discussion=background and agent_runner is None,
         ),
         agent_runner=agent_runner,
         background=background,
@@ -1239,6 +1252,11 @@ def open_hypothesis_review_meeting(
     bound = meeting_rounds.bind_meeting_chat_room_round(
         team["teamId"], meeting_round_id, room_id, round_id
     )
+    if background and agent_runner is None:
+        # The first room round can finish before its meeting binding is
+        # persisted. Scheduling after the bind closes that race; the scheduler
+        # remains a no-op until the opening round is terminal.
+        schedule_meeting_discussion(team["teamId"], meeting_round_id)
     return {
         "schemaVersion": meeting_rounds.SCHEMA_VERSION,
         "teamId": team["teamId"],
@@ -1384,6 +1402,7 @@ def open_candidate_generation_meeting(
             selection_shim,
             discussion_round_index=1,
             team_id=str(team_id or ""),
+            auto_drive_discussion=background and agent_runner is None,
         ),
         agent_runner=agent_runner,
         background=background,
@@ -1395,6 +1414,8 @@ def open_candidate_generation_meeting(
     bound = meeting_rounds.bind_meeting_chat_room_round(
         team["teamId"], meeting_round_id, room_id, round_id
     )
+    if background and agent_runner is None:
+        schedule_meeting_discussion(team["teamId"], meeting_round_id)
     return {
         "schemaVersion": meeting_rounds.SCHEMA_VERSION,
         "teamId": team["teamId"],
@@ -1464,6 +1485,146 @@ def run_meeting_discussion(
         )
     finally:
         _DISCUSSION_DRIVER.active = False
+
+
+def _record_meeting_discussion_driver_event(
+    team_id: str,
+    meeting_round_id: str,
+    event_code: str,
+    *,
+    outcome: str,
+    error: Exception | None = None,
+) -> None:
+    """Emit bounded scheduler evidence without turning logs into authority."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_discussion",
+            event_code,
+            message=(
+                "Hypothesis meeting discussion driver failed."
+                if error is not None
+                else "Hypothesis meeting discussion driver scheduled."
+            ),
+            level="error" if error is not None else "info",
+            outcome=outcome,
+            fields={
+                "teamId": team_id,
+                "meetingRoundId": meeting_round_id,
+                "errorType": type(error).__name__ if error is not None else "",
+                "error": str(error)[:240] if error is not None else "",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        # A diagnostic outage must not alter the meeting lifecycle.
+        return
+
+
+def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> None:
+    key = (team_id, meeting_round_id)
+    try:
+        result = run_meeting_discussion(team_id, meeting_round_id)
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_discussion.driver.completed",
+            outcome=str(result.get("stopReason") or "completed"),
+        )
+    except Exception as exc:  # noqa: BLE001 - background failures need durable evidence
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_discussion.driver.failed",
+            outcome="failed",
+            error=exc,
+        )
+    finally:
+        with _MEETING_DISCUSSION_JOBS_LOCK:
+            _MEETING_DISCUSSION_JOBS.discard(key)
+
+
+def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str, Any]:
+    """Queue the post-opening discussion driver exactly once when it is ready.
+
+    Opening chat rounds run in the chat executor. A separate bounded meeting
+    executor avoids blocking that worker while each candidate completes its
+    own second/third round and reaches the human approval gate.
+    """
+
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRuntimeError("Meeting round id is required.")
+    meeting_round = meeting_rounds.get_meeting_round(
+        normalized_team_id, normalized_round_id
+    )["meetingRound"]
+    if str(meeting_round.get("status") or "").strip().lower() != "open":
+        return {
+            "status": "not_open",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+    if not bound_round_ids:
+        return {
+            "status": "waiting_for_binding",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    if meeting_rounds.running_bound_round_ids(meeting_round):
+        return {
+            "status": "waiting_for_opening_round",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    latest_messages = _latest_bound_round_messages(meeting_round)
+    if not any(
+        str(message.get("status") or "").strip().lower() == "completed"
+        for message in latest_messages
+    ):
+        return {
+            "status": "waiting_for_completed_speech",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    key = (normalized_team_id, normalized_round_id)
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        if key in _MEETING_DISCUSSION_JOBS:
+            return {
+                "status": "already_scheduled",
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+            }
+        _MEETING_DISCUSSION_JOBS.add(key)
+    try:
+        _MEETING_DISCUSSION_EXECUTOR.submit(
+            _run_scheduled_meeting_discussion,
+            normalized_team_id,
+            normalized_round_id,
+        )
+    except Exception:
+        with _MEETING_DISCUSSION_JOBS_LOCK:
+            _MEETING_DISCUSSION_JOBS.discard(key)
+        raise
+    _record_meeting_discussion_driver_event(
+        normalized_team_id,
+        normalized_round_id,
+        "meeting_discussion.driver.scheduled",
+        outcome="scheduled",
+    )
+    return {
+        "status": "scheduled",
+        "teamId": normalized_team_id,
+        "meetingRoundId": normalized_round_id,
+    }
 
 
 def _run_meeting_discussion_impl(
@@ -2100,6 +2261,8 @@ def maybe_auto_draft_after_chat_round(
     team_id = _team_id_for_auto_draft(room, round_payload)
     if not team_id:
         return None
+    if bool(config.get("autoDriveDiscussion")):
+        return schedule_meeting_discussion(team_id, meeting_round_id)
     return maybe_auto_draft_meeting(
         team_id,
         meeting_round_id,
