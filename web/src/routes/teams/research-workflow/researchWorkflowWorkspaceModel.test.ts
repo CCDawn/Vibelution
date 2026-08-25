@@ -287,6 +287,20 @@ describe("researchWorkflowWorkspaceModel", () => {
     }));
     expect(allowsResearchRunLaunch(noRun)).toBe(true);
 
+    const converged = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: null,
+      scope: { ...baseInput().scope, questionId: "SCI-001", runId: null, runVersion: null },
+      legacyNextAction: {
+        stage: "converged",
+        targetNodeId: "hf_convergence",
+        navigationLabel: "创建正式研究运行",
+        command: "create_run",
+        commandLabel: "创建正式研究运行",
+      },
+    }));
+    expect(converged.source).toBe("hypothesis_first");
+    expect(allowsResearchRunLaunch(converged)).toBe(false);
+
     const route = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, questionId: null, runId: null, runVersion: null },

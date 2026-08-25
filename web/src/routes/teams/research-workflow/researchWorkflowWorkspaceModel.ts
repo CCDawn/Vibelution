@@ -159,10 +159,7 @@ export function allowsResearchRunLaunch(model: ResearchWorkflowWorkspaceModel): 
   if (model.source === "route") return true;
   if (model.source !== "hypothesis_first") return false;
   return model.currentTask?.source === "hypothesis_first"
-    && (
-      model.currentTask.nextAction.stage === "no_run"
-      || model.currentTask.nextAction.command === "create_run"
-    );
+    && model.currentTask.nextAction.stage === "no_run";
 }
 
 const HYPOTHESIS_STAGE_LABELS: Record<string, string> = {
