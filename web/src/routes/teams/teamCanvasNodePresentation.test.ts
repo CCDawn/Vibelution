@@ -53,7 +53,7 @@ describe("teamCanvasNodePresentation", () => {
     expect(canvasNodeAgentLine(bound, "资料寻找员", "zh")).toBe("资料寻找员");
     expect(canvasNodeAgentLine(bound, undefined, "zh")).toBe("Finder Bot");
     expect(canvasNodeAgentLine(bound, "  ", "zh")).toBe("Finder Bot");
-    // agentCode 是机器标识，不再直出：无名称时显示"未命名 + 短后缀"`n    expect(canvasNodeAgentLine({ ...bound, agentName: "" }, undefined, "zh")).toBe("未命名 Agent r-01");`n    expect(canvasNodeAgentLine({ ...bound, agentName: "", agentId: "" }, undefined, "zh")).toBe("未绑定");
+    expect(canvasNodeAgentLine({ ...bound, agentName: "" }, undefined, "zh")).toBe("finder-01");
 
     const unbound = {
       role: "worker",

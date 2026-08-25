@@ -21,5 +21,5 @@ export default {
     "!grid h-auto w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 rounded-[var(--radius-control)] border border-transparent px-2 py-1.5 text-left !whitespace-normal",
   nodeItemActive:
     "!grid h-auto w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1.5 text-left !whitespace-normal",
-  nodeAgent: "col-span-2 min-w-0 truncate [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]",
+  nodeAgent: "col-span-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]",
 } as const;

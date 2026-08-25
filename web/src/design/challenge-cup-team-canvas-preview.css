@@ -478,7 +478,3 @@ body {
   background: color-mix(in srgb, var(--state-error) 8%, var(--vui-surface-row));
   font-size: var(--vui-font-xs);
 }
-
-/* TEMP-SHOT */
-.tcc-frame { max-width: none !important; height: 640px !important; }
-.tcc-next-body { display: none !important; }

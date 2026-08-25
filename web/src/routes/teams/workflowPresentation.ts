@@ -49,13 +49,6 @@ export function workRunNumber(snapshot: unknown, key: string, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/** 未知枚举不再以英文原样透出：本地化为可识别的"未知"标记，方便发现漏翻。 */
-export function unknownStatusLabel(value: string, lang: "zh" | "en") {
-  const normalized = String(value || "").trim();
-  if (!normalized) return "-";
-  return lang === "zh" ? `未知状态（${normalized}）` : `unknown (${normalized})`;
-}
-
 export function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
   const normalized = String(status || "").toLowerCase();
   if (normalized === "running") {
@@ -86,9 +79,7 @@ export function teamConversationStatusLabel(status: string, lang: "zh" | "en") {
     agent_missing: "agent missing",
     membership_conflict: "membership mismatch",
   };
-  const mapped = (lang === "zh" ? zh : en)[normalized];
-  if (mapped) return mapped;
-  return unknownStatusLabel(normalized, lang);
+  return (lang === "zh" ? zh : en)[normalized] ?? normalized;
 }
 
 export function workflowStateLabel(value: string, lang: "zh" | "en") {
@@ -151,9 +142,7 @@ export function workflowStateLabel(value: string, lang: "zh" | "en") {
     official_synced: "Official sync complete",
     returned_for_rework: "Returned for rework",
   };
-  const mapped = (lang === "zh" ? zh : en)[normalized];
-  if (mapped) return mapped;
-  return unknownStatusLabel(normalized, lang);
+  return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
 }
 
 export function workflowCoordinationStatusLabel(value: string, lang: "zh" | "en") {
@@ -184,11 +173,7 @@ export function workflowCoordinationStatusLabel(value: string, lang: "zh" | "en"
     blockedQueue: "blocked",
     active: "active",
   };
-  const mapped = (lang === "zh" ? zh : en)[normalized];
-  if (mapped) return mapped;
-  const ingestion = workflowIngestionStatusLabel(normalized, lang);
-  if (ingestion && ingestion !== normalized) return ingestion;
-  return unknownStatusLabel(normalized, lang);
+  return (lang === "zh" ? zh : en)[normalized] ?? workflowIngestionStatusLabel(normalized, lang);
 }
 
 export function workflowCoordinationChannelLabel(value: string, lang: "zh" | "en") {
@@ -201,9 +186,7 @@ export function workflowCoordinationChannelLabel(value: string, lang: "zh" | "en
     team_linked_room: "team room",
     project_agent_bus: "Agent Bus",
   };
-  const mapped = (lang === "zh" ? zh : en)[normalized];
-  if (mapped) return mapped;
-  return unknownStatusLabel(normalized, lang);
+  return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
