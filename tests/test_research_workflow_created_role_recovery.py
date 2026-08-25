@@ -74,6 +74,51 @@ def test_created_run_without_attempt_is_failed_once(tmp_path: Path) -> None:
         store.close()
 
 
+def test_hypothesis_first_prelude_without_attempt_is_not_reaped(
+    tmp_path: Path,
+) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        run = replace(
+            build_run_record(
+                run_id="run-hypothesis-first-prelude",
+                status="created",
+                last_event_sequence=1,
+                created_at_ms=FIXED_NOW_MS,
+            ),
+            input_snapshot_json=json.dumps(
+                {
+                    "researchObjectiveContract": {
+                        "hypothesisFirst": True,
+                    }
+                }
+            ),
+        )
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(run)
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run.run_id,
+                    event_id=f"evt-created-{run.run_id}",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+
+        assert _worker(store, tmp_path).run_once() == 0
+        current = store.get_run(run.run_id)
+        assert current is not None
+        assert current.status == "created"
+        assert current.terminal_reason is None
+        assert [event.event_type for event in store.list_events(run.run_id)] == [
+            "run_created"
+        ]
+    finally:
+        store.close()
+
+
 def test_created_run_with_node_attempt_is_not_reaped(tmp_path: Path) -> None:
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
     try:
