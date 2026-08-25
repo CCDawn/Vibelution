@@ -72,6 +72,27 @@ def _path_component(value: Any, *, field_name: str) -> str:
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
+def _io_path(path: Path) -> Path:
+    """Normalize a store path to the ``\\\\?\\`` extended-length IO form.
+
+    The receipt store nests two SHA-256 path components under the team
+    program root; on real deployments the final file path exceeds the legacy
+    Windows ``MAX_PATH`` boundary and ``os.replace`` fails with ``WinError 3``
+    even though the directory itself is writable.  The logical path returned
+    by ``_path`` stays prefix-free so containment checks keep comparing.
+    """
+
+    resolved = path.resolve()
+    if os.name != "nt":
+        return resolved
+    value = str(resolved)
+    if value.startswith("\\\\?\\"):
+        return resolved
+    if value.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{value[2:]}")
+    return Path(f"\\\\?\\{value}")
+
+
 def _path(team_id: str, question_id: str, workflow_run_id: str) -> Path:
     normalized_question = str(question_id or "").strip().upper()
     normalized_run = str(workflow_run_id or "").strip()
@@ -87,12 +108,13 @@ def _path(team_id: str, question_id: str, workflow_run_id: str) -> Path:
 
 
 def _load(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
+    io_path = _io_path(path)
+    if not io_path.exists():
         return None
-    if not path.is_file():
+    if not io_path.is_file():
         raise ValueError("model invocation receipt store path is not a file")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(io_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("model invocation receipt store is unreadable or corrupt") from exc
     if not isinstance(payload, dict):
@@ -101,17 +123,18 @@ def _load(path: Path) -> dict[str, Any] | None:
 
 
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    io_path = _io_path(path)
+    io_path.parent.mkdir(parents=True, exist_ok=True)
     # Keep the atomic sibling name short.  The receipt path already contains
     # two SHA-256 segments, so repeating the target basename plus a full UUID
     # can exceed the legacy Windows MAX_PATH boundary even when the final file
     # itself is valid.
-    temporary = path.with_name(f".tmp-{uuid4().hex[:12]}")
+    temporary = io_path.with_name(f".tmp-{uuid4().hex[:12]}")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    os.replace(temporary, path)
+    os.replace(temporary, io_path)
 
 
 def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
