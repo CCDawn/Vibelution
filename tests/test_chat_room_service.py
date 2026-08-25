@@ -2694,6 +2694,52 @@ def test_formal_meeting_speaker_turn_journals_receipt_outcome(tmp_path, monkeypa
     assert [receipt.get("receiptId") for receipt in registered_receipts] == ["receipt-meeting-1"]
 
 
+def test_scoped_discussion_room_round_fails_closed_without_receipt_authority(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    scoped_room = chat_room_service.create_chat_room(
+        title="正式阶段群聊",
+        participant_session_ids=["session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "hypothesis_review", "questionId": "SCI-096", "key": "scope-1"},
+            "scopeHash": "c" * 24,
+        },
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError) as excinfo:
+        chat_room_service.start_chat_room_round(
+            scoped_room["roomId"],
+            "假说评审会议开幕",
+        )
+    message = str(excinfo.value)
+    assert "回执授权" in message or "receipt authority" in message
+
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+    with_authority_message = ""
+    try:
+        chat_room_service.start_chat_room_round(
+            scoped_room["roomId"],
+            "假说评审会议开幕",
+            _model_invocation_receipt_authority=authority,
+        )
+    except chat_room_service.ChatRoomValidationError as exc:
+        with_authority_message = str(exc)
+    assert "回执授权" not in with_authority_message and "receipt authority" not in with_authority_message
+
+
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

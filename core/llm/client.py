@@ -2725,11 +2725,10 @@ class LLMClient:
             return outcome
         binding = context["binding"]
         raw = context["raw"]
-        actual_model = (
-            str(request_content.get("model") or "").strip()
-            if isinstance(request_content, Mapping)
-            else ""
-        )
+        # The persisted request summary is redacted to bounded shape metadata
+        # and the wire payload carries a litellm routing name, so neither is
+        # the resolved model identity; this client's resolved profile is.
+        actual_model = str(getattr(self.profile, "model", "") or "").strip()
         expected_provider = context["expectedProviderId"]
         expected_model = context["expectedModelId"]
         expected_model_ref = context["expectedModelRef"]

@@ -430,6 +430,106 @@ def test_client_message_metadata_cannot_mint_model_invocation_receipt() -> None:
     )
 
 
+def _receipt_binding_outcome() -> tuple[TurnOutcome, dict]:
+    outcome = TurnOutcome.final_answer(
+        identity=CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-1",
+            iteration=0,
+            item_id="item-1",
+        ),
+        text="review verdict",
+    )
+    binding = {
+        "questionId": "SCI-001",
+        "questionRunId": "workflow-run-1",
+        "workflowRunId": "workflow-run-1",
+        "workflowId": "workflow-1",
+        "workflowVersionId": "version-1",
+        "formalNodeId": "hypothesis_design",
+        "formalNodeRunId": "node-run-1",
+        "formalNodeAttempt": 1,
+        "sessionId": "session-1",
+        "taskId": "task-1",
+        "turnId": "turn-1",
+        "outcomeKinds": ["review"],
+    }
+    return outcome, binding
+
+
+def test_receipt_attaches_with_redacted_request_summary() -> None:
+    # The persisted request summary carries only bounded shape metadata, so
+    # the route check must resolve the actual model from the client profile;
+    # the redacted summary itself never names the model.
+    outcome, binding = _receipt_binding_outcome()
+    receipt_context = {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-plus",
+        },
+        "questionInvocationBinding": binding,
+    }
+    client = LLMClient(config=make_config(), backend=lambda _payload: {})
+
+    with model_invocation_receipt_context_scope(receipt_context):
+        attached = client._attach_model_invocation_receipt(
+            outcome,
+            metadata=None,
+            invocation_scope=outcome.identity,
+            request_content={
+                "conversationSha256": "b" * 64,
+                "messageCount": 1,
+                "payloadShape": {"messageRoles": {"user": 1}},
+            },
+            response_content={"finalText": "review verdict"},
+            started_at_ms=100,
+            finished_at_ms=120,
+            attempt=1,
+            retry_count=0,
+        )
+
+    receipt = attached.model_invocation_receipt
+    assert isinstance(receipt, dict)
+    assert receipt["receiptId"]
+    assert receipt["model"] == "qwen-plus"
+
+
+def test_receipt_still_fails_closed_when_profile_route_differs() -> None:
+    outcome, binding = _receipt_binding_outcome()
+    receipt_context = {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-max",
+        },
+        "questionInvocationBinding": binding,
+    }
+    client = LLMClient(config=make_config(), backend=lambda _payload: {})
+
+    with model_invocation_receipt_context_scope(receipt_context):
+        attached = client._attach_model_invocation_receipt(
+            outcome,
+            metadata=None,
+            invocation_scope=outcome.identity,
+            request_content={"conversationSha256": "b" * 64, "messageCount": 1},
+            response_content={"finalText": "review verdict"},
+            started_at_ms=100,
+            finished_at_ms=120,
+            attempt=1,
+            retry_count=0,
+        )
+
+    assert attached.model_invocation_receipt is None
+
+
 def test_prompt_cache_payload_summary_fingerprints_messages_and_tool_schema_without_content() -> None:
     payload = {
         "messages": [
