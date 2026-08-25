@@ -32,7 +32,7 @@ describe("nodeOpsProjection", () => {
         },
       },
     });
-    expect(proj?.blockedReason).toMatch(/Frozen Protocol/);
+    expect(proj?.blockedReason).toMatch(/冻结协议和试跑人工放行/);
   });
 
   it("marks runtime current node", () => {

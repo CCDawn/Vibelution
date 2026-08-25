@@ -144,7 +144,7 @@ function baseStages(partial: Partial<Record<MacroId, Partial<StageNode>>>): Stag
       substages: [
         { id: "hypothesis", label: "假设", state: "idle", agent: "林知序", summary: "可证伪假设与变量" },
         { id: "protocol", label: "协议", state: "idle", agent: "沈观止", summary: "冻结实验协议" },
-        { id: "smoke", label: "Smoke", state: "idle", agent: "沈观止", summary: "冒烟门禁" },
+        { id: "smoke", label: "试跑", state: "idle", agent: "沈观止", summary: "小规模试跑验证" },
       ],
     },
     {
@@ -251,7 +251,7 @@ const SCENARIOS: Scenario[] = [
     currentLabel: "实验设计 · 协议冻结",
     progress: "阶段 2/3 · 子步 2/3",
     runStatus: "running",
-    nextAction: "冻结协议并跑 smoke",
+    nextAction: "冻结协议并试跑",
     stages: baseStages({
       knowledge_collection: {
         state: "done",
@@ -267,11 +267,11 @@ const SCENARIOS: Scenario[] = [
       experiment: {
         state: "active",
         badge: "进行中",
-        metrics: ["假设 2", "协议草稿", "smoke 待跑"],
+        metrics: ["假设 2", "协议草稿", "试跑待执行"],
         substages: [
           { id: "hypothesis", label: "假设", state: "done", agent: "林知序", summary: "2 条可证伪假设" },
           { id: "protocol", label: "协议", state: "active", agent: "沈观止", summary: "seed/数据已填，待冻结" },
-          { id: "smoke", label: "Smoke", state: "idle", agent: "沈观止", summary: "等待协议冻结" },
+          { id: "smoke", label: "试跑", state: "idle", agent: "沈观止", summary: "等待协议冻结" },
         ],
       },
       iteration: { state: "idle", badge: "等待前置" },
@@ -296,11 +296,11 @@ const SCENARIOS: Scenario[] = [
       experiment: {
         state: "done",
         badge: "已放行",
-        metrics: ["假设 2", "协议冻结", "smoke 通过"],
+        metrics: ["假设 2", "协议冻结", "试跑通过"],
         substages: [
           { id: "hypothesis", label: "假设", state: "done", agent: "林知序", summary: "已冻结" },
           { id: "protocol", label: "协议", state: "done", agent: "沈观止", summary: "已冻结" },
-          { id: "smoke", label: "Smoke", state: "done", agent: "沈观止", summary: "通过" },
+          { id: "smoke", label: "试跑", state: "done", agent: "沈观止", summary: "通过" },
         ],
       },
       iteration: {
@@ -325,20 +325,20 @@ const SCENARIOS: Scenario[] = [
     project: "稀疏预测误差门控假说",
     currentStageId: "experiment",
     currentSubId: "smoke",
-    currentLabel: "实验设计 · Smoke 失败",
+    currentLabel: "实验设计 · 试跑失败",
     progress: "阶段 2/3 · 阻塞",
     runStatus: "failed",
-    nextAction: "修复 smoke 后重试或回退协议",
+    nextAction: "修复试跑问题后重试或回退协议",
     stages: baseStages({
       knowledge_collection: { state: "done", badge: "已完成", metrics: ["资料 24", "证据 12"] },
       experiment: {
         state: "blocked",
-        badge: "Smoke 失败",
-        metrics: ["假设 2", "协议冻结", "smoke ✕"],
+        badge: "试跑失败",
+        metrics: ["假设 2", "协议冻结", "试跑 ✕"],
         substages: [
           { id: "hypothesis", label: "假设", state: "done", agent: "林知序", summary: "已冻结" },
           { id: "protocol", label: "协议", state: "done", agent: "沈观止", summary: "已冻结" },
-          { id: "smoke", label: "Smoke", state: "blocked", agent: "沈观止", summary: "exit 1 · 缺数据列" },
+          { id: "smoke", label: "试跑", state: "blocked", agent: "沈观止", summary: "未通过 · 缺数据列" },
         ],
       },
       iteration: { state: "idle", badge: "锁定" },
@@ -400,9 +400,9 @@ const PANEL_COPY: Record<
     opsTitle: "seed · 数据 · 冻结",
   },
   smoke: {
-    title: "Smoke 门禁",
-    legacyPage: "原 smoke 检查页",
-    opsTitle: "冒烟运行 · 放行",
+    title: "试跑放行",
+    legacyPage: "原试跑检查页",
+    opsTitle: "试跑 · 放行",
   },
   run: {
     title: "执行批次",

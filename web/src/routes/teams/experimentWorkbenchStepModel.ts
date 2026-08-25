@@ -78,7 +78,7 @@ export type HypothesisProgressStepId = (typeof HYPOTHESIS_PROGRESS_STEP_IDS)[num
 
 const HYPOTHESIS_PROGRESS_STEP_LABELS: Record<string, { zh: string; en: string }> = {
   design: { zh: "实验设计", en: "Design" },
-  smoke: { zh: "冒烟试跑", en: "Smoke run" },
+  smoke: { zh: "试跑", en: "Trial run" },
   full_run: { zh: "正式运行", en: "Full run" },
   evaluation: { zh: "结果评估", en: "Evaluation" },
   promotion: { zh: "成果入库", en: "Promotion" },

@@ -112,7 +112,7 @@ _EXPERIMENT_NODES: tuple[WorkflowNodeSpec, ...] = (
     WorkflowNodeSpec(
         nodeId="smoke_gate",
         stageId=WorkflowStageId.EXPERIMENT_DESIGN,
-        label="Smoke 放行",
+        label="试跑放行",
         actorKind=ActorKind.HUMAN,
         primaryRoleKey="research_owner",
         acceptsGateKinds=(GateKind.SMOKE, GateKind.HUMAN, GateKind.FROZEN_PROTOCOL),
@@ -233,7 +233,7 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
             "e_smoke_run",
             "smoke_gate",
             "controlled_run",
-            "Smoke 放行",
+            "试跑放行",
             GateKind.SMOKE,
             ("smoke_release", "frozen_protocol"),
             requiresHumanAccept=True,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CHALLENGE_CUP_NODE_IDS } from "../../../api/types/researchWorkflow";
 import {
   adaptersForStage,
+  commandLabel,
   getNodeAdapter,
   listNodeAdapters,
   WIRED_COMMANDS,
@@ -65,6 +66,12 @@ describe("nodeAdapterModel", () => {
     expect(adapter?.actorKind).toBe("system");
     expect(adapter?.slot).toBe("system_run");
     expect(adapter?.commands).not.toContain("open_session");
+  });
+
+  it("presents the smoke protocol as a trial run without renaming protocol ids", () => {
+    expect(getNodeAdapter("smoke_gate")?.labelEn).toBe("Trial-run gate");
+    expect(commandLabel("run_smoke", "zh")).toBe("运行试跑");
+    expect(commandLabel("run_smoke", "en")).toBe("Start trial run");
   });
 
   it("groups three stages", () => {

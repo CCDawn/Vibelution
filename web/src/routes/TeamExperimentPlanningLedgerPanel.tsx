@@ -464,27 +464,27 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     );
     const smokeGateDetail = !designExecutionAllowed
       ? (lang === "zh"
-        ? "先完成假设审查并冻结设计；之后可运行自包含受控 Smoke。"
-        : "Review the hypothesis and freeze the design first; then the bounded self-contained Smoke becomes available.")
+        ? "先完成假设审查并冻结设计；之后可运行受控试跑。"
+        : "Review the hypothesis and freeze the design first; then the bounded trial run becomes available.")
       : !activeSmokeAdapter
         ? declaredSmokeAdapterId
           ? (lang === "zh"
-            ? `计划声明的离线 Smoke 执行器不可用：${declaredSmokeAdapterId}。`
-            : `The offline smoke adapter declared by the plan is unavailable: ${declaredSmokeAdapterId}.`)
+            ? `计划声明的离线试跑执行器不可用：${declaredSmokeAdapterId}。`
+            : `The offline trial-run adapter declared by the plan is unavailable: ${declaredSmokeAdapterId}.`)
           : (lang === "zh"
-            ? "当前实验方式没有可用的白名单离线 Smoke 执行器。"
-            : "No allowlisted offline smoke adapter is available for this method.")
+            ? "当前实验方式没有可用的许可离线试跑执行器。"
+            : "No allowlisted offline trial-run adapter is available for this method.")
         : !activeBaselineArtifact
         ? activePlan?.readiness.readyForBoundedSmokeRun
           ? (lang === "zh"
-            ? "自包含执行器会在 Smoke 中同时计算 baseline 与 variant；无需手工登记 baseline artifact。"
-            : "The self-contained runner computes baseline and variant in the Smoke; no manual baseline artifact is required.")
+            ? "自包含执行器会在试跑中同时计算对照与实验两组结果；无需手工登记对照产物。"
+            : "The self-contained runner computes the baseline and the variant in the trial run; no manual baseline artifact is required.")
           : (lang === "zh"
-            ? "冻结设计尚未满足自包含 Smoke 合同。"
-            : "The frozen design is not ready for the self-contained Smoke contract.")
+            ? "冻结的设计尚未满足受控试跑的运行条件。"
+            : "The frozen design is not ready for the bounded trial run.")
         : (lang === "zh"
-            ? "仅运行后端白名单离线 Smoke；不会启动 full run，也不会生成正式科学结论。"
-            : "Runs only the backend allowlisted offline smoke; no full run or formal scientific claim.");
+            ? "仅运行后端许可的离线试跑；不会启动正式实验，也不会生成正式科学结论。"
+            : "Runs only the backend allowlisted offline trial run; no formal run and no formal scientific claim.");
     const canRegisterFullRunResult = Boolean(
       selectedTeam?.teamId
       && activePlan
@@ -807,7 +807,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
           {currentStep === "execute" && activePlan ? (
             <>
             <div className={styles.experimentBaselineArtifact}>
-              <span>{lang === "zh" ? "受控试跑" : "Bounded smoke"}</span>
+              <span>{lang === "zh" ? "受控试跑" : "Bounded trial run"}</span>
               <strong title={activeSmokeRun?.artifactHash || activeSmokeAdapter?.adapterId || ""}>
                 {activeSmokeRun
                   ? `${shortProtocolLabel(String(activeSmokeRun.adapter || ""), 28)} · ${activeSmokeRun.status}`
@@ -828,19 +828,19 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
               >
                 <Play size={13} />
                 {selectedTeamRunExperimentSmokePending
-                  ? (lang === "zh" ? "Smoke 运行中" : "Running smoke")
-                  : (lang === "zh" ? "运行受控 Smoke" : "Run bounded smoke")}
+                  ? (lang === "zh" ? "试跑运行中" : "Trial run in progress")
+                  : (lang === "zh" ? "运行受控试跑" : "Run bounded trial run")}
               </VNativeButton>
             </div>
             {activeSmokeRun ? (
               <section
                 className={styles.experimentSmokeRunEvidence}
-                aria-label={lang === "zh" ? "本次受控 Smoke 证据" : "Bounded smoke evidence"}
+                aria-label={lang === "zh" ? "本次试跑证据" : "Trial run evidence"}
               >
                 <VPanelHeader
                   className={styles.experimentSmokeRunHeader}
                   headingLevel={null}
-                  eyebrow={lang === "zh" ? "本次 Smoke 证据" : "Smoke evidence"}
+                  eyebrow={lang === "zh" ? "本次试跑证据" : "Trial run evidence"}
                   title={activeSmokeRun.adapter}
                   actions={(
                     <div className={styles.experimentSmokeMeta}>
@@ -898,7 +898,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                     ].join(" ")}
                   >
                     <div>
-                      <span>{lang === "zh" ? "Active smoke" : "Active smoke"}</span>
+                      <span>{lang === "zh" ? "当前试跑结果" : "Active trial-run result"}</span>
                       <strong title={activeSmokeResult.resultPath || activeSmokeResult.logRef || activeSmokeResult.smokeResultId}>
                         {activeSmokeResult.resultPath || activeSmokeResult.logRef || activeSmokeResult.smokeResultId}
                       </strong>
@@ -920,9 +920,9 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 ) : null}
                 <div className={styles.experimentSmokeForm}>
                   <label>
-                    <span>{lang === "zh" ? "Smoke 状态" : "Smoke status"}</span>
+                    <span>{lang === "zh" ? "试跑状态" : "Trial run status"}</span>
                     <VStringSelect
-                      ariaLabel={lang === "zh" ? "Smoke 状态" : "Smoke status"}
+                      ariaLabel={lang === "zh" ? "试跑状态" : "Trial run status"}
                       value={experimentSmokeResultDraft.status}
                       onValueChange={(status) =>
                         setExperimentSmokeResultDraft((draft) => ({
@@ -941,7 +941,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                     />
                   </label>
                   <label>
-                    <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
+                    <span>{lang === "zh" ? "试跑指标" : "Trial run metric"}</span>
                     <VNativeInput
                       value={experimentSmokeResultDraft.metricValue}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
@@ -985,8 +985,8 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                     {selectedTeamRegisterExperimentSmokeResultPending
                       ? (lang === "zh" ? "登记中" : "Registering")
                       : activeSmokeResult
-                        ? (lang === "zh" ? "更新 smoke 结果" : "Update smoke result")
-                        : (lang === "zh" ? "登记 smoke 结果" : "Register smoke")}
+                        ? (lang === "zh" ? "更新试跑结果" : "Update trial-run result")
+                        : (lang === "zh" ? "登记试跑结果" : "Register trial-run result")}
                   </VNativeButton>
                   <label className={styles.experimentSmokeWide}>
                     <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
@@ -1076,7 +1076,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                         />
                       </label>
                       <label>
-                        <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
+                        <span>{lang === "zh" ? "试跑指标" : "Trial run metric"}</span>
                         <VNativeInput
                           value={experimentFullRunResultDraft.smokeMetricValue}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, smokeMetricValue: event.target.value }))}

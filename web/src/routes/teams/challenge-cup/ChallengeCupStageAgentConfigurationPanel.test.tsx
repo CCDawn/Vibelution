@@ -13,8 +13,8 @@ const bindings: ResearchStageAgentBinding[] = [
     roleKeys: ["experiment_planner"],
     zh: "实验规划",
     en: "Experiment planner",
-    zhFocus: "计划、baseline 与 smoke gate",
-    enFocus: "Plan, baseline, smoke gate",
+    zhFocus: "计划、baseline 与试跑放行",
+    enFocus: "Plan, baseline, trial-run gate",
     agentId: "agent-experiment-planner",
     agent: {
       agentId: "agent-experiment-planner",

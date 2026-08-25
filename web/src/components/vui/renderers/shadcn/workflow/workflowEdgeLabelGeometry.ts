@@ -20,7 +20,7 @@ const ASCII_ADVANCE = 6.5;
 const CANVAS_EDGE_LABEL_ALIASES: Record<string, string> = {
   "Knowledge Package": "知识包",
   "knowledge package": "知识包",
-  "Smoke 放行": "冒烟放行",
+  "Smoke 放行": "试跑放行",
 };
 
 export type EdgeLabelSpec = {
