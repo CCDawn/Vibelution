@@ -1,0 +1,417 @@
+"""Bridge a canonical workflow result package into the Challenge Program.
+
+The research workflow and the Challenge Program have different contracts.  A
+generic ``research_result_package`` contains a fact chain and deliverables; it
+is not, by itself, a ``challenge_question_output.v2``.  This module is the
+small boundary between them:
+
+* read only the scoped workflow-artifact authority;
+* require an explicitly embedded canonical v2 output and citation checks;
+* bind registration to the immutable result-package content hash; and
+* leave the existing Challenge Program registration/review gate authoritative.
+
+If the upstream package does not carry that authority, the bridge returns
+``NEEDS_CONTEXT`` and lists the smallest missing contract.  It never derives
+question text, hypotheses, citations, or a research plan from generic result
+package fields.
+"""
+
+from __future__ import annotations
+
+import re
+from copy import deepcopy
+from typing import Any
+
+from core.web.services.team_workflow import challenge_question_runs
+
+from .artifact_readback_registry import load_scoped_artifact_payload
+
+HANDOFF_STATUS_REGISTERED = "registered"
+HANDOFF_STATUS_IDEMPOTENT = "idempotent"
+HANDOFF_STATUS_NEEDS_CONTEXT = "NEEDS_CONTEXT"
+NEEDS_CONTEXT = HANDOFF_STATUS_NEEDS_CONTEXT
+
+
+class ProgramCandidateHandoffContractError(ValueError):
+    """A permanent handoff contract or immutable-binding violation.
+
+    Missing upstream context is represented by the normal ``NEEDS_CONTEXT``
+    response.  This exception is reserved for a source that claimed to be
+    complete but failed the Challenge Program registration contract, such as a
+    changed package binding on an existing immutable record.  Delivery maps it
+    to a permanent orchestration error instead of retrying it as I/O.
+    """
+
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_OUTPUT_KEYS = (
+    "challengeQuestionOutput",
+    "challenge_question_output",
+    "challengeQuestionOutputV2",
+    "challenge_question_output_v2",
+)
+_CITATION_CHECK_KEYS = (
+    "citationChecks",
+    "citation_checks",
+    "challengeQuestionCitationChecks",
+    "challenge_question_citation_checks",
+)
+_REQUIRED_OUTPUT_FIELDS = (
+    "identity",
+    "classification",
+    "scope",
+    "run",
+    "problem_understanding",
+    "evidence",
+    "hypotheses",
+    "dimension_reviews",
+    "selection",
+    "research_plan",
+    "feedback_iterations",
+    "result_classification",
+    "competition_result_view",
+    "collaboration_refs",
+    "review",
+    "submission",
+    "audit",
+)
+
+
+def _first_object(container: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any] | None:
+    for key in keys:
+        value = container.get(key)
+        if isinstance(value, dict):
+            return deepcopy(value)
+    return None
+
+
+def _first_present(container: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in container:
+            return container.get(key)
+    return None
+
+
+def _missing_context(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+    reason: str,
+    missing_authorities: list[str] | tuple[str, ...] = (),
+    missing_fields: list[str] | tuple[str, ...] = (),
+    source_result_package_hash: str = "",
+    diagnostics: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    fields = list(dict.fromkeys(str(item) for item in missing_fields if str(item)))
+    authorities = list(
+        dict.fromkeys(str(item) for item in missing_authorities if str(item))
+    )
+    return {
+        "status": HANDOFF_STATUS_NEEDS_CONTEXT,
+        "teamId": team_id,
+        "workflowRunId": workflow_run_id,
+        "sourceCollectionRunId": source_collection_run_id,
+        "sourceResultPackageHash": source_result_package_hash,
+        "reason": reason,
+        "missingAuthorities": authorities,
+        "missingFields": fields,
+        "requiredUpstreamContract": {
+            "artifactKind": "research_result_package",
+            "field": "package.challengeQuestionOutput",
+            "schema": "challenge_question_output.v2",
+            "citationField": "package.citationChecks",
+            "binding": "teamId + questionId + workflowRunId + package.contentHash",
+        },
+        "diagnostics": list(dict.fromkeys(str(item) for item in diagnostics if str(item))),
+    }
+
+
+def _package_hash(package: dict[str, Any], artifact_payload: dict[str, Any]) -> str:
+    value = str(
+        package.get("contentHash")
+        or package.get("canonicalHash")
+        or package.get("canonical_sha256")
+        or artifact_payload.get("contentHash")
+        or ""
+    ).strip().lower()
+    return value if _SHA256_RE.fullmatch(value) else ""
+
+
+def _extract_required_error_fields(issues: list[dict[str, str]]) -> list[str]:
+    missing: list[str] = []
+    for issue in issues:
+        message = str(issue.get("message") or "")
+        path = str(issue.get("path") or "$")
+        match = re.match(r"^'([^']+)' is a required property$", message)
+        missing.append(f"{path}.{match.group(1)}" if match else path)
+    return list(dict.fromkeys(missing))
+
+
+def _read_canonical_package(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    authority_run_id = source_collection_run_id or workflow_run_id
+    envelope = load_scoped_artifact_payload(
+        "research_result_package",
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=workflow_run_id,
+    )
+    if not isinstance(envelope, dict):
+        return None, _missing_context(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            reason="canonical research_result_package is unavailable",
+            missing_authorities=["research_result_package"],
+            missing_fields=["package", "package.contentHash"],
+        )
+
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        return None, _missing_context(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            reason="research_result_package payload is not an object",
+            missing_authorities=["research_result_package"],
+            missing_fields=["payload"],
+        )
+
+    package = payload.get("package")
+    if not isinstance(package, dict):
+        return None, _missing_context(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            reason="research_result_package does not contain its canonical package",
+            missing_authorities=["research_result_package"],
+            missing_fields=["package", "package.contentHash"],
+        )
+
+    package_hash = _package_hash(package, payload)
+    if not package_hash:
+        return None, _missing_context(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            reason="canonical result package contentHash is missing or invalid",
+            missing_authorities=["research_result_package"],
+            missing_fields=["package.contentHash"],
+        )
+
+    envelope_team = str(envelope.get("teamId") or payload.get("teamId") or "").strip()
+    envelope_workflow = str(
+        envelope.get("workflowRunId") or payload.get("workflowRunId") or ""
+    ).strip()
+    if envelope_team and envelope_team != team_id:
+        return None, _missing_context(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            reason="result package team scope does not match the delivery run",
+            source_result_package_hash=package_hash,
+            diagnostics=[f"packageTeamId={envelope_team}"],
+        )
+    if envelope_workflow and envelope_workflow != workflow_run_id:
+        return None, _missing_context(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            reason="result package workflow scope does not match the delivery run",
+            source_result_package_hash=package_hash,
+            diagnostics=[f"packageWorkflowRunId={envelope_workflow}"],
+        )
+    return {
+        "envelope": envelope,
+        "payload": payload,
+        "package": package,
+        "packageHash": package_hash,
+        "authorityRunId": authority_run_id,
+    }, None
+
+
+def handoff_result_package_to_challenge_program(
+    store: Any = None,
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str = "",
+    registered_by: str = "research_result_package_bridge",
+) -> dict[str, Any]:
+    """Register an explicitly complete v2 output, or return ``NEEDS_CONTEXT``.
+
+    ``store`` is accepted so the bridge can be called from the delivery worker
+    without changing its orchestration contract.  Artifact read-back remains
+    owned by ``load_scoped_artifact_payload``; the store argument is not used as
+    a second source of truth.
+    """
+
+    _ = store
+    team = str(team_id or "").strip()
+    workflow = str(workflow_run_id or "").strip()
+    authority = str(source_collection_run_id or "").strip() or workflow
+    if not team or not workflow:
+        return _missing_context(
+            team_id=team,
+            workflow_run_id=workflow,
+            source_collection_run_id=authority,
+            reason="teamId and workflowRunId are required for a scoped handoff",
+            missing_fields=["teamId", "workflowRunId"],
+        )
+
+    package_context, missing = _read_canonical_package(
+        team_id=team,
+        workflow_run_id=workflow,
+        source_collection_run_id=authority,
+    )
+    if missing is not None:
+        return missing
+    assert package_context is not None
+    payload = package_context["payload"]
+    package = package_context["package"]
+    package_hash = str(package_context["packageHash"])
+
+    output = _first_object(payload, _OUTPUT_KEYS) or _first_object(package, _OUTPUT_KEYS)
+    if output is None:
+        return _missing_context(
+            team_id=team,
+            workflow_run_id=workflow,
+            source_collection_run_id=authority,
+            reason="canonical result package has no complete Challenge Question v2 authority",
+            missing_authorities=["canonical_challenge_question_output.v2"],
+            missing_fields=list(_REQUIRED_OUTPUT_FIELDS) + ["package.challengeQuestionOutput"],
+            source_result_package_hash=package_hash,
+        )
+
+    issues = challenge_question_runs._schema_issues(output)
+    if issues:
+        return _missing_context(
+            team_id=team,
+            workflow_run_id=workflow,
+            source_collection_run_id=authority,
+            reason="canonical Challenge Question output is not a complete schema v2 artifact",
+            missing_authorities=["canonical_challenge_question_output.v2"],
+            missing_fields=_extract_required_error_fields(issues),
+            source_result_package_hash=package_hash,
+            diagnostics=[
+                f"{item.get('path')}: {item.get('message')}"
+                for item in issues[:12]
+            ],
+        )
+
+    identity = output.get("identity") if isinstance(output.get("identity"), dict) else {}
+    run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    question_id = str(identity.get("question_id") or "").strip().upper()
+    output_run_id = str(run.get("run_id") or "").strip()
+    package_question_id = str(
+        package.get("questionId") or package.get("question_id") or ""
+    ).strip().upper()
+    package_run_id = str(package.get("runId") or package.get("run_id") or "").strip()
+    binding_diagnostics: list[str] = []
+    if package_question_id and package_question_id != question_id:
+        binding_diagnostics.append(
+            f"packageQuestionId={package_question_id}; outputQuestionId={question_id}"
+        )
+    if package_run_id and package_run_id != workflow:
+        binding_diagnostics.append(f"packageRunId={package_run_id}; workflowRunId={workflow}")
+    if output_run_id != workflow:
+        binding_diagnostics.append(f"outputRunId={output_run_id}; workflowRunId={workflow}")
+    if binding_diagnostics:
+        return _missing_context(
+            team_id=team,
+            workflow_run_id=workflow,
+            source_collection_run_id=authority,
+            reason="canonical v2 output and result package identity do not match",
+            missing_authorities=["canonical_challenge_question_output.v2"],
+            missing_fields=["identity.question_id", "run.run_id"],
+            source_result_package_hash=package_hash,
+            diagnostics=binding_diagnostics,
+        )
+
+    source_status = str(
+        (
+            output.get("result_classification")
+            if isinstance(output.get("result_classification"), dict)
+            else {}
+        ).get("status")
+        or ""
+    ).strip()
+    if source_status in {"blocked", "failed"}:
+        return _missing_context(
+            team_id=team,
+            workflow_run_id=workflow,
+            source_collection_run_id=authority,
+            reason="blocked or failed workflow output is not a Challenge Program candidate",
+            missing_authorities=["canonical_challenge_question_output.v2"],
+            missing_fields=["result_classification.status=review_required"],
+            source_result_package_hash=package_hash,
+            diagnostics=[f"sourceStatus={source_status}"],
+        )
+
+    citation_checks = _first_present(payload, _CITATION_CHECK_KEYS)
+    if citation_checks is None:
+        citation_checks = _first_present(package, _CITATION_CHECK_KEYS)
+    if not isinstance(citation_checks, list) or any(
+        not isinstance(item, dict) for item in citation_checks
+    ):
+        return _missing_context(
+            team_id=team,
+            workflow_run_id=workflow,
+            source_collection_run_id=authority,
+            reason="canonical v2 output has no canonical citation-check authority",
+            missing_authorities=["canonical_citation_check_receipt"],
+            missing_fields=["package.citationChecks"],
+            source_result_package_hash=package_hash,
+        )
+
+    try:
+        registered = challenge_question_runs.register_challenge_question_output(
+            team,
+            {
+                "output": output,
+                "citationChecks": deepcopy(citation_checks),
+                "registeredBy": str(registered_by or "").strip()
+                or "research_result_package_bridge",
+                "sourceResultPackageHash": package_hash,
+            },
+        )
+    except ValueError as exc:
+        raise ProgramCandidateHandoffContractError(str(exc)) from exc
+    record = registered.get("record") if isinstance(registered, dict) else {}
+    response = {
+        "status": HANDOFF_STATUS_IDEMPOTENT
+        if registered.get("idempotent")
+        else HANDOFF_STATUS_REGISTERED,
+        "teamId": team,
+        "workflowRunId": workflow,
+        "sourceCollectionRunId": authority,
+        "questionId": question_id,
+        "runId": output_run_id,
+        "sourceResultPackageHash": package_hash,
+        "outputSha256": str(record.get("outputSha256") or ""),
+        "recordId": str(record.get("recordId") or ""),
+        "reviewStatus": str(record.get("status") or ""),
+        "humanGates": deepcopy(record.get("humanGates") or {}),
+    }
+    return response
+
+
+# Short compatibility aliases for callers that use the bridge as a command.
+bridge_result_package_to_challenge_question = handoff_result_package_to_challenge_program
+register_result_package_candidate = handoff_result_package_to_challenge_program
+
+
+__all__ = [
+    "HANDOFF_STATUS_IDEMPOTENT",
+    "HANDOFF_STATUS_NEEDS_CONTEXT",
+    "HANDOFF_STATUS_REGISTERED",
+    "NEEDS_CONTEXT",
+    "ProgramCandidateHandoffContractError",
+    "bridge_result_package_to_challenge_question",
+    "handoff_result_package_to_challenge_program",
+    "register_result_package_candidate",
+]

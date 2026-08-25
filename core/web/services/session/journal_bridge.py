@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from core.chat.chat_task_types import trim_lines
 from core.chat.conversation_ledger import (
     append_conversation_event,
     conversation_ledger_path,
@@ -22,6 +21,7 @@ from core.chat.conversation_ledger import (
     load_conversation_events,
 )
 from core.chat.session_catalog import notify_session_catalog_dirty
+from core.chat.turn_journal import TERMINAL_EVENTS
 
 from ..runtime_scene_service import record_runtime_scene_event
 
@@ -42,6 +42,10 @@ _SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
 
 def _perf_counter() -> float:
     return time.perf_counter()
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return max(0.0, round((_perf_counter() - started_at) * 1000, 2))
 
 
 def _resolve_project_root(project_root: Path | None) -> Path:
@@ -210,6 +214,7 @@ def append_session_conversation_event(
     if not normalized_session_id or not normalized_event_type:
         return
     root = _resolve_project_root(project_root)
+    started_at = _perf_counter()
     try:
         event = append_conversation_event(
             root,
@@ -235,9 +240,33 @@ def append_session_conversation_event(
             normalized_session_id,
             f"journal:{sequence}",
         )
+        if normalized_event_type in TERMINAL_EVENTS:
+            try:
+                record_runtime_scene_event(
+                    "conversation",
+                    "conversation_ledger",
+                    "conversation.ledger.terminal_committed",
+                    level="info",
+                    outcome="completed",
+                    message="Committed a terminal chat turn event to the conversation ledger.",
+                    fields={
+                        "sessionId": normalized_session_id,
+                        "turnId": str(turn_id or "").strip(),
+                        "eventType": normalized_event_type,
+                        "status": str(getattr(event, "status", status) or "").strip()[:80],
+                        "sequence": max(0, int(getattr(event, "sequence", sequence) or 0)),
+                        "eventId": str(getattr(event, "event_id", "") or "").strip()[:160],
+                        "durationMs": _elapsed_ms(started_at),
+                        "durability": "fsync",
+                    },
+                    lifecycle=True,
+                )
+            except Exception:
+                pass
         return event
     except Exception as exc:
         try:
+            error_message_length = len(str(exc))
             record_runtime_scene_event(
                 "conversation",
                 "conversation_ledger",
@@ -250,7 +279,8 @@ def append_session_conversation_event(
                     "turnId": str(turn_id or "").strip(),
                     "eventType": normalized_event_type,
                     "errorType": type(exc).__name__,
-                    "errorPreview": trim_lines(str(exc), max_lines=2),
+                    "errorMessageLength": error_message_length,
+                    "durationMs": _elapsed_ms(started_at),
                 },
                 lifecycle=True,
             )

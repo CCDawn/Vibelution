@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from core.web.services.team_workflow import knowledge as _team_workflow_knowledge
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
+    write_problem_understanding_artifact,
+)
 from tests._support.team_workflow.helpers import *  # noqa: F403
 
 
@@ -412,6 +416,7 @@ def test_knowledge_expansion_team_agents_purge_unregistered_source_role_agents(t
 
 def test_research_stage_status_does_not_reconcile_nonterminal_failed_tool_event(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
@@ -420,6 +425,7 @@ def test_research_stage_status_does_not_reconcile_nonterminal_failed_tool_event(
         name="挑战杯科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
+    workflow_run_id = "workflow-stage-task-tool-error"
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
         {
@@ -430,6 +436,27 @@ def test_research_stage_status_does_not_reconcile_nonterminal_failed_tool_event(
             "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {"workflowRunId": workflow_run_id},
+        },
+    )
+    source_run_id = stage_response["run"]["runId"]
+    write_problem_understanding_artifact(
+        team_id=team["teamId"],
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_run_id,
+        node_run_id="node-problem-stage-task-tool-error",
+        problem_understanding={
+            "scope": "验证非终态工具错误不会被误判为任务完成。",
+            "subquestions": ["单次工具失败是否保持当前 Agent 任务运行态？"],
+            "assumptions": ["资料搜集运行已绑定当前工作流。"],
+            "known_unknowns": ["后续工具调用是否成功尚未确定。"],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "reviewer": "test-reviewer",
+                "decided_at": "2026-08-24T00:00:00Z",
+                "rationale": "测试已确认问题边界，可以进入 finding 阶段。",
+            },
         },
     )
     monkeypatch.setattr(
@@ -444,7 +471,7 @@ def test_research_stage_status_does_not_reconcile_nonterminal_failed_tool_event(
     )
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
-        stage_response["run"]["runId"],
+        source_run_id,
         {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     append_conversation_event(

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Mapping
 from typing import Any
 
+from core.logging.trace_context import TraceContext, merge_current_trace_fields
 
 _SESSION_CATALOG_READ_SAMPLE_LOCK = threading.Lock()
 _SESSION_CATALOG_SUCCESSFUL_READ_COUNT = 0
@@ -616,6 +618,7 @@ def _record_session_turn_accepted_event(
         "accepted",
         turn_id=turn_id,
         outcome="accepted",
+        trace_context_carrier=context.get("trace_context_carrier"),
         fields={
             "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
             "clientSubmissionId": str(context.get("client_submission_id") or "").strip(),
@@ -632,15 +635,24 @@ def _record_session_turn_lifecycle_event(
     level: str = "info",
     outcome: str = "observed",
     fields: dict[str, Any] | None = None,
+    trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> None:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     normalized_phase = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(phase or "event").strip()).strip("._-") or "event"
     normalized_turn_id = str(turn_id or "").strip()
-    event_fields = {
-        "sessionId": normalized_session_id,
-        "turnId": normalized_turn_id,
-        **(fields or {}),
+    event_fields = _merge_session_trace_fields(
+        {
+            "sessionId": normalized_session_id,
+            "turnId": normalized_turn_id,
+            **(fields or {}),
+        },
+        trace_context_carrier,
+    )
+    trace_fields = {
+        key: event_fields[key]
+        for key in ("traceId", "spanId", "parentSpanId", "requestId")
+        if key in event_fields
     }
     child_payload = {
         "session_id": normalized_session_id,
@@ -648,6 +660,7 @@ def _record_session_turn_lifecycle_event(
         "phase": normalized_phase,
         "outcome": str(outcome or "").strip() or "observed",
         **(fields or {}),
+        **trace_fields,
     }
     try:
         s.record_runtime_scene_event(
@@ -707,6 +720,7 @@ def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
         "scheduled",
         turn_id=turn_id,
         outcome="queued",
+        trace_context_carrier=context.get("trace_context_carrier"),
         fields={
             "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
             "historyMessageCount": len(list(context.get("history_messages") or [])),
@@ -729,6 +743,7 @@ def _record_session_turn_started_event(
     raw_user_message: str = "",
     user_message_source: str = "",
     attachments: list[dict[str, Any]] | None = None,
+    trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> None:
     s = _service()
     attachment_summary = s._safe_attachment_log_summary(attachments or [])
@@ -740,16 +755,19 @@ def _record_session_turn_started_event(
             message="Web chat turn started.",
             level="info",
             outcome="running",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "turnId": str(turn_id or "").strip(),
-                "leaseCount": len(list(leases or [])),
-                "userMessageChars": len(str(user_message or "")),
-                "rawUserMessageChars": len(str(raw_user_message or "")),
-                "userMessageSource": str(user_message_source or "").strip(),
-                "attachmentCount": len(attachment_summary),
-                "attachments": attachment_summary,
-            },
+            fields=_merge_session_trace_fields(
+                {
+                    "sessionId": str(session_id or "").strip(),
+                    "turnId": str(turn_id or "").strip(),
+                    "leaseCount": len(list(leases or [])),
+                    "userMessageChars": len(str(user_message or "")),
+                    "rawUserMessageChars": len(str(raw_user_message or "")),
+                    "userMessageSource": str(user_message_source or "").strip(),
+                    "attachmentCount": len(attachment_summary),
+                    "attachments": attachment_summary,
+                },
+                trace_context_carrier,
+            ),
             lifecycle=True,
         )
     except Exception as exc:
@@ -757,6 +775,17 @@ def _record_session_turn_started_event(
             f"runtime scene chat turn start log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _merge_session_trace_fields(
+    fields: Mapping[str, Any] | None,
+    trace_context_carrier: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Add request/trace correlation while keeping explicit event fields authoritative."""
+
+    carrier_context = TraceContext.from_carrier(trace_context_carrier)
+    carrier_fields = carrier_context.to_fields() if carrier_context is not None else {}
+    return merge_current_trace_fields({**carrier_fields, **dict(fields or {})})
 
 
 def _record_session_turn_subpackage_event(

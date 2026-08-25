@@ -115,11 +115,13 @@ const mutationState = vi.hoisted(() => {
 });
 
 const queryClientMock = vi.hoisted(() => ({ invalidateQueries: vi.fn() }));
+const devQueryEnabled = vi.hoisted(() => ({ current: true }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options?: { queryKey?: readonly unknown[] }) => {
+  useQuery: (options?: { queryKey?: readonly unknown[]; enabled?: boolean }) => {
     const key = (options?.queryKey ?? []) as readonly unknown[];
     if (key.includes("dev-controls")) {
+      devQueryEnabled.current = options?.enabled !== false;
       return devControlsQueryState.current;
     }
     if (key.includes("catalog-overview")) {
@@ -637,33 +639,14 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("暂无已验证题目");
   });
 
-  it("offers a register/publish entry that opens the question-write dialog", async () => {
+  it("fails closed without a register or publish entry", () => {
     setMainData(emptyMainData());
     setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
       <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
     );
-    expect(markup).toContain("登记 / 发布题目产出");
-
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const entry = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("登记 / 发布题目产出"));
-    expect(entry).toBeTruthy();
-    await act(async () => {
-      entry!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(document.body.textContent).toContain("粘贴研究运行产出的题目 JSON");
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
+    expect(markup).not.toContain("登记 / 发布题目产出");
+    expect(panelSource).not.toContain("ChallengeQuestionRegisterDialog");
   });
 
   it("surfaces a total load error with a retry action", () => {
@@ -819,7 +802,7 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("dev-12 / dev-125");
     expect(markup).toContain("fixtureOnly=true");
     expect(markup).toContain("real_qwen_invocation");
-    expect(markup).toContain("CLI 诊断");
+    expect(markup).toContain("开发者诊断");
     expect(markup).toContain("platform_flow_ready.py");
     expect(markup).toContain("下一合法动作：运行 DEV readiness");
   });
@@ -837,14 +820,42 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(panelSource).not.toContain('"program-v2"');
   });
 
-  it("keeps DEV readiness/fixture/repair controls in the production workbench panel", () => {
-    expect(panelSource).not.toContain("import.meta.env.DEV");
+  it("keeps DEV controls disabled and unqueried without the explicit capability", () => {
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel
+        teamId="team-1"
+        onOpenQuestion={vi.fn()}
+        defaultDevControlsOpen
+        devControlsEnabled={false}
+      />,
+    );
+    expect(devQueryEnabled.current).toBe(false);
+    expect(markup).not.toContain("开发态就绪 / 批次 / 证据 locator");
+    expect(markup).not.toContain("运行 DEV readiness");
+    expect(panelSource).toContain("import.meta.env.DEV");
     expect(panelSource).toContain("fetchChallengeCupDevControlSnapshot(teamId)");
     expect(panelSource).toContain('<section className={styles.devControls}');
     expect(panelSource).toContain('import challengeMvpProgressPanelContract from "./ChallengeMvpProgressPanel.contract.json"');
     expect(panelSource).toContain("data-dev-controls={devMarkers.readiness}");
     expect(panelSource).toContain("data-dev-controls={planId}");
     expect(panelSource).toContain("([devPlanIds.dev1, devPlanIds.dev5] as const)");
+  });
+
+  it("preserves the existing DEV controls behind the explicit capability", () => {
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel
+        teamId="team-1"
+        onOpenQuestion={vi.fn()}
+        defaultDevControlsOpen
+        devControlsEnabled
+      />,
+    );
+    expect(devQueryEnabled.current).toBe(true);
+    expect(markup).toContain("运行 DEV readiness");
   });
 
   it("clicks the full readiness → dev-1 → dev-5(maxItems=2) → resume(null) loop", async () => {

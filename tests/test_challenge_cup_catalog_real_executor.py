@@ -21,11 +21,11 @@ from typing import ClassVar
 import pytest
 from fastapi.testclient import TestClient
 
-from config.models import ProviderConfig
 from core.research.competition.catalog_execution import (
     CatalogExecutionError,
     CatalogExecutionState,
     QuestionStatus,
+    build_result_set,
     dev_plan,
 )
 from core.research.competition.question_result_package import (
@@ -83,7 +83,7 @@ class _Harness:
         self.launch_failures: set[str] = set()
         monkeypatch.setattr(
             svc,
-            "team_workspace_root",
+            "formal_team_workspace_root",
             lambda team_id: tmp_path / "teams" / team_id,
         )
         monkeypatch.setattr(
@@ -145,11 +145,28 @@ class _Harness:
         assert run_id in self.runs
         self.runs[run_id]["status"] = status
 
-    def approve(self, question_id: str) -> None:
+    def approve(
+        self,
+        question_id: str,
+        plan_id: str,
+        *,
+        package: QuestionResultPackage | dict | None = None,
+    ) -> None:
+        state = svc._state_of(svc._load_envelope(TEAM_ID, plan_id))
+        resolved_package = package or _approved_package(
+            state,
+            question_id,
+            run_id=f"run-{question_id.lower()}",
+        )
         self.approved[question_id] = {
-            "reviewRunId": f"review-{question_id.lower()}",
+            "reviewRunId": f"run-{question_id.lower()}",
             "catalogId": "science-125-questions-2021",
             "artifactSha256": "f" * 64,
+            "resultPackage": (
+                resolved_package.to_dict()
+                if isinstance(resolved_package, QuestionResultPackage)
+                else deepcopy(resolved_package)
+            ),
         }
 
 
@@ -190,15 +207,16 @@ def _approved_package(
     question_id: str,
     *,
     package_id: str | None = None,
+    run_id: str | None = None,
 ) -> QuestionResultPackage:
     payload = deepcopy(_valid_payload())
-    run_id = f"run-{question_id.lower()}-seed"
+    resolved_run_id = run_id or f"run-{question_id.lower()}-seed"
     payload.update(
         {
             "package_id": package_id or f"pkg-{question_id.lower()}-seed",
             "scope": state.scope.to_dict(),
             "question_id": question_id,
-            "run_id": run_id,
+            "run_id": resolved_run_id,
             "input_snapshot_sha256": "a" * 64,
         }
     )
@@ -216,11 +234,11 @@ def _approved_package(
     for stage, receipt in payload["model_invocation_receipts"].items():
         receipt["receiptId"] = f"receipt-{question_id.lower()}-{stage}"
         receipt["nodeRunId"] = f"node-{question_id.lower()}-{stage}"
-        receipt["runId"] = run_id
+        receipt["runId"] = resolved_run_id
         receipt["scope"].update(
             {
                 "questionId": question_id,
-                "runId": run_id,
+                "runId": resolved_run_id,
                 "catalogId": state.scope.catalog_id,
                 "catalogVersion": state.scope.catalog_version,
                 "catalogSha256": state.scope.catalog_sha256,
@@ -393,6 +411,58 @@ def test_start_requires_durable_authorization_and_platform_authorization(
         )
 
 
+@pytest.mark.parametrize(
+    ("snapshot_kind", "expected_code"),
+    [
+        ("lookalike_action", "platform_not_authorized"),
+        ("mismatched_report_hash", "catalog_run_authorization_required"),
+        ("foreign_team", "platform_not_authorized"),
+    ],
+)
+def test_start_rejects_untrusted_readiness_snapshot(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_kind: str,
+    expected_code: str,
+) -> None:
+    harness.authorize("real-1")
+    snapshot: dict[str, object] = {
+        "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+        "readinessReport": dict(harness.readiness_report),
+    }
+    if snapshot_kind == "lookalike_action":
+        snapshot["nextLegalAction"] = "BOGUS_AUTHORIZATION_REQUIRED"
+    elif snapshot_kind == "mismatched_report_hash":
+        snapshot["readinessReport"] = {
+            **harness.readiness_report,
+            "reportId": "changed-under-old-hash",
+        }
+        snapshot["readinessReportSha256"] = catalog_run_authorization.readiness_report_sha256(
+            harness.readiness_report
+        )
+    elif snapshot_kind == "foreign_team":
+        snapshot["teamId"] = "another-research-team"
+    else:  # pragma: no cover - keeps the parametrized fixture exhaustive.
+        raise AssertionError(snapshot_kind)
+    monkeypatch.setattr(
+        svc,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda _team_id: dict(snapshot),
+    )
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as rejected:
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-1",
+            confirmed=True,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
+    assert rejected.value.code == expected_code
+    assert harness.launch_log == []
+    assert harness.start_log == []
+
+
 @pytest.mark.parametrize("operation", ["start", "poll"])
 def test_old_envelope_cannot_cross_readiness_authorization_change(
     harness: _Harness,
@@ -512,6 +582,29 @@ def test_cross_gate_seed_preserves_canonical_package_and_is_idempotent(
     )
 
 
+def test_cross_gate_seed_rejects_legacy_result(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = new_real_batch_state("real-5")
+    legacy = QuestionResult.create(
+        scope=target.scope,
+        question_id="SCI-091",
+        model_receipt_locator="legacy://receipt",
+        knowledge_locator="legacy://knowledge",
+    )
+    _seed_state(monkeypatch, legacy)
+
+    with pytest.raises(CatalogExecutionError, match="canonical package"):
+        svc._seed_from_previous_gates(
+            TEAM_ID,
+            target,
+            expected_model_policy_sha256=harness.model_policy["policySha256"],
+        )
+
+    assert target.result_for("SCI-091") is None
+
+
 def test_cross_gate_seed_validates_every_package_before_mutating_target(
     harness: _Harness,
     monkeypatch: pytest.MonkeyPatch,
@@ -584,7 +677,7 @@ def test_cross_gate_seed_rejects_conflicting_package_hashes_before_mutation(
     assert target.result_for("SCI-091") is None
 
 
-def test_server_model_policy_requires_official_qwen_dialogue_bindings(
+def test_server_model_policy_freezes_configured_flash_dialogue_bindings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     role_bindings = {
@@ -594,20 +687,16 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         )
     }
     model_by_agent = {
-        "agent-0": ("dashscope", "qwen-plus"),
-        "agent-1": ("aliyun", "qwen-max"),
-        "agent-2": ("dashscope", "qwen-plus"),
-        "agent-3": ("aliyun", "qwen-max"),
-        "agent-4": ("dashscope", "qwen-plus"),
-        "agent-5": ("aliyun", "qwen-max"),
+        f"agent-{index}": ("opencode_go", "deepseek-v4-flash")
+        for index in range(6)
     }
 
     class _FakeLlm:
         model_library: ClassVar[dict[str, object]] = {
-            "qwen-plus": {"upstream_id": "qwen-plus"},
-            "qwen-max": {"upstream_id": "qwen-max"},
-            "gpt-5": {"upstream_id": "gpt-5"},
-            "qwen-alias": {"upstream_id": "gpt-5"},
+            "opencode_go/deepseek-v4-flash": {
+                "upstream_id": "deepseek-v4-flash"
+            },
+            "opencode_go/gpt-5": {"upstream_id": "gpt-5"},
         }
 
         @staticmethod
@@ -616,22 +705,13 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
         @staticmethod
         def get_provider(provider_id: str) -> SimpleNamespace:
-            if provider_id == "relay":
-                return SimpleNamespace(
-                    provider_id=provider_id,
-                    service_class="relay",
-                    kind="relay",
-                    vendor="custom",
-                    label="relay",
-                    base_url="https://ai-pixel.online/v1",
-                )
             return SimpleNamespace(
                 provider_id=provider_id,
-                service_class="official_api",
-                kind="aliyun",
-                vendor="aliyun",
+                service_class="aggregator",
+                kind="opencode",
+                vendor="opencode",
                 label=provider_id,
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                base_url="https://opencode.ai/zen/go/v1",
             )
 
     monkeypatch.setattr(
@@ -658,7 +738,10 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref=model_by_agent[agent["agentId"]][1],
+            model_ref=(
+                f"{model_by_agent[agent['agentId']][0]}/"
+                f"{model_by_agent[agent['agentId']][1]}"
+            ),
             model_id=model_by_agent[agent["agentId"]][1],
             model=model_by_agent[agent["agentId"]][1],
             provider_id=model_by_agent[agent["agentId"]][0],
@@ -667,127 +750,62 @@ def test_server_model_policy_requires_official_qwen_dialogue_bindings(
 
     policy = catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
-    assert policy["family"] == "qwen"
-    assert policy["providerIds"] == ["aliyun", "dashscope"]
-    assert policy["modelIds"] == ["qwen-max", "qwen-plus"]
+    assert policy["family"] == "deepseek"
+    assert policy["providerIds"] == ["opencode_go"]
+    assert policy["modelIds"] == ["deepseek-v4-flash"]
+    assert policy["requireOfficialProvider"] is False
     assert len(policy["policySha256"]) == 64
 
+    routing_policy = catalog_run_authorization.resolve_catalog_model_routing_policy(
+        TEAM_ID
+    )
+    for purpose_routes in routing_policy["routes"].values():
+        for role_id, route in purpose_routes["byProductRole"].items():
+            assert route["productRoleId"] == role_id
+            assert route["modelRef"] == "opencode_go/deepseek-v4-flash"
+            assert route["officialProvider"] is False
+
+    model_by_agent["agent-5"] = ("opencode_go", "gpt-5")
     monkeypatch.setattr(
         catalog_run_authorization,
         "resolve_agent_llm",
         lambda agent, slot, config: SimpleNamespace(
             config=config,
-            model_ref="gpt-5",
-            model_id="gpt-5",
-            model="gpt-5",
-            provider_id="aliyun",
+            model_ref=(
+                f"{model_by_agent[agent['agentId']][0]}/"
+                f"{model_by_agent[agent['agentId']][1]}"
+            ),
+            model_id=model_by_agent[agent["agentId"]][1],
+            model=model_by_agent[agent["agentId"]][1],
+            provider_id=model_by_agent[agent["agentId"]][0],
         ),
     )
-    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="Qwen"):
+    with pytest.raises(
+        catalog_run_authorization.CatalogRunAuthorizationError,
+        match="one model family",
+    ):
         catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
-    monkeypatch.setattr(
-        catalog_run_authorization,
-        "resolve_agent_llm",
-        lambda agent, slot, config: SimpleNamespace(
-            config=config,
-            model_ref="qwen-alias",
-            model_id="qwen-alias",
-            model="gpt-5",
-            provider_id="aliyun",
-        ),
-    )
-    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="Qwen"):
-        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
-
-    monkeypatch.setattr(
-        catalog_run_authorization,
-        "resolve_agent_llm",
-        lambda agent, slot, config: SimpleNamespace(
-            config=config,
-            model_ref="qwen-plus",
-            model_id="qwen-plus",
-            model="qwen-plus",
-            provider_id="relay",
-        ),
-    )
-    with pytest.raises(catalog_run_authorization.CatalogRunAuthorizationError, match="official provider"):
-        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
-
-    legal_default_provider = ProviderConfig(
-        provider_id="default-dashscope",
-        kind="aliyun",
-        service_class="official_api",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    )
-    assert legal_default_provider.vendor == "custom"
+    model_by_agent["agent-5"] = ("opencode_go", "deepseek-v4-flash")
     monkeypatch.setattr(
         _FakeLlm,
         "get_provider",
-        staticmethod(lambda _provider_id: legal_default_provider),
-    )
-    monkeypatch.setattr(
-        catalog_run_authorization,
-        "resolve_agent_llm",
-        lambda agent, slot, config: SimpleNamespace(
-            config=config,
-            model_ref="qwen-plus",
-            model_id="qwen-plus",
-            model="qwen-plus",
-            provider_id="default-dashscope",
+        staticmethod(
+            lambda provider_id: SimpleNamespace(
+                provider_id=provider_id,
+                service_class="aggregator",
+                kind="opencode",
+                vendor="opencode",
+                label=provider_id,
+                base_url="http://opencode.ai/zen/go/v1",
+            )
         ),
     )
-    default_policy = catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
-    assert default_policy["providerIds"] == ["default-dashscope"]
-
-    forged_providers = (
-        SimpleNamespace(
-            provider_id="forged",
-            service_class="official_api",
-            kind="custom",
-            vendor="custom",
-            label="DashScope",
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        ),
-        SimpleNamespace(
-            provider_id="forged",
-            service_class="official_api",
-            kind="openai",
-            vendor="openai",
-            label="DashScope",
-            base_url="https://api.openai.com/v1",
-        ),
-        SimpleNamespace(
-            provider_id="forged",
-            service_class="official_api",
-            kind="aliyun",
-            vendor="aliyun",
-            label="DashScope",
-            base_url="https://api.openai.com/v1",
-        ),
-    )
-    for forged_provider in forged_providers:
-        monkeypatch.setattr(
-            _FakeLlm,
-            "get_provider",
-            staticmethod(lambda _provider_id, value=forged_provider: value),
-        )
-        monkeypatch.setattr(
-            catalog_run_authorization,
-            "resolve_agent_llm",
-            lambda agent, slot, config: SimpleNamespace(
-                config=config,
-                model_ref="qwen-plus",
-                model_id="qwen-plus",
-                model="qwen-plus",
-                provider_id="forged",
-            ),
-        )
-        with pytest.raises(
-            catalog_run_authorization.CatalogRunAuthorizationError,
-            match="official provider",
-        ):
-            catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
+    with pytest.raises(
+        catalog_run_authorization.CatalogRunAuthorizationError,
+        match="valid configured provider",
+    ):
+        catalog_run_authorization.resolve_catalog_model_policy(TEAM_ID)
 
 
 def test_legacy_catalog_authorization_without_policy_fails_closed(
@@ -829,14 +847,15 @@ def test_question_launch_authorization_lookup_includes_server_model_policy(
     from core.web.services.team_workflow import challenge_cup_dev_controls
     from core.web.services.team_workflow.research_runtime import question_launch
 
+    snapshot = {
+        "teamId": TEAM_ID,
+        "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+        "readinessReport": dict(harness.readiness_report),
+    }
     monkeypatch.setattr(
         challenge_cup_dev_controls,
         "get_challenge_cup_dev_control_snapshot",
-        lambda _team_id: {
-            "teamId": TEAM_ID,
-            "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
-            "readinessReport": harness.readiness_report,
-        },
+        lambda _team_id: dict(snapshot),
     )
     monkeypatch.setattr(
         catalog_run_authorization,
@@ -858,6 +877,19 @@ def test_question_launch_authorization_lookup_includes_server_model_policy(
 
     assert question_launch._dev_authorization_ready(TEAM_ID) is True
     assert captured["scope"]["modelPolicy"] == harness.model_policy
+    assert question_launch._dev_authorization_ready("another-research-team") is False
+
+    snapshot["nextLegalAction"] = "BOGUS_AUTHORIZATION_REQUIRED"
+    assert question_launch._dev_authorization_ready(TEAM_ID) is False
+    snapshot["nextLegalAction"] = "RESEARCH_AUTHORIZATION_REQUIRED"
+    snapshot["readinessReport"] = {
+        **harness.readiness_report,
+        "reportId": "changed-under-old-hash",
+    }
+    snapshot["readinessReportSha256"] = catalog_run_authorization.readiness_report_sha256(
+        harness.readiness_report
+    )
+    assert question_launch._dev_authorization_ready(TEAM_ID) is False
 
 
 def test_cross_gate_checkpoint_restore_uses_durable_policy_and_seeds_without_state_mock(
@@ -1097,7 +1129,7 @@ def _open_gate(harness: _Harness, plan_id: str) -> None:
     state = svc._state_of(svc._load_envelope(TEAM_ID, plan_id))
     for question_id in state.plan.question_ids:
         harness.set_run_status(question_id, "succeeded")
-        harness.approve(question_id)
+        harness.approve(question_id, plan_id)
     result = _poll(harness, plan_id)
     assert result["gateComplete"] is True
 
@@ -1128,7 +1160,7 @@ def test_poll_harvests_success_awaiting_and_failure(harness: _Harness) -> None:
     _open_gate(harness, "real-1")
     _start(harness, "real-5")
     harness.set_run_status("SCI-096", "succeeded")
-    harness.approve("SCI-096")
+    harness.approve("SCI-096", "real-5")
     harness.set_run_status("SCI-002", "succeeded")
 
     polled = _poll(harness, "real-5")
@@ -1143,9 +1175,99 @@ def test_poll_harvests_success_awaiting_and_failure(harness: _Harness) -> None:
     result = svc._state_of(svc._load_envelope(TEAM_ID, "real-5"))
     approved = result.result_for("SCI-096")
     assert approved is not None
+    assert approved.is_package_backed is True
+    assert approved.receipt_complete is True
     assert approved.submission_eligible is True
-    assert approved.knowledge_locator.startswith("challenge-question-artifact://science-125-questions-2021/SCI-096/")
-    assert approved.model_receipt_locator == "challenge-model-evidence://SCI-096/review-sci-096"
+    assert approved.knowledge_locator.startswith("question-result-package://")
+    assert approved.model_receipt_locator.endswith("#model-invocation-receipts")
+    manifest = build_result_set(result).manifest()
+    entry = next(item for item in manifest["entries"] if item["question_id"] == "SCI-096")
+    assert set(entry["receipts"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+
+
+def test_poll_rejects_approved_output_without_canonical_package(
+    harness: _Harness,
+) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    harness.approved["SCI-091"] = {
+        "reviewRunId": "run-sci-091",
+        "catalogId": "science-125-questions-2021",
+        "artifactSha256": "f" * 64,
+    }
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
+    envelope = svc._load_envelope(TEAM_ID, "real-1")
+    assert envelope["runRefs"]["SCI-091"]["runId"] == "run-sci-091"
+    state = svc._state_of(envelope)
+    assert state.status("SCI-091") is QuestionStatus.RUNNING
+    assert state.result_for("SCI-091") is None
+
+
+def test_poll_rejects_package_missing_required_receipt_stage(
+    harness: _Harness,
+) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    package = _approved_package(
+        state,
+        "SCI-091",
+        run_id="run-sci-091",
+    ).to_dict()
+    package["model_invocation_receipts"].pop("revision")
+    harness.approve("SCI-091", "real-1", package=package)
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
+
+
+def test_poll_rejects_package_bound_to_another_run(harness: _Harness) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    harness.approve(
+        "SCI-091",
+        "real-1",
+        package=_approved_package(
+            state,
+            "SCI-091",
+            run_id="run-other",
+        ),
+    )
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
+    assert "run" in str(exc_info.value)
+
+
+def test_poll_rejects_canonical_package_tamper(harness: _Harness) -> None:
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    package = _approved_package(
+        state,
+        "SCI-091",
+        run_id="run-sci-091",
+    ).to_dict()
+    package["result_classification"]["summary"] = "tampered after approval"
+    harness.approve("SCI-091", "real-1", package=package)
+
+    with pytest.raises(svc.ChallengeCupRealBatchError) as exc_info:
+        _poll(harness, "real-1")
+
+    assert exc_info.value.code == "result_package_invalid"
 
 
 def test_awaiting_approval_promotes_after_human_gate(harness: _Harness) -> None:
@@ -1154,11 +1276,14 @@ def test_awaiting_approval_promotes_after_human_gate(harness: _Harness) -> None:
     first = _poll(harness, "real-1")
     assert first["awaitingApprovalQuestionIds"] == ["SCI-091"]
 
-    harness.approve("SCI-091")
+    harness.approve("SCI-091", "real-1")
     second = _poll(harness, "real-1")
     assert second["awaitingApprovalQuestionIds"] == []
     assert second["statusSummary"]["succeeded"] == 1
     assert second["gateComplete"] is True
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert state.attempts("SCI-091") == 2
 
 
 def test_failure_counts_toward_circuit_breaker_and_stops_refill(harness: _Harness) -> None:
@@ -1180,7 +1305,7 @@ def test_checkpoint_round_trip_preserves_batch_state(harness: _Harness) -> None:
     _start(harness, "real-5")
     envelope = svc._load_envelope(TEAM_ID, "real-5")
     assert envelope is not None
-    state = CatalogExecutionState.from_checkpoint(envelope["checkpoint"])
+    state = svc._state_of(envelope)
     assert state.outcome_summary()["running"] == 2
     assert state.status("SCI-096") is QuestionStatus.RUNNING
 

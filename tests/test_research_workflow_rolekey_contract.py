@@ -28,6 +28,7 @@ from core.web.services.team_workflow.research_runtime.team_role_source import (
 
 
 EXPECTED_AGENT_NODE_ROLE_KEYS = {
+    "problem_understanding": "source_finder",
     "source_finding": "source_finder",
     "source_extraction": "source_extractor",
     "evidence_relations": "source_relation_mapper",

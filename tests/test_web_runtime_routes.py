@@ -40,7 +40,24 @@ from tests.helpers.web_runtime_scene import _runtime_scene_local_index_parts, _s
 pytestmark = pytest.mark.serial
 
 
-client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+_TEST_SERVING_DIST = Path(__file__).resolve().parents[1] / "web"
+
+
+def _create_test_app():
+    """Pin API-only test apps to the checked-in SPA shell directory.
+
+    A production app pins an immutable built release during construction.  This
+    route module exercises API behavior without building a frontend, so use the
+    existing source shell as the stable directory that lets route bootstrap
+    mount.  Static-route tests override this state with their temporary dist.
+    """
+
+    app = create_app()
+    app.state.serving_frontend_dist = str(_TEST_SERVING_DIST)
+    return app
+
+
+client = TestClient(_create_test_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
 @pytest.fixture(autouse=True)
@@ -149,7 +166,7 @@ def _reset_self_evolution_live_state() -> None:
 
 
 def test_web_control_token_endpoint_is_local_and_required_for_mutations():
-    guarded_client = TestClient(create_app())
+    guarded_client = TestClient(_create_test_app())
 
     token_response = guarded_client.get("/api/control-token")
     assert token_response.status_code == 200
@@ -164,7 +181,7 @@ def test_web_control_token_endpoint_is_local_and_required_for_mutations():
     assert rejected_response.status_code == 403
     assert "control token" in rejected_response.json()["detail"]
 
-    accepted_client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: token_payload["controlToken"]})
+    accepted_client = TestClient(_create_test_app(), headers={CONTROL_TOKEN_HEADER: token_payload["controlToken"]})
     accepted_response = accepted_client.post(
         "/api/runtime/browser-telemetry",
         json={"phase": "page", "eventCode": "probe", "message": "accepted"},
@@ -172,7 +189,7 @@ def test_web_control_token_endpoint_is_local_and_required_for_mutations():
     assert accepted_response.status_code == 202
 
 def test_web_control_guard_rejects_untrusted_origin_even_with_token():
-    guarded_client = TestClient(create_app())
+    guarded_client = TestClient(_create_test_app())
 
     response = guarded_client.post(
         "/api/runtime/browser-telemetry",
@@ -187,7 +204,7 @@ def test_web_control_guard_rejects_untrusted_origin_even_with_token():
     assert "origin" in response.json()["detail"].lower()
 
 def test_web_control_token_endpoint_rejects_untrusted_origin():
-    guarded_client = TestClient(create_app())
+    guarded_client = TestClient(_create_test_app())
 
     response = guarded_client.get(
         "/api/control-token",
@@ -198,7 +215,7 @@ def test_web_control_token_endpoint_rejects_untrusted_origin():
     assert "origin" in response.json()["detail"].lower()
 
 def test_web_control_guard_rejects_untrusted_host_by_default():
-    guarded_client = TestClient(create_app(), base_url="http://192.168.20.30:8000")
+    guarded_client = TestClient(_create_test_app(), base_url="http://192.168.20.30:8000")
 
     response = guarded_client.get("/api/control-token")
 
@@ -207,7 +224,7 @@ def test_web_control_guard_rejects_untrusted_host_by_default():
 
 def test_web_control_guard_allows_configured_remote_host(monkeypatch):
     monkeypatch.setenv("VIBELUTION_TRUSTED_WEB_HOSTS", "192.168.20.30")
-    guarded_client = TestClient(create_app(), base_url="http://192.168.20.30:8000")
+    guarded_client = TestClient(_create_test_app(), base_url="http://192.168.20.30:8000")
 
     response = guarded_client.get(
         "/api/control-token",
@@ -217,30 +234,32 @@ def test_web_control_guard_allows_configured_remote_host(monkeypatch):
     assert response.status_code == 200
     assert response.json()["controlToken"]
 
-def test_static_assets_allow_same_origin_referer_on_custom_port(tmp_path, monkeypatch):
+def test_static_assets_allow_same_origin_referer_on_custom_port(tmp_path):
     dist_dir = tmp_path / "web-dist"
     assets_dir = dist_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     (dist_dir / "index.html").write_text("<!doctype html><html><body>app</body></html>", encoding="utf-8")
     (assets_dir / "app.js").write_text("console.log('ok');", encoding="utf-8")
 
-    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
-    temp_client = TestClient(create_app(), base_url="http://127.0.0.1:8012")
+    temp_app = create_app()
+    temp_app.state.serving_frontend_dist = str(dist_dir)
+    temp_client = TestClient(temp_app, base_url="http://127.0.0.1:8012")
 
     response = temp_client.get("/assets/app.js", headers={"Referer": "http://127.0.0.1:8012/"})
 
     assert response.status_code == 200, response.text
     assert "console.log" in response.text
 
-def test_static_assets_reject_cross_origin_referer(tmp_path, monkeypatch):
+def test_static_assets_reject_cross_origin_referer(tmp_path):
     dist_dir = tmp_path / "web-dist"
     assets_dir = dist_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     (dist_dir / "index.html").write_text("<!doctype html><html><body>app</body></html>", encoding="utf-8")
     (assets_dir / "app.js").write_text("console.log('ok');", encoding="utf-8")
 
-    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
-    temp_client = TestClient(create_app(), base_url="http://127.0.0.1:8012")
+    temp_app = create_app()
+    temp_app.state.serving_frontend_dist = str(dist_dir)
+    temp_client = TestClient(temp_app, base_url="http://127.0.0.1:8012")
 
     response = temp_client.get("/assets/app.js", headers={"Referer": "https://example.invalid/"})
 
@@ -4922,28 +4941,30 @@ def test_runtime_scene_delete_rejects_running_bundle(tmp_path, monkeypatch):
     assert response.status_code == 400
     assert "still running" in response.json()["detail"]
 
-def test_missing_static_asset_returns_404_instead_of_index(tmp_path, monkeypatch):
+def test_missing_static_asset_returns_404_instead_of_index(tmp_path):
     dist_dir = tmp_path / "web-dist"
     assets_dir = dist_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     (dist_dir / "index.html").write_text("<!doctype html><html><body>app</body></html>", encoding="utf-8")
 
-    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
-    temp_client = TestClient(create_app())
+    temp_app = create_app()
+    temp_app.state.serving_frontend_dist = str(dist_dir)
+    temp_client = TestClient(temp_app)
 
     response = temp_client.get("/assets/FilePreview-missing.js")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Not Found"
 
-def test_spa_route_still_falls_back_to_index_html(tmp_path, monkeypatch):
+def test_spa_route_still_falls_back_to_index_html(tmp_path):
     dist_dir = tmp_path / "web-dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
     index_html = "<!doctype html><html><body>app shell</body></html>"
     (dist_dir / "index.html").write_text(index_html, encoding="utf-8")
 
-    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
-    temp_client = TestClient(create_app())
+    temp_app = create_app()
+    temp_app.state.serving_frontend_dist = str(dist_dir)
+    temp_client = TestClient(temp_app)
 
     response = temp_client.get("/logs")
 

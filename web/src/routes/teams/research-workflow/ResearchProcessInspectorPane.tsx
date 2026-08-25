@@ -25,7 +25,10 @@ import {
   ResearchRunTimeline,
   ResearchTeamPanel,
 } from "../teamLazyPanels";
-import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
+import {
+  hypothesisFirstSemanticNodeId,
+  isHypothesisFirstCanvasNode,
+} from "./hypothesisFirstCanvasRegion";
 import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
@@ -35,6 +38,7 @@ import type { CommandOffer } from "../../../api/types/research-workflow/commands
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { handoffsForNode } from "./researchNodeHandoffModel";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import type { NodeDetailState } from "./useNodeDetailState";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchProcessInspectorPane.styles";
@@ -45,9 +49,17 @@ export function ownsResearchCurrentTask(
   selectedNodeId: string | null | undefined,
   currentTaskNodeId: string | null | undefined,
 ): boolean {
-  const selected = selectedNodeId?.trim();
-  const current = currentTaskNodeId?.trim();
+  const selected = hypothesisFirstSemanticNodeId(selectedNodeId);
+  const current = hypothesisFirstSemanticNodeId(currentTaskNodeId);
   return Boolean(selected && current && selected === current);
+}
+
+export function researchArchiveReturnNodeId(
+  selectedNodeId: string | null | undefined,
+  currentTaskNodeId: string | null | undefined,
+): string | null {
+  return hypothesisFirstSemanticNodeId(currentTaskNodeId)
+    ?? hypothesisFirstSemanticNodeId(selectedNodeId);
 }
 
 export function ResearchProcessInspectorPane(props: {
@@ -77,18 +89,37 @@ export function ResearchProcessInspectorPane(props: {
     submitOffer: (offer: import("../../../api/types/research-workflow/commands").CommandOffer) => Promise<void>;
   };
   nextAction?: HypothesisFirstNextAction;
+  discussionModel?: ScopedDiscussionModel;
   onRecoverCollection?: (requestId: string) => Promise<void>;
   collectionRecoveryBusy?: boolean;
   collectionRecoveryError?: string | null;
+  primaryActionOwnedByWorkspace?: boolean;
+  /** Stale launch URLs must not create a second mutation surface. */
+  allowLaunchPanel?: boolean;
+  archiveSummary?: {
+    selectedHypotheses?: number;
+    effectiveReviews: number;
+    retryAttempts: number;
+    collectionRequests: number;
+    reviewHistory?: Array<{
+      id: string;
+      round: number;
+      status: string;
+      digestAvailable: boolean;
+      retryAttempts: number;
+    }>;
+  };
 }) {
   const {
     scope,
     state,
     actions,
     nextAction,
+    discussionModel,
     onRecoverCollection,
     collectionRecoveryBusy = false,
     collectionRecoveryError = null,
+    allowLaunchPanel = true,
   } = props;
   const { lang: shellLang } = useShellI18n();
   const lang = props.lang ?? shellLang;
@@ -104,6 +135,11 @@ export function ResearchProcessInspectorPane(props: {
     staleTime: 60_000,
   });
 
+  const collectionRecoveryOwnsCurrentTask = Boolean(
+    nextAction?.collectionRequestId
+    && (nextAction.command === "retry_collection" || nextAction.command === "continue_collection"),
+  );
+
   if (scope.panel === "progress") {
     return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
   }
@@ -118,6 +154,10 @@ export function ResearchProcessInspectorPane(props: {
         />
       );
     }
+    const returnNodeId = researchArchiveReturnNodeId(
+      scope.selectedNodeId,
+      nextAction?.targetNodeId,
+    );
     return (
       <div className={styles.question} data-vui="research-question-archive">
         <ChallengeQuestionDetailPanel
@@ -128,8 +168,10 @@ export function ResearchProcessInspectorPane(props: {
           onSelectRunId={setSelectedQuestionRunId}
           isLoading={questionDetail.isPending}
           errorMessage={questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
-          onClose={() => actions.replaceParams({ panel: "progress" })}
-          onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
+          onClose={() => actions.replaceParams({ panel: "node", node: returnNodeId })}
+          onNavigateToNode={(nodeId) => actions.replaceParams({ node: hypothesisFirstSemanticNodeId(nodeId) ?? nodeId, panel: "node" })}
+          readOnlyArchive
+          archiveSummary={props.archiveSummary}
         />
       </div>
     );
@@ -137,7 +179,31 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.panel === "agents") {
     return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang={lang} />;
   }
-  if (scope.panel === "launch" || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)) {
+  if (scope.panel === "launch" && collectionRecoveryOwnsCurrentTask) {
+    return (
+      <ResearchCenteredEmptyState
+        title={isZh ? "资料补充需要处理" : "Evidence collection needs attention"}
+        hint={nextAction?.recovery?.reason || nextAction?.statusMessage}
+      />
+    );
+  }
+  if (scope.panel === "launch" && !allowLaunchPanel) {
+    return (
+      <ResearchCenteredEmptyState
+        title={isZh ? "当前任务已接管操作" : "The current task owns the action"}
+        hint={isZh ? "请从右侧当前任务继续，启动入口已隐藏。" : "Continue from the current-task panel; the launch entry is hidden."}
+      />
+    );
+  }
+  const needsFormalRunAfterConvergence = scope.panel === "node"
+    && scope.selectedNodeId === "hf_convergence_gate"
+    && nextAction?.stage === "converged"
+    && !scope.runId;
+  if (
+    scope.panel === "launch"
+    || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)
+    || needsFormalRunAfterConvergence
+  ) {
     return (
       <ResearchRunLaunchPanel
         lang={lang}
@@ -175,6 +241,7 @@ export function ResearchProcessInspectorPane(props: {
         questionId={scope.questionId || state.run?.questionId || ""}
         nodeId={scope.selectedNodeId}
         runId={scope.runId}
+        discussionModel={discussionModel}
         collectionChildStatus={collectionChildStatus}
         onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
         onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
@@ -218,6 +285,7 @@ export function ResearchProcessInspectorPane(props: {
       handoffPending={Boolean(actions.pendingTaskId(scope.selectedNodeId))}
       busy={state.busy}
       isCurrentTask={isCurrentTask}
+      primaryActionOwnedByWorkspace={props.primaryActionOwnedByWorkspace}
       onOffer={actions.submitOffer}
       hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
       statusBanner={
@@ -232,7 +300,7 @@ export function ResearchProcessInspectorPane(props: {
       }
       onNavigateHypothesis={
         nextAction?.targetNodeId
-          ? () => actions.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
+          ? () => actions.replaceParams({ node: hypothesisFirstSemanticNodeId(nextAction.targetNodeId), panel: "node" })
           : undefined
       }
       collectionRecoveryRequestId={

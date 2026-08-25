@@ -2,6 +2,7 @@ import { ArrowRight, Compass } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { VButton, VSurface } from "../../components/vui";
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import researchStyles from "../TeamsRoute.research.styles";
 import {
   researchPrimaryActionDetail,
@@ -84,9 +85,9 @@ function continueCtaLabel(action: ResearchPrimaryAction, lang: "zh" | "en", pend
   }
   switch (action.kind) {
     case "start_knowledge_collection":
-      return lang === "zh" ? "开始知识搜集" : "Start collection";
+      return lang === "zh" ? `开始${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Start collection";
     case "continue_knowledge_collection":
-      return lang === "zh" ? "继续知识搜集" : "Continue collection";
+      return lang === "zh" ? `继续${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Continue collection";
     case "continue_experiment":
       return lang === "zh" ? "继续实验设计" : "Continue experiment";
     case "continue_iteration":

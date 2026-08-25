@@ -4,6 +4,7 @@
  */
 import type { TeamSourceCollectionStandaloneStageModule } from "../../TeamSourceCollectionStandaloneStagePanel";
 import type { TeamWorkflowKnowledgeIngestionWorkRun } from "../../../api/types";
+import { RESEARCH_STAGE_TERMS } from "../research-workflow/researchTerminology";
 import { SOURCE_COLLECTION_STAGE_AGENT_KEYS } from "../teamSourceCollectionShellModel";
 import type { SourceCollectionStepState } from "./runModel";
 import type {
@@ -404,7 +405,7 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     actionTone: "primary",
     actionIcon: "check",
     secondaryActionLabel: sourceCollectionIngestionReadyForExperiment
-      ? (lang === "zh" ? "进入实验设计（离开知识搜集）" : "Enter experiment (leave collection)")
+      ? (lang === "zh" ? `进入实验设计（离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}）` : "Enter experiment (leave collection)")
       : undefined,
     secondaryActionDisabled: sourceCollectionIngestionReadyForExperiment ? false : undefined,
     secondaryActionIcon: sourceCollectionIngestionReadyForExperiment ? "play" : undefined,

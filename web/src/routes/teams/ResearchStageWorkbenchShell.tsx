@@ -7,6 +7,7 @@ import { ArrowLeft, RefreshCw, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { VButton, VNativeButton, VStatusChip } from "../../components/vui";
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import type { ResearchStageUnlock } from "./researchPrimaryActionModel";
 import {
@@ -85,7 +86,7 @@ export function ResearchStageWorkbenchShell({
   const resolvedChatBack =
     chatBackLabel
     ?? (current === "knowledge_collection"
-      ? (lang === "zh" ? "返回知识搜集" : "Back to knowledge collection")
+      ? (lang === "zh" ? `返回${RESEARCH_STAGE_TERMS.knowledge_collection.zh}` : "Back to knowledge collection")
       : (lang === "zh" ? "返回阶段页" : "Back to stage"));
 
   const dataAttrProps = Object.fromEntries(

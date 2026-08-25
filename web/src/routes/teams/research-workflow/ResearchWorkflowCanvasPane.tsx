@@ -46,6 +46,7 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
             height="100%"
             className={styles.canvas}
             layoutMode="serpentine"
+            compactControls
             showMiniMap
             showLegend={false}
           />

@@ -131,6 +131,143 @@ export type BudgetSummary = {
   receiptCount: number;
 };
 
+/** Server-owned formal runtime task; UI selection is intentionally absent. */
+export type ResearchWorkflowTaskState =
+  | "auto_running"
+  | "waiting_user"
+  | "blocked_retryable"
+  | "blocked_terminal"
+  | "completed";
+
+export type ResearchWorkflowBlockedReason = {
+  code: string | null;
+  detail: string | null;
+  retryable: boolean;
+  failureClass: string | null;
+  message: string | null;
+  blockerIds: string[];
+};
+
+export type ResearchWorkflowTaskRecovery = {
+  status: "none" | "retryable" | "terminal";
+  retryable: boolean;
+  code: string | null;
+  detail: string | null;
+  retryScope: "task" | "run" | "original_version" | "current_version" | "none";
+  recoveryPoint: string | null;
+  nextRetryAt: string | null;
+  requiresOperator: boolean;
+  afterSubmit: string | null;
+};
+
+export type ResearchWorkflowCurrentTask = {
+  key: string;
+  nodeId: ChallengeCupNodeId | null;
+  stageId: string | null;
+  nodeRunId: string | null;
+  attempt: number | null;
+  actorKind: string | null;
+  taskId: string | null;
+  status: string;
+  state: ResearchWorkflowTaskState;
+  kind: "node" | "human_gate" | "run";
+  label: string | null;
+  detail: string | null;
+  responsibility: "system" | "user" | "operator";
+  maxAttempts: number | null;
+  automaticNextStep: {
+    nodeId?: ChallengeCupNodeId | null;
+    effectCode: string;
+  } | null;
+  blockedReason: ResearchWorkflowBlockedReason | null;
+  recovery: ResearchWorkflowTaskRecovery;
+  authority: "formal_runtime";
+};
+
+export type ResearchWorkflowProgress = {
+  completedNodes: number;
+  totalNodes: number;
+  blockedNodes: number;
+  currentStageId: string | null;
+  stages: Array<{
+    id: string;
+    completed: number;
+    total: number;
+    blocked: number;
+    state: "completed" | "current" | "upcoming" | "blocked";
+  }>;
+  completedNodeIds: ChallengeCupNodeId[];
+  blockedNodeIds: ChallengeCupNodeId[];
+  completed: number;
+  total: number;
+  percent: number;
+  currentNodeId: ChallengeCupNodeId | null;
+  status: string;
+};
+
+export type ResearchWorkflowRetry = {
+  available: boolean;
+  command: string | null;
+  nodeId: ChallengeCupNodeId | null;
+  reasonCode: string;
+  idempotencyKey: string | null;
+  expectedRunVersion: number | null;
+};
+
+export type ResearchWorkflowRecovery = ResearchWorkflowTaskRecovery;
+
+export type ResearchWorkflowArtifactSummary = {
+  count: number;
+  materializedCount: number;
+  kinds: string[];
+  finalArtifactId: string | null;
+  finalArtifactLocator: string | null;
+  refs: Array<{
+    receiptId: string | null;
+    nodeRunId: string | null;
+    kind: string;
+    version: string;
+    canonicalRef: string | null;
+    sha256: string;
+    domainRevision: string;
+    materialized: boolean;
+    verifiedAtMs: number;
+  }>;
+};
+
+/** Server-authored identity for the one active Challenge Cup discussion. */
+export type ResearchWorkflowActiveDiscussionAnchor = {
+  scope: Record<string, unknown> | null;
+  scopeHash: string;
+  roomId: string;
+  meetingRoundId: string;
+  questionId: string;
+  selectionId: string;
+  candidateId: string;
+  deepLink: string;
+  status: "ready" | "degraded";
+  degradedReason: string;
+};
+
+export type ResearchWorkflowLaunchContext = {
+  questionId: string | null;
+  hypothesisSelectionId: string | null;
+  catalogAuthorizationId: string | null;
+  readinessReportSha256: string | null;
+  chainCorrelationId: string | null;
+  source?: string | null;
+  sourceCollectionRunId?: string | null;
+  authorizationId?: string | null;
+  planId?: string | null;
+  scopeHash?: string | null;
+  recordHash?: string | null;
+  approvedBy?: string | null;
+  approvedAtMs?: number | null;
+  inputSnapshotHash?: string | null;
+  /** Never inferred from the team's legacy linkedChatRoomId. */
+  activeDiscussionAnchor?: ResearchWorkflowActiveDiscussionAnchor | null;
+};
+
 export type ResearchWorkflowNodeDetail = {
   runId: string;
   teamId: string;
@@ -174,4 +311,13 @@ export type ResearchWorkflowSnapshot = {
   budgetSummary: BudgetSummary;
   latestEventSequence: number;
   generatedAt: string;
+  /** Optional for legacy clients/fixtures; present on v2 server snapshots. */
+  schemaVersion?: 2;
+  currentTask?: ResearchWorkflowCurrentTask | null;
+  progress?: ResearchWorkflowProgress;
+  retry?: ResearchWorkflowRetry;
+  recovery?: ResearchWorkflowRecovery;
+  artifactSummary?: ResearchWorkflowArtifactSummary;
+  deliveryStatus?: string | null;
+  launchContext?: ResearchWorkflowLaunchContext;
 };

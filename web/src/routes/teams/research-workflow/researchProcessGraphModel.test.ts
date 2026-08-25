@@ -384,16 +384,16 @@ describe("composeHypothesisFirstGraph", () => {
     // Region cards come first; base nodes keep their identity.
     expect(composed.nodes.map((node) => node.nodeId)).toEqual([
       "hf_selection",
-      "hf_meeting_1",
+      "hf_review",
       "hf_convergence_gate",
       ...base.nodes.map((node) => node.nodeId),
     ]);
-    expect(composed.nodes.find((node) => node.nodeId === "hf_meeting_1")?.status).toBe("succeeded");
+    expect(composed.nodes.find((node) => node.nodeId === "hf_review")?.status).toBe("succeeded");
 
     // Gate edges land on the main graph entry points.
     const stage1 = composed.edges.find((edge) => edge.edgeId === "hf_e_m1_stage1")!;
     expect(stage1).toMatchObject({
-      fromNodeId: "hf_meeting_1",
+      fromNodeId: "hf_review",
       toNodeId: "source_finding",
       label: "首轮搜集范围就绪",
       semanticKind: "human_gate",
@@ -530,8 +530,13 @@ describe("composeHypothesisFirstGraph", () => {
     expect(region.showDownstreamPipeline).toBe(false);
     const composed = composeHypothesisFirstGraph(base, region, { demotePipelineStages: true });
     expect(composed.stages.map((stage) => stage.stageId)).toEqual(["hypothesis_first"]);
-    expect(composed.nodes.map((node) => node.nodeId)).toEqual(["hf_selection"]);
-    expect(composed.edges).toEqual([]);
-    expect(composed.stages[0]?.stageTone).toBe("done");
+    expect(composed.nodes.map((node) => node.nodeId)).toEqual(["hf_selection", "hf_review"]);
+    expect(composed.edges).toHaveLength(1);
+    expect(composed.edges[0]).toMatchObject({
+      edgeId: "hf_e_sel_review",
+      fromNodeId: "hf_selection",
+      toNodeId: "hf_review",
+    });
+    expect(composed.stages[0]?.stageTone).toBe("idle");
   });
 });

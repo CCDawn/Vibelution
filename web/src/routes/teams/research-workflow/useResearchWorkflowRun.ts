@@ -11,6 +11,7 @@ import { submitResearchWorkflowCommand } from "../../../api/research-workflow/co
 import type { CommandReceipt } from "../../../api/types/research-workflow/commands";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
+import type { ResearchWorkflowSnapshot } from "../../../api/types/research-workflow/core";
 import {
   snapshotToCanvasProjection,
   snapshotToRunRecord,
@@ -22,9 +23,12 @@ import { useResearchWorkflowSnapshot } from "./useResearchWorkflowSnapshot";
 export type UseResearchWorkflowRunResult = {
   projection: WorkflowCanvasProjection | null;
   run: WorkflowRunRecord | null;
+  /** Formal snapshot v2 is kept beside the legacy canvas projection. */
+  snapshot: ResearchWorkflowSnapshot | null;
   commandOffers: CommandOffer[];
   error: string | null;
   streamState: ReturnType<typeof useResearchWorkflowEventStream>["state"];
+  resyncRequired: boolean;
   busy: boolean;
   lastSequence: number;
   refresh: () => Promise<void>;
@@ -107,10 +111,20 @@ export function useResearchWorkflowRun(
   }, [runId, teamId]);
 
   useEffect(() => {
-    if (eventState.resyncRequired) {
+    if (
+      eventState.resyncRequired
+      || snapshotState.resyncRequired
+      || eventState.lastSequence > snapshotState.lastSequence
+    ) {
       scheduleRefresh();
     }
-  }, [eventState.resyncRequired, scheduleRefresh]);
+  }, [
+    eventState.lastSequence,
+    eventState.resyncRequired,
+    scheduleRefresh,
+    snapshotState.lastSequence,
+    snapshotState.resyncRequired,
+  ]);
 
   const stream = useResearchWorkflowEventStream({
     teamId,
@@ -177,11 +191,13 @@ export function useResearchWorkflowRun(
   return {
     projection,
     run,
+    snapshot: snapshotState.snapshot,
     commandOffers: snapshotState.snapshot?.commandOffers ?? [],
     error,
     streamState: stream.state,
+    resyncRequired: snapshotState.resyncRequired || eventState.resyncRequired,
     busy,
-    lastSequence: eventState.lastSequence,
+    lastSequence: Math.max(eventState.lastSequence, snapshotState.lastSequence),
     refresh: snapshotState.refresh,
     createRun,
     resolveHuman,

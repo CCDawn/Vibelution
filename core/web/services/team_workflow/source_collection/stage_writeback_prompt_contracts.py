@@ -23,6 +23,11 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
             "- 要进入正式 `ClaimEvidenceStore` 的主张，`claims[]` 还必须提供来源中可复核的有界原文 `quote`；`claim` 是归纳主张，不能冒充原文。没有真实 `quote` 时必须保持 `missing_evidence_anchor`，不得为通过门禁改写或补造引文。",
             "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 中已有的真实锚点原样写入对应 extraction；如果只有 DOI/URL 或摘要定位，保留 `keep/needs_more_info` 决定，但证据状态必须保持 `missing_evidence_anchor`，不得虚构页码、直接引语或全文结论。",
+            "- 正式 Challenge v2 的每个 extraction/finding 必须显式回写 `title`、`source_type`、`source_url`、`retrieved_at`、`fact`、`relation`、`verification_status`；共享元数据可以放在 extraction 父项，但最终每张 evidence card 必须完整展开。",
+            "- `source_type` 必须是 `peer_reviewed_paper/preprint/dataset/standard/official_document/book/other` 之一，`relation` 必须是 `supports/challenges/context/method/boundary` 之一，`verification_status` 必须是 `unverified/metadata_checked/full_text_checked/human_verified` 之一；不要把 `sourceKind` 当作推断依据。",
+            "- `source_url` 只能写真实的 `https://` 定位符，`retrieved_at` 必须是带时区的 RFC3339 时间；不得从 DOI、URL、摘要、标题或 `valueSummary` 猜造 `fact`、`relation` 或验证状态。",
+            "- 每条 evidence card 必须同时保留 `sourceId` 与 `candidateId`（或 `recordId`）的正式来源联结；`sourceId` 必须等于该 candidate/record ID，不能用 URL 充当来源身份。可选字段为 `doi`、`date`、`limitations`。",
+            "- 若正式字段缺失、来源联结不一致或没有真实 citation anchor，必须结构化回写 `needs_review`/`blocked` 及原因；不能用旧版宽松卡片冒充 Challenge v2 证据。",
         ]
     if stage_id == "relations":
         return [

@@ -13,6 +13,7 @@ from core.llm.semantic_messages import (
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
+    SemanticOutputSchema,
     SemanticToolDefinition,
     TextPart,
     ToolCallPart,
@@ -56,6 +57,35 @@ def identity(item_id: str, *, iteration: int = 0) -> CanonicalItemIdentity:
         iteration=current.iteration,
         item_id=item_id,
     )
+
+
+def test_responses_encodes_strict_structured_output_schema():
+    schema = {
+        "type": "object",
+        "properties": {"reasoning": {"type": "string"}},
+        "required": ["reasoning"],
+        "additionalProperties": False,
+    }
+    output_schema = SemanticOutputSchema(
+        name="research_hypothesis_design_v1",
+        schema=schema,
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="user", parts=(TextPart("design"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=128),
+        output_schema=output_schema,
+    )
+
+    payload = ResponsesWireAdapter().encode_request(request, route=route()).body
+
+    assert payload["text"]["format"] == {
+        "type": "json_schema",
+        "name": "research_hypothesis_design_v1",
+        "strict": True,
+        "schema": schema,
+    }
 
 
 def test_responses_stateless_history_emits_full_call_output_pairs_without_previous_response_id():

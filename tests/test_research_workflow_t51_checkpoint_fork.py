@@ -55,8 +55,7 @@ def test_fork_revision_child_thread_id_equals_run_id_and_resumes(
         )
 
         harness.seed(run_id="run-parent")
-        harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding", run_id="run-parent")
         parent_snap = harness.coordinator.snapshot("run-parent")
         parent_ckpt = parent_snap["checkpointId"]
         assert parent_ckpt
@@ -146,8 +145,7 @@ def test_checkpoint_fork_replay_when_child_already_forked_enqueues_dispatch(
             lambda: harness.coordinator
         )
         harness.seed(run_id="run-parent")
-        harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding", run_id="run-parent")
         parent_ckpt = harness.coordinator.snapshot("run-parent")["checkpointId"]
         assert parent_ckpt
 
@@ -247,8 +245,7 @@ def test_fork_checkpoint_failure_marks_reconciliation_required(
             lambda: harness.coordinator
         )
         harness.seed(run_id="run-parent")
-        harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding", run_id="run-parent")
 
         with server_operator_scope("u-1", roles=("operator",)):
             harness.commands.command_service.submit(

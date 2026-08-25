@@ -66,6 +66,7 @@ _MODEL_POLICY_FIELDS = frozenset(
     {"family", "providerIds", "modelIds", "requireOfficialProvider", "policySha256"}
 )
 _QWEN_MODEL_ID_RE = re.compile(r"(?:^|[/._:-])qwen(?:$|[0-9/._:-])", re.IGNORECASE)
+_MODEL_FAMILY_RE = re.compile(r"^[a-z]+", re.IGNORECASE)
 _SELECTION_FIELDS = frozenset(
     {
         "selected_hypothesis_id",
@@ -377,6 +378,21 @@ def is_qwen_model_id(value: Any) -> bool:
     return bool(normalized and _QWEN_MODEL_ID_RE.search(normalized))
 
 
+def model_family_for_model_id(value: Any) -> str:
+    """Return the stable upstream family prefix used by a frozen policy."""
+
+    normalized = str(value or "").strip().casefold().rsplit("/", 1)[-1]
+    match = _MODEL_FAMILY_RE.match(normalized)
+    return match.group(0) if match else ""
+
+
+def model_id_matches_family(value: Any, family: Any) -> bool:
+    return bool(
+        str(family or "").strip()
+        and model_family_for_model_id(value) == str(family).strip().casefold()
+    )
+
+
 def _canonical_model_policy_body(payload: Any) -> dict[str, Any]:
     raw = _mapping(payload, "model_policy")
     allowed_without_hash = _MODEL_POLICY_FIELDS - {"policySha256"}
@@ -391,8 +407,10 @@ def _canonical_model_policy_body(payload: Any) -> dict[str, Any]:
             "model_policy contains unsupported fields: " + ", ".join(unknown)
         )
     family = _text(raw.get("family"), "model_policy.family").casefold()
-    if family != "qwen":
-        raise QuestionResultPackageError("model_policy.family must be qwen")
+    if not _MODEL_FAMILY_RE.fullmatch(family):
+        raise QuestionResultPackageError(
+            "model_policy.family must be a lowercase model-family identifier"
+        )
 
     def identifiers(field: str) -> list[str]:
         values = _string_list(
@@ -400,20 +418,21 @@ def _canonical_model_policy_body(payload: Any) -> dict[str, Any]:
         )
         return sorted({value.casefold() for value in values})
 
-    if raw.get("requireOfficialProvider") is not True:
+    require_official_provider = raw.get("requireOfficialProvider")
+    if not isinstance(require_official_provider, bool):
         raise QuestionResultPackageError(
-            "model_policy.requireOfficialProvider must be true"
+            "model_policy.requireOfficialProvider must be a boolean"
         )
     model_ids = identifiers("modelIds")
-    if any(not is_qwen_model_id(model_id) for model_id in model_ids):
+    if any(not model_id_matches_family(model_id, family) for model_id in model_ids):
         raise QuestionResultPackageError(
-            "model_policy.modelIds must contain only Qwen upstream model ids"
+            "model_policy.modelIds must match model_policy.family"
         )
     body = {
         "family": family,
         "providerIds": identifiers("providerIds"),
         "modelIds": model_ids,
-        "requireOfficialProvider": True,
+        "requireOfficialProvider": require_official_provider,
     }
     return body
 
@@ -710,6 +729,17 @@ def _normalize_research_plan(payload: Any) -> dict[str, Any]:
     return normalized
 
 
+def normalize_research_plan(payload: Any) -> dict[str, Any]:
+    """Normalize the canonical v2 research plan outside a full package.
+
+    The formal workflow uses the exact same strict field, list, work-package,
+    and human-gate rules as ``QuestionResultPackage``.  Keep the package path
+    private so the public helper remains a small compatibility surface.
+    """
+
+    return _normalize_research_plan(payload)
+
+
 def _normalize_feedback(payload: Any) -> tuple[dict[str, Any], ...]:
     values = _list(payload, "feedback_iterations", allow_empty=False)
     result: list[dict[str, Any]] = []
@@ -915,7 +945,7 @@ def _validate_receipt(
         raise QuestionResultPackageError(f"receipt.{stage} is malformed") from exc
     if receipt.status not in _ALLOWED_RECEIPT_STATUSES:
         raise QuestionResultPackageError(
-            f"receipt.{stage} must represent a successful Qwen invocation"
+            f"receipt.{stage} must represent a successful model invocation"
         )
     provider = receipt.provider.strip().lower()
     model = receipt.model.strip().lower()
@@ -928,7 +958,7 @@ def _validate_receipt(
         or requested_model not in allowed_models
     ):
         raise QuestionResultPackageError(
-            f"receipt.{stage} must exactly match the authorized Qwen model policy"
+            f"receipt.{stage} must exactly match the authorized model policy"
         )
     if not receipt.evidence_locator:
         raise QuestionResultPackageError(
@@ -1572,5 +1602,8 @@ __all__ = [
     "canonical_model_policy",
     "compute_question_result_package_hash",
     "is_qwen_model_id",
+    "model_family_for_model_id",
+    "model_id_matches_family",
+    "normalize_research_plan",
     "question_result_package_idempotency_key",
 ]

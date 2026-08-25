@@ -261,15 +261,20 @@ function statusOf(entry: RegistryEntry | undefined): string {
 }
 
 function ensurePayload(raw: unknown): RegistryPayload {
-  const record = asRecord(raw);
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("instances registry is corrupt: root must be an object");
+  }
+  const record = raw as Record<string, unknown>;
   const instancesRaw = record.instances;
+  if (typeof instancesRaw !== "object" || instancesRaw === null || Array.isArray(instancesRaw)) {
+    throw new Error("instances registry is corrupt: instances must be an object");
+  }
   const instances: Record<string, RegistryEntry> = {};
-  if (typeof instancesRaw === "object" && instancesRaw !== null && !Array.isArray(instancesRaw)) {
-    for (const [key, value] of Object.entries(instancesRaw)) {
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        instances[key] = { ...(value as RegistryEntry) };
-      }
+  for (const [key, value] of Object.entries(instancesRaw)) {
+    if (!key.trim() || typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error("instances registry is corrupt: invalid instance entry");
     }
+    instances[key] = { ...(value as RegistryEntry) };
   }
   return {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
@@ -781,8 +786,15 @@ export function applyRecordSpawnPid(
 export async function readRegistry(registryPath: string): Promise<RegistryPayload> {
   try {
     return ensurePayload(JSON.parse(await readFile(registryPath, "utf8")));
-  } catch {
-    return emptyRegistry();
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT") {
+      return emptyRegistry();
+    }
+    if (error instanceof Error && error.message.startsWith("instances registry is corrupt:")) {
+      throw error;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`instances registry is corrupt: ${detail}`);
   }
 }
 

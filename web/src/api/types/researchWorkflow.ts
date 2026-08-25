@@ -4,9 +4,17 @@
  * selectedNodeId is UI-only and must not appear on server projections.
  */
 
-import type { NodeSessionAnchor, ScopedSessionAnchor } from "./research-workflow/core";
+import type {
+  NodeSessionAnchor,
+  ResearchWorkflowActiveDiscussionAnchor,
+  ScopedSessionAnchor,
+} from "./research-workflow/core";
 
-export type { NodeSessionAnchor, ScopedSessionAnchor } from "./research-workflow/core";
+export type {
+  NodeSessionAnchor,
+  ResearchWorkflowActiveDiscussionAnchor,
+  ScopedSessionAnchor,
+} from "./research-workflow/core";
 
 export type ActorKind = "agent" | "system" | "human";
 

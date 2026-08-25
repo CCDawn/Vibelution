@@ -32,7 +32,7 @@
 | Gym / Evolution 产品意图 | [prds/README.md](prds/README.md) |
 | **产品语境 / UI 注册表** | [product/README.md](product/README.md) · [product/design-register.md](product/design-register.md) |
 | ADR 索引 | [adr/README.md](adr/README.md) |
-| **Web services 全量（69）** | [../core/web/services/README.md](../core/web/services/README.md) |
+| **Web services 全量（71）** | [../core/web/services/README.md](../core/web/services/README.md) |
 
 ---
 
@@ -59,6 +59,8 @@
 | --- | --- |
 | [plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved：挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
 | [plans/2026-08-21-research-workflow-three-pane-current-task-redesign.md](plans/2026-08-21-research-workflow-three-pane-current-task-redesign.md) | USER-APPROVED：科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
+| [plans/2026-08-20-physical-retirement-of-python-lifecycle.md](plans/2026-08-20-physical-retirement-of-python-lifecycle.md) | ACTIVE：Python lifecycle 退役代码物理清理；批次 D 仍未完成 |
+| [plans/2026-08-20-physical-retirement-of-python-lifecycle.prompt.md](plans/2026-08-20-physical-retirement-of-python-lifecycle.prompt.md) | 上述 Active 计划的执行附件；随主计划关闭后归档 |
 | [plans/2026-08-15-research-graph-outcome-memory.md](plans/2026-08-15-research-graph-outcome-memory.md) | 三层记忆 + 公共结构策展/保鲜 + 研究成败图 v2.3（非正式规范） |
 | [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
 | [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |

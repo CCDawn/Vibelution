@@ -1,4 +1,4 @@
-"""Challenge Cup v2.1 graph with 16 nodes and human gates."""
+"""Challenge Cup v2.1 graph with 17 nodes and human gates."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from core.research.workflow.challenge_cup_graph import (
     build_challenge_cup_graph,
     compile_challenge_cup_graph,
 )
+from core.research.workflow.challenge_cup_runtime import successor_map
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
@@ -26,11 +27,12 @@ def test_graph_contains_all_definition_nodes() -> None:
     definition = build_challenge_cup_workflow_definition()
     # compile to ensure graph builds
     path = Path(__file__).resolve()  # noqa: F841
-    assert len(definition.nodes) == 16
+    assert len(definition.nodes) == 17
 
 
 def test_graph_static_edges_are_definition_owned() -> None:
     expected_static = (
+        ("problem_understanding", "source_finding"),
         ("source_finding", "source_extraction"),
         ("source_extraction", "evidence_relations"),
         ("evidence_relations", "knowledge_ingestion"),
@@ -58,9 +60,19 @@ def test_graph_static_edges_are_definition_owned() -> None:
     graph = build_challenge_cup_graph()
     assert graph.edges == {
         *expected_static,
-        ("__start__", "source_finding"),
+        ("__start__", "problem_understanding"),
         ("result_package", "__end__"),
     }
+    expected_successors = {node.nodeId: () for node in build_challenge_cup_workflow_definition().nodes}
+    for source, target in expected_static:
+        expected_successors[source] = (*expected_successors[source], target)
+    expected_successors["iteration_decision"] = graph_conditional_targets(
+        "iteration_decision"
+    )
+    expected_successors["version_governance"] = graph_conditional_targets(
+        "version_governance"
+    )
+    assert successor_map() == expected_successors
 
 
 def test_direct_graph_requires_durable_adapter_execution(tmp_path: Path) -> None:
@@ -70,7 +82,7 @@ def test_direct_graph_requires_durable_adapter_execution(tmp_path: Path) -> None
         cfg = {"configurable": {"thread_id": "cc-1"}}
         graph.invoke({}, cfg)
         state = graph.get_state(cfg)
-        assert list(state.next or []) == ["source_finding"]
+        assert list(state.next or []) == ["problem_understanding"]
         assert state.values == {}
 
 

@@ -22,6 +22,7 @@ from core.research.workflow.contracts.workflow_snapshot import (
 from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
 from core.research.workflow.models import WorkflowDefinition
 
+from ..active_discussion_anchor import project_active_discussion_anchor
 from .blocked_reason import format_blocked_reason, parse_problem_json
 
 
@@ -36,6 +37,16 @@ class ProjectionInputs:
     command_offers: tuple[CommandOffer, ...]
     latest_event_sequence: int
     generated_at: str
+    artifact_receipts: tuple[Mapping[str, Any] | Sequence[Any], ...] = ()
+    delivery_status: str | None = None
+    delivery_artifact: Mapping[str, Any] | None = None
+    launch_context: Mapping[str, Any] | None = None
+    # Discussion authority is deliberately supplied as already-loaded
+    # projections.  The builder never reaches into meeting/chat stores and
+    # therefore remains a pure read-model function.
+    discussion_projection: Mapping[str, Any] | None = None
+    discussion_meetings: Any = None
+    discussion_rooms: Any = None
 
 
 def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkflowSnapshot:
@@ -77,6 +88,50 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
     )
 
     safety_limits = _loads(run.safety_limits_json)
+    current_task = _current_task(
+        run=run,
+        definition=inputs.definition,
+        attempts=inputs.attempts,
+        pending_human_tasks=inputs.pending_human_tasks,
+        active_node_ids=active_ids,
+        command_offers=inputs.command_offers,
+        safety_limits=safety_limits,
+    )
+    retry = _retry_summary(
+        run=run,
+        attempts=inputs.attempts,
+        current_task=current_task,
+        command_offers=inputs.command_offers,
+    )
+    recovery = _recovery_summary(
+        run=run,
+        attempts=inputs.attempts,
+        current_task=current_task,
+        retry=retry,
+    )
+    if current_task is not None:
+        current_task = {**current_task, "recovery": dict(recovery)}
+    progress = _progress_summary(
+        run=run,
+        run_summary=run_summary,
+        definition=inputs.definition,
+        attempts=inputs.attempts,
+        active_node_ids=active_ids,
+        current_task=current_task,
+        command_offers=inputs.command_offers,
+    )
+    launch_context = _normalize_launch_context(inputs.launch_context, run)
+    discussion_anchor = _discussion_anchor(
+        inputs,
+        launch_context=launch_context,
+    )
+    if discussion_anchor is not None:
+        # ``launchContext`` is an existing additive projection envelope.  Keep
+        # the formal snapshot DTO stable while making the server-authored
+        # anchor available to current clients.  A route may promote this
+        # value to a top-level response field without creating another rule.
+        launch_context["activeDiscussionAnchor"] = discussion_anchor
+
     return ResearchWorkflowSnapshot(
         run=run_summary,
         definition=inputs.definition.to_dict(),
@@ -110,6 +165,17 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         ),
         latest_event_sequence=int(inputs.latest_event_sequence),
         generated_at=inputs.generated_at,
+        schema_version=2,
+        current_task=current_task,
+        progress=progress,
+        retry=retry,
+        recovery=recovery,
+        artifact_summary=_artifact_summary(
+            inputs.artifact_receipts,
+            delivery_artifact=inputs.delivery_artifact,
+        ),
+        delivery_status=_normalize_delivery_status(inputs.delivery_status),
+        launch_context=launch_context,
     )
 
 
@@ -175,6 +241,858 @@ def _run_summary_with_active_block(
         fallback=summary.blocked_reason,
     ) or summary.blocked_reason
     return replace(summary, status="blocked", blocked_reason=reason)
+
+
+def _latest_attempt_by_node(
+    attempts: Sequence[NodeAttemptRecord],
+) -> dict[str, NodeAttemptRecord]:
+    latest: dict[str, NodeAttemptRecord] = {}
+    for attempt in attempts:
+        prior = latest.get(attempt.node_id)
+        if prior is None or int(attempt.attempt) >= int(prior.attempt):
+            latest[attempt.node_id] = attempt
+    return latest
+
+
+def _definition_node(definition: WorkflowDefinition, node_id: str | None) -> Any | None:
+    wanted = str(node_id or "").strip()
+    if not wanted:
+        return None
+    return next((node for node in definition.nodes if node.nodeId == wanted), None)
+
+
+def _human_task_for_node(
+    pending_human_tasks: Sequence[HumanTaskSummary | Mapping[str, Any]],
+    *,
+    node_id: str | None,
+    node_run_id: str | None,
+) -> HumanTaskSummary | Mapping[str, Any] | None:
+    current_node_run_id = str(node_run_id or "").strip()
+    for item in pending_human_tasks:
+        item_node_id = (
+            item.node_id if isinstance(item, HumanTaskSummary) else item.get("nodeId")
+        )
+        item_node_run_id = (
+            item.node_run_id
+            if isinstance(item, HumanTaskSummary)
+            else item.get("nodeRunId")
+        )
+        if current_node_run_id:
+            if str(item_node_run_id or "").strip() == current_node_run_id:
+                return item
+            # A known attempt identity is authoritative. Do not fall back to
+            # nodeId and accidentally attach an older pending human task.
+            continue
+        if node_id and str(item_node_id or "").strip() == node_id:
+            return item
+    return None
+
+
+def _task_id(item: HumanTaskSummary | Mapping[str, Any] | None) -> str | None:
+    if item is None:
+        return None
+    value = item.task_id if isinstance(item, HumanTaskSummary) else item.get("taskId")
+    return _as_optional_str(value)
+
+
+def _current_task(
+    *,
+    run: RunRecord,
+    definition: WorkflowDefinition,
+    attempts: Sequence[NodeAttemptRecord],
+    pending_human_tasks: Sequence[HumanTaskSummary | Mapping[str, Any]],
+    active_node_ids: Sequence[str],
+    command_offers: Sequence[CommandOffer],
+    safety_limits: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    latest_by_node = _latest_attempt_by_node(attempts)
+    active_node_id = str(
+        active_node_ids[0] if active_node_ids else run.active_node_id or ""
+    ).strip()
+    node_id = active_node_id or None
+    latest = latest_by_node.get(node_id) if node_id else None
+    task = _human_task_for_node(
+        pending_human_tasks,
+        node_id=node_id,
+        node_run_id=latest.node_run_id if latest is not None else None,
+    )
+    start_offer = _available_offer(
+        command_offers,
+        command="start_node",
+        node_id=node_id,
+        expected_run_version=run.run_version,
+    )
+    if (
+        run.status in {"created", "running"}
+        and start_offer is None
+        and latest is None
+        and task is None
+    ):
+        # A created/running run can have no accepted attempt yet. In that
+        # window the only authoritative current task is an executable
+        # start_node offer scoped to this run version.
+        start_offer = _available_offer(
+            command_offers,
+            command="start_node",
+            node_id=None,
+            expected_run_version=run.run_version,
+        )
+        if start_offer is not None:
+            node_id = _as_optional_str(start_offer.node_id)
+            latest = latest_by_node.get(node_id or "")
+            task = _human_task_for_node(
+                pending_human_tasks,
+                node_id=node_id,
+                node_run_id=latest.node_run_id if latest is not None else None,
+            )
+
+    if run.status == "succeeded":
+        latest = _latest_terminal_attempt(attempts)
+        node_id = latest.node_id if latest is not None else None
+        task = _human_task_for_node(
+            pending_human_tasks,
+            node_id=node_id,
+            node_run_id=latest.node_run_id if latest is not None else None,
+        )
+        return _task_projection(
+            run=run,
+            definition=definition,
+            node_id=node_id,
+            latest=latest,
+            task=task,
+            state="completed",
+            safety_limits=safety_limits,
+            identity_offer=None,
+            problem={},
+            status="succeeded",
+        )
+
+    if run.status in _TERMINAL_RUN_STATUS:
+        problem = _problem_mapping(
+            latest.problem_json if latest is not None else None,
+            run.blocked_problem_json,
+        )
+        return _task_projection(
+            run=run,
+            definition=definition,
+            node_id=node_id,
+            latest=latest,
+            task=task,
+            state="blocked_terminal",
+            safety_limits=safety_limits,
+            identity_offer=None,
+            problem=problem,
+            status=run.status,
+        )
+
+    if latest is None and task is None and start_offer is None:
+        if run.status not in {"blocked", "reconciliation_required"}:
+            # No formal runtime attempt and no executable offer means there is
+            # no authority for a CTA/current task projection.
+            return None
+        return _task_projection(
+            run=run,
+            definition=definition,
+            node_id=node_id,
+            latest=None,
+            task=None,
+            state="blocked_terminal",
+            safety_limits=safety_limits,
+            identity_offer=None,
+            problem=_problem_mapping(run.blocked_problem_json),
+            status=run.status,
+        )
+
+    problem = _problem_mapping(
+        latest.problem_json if latest is not None else None,
+        run.blocked_problem_json,
+    )
+    retry_offer = _available_offer(
+        command_offers,
+        command="retry_node",
+        node_id=node_id,
+        expected_run_version=run.run_version,
+    )
+    state = _task_state(
+        run=run,
+        latest=latest,
+        task=task,
+        start_offer=start_offer,
+        retry_offer=retry_offer,
+        problem=problem,
+    )
+    if state is None:
+        # A succeeded attempt with no successor authority is not a current
+        # task while the run itself is still live.
+        return None
+    identity_offer = (
+        retry_offer
+        if state == "blocked_retryable" and retry_offer is not None
+        else start_offer or retry_offer
+    )
+    return _task_projection(
+        run=run,
+        definition=definition,
+        node_id=node_id,
+        latest=latest,
+        task=task,
+        state=state,
+        safety_limits=safety_limits,
+        identity_offer=identity_offer,
+        problem=problem,
+        status=latest.status if latest is not None else run.status,
+    )
+
+
+def _available_offer(
+    offers: Sequence[CommandOffer],
+    *,
+    command: str,
+    node_id: str | None,
+    expected_run_version: int,
+) -> CommandOffer | None:
+    for offer in offers:
+        if _offer_command_value(offer) != command or not offer.available:
+            continue
+        if int(offer.expected_run_version) != int(expected_run_version):
+            continue
+        if node_id is not None and str(offer.node_id or "") != node_id:
+            continue
+        if node_id is None and not str(offer.node_id or "").strip():
+            continue
+        return offer
+    return None
+
+
+def _latest_terminal_attempt(
+    attempts: Sequence[NodeAttemptRecord],
+) -> NodeAttemptRecord | None:
+    if not attempts:
+        return None
+    return max(
+        attempts,
+        key=lambda item: (int(item.updated_at_ms), int(item.attempt), item.node_run_id),
+    )
+
+
+def _task_state(
+    *,
+    run: RunRecord,
+    latest: NodeAttemptRecord | None,
+    task: HumanTaskSummary | Mapping[str, Any] | None,
+    start_offer: CommandOffer | None,
+    retry_offer: CommandOffer | None,
+    problem: Mapping[str, Any],
+) -> str | None:
+    if run.status == "waiting_human" or (
+        latest is not None and latest.status == "waiting_human"
+    ) or task is not None:
+        return "waiting_user"
+    if run.status in {"blocked", "reconciliation_required"} or (
+        latest is not None and latest.status in {"blocked", "failed", "cancelled"}
+    ):
+        explicitly_unavailable = (
+            "retryable" in problem and not bool(problem.get("retryable"))
+        )
+        return (
+            "blocked_retryable"
+            if retry_offer is not None and not explicitly_unavailable
+            else "blocked_terminal"
+        )
+    if latest is not None and latest.status in {
+        "starting",
+        "dispatching",
+        "running",
+    }:
+        return "auto_running"
+    # An executable start offer is a user-facing command, not evidence that
+    # the node is already executing. Only a live attempt above may claim
+    # system-owned auto-running state.
+    if start_offer is not None:
+        return "waiting_user"
+    return None
+
+
+def _task_projection(
+    *,
+    run: RunRecord,
+    definition: WorkflowDefinition,
+    node_id: str | None,
+    latest: NodeAttemptRecord | None,
+    task: HumanTaskSummary | Mapping[str, Any] | None,
+    state: str,
+    safety_limits: Mapping[str, Any],
+    identity_offer: CommandOffer | None,
+    problem: Mapping[str, Any],
+    status: str,
+) -> dict[str, Any]:
+    node = _definition_node(definition, node_id)
+    actor_kind = latest.actor_kind if latest is not None else (
+        node.actorKind.value if node is not None else None
+    )
+    stage_id = node.stageId.value if node is not None else None
+    scoped_retry_blocker_ids = (
+        identity_offer.blocker_ids
+        if identity_offer is not None
+        and _offer_command_value(identity_offer) == "retry_node"
+        else ()
+    )
+    blocked_reason = _structured_blocked_reason(
+        problem,
+        terminal_reason=run.terminal_reason if state == "blocked_terminal" else None,
+        retryable=state == "blocked_retryable",
+        offer_blocker_ids=scoped_retry_blocker_ids,
+    )
+    task_id = _task_id(task)
+    node_run_id = latest.node_run_id if latest is not None else None
+    offer_idempotency_key = (
+        _as_optional_str(identity_offer.idempotency_key)
+        if identity_offer is not None
+        else None
+    )
+    return {
+        "key": task_id or node_run_id or offer_idempotency_key or f"{run.run_id}:{state}",
+        "nodeId": node_id,
+        "stageId": stage_id,
+        "nodeRunId": node_run_id,
+        "attempt": latest.attempt if latest is not None else None,
+        "actorKind": actor_kind,
+        "taskId": task_id,
+        "status": "blocked" if state in {"blocked_retryable", "blocked_terminal"} else status,
+        "state": state,
+        "kind": (
+            "human_gate"
+            if actor_kind == "human"
+            else "node"
+            if node is not None
+            else "run"
+        ),
+        "label": node.label if node is not None else None,
+        "detail": format_blocked_reason(problem) or None,
+        "responsibility": _task_responsibility(state),
+        "maxAttempts": _max_attempts(safety_limits, node_id),
+        # No durable effect contract currently exists for automatic successor
+        # execution. CommandOffer is a user-submitted mutation, not an effect.
+        "automaticNextStep": None,
+        "blockedReason": blocked_reason,
+        "recovery": {
+            "status": "terminal" if state == "blocked_terminal" else (
+                "retryable" if state == "blocked_retryable" else "none"
+            ),
+            "retryable": state == "blocked_retryable",
+            "code": blocked_reason.get("code") if blocked_reason else None,
+            "detail": blocked_reason.get("detail") if blocked_reason else None,
+            "retryScope": "none",
+            "recoveryPoint": None,
+            "nextRetryAt": None,
+            "requiresOperator": state == "blocked_terminal",
+            "afterSubmit": None,
+        },
+        "authority": "formal_runtime",
+    }
+
+
+def _structured_blocked_reason(
+    problem: Mapping[str, Any],
+    *,
+    terminal_reason: str | None,
+    retryable: bool,
+    offer_blocker_ids: Sequence[str] = (),
+) -> dict[str, Any] | None:
+    code = str(problem.get("code") or terminal_reason or "").strip()
+    detail = problem.get("detail")
+    failure_class = _as_optional_str(problem.get("failureClass"))
+    message = _as_optional_str(problem.get("message"))
+    blocker_ids = tuple(
+        dict.fromkeys(
+            [
+                *_explicit_blocker_ids(problem.get("blockerIds")),
+                *(
+                    str(value).strip()
+                    for value in offer_blocker_ids
+                    if str(value).strip()
+                ),
+            ]
+        )
+    )
+    if not code and detail is None and failure_class is None and message is None and not blocker_ids:
+        return None
+    return {
+        "code": code or None,
+        "detail": None if detail is None else str(detail),
+        "retryable": bool(problem.get("retryable"))
+        if "retryable" in problem
+        else bool(retryable),
+        "failureClass": failure_class,
+        "message": message,
+        "blockerIds": list(blocker_ids),
+    }
+
+
+def _explicit_blocker_ids(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return ()
+    return tuple(
+        dict.fromkeys(str(item).strip() for item in value if str(item).strip())
+    )
+
+
+def _task_responsibility(state: str) -> str:
+    if state in {"auto_running", "completed"}:
+        return "system"
+    if state in {"waiting_user", "blocked_retryable"}:
+        return "user"
+    return "operator"
+
+
+def _max_attempts(safety_limits: Mapping[str, Any], node_id: str | None) -> int | None:
+    candidates: list[Any] = []
+    if node_id:
+        for key in ("maxAttemptsByNode", "max_attempts_by_node"):
+            by_node = safety_limits.get(key)
+            if isinstance(by_node, Mapping):
+                candidates.append(by_node.get(node_id))
+    candidates.extend(
+        safety_limits.get(key)
+        for key in ("maxAttempts", "max_attempts")
+    )
+    for value in candidates:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
+    return None
+
+
+def _progress_summary(
+    *,
+    run: RunRecord,
+    run_summary: WorkflowRunSummary,
+    definition: WorkflowDefinition,
+    attempts: Sequence[NodeAttemptRecord],
+    active_node_ids: Sequence[str],
+    current_task: Mapping[str, Any] | None,
+    command_offers: Sequence[CommandOffer],
+) -> dict[str, Any]:
+    latest = _latest_attempt_by_node(attempts)
+    all_node_ids = tuple(node.nodeId for node in definition.nodes)
+    completed = (
+        all_node_ids
+        if run.status == "succeeded"
+        else tuple(
+            node.nodeId
+            for node in definition.nodes
+            if latest.get(node.nodeId) is not None
+            and latest[node.nodeId].status == "succeeded"
+        )
+    )
+    blocked = tuple(
+        node.nodeId
+        for node in definition.nodes
+        if latest.get(node.nodeId) is not None
+        and latest[node.nodeId].status in {"blocked", "failed", "cancelled"}
+    )
+    total = len(definition.nodes)
+    percent = 100 if run.status == "succeeded" else (
+        round((len(completed) / total) * 100) if total else 0
+    )
+    status = str(current_task.get("state") or "") if current_task else ""
+    if not status:
+        status = _task_state(
+            run=run,
+            latest=latest.get(active_node_ids[0]) if active_node_ids else None,
+            task=None,
+            start_offer=_available_offer(
+                command_offers,
+                command="start_node",
+                node_id=active_node_ids[0] if active_node_ids else None,
+                expected_run_version=run.run_version,
+            ),
+            retry_offer=None,
+            problem=_problem_mapping(run.blocked_problem_json),
+        ) or (
+            "not_started"
+            if run.status == "created" and not attempts
+            else "unknown"
+        )
+    current_stage_id = _stage_id_for_node(definition, (
+        current_task.get("nodeId") if current_task else (
+            active_node_ids[0] if active_node_ids else None
+        )
+    ))
+    if run_summary.status == "succeeded":
+        status = "completed"
+    stages: list[dict[str, Any]] = []
+    for stage in definition.stages:
+        stage_nodes = set(stage.nodeIds)
+        stage_completed = sum(1 for node_id in completed if node_id in stage_nodes)
+        stage_blocked = sum(1 for node_id in blocked if node_id in stage_nodes)
+        if stage_completed == len(stage_nodes) and stage_nodes:
+            stage_state = "completed"
+        elif stage_blocked:
+            stage_state = "blocked"
+        elif current_stage_id == stage.stageId.value:
+            stage_state = "current"
+        else:
+            stage_state = "upcoming"
+        stages.append(
+            {
+                "id": stage.stageId.value,
+                "completed": stage_completed,
+                "total": len(stage_nodes),
+                "blocked": stage_blocked,
+                "state": stage_state,
+            }
+        )
+    return {
+        "completedNodes": len(completed),
+        "totalNodes": total,
+        "blockedNodes": len(blocked),
+        "currentStageId": current_stage_id,
+        "stages": stages,
+        "completedNodeIds": list(completed),
+        "blockedNodeIds": list(blocked),
+        "completed": len(completed),
+        "total": total,
+        "percent": percent,
+        "currentNodeId": str(active_node_ids[0]).strip() if active_node_ids else None,
+        "status": status,
+    }
+
+
+def _stage_id_for_node(
+    definition: WorkflowDefinition,
+    node_id: str | None,
+) -> str | None:
+    node = _definition_node(definition, node_id)
+    return node.stageId.value if node is not None else None
+
+
+def _offer_command_value(offer: CommandOffer) -> str:
+    command = getattr(offer.command, "value", offer.command)
+    return str(command or "").strip()
+
+
+def _retry_summary(
+    *,
+    run: RunRecord,
+    attempts: Sequence[NodeAttemptRecord],
+    current_task: Mapping[str, Any] | None,
+    command_offers: Sequence[CommandOffer],
+) -> dict[str, Any]:
+    node_id = _as_optional_str(current_task.get("nodeId")) if current_task else None
+    offer = _available_offer(
+        command_offers,
+        command="retry_node",
+        node_id=node_id,
+        expected_run_version=run.run_version,
+    )
+    latest = _latest_attempt_by_node(attempts).get(node_id or "")
+    problem = _problem_mapping(
+        latest.problem_json if latest is not None else None,
+        run.blocked_problem_json,
+    )
+    explicitly_unavailable = "retryable" in problem and not bool(problem.get("retryable"))
+    available = bool(
+        offer is not None
+        and offer.available
+        and run.status not in _TERMINAL_RUN_STATUS
+        and not explicitly_unavailable
+    )
+    return {
+        "available": available,
+        "command": _offer_command_value(offer) if offer is not None else None,
+        "nodeId": node_id,
+        "reasonCode": (
+            str(offer.reason_code or "retry_not_available")
+            if offer is not None
+            else "retry_not_available"
+        ),
+        "idempotencyKey": offer.idempotency_key if offer is not None else None,
+        "expectedRunVersion": (
+            int(offer.expected_run_version) if offer is not None else None
+        ),
+    }
+
+
+def _recovery_summary(
+    *,
+    run: RunRecord,
+    attempts: Sequence[NodeAttemptRecord],
+    current_task: Mapping[str, Any] | None,
+    retry: Mapping[str, Any],
+) -> dict[str, Any]:
+    node_id = _as_optional_str(current_task.get("nodeId")) if current_task else None
+    latest = _latest_attempt_by_node(attempts).get(node_id or "")
+    problem = _problem_mapping(
+        latest.problem_json if latest is not None else None,
+        run.blocked_problem_json,
+    )
+    blocked = run.status in {
+        "blocked",
+        "failed",
+        "cancelled",
+        "archived",
+        "reconciliation_required",
+    }
+    if current_task is not None and current_task.get("state") in {
+        "blocked_retryable",
+        "blocked_terminal",
+    }:
+        blocked = True
+    if not blocked:
+        return {
+            "status": "none",
+            "retryable": False,
+            "code": None,
+            "detail": None,
+            "retryScope": "none",
+            "recoveryPoint": None,
+            "nextRetryAt": None,
+            "requiresOperator": False,
+            "afterSubmit": None,
+        }
+    is_retryable = bool(retry.get("available"))
+    retry_node_id = _as_optional_str(retry.get("nodeId")) if is_retryable else None
+    return {
+        "status": "retryable" if is_retryable else "terminal",
+        "retryable": is_retryable,
+        "code": str(problem.get("code") or "") or None,
+        "detail": str(problem.get("detail") or "") or None,
+        "retryScope": "task" if retry_node_id else "none",
+        "recoveryPoint": retry_node_id,
+        "nextRetryAt": None,
+        "requiresOperator": bool(
+            current_task is not None
+            and current_task.get("state") == "blocked_terminal"
+        ),
+        "afterSubmit": None,
+    }
+
+
+def _problem_mapping(*raw_values: str | None) -> dict[str, Any]:
+    for raw in raw_values:
+        parsed = parse_problem_json(raw)
+        if parsed:
+            return parsed
+    return {}
+
+
+def _artifact_summary(
+    receipts: Sequence[Mapping[str, Any] | Sequence[Any]],
+    *,
+    delivery_artifact: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    refs: list[dict[str, Any]] = []
+    kinds: list[str] = []
+    for item in receipts:
+        if isinstance(item, Mapping):
+            canonical = item.get("canonicalRef")
+            if canonical is None:
+                canonical = item.get("uri")
+            if canonical is None:
+                canonical = _canonical_ref(item.get("canonicalRefJson"))
+            kind = str(item.get("artifactKind") or item.get("kind") or "")
+            ref = {
+                "receiptId": _as_optional_str(item.get("receiptId")),
+                "nodeRunId": _as_optional_str(item.get("nodeRunId")),
+                "kind": kind,
+                "version": str(
+                    item.get("artifactVersion") or item.get("version") or ""
+                ),
+                "canonicalRef": _as_optional_str(canonical),
+                "sha256": str(item.get("sha256") or item.get("contentHash") or ""),
+                "domainRevision": str(item.get("domainRevision") or ""),
+                "materialized": bool(item.get("materialized")),
+                "verifiedAtMs": int(item.get("verifiedAtMs") or 0),
+            }
+        else:
+            row = list(item)
+            raw_ref = row[5] if len(row) > 5 else None
+            kind = str(row[4] or "") if len(row) > 4 else ""
+            ref = {
+                "receiptId": _as_optional_str(row[0] if len(row) > 0 else None),
+                "nodeRunId": _as_optional_str(row[2] if len(row) > 2 else None),
+                "kind": kind,
+                "version": str(row[6] or "") if len(row) > 6 else "",
+                "canonicalRef": _as_optional_str(_canonical_ref(raw_ref)),
+                "sha256": str(row[7] or "") if len(row) > 7 else "",
+                "domainRevision": str(row[8] or "") if len(row) > 8 else "",
+                "materialized": bool(row[9]) if len(row) > 9 else False,
+                "verifiedAtMs": int(row[10] or 0) if len(row) > 10 else 0,
+            }
+        if kind and kind not in kinds:
+            kinds.append(kind)
+        refs.append(ref)
+    final_artifact_id: str | None = None
+    final_artifact_locator: str | None = None
+    if isinstance(delivery_artifact, Mapping):
+        final_artifact_locator = _as_optional_str(
+            delivery_artifact.get("artifactRef")
+            or delivery_artifact.get("canonicalRef")
+        )
+        event_artifact_id = _as_optional_str(
+            delivery_artifact.get("artifactId")
+        )
+        if event_artifact_id:
+            final_artifact_id = event_artifact_id
+        elif final_artifact_locator:
+            matching = next(
+                (
+                    item
+                    for item in refs
+                    if item.get("canonicalRef") == final_artifact_locator
+                ),
+                None,
+            )
+            if matching is not None:
+                final_artifact_id = _as_optional_str(matching.get("receiptId"))
+    if final_artifact_locator is None:
+        # A receipt is only a final-artifact authority when its kind is the
+        # dedicated delivery result. Never select an arbitrary last receipt.
+        delivery_refs = [
+            item
+            for item in refs
+            if item.get("kind") == "delivery_orchestration_result"
+        ]
+        if len(delivery_refs) == 1:
+            final_artifact_locator = _as_optional_str(
+                delivery_refs[0].get("canonicalRef")
+            )
+            final_artifact_id = _as_optional_str(delivery_refs[0].get("receiptId"))
+    return {
+        "count": len(refs),
+        "materializedCount": sum(1 for item in refs if item["materialized"]),
+        "kinds": kinds,
+        "refs": refs,
+        "finalArtifactId": final_artifact_id,
+        "finalArtifactLocator": final_artifact_locator,
+    }
+
+
+def _canonical_ref(raw: Any) -> str:
+    if isinstance(raw, Mapping):
+        return str(raw.get("canonicalRef") or "").strip()
+    try:
+        payload = json.loads(str(raw or "{}"))
+    except (TypeError, ValueError):
+        return ""
+    return str(payload.get("canonicalRef") or "") if isinstance(payload, Mapping) else ""
+
+
+def _launch_context(run: RunRecord) -> dict[str, Any]:
+    snapshot = _loads(run.input_snapshot_json)
+    constraint = snapshot.get("constraintSnapshot")
+    constraint = constraint if isinstance(constraint, Mapping) else {}
+    source = str(
+        snapshot.get("launchSource")
+        or constraint.get("launchSource")
+        or ("catalog" if snapshot.get("competitionRuleRef") else "")
+    ).strip() or None
+    return {
+        "source": source,
+        "sourceCollectionRunId": _as_optional_str(snapshot.get("sourceCollectionRunId")),
+        "authorizationId": _as_optional_str(
+            snapshot.get("authorizationId")
+            or snapshot.get("catalogAuthorizationId")
+        ),
+        "planId": _as_optional_str(snapshot.get("planId")),
+        "questionId": _as_optional_str(
+            snapshot.get("questionId") or run.question_id
+        ),
+        "hypothesisSelectionId": _as_optional_str(
+            snapshot.get("hypothesisSelectionId")
+            or snapshot.get("selectionId")
+        ),
+        "catalogAuthorizationId": _as_optional_str(
+            snapshot.get("catalogAuthorizationId")
+            or snapshot.get("authorizationId")
+        ),
+        "readinessReportSha256": _as_optional_str(
+            snapshot.get("readinessReportSha256")
+        ),
+        "chainCorrelationId": _as_optional_str(
+            snapshot.get("chainCorrelationId")
+        ),
+        "inputSnapshotHash": _as_optional_str(run.input_snapshot_hash),
+    }
+
+
+def _normalize_launch_context(
+    value: Mapping[str, Any] | None,
+    run: RunRecord,
+) -> dict[str, Any]:
+    context = _launch_context(run)
+    if value is not None:
+        context.update(dict(value))
+    # Keep the exact v2 names populated from their legacy aliases when a
+    # narrow test double or older caller supplies only the v1 spelling.
+    context["questionId"] = _as_optional_str(
+        context.get("questionId") or run.question_id
+    )
+    context["catalogAuthorizationId"] = _as_optional_str(
+        context.get("catalogAuthorizationId") or context.get("authorizationId")
+    )
+    context["authorizationId"] = _as_optional_str(
+        context.get("authorizationId") or context.get("catalogAuthorizationId")
+    )
+    context["hypothesisSelectionId"] = _as_optional_str(
+        context.get("hypothesisSelectionId") or context.get("selectionId")
+    )
+    context["readinessReportSha256"] = _as_optional_str(
+        context.get("readinessReportSha256")
+    )
+    context["chainCorrelationId"] = _as_optional_str(
+        context.get("chainCorrelationId")
+    )
+    return context
+
+
+def _discussion_anchor(
+    inputs: ProjectionInputs,
+    *,
+    launch_context: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Project the one server-authored discussion anchor for a snapshot.
+
+    ``active_discussion_anchor`` owns all identity matching and degraded
+    reasons.  This adapter only decides whether the caller supplied enough
+    authority to invoke it and adapts the immutable run input when a caller
+    has not supplied a richer workflow projection.  In particular, it never
+    derives a room from ``linkedChatRoomId`` or from an array position.
+    """
+
+    supplied_authority = (
+        inputs.discussion_projection is not None
+        or inputs.discussion_meetings is not None
+        or inputs.discussion_rooms is not None
+    )
+    existing = launch_context.get("activeDiscussionAnchor")
+    if not supplied_authority and isinstance(existing, Mapping):
+        # A query adapter may already have projected the canonical anchor.  It
+        # is an input fact, not a second selection algorithm; preserve it for
+        # compatibility with the additive launch-context envelope.
+        return dict(existing)
+    if not supplied_authority:
+        return None
+
+    workflow_projection: Mapping[str, Any] = (
+        inputs.discussion_projection
+        if isinstance(inputs.discussion_projection, Mapping)
+        else {}
+    )
+    return project_active_discussion_anchor(
+        workflow_projection,
+        inputs.discussion_meetings,
+        inputs.discussion_rooms,
+    )
+
+
+def _normalize_delivery_status(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    return normalized or None
 
 
 def _run_summary(run: RunRecord) -> WorkflowRunSummary:

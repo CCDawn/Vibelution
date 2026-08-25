@@ -69,6 +69,23 @@ describe("ResearchCurrentTaskInspector", () => {
     await act(async () => root.unmount());
   });
 
+  it("keeps header, body, and footer regions mounted while the task is loading", async () => {
+    const loading = context();
+    loading.currentTask = null;
+    loading.loadState = "loading";
+    const { container, root } = await render(
+      <ResearchCurrentTaskInspector context={loading}>
+        <div>启动流程</div>
+      </ResearchCurrentTaskInspector>,
+    );
+
+    expect(container.querySelector('[data-vui-region="current-task-header"]')).not.toBeNull();
+    expect(container.querySelector('[data-vui-region="current-task-body"]')?.textContent).toContain("启动流程");
+    expect(container.querySelector('[data-vui-region="current-task-action"]')).not.toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
   it("makes a selected history node read-only and returns focus ownership to the current task", async () => {
     const onReturn = vi.fn();
     const { container, root } = await render(
@@ -82,8 +99,11 @@ describe("ResearchCurrentTaskInspector", () => {
     );
 
     expect(container.querySelector('[data-history-mode="true"]')).not.toBeNull();
-    expect(container.textContent).toContain("历史回顾 · 只读");
+    expect(container.textContent).toContain("归档记录 · 当前仍是“本轮评审正在整理”");
+    expect(container.textContent).not.toContain("历史回顾 · 只读");
     expect(container.textContent).not.toContain("不应显示的写操作");
+    expect(container.querySelector('[data-vui-region="current-task-action"]')?.textContent)
+      .toBe("返回当前任务");
     const returnButton = Array.from(container.querySelectorAll("button")).find((button) => (
       button.textContent?.includes("返回当前任务")
     ));

@@ -192,6 +192,7 @@ def _meeting_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "resolutionHash",
             "inputArtifactRefs",
             "linkedChatRoomId",
+            "modelInvocationReceiptAuthority",
         )
     }
 
@@ -288,6 +289,15 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
         "linkedChatRoomId": str(request.get("linkedChatRoomId") or "").strip(),
         "chatRoomRoundIds": [],
+        **(
+            {
+                "modelInvocationReceiptAuthority": dict(
+                    request["modelInvocationReceiptAuthority"]
+                )
+            }
+            if isinstance(request.get("modelInvocationReceiptAuthority"), Mapping)
+            else {}
+        ),
     }
     if not record["participants"]:
         raise ContractValidationError("a meeting round requires at least one participant")
@@ -341,6 +351,57 @@ def _append_round_record(normalized_team_id: str, record: dict[str, Any]) -> dic
     MeetingRound.from_dict(record)
     _append_jsonl(_rounds_path(normalized_team_id), record)
     return record
+
+
+def persist_meeting_discussion_scope(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    discussion_scope: Mapping[str, Any],
+    discussion_scope_hash: str,
+    scope_authority: str,
+) -> dict[str, Any]:
+    """Append the canonical discussion-scope projection to one meeting.
+
+    This is the owning write facade used by meeting_runtime; callers cannot
+    replace lifecycle fields or create a second MeetingRound identity.
+    """
+
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_meeting_id = str(meeting_round_id or "").strip()
+    scope = WorkflowDiscussionScopeV1.from_mapping(discussion_scope)
+    normalized_hash = str(discussion_scope_hash or "").strip().lower()
+    if normalized_hash != scope.scope_hash:
+        raise ContractValidationError(
+            "discussionScopeHash does not match the discussion scope"
+        )
+    with _LOCK:
+        meeting = _load_meeting_round(normalized_team_id, normalized_meeting_id)
+        existing = meeting.get("discussionScope")
+        if isinstance(existing, Mapping):
+            existing_scope = WorkflowDiscussionScopeV1.from_mapping(existing)
+            if existing_scope.key != scope.key:
+                raise ContractValidationError(
+                    "meeting is already bound to a different discussion scope"
+                )
+            return meeting
+        updated = {
+            **meeting,
+            "discussionScope": scope.to_dict(),
+            "discussionScopeHash": scope.scope_hash,
+            "scopeAuthority": str(scope_authority or "").strip(),
+            "researchProjectId": scope.researchProjectId,
+            "workflowRunId": scope.workflowRunId,
+            "workflowNodeId": scope.workflowNodeId,
+            "updatedAt": _utc_now(),
+        }
+        _append_round_record(normalized_team_id, updated)
+    return updated
 
 
 def bind_meeting_chat_room_round(

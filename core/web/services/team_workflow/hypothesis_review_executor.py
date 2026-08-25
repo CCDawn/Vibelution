@@ -4,14 +4,14 @@ The executor turns the bounded review context (closed meeting digest v2 +
 candidate hypotheses + evidence refs) into the content of a closable
 ``HypothesisRound``:
 
-1. **Reflection** — every candidate is scored independently on the seven
+1. **Reflection** — every candidate is scored independently on the five
    fixed review dimensions; owning role ``research_evidence_reviewer``.
 2. **Pairwise debate** — every unordered candidate pair is compared once; the
    left/right presentation order is randomized from a recorded seed to
    mitigate position bias, and the persisted comparison fields record the
    order that was debated; owning role ``research_theme_synthesizer``.
 3. **Pareto classification** — every candidate is classified as front or
-   dominated over the seven dimensions (no Elo-style single total score,
+   dominated over the five dimensions (no Elo-style single total score,
    D-02); owning role ``research_theme_synthesizer``.
 4. **MetaReview** — one recommendation with rationale, risk notes, and an
    acceptance flag; owning role is the meeting Coordinator.
@@ -30,6 +30,7 @@ import hashlib
 import json
 import random
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 from core.research.workflow.contracts import (
@@ -114,13 +115,15 @@ def _reflection_step(
     runner: ReflectionRunner | None,
     agent_id: str,
 ) -> list[dict[str, Any]]:
-    """Score every candidate independently on the seven fixed dimensions."""
+    """Score every candidate independently on the five fixed dimensions."""
 
     context_id = str(context.get("contextId") or "")
     reviewed: list[dict[str, Any]] = []
     for candidate in candidates:
         candidate_id = str(candidate["candidateId"])
         merged = dict(candidate)
+        explicit_dimension_reviews: Any = None
+        has_explicit_dimension_reviews = False
         if runner is not None:
             produced = runner(dict(candidate), dict(context))
             if not isinstance(produced, Mapping):
@@ -128,6 +131,21 @@ def _reflection_step(
                     f"reflection runner must return a mapping for candidate {candidate_id}"
                 )
             merged.update(dict(produced))
+            # The v2 dimension rows are an independent output of the real
+            # reflection runner.  Preserve them verbatim for the canonical
+            # artifact writer; never manufacture rows from scores.
+            if "dimensionReviews" in produced:
+                explicit_dimension_reviews = produced["dimensionReviews"]
+                has_explicit_dimension_reviews = True
+            elif "dimension_reviews" in produced:
+                explicit_dimension_reviews = produced["dimension_reviews"]
+                has_explicit_dimension_reviews = True
+            if has_explicit_dimension_reviews and not isinstance(
+                explicit_dimension_reviews, (list, tuple)
+            ):
+                raise ContractValidationError(
+                    f"reflection dimensionReviews for {candidate_id} must be a list"
+                )
         else:
             merged["scores"] = {
                 dimension: _fixture_score(context_id, candidate_id, dimension)
@@ -152,22 +170,23 @@ def _reflection_step(
                 f"reflection result for {candidate_id} is missing review dimensions: "
                 + ", ".join(missing)
             )
-        reviewed.append(
-            {
-                "candidateId": candidate_id,
-                "claim": str(merged.get("claim") or "").strip(),
-                "rationale": str(merged.get("rationale") or "").strip(),
-                "differenceFromAlternatives": str(
-                    merged.get("differenceFromAlternatives") or ""
-                ).strip(),
-                "lineageRefs": [
-                    str(item) for item in list(merged.get("lineageRefs") or [])
-                ],
-                "scores": {dimension: scores[dimension] for dimension in SCORE_DIMENSIONS},
-                "reviewedBy": str(merged.get("reviewedBy") or "").strip() or agent_id,
-                "status": str(merged.get("status") or "").strip() or "reviewed",
-            }
-        )
+        reviewed_item = {
+            "candidateId": candidate_id,
+            "claim": str(merged.get("claim") or "").strip(),
+            "rationale": str(merged.get("rationale") or "").strip(),
+            "differenceFromAlternatives": str(
+                merged.get("differenceFromAlternatives") or ""
+            ).strip(),
+            "lineageRefs": [
+                str(item) for item in list(merged.get("lineageRefs") or [])
+            ],
+            "scores": {dimension: scores[dimension] for dimension in SCORE_DIMENSIONS},
+            "reviewedBy": str(merged.get("reviewedBy") or "").strip() or agent_id,
+            "status": str(merged.get("status") or "").strip() or "reviewed",
+        }
+        if has_explicit_dimension_reviews:
+            reviewed_item["dimensionReviews"] = deepcopy(list(explicit_dimension_reviews))
+        reviewed.append(reviewed_item)
     return reviewed
 
 
@@ -198,7 +217,7 @@ def _fixture_debate_outcome(
     else:
         outcome = "tie"
     justification = (
-        f"七维独立评分对比：{left_id} 在 {len(left_ahead)} 维领先（{('、'.join(left_ahead)) or '无'}），"
+        f"五维独立评分对比：{left_id} 在 {len(left_ahead)} 维领先（{('、'.join(left_ahead)) or '无'}），"
         f"{right_id} 在 {len(right_ahead)} 维领先（{('、'.join(right_ahead)) or '无'}）。"
     )
     return outcome, justification
@@ -313,7 +332,7 @@ def _pareto_step(
         notes = str(produced.get("notes") or "").strip()
     else:
         front, dominated = _fixture_pareto(scores_by_candidate)
-        notes = "七维评分 Pareto 分类：前沿候选不被任何其他候选全维度占优（DEV fixture）。"
+        notes = "五维评分 Pareto 分类：前沿候选不被任何其他候选全维度占优（DEV fixture）。"
     candidate_ids = set(scores_by_candidate)
     overlap = set(front) & set(dominated)
     if overlap:

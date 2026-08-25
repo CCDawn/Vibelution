@@ -84,6 +84,7 @@ def invoke_llm(
     context: LLMInvocationContext,
     tools: list[Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    output_schema: Any = None,
 ) -> Any:
     """Invoke a client with normalized metadata and prompt-cache partitioning."""
 
@@ -92,7 +93,10 @@ def invoke_llm(
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
     with scope:
-        return client.invoke(messages, tools=tools, metadata=effective_metadata)
+        kwargs = {"tools": tools, "metadata": effective_metadata}
+        if output_schema is not None:
+            kwargs["output_schema"] = output_schema
+        return client.invoke(messages, **kwargs)
 
 
 def invoke_llm_outcome(
@@ -103,6 +107,7 @@ def invoke_llm_outcome(
     tools: list[Any] | None = None,
     metadata: dict[str, Any] | None = None,
     replay_state: Any = None,
+    output_schema: Any = None,
 ) -> TurnOutcome:
     """Invoke an LLM and return the canonical control-plane result."""
     effective_context = _context_with_effective_partition(context)
@@ -110,12 +115,14 @@ def invoke_llm_outcome(
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
     with scope:
-        outcome = client.invoke_outcome(
-            messages,
-            tools=tools,
-            metadata=effective_metadata,
-            replay_state=replay_state,
-        )
+        kwargs = {
+            "tools": tools,
+            "metadata": effective_metadata,
+            "replay_state": replay_state,
+        }
+        if output_schema is not None:
+            kwargs["output_schema"] = output_schema
+        outcome = client.invoke_outcome(messages, **kwargs)
     if not isinstance(outcome, TurnOutcome):
         raise TypeError("LLM client did not return canonical TurnOutcome")
     return outcome
@@ -128,6 +135,7 @@ def stream_llm(
     context: LLMInvocationContext,
     tools: list[Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    output_schema: Any = None,
 ) -> Iterator[Any]:
     """Stream from a client with normalized metadata and prompt-cache partitioning."""
 
@@ -136,7 +144,10 @@ def stream_llm(
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
     with scope:
-        yield from client.stream(messages, tools=tools, metadata=effective_metadata)
+        kwargs = {"tools": tools, "metadata": effective_metadata}
+        if output_schema is not None:
+            kwargs["output_schema"] = output_schema
+        yield from client.stream(messages, **kwargs)
 
 
 def run_streaming_llm_outcome(
@@ -148,6 +159,7 @@ def run_streaming_llm_outcome(
     tools: list[Any] | None = None,
     metadata: dict[str, Any] | None = None,
     replay_state: Any = None,
+    output_schema: Any = None,
 ) -> TurnOutcome:
     """Drain compatibility chunks while consuming canonical events and outcome directly."""
     effective_context = _context_with_effective_partition(context)
@@ -155,14 +167,16 @@ def run_streaming_llm_outcome(
     partition = str(effective_context.cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
     with scope:
+        kwargs = {
+            "tools": tools,
+            "metadata": effective_metadata,
+            "replay_state": replay_state,
+            "protocol_event_sink": on_event,
+        }
+        if output_schema is not None:
+            kwargs["output_schema"] = output_schema
         iterator = iter(
-            client.stream_events(
-                messages,
-                tools=tools,
-                metadata=effective_metadata,
-                replay_state=replay_state,
-                protocol_event_sink=on_event,
-            )
+            client.stream_events(messages, **kwargs)
         )
         while True:
             try:

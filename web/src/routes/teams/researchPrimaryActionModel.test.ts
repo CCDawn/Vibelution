@@ -93,7 +93,7 @@ describe("resolveResearchPrimaryAction", () => {
     const advance = resolveResearchAdvanceAction(input);
     expect(advance?.kind).toBe("start_experiment");
     expect(advance?.navigateView).toBe("experiment");
-    expect(advance?.labelZh).toContain("离开知识搜集");
+    expect(advance?.labelZh).toContain("离开资料搜集");
 
     const handoff = resolveResearchStageHandoff(input);
     expect(handoff?.toStage).toBe("experiment");

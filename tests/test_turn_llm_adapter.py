@@ -7,6 +7,7 @@ from agent import SelfEvolvingAgent, TurnStopRequested
 from core.infrastructure.llm_utils import MAX_CONSECUTIVE_FAILURES
 from core.infrastructure.runtime_input import build_chat_user_message
 from core.llm import LLMError
+from core.llm.semantic_messages import SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, TurnOutcome
 from core.orchestration.turn_llm_adapter import (
     AgentLlmTurnHooks,
@@ -448,6 +449,66 @@ def test_adapter_invokes_when_streaming_requested_but_client_has_no_stream():
     )
     assert result.payload[1].content == "ok"
     assert calls and calls[0][0] == "primary"
+
+
+def test_adapter_forwards_and_validates_strict_structured_output():
+    received = []
+
+    def validator(payload):
+        if payload.get("taskKind") != "hypothesis_design":
+            raise ValueError("wrong task kind")
+
+    contract = SemanticOutputSchema(
+        name="research_hypothesis_design_v1",
+        schema={"type": "object"},
+        validator=validator,
+    )
+
+    def invoke_outcome(_client, _messages, **kwargs):
+        received.append(kwargs.get("output_schema"))
+        return TurnOutcome.final_answer(
+            identity=_identity(),
+            text='{"taskKind":"hypothesis_design","reasoning":"bounded"}',
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            invoke_outcome=invoke_outcome,
+            structured_output_contract=contract,
+        ),
+    )
+
+    assert received == [contract]
+    assert result.payload[0].kind == "final_answer"
+
+
+def test_adapter_fails_closed_when_structured_output_is_invalid():
+    contract = SemanticOutputSchema(
+        name="research_result_evaluation_v1",
+        schema={"type": "object"},
+        validator=lambda payload: (_ for _ in ()).throw(ValueError("invalid result")),
+    )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            invoke_outcome=lambda *_args, **_kwargs: TurnOutcome.final_answer(
+                identity=_identity(),
+                text='{"taskKind":"result_evaluation"}',
+            ),
+            structured_output_contract=contract,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="structured_output_validation_error",
+                retryable=False,
+                action="stop",
+                user_message="invalid structured output",
+            ),
+        ),
+    )
+
+    assert result.payload is None
+    assert result.last_error_category == "structured_output_validation_error"
 
 
 def test_sanitize_llm_turn_messages_rejects_character_split_and_decodes_system_role():

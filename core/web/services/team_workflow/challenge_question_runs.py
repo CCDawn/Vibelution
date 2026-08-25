@@ -15,6 +15,10 @@ from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from core.research.competition.question_result_package import (
+    QuestionResultPackageError,
+    canonical_model_policy,
+)
 from core.research.competition.resources import (
     CATALOG_SHA256,
     QUESTION_CATALOG_PATH,
@@ -53,6 +57,7 @@ REQUIRED_HUMAN_GATE_KEYS = {
     "H3_research_plan",
     "H4_external_output",
 }
+MODEL_INVOCATION_RECEIPT_STAGES = ("generation", "review", "revision")
 _STORE_LOCK = RLock()
 
 
@@ -222,6 +227,27 @@ def _output_sha256(output: dict[str, Any]) -> str:
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _CANONICAL_OUTPUT_REF_SCHEME = "turn-journal"
+
+
+def _source_result_package_hash(payload: dict[str, Any]) -> str:
+    """Return the optional immutable result-package binding for a registration.
+
+    The bridge that moves a canonical workflow result into the Challenge
+    Program store supplies this value.  It is deliberately kept outside the
+    v2 output hash: the output remains the producer's immutable artifact while
+    the index records which workflow package authorized its registration.
+    """
+
+    value = str(
+        payload.get("sourceResultPackageHash")
+        or payload.get("source_result_package_hash")
+        or ""
+    ).strip().lower()
+    if value and not _SHA256_RE.fullmatch(value):
+        raise ValueError(
+            "sourceResultPackageHash must be a 64-character SHA-256 value."
+        )
+    return value
 
 
 def _canonical_output_ref(
@@ -799,7 +825,7 @@ def normalize_challenge_research_task_policy(
     question_id: Any,
     required_model_policy: Any,
 ) -> dict[str, Any]:
-    """Validate the explicit question and official Qwen route contract."""
+    """Validate the explicit question and frozen server model route contract."""
     normalized_question_id = str(question_id or "").strip()[:32]
     policy = dict(required_model_policy) if isinstance(required_model_policy, dict) else {}
     if not normalized_question_id and not policy:
@@ -808,44 +834,124 @@ def normalize_challenge_research_task_policy(
         raise ValueError("challenge_task_contract_incomplete: questionId and requiredModelPolicy are both required.")
     if _catalog_question(normalized_question_id) is None:
         raise ValueError("challenge_task_question_unknown: questionId is not present in the official catalog.")
+    canonical_policy: dict[str, Any] | None = None
+    if "family" in policy or "policySha256" in policy:
+        try:
+            canonical_policy = canonical_model_policy(policy)
+        except QuestionResultPackageError as exc:
+            raise ValueError(
+                "challenge_task_model_policy_invalid: requiredModelPolicy is not canonical."
+            ) from exc
+        supplied_hash = str(policy.get("policySha256") or "").strip().lower()
+        if supplied_hash and supplied_hash != canonical_policy["policySha256"]:
+            raise ValueError(
+                "challenge_task_model_policy_invalid: requiredModelPolicy hash does not match."
+            )
+        policy = canonical_policy
     provider_ids = _normalized_string_list(policy.get("providerIds"))
     model_ids = _normalized_string_list(policy.get("modelIds"))
-    require_official = policy.get("requireOfficialProvider") is not False
-    if not provider_ids or not model_ids or not require_official:
+    require_official = policy.get("requireOfficialProvider")
+    if (
+        not provider_ids
+        or not model_ids
+        or not isinstance(require_official, bool)
+    ):
         raise ValueError(
-            "challenge_task_model_policy_invalid: official providerIds, modelIds and requireOfficialProvider=true are required."
+            "challenge_task_model_policy_invalid: providerIds, modelIds and a boolean requireOfficialProvider are required."
         )
-    if any(not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS) for provider_id in provider_ids):
+    if require_official and any(
+        not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
+        for provider_id in provider_ids
+    ):
         raise ValueError("challenge_task_model_policy_invalid: providerIds must identify DashScope/Bailian/Aliyun.")
-    if any("qwen" not in model_id.lower() for model_id in model_ids):
-        raise ValueError("challenge_task_model_policy_invalid: modelIds must identify Qwen models.")
-    return {
-        "questionId": normalized_question_id,
-        "requiredModelPolicy": {
+    required_policy = (
+        canonical_policy
+        if canonical_policy is not None
+        else {
             "providerIds": provider_ids,
             "modelIds": model_ids,
-            "requireOfficialProvider": True,
-        },
+            "requireOfficialProvider": require_official,
+        }
+    )
+    contract = {
+        "questionId": normalized_question_id,
+        "requiredModelPolicy": required_policy,
     }
+    if canonical_policy is not None:
+        contract["modelPolicySha256"] = canonical_policy["policySha256"]
+    return contract
 
 
 def derive_challenge_required_model_policy(model_ref: Any) -> dict[str, Any]:
-    """Recover a narrow official-model policy from a canonical provider/model ref."""
+    """Recover a narrow frozen-model policy from a canonical provider/model ref."""
     normalized_model_ref = str(model_ref or "").strip()[:160]
     provider_id, separator, model_id = normalized_model_ref.partition("/")
     if (
         not separator
         or not provider_id
         or not model_id
-        or not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
-        or "qwen" not in model_id.lower()
     ):
         return {}
     return {
         "providerIds": [provider_id],
         "modelIds": [model_id],
-        "requireOfficialProvider": True,
+        "requireOfficialProvider": any(
+            marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS
+        ),
     }
+
+
+def is_challenge_official_model_evidence_eligible(
+    policy: Any,
+    *,
+    provider_id: Any,
+    model_ref: Any = "",
+    model_id: Any = "",
+) -> bool:
+    """Return whether a server-owned route can mint official model evidence.
+
+    Execution is intentionally independent from this gate: the current Flash
+    route remains executable, but only a canonical Qwen policy with an
+    official DashScope/Bailian/Aliyun provider may enter the official ledger.
+    """
+    if not isinstance(policy, dict):
+        return False
+    if str(policy.get("family") or "").strip().casefold() != "qwen":
+        return False
+    if policy.get("requireOfficialProvider") is not True:
+        return False
+    try:
+        if canonical_model_policy(policy) != policy:
+            return False
+    except QuestionResultPackageError:
+        return False
+    normalized_provider = str(provider_id or "").strip().casefold()
+    if not normalized_provider:
+        return False
+    provider_is_official = any(
+        normalized_provider == marker
+        or normalized_provider.startswith(f"{marker}_")
+        or normalized_provider.startswith(f"{marker}-")
+        for marker in OFFICIAL_PROVIDERS
+    )
+    allowed_provider_ids = {
+        str(item or "").strip().casefold()
+        for item in policy.get("providerIds", [])
+    }
+    allowed_model_ids = {
+        str(item or "").strip().casefold()
+        for item in policy.get("modelIds", [])
+    }
+    model_candidates = {
+        str(model_ref or "").strip().casefold(),
+        str(model_id or "").strip().casefold(),
+    }
+    model_candidates.discard("")
+    return (
+        normalized_provider in allowed_provider_ids
+        and bool(model_candidates & allowed_model_ids)
+        and provider_is_official
+    )
 
 
 def bind_challenge_research_task_model(
@@ -871,14 +977,11 @@ def bind_challenge_research_task_model(
     provider_id = str(entry.get("provider_id") or "").strip() or model_ref.partition("/")[0]
     upstream_model_id = str(entry.get("upstream_id") or entry.get("model") or "").strip()
     policy = contract["requiredModelPolicy"]
-    allowed_provider_ids = {item.lower() for item in policy["providerIds"]}
-    allowed_model_ids = {item.lower() for item in policy["modelIds"]}
-    model_candidates = {model_ref.lower(), upstream_model_id.lower()}
-    official_evidence_eligible = (
-        provider_id.lower() in allowed_provider_ids
-        and any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
-        and bool(model_candidates & allowed_model_ids)
-        and "qwen" in upstream_model_id.lower()
+    official_evidence_eligible = is_challenge_official_model_evidence_eligible(
+        policy,
+        provider_id=provider_id,
+        model_ref=model_ref,
+        model_id=upstream_model_id,
     )
     return {
         **contract,
@@ -921,11 +1024,18 @@ def register_challenge_task_model_evidence(
         if isinstance(contract.get("evidencePolicy"), dict)
         else {}
     )
-    if evidence_policy.get("officialEvidenceEligible") is False:
+    if evidence_policy.get("officialEvidenceEligible") is not True:
         return None
     if str(usage.get("source") or "").strip() in {"", "missing", "not_called", "not_called_preflight"}:
         return None
     effective = contract.get("effectiveRoute") if isinstance(contract.get("effectiveRoute"), dict) else {}
+    if not is_challenge_official_model_evidence_eligible(
+        contract.get("requiredModelPolicy"),
+        provider_id=effective.get("providerId"),
+        model_ref=effective.get("modelRef"),
+        model_id=effective.get("modelId"),
+    ):
+        return None
     usage_provider = str(usage.get("provider") or "").strip()
     usage_model = str(usage.get("model") or "").strip()
     usage_model_ref = str(usage.get("llmModelId") or "").strip()
@@ -934,7 +1044,6 @@ def register_challenge_task_model_evidence(
     expected_model_ref = str(effective.get("modelRef") or "").strip()
     if (
         not usage_provider
-        or not any(marker in usage_provider.lower() for marker in OFFICIAL_PROVIDERS)
         or usage_provider.lower() not in {expected_provider.lower(), expected_provider.partition("_")[0].lower()}
         or usage_model.lower() != expected_model.lower()
         or (usage_model_ref and usage_model_ref != expected_model_ref)
@@ -948,7 +1057,23 @@ def register_challenge_task_model_evidence(
     if not all((research_project_id, question_id, task_id, turn_id)):
         return None
     source_session_id = str(task.get("sessionId") or turn.get("sessionId") or "").strip()
-    source_run_id = str(task.get("runId") or "").strip()
+    challenge_contract = (
+        task.get("challengeTaskContract")
+        if isinstance(task.get("challengeTaskContract"), dict)
+        else {}
+    )
+    source_run_id = next(
+        (
+            value
+            for value in (
+                task.get("runId"),
+                task.get("workflowRunId"),
+                challenge_contract.get("runId"),
+            )
+            if str(value or "").strip()
+        ),
+        "",
+    )
     source_binding = _read_canonical_turn_output(
         session_id=source_session_id,
         source_run_id=source_run_id,
@@ -1326,15 +1451,26 @@ def publish_research_project_challenge_question_output(
         if promoted is not None and receipts_changed:
             program_store["updatedAt"] = _utc_now()
             _write_json(program_evidence_path, program_store)
+        registration_payload = {
+            "output": output,
+            "citationChecks": citation_checks,
+            "registeredBy": str(payload.get("registeredBy") or ""),
+            "parentRunId": str(payload.get("parentRunId") or ""),
+            "lineageRefs": lineage_refs,
+        }
+        result_package = payload.get("resultPackage")
+        if isinstance(result_package, dict):
+            registration_payload["resultPackage"] = deepcopy(result_package)
+        authorized_model_policy_sha256 = str(
+            payload.get("authorizedModelPolicySha256") or ""
+        ).strip()
+        if authorized_model_policy_sha256:
+            registration_payload["authorizedModelPolicySha256"] = (
+                authorized_model_policy_sha256
+            )
         registered = register_challenge_question_output(
             team_id,
-            {
-                "output": output,
-                "citationChecks": citation_checks,
-                "registeredBy": str(payload.get("registeredBy") or ""),
-                "parentRunId": str(payload.get("parentRunId") or ""),
-                "lineageRefs": lineage_refs,
-            },
+            registration_payload,
         )
     return {
         **registered,
@@ -1358,6 +1494,256 @@ def _load_store(team_id: str) -> dict[str, Any]:
     }
 
 
+def _receipt_locator_sha256(locator: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        locator,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest().upper()
+
+
+def _model_invocation_receipt_refs_from_package(package: Any) -> dict[str, dict[str, Any]]:
+    """Project bounded receipt identities from the validated package authority."""
+
+    from core.research.competition.result_set import QuestionResult
+
+    return deepcopy(QuestionResult.from_package(package).manifest_entry()["receipts"])
+
+
+def _question_model_invocation_trace_projection(
+    team_id: str,
+    record: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read and verify the immutable per-invocation projection for one run."""
+
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        model_invocation_receipt_coverage,
+        question_model_invocation_receipt_refs,
+    )
+
+    question_id = str(record.get("questionId") or "").strip().upper()
+    run_id = str(record.get("runId") or "").strip()
+    refs = (
+        question_model_invocation_receipt_refs(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=run_id,
+        )
+        if question_id and run_id
+        else []
+    )
+    coverage = model_invocation_receipt_coverage(refs)
+    refs_present = "modelInvocationReceiptTraceRefs" in record
+    coverage_present = "modelInvocationReceiptCoverage" in record
+    if (
+        refs_present
+        and record.get("modelInvocationReceiptTraceRefs") != refs
+    ) or (
+        coverage_present
+        and record.get("modelInvocationReceiptCoverage") != coverage
+    ):
+        failed = model_invocation_receipt_coverage([])
+        failed["integrityIssue"] = "stored_projection_mismatch"
+        return [], failed
+    return refs, coverage
+
+
+def _apply_question_model_invocation_trace_projection(
+    team_id: str,
+    record: dict[str, Any],
+) -> bool:
+    refs_present = "modelInvocationReceiptTraceRefs" in record
+    coverage_present = "modelInvocationReceiptCoverage" in record
+    refs, coverage = _question_model_invocation_trace_projection(team_id, record)
+    if coverage.get("integrityIssue") == "stored_projection_mismatch":
+        raise ValueError(
+            "challenge_question_run_receipt_trace_mismatch: immutable real "
+            "invocation receipts changed."
+        )
+    changed = (
+        record.get("teamId") != team_id
+        or not refs_present
+        or not coverage_present
+        or record.get("modelInvocationReceiptTraceRefs") != refs
+        or record.get("modelInvocationReceiptCoverage") != coverage
+    )
+    record["teamId"] = team_id
+    record["modelInvocationReceiptTraceRefs"] = deepcopy(refs)
+    record["modelInvocationReceiptCoverage"] = deepcopy(coverage)
+    return changed
+
+
+def _validated_model_invocation_receipt_refs(value: Any) -> dict[str, dict[str, Any]]:
+    """Return canonical stored refs only when all stages and locator hashes verify."""
+
+    if not isinstance(value, dict) or set(value) != set(MODEL_INVOCATION_RECEIPT_STAGES):
+        return {}
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for stage_id in MODEL_INVOCATION_RECEIPT_STAGES:
+        item = value.get(stage_id)
+        if not isinstance(item, dict):
+            return {}
+        receipt_id = str(item.get("receipt_id") or "").strip()
+        node_run_id = str(item.get("node_run_id") or "").strip()
+        locator = item.get("evidence_locator")
+        locator_sha256 = str(item.get("evidence_locator_sha256") or "").strip().upper()
+        if (
+            not receipt_id
+            or not node_run_id
+            or not isinstance(locator, dict)
+            or not locator
+            or not re.fullmatch(r"[0-9A-F]{64}", locator_sha256)
+        ):
+            return {}
+        try:
+            expected_locator_sha256 = _receipt_locator_sha256(locator)
+        except (TypeError, ValueError):
+            return {}
+        if locator_sha256 != expected_locator_sha256:
+            return {}
+        normalized[stage_id] = {
+            "receipt_id": receipt_id,
+            "node_run_id": node_run_id,
+            "evidence_locator": deepcopy(locator),
+            "evidence_locator_sha256": locator_sha256,
+        }
+    return normalized
+
+
+def _apply_model_invocation_receipt_projection(
+    record: dict[str, Any],
+    expected_refs: dict[str, dict[str, Any]],
+) -> bool:
+    """Apply the derived projection and reject any conflicting persisted copy."""
+
+    refs_field_present = "modelInvocationReceiptRefs" in record
+    stored_refs = record.get("modelInvocationReceiptRefs")
+    if refs_field_present:
+        if expected_refs and (
+            _validated_model_invocation_receipt_refs(stored_refs) != expected_refs
+        ):
+            raise ValueError(
+                "challenge_question_run_receipt_mismatch: canonical package receipts "
+                "do not match the index record."
+            )
+        if not expected_refs and stored_refs:
+            raise ValueError(
+                "challenge_question_run_receipt_mismatch: receipt refs exist without "
+                "a canonical result package."
+            )
+
+    validation = (
+        dict(record.get("validation"))
+        if isinstance(record.get("validation"), dict)
+        else {}
+    )
+    expected_status = "passed" if expected_refs else "failed"
+    changed = (
+        not refs_field_present
+        or stored_refs != expected_refs
+        or validation.get("modelInvocationReceipts") != expected_status
+        or (
+            bool(expected_refs)
+            and "modelInvocationReceiptIssue" in validation
+        )
+        or (
+            not expected_refs
+            and validation.get("modelInvocationReceiptIssue")
+            != "canonical_result_package_missing"
+        )
+    )
+    record["modelInvocationReceiptRefs"] = deepcopy(expected_refs)
+    validation["modelInvocationReceipts"] = expected_status
+    if expected_refs:
+        validation.pop("modelInvocationReceiptIssue", None)
+    else:
+        validation["modelInvocationReceiptIssue"] = (
+            "canonical_result_package_missing"
+        )
+    record["validation"] = validation
+    return changed
+
+
+def _package_bound_model_invocation_receipt_refs(
+    record: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Verify a stored projection against its immutable package before summary use."""
+
+    package_metadata = record.get("resultPackage")
+    if not isinstance(package_metadata, dict):
+        return {}
+    locator = str(package_metadata.get("locator") or "").strip()
+    if not locator:
+        return {}
+    package_path = Path(locator)
+    package_payload = _read_json(package_path)
+    if not package_payload or not package_path.is_file():
+        return {}
+    try:
+        from core.research.competition.question_result_package import (
+            QuestionResultPackage,
+        )
+        from core.research.competition.result_set import CatalogScope
+
+        restored_package = QuestionResultPackage.from_dict(
+            package_payload,
+            expected_model_policy_sha256=str(
+                package_metadata.get("modelPolicySha256") or ""
+            ),
+        )
+    except (TypeError, ValueError, KeyError):
+        return {}
+    if (
+        package_metadata.get("schemaVersion") != restored_package.schema_version
+        or str(package_metadata.get("packageId") or "") != restored_package.package_id
+        or restored_package.canonical_hash
+        != str(package_metadata.get("canonicalHash") or "")
+        or restored_package.idempotency_key
+        != str(package_metadata.get("idempotencyKey") or "")
+        or restored_package.question_id
+        != str(record.get("questionId") or "").strip().upper()
+        or restored_package.run_id != str(record.get("runId") or "").strip()
+        or restored_package.scope != CatalogScope.from_tracked_resources()
+    ):
+        return {}
+    expected_refs = _model_invocation_receipt_refs_from_package(restored_package)
+    if (
+        _validated_model_invocation_receipt_refs(
+            record.get("modelInvocationReceiptRefs")
+        )
+        != expected_refs
+    ):
+        return {}
+    return expected_refs
+
+
+def _summary_receipt_validation(
+    record: dict[str, Any],
+    receipt_refs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    validation = deepcopy(record.get("validation") or {})
+    if isinstance(record.get("resultPackage"), dict):
+        validation["modelInvocationReceipts"] = (
+            "passed" if receipt_refs else "failed"
+        )
+        if receipt_refs:
+            validation.pop("modelInvocationReceiptIssue", None)
+        else:
+            validation["modelInvocationReceiptIssue"] = (
+                "canonical_result_package_receipt_mismatch"
+            )
+    else:
+        validation["modelInvocationReceipts"] = "failed"
+        validation["modelInvocationReceiptIssue"] = (
+            "canonical_result_package_missing"
+        )
+    return validation
+
+
 def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     records = _load_store(team_id).get("records")
     records = records if isinstance(records, list) else []
@@ -1375,25 +1761,59 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         for record in valid_candidates
         if (record.get("validation") or {}).get("semanticValidation") == "passed"
     ]
+    receipt_refs_by_record_id: dict[str, dict[str, dict[str, Any]]] = {}
+    trace_refs_by_record_id: dict[str, list[dict[str, Any]]] = {}
+    trace_coverage_by_record_id: dict[str, dict[str, Any]] = {}
+    receipt_ready_candidates: list[dict[str, Any]] = []
+    for record in validated_candidates:
+        receipt_refs = _package_bound_model_invocation_receipt_refs(record)
+        record_id = str(record.get("recordId") or "")
+        trace_refs, trace_coverage = _question_model_invocation_trace_projection(
+            team_id, record
+        )
+        trace_refs_by_record_id[record_id] = trace_refs
+        trace_coverage_by_record_id[record_id] = trace_coverage
+        if receipt_refs:
+            receipt_refs_by_record_id[record_id] = receipt_refs
+        if receipt_refs and trace_coverage.get("status") == "passed":
+            receipt_ready_candidates.append(record)
     completed = [
         record
         for record in valid_candidates
         if record.get("submissionEligible") is True
         and _all_human_gates_approved(record.get("humanGates"))
         and str(record.get("status") or "") == "approved"
+        and str(record.get("recordId") or "") in receipt_refs_by_record_id
+        and trace_coverage_by_record_id.get(
+            str(record.get("recordId") or ""), {}
+        ).get("status")
+        == "passed"
     ]
     completed_question_ids = sorted({str(record.get("questionId") or "") for record in completed})
     completed_question_results = [
         {
             "questionId": str(record.get("questionId") or ""),
+            "teamId": team_id,
             "runId": str(record.get("runId") or ""),
             "schemaVersion": record.get("schemaVersion"),
             "submissionEligible": record.get("submissionEligible") is True,
             "status": str(record.get("status") or ""),
-            "validation": deepcopy(record.get("validation") or {}),
+            "validation": _summary_receipt_validation(
+                record,
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {}),
+            ),
             "humanGates": deepcopy(record.get("humanGates") or {}),
             "outputSha256": str(record.get("outputSha256") or ""),
             "artifactPath": str(record.get("artifactPath") or ""),
+            "modelInvocationReceiptRefs": deepcopy(
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
+            "modelInvocationReceiptTraceRefs": deepcopy(
+                trace_refs_by_record_id.get(str(record.get("recordId") or ""), [])
+            ),
+            "modelInvocationReceiptCoverage": deepcopy(
+                trace_coverage_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
             "resultPackage": deepcopy(record.get("resultPackage"))
             if isinstance(record.get("resultPackage"), dict)
             else None,
@@ -1413,12 +1833,25 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     validated_question_results = [
         {
             "questionId": question_id,
+            "teamId": team_id,
             "runId": str(record.get("runId") or ""),
             "status": str(record.get("status") or ""),
-            "validation": deepcopy(record.get("validation") or {}),
+            "validation": _summary_receipt_validation(
+                record,
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {}),
+            ),
             "humanGates": deepcopy(record.get("humanGates") or {}),
             "outputSha256": str(record.get("outputSha256") or ""),
             "artifactPath": str(record.get("artifactPath") or ""),
+            "modelInvocationReceiptRefs": deepcopy(
+                receipt_refs_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
+            "modelInvocationReceiptTraceRefs": deepcopy(
+                trace_refs_by_record_id.get(str(record.get("recordId") or ""), [])
+            ),
+            "modelInvocationReceiptCoverage": deepcopy(
+                trace_coverage_by_record_id.get(str(record.get("recordId") or ""), {})
+            ),
             "resultPackage": deepcopy(record.get("resultPackage"))
             if isinstance(record.get("resultPackage"), dict)
             else None,
@@ -1429,6 +1862,32 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     approved_deep_experiment_question_ids = [
         question_id for question_id in completed_question_ids if question_id in deep_question_ids
     ]
+    receipt_ready_question_ids = sorted(
+        {
+            str(record.get("questionId") or "")
+            for record in receipt_ready_candidates
+            if str(record.get("questionId") or "")
+        }
+    )
+    latest_candidate = deepcopy(valid_candidates[-1]) if valid_candidates else None
+    if latest_candidate is not None:
+        latest_receipt_refs = receipt_refs_by_record_id.get(
+            str(latest_candidate.get("recordId") or ""), {}
+        )
+        latest_candidate["modelInvocationReceiptRefs"] = deepcopy(
+            latest_receipt_refs
+        )
+        latest_record_id = str(latest_candidate.get("recordId") or "")
+        latest_candidate["teamId"] = team_id
+        latest_candidate["modelInvocationReceiptTraceRefs"] = deepcopy(
+            trace_refs_by_record_id.get(latest_record_id, [])
+        )
+        latest_candidate["modelInvocationReceiptCoverage"] = deepcopy(
+            trace_coverage_by_record_id.get(latest_record_id, {})
+        )
+        latest_candidate["validation"] = _summary_receipt_validation(
+            latest_candidate, latest_receipt_refs
+        )
     return {
         "recordCount": len(records),
         "validCandidateCount": len(valid_candidates),
@@ -1436,13 +1895,15 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         "validatedQuestionIds": validated_question_ids,
         "validatedOutcomeCounts": dict(sorted(validated_outcome_counts.items())),
         "validatedQuestionResults": validated_question_results,
+        "receiptReadyQuestionCount": len(receipt_ready_question_ids),
+        "receiptReadyQuestionIds": receipt_ready_question_ids,
         "completedCount": len(completed_question_ids),
         "completedQuestionIds": completed_question_ids,
         "completedQuestionResults": completed_question_results,
         # Deep experiments share the per-question submission gate; the explicit
         # list exists so the program projection can confirm them independently.
         "approvedDeepExperimentQuestionIds": approved_deep_experiment_question_ids,
-        "latestCandidate": deepcopy(valid_candidates[-1]) if valid_candidates else None,
+        "latestCandidate": latest_candidate,
     }
 
 
@@ -1535,12 +1996,22 @@ def get_challenge_question_run_detail(
                 "challenge_question_run_package_mismatch: canonical package does not match its index record."
             )
         result_package = package_payload
+        expected_receipt_refs = _model_invocation_receipt_refs_from_package(
+            restored_package
+        )
+        _apply_model_invocation_receipt_projection(
+            selected_record, expected_receipt_refs
+        )
         result_package_artifact = {
             "path": str(package_path),
             "canonicalHash": restored_package.canonical_hash,
             "idempotencyKey": restored_package.idempotency_key,
             "immutable": True,
         }
+    else:
+        _apply_model_invocation_receipt_projection(selected_record, {})
+
+    _apply_question_model_invocation_trace_projection(team_id, selected_record)
 
     return {
         "teamId": team_id,
@@ -1602,6 +2073,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     run_id = str(run.get("run_id") or "").strip()
     if not question_id or not run_id:
         raise ValueError("output.identity.question_id and output.run.run_id are required.")
+    source_result_package_hash = _source_result_package_hash(payload)
     parent_run_id = str(payload.get("parentRunId") or "").strip()
     if parent_run_id == run_id:
         raise ValueError("parentRunId must reference an earlier run.")
@@ -1693,6 +2165,24 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             "modelPolicySha256": canonical_package.model_policy["policySha256"],
             "locator": str(package_path),
         }
+    model_invocation_receipt_refs = (
+        _model_invocation_receipt_refs_from_package(canonical_package)
+        if canonical_package is not None
+        else {}
+    )
+    if model_invocation_receipt_refs:
+        receipt_evidence_refs = {
+            str(item["evidence_locator"].get("evidenceId") or "").strip()
+            for item in model_invocation_receipt_refs.values()
+            if isinstance(item.get("evidence_locator"), dict)
+        }
+        matched_evidence_refs = sorted(
+            set(matched_evidence_refs)
+            | {item for item in receipt_evidence_refs if item}
+        )
+        official_call = model_provider in OFFICIAL_PROVIDERS and bool(
+            matched_evidence_refs
+        )
 
     record = {
         "recordId": f"{question_id}:{run_id}",
@@ -1720,8 +2210,14 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         "registeredAt": _utc_now(),
         "registeredBy": str(payload.get("registeredBy") or ""),
     }
+    _apply_model_invocation_receipt_projection(
+        record, model_invocation_receipt_refs
+    )
+    _apply_question_model_invocation_trace_projection(team_id, record)
     if package_metadata is not None:
         record["resultPackage"] = package_metadata
+    if source_result_package_hash:
+        record["sourceResultPackageHash"] = source_result_package_hash
     if parent_run_id or lineage_refs:
         record["lineage"] = {
             "relation": "revises" if parent_run_id else "derived_from_evidence",
@@ -1745,6 +2241,22 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     "Existing challenge question run artifact does not match its immutable index record."
                 )
             existing_package_metadata = existing_record.get("resultPackage")
+            if existing_package_metadata is not None and package_metadata is None:
+                raise ValueError(
+                    "Existing challenge question run is bound to a canonical result "
+                    "package; idempotent replay must include the same package."
+                )
+            existing_source_result_package_hash = str(
+                existing_record.get("sourceResultPackageHash") or ""
+            ).strip().lower()
+            if source_result_package_hash and (
+                not existing_source_result_package_hash
+                or existing_source_result_package_hash != source_result_package_hash
+            ):
+                raise ValueError(
+                    "Existing challenge question run does not match the immutable "
+                    "source result package binding."
+                )
             if package_metadata is not None:
                 if not isinstance(existing_package_metadata, dict):
                     raise ValueError(
@@ -1792,7 +2304,23 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     package_metadata is None
                     or existing_package_metadata == package_metadata
                 )
+                and (
+                    not source_result_package_hash
+                    or existing_source_result_package_hash == source_result_package_hash
+                )
             ):
+                projection_changed = _apply_model_invocation_receipt_projection(
+                    existing_record, model_invocation_receipt_refs
+                )
+                projection_changed = (
+                    _apply_question_model_invocation_trace_projection(
+                        team_id, existing_record
+                    )
+                    or projection_changed
+                )
+                if projection_changed:
+                    store["updatedAt"] = _utc_now()
+                    _write_json(_store_path(team_id), store)
                 return {
                     "record": deepcopy(existing_record),
                     "output": existing_output,
@@ -1832,6 +2360,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             "questionId": question_id,
             "runId": run_id,
             "parentRunId": parent_run_id,
+            "sourceResultPackageHash": source_result_package_hash,
             "schemaValidation": record["validation"]["schemaValidation"],
             "citationValidation": record["validation"]["citationValidation"],
             "officialModelCall": official_call,

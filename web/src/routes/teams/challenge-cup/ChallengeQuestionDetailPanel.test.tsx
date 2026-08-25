@@ -193,6 +193,73 @@ describe("ChallengeQuestionDetailPanel reset entry", () => {
 });
 
 describe("ChallengeQuestionDetailPanel", () => {
+  it("renders the workflow archive as a summary-first read-only surface", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        teamId="research-team"
+        detail={detail()}
+        isLoading={false}
+        readOnlyArchive
+        archiveSummary={{
+          selectedHypotheses: 1,
+          effectiveReviews: 3,
+          retryAttempts: 2,
+          collectionRequests: 1,
+          reviewHistory: [{
+            id: "meeting-3",
+            round: 3,
+            status: "closed",
+            digestAvailable: true,
+            retryAttempts: 1,
+          }],
+        }}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="question-archive"');
+    expect(markup).toContain("题目档案 · 只读");
+    expect(markup).toContain("采用假说");
+    expect(markup).toContain("有效评审");
+    expect(markup).toContain(">3<");
+    expect(markup).toContain("失败重试");
+    expect(markup).toContain(">2<");
+    expect(markup).toContain("资料请求");
+    expect(markup).toContain("假说摘要");
+    expect(markup).toContain("评审历程");
+    expect(markup).toContain("第 3 轮");
+    expect(markup).toContain("含 1 次失败重试");
+    expect(markup).not.toContain("Pareto 前沿");
+    expect(markup).not.toContain("lineage");
+    expect(markup.match(/aria-expanded="true"/g)).toHaveLength(1);
+    expect(markup).not.toContain("更多操作");
+    expect(markup).not.toContain("登记修订产出");
+    expect(markup).not.toContain("提交审核结论");
+    expect(markup).not.toContain("研究计划");
+  });
+
+  it("keeps archive failure compact and returns only to the current task", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-999"
+        teamId="research-team"
+        isLoading={false}
+        errorMessage="challenge_question_run_not_found"
+        readOnlyArchive
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="question-archive-error"');
+    expect(markup).toContain("返回当前任务");
+    expect(markup).not.toContain("返回题目列表");
+    expect(markup).not.toContain("question-detail-fail-soft-ops");
+    expect(markup).not.toContain("更多操作");
+    expect(markup).not.toContain("重置本题运行");
+    expect(markup).not.toContain("challenge_question_run_not_found");
+  });
+
   it("renders the complete SCI-096 white-box audit chain without inventing missing anchors", () => {
     const markup = renderPanel(
       <ChallengeQuestionDetailPanel

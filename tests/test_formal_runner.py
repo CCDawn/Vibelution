@@ -9,7 +9,18 @@ import pytest
 from core.research import formal_runner
 
 
+@pytest.fixture(autouse=True)
+def _use_tmp_canonical_data_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "canonical-data"))
+
+
 def _execution_config(tmp_path: Path, project_root: Path) -> dict[str, object]:
+    identity_path = project_root / ".vibelution" / "project.json"
+    identity_path.parent.mkdir(parents=True, exist_ok=True)
+    identity_path.write_text(
+        '{"schemaVersion": 1, "projectId": "test-formal-runner"}\n',
+        encoding="utf-8",
+    )
     python_executable = tmp_path / "python.exe"
     python_executable.write_text("placeholder", encoding="utf-8")
     data_root = tmp_path / "fashion-data"
@@ -17,7 +28,7 @@ def _execution_config(tmp_path: Path, project_root: Path) -> dict[str, object]:
     return {
         "pythonExecutable": str(python_executable),
         "dataRoot": str(data_root),
-        "outputRoot": str(tmp_path / "formal-runs"),
+        "outputRoot": str(tmp_path / "canonical-data" / "formal-runs"),
         "epochs": 2,
         "trainSamples": 512,
         "testSamples": 128,
@@ -35,7 +46,7 @@ def _method_config() -> dict[str, object]:
     }
 
 
-def test_prepare_full_run_requires_explicit_external_environment_and_builds_fixed_commands(tmp_path, monkeypatch):
+def test_prepare_full_run_requires_explicit_canonical_environment_and_builds_fixed_commands(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"
     script_path.parent.mkdir(parents=True)
@@ -69,6 +80,50 @@ def test_prepare_full_run_requires_explicit_external_environment_and_builds_fixe
     assert calls == [[str(tmp_path / "python.exe"), str(script_path), "--self-check"]]
     assert "user_triggered_only" in prepared["boundaries"]
     assert "manual_result_review_required" in prepared["boundaries"]
+    assert "artifacts_inside_current_instance_canonical_data_root" in prepared["boundaries"]
+
+
+def test_assert_canonical_project_data_path_accepts_current_instance_data_root(tmp_path):
+    project_root = tmp_path / "project"
+    execution_config = _execution_config(tmp_path, project_root)
+
+    resolved = formal_runner.assert_canonical_project_data_path(
+        execution_config["outputRoot"],
+        project_root=project_root,
+    )
+
+    assert resolved == (tmp_path / "canonical-data" / "formal-runs").resolve()
+    assert not resolved.exists()
+
+
+def test_assert_canonical_project_data_path_accepts_existing_file_inside_current_instance_data_root(tmp_path):
+    project_root = tmp_path / "project"
+    execution_config = _execution_config(tmp_path, project_root)
+    result_path = Path(execution_config["outputRoot"]) / "formal-run-result.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text("{}", encoding="utf-8")
+
+    resolved = formal_runner.assert_canonical_project_data_path(
+        result_path,
+        project_root=project_root,
+    )
+
+    assert resolved == result_path.resolve()
+
+
+def test_assert_canonical_project_data_path_create_rejects_existing_file(tmp_path):
+    project_root = tmp_path / "project"
+    execution_config = _execution_config(tmp_path, project_root)
+    result_path = Path(execution_config["outputRoot"]) / "formal-run-result.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(formal_runner.FormalRunnerError, match="current project canonical data root"):
+        formal_runner.assert_canonical_project_data_path(
+            result_path,
+            project_root=project_root,
+            create=True,
+        )
 
 
 def test_prepare_full_run_rejects_unknown_candidate_loss_mask_mode(tmp_path, monkeypatch):
@@ -96,13 +151,63 @@ def test_prepare_full_run_rejects_repository_local_artifacts_before_spawning_a_p
     execution_config = _execution_config(tmp_path, project_root)
     execution_config["outputRoot"] = str(project_root / "artifacts")
 
-    with pytest.raises(formal_runner.FormalRunnerError, match="outside the repository"):
+    with pytest.raises(formal_runner.FormalRunnerError, match="current project canonical data root"):
         formal_runner.prepare_full_run(
             formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
             method_config=_method_config(),
             execution_config=execution_config,
             project_root=project_root,
         )
+
+
+@pytest.mark.parametrize("output_kind", ["other-instance", "arbitrary"])
+def test_assert_canonical_project_data_path_rejects_other_instance_and_arbitrary_directories(
+    tmp_path, output_kind
+):
+    project_root = tmp_path / "project"
+    _execution_config(tmp_path, project_root)
+    if output_kind == "other-instance":
+        output_root = tmp_path / "projects" / "test-formal-runner" / "instances" / "other" / "data" / "formal-runs"
+    else:
+        output_root = tmp_path / "arbitrary-output" / "formal-runs"
+
+    with pytest.raises(formal_runner.FormalRunnerError, match="current project canonical data root"):
+        formal_runner.assert_canonical_project_data_path(output_root, project_root=project_root)
+
+    assert not output_root.exists()
+
+
+def test_assert_canonical_project_data_path_rejects_relative_paths(tmp_path):
+    project_root = tmp_path / "project"
+    _execution_config(tmp_path, project_root)
+
+    with pytest.raises(formal_runner.FormalRunnerError, match="absolute path"):
+        formal_runner.assert_canonical_project_data_path(
+            "canonical-data/formal-runs",
+            project_root=project_root,
+        )
+
+
+def test_assert_canonical_project_data_path_rejects_symlink_escape(tmp_path):
+    project_root = tmp_path / "project"
+    _execution_config(tmp_path, project_root)
+    canonical_root = tmp_path / "canonical-data"
+    canonical_root.mkdir()
+    outside_root = tmp_path / "outside"
+    outside_root.mkdir()
+    escaped = canonical_root / "escaped"
+    try:
+        escaped.symlink_to(outside_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable in this environment")
+
+    with pytest.raises(formal_runner.FormalRunnerError, match="current project canonical data root"):
+        formal_runner.assert_canonical_project_data_path(
+            escaped / "formal-runs",
+            project_root=project_root,
+        )
+
+    assert not (outside_root / "formal-runs").exists()
 
 
 def test_prepare_full_run_reports_a_bounded_self_check_timeout(tmp_path, monkeypatch):

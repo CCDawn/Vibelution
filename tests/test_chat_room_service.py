@@ -2,6 +2,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
@@ -20,6 +21,7 @@ from core.infrastructure import developer_sandbox
 from core.runtime_manager import work_run_store
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
+from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
 
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
@@ -1059,6 +1061,92 @@ def test_chat_room_participant_index_releases_singleflight_after_builder_error(m
     chat_room_service._clear_participant_refresh_index_cache()
 
 
+def test_reconciliation_does_not_hold_room_lock_while_loading_work_run(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="对账不阻塞停止",
+        participant_session_ids=["session-alpha"],
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = "running"
+    stored_room["activeRoundId"] = "round-running"
+    stored_room["rounds"] = [{
+        "roundId": "round-running",
+        "status": "running",
+        "messages": [],
+        "speakerOrder": ["session-session-alpha"],
+        "startedAt": "2026-08-24T00:00:00+00:00",
+        "updatedAt": "2026-08-24T00:00:00+00:00",
+    }]
+    chat_room_service._store().save(state)
+
+    work_run_read_started = threading.Event()
+    release_work_run_read = threading.Event()
+
+    class SlowWorkRunStore:
+        def load_snapshot(self, _run_kind, _round_id):
+            work_run_read_started.set()
+            assert release_work_run_read.wait(timeout=2)
+            return {}
+
+        def persist_snapshot(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(chat_room_service, "_work_run_store", lambda: SlowWorkRunStore())
+    monkeypatch.setattr(chat_room_service, "_publish_chat_room_detail_snapshot", lambda _room_id: None)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(chat_room_service._reconcile_chat_room_round_state)
+        try:
+            assert work_run_read_started.wait(timeout=1)
+            stopped = chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest reconciliation stop")
+            assert stopped["status"] == "stopping"
+        finally:
+            release_work_run_read.set()
+        assert future.result(timeout=2) == []
+
+
+def test_terminal_round_failure_publishes_after_releasing_room_lock(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="终态失败通知",
+        participant_session_ids=["session-alpha"],
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    terminal_round = {
+        "roundId": "round-terminal",
+        "status": "stopped",
+        "messages": [],
+        "speakerOrder": [],
+    }
+    stored_room["rounds"] = [terminal_round]
+    chat_room_service._store().save(state)
+    published: list[str] = []
+
+    def publish_after_unlock(room_id: str):
+        assert not chat_room_service._chat_room_lock_owned_by_current_thread()
+        published.append(room_id)
+
+    monkeypatch.setattr(chat_room_service, "_publish_chat_room_detail_snapshot", publish_after_unlock)
+
+    chat_room_service._fail_chat_room_round(
+        room["roomId"],
+        "round-terminal",
+        stored_room,
+        terminal_round,
+        RuntimeError("already terminal"),
+        lang="zh",
+    )
+
+    assert published == [room["roomId"]]
+
+
 def test_chat_room_refresh_rebinds_participant_to_current_agent_direct_session(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1390,13 +1478,13 @@ def test_start_chat_room_round_revalidates_participant_snapshot_before_persist(t
     refresh_calls = 0
     real_refresh = chat_room_service._refresh_chat_room_round_participants
 
-    def blocking_first_refresh(participants):
+    def blocking_first_refresh(participants, **kwargs):
         nonlocal refresh_calls
         refresh_calls += 1
         if refresh_calls == 1:
             first_refresh_started.set()
             assert release_first_refresh.wait(timeout=5)
-        return real_refresh(participants)
+        return real_refresh(participants, **kwargs)
 
     monkeypatch.setattr(
         chat_room_service,
@@ -1466,14 +1554,14 @@ def test_start_chat_room_round_aborts_after_bounded_participant_snapshot_retries
     monkeypatch.setattr(session_service, "get_session_detail", tracked_get_session_detail)
     monkeypatch.setattr(session_service, "list_sessions", tracked_list_sessions)
 
-    def blocking_refresh(participants):
+    def blocking_refresh(participants, **kwargs):
         nonlocal refresh_calls
         attempt = refresh_calls
         refresh_calls += 1
         assert attempt < len(refresh_releases)
         refresh_started.set()
         assert refresh_releases[attempt].wait(timeout=5)
-        return real_refresh(participants)
+        return real_refresh(participants, **kwargs)
 
     monkeypatch.setattr(
         chat_room_service,
@@ -2259,6 +2347,18 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         llm_bindings={"dialogue": {"modelId": "agent-explorer-model"}},
     )
     captured = {}
+    captured_receipt_routes = []
+    original_build_receipt_context = meeting_receipt_authority.build_speaker_receipt_context
+
+    def capture_receipt_context(*args, **kwargs):
+        captured_receipt_routes.append(dict(kwargs["expected_model_route"]))
+        return original_build_receipt_context(*args, **kwargs)
+
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "build_speaker_receipt_context",
+        capture_receipt_context,
+    )
 
     class ProfileAwareAgent:
         def __init__(self, workspace_path=None, config=None):
@@ -2311,6 +2411,13 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert captured["history"]
     assert captured["turn_identity"].startswith("chat-room:")
     assert captured["active_runtime"]["turnId"] == captured["turn_identity"]
+    assert captured_receipt_routes == [
+        {
+            "modelRef": "agent-explorer-model",
+            "providerId": base_config.llm.profiles["primary"].provider_id,
+            "modelId": "explorer-model",
+        }
+    ]
     assert turn_results[-1]["agentId"] == agent_id
     assert turn_results[-1]["status"] == "completed"
     assert detail["rounds"][-1]["messages"][0]["status"] == "completed"
@@ -2349,6 +2456,288 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
     assert invocations[0]["turnId"].startswith("chat-room:")
     latest_message = detail["rounds"][-1]["messages"][0]
     assert "ledger identity" not in str(latest_message.get("content") or "").lower()
+
+
+def test_formal_meeting_speaker_builds_question_receipt_context():
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+
+    receipt_context = meeting_receipt_authority.build_speaker_receipt_context(
+        {"participantId": "participant-1", "agentId": "agent-1"},
+        {
+            "roundId": "round-1",
+            "meetingRoundId": "meeting-1",
+            "meetingType": "hypothesis_candidate_generation",
+            "teamId": "team-formal",
+            "questionId": "SCI-096",
+            "_modelInvocationReceiptAuthority": authority,
+        },
+        session_id="session-1",
+        turn_identity="chat-room:round-1:participant-1",
+        expected_model_route={
+            "modelRef": "opencode/deepseek-v4-flash",
+            "providerId": "opencode",
+            "modelId": "deepseek-v4-flash",
+        },
+    )
+
+    assert receipt_context is not None
+    assert receipt_context["receiptRunId"] == "run-formal"
+    assert receipt_context["outcomeKinds"] == ["candidate"]
+    assert receipt_context["expectedModelRoute"] == {
+        "modelRef": "opencode/deepseek-v4-flash",
+        "providerId": "opencode",
+        "modelId": "deepseek-v4-flash",
+    }
+    binding = receipt_context["questionStageBinding"]
+    assert binding["questionStage"] == "generation"
+    assert binding["formalNodeId"] == "hypothesis_design"
+    assert binding["formalNodeRunId"] == "meeting:meeting-1:round-1:participant-1"
+    assert receipt_context["evidenceLocator"]["executionKind"] == "chat_room_meeting"
+
+
+def test_formal_meeting_speaker_without_receipt_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.load_conversation_events",
+        lambda *_args: [],
+    )
+
+    with pytest.raises(
+        meeting_receipt_authority.MeetingReceiptAuthorityError,
+        match="without a verifiable invocation receipt",
+    ):
+        meeting_receipt_authority.register_speaker_receipts(
+            project_root=Path("."),
+            team_id="team-formal",
+            question_id="SCI-096",
+            workflow_run_id="run-formal",
+            session_id="session-1",
+            turn_identity="turn-1",
+        )
+
+
+def test_formal_meeting_speaker_turn_journals_receipt_outcome(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    _provider_id = base_config.llm.profiles["primary"].provider_id
+    _model_key = f"{_provider_id}/agent-explorer-model"
+    # Receipt route validation requires the model library key (the resolved
+    # modelRef) to carry the provider prefix, as production entries do.
+    base_config.llm.model_library[_model_key] = {
+        "provider_id": _provider_id,
+        "model": "explorer-model",
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    beta_agent = agent_directory_service.ensure_agent_for_session("session-beta", display_name="Beta Agent")
+    detail = session_service.get_session_detail("session-beta")
+    agent_id = detail["agentId"] or beta_agent["agentId"]
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        llm_bindings={"dialogue": {"modelId": _model_key}},
+    )
+
+    registered_receipts = []
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
+    def capture_registration(*_args, **kwargs):
+        registered_receipts.extend(list(kwargs.get("receipts") or []))
+        return [f"receipt-ref-{index}" for index, _ in enumerate(registered_receipts)]
+
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "register_question_model_invocation_receipts",
+        capture_registration,
+    )
+
+    class ReceiptJournalingAgent:
+        def __init__(self, workspace_path=None, config=None):
+            pass
+
+        def set_turn_identity(self, turn_identity):
+            self.turn_identity = str(turn_identity or "")
+
+        def seed_chat_history(self, messages):
+            pass
+
+        def seed_static_runtime_context(self, content):
+            pass
+
+        def seed_runtime_context(self, content):
+            pass
+
+        def mark_runtime_context_seeded_by_host(self):
+            pass
+
+        def set_turn_interrupt_checker(self, checker):
+            pass
+
+        def record_turn_preparation_diagnostic(self, diagnostic):
+            pass
+
+        def clear_turn_preparation_state(self):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, disable_tools=False):
+            from core.infrastructure.event_bus import EventNames, get_event_bus
+
+            runtime = agent_directory_service.current_agent_runtime()
+            identity = SimpleNamespace(
+                session_id=str(runtime.get("sessionId") or ""),
+                turn_id=str(runtime.get("turnId") or ""),
+                invocation_id="inv-meeting-1",
+                iteration=0,
+                item_id="item-final",
+                item_revision=0,
+                sequence=0,
+            )
+            outcome = SimpleNamespace(
+                identity=identity,
+                kind="final_answer",
+                final_text="CANDIDATE: C1 | 候选假说 | 理由",
+                events=(),
+                tool_calls=(),
+                model_invocation_receipt={
+                    "receiptId": "receipt-meeting-1",
+                    "provider": "opencode",
+                    "model": "deepseek-v4-flash",
+                },
+            )
+            get_event_bus().publish(
+                EventNames.LLM_RESPONSE,
+                {"turn_outcome": outcome},
+                source="agent.canonical_turn_outcome",
+            )
+            return {
+                "status": "completed",
+                "raw_output": "CANDIDATE: C1 | 候选假说 | 理由",
+                "summary": "ok",
+                "tool_call_count": 0,
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", ReceiptJournalingAgent)
+    room = chat_room_service.create_chat_room(
+        title="正式会议回执群聊",
+        participant_session_ids=["session-beta"],
+    )
+    participant = room["participants"][0]
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+
+    result = chat_room_service._run_participant_agent(
+        participant,
+        "请提出候选假说",
+        {
+            "roomId": room["roomId"],
+            "roundId": "round-formal-1",
+            "topic": "候选假说生成",
+            "purpose": "meeting",
+            "meetingRoundId": "meeting-formal-1",
+            "meetingType": "hypothesis_candidate_generation",
+            "teamId": "team-formal",
+            "questionId": "SCI-096",
+            "_modelInvocationReceiptAuthority": authority,
+        },
+    )
+
+    assert result["status"] == "completed"
+    session_id = str(participant.get("sessionId") or "").strip()
+    participant_id = str(participant.get("participantId") or "").strip()
+    journal_path = (
+        tmp_path
+        / "workspace"
+        / "sessions"
+        / session_id
+        / "turn_journal.jsonl"
+    )
+    assert journal_path.exists(), "formal meeting turn must journal its canonical outcome"
+    committed_with_receipt = []
+    for line in journal_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        if event.get("eventType") != "assistant_item_committed":
+            continue
+        if event.get("source") != "canonical_turn_outcome":
+            continue
+        if event.get("turnId") != f"chat-room:round-formal-1:{participant_id}":
+            continue
+        payload = event.get("payload") or {}
+        if isinstance(payload.get("modelInvocationReceipt"), dict):
+            committed_with_receipt.append(payload["modelInvocationReceipt"])
+    assert [receipt.get("receiptId") for receipt in committed_with_receipt] == ["receipt-meeting-1"]
+    assert [receipt.get("receiptId") for receipt in registered_receipts] == ["receipt-meeting-1"]
+
+
+def test_scoped_discussion_room_round_fails_closed_without_receipt_authority(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    scoped_room = chat_room_service.create_chat_room(
+        title="正式阶段群聊",
+        participant_session_ids=["session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "hypothesis_review", "questionId": "SCI-096", "key": "scope-1"},
+            "scopeHash": "c" * 24,
+        },
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError) as excinfo:
+        chat_room_service.start_chat_room_round(
+            scoped_room["roomId"],
+            "假说评审会议开幕",
+        )
+    message = str(excinfo.value)
+    assert "回执授权" in message or "receipt authority" in message
+
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+    with_authority_message = ""
+    try:
+        chat_room_service.start_chat_room_round(
+            scoped_room["roomId"],
+            "假说评审会议开幕",
+            _model_invocation_receipt_authority=authority,
+        )
+    except chat_room_service.ChatRoomValidationError as exc:
+        with_authority_message = str(exc)
+    assert "回执授权" not in with_authority_message and "receipt authority" not in with_authority_message
 
 
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):

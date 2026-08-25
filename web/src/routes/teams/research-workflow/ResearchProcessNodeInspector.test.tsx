@@ -68,6 +68,7 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
   adapter?: ReturnType<typeof getNodeAdapter>;
   handoffPending?: boolean;
   isCurrentTask?: boolean;
+  primaryActionOwnedByWorkspace?: boolean;
   hideStartOffer?: boolean;
   statusBanner?: string | null;
   collectionRecoveryRequestId?: string;
@@ -86,6 +87,7 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
       handoffPending={Boolean(extras.handoffPending)}
       busy={false}
       isCurrentTask={extras.isCurrentTask}
+      primaryActionOwnedByWorkspace={extras.primaryActionOwnedByWorkspace}
       onOffer={vi.fn()}
       hideStartOffer={extras.hideStartOffer}
       statusBanner={extras.statusBanner}
@@ -103,7 +105,7 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     const markup = renderInspector(makeDetail({ nodeAttempt: 2 }));
     expect(markup).toContain("Finder Agent");
     expect(markup).toContain("agent-1");
-    expect(markup).toContain("知识搜集");
+    expect(markup).toContain("资料搜集");
     expect(markup).toContain("Tokens");
     expect(markup).toContain('data-testid="node-inspector-model-trigger"');
     expect(markup).not.toContain("source_finder");
@@ -116,6 +118,19 @@ describe("ResearchProcessNodeInspector command rendering", () => {
   it("renders backend-declared available CommandOffers as buttons", () => {
     const markup = renderInspector(makeDetail());
     expect(markup).toContain("启动 资料寻找");
+  });
+
+  it("hides every formal command offer when the fixed workspace owns the primary action", () => {
+    const markup = renderInspector(makeDetail({
+      commandOffers: [
+        offer({ command: "start_node", label: "正式主操作" }),
+        offer({ command: "retry_node", label: "正式次操作" }),
+      ],
+    }), { primaryActionOwnedByWorkspace: true });
+
+    expect(markup).not.toContain("正式主操作");
+    expect(markup).not.toContain("正式次操作");
+    expect(markup).not.toContain('data-vui="node-commands"');
   });
 
   it("keeps historical formal nodes read-only", () => {

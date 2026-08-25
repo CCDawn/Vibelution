@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .provider_replay_state import ProviderReplayState
 from .types import CanonicalToolCall, CanonicalToolResult
@@ -231,12 +233,53 @@ class SemanticGenerationSettings:
 
 
 @dataclass(frozen=True)
+class SemanticOutputSchema:
+    """Provider-neutral strict JSON Schema plus an optional local validator."""
+
+    name: str
+    schema: Mapping[str, Any]
+    strict: bool = True
+    validator: Callable[[Mapping[str, Any]], Any] | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("semantic output schema requires a name")
+        if not isinstance(self.schema, Mapping) or self.schema.get("type") != "object":
+            raise ValueError("semantic output schema root must be an object")
+        if not self.strict:
+            raise ValueError("semantic output schemas must be strict")
+        object.__setattr__(self, "schema", _freeze_value(self.schema))
+
+    @property
+    def schema_sha256(self) -> str:
+        def thaw(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                return {str(key): thaw(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [thaw(item) for item in value]
+            return value
+
+        encoded = json.dumps(
+            thaw(self.schema),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
 class SemanticModelRequest:
     scope: InvocationScope
     messages: tuple[SemanticMessage, ...]
     tools: tuple[SemanticToolDefinition, ...]
     settings: SemanticGenerationSettings
     replay_state: ProviderReplayState | None = None
+    output_schema: SemanticOutputSchema | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
@@ -253,6 +296,7 @@ __all__ = [
     "SemanticGenerationSettings",
     "SemanticMessage",
     "SemanticModelRequest",
+    "SemanticOutputSchema",
     "SemanticToolDefinition",
     "TextPart",
     "ToolCallPart",

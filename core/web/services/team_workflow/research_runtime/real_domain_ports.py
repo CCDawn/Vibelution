@@ -30,6 +30,7 @@ from .domain_ports import (
     ReadBackVerdict,
     ScopedAgentTaskHandle,
 )
+from .agent_node_execution import _formal_task_authorities
 from .formal_hypothesis_fanout import (
     HypothesisAuthorityUnavailable as _HypothesisAuthorityUnavailable,
 )
@@ -691,11 +692,20 @@ class RealDomainPorts:
                 discriminator=scope_mode,
             )
             if scope_mode == "on" and fan_out is not None:
+                challenge_task_contract, model_invocation_receipt_binding = (
+                    _formal_task_authorities(
+                        action=action,
+                        input_snapshot=snapshot,
+                        agent_id=binding.agent_id,
+                    )
+                )
                 return self._create_hypothesis_fan_out(
                     action=action,
                     binding=binding,
                     snapshot=snapshot,
                     fan_out=fan_out,
+                    challenge_task_contract=challenge_task_contract,
+                    model_invocation_receipt_binding=model_invocation_receipt_binding,
                 )
         if self._agent_task_factory is not None:
             return self._agent_task_factory(action=action, binding=binding)
@@ -765,6 +775,8 @@ class RealDomainPorts:
         binding: BindingResolution,
         snapshot: dict[str, Any],
         fan_out: dict[str, Any],
+        challenge_task_contract: Mapping[str, Any],
+        model_invocation_receipt_binding: Mapping[str, Any],
     ) -> AgentTaskHandle:
         """Create/replay one root and one canonical child task per candidate.
 
@@ -855,6 +867,8 @@ class RealDomainPorts:
                     candidate_context=candidate_context,
                     subtask_id=subtask_id,
                     previous=prior,
+                    challenge_task_contract=challenge_task_contract,
+                    model_invocation_receipt_binding=model_invocation_receipt_binding,
                 )
                 child = _scoped_handle_from_started(
                     started,
@@ -1509,6 +1523,7 @@ class RealDomainPorts:
 
 def _stage_for(node_id: str) -> str:
     _STAGE_BY_NODE = {
+        "problem_understanding": "knowledge_collection",
         "source_finding": "knowledge_collection",
         "source_extraction": "knowledge_collection",
         "evidence_relations": "knowledge_collection",
@@ -1529,6 +1544,107 @@ def _stage_for(node_id: str) -> str:
     return _STAGE_BY_NODE.get(node_id, "execution_iteration")
 
 
+def _ensure_problem_understanding_source_collection_run(
+    *,
+    team_id: str,
+    project_id: str,
+    input_snapshot: dict[str, Any],
+    action: PendingAction,
+    binding: BindingResolution,
+    store: WorkflowLedgerStore | None,
+) -> str:
+    """Ensure the problem node has a persisted source-collection authority.
+
+    ``problem_understanding`` is a research-project task, not a source-stage
+    task.  It still needs the canonical source-run identity that scopes its
+    server task contract.  Bootstrap only the run here; never create a
+    ``source_collection.stage_session`` task as a side effect.
+    """
+
+    source_run_id = str(input_snapshot.get("sourceCollectionRunId") or "").strip()
+    if source_run_id:
+        return source_run_id
+    if store is None:
+        raise RuntimeError(
+            "problem_understanding requires a WorkflowLedgerStore to persist "
+            "source collection authority"
+        )
+
+    from core.web.services.team_workflow.source_collection.runs import (
+        start_source_collection_run,
+    )
+
+    objective = input_snapshot.get("researchObjectiveContract") or {}
+    model_routing_policy = (
+        input_snapshot.get("modelRoutingPolicy")
+        if isinstance(input_snapshot.get("modelRoutingPolicy"), dict)
+        else {}
+    )
+    required_model_policy = model_routing_policy.get("requiredModelPolicy")
+    if not isinstance(required_model_policy, dict) or not required_model_policy:
+        raise RuntimeError(
+            "problem_understanding source authority requires the frozen model policy"
+        )
+    started_run = start_source_collection_run(
+        team_id,
+        {
+            "researchProjectId": project_id,
+            "questionId": str(input_snapshot.get("questionId") or "").strip(),
+            "requiredModelPolicy": dict(required_model_policy),
+            "title": "Challenge Cup workflow source collection",
+            "goal": str(objective.get("question") or ""),
+            "topic": str(objective.get("question") or ""),
+            "inputRefs": list(input_snapshot.get("datasetRefs") or []),
+            # The problem-understanding Agent owns the search seat, while this
+            # run is only the canonical source authority.  No stage session is
+            # started until the graph reaches source_finding.
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": binding.agent_id},
+            "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {
+                "workflowRunId": action.run_id,
+                "researchProjectId": project_id,
+            },
+        },
+    )
+    nested_run = started_run.get("run") if isinstance(started_run, dict) else {}
+    source_run_id = str(
+        started_run.get("runId")
+        or (nested_run.get("runId") if isinstance(nested_run, dict) else "")
+        or ""
+    ).strip()
+    if not source_run_id:
+        raise RuntimeError("source collection authority did not return a runId")
+
+    # The write is deliberately followed by an independent Ledger read-back.
+    # The low-level helper is shared with the legacy source-stage path and is
+    # historically tolerant of missing/invalid snapshots; this path must not
+    # create a project task unless the frozen/current snapshot is confirmed.
+    _persist_source_collection_run_id(store, action.run_id, source_run_id)
+    persisted_run = store.get_run(action.run_id)
+    if persisted_run is None or not persisted_run.input_snapshot_json:
+        raise RuntimeError(
+            "source collection authority was created but Ledger input snapshot is unavailable"
+        )
+    try:
+        persisted_snapshot = json.loads(persisted_run.input_snapshot_json)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "source collection authority was created but Ledger input snapshot is invalid"
+        ) from exc
+    persisted_id = (
+        str(persisted_snapshot.get("sourceCollectionRunId") or "").strip()
+        if isinstance(persisted_snapshot, dict)
+        else ""
+    )
+    if persisted_id != source_run_id:
+        raise RuntimeError(
+            "source collection authority was created but Ledger input snapshot was not persisted"
+        )
+    input_snapshot["sourceCollectionRunId"] = persisted_id
+    return persisted_id
+
+
 def _create_real_agent_task(
     action: PendingAction,
     binding: BindingResolution,
@@ -1547,6 +1663,34 @@ def _create_real_agent_task(
     if not team_id:
         raise RuntimeError("input snapshot has no teamId")
     idempotency_key = f"agent-task:{action.node_run_id}"
+    challenge_task_contract, model_invocation_receipt_binding = (
+        _formal_task_authorities(
+            action=action,
+            input_snapshot=input_snapshot,
+            agent_id=binding.agent_id,
+        )
+    )
+    source_collection_run_id = ""
+    if spec.family != "source_collection" and action.node_id == "problem_understanding":
+        if not project_id:
+            raise RuntimeError("input snapshot has no projectId")
+        if not str(binding.agent_id or "").strip():
+            raise RuntimeError("problem_understanding has no bound Agent")
+        source_collection_run_id = _ensure_problem_understanding_source_collection_run(
+            team_id=team_id,
+            project_id=project_id,
+            input_snapshot=input_snapshot,
+            action=action,
+            binding=binding,
+            store=store,
+        )
+    if source_collection_run_id:
+        # The formal authority helper owns the rest of this contract.  Bind the
+        # source-run scope only after the Ledger read-back above succeeds.
+        challenge_task_contract = {
+            **challenge_task_contract,
+            "sourceCollectionRunId": source_collection_run_id,
+        }
     if spec.family == "source_collection":
         started = _start_source_collection_agent_task(
             team_id=team_id,
@@ -1558,6 +1702,7 @@ def _create_real_agent_task(
             role_key=spec.role_key or binding.role_key,
             idempotency_key=idempotency_key,
             store=store,
+            challenge_task_contract=challenge_task_contract,
         )
     else:
         from core.web.services.team_workflow.research_project_agent_tasks import (
@@ -1608,6 +1753,8 @@ def _create_real_agent_task(
                 ),
                 **scoped_payload,
             },
+            _challenge_task_contract=challenge_task_contract,
+            _model_invocation_receipt_binding=model_invocation_receipt_binding,
         )
     return _agent_handle_from_started(started)
 
@@ -1631,6 +1778,7 @@ def _start_source_collection_agent_task(
     role_key: str,
     idempotency_key: str,
     store: WorkflowLedgerStore | None = None,
+    challenge_task_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.source_collection.runs import (
         start_source_collection_run,
@@ -1690,10 +1838,7 @@ def _start_source_collection_agent_task(
             workflow_run_id=action.run_id,
             source_collection_run_id=source_run_id,
         )
-    return start_source_collection_stage_session_task(
-        team_id,
-        source_run_id,
-        {
+    stage_task_payload = {
             "stageId": stage_id,
             "agentId": binding.agent_id,
             "agentRole": role_key,
@@ -1705,7 +1850,18 @@ def _start_source_collection_agent_task(
             # terminal task.
             "formalRetry": False,
             "evidenceRemediationContract": evidence_remediation_contract,
-        },
+    }
+    if isinstance(challenge_task_contract, Mapping):
+        return start_source_collection_stage_session_task(
+            team_id,
+            source_run_id,
+            stage_task_payload,
+            _challenge_task_contract=dict(challenge_task_contract),
+        )
+    return start_source_collection_stage_session_task(
+        team_id,
+        source_run_id,
+        stage_task_payload,
     )
 
 
@@ -3009,6 +3165,12 @@ def _ledger_result_package(
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Ledger path for result_package — UI projection, else bounded STOP package."""
     from .result_package import ResultPackageError, build_result_package
+    from .result_package_v2 import (
+        ResultPackageV2Error,
+        build_challenge_result_package_v2,
+        build_proposal_result_package_base,
+        is_proposal_only_challenge_run,
+    )
 
     team_id = str(snapshot.get("teamId") or "").strip()
     if not team_id:
@@ -3026,12 +3188,32 @@ def _ledger_result_package(
         research_ledger = {}
 
     if isinstance(record, dict):
+        proposal_only = is_proposal_only_challenge_run(record)
         try:
-            package = build_result_package(record, research_ledger=research_ledger)
-        except ResultPackageError as exc:
-            bounded = _ledger_bounded_result_package(action, snapshot)
-            if bounded is not None:
-                return bounded
+            package = (
+                build_proposal_result_package_base(record)
+                if proposal_only
+                else build_result_package(record, research_ledger=research_ledger)
+            )
+            if proposal_only:
+                package = build_challenge_result_package_v2(
+                    generic_package=package,
+                    record=record,
+                    team_id=team_id,
+                    workflow_run_id=action.run_id,
+                    source_collection_run_id=str(
+                        snapshot.get("sourceCollectionRunId")
+                        or (record.get("inputSnapshot") or {}).get(
+                            "sourceCollectionRunId"
+                        )
+                        or action.run_id
+                    ),
+                )
+        except (ResultPackageError, ResultPackageV2Error) as exc:
+            if not proposal_only:
+                bounded = _ledger_bounded_result_package(action, snapshot)
+                if bounded is not None:
+                    return bounded
             raise RuntimeError(str(exc)) from exc
         if not isinstance(package, dict) or not str(package.get("packageId") or "").strip():
             raise RuntimeError("result_package builder returned an incomplete package")

@@ -35,7 +35,7 @@ describe("Electron main startup sequence", () => {
       'else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null)'
     );
     const noProjectHandleIndex = source.indexOf(
-      "void handleSecondInstanceLifecycleCommand(firstLifecycle)"
+      "await handleSecondInstanceLifecycleCommand(firstLifecycle)"
     );
 
     expect(deferIndex).toBeGreaterThan(0);
@@ -49,6 +49,9 @@ describe("Electron main startup sequence", () => {
     );
     expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
       "} else if (firstLifecycle && firstLifecycle !== \"status\" && windowProvider !== null)"
+    );
+    expect(source.slice(noProjectLifecycleIndex, noProjectHandleIndex)).toContain(
+      "startOrFocusWorkbenchFromProductEntryOnShell()"
     );
     expect(source).toContain("if (deferWorkbenchOpen)");
     expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');

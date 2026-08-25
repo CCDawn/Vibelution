@@ -5,6 +5,7 @@
 
 import type { ActorKind, ChallengeCupNodeId } from "../../../api/types/researchWorkflow";
 import { CHALLENGE_CUP_NODE_IDS } from "../../../api/types/researchWorkflow";
+import { HYPOTHESIS_DESIGN_NODE_TERM } from "./researchTerminology";
 
 export type NodeAdapterSlot =
   | "knowledge_ops"
@@ -92,8 +93,8 @@ const ADAPTERS: NodeAdapterSpec[] = [
   {
     nodeId: "hypothesis_design",
     stageId: "experiment_design",
-    label: "假设设计",
-    labelEn: "Hypothesis design",
+    label: HYPOTHESIS_DESIGN_NODE_TERM.zh,
+    labelEn: HYPOTHESIS_DESIGN_NODE_TERM.en,
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],

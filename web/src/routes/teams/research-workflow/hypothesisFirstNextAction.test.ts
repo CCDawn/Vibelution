@@ -124,6 +124,7 @@ function reviewLink(
     collectionRequestId: "",
     questionId: "SCI-002",
     roundIndex,
+    candidateId: "cand-1",
     createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
     ...overrides,
   };
@@ -323,6 +324,32 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.commandLabel).toBe("确认并结束本轮");
   });
 
+  it("shows how many sibling candidate reviews remain before fan-in", () => {
+    const digestDraft = {
+      summary: "候选评审结论",
+      contentHash: "digest-hash",
+      agreements: ["候选仍值得验证"],
+      evidenceRequests: [],
+    };
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection({ selectedCandidateIds: ["cand-a", "cand-b"] }),
+      chainState: chain({ selectionId: "sel-1", candidateCount: 2 }),
+      meetings: [
+        meeting({ meetingRoundId: "mtg-a", status: "awaiting_approval", digestDraft }),
+        meeting({ meetingRoundId: "mtg-b", status: "awaiting_approval", digestDraft }),
+      ],
+      reviewRoundLinks: [
+        reviewLink("mtg-a", 1, { candidateId: "cand-a", candidateOrder: 0 }),
+        reviewLink("mtg-b", 1, { candidateId: "cand-b", candidateOrder: 1 }),
+      ],
+    });
+
+    expect(next.stage).toBe("review_awaiting_approval");
+    expect(next.meetingRoundId).toBe("mtg-b");
+    expect(next.commandDetail).toContain("其余 1 个候选");
+  });
+
   it("shows 资料搜集中 after a child run is bound", () => {
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },
@@ -360,6 +387,28 @@ describe("resolveHypothesisFirstNextAction", () => {
       collectionRequests: [request({ status: "needs_continue" })],
       collectionChildStatus: "needs_continue",
     });
+    expect(cont.command).toBe("continue_collection");
+    expect(cont.commandLabel).toBe("继续搜集");
+  });
+
+  it("uses the child-run terminal status when the request record is still pending", () => {
+    const failed = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "pending", collectionRunStatus: "failed" })],
+    });
+    expect(failed.stage).toBe("collection_recovery");
+    expect(failed.command).toBe("retry_collection");
+    expect(failed.recovery?.reason).toBe("资料搜集失败，请重试。");
+
+    const cont = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "pending", collectionRunStatus: "needs_continue" })],
+    });
+    expect(cont.stage).toBe("collection_recovery");
     expect(cont.command).toBe("continue_collection");
     expect(cont.commandLabel).toBe("继续搜集");
   });
@@ -521,7 +570,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     });
 
     expect(next.stage).toBe("review_summarizing");
-    expect(next.targetNodeId).toBe("hf_meeting_5");
+    expect(next.targetNodeId).toBe("hf_meeting_5_cand-1");
     expect(next.meetingRoundId).toBe("r5");
   });
 
@@ -555,7 +604,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     });
 
     expect(next.stage).toBe("next_review");
-    expect(next.targetNodeId).toBe("hf_meeting_2");
+    expect(next.targetNodeId).toBe("hf_meeting_2_cand-1");
     expect(next.meetingRoundId).toBe("current-r2");
   });
 

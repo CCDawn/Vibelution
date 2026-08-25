@@ -22,6 +22,8 @@ import pytest
 
 from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+    HYPOTHESIS_REVIEW_MEETING_TYPE,
     SCORE_DIMENSIONS,
     ContractValidationError,
     HypothesisRound,
@@ -41,7 +43,10 @@ from core.web.services.team_workflow import meeting_rounds as meetings
 from core.web.services.team_workflow import personal_memory_candidates as memories
 from tests._support.team_workflow.helpers import _use_tmp_project_root
 
-_ROLES = ("coordinator", "researcher")
+_ROLES = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.participant_policy(
+    HYPOTHESIS_REVIEW_MEETING_TYPE
+).required_product_role_ids
+_TEAM_ROLES = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_role_ids
 _SELECTED_IDS = ("cand-a", "cand-b", "cand-c")
 
 
@@ -51,15 +56,19 @@ def _team_with_room(tmp_path, monkeypatch):
     monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(hypothesis_rounds, "PROJECT_ROOT", tmp_path)
     agents: dict[str, str] = {}
-    for role in _ROLES:
+    for role in _TEAM_ROLES:
         agent = agent_directory_service.create_agent_instance(display_name=f"HF3 {role}")
         session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title=f"HF3 {role}")
         agents[role] = agent["agentId"]
     team_id = team_service.create_team(
         name="HF-3 假说评审执行器团队",
-        members=[{"agentId": agents[role], "role": role} for role in _ROLES],
+        members=[{"agentId": agents[role], "role": role} for role in _TEAM_ROLES],
     )["teamId"]
     return team_id, agents
+
+
+def _participant_agent_ids(agents):
+    return [agents[role] for role in _ROLES]
 
 
 def _selection_payload(agent_ids, **overrides):
@@ -78,7 +87,6 @@ def _selection_payload(agent_ids, **overrides):
         "agentId": agent_ids[0],
         "mode": "dev",
         "participants": list(agent_ids),
-        "participantRoleIds": list(_ROLES),
     }
     payload.update(overrides)
     return payload
@@ -89,13 +97,13 @@ def _marker_runner(participant, prompt, context):
     if "批评与修订" in str(prompt):
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
     role = str(participant.get("teamRole") or "participant")
-    if role == "coordinator":
+    if role == "challenge_cup_search":
         content = "AGREE: cand-a 的机制证据最完整，进入有界验证"
     else:
         content = (
             "DISAGREE: cand-b 的泛化证据不足\n"
             "RISK: 数据集偏差尚未评估\n"
-            "ACTION: researcher | 补充 cand-b 的消融实验证据\n"
+            "ACTION: challenge_cup_experiment_revision | 补充 cand-b 的消融实验证据\n"
             "KNOWLEDGE: 预测编码层级最新综述"
         )
     return {"status": "completed", "raw_output": content, "summary": "ok"}
@@ -124,7 +132,7 @@ def _closure_payload(agent_ids, **overrides):
 
 
 def _open_and_close_meeting(team_id, agents, **overrides):
-    agent_ids = list(agents.values())
+    agent_ids = _participant_agent_ids(agents)
     opened = meeting_runtime.open_hypothesis_review_meeting(
         team_id,
         _selection_payload(agent_ids, **overrides),
@@ -253,9 +261,9 @@ def test_generate_from_closed_meeting_completes_full_review_loop(tmp_path, monke
     assert pareto["paretoFrontCandidateIds"]
     assert pareto["analystAgentId"] == hypothesis_review_executor.PARETO_ROLE
 
-    # MetaReview: the meeting Coordinator role recommends one candidate.
+    # MetaReview: the meeting's closing actor recommends one candidate.
     meta_review = round_record["metaReview"]
-    assert meta_review["reviewerAgentId"] == agents["coordinator"]
+    assert meta_review["reviewerAgentId"] == agents["challenge_cup_search"]
     assert meta_review["recommendationCandidateId"] in _SELECTED_IDS
     assert meta_review["recommendationCandidateId"] in pareto["paretoFrontCandidateIds"]
     assert meta_review["accepted"] is True
@@ -279,7 +287,7 @@ def test_generate_from_closed_meeting_completes_full_review_loop(tmp_path, monke
         "reflection": hypothesis_review_executor.REFLECTION_ROLE,
         "pairwise": hypothesis_review_executor.PAIRWISE_ROLE,
         "pareto": hypothesis_review_executor.PARETO_ROLE,
-        "metareview": agents["coordinator"],
+        "metareview": agents["challenge_cup_search"],
     }
     assert result["review"]["contextId"].startswith("hypothesis-review-context-")
 
@@ -315,7 +323,7 @@ def test_review_context_is_bounded_and_reference_first(tmp_path, monkeypatch):
 
 def test_generate_requires_a_closed_hypothesis_review_meeting(tmp_path, monkeypatch):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
-    agent_ids = list(agents.values())
+    agent_ids = _participant_agent_ids(agents)
     opened = meeting_runtime.open_hypothesis_review_meeting(
         team_id,
         _selection_payload(agent_ids),
@@ -431,7 +439,7 @@ def test_pairwise_runner_gap_fails_closed(tmp_path, monkeypatch):
     def silent_pairwise(left, right, context):
         if {left["candidateId"], right["candidateId"]} == {"cand-a", "cand-c"}:
             return None
-        return {"outcome": "left_wins", "justification": "七维评分多数维度占优"}
+        return {"outcome": "left_wins", "justification": "五维评分多数维度占优"}
 
     with pytest.raises(ContractValidationError, match="pairwise runner must return a mapping"):
         _generate(team_id, meeting_round_id, pairwise_runner=silent_pairwise)

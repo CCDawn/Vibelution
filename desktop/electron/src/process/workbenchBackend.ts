@@ -40,10 +40,12 @@ import {
 } from "./workbenchBackendHealth.js";
 import {
   collectRegisteredHandles,
+  reconcileDeadRegisteredHandles,
   requestGracefulWorkbenchShutdown,
   retireRegisteredHandles,
   terminatePid,
-  waitForPortRelease
+  waitForPortRelease,
+  type GracefulWorkbenchShutdownResult
 } from "./workbenchBackendRetire.js";
 import {
   blockLifecycleIfActiveWork,
@@ -313,6 +315,51 @@ function stateProcessIdentities(state: WorkbenchBackendState): Readonly<Record<s
   add("backendLaunchPid", "backendLaunchCreateTime", "backendLaunchExecutable");
   add("spawnPid", "spawnCreateTime", "spawnExecutable");
   return identities;
+}
+
+function stateWithoutReconciledBackendHandles(
+  state: WorkbenchBackendState,
+  reconciledPids: ReadonlySet<number>
+): WorkbenchBackendState {
+  const sanitized = { ...state };
+  const clearIfReconciled = (
+    pidKey: string,
+    createTimeKey: string,
+    executableKey: string
+  ): void => {
+    const pid = Math.trunc(Number(state[pidKey] || 0));
+    if (!reconciledPids.has(pid)) {
+      return;
+    }
+    sanitized[pidKey] = 0;
+    sanitized[createTimeKey] = 0;
+    sanitized[executableKey] = "";
+  };
+  clearIfReconciled("backendPid", "backendCreateTime", "backendExecutable");
+  clearIfReconciled("backendLaunchPid", "backendLaunchCreateTime", "backendLaunchExecutable");
+  clearIfReconciled("spawnPid", "spawnCreateTime", "spawnExecutable");
+  return sanitized;
+}
+
+function liveUnverifiedBrowserWindowHandles(
+  state: WorkbenchBackendState,
+  pidAlive: (pid: number) => boolean,
+  trustedPids: readonly number[] = []
+): number[] {
+  const trusted = new Set(trustedPids.map((pid) => Math.trunc(Number(pid))));
+  const handles = new Set<number>();
+  for (const key of [
+    "browserLaunchPid",
+    "browserWindowPid",
+    "workbenchBrowserLaunchPid",
+    "workbenchBrowserWindowPid"
+  ]) {
+    const pid = Math.trunc(Number(state[key] || 0));
+    if (Number.isFinite(pid) && pid > 0 && !trusted.has(pid) && pidAlive(pid)) {
+      handles.add(pid);
+    }
+  }
+  return [...handles].sort((left, right) => right - left);
 }
 
 export function readLauncherStateFile(path: string): WorkbenchBackendState {
@@ -588,13 +635,26 @@ export async function reclaimStaleWorkbenchBackend(input: {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  /**
+   * Capture an identity only after the loopback health check has proved that
+   * this PID belongs to this project's workbench. This recovers an orphaned
+   * backend whose original launcher parent has already exited.
+   */
+  captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
+  /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
+  forceRetireOnActiveWorkRefusal?: boolean;
   registeredPids?: number[];
   extraPids?: number[];
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
-}): Promise<{ reclaimed: boolean; reason: string; verifiedPid?: number }> {
+}): Promise<{
+  reclaimed: boolean;
+  reason: string;
+  verifiedPid?: number;
+  activeWorkBlocked?: boolean;
+}> {
   const port = Math.trunc(input.port);
   if (!Number.isFinite(port) || port <= 0) {
     const pidAlive = input.pidAlive ?? knownPidIsAlive;
@@ -625,12 +685,15 @@ export async function reclaimStaleWorkbenchBackend(input: {
     };
   }
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
+  const expectedIdentities: Record<string, PythonProcessIdentity> = {
+    ...(input.expectedIdentities ?? {})
+  };
   const occupant = await classifyWorkbenchPortOccupant(input);
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
   const terminateOne = async (pid: number): Promise<boolean> => {
     if (input.terminateProcessTree) {
-      const expectedIdentity = input.expectedIdentities?.[String(pid)];
+      const expectedIdentity = expectedIdentities[String(pid)];
       // The project classifier is not a substitute for pid/create-time/exe
       // identity. Old state without that identity remains visible rather than
       // risking a PID-reuse kill.
@@ -703,9 +766,10 @@ export async function reclaimStaleWorkbenchBackend(input: {
     };
   }
   let gracefulCompleted = false;
+  let graceful: GracefulWorkbenchShutdownResult | undefined;
   if (pidAlive(occupant.pid)) {
     if (input.gracefulShutdown) {
-      const graceful = await input.gracefulShutdown({
+      graceful = await input.gracefulShutdown({
         port,
         host: input.host,
         backendPid: occupant.pid,
@@ -719,7 +783,39 @@ export async function reclaimStaleWorkbenchBackend(input: {
       });
       gracefulCompleted = graceful.completed;
     }
+    if (
+      !gracefulCompleted
+      && graceful?.status === 409
+      && !input.forceRetireOnActiveWorkRefusal
+    ) {
+      return {
+        reclaimed: false,
+        activeWorkBlocked: true,
+        reason: graceful.reason,
+        verifiedPid: occupant.pid
+      };
+    }
     if (!gracefulCompleted) {
+      // The persisted state may identify the detached Python parent while
+      // /api/health reports the still-listening child. Capture the child only
+      // after health has matched its workspace, then let the existing
+      // identity-checked, kind-checked tree terminator make the final call.
+      if (!expectedIdentities[String(occupant.pid)] && input.captureProcessIdentity) {
+        const captured = await input.captureProcessIdentity(occupant.pid);
+        if (
+          captured
+          && Math.trunc(Number(captured.pid)) === occupant.pid
+          && Number.isFinite(Number(captured.createTime))
+          && Number(captured.createTime) > 0
+          && String(captured.executable || "").trim()
+        ) {
+          expectedIdentities[String(occupant.pid)] = {
+            pid: occupant.pid,
+            createTime: Number(captured.createTime),
+            executable: String(captured.executable).trim()
+          };
+        }
+      }
       const terminated = await terminateOne(occupant.pid);
       if (!terminated) {
         return {
@@ -802,8 +898,11 @@ export async function resolveBindableWorkbenchPort(input: {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
+  /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
+  forceRetireOnActiveWorkRefusal?: boolean;
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
 }): Promise<{ port: number; note: string }> {
@@ -938,13 +1037,20 @@ export async function ensureFrontendBuild(input: {
   });
 }
 
+export type FrontendReleaseEnsureResult = {
+  skipped: boolean;
+  rebuilt: boolean;
+  buildKey?: string;
+  release?: string;
+};
+
 export async function ensureFrontendRelease(input: {
   workspaceRoot: string;
   pythonPath: string;
   signal?: AbortSignal;
   runBridge?: typeof runPythonJsonBridge;
   terminateProcessTree?: PythonOwnedProcessTreeTerminator;
-}): Promise<void> {
+}): Promise<FrontendReleaseEnsureResult> {
   const runBridge = input.runBridge ?? runPythonJsonBridge;
   const terminateProcessTree = input.terminateProcessTree ?? createPythonOwnedProcessTreeTerminator({
     pythonPath: input.pythonPath,
@@ -988,10 +1094,23 @@ export async function ensureFrontendRelease(input: {
       pid
     })
   });
-  const payload = parsePythonJsonBridgePayload<{ ok?: unknown; reason?: unknown }>(raw, "frontend build preflight");
+  const payload = parsePythonJsonBridgePayload<{
+    ok?: unknown;
+    reason?: unknown;
+    skipped?: unknown;
+    rebuilt?: unknown;
+    buildKey?: unknown;
+    release?: unknown;
+  }>(raw, "frontend build preflight");
   if (payload.ok !== true) {
     throw new Error(String(payload.reason || "frontend build preflight failed"));
   }
+  return {
+    skipped: Boolean(payload.skipped),
+    rebuilt: Boolean(payload.rebuilt),
+    ...(typeof payload.buildKey === "string" && payload.buildKey ? { buildKey: payload.buildKey } : {}),
+    ...(typeof payload.release === "string" && payload.release ? { release: payload.release } : {})
+  };
 }
 
 function defaultEnsureFrontend(
@@ -1001,7 +1120,7 @@ function defaultEnsureFrontend(
   pythonPath?: string
 ): Promise<void> {
   if (pythonPath) {
-    return ensureFrontendRelease({ workspaceRoot, pythonPath, signal: options.signal });
+    return ensureFrontendRelease({ workspaceRoot, pythonPath, signal: options.signal }).then(() => undefined);
   }
   return ensureFrontendBuild({
     workspaceRoot,
@@ -1273,9 +1392,19 @@ export async function executeMainLineWorkbench(
   const host = DEFAULT_WORKBENCH_HOST;
   const operation = input.operation;
   const commandId = input.command.commandId;
+  const captureIdentity = input.captureProcessIdentity
+    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
+      capturePythonProcessIdentity(captureInput));
+  const captureCurrentBackendIdentity = async (pid: number): Promise<PythonProcessIdentity | null> => {
+    return await captureIdentity({
+      pythonPath: input.pythonPath,
+      workspaceRoot: input.workspaceRoot,
+      pid
+    });
+  };
 
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
-    if (operation === "stop") {
+    if (operation === "stop" || operation === "shutdown") {
       const blocked = blockLifecycleIfActiveWork(
         "stop",
         (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
@@ -1294,22 +1423,41 @@ export async function executeMainLineWorkbench(
     }
     const previous = readState();
     const port = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
-    const extraPids = [(input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot)];
+    const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
+    const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
+    const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
+    // A daemon PID without its captured identity is only a historical hint.
+    // It may refer to a terminated process (or a reused PID), so it must never
+    // be sent to the owned-tree terminator during shutdown or desktop startup.
+    const unverifiedDaemonPid = daemonPid > 0 && !verifiedDaemonPid ? daemonPid : 0;
+    const extraPids = verifiedDaemonPid > 0 ? [verifiedDaemonPid] : [];
     const expectedIdentities: Record<string, PythonProcessIdentity> = {
       ...stateProcessIdentities(previous),
       ...(input.expectedIdentities ?? {})
     };
-    const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
     if (daemonIdentity && extraPids.includes(daemonIdentity.pid)) {
       expectedIdentities[String(daemonIdentity.pid)] = daemonIdentity;
     }
     const backendTreePids = ["backendPid", "backendLaunchPid", "spawnPid"]
       .map((key) => Math.trunc(Number(previous[key] || 0)))
       .filter((pid) => Number.isFinite(pid) && pid > 0);
+    const registeredHandles = collectRegisteredHandles(previous, extraPids);
+    const deadHandleReconcile = await reconcileDeadRegisteredHandles({
+      pids: registeredHandles,
+      port,
+      host,
+      expectedIdentities,
+      pidAlive: input.pidAlive,
+      connect: input.connect
+    });
+    const reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
+    const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
+    const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
+    const retainedExtraPids = extraPids.filter((pid) => !reconciledDeadPids.has(pid));
     // An injected killPid is a test/host override for the known backend and
     // daemon handles only; browser/window handles remain fail-closed below.
     const injectedOwnedDirectPids = input.killPid
-      ? [...backendTreePids, ...extraPids]
+      ? [...retainedBackendTreePids, ...retainedExtraPids]
       : [];
     const terminateProcessTree = input.terminateProcessTree
       ?? (input.killPid
@@ -1321,7 +1469,12 @@ export async function executeMainLineWorkbench(
           }));
     const gracefulShutdown = input.gracefulShutdown
       ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
-    let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
+    let staleReclaim: {
+      reclaimed: boolean;
+      reason: string;
+      verifiedPid?: number;
+      activeWorkBlocked?: boolean;
+    };
     if (gracefulShutdown && terminateProcessTree) {
       staleReclaim = await reclaimStaleWorkbenchBackend({
         port,
@@ -1334,10 +1487,12 @@ export async function executeMainLineWorkbench(
         killPid: input.killPid,
         terminateProcessTree,
         expectedIdentities,
+        captureProcessIdentity: captureCurrentBackendIdentity,
         controlToken: input.controlToken,
         gracefulShutdown,
-        registeredPids: backendTreePids,
-        extraPids
+        forceRetireOnActiveWorkRefusal: operation === "force-stop",
+        registeredPids: retainedBackendTreePids,
+        extraPids: retainedExtraPids
       });
     } else {
       staleReclaim = {
@@ -1346,26 +1501,28 @@ export async function executeMainLineWorkbench(
       };
     }
     const unverifiedHandles: number[] = [];
-    await retireRegisteredHandles({
-      pids: collectRegisteredHandles(previous, extraPids),
-      port,
-      host,
-      signal: input.signal,
-      pidAlive: input.pidAlive,
-      killPid: input.killPid,
-      terminateProcessTree,
-      // reclaimStaleWorkbenchBackend has already established this one
-      // backend's completion (through graceful shutdown or a verified tree
-      // terminator). Do not re-run a root-only helper after that root exited.
-      treePids: [...backendTreePids, ...extraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
-      expectedIdentities,
-      ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
-      reportUnverified: (pids) => unverifiedHandles.push(...pids),
-      connect: input.connect
-    });
+    if (!staleReclaim.activeWorkBlocked) {
+      await retireRegisteredHandles({
+        pids: retainedRegisteredHandles,
+        port,
+        host,
+        signal: input.signal,
+        pidAlive: input.pidAlive,
+        killPid: input.killPid,
+        terminateProcessTree,
+        // reclaimStaleWorkbenchBackend has already established this one
+        // backend's completion (through graceful shutdown or a verified tree
+        // terminator). Do not re-run a root-only helper after that root exited.
+        treePids: [...retainedBackendTreePids, ...retainedExtraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
+        expectedIdentities,
+        ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
+        reportUnverified: (pids) => unverifiedHandles.push(...pids),
+        connect: input.connect
+      });
+    }
     // A stale same-project backend whose pid was lost from state must not
     // outlive a stop; foreign occupants are intentionally left alone.
-    if (!gracefulShutdown || !terminateProcessTree) {
+    if (!staleReclaim.activeWorkBlocked && (!gracefulShutdown || !terminateProcessTree)) {
       staleReclaim = await reclaimStaleWorkbenchBackend({
         port,
         host,
@@ -1377,15 +1534,17 @@ export async function executeMainLineWorkbench(
         killPid: input.killPid,
         terminateProcessTree,
         expectedIdentities,
+        captureProcessIdentity: captureCurrentBackendIdentity,
         controlToken: input.controlToken,
-        registeredPids: backendTreePids,
-        extraPids
+        forceRetireOnActiveWorkRefusal: operation === "force-stop",
+        registeredPids: retainedBackendTreePids,
+        extraPids: retainedExtraPids
       });
     }
     if (!staleReclaim.reclaimed) {
       const message = `backend retirement remains unverified: ${staleReclaim.reason}`;
       writeState({
-        ...previous,
+        ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
         desiredState: "closed",
         observedState: "failed",
         phase: "failed",
@@ -1399,7 +1558,7 @@ export async function executeMainLineWorkbench(
         accepted: false,
         operation,
         commandId,
-        code: "backend_retire_incomplete",
+        code: staleReclaim.activeWorkBlocked ? "active_work_blocked" : "backend_retire_incomplete",
         message
       };
     }
@@ -1407,9 +1566,19 @@ export async function executeMainLineWorkbench(
     const previousBrowserWindowPid = Math.trunc(Number(previous.browserWindowPid || previous.workbenchBrowserWindowPid || 0));
     const retainedBrowserLaunchPid = unverifiedHandles.includes(previousBrowserLaunchPid) ? previousBrowserLaunchPid : 0;
     const retainedBrowserWindowPid = unverifiedHandles.includes(previousBrowserWindowPid) ? previousBrowserWindowPid : 0;
-    const unverifiedMessage = unverifiedHandles.length > 0
-      ? `unverified browser/window handles retained: ${[...new Set(unverifiedHandles)].join(",")}`
-      : undefined;
+    const lifecycleWarnings = [
+      reconciledDeadPids.size > 0
+        ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
+        : "",
+      unverifiedDaemonPid > 0
+        ? `Skipped unverified Runtime Manager daemon pid ${unverifiedDaemonPid}; no process was terminated.`
+        : "",
+      unverifiedHandles.length > 0
+        ? `unverified browser/window handles retained: ${[...new Set(unverifiedHandles)].join(",")}`
+        : ""
+    ].filter(Boolean);
+    const lifecycleWarning = lifecycleWarnings.join("; ");
+    clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
     writeState({
       ...previous,
       desiredState: "closed",
@@ -1427,12 +1596,12 @@ export async function executeMainLineWorkbench(
       browserLaunchPid: retainedBrowserLaunchPid,
       browserWindowPid: retainedBrowserWindowPid,
       ...(staleReclaim.reclaimed ? { staleReclaimNote: staleReclaim.reason } : {}),
-      ...(unverifiedMessage ? { lifecycleWarning: unverifiedMessage } : {}),
+      ...(lifecycleWarning ? { lifecycleWarning } : {}),
       lastReason: `electron_main_${operation.replace("-", "_")}`,
       lastSource: "electron_main",
       updatedAt: isoNow(input.now)
     });
-    return accepted(operation, commandId, unverifiedMessage ? { message: unverifiedMessage } : {});
+    return accepted(operation, commandId, lifecycleWarning ? { message: lifecycleWarning } : {});
   }
 
   if (operation === "restart") {
@@ -1453,32 +1622,79 @@ export async function executeMainLineWorkbench(
     }
   }
 
-  await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(
-    input.workspaceRoot,
-    opts,
-    fileExists,
-    input.pythonPath
-  )))({
-    force: operation === "rebuild-and-start",
-    signal: input.signal
-  });
-
   const previous = readState();
+  let reconciledDeadPids: ReadonlySet<number> = new Set();
+  const persistStartPreflightFailure = (error: unknown): void => {
+    const detail = error instanceof Error ? error.message : String(error);
+    writeState({
+      ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
+      desiredState: "closed",
+      observedState: "failed",
+      phase: "failed",
+      lifecycleWarning: detail,
+      lastReason: `electron_main_${operation.replace(/-/g, "_")}_preflight_failed`,
+      lastSource: "electron_main",
+      updatedAt: isoNow(input.now)
+    });
+  };
+  try {
+    await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(
+      input.workspaceRoot,
+      opts,
+      fileExists,
+      input.pythonPath
+    )))({
+      force: operation === "rebuild-and-start",
+      signal: input.signal
+    });
+  } catch (error: unknown) {
+    persistStartPreflightFailure(error);
+    throw error;
+  }
+
   const preferred = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
-  const extraPids = [(input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot)];
+  const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
+  const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
+  const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
+  const daemonPidIsAlive = daemonPid > 0 && (input.pidAlive ?? knownPidIsAlive)(daemonPid);
+  if (daemonPid > 0 && !verifiedDaemonPid && daemonPidIsAlive) {
+    const error = new Error(
+      `Runtime Manager daemon pid ${daemonPid} is live but has no verifiable identity; refusing to retire it before starting the workbench.`,
+    );
+    persistStartPreflightFailure(error);
+    throw error;
+  }
+  // A PID alone is not ownership evidence: Windows can reuse it after the
+  // historical Runtime Manager process has exited. Keep the stale record on
+  // disk for the owning lifecycle to reconcile, but never let it block a new
+  // workbench start or target an unrelated process for termination.
+  const ignoredStaleDaemonPid = daemonPid > 0 && !verifiedDaemonPid ? daemonPid : 0;
+  const extraPids = verifiedDaemonPid > 0 ? [verifiedDaemonPid] : [];
   const expectedIdentities: Record<string, PythonProcessIdentity> = {
     ...stateProcessIdentities(previous),
     ...(input.expectedIdentities ?? {})
   };
-  const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
   if (daemonIdentity && extraPids.includes(daemonIdentity.pid)) {
     expectedIdentities[String(daemonIdentity.pid)] = daemonIdentity;
   }
   const backendTreePids = ["backendPid", "backendLaunchPid", "spawnPid"]
     .map((key) => Math.trunc(Number(previous[key] || 0)))
     .filter((pid) => Number.isFinite(pid) && pid > 0);
+  const registeredHandles = collectRegisteredHandles(previous, extraPids);
+  const deadHandleReconcile = await reconcileDeadRegisteredHandles({
+    pids: registeredHandles,
+    port: preferred,
+    host,
+    expectedIdentities,
+    pidAlive: input.pidAlive,
+    connect: input.connect
+  });
+  reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
+  const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
+  const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
+  const retainedExtraPids = extraPids.filter((pid) => !reconciledDeadPids.has(pid));
   const injectedOwnedDirectPids = input.killPid
-    ? [...backendTreePids, ...extraPids]
+    ? [...retainedBackendTreePids, ...retainedExtraPids]
     : [];
   const terminateProcessTree = input.terminateProcessTree
     ?? (input.killPid
@@ -1488,37 +1704,61 @@ export async function executeMainLineWorkbench(
           workspaceRoot: input.workspaceRoot,
           allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
         }));
+  const gracefulShutdown = input.gracefulShutdown
+    ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
   const unverifiedHandles: number[] = [];
-  await retireRegisteredHandles({
-    pids: collectRegisteredHandles(previous, extraPids),
-    port: preferred,
-    host,
-    signal: input.signal,
-    pidAlive: input.pidAlive,
-    killPid: input.killPid,
-    terminateProcessTree,
-    treePids: [...backendTreePids, ...extraPids],
-    expectedIdentities,
-    ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
-    reportUnverified: (pids) => unverifiedHandles.push(...pids),
-    connect: input.connect
-  });
-  if (unverifiedHandles.length > 0) {
-    throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
+  let resolved: { port: number; note: string };
+  try {
+    const liveUnverifiedBrowserHandles = liveUnverifiedBrowserWindowHandles(
+      previous,
+      input.pidAlive ?? knownPidIsAlive,
+      [...retainedBackendTreePids, ...retainedExtraPids, ...(input.ownedDirectPids ?? [])]
+    );
+    if (liveUnverifiedBrowserHandles.length > 0) {
+      throw new Error(
+        `Refusing to start while unverified browser/window handles remain: ${liveUnverifiedBrowserHandles.join(",")}`
+      );
+    }
+    // Classify and, when necessary, gracefully retire the port occupant before
+    // touching registered handles.  A backend HTTP 409 is an active-work
+    // protection decision; ordinary restart must not kill its process tree
+    // merely because the port needs to be rebound.
+    resolved = await resolveBindableWorkbenchPort({
+      preferred,
+      host,
+      workspaceRoot: input.workspaceRoot,
+      signal: input.signal,
+      connect: input.connect,
+      fetchHealth: input.fetchHealth,
+      pidAlive: input.pidAlive,
+      killPid: input.killPid,
+      terminateProcessTree,
+      expectedIdentities,
+      captureProcessIdentity: captureCurrentBackendIdentity,
+      gracefulShutdown,
+      forceRetireOnActiveWorkRefusal: false
+    });
+    await retireRegisteredHandles({
+      pids: retainedRegisteredHandles,
+      port: resolved.port,
+      host,
+      signal: input.signal,
+      pidAlive: input.pidAlive,
+      killPid: input.killPid,
+      terminateProcessTree,
+      treePids: [...retainedBackendTreePids, ...retainedExtraPids],
+      expectedIdentities,
+      ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
+      reportUnverified: (pids) => unverifiedHandles.push(...pids),
+      connect: input.connect
+    });
+    if (unverifiedHandles.length > 0) {
+      throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
+    }
+  } catch (error: unknown) {
+    persistStartPreflightFailure(error);
+    throw error;
   }
-  const resolved = await resolveBindableWorkbenchPort({
-    preferred,
-    host,
-    workspaceRoot: input.workspaceRoot,
-    signal: input.signal,
-    connect: input.connect,
-    fetchHealth: input.fetchHealth,
-    pidAlive: input.pidAlive,
-    killPid: input.killPid,
-    terminateProcessTree,
-    expectedIdentities,
-    gracefulShutdown: input.gracefulShutdown
-  });
   const spawned = spawnWorkbenchBackend({
     workspaceRoot: input.workspaceRoot,
     pythonPath: input.pythonPath,
@@ -1528,13 +1768,10 @@ export async function executeMainLineWorkbench(
     fileExists
   });
   const spawnPid = Number(spawned.child.pid || 0);
-  const captureIdentity = input.captureProcessIdentity
-    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
-      capturePythonProcessIdentity(captureInput));
   let backendIdentity: PythonProcessIdentity | null = null;
   const persistUnretiredStart = (message: string): void => {
     writeState({
-      ...previous,
+      ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed",
       observedState: "failed",
       phase: "failed",
@@ -1640,6 +1877,14 @@ export async function executeMainLineWorkbench(
         }
       : {}),
     portRelocationNote: resolved.note,
+    lifecycleWarning: [
+      reconciledDeadPids.size > 0
+        ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
+        : "",
+      ignoredStaleDaemonPid > 0
+        ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
+        : ""
+    ].filter(Boolean).join("; "),
     lastReason: `electron_main_${operation.replace(/-/g, "_")}`,
     lastSource: "electron_main",
     pythonExecutable: spawned.pythonPath,

@@ -29,6 +29,61 @@ from core.web.services.team_workflow.research_project_agent_tasks import (
 )
 
 
+def test_source_collection_task_receipt_context_uses_server_task_authority(
+    monkeypatch,
+) -> None:
+    from core.web.services.session.worker import _model_invocation_receipt_context
+    from core.web.services.team_workflow.source_collection import stage_session
+
+    policy_sha256 = "a" * 64
+    monkeypatch.setattr(
+        stage_session,
+        "_read_source_collection_stage_session_task_record",
+        lambda team_id, task_id: {
+            "teamId": team_id,
+            "taskId": task_id,
+            "sessionId": "session-source-1",
+            "researchProjectId": "project-source-1",
+            "turn": {"turnId": "turn-source-1"},
+            "challengeTaskContract": {
+                "questionId": "SCI-096",
+                "workflowRunId": "run-source-formal-1",
+                "workflowId": "challenge-cup-research",
+                "workflowVersionId": "v2.1",
+                "workflowNodeId": "source_finding",
+                "nodeRunId": "node-run-source-1",
+                "nodeAttempt": 1,
+                "stageId": "generation",
+                "modelPolicySha256": policy_sha256,
+                "effectiveRoute": {
+                    "modelRef": "openai/gpt-5.6",
+                    "providerId": "openai",
+                    "modelId": "gpt-5.6",
+                },
+            },
+        },
+    )
+
+    context = _model_invocation_receipt_context(
+        {
+            "message_metadata": {
+                "taskId": "source-task-1",
+                "sourceCollectionStageTaskId": "source-task-1",
+                "teamId": "team-source-1",
+                "researchProjectId": "project-source-1",
+            }
+        },
+        session_id="session-source-1",
+        turn_id="turn-source-1",
+    )
+
+    assert context is not None
+    assert context["receiptRunId"] == "run-source-formal-1"
+    assert context["modelPolicySha256"] == policy_sha256
+    assert context["outcomeKinds"] == ["source_evidence"]
+    assert context["questionStageBinding"]["formalNodeId"] == "source_finding"
+
+
 def _use_tmp_project_root(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     for service in (

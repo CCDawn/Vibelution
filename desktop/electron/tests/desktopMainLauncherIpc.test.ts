@@ -153,15 +153,42 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("signal: intentLease.signal");
   });
 
+  it("waits for the Electron control plane before dispatching startup and second-instance lifecycle commands", () => {
+    const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths);");
+    const readyResolveIndex = mainSource.indexOf("resolveLauncherControlPlaneReady?.();");
+    expect(bootstrapIndex).toBeGreaterThan(0);
+    expect(readyResolveIndex).toBeGreaterThan(bootstrapIndex);
+
+    const projectSlotStart = mainSource.indexOf("async function applyPendingProjectSlot");
+    const projectSlotEnd = mainSource.indexOf("if (runPrimaryWhenReady)", projectSlotStart);
+    const projectSlotBody = mainSource.slice(projectSlotStart, projectSlotEnd);
+    expect(projectSlotBody).toContain("await launcherControlPlaneReady");
+
+    const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
+    const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);
+    const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
+    expect(secondInstanceBody).toContain("await launcherControlPlaneReady");
+
+    const firstLifecycleIndex = mainSource.indexOf("const firstLifecycle =");
+    const firstLifecycleEnd = mainSource.indexOf("// T6:", firstLifecycleIndex);
+    const firstLifecycleBody = mainSource.slice(firstLifecycleIndex, firstLifecycleEnd);
+    expect(firstLifecycleBody).toContain("await handleSecondInstanceLifecycleCommand(firstLifecycle)");
+    expect(firstLifecycleBody).not.toContain("void handleSecondInstanceLifecycleCommand(firstLifecycle)");
+  });
+
   it("keeps command ids on reused main-line starts and accepted stop results", () => {
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle", lifecycleStart);
     const lifecycleBody = mainSource.slice(lifecycleStart, lifecycleEnd);
     const reuseStart = lifecycleBody.indexOf("mainLineBackendIsReusable(paths.workspaceRoot)");
-    const reuseEnd = lifecycleBody.indexOf("const intentLease", reuseStart);
+    const intentLeaseIndex = lifecycleBody.indexOf("const intentLease");
+    const reuseEnd = lifecycleBody.indexOf("// A reachable but non-reusable backend", reuseStart);
     const reuseBody = lifecycleBody.slice(reuseStart, reuseEnd);
 
+    expect(intentLeaseIndex).toBeGreaterThan(0);
+    expect(intentLeaseIndex).toBeLessThan(reuseStart);
     expect(reuseBody).toContain("commandId: randomUUID()");
+    expect(reuseBody).toContain("launcherLifecycleSupervisor.isCurrent(intentLease)");
     expect(lifecycleBody).toContain("mutation.value.accepted && !mutation.value.commandId?.trim()");
     expect(lifecycleBody).toContain("commandId: randomUUID()");
     expect(lifecycleBody).toContain('desiredState === "closed"');
@@ -224,14 +251,24 @@ describe("Electron main Launcher IPC facade", () => {
     expect(startupBody).not.toContain("windowProvider.openOrFocusWorkbench()");
   });
 
-  it("refreshes the live workbench URL after start instead of waiting on a stale bootstrap port", () => {
+  it("checks the verified release before reusing a live workbench", () => {
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
     const readyBody = mainSource.slice(readyStart, readyStart + 700);
     expect(readyBody).toContain("await refreshLiveWorkbenchUrl(paths)");
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBody.indexOf("await ensureLatestLauncher(")).toBeLessThan(
+      lifecycleBody.indexOf("await mainLineBackendIsReusable(paths.workspaceRoot)")
+    );
+    expect(lifecycleBody).toContain("mainLineBackendIsReachable(paths.workspaceRoot)");
+    expect(lifecycleBody).toContain('lifecycleOperation = "restart"');
+    expect(lifecycleBody).toContain("app.relaunch()");
     const productStart = mainSource.indexOf("async function startOrFocusWorkbenchFromProductEntryOnShell");
     const productBody = mainSource.slice(productStart, productStart + 1200);
-    expect(productBody).toContain("await refreshLiveWorkbenchUrl(");
     expect(productBody).toContain('orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })');
+    expect(productBody).not.toContain("waitForHttp");
+    expect(productBody).not.toContain("openOrFocus:");
     const secondStart = mainSource.indexOf("async function requestOpenWorkbenchFromSecondInstance");
     const secondBody = mainSource.slice(secondStart, secondStart + 900);
     expect(secondBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");

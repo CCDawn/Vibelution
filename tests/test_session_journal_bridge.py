@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.chat.conversation_ledger import (
+    EVENT_TURN_COMPLETED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_conversation_event,
@@ -132,6 +133,106 @@ def test_journal_bridge_notifies_catalog_after_successful_append(tmp_path: Path)
         set_session_catalog_dirty_observer(None)
 
     assert observed == [(tmp_path, "journal-dirty-session", "journal:1")]
+
+
+def test_journal_bridge_logs_only_terminal_commit(tmp_path: Path, monkeypatch) -> None:
+    observed: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    counters = iter((10.0, 20.0, 20.25))
+    monkeypatch.setattr(journal_bridge, "_perf_counter", lambda: next(counters))
+    monkeypatch.setattr(
+        journal_bridge,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: observed.append((args, kwargs)),
+    )
+
+    journal_bridge.append_session_conversation_event(
+        "journal-terminal-session",
+        "turn-a",
+        EVENT_TURN_STARTED,
+        status="running",
+        payload={},
+        source="test",
+        project_root=tmp_path,
+    )
+    terminal_event = journal_bridge.append_session_conversation_event(
+        "journal-terminal-session",
+        "turn-a",
+        EVENT_TURN_COMPLETED,
+        status="completed",
+        payload={"content": "must not enter diagnostics"},
+        source="test",
+        project_root=tmp_path,
+    )
+
+    assert len(observed) == 1
+    args, kwargs = observed[0]
+    assert args == (
+        "conversation",
+        "conversation_ledger",
+        "conversation.ledger.terminal_committed",
+    )
+    assert kwargs["outcome"] == "completed"
+    assert kwargs["fields"] == {
+        "sessionId": "journal-terminal-session",
+        "turnId": "turn-a",
+        "eventType": EVENT_TURN_COMPLETED,
+        "status": "completed",
+        "sequence": terminal_event.sequence,
+        "eventId": terminal_event.event_id,
+        "durationMs": 250.0,
+        "durability": "fsync",
+    }
+    assert "must not enter diagnostics" not in repr(observed)
+
+
+def test_journal_bridge_append_failure_redacts_exception_message(tmp_path: Path, monkeypatch) -> None:
+    secret = "secret-token-must-not-be-logged"
+    observed: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    counters = iter((30.0, 30.125))
+
+    def fail_append(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(journal_bridge, "_perf_counter", lambda: next(counters))
+    monkeypatch.setattr(
+        journal_bridge,
+        "append_conversation_event",
+        fail_append,
+    )
+    monkeypatch.setattr(
+        journal_bridge,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: observed.append((args, kwargs)),
+    )
+
+    with pytest.raises(RuntimeError, match="secret-token"):
+        journal_bridge.append_session_conversation_event(
+            "journal-failed-session",
+            "turn-f",
+            EVENT_TURN_COMPLETED,
+            status="failed",
+            payload={"content": "also private"},
+            source="test",
+            project_root=tmp_path,
+        )
+
+    assert len(observed) == 1
+    args, kwargs = observed[0]
+    assert args == (
+        "conversation",
+        "conversation_ledger",
+        "conversation.ledger.append_failed",
+    )
+    assert kwargs["fields"] == {
+        "sessionId": "journal-failed-session",
+        "turnId": "turn-f",
+        "eventType": EVENT_TURN_COMPLETED,
+        "errorType": "RuntimeError",
+        "errorMessageLength": len(secret),
+        "durationMs": 125.0,
+    }
+    assert secret not in repr(observed)
+    assert "also private" not in repr(observed)
 
 
 def test_facade_forwards_monkeypatched_project_root(tmp_path: Path, monkeypatch) -> None:

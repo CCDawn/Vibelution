@@ -18,6 +18,45 @@ describe("researchWorkflow formal contracts (T6)", () => {
     expect(coreSource).toContain("generatedAt");
   });
 
+  it("exposes additive formal runtime semantics without moving UI state into the snapshot", () => {
+    expect(coreSource).toContain("schemaVersion?: 2");
+    expect(coreSource).toContain("currentTask");
+    expect(coreSource).toContain("key: string");
+    expect(coreSource).toContain("stageId: string | null");
+    expect(coreSource).toContain("state: ResearchWorkflowTaskState");
+    expect(coreSource).toContain("automaticNextStep");
+    expect(coreSource).toContain("blockedReason");
+    expect(coreSource).toContain('responsibility: "system" | "user" | "operator"');
+    expect(coreSource).toContain("failureClass: string | null");
+    expect(coreSource).toContain("message: string | null");
+    expect(coreSource).toContain("blockerIds: string[]");
+    expect(coreSource).toContain("retryScope:");
+    expect(coreSource).toContain("recoveryPoint: string | null");
+    expect(coreSource).toContain("nextRetryAt: string | null");
+    expect(coreSource).toContain("requiresOperator: boolean");
+    expect(coreSource).toContain("afterSubmit: string | null");
+    expect(coreSource).toContain("maxAttempts");
+    expect(coreSource).toContain("progress");
+    expect(coreSource).toContain("completedNodes");
+    expect(coreSource).toContain("completedNodes: number");
+    expect(coreSource).toContain("totalNodes");
+    expect(coreSource).toContain("blockedNodes");
+    expect(coreSource).toContain("blockedNodes: number");
+    expect(coreSource).toContain("blockedNodeIds: ChallengeCupNodeId[]");
+    expect(coreSource).toContain("currentStageId");
+    expect(coreSource).toContain("stages");
+    expect(coreSource).toContain("artifactSummary");
+    expect(coreSource).toContain("finalArtifactId");
+    expect(coreSource).toContain("finalArtifactLocator");
+    expect(coreSource).toContain("deliveryStatus");
+    expect(coreSource).toContain("launchContext");
+    expect(coreSource).toContain("hypothesisSelectionId");
+    expect(coreSource).toContain("catalogAuthorizationId");
+    expect(coreSource).toContain("readinessReportSha256");
+    expect(coreSource).toContain("chainCorrelationId");
+    expect(coreSource).not.toContain("selectedNodeId:");
+  });
+
   it("accepts a typed snapshot and event envelope shape", () => {
     const offer: CommandOffer = {
       command: "start_node",

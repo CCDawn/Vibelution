@@ -66,6 +66,9 @@ describe("TeamResearchBoardPrimarySurface extraction contract", () => {
     expect(readFileSync(new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url), "utf8")).toContain("toolbarLeading");
     expect(readFileSync(new URL("./research-workflow/ResearchProcessWorkspace.tsx", import.meta.url), "utf8")).toContain("leading={toolbarLeading}");
     expect(readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8")).toContain("const statusCta = researchWorkflowTeamSelected && researchPrimaryAction");
+    expect(readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8")).toMatch(
+      /challengeCupResearchTeamSelected\s*&&\s*\(researchWorkspaceView === "workflow" \|\| researchWorkspaceView === "overview"\)/,
+    );
   });
 
   it("surface progressive-fills overview shell; empty only when settled without workflow", () => {

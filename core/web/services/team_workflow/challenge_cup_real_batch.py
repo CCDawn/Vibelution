@@ -55,14 +55,13 @@ from core.web.services import team_service
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
     get_challenge_cup_dev_control_snapshot,
 )
-from core.web.services.team_workflow.research_projects import team_workspace_root
+from core.web.services.team_workflow.research_projects import formal_team_workspace_root
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     CatalogRunAuthorizationError,
     authorization_to_dict,
     authorized_model_policy_sha256,
     find_catalog_run_authorization,
-    readiness_report_sha256,
-    require_readiness_report_sha256,
+    readiness_hash_from_snapshot,
     resolve_catalog_model_policy,
 )
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
@@ -74,7 +73,6 @@ BATCHES_DIRNAME = "batches"
 ENVELOPE_SCHEMA_VERSION = 1
 AWAITING_APPROVAL_BLOCKED_PREFIX = "awaiting_human_approval"
 CANCELLED_BLOCKED_REASON = "cancelled_by_operator"
-TEMPLATE_VERSION = "question-output-v2"
 
 DEFAULT_STAGE_TOKENS = 200_000
 DEFAULT_TOOL_CALLS = 600
@@ -121,7 +119,7 @@ def _resolve_team_id(team_id: str) -> str:
 
 
 def _batches_root(team_id: str) -> Path:
-    return team_workspace_root(team_id) / CONTROLS_DIRNAME / BATCHES_DIRNAME
+    return formal_team_workspace_root(team_id) / CONTROLS_DIRNAME / BATCHES_DIRNAME
 
 
 def _envelope_path(team_id: str, plan_id: str) -> Path:
@@ -263,31 +261,59 @@ def _default_approved_output_reader(
         "reviewRunId": run_id,
         "catalogId": catalog_id,
         "artifactSha256": artifact_sha256,
+        "resultPackage": detail.get("resultPackage"),
         "officialModelCall": record.get("validation", {})
         .get("officialModelCall")
         is True,
     }
 
 
-def _question_result_from_approved(
+def _validated_approved_package(
     state: CatalogExecutionState,
     question_id: str,
+    expected_run_id: str,
     approved: dict[str, Any],
-) -> QuestionResult:
-    knowledge_locator = (
-        f"challenge-question-artifact://{approved['catalogId']}/{question_id}/"
-        f"{approved['reviewRunId']}/{approved['artifactSha256']}"
-    )
-    model_receipt_locator = (
-        f"challenge-model-evidence://{question_id}/{approved['reviewRunId']}"
-    )
-    return QuestionResult.create(
-        scope=state.scope,
-        question_id=question_id,
-        model_receipt_locator=model_receipt_locator,
-        knowledge_locator=knowledge_locator,
-        template_version=TEMPLATE_VERSION,
-    )
+    *,
+    expected_model_policy_sha256: str,
+) -> QuestionResultPackage:
+    raw_package = approved.get("resultPackage")
+    if not isinstance(raw_package, Mapping):
+        raise ChallengeCupRealBatchError(
+            f"Approved output has no canonical result package: {question_id}.",
+            code="result_package_invalid",
+        )
+    try:
+        package = QuestionResultPackage.from_dict(
+            dict(raw_package),
+            expected_model_policy_sha256=expected_model_policy_sha256,
+        )
+    except (QuestionResultPackageError, TypeError, KeyError) as exc:
+        raise ChallengeCupRealBatchError(
+            f"Approved output canonical result package is invalid: {question_id}: {exc}",
+            code="result_package_invalid",
+        ) from exc
+    if package.question_id != question_id:
+        raise ChallengeCupRealBatchError(
+            f"Approved output package question does not match {question_id}.",
+            code="result_package_invalid",
+        )
+    if package.run_id != expected_run_id:
+        raise ChallengeCupRealBatchError(
+            f"Approved output package run does not match {expected_run_id}: {question_id}.",
+            code="result_package_invalid",
+        )
+    if package.scope.to_dict() != state.scope.to_dict():
+        raise ChallengeCupRealBatchError(
+            f"Approved output package scope does not match the real batch: {question_id}.",
+            code="result_package_invalid",
+        )
+    result = QuestionResult.from_package(package)
+    if result.submission_eligible is not True or result.receipt_complete is not True:
+        raise ChallengeCupRealBatchError(
+            f"Approved output package is not submission-approved: {question_id}.",
+            code="result_package_invalid",
+        )
+    return package
 
 
 def _validated_seed_package(
@@ -349,16 +375,10 @@ def _validated_seed_package(
 
 def _same_seed_result(
     existing: QuestionResult | None,
-    incoming: QuestionResult,
-    incoming_package: QuestionResultPackage | None,
+    incoming_package: QuestionResultPackage,
 ) -> bool:
     if existing is None:
         return False
-    if incoming_package is None:
-        return (
-            not existing.is_package_backed
-            and existing.to_dict() == incoming.to_dict()
-        )
     existing_snapshot = existing.package_snapshot
     return (
         existing_snapshot is not None
@@ -381,7 +401,7 @@ def _seed_from_previous_gates(
     """
     candidates: dict[
         str,
-        tuple[QuestionResult, QuestionResultPackage | None],
+        tuple[QuestionResult, QuestionResultPackage],
     ] = {}
     gate_id = state.plan.gate_id
     chain: list[str] = []
@@ -403,27 +423,19 @@ def _seed_from_previous_gates(
                     f"{result.question_id}."
                 ) from exc
 
-            package = (
-                _validated_seed_package(
-                    state,
-                    result,
-                    expected_model_policy_sha256=expected_model_policy_sha256,
-                )
-                if result.is_package_backed
-                else None
-            )
-            if package is None and result.locator != state.scope.locator_for(
-                result.question_id
-            ):
+            if not result.is_package_backed:
                 raise CatalogExecutionError(
-                    f"Previous gate legacy result does not match the full target "
-                    f"catalog scope: {result.question_id}."
+                    f"Previous gate result has no canonical package: {result.question_id}."
                 )
+            package = _validated_seed_package(
+                state,
+                result,
+                expected_model_policy_sha256=expected_model_policy_sha256,
+            )
 
             if target_status is not QuestionStatus.PENDING:
                 if target_status is QuestionStatus.SUCCEEDED and not _same_seed_result(
                     state.result_for(result.question_id),
-                    result,
                     package,
                 ):
                     raise CatalogExecutionError(
@@ -436,7 +448,6 @@ def _seed_from_previous_gates(
             if existing_candidate is not None:
                 if not _same_seed_result(
                     existing_candidate[0],
-                    result,
                     package,
                 ):
                     raise CatalogExecutionError(
@@ -448,10 +459,7 @@ def _seed_from_previous_gates(
 
     seeded = 0
     for result, package in candidates.values():
-        if package is not None:
-            state.record_package(package)
-        else:
-            state.record_success(result.question_id, result)
+        state.record_package(package)
         seeded += 1
     return seeded
 
@@ -646,43 +654,19 @@ def _platform_snapshot_allows_real_batch(snapshot: Mapping[str, Any]) -> bool:
     """Recognize the current readiness boundary without owning its schema.
 
     The legacy DEV control surface projects ``RESEARCH_AUTHORIZATION_REQUIRED``.
-    Catalog readiness will expose its own report/action later, so the real-batch
-    service accepts any explicit authorization-required action or a READY report
-    that says research authorization is required.  The durable approval record
-    below remains mandatory in every case.
+    The real-batch service accepts only that exact action.  The durable approval
+    record below remains mandatory as a separate authorization proof.
     """
 
-    action = str(snapshot.get("nextLegalAction") or "").strip().upper()
-    if action.endswith("AUTHORIZATION_REQUIRED"):
-        return True
-    report = snapshot.get("report")
-    if not isinstance(report, Mapping):
-        report = snapshot.get("readinessReport")
     return (
-        isinstance(report, Mapping)
-        and str(report.get("status") or "").strip().upper() == "READY"
-        and report.get("researchAuthorizationRequired") is True
+        str(snapshot.get("nextLegalAction") or "").strip()
+        == "RESEARCH_AUTHORIZATION_REQUIRED"
     )
 
 
 def _readiness_evidence_from_snapshot(snapshot: Mapping[str, Any]) -> str:
     """Resolve the exact current readiness hash used by authorization lookup."""
-
-    for key in (
-        "readinessReportSha256",
-        "readinessReportHash",
-        "catalogReadinessReportSha256",
-    ):
-        value = str(snapshot.get(key) or "").strip()
-        if value:
-            return require_readiness_report_sha256(value)
-    for key in ("readinessReport", "report"):
-        value = snapshot.get(key)
-        if isinstance(value, (Mapping, list)):
-            return readiness_report_sha256(value)
-    raise CatalogRunAuthorizationError(
-        "The readiness snapshot has no canonical report/hash."
-    )
+    return readiness_hash_from_snapshot(snapshot)
 
 
 def _batch_scope(team_id: str, plan_id: str) -> dict[str, Any]:
@@ -708,7 +692,13 @@ def _require_authorization(team_id: str) -> dict[str, Any]:
         snapshot
     ):
         raise ChallengeCupRealBatchError(
-            "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED or another explicit research-authorization boundary; real batches stay closed.",
+            "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED; real batches stay closed.",
+            code="platform_not_authorized",
+        )
+    snapshot_team = str(snapshot.get("teamId") or "").strip()
+    if snapshot_team and snapshot_team != str(team_id or "").strip():
+        raise ChallengeCupRealBatchError(
+            "The DEV control snapshot belongs to another team; real batches stay closed.",
             code="platform_not_authorized",
         )
     return dict(snapshot)
@@ -721,7 +711,10 @@ def _require_catalog_run_authorization(
 ):
     try:
         scope = _batch_scope(team_id, plan_id)
-        report_hash = _readiness_evidence_from_snapshot(snapshot)
+        report_hash = readiness_hash_from_snapshot(
+            snapshot,
+            expected_team_id=team_id,
+        )
         authorization = find_catalog_run_authorization(
             team_id,
             plan_id=plan_id,
@@ -811,8 +804,12 @@ def record_catalog_run_authorization(
         and readiness_report_sha256_value is None
         and readiness_report_hash is None
     ):
-        snapshot = _require_authorization(_resolve_team_id(team_id))
-        readiness_evidence = snapshot.get("readinessReport") or snapshot.get("report")
+        normalized_team = _resolve_team_id(team_id)
+        snapshot = _require_authorization(normalized_team)
+        readiness_report_sha256_value = readiness_hash_from_snapshot(
+            snapshot,
+            expected_team_id=normalized_team,
+        )
     try:
         return _record_catalog_run_authorization(
             _resolve_team_id(team_id),
@@ -1106,6 +1103,20 @@ def poll_real_batch(
         _require_envelope_catalog_run_authorization(
             envelope, current_authorization
         )
+        try:
+            durable_authorization = _durable_authorization_record(
+                envelope.get("catalogRunAuthorization"),
+                team_id=normalized_team,
+                plan_id=normalized_plan,
+            )
+            expected_model_policy_sha256 = authorized_model_policy_sha256(
+                durable_authorization
+            )
+        except CatalogRunAuthorizationError as exc:
+            raise ChallengeCupRealBatchError(
+                "The real batch durable CatalogRunAuthorization is invalid.",
+                code="catalog_run_authorization_stale",
+            ) from exc
         harvested: list[dict[str, Any]] = []
         for question_id in state.plan.question_ids:
             if state.status(question_id) is not QuestionStatus.RUNNING:
@@ -1120,10 +1131,10 @@ def poll_real_batch(
                 continue
             status = str(run.get("status") or "").strip()
             if status in ("succeeded", "failed", "cancelled"):
-                envelope["runRefs"].pop(question_id, None)
                 if status == "succeeded":
                     approved = approved_reader(normalized_team, question_id)
                     if approved is None:
+                        envelope["runRefs"].pop(question_id, None)
                         state.record_blocked(
                             question_id,
                             f"{AWAITING_APPROVAL_BLOCKED_PREFIX}:{entry['runId']}",
@@ -1136,13 +1147,19 @@ def poll_real_batch(
                             {"questionId": question_id, "outcome": "awaiting_human_approval"}
                         )
                     else:
-                        state.record_success(
+                        package = _validated_approved_package(
+                            state,
                             question_id,
-                            _question_result_from_approved(state, question_id, approved),
+                            str(entry["runId"]),
+                            approved,
+                            expected_model_policy_sha256=expected_model_policy_sha256,
                         )
+                        state.record_package(package)
+                        envelope["runRefs"].pop(question_id, None)
                         envelope["consecutiveFailures"] = 0
                         harvested.append({"questionId": question_id, "outcome": "succeeded"})
                 else:
+                    envelope["runRefs"].pop(question_id, None)
                     state.record_failure(question_id, f"run_{status}")
                     envelope["consecutiveFailures"] = int(envelope["consecutiveFailures"]) + 1
                     harvested.append({"questionId": question_id, "outcome": f"run_{status}"})
@@ -1154,10 +1171,21 @@ def poll_real_batch(
             if state.status(question_id) is QuestionStatus.BLOCKED:
                 approved = approved_reader(normalized_team, question_id)
                 if approved is not None:
-                    state.record_success(
+                    awaiting = envelope["awaitingApproval"].get(question_id)
+                    if not isinstance(awaiting, Mapping) or not awaiting.get("runId"):
+                        raise ChallengeCupRealBatchError(
+                            f"Awaiting approval run binding is missing: {question_id}.",
+                            code="result_package_invalid",
+                        )
+                    package = _validated_approved_package(
+                        state,
                         question_id,
-                        _question_result_from_approved(state, question_id, approved),
+                        str(awaiting["runId"]),
+                        approved,
+                        expected_model_policy_sha256=expected_model_policy_sha256,
                     )
+                    state.invalidate(question_id, "human_approval_package_available")
+                    state.record_package(package)
                     envelope["awaitingApproval"].pop(question_id, None)
                     envelope["consecutiveFailures"] = 0
                     harvested.append({"questionId": question_id, "outcome": "approved"})

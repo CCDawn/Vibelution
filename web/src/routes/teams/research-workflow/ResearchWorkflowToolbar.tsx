@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import {
   VButton,
+  VDropdownMenu,
   VSelect,
   VStatusChip,
-  VTabs,
   VToolbar,
 } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
@@ -15,6 +15,10 @@ import {
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import type { HypothesisFirstStage } from "./hypothesisFirstNextAction";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import {
+  RESEARCH_STAGE_TERMS,
+  RUN_TIMELINE_TERM,
+} from "./researchTerminology";
 import styles from "./ResearchWorkflowToolbar.styles";
 
 type WorkflowPhase = {
@@ -25,6 +29,24 @@ type WorkflowPhase = {
   currentNodeEn?: string;
   stageZh?: string;
   stageEn?: string;
+};
+
+const HYPOTHESIS_FIRST_STAGE_PHASES: Partial<Record<HypothesisFirstStage, WorkflowPhase>> = {
+  generation_missing: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_running: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_ready_to_summarize: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_summarizing: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  generation_awaiting_approval: { step: 1, zh: "候选形成", en: "Candidate formation" },
+  selection_required: { step: 2, zh: "假说选择", en: "Hypothesis selection" },
+  review_running: { step: 3, zh: "团队评审", en: "Team review" },
+  review_ready_to_summarize: { step: 3, zh: "团队评审", en: "Team review" },
+  review_summarizing: { step: 3, zh: "团队评审", en: "Team review" },
+  review_awaiting_approval: { step: 3, zh: "团队评审", en: "Team review" },
+  next_review: { step: 3, zh: "团队评审", en: "Team review" },
+  budget_exhausted: { step: 3, zh: "团队评审", en: "Team review" },
+  collecting: { step: 4, zh: "资料搜集", en: "Evidence collection" },
+  collection_recovery: { step: 4, zh: "资料搜集", en: "Evidence collection" },
+  handoff_pending: { step: 4, zh: "资料搜集", en: "Evidence collection" },
 };
 
 export function researchWorkflowPhase(
@@ -39,11 +61,7 @@ export function researchWorkflowPhase(
       .find(Boolean)
     : null;
   if (runtimeNode) {
-    const stage = {
-      knowledge_collection: { zh: "资料搜集", en: "Knowledge collection" },
-      experiment_design: { zh: "实验设计", en: "Experiment design" },
-      execution_iteration: { zh: "执行迭代", en: "Execution & iteration" },
-    }[runtimeNode.stageId];
+    const stage = RESEARCH_STAGE_TERMS[runtimeNode.stageId];
     return {
       step: null,
       zh: stage.zh,
@@ -65,6 +83,14 @@ export function researchWorkflowPhase(
       en: "Hypothesis-first loop complete",
     };
   }
+  // Structural stage mapping is authoritative whenever the hypothesis-first
+  // chain provides one. The navigation-label ladder below stays only as a
+  // fallback for callers without a stage, so label rewording can no longer
+  // silently move the progress marker.
+  const stagedPhase = nextActionStage ? HYPOTHESIS_FIRST_STAGE_PHASES[nextActionStage] : undefined;
+  if (stagedPhase) {
+    return stagedPhase;
+  }
   const label = String(navigationLabel || "").trim();
   if (label.includes("假说收敛")) return { step: 5, zh: "假说收敛", en: "Convergence" };
   if (label.includes("资料搜集")) return { step: 4, zh: "资料搜集", en: "Evidence collection" };
@@ -82,8 +108,6 @@ export function ResearchWorkflowToolbar(props: {
   runStatus: string;
   experimentOptions: ExperimentSwitchOption[];
   panel: ResearchProcessPanel;
-  createDisabled: boolean;
-  createDisabledReason?: string;
   /** A hypothesis-first chain may be active without a formal run id. */
   workflowActive?: boolean;
   navigationLabel?: string;
@@ -91,7 +115,7 @@ export function ResearchWorkflowToolbar(props: {
   formalRuntimeActive?: boolean;
   /** Authoritative hypothesis-first stage when no formal runtime node exists. */
   nextActionStage?: HypothesisFirstStage;
-  /** Fail-closed scope transition state: show status instead of a launch action. */
+  /** Fail-closed scope transition state shown as read-only workflow health. */
   scopeMismatch?: boolean;
   statusMessage?: string;
   atCurrentTask?: boolean;
@@ -107,40 +131,18 @@ export function ResearchWorkflowToolbar(props: {
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
-  const workflowActive = props.workflowActive ?? Boolean(props.runId);
   const selectedQuestionId = props.identity?.questionId || null;
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
     : (isZh ? "尚未选择实验" : "No experiment selected");
-  const phase = researchWorkflowPhase(
-    props.navigationLabel,
-    props.runtimeCurrentNodeIds,
-    props.formalRuntimeActive,
-    props.nextActionStage,
-  );
-  const detailsPanel = (
-    props.panel === "question"
-    || props.panel === "agents"
-    || props.panel === "timeline"
-    || props.panel === "evidence"
-    || props.panel === "team"
-    || props.panel === "progress"
-    || props.panel === "launch"
-  ) ? props.panel : null;
-  // Navigation tabs for the inspector pane: views only. Actions never live
-  // here — 新建运行 stays a button so navigation and actions stay separable
-  // (GitHub Actions keeps view switches and run actions apart).
-  const detailTabs = [
-    { id: "progress", label: isZh ? "题目进度" : "Progress" },
-    { id: "question", label: isZh ? "题目档案" : "Question archive" },
-    { id: "team", label: isZh ? "成员与讨论" : "Members" },
-    { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph" },
-    { id: "agents", label: "Agent" },
-    { id: "timeline", label: isZh ? "运行记录" : "History" },
+  const detailItems = [
+    { id: "progress", label: isZh ? "题目进度" : "Progress", onSelect: () => props.onOpenPanel("progress") },
+    { id: "question", label: isZh ? "题目档案" : "Question archive", onSelect: () => props.onOpenPanel("question") },
+    { id: "team", label: isZh ? "成员与讨论" : "Members", onSelect: () => props.onOpenPanel("team") },
+    { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph", onSelect: () => props.onOpenPanel("evidence") },
+    { id: "agents", label: "Agent", onSelect: () => props.onOpenPanel("agents") },
+    { id: "timeline", label: isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en, onSelect: () => props.onOpenPanel("timeline") },
   ];
-  const activeDetailTab = detailTabs.some((tab) => tab.id === detailsPanel)
-    ? String(detailsPanel ?? "")
-    : undefined;
   return (
     <VToolbar ariaLabel={isZh ? "科研流程" : "Research workflow"} wrap={false} className={styles.root}>
       <div className={styles.context}>
@@ -166,31 +168,13 @@ export function ResearchWorkflowToolbar(props: {
             <span className={styles.empty}>{emptySwitcherLabel}</span>
           )}
         </div>
-        {workflowActive ? (
-          <div className={styles.phase} data-vui="research-workflow-phase">
-            {phase.stageZh && phase.currentNodeZh
-              ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
-              : phase.step === 3 && props.chainRound && props.chainRound.current > 0
-                ? (isZh
-                  ? `假说评审 · 第 ${Math.min(props.chainRound.current, props.chainRound.budget)}/${props.chainRound.budget} 轮`
-                  : `Hypothesis review · round ${Math.min(props.chainRound.current, props.chainRound.budget)}/${props.chainRound.budget}`)
-              : phase.step
-                ? (isZh ? `假说准备 · ${phase.step}/5` : "Hypothesis prep · " + phase.step + "/5")
-                : (isZh ? phase.zh : phase.en)}
-          </div>
-        ) : null}
       </div>
       <div className={styles.actions}>
-        <VTabs
-          density="compact"
-          className={styles.details}
-          listClassName="flex-nowrap overflow-x-auto"
-          aria-label={isZh ? "检查器视图" : "Inspector views"}
-          items={detailTabs}
-          value={activeDetailTab}
-          onValueChange={(key) => {
-            props.onOpenPanel(key as ResearchProcessPanel);
-          }}
+        <VDropdownMenu
+          aria-label={isZh ? "查看只读信息" : "View read-only information"}
+          align="end"
+          items={detailItems}
+          trigger={<VButton type="button" density="compact" variant="secondary">{isZh ? "查看" : "View"}</VButton>}
         />
         {props.onOpenTeamCommunication ? (
           <VButton
@@ -200,62 +184,13 @@ export function ResearchWorkflowToolbar(props: {
             onClick={props.onOpenTeamCommunication}
             data-testid="research-open-team-communication"
           >
-            {isZh ? "团队沟通" : "Team communication"}
-          </VButton>
-        ) : null}
-        {props.runId ? (
-          <VButton
-            type="button"
-            density="compact"
-            variant="ghost"
-            isDisabled={props.createDisabled}
-            disabledReason={props.createDisabledReason}
-            onClick={() => props.onOpenPanel("launch")}
-          >
-            {isZh ? "新建运行" : "New run"}
-          </VButton>
-        ) : null}
-        {workflowActive && props.atCurrentTask ? (
-          // Position indicator, not a dead button: a disabled ghost labeled
-          // 当前任务 reads as broken while adding no action (audit #7).
-          <VStatusChip tone="accent" className={styles.primary}>
-            {isZh ? "当前任务" : "Current task"}
-          </VStatusChip>
-        ) : null}
-        {workflowActive && !props.atCurrentTask ? (
-          <VButton
-            type="button"
-            density="compact"
-            variant="primary"
-            className={styles.primary}
-            isDisabled={!props.onNavigateCurrent}
-            disabledReason={
-              !props.onNavigateCurrent
-                ? (isZh ? "当前任务导航尚未准备好，请稍后重试" : "Current-task navigation is not ready; try again shortly")
-                : undefined
-            }
-            onClick={props.onNavigateCurrent}
-          >
-            {(props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
+            {isZh ? "协作" : "Collaborate"}
           </VButton>
         ) : null}
         {props.scopeMismatch && props.statusMessage ? (
-          <VStatusChip tone="warning" role="status" className={styles.primary}>
+          <VStatusChip tone="warning" role="status" className={styles.trailing}>
             {props.statusMessage}
           </VStatusChip>
-        ) : null}
-        {!workflowActive && !props.scopeMismatch ? (
-          <VButton
-            type="button"
-            density="compact"
-            variant="primary"
-            className={styles.primary}
-            onClick={() => props.onOpenPanel("launch")}
-            isDisabled={props.createDisabled}
-            disabledReason={props.createDisabledReason}
-          >
-            {isZh ? "选择题目开始研究" : "Choose a question to start research"}
-          </VButton>
         ) : null}
       </div>
     </VToolbar>

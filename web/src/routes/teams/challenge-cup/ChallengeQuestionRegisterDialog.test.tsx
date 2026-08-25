@@ -56,7 +56,6 @@ vi.mock("@tanstack/react-query", () => ({
 import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
 import dialogSource from "./ChallengeQuestionRegisterDialog.tsx?raw";
 import detailPanelSource from "./ChallengeQuestionDetailPanel.tsx?raw";
-import progressPanelSource from "../research-workflow/ChallengeMvpProgressPanel.tsx?raw";
 
 const VALID_OUTPUT = {
   schema_version: 2,
@@ -316,9 +315,6 @@ describe("ChallengeQuestionRegisterDialog", () => {
     expect(dialogSource).toContain("publishChallengeQuestionRun");
     expect(dialogSource).toContain("queryKeys.challengeQuestionRunStatus(teamId)");
     expect(dialogSource).toContain("queryKeys.challengeQuestionRunDetail(teamId, affectedQuestionId)");
-
-    expect(progressPanelSource).toContain('from "../challenge-cup/ChallengeQuestionRegisterDialog"');
-    expect(progressPanelSource).toContain("setRegisterDialogOpen(true)");
 
     expect(detailPanelSource).toContain('record.status === "needs_revision"');
     expect(detailPanelSource).toContain("parentRunId={record.runId}");

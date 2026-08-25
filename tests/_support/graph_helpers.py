@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,10 @@ from core.web.services.team_workflow.research_runtime.graph_dispatch_worker impo
 from tests._support.command_helpers import CommandHarness
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
 
+ENTRY_NODE_ID = "problem_understanding"
+
 NODE_ORDER = [
+    ENTRY_NODE_ID,
     "source_finding",
     "source_extraction",
     "evidence_relations",
@@ -151,6 +155,34 @@ class GraphHarness:
             )
 
         self.commands.store.submit(mutate, force_flush=True).result(timeout=10)
+
+    def start_thread_to(self, target_node_id: str, *, run_id: str = "run-test"):
+        """Enter a fresh run through the graph entry node and walk until the
+        thread interrupts at ``target_node_id``; returns its pending adapter
+        record (left unconsumed for the caller).
+
+        The formal graph entry is ``problem_understanding``: a start dispatch
+        targeting a downstream node on a fresh run is blocked as a node
+        mismatch, so tests must enter through the entry like production does.
+        """
+        self.enqueue_graph_dispatch(run_id, ENTRY_NODE_ID, 1)
+        for _ in range(len(NODE_ORDER)):
+            self.worker.run_once()
+            pending = self.latest_adapter_pending(run_id)
+            if pending is None:
+                raise AssertionError(f"walk to {target_node_id}: no adapter pending")
+            payload = json.loads(pending.payload_json)
+            node_id = str(payload["nodeId"])
+            if node_id == target_node_id:
+                return pending
+            self.resume(
+                run_id=run_id,
+                node_id=node_id,
+                attempt=int(payload["attempt"]),
+                action_id=str(payload["actionId"]),
+            )
+            self.consume_adapter(pending.action_id)
+        raise AssertionError(f"walk did not reach {target_node_id}")
 
     def resume(
         self,

@@ -9,11 +9,15 @@ import type {
 } from "../../../api/types/hypothesisFirst";
 import {
   buildHypothesisFirstCanvasRegion,
+  HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+  HYPOTHESIS_FIRST_REVIEW_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
   HYPOTHESIS_FIRST_STAGE_ID,
+  hypothesisFirstSemanticNodeId,
   isHypothesisFirstCanvasNode,
+  summarizeHypothesisReviewMeetings,
   type HypothesisFirstCanvasRegionInput,
 } from "./hypothesisFirstCanvasRegion";
 
@@ -150,6 +154,17 @@ function regionOf(input: Partial<HypothesisFirstCanvasRegionInput>) {
 }
 
 describe("hypothesisFirstCanvasRegion", () => {
+  it("counts fan-out siblings as one logical review round", () => {
+    const summary = summarizeHypothesisReviewMeetings([
+      meeting(1, "closed", { meetingRoundId: "r1-a", digestId: "d1-a" }),
+      meeting(1, "closed", { meetingRoundId: "r1-b", digestId: "d1-b" }),
+      meeting(2, "awaiting_approval", { meetingRoundId: "r2-a" }),
+    ]);
+
+    expect(summary.effectiveRounds).toBe(2);
+    expect(summary.latestRound).toBe(2);
+  });
+
   it("returns null only when the chain has no question identity", () => {
     expect(regionOf({ chainState: null })).toBeNull();
   });
@@ -239,23 +254,29 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(selectionNode.description).toBe("已产出 3 条候选，等待人工选择");
   });
 
-  it("selection only: selection card succeeded, no future gate, no pipeline", () => {
+  it("selection only: selection succeeds and the stable review card waits for its first round", () => {
     const region = regionOf({ selection: selection() })!;
     expect(region).not.toBeNull();
     expect(region.stage.stageId).toBe(HYPOTHESIS_FIRST_STAGE_ID);
     expect(region.stage.label).toBe("假说先行");
     expect(region.stage.index).toBe(0);
-    expect(region.stage.progress).toEqual({ completed: 1, total: 1 });
-    expect(region.stage.stageTone).toBe("done");
+    expect(region.stage.progress).toEqual({ completed: 1, total: 2 });
+    expect(region.stage.stageTone).toBe("idle");
     expect(region.showDownstreamPipeline).toBe(false);
 
     const ids = region.nodes.map((node) => node.nodeId);
-    expect(ids).toEqual([HYPOTHESIS_FIRST_SELECTION_NODE_ID]);
+    expect(ids).toEqual([HYPOTHESIS_FIRST_SELECTION_NODE_ID, HYPOTHESIS_FIRST_REVIEW_NODE_ID]);
     const selectionNode = region.nodes[0]!;
     expect(selectionNode.visualKind).toBe("human_gate");
     expect(selectionNode.status).toBe("succeeded");
     expect(selectionNode.description).toContain("3 个候选");
-    expect(region.edges).toEqual([]);
+    expect(region.edges).toEqual([
+      expect.objectContaining({
+        edgeId: "hf_e_sel_review",
+        fromNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+        toNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
+      }),
+    ]);
   });
 
   it("candidates without a generation meeting still show a completed generation card", () => {
@@ -279,7 +300,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     const selectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID)!;
     expect(selectionNode.status).toBe("pending");
     // No selection → no 选定假说 edge.
-    expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_m1")).toBe(false);
+    expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_review")).toBe(false);
   });
 
   it("with candidates but no selection the selection card waits for a human", () => {
@@ -289,27 +310,28 @@ describe("hypothesisFirstCanvasRegion", () => {
     })!;
     const selectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID)!;
     expect(selectionNode.status).toBe("waiting_human");
-    expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_m1")).toBe(false);
+    expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_review")).toBe(false);
   });
 
-  it("first round open: meeting card running, no future gate or pipeline", () => {
+  it("projects an open first round as the single semantic review card", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [meeting(1, "open")],
       chainState: chainState({ meetingCount: 1, firstMeetingId: "hf-review-sel-1-r1", openMeetingIds: ["hf-review-sel-1-r1"] }),
     })!;
-    const meetingNode = region.nodes.find((node) => node.nodeId === "hf_meeting_1")!;
-    expect(meetingNode.status).toBe("running");
-    expect(meetingNode.visualKind).toBe("agent_task");
+    const reviewNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(reviewNode.status).toBe("running");
+    expect(reviewNode.visualKind).toBe("agent_task");
+    expect(reviewNode.description).toBe("1 轮有效评审 · 0 次失败重试 · 最近第 1 轮");
 
     const edgeIds = region.edges.map((edge) => edge.edgeId);
-    expect(edgeIds).toEqual(["hf_e_sel_m1"]);
+    expect(edgeIds).toEqual(["hf_e_sel_review"]);
     expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)).toBe(false);
     expect(region.showDownstreamPipeline).toBe(false);
     const entry = region.edges[0]!;
     expect(entry).toMatchObject({
       fromNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
-      toNodeId: "hf_meeting_1",
+      toNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
       label: "选定假说",
       // decision_branch keeps the label narrative-visible in serpentine mode.
       semanticKind: "decision_branch",
@@ -317,7 +339,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     });
   });
 
-  it("maps meeting statuses: summarizing/awaiting_approval wait on humans, closed without digest is blocked", () => {
+  it("uses the latest attempt status while retaining all rounds in the summary", () => {
     const region = regionOf({
       meetings: [
         meeting(1, "summarizing"),
@@ -325,51 +347,55 @@ describe("hypothesisFirstCanvasRegion", () => {
         meeting(3, "closed", { previousMeetingRoundId: "hf-review-sel-1-r2" }),
       ],
     })!;
-    expect(region.nodes.find((node) => node.nodeId === "hf_meeting_1")?.status).toBe("waiting_human");
-    expect(region.nodes.find((node) => node.nodeId === "hf_meeting_1")?.description).toBe(
-      "正在整理本轮讨论结论",
-    );
-    expect(region.nodes.find((node) => node.nodeId === "hf_meeting_2")?.status).toBe("waiting_human");
-    // fail-closed: closed round without digestRef is NOT succeeded.
-    expect(region.nodes.find((node) => node.nodeId === "hf_meeting_3")?.status).toBe("blocked");
-    // Direct continuations (no collection bridge) carry the 再讨论 label.
-    const continuations = region.edges.filter((edge) => edge.label === "再讨论");
-    expect(continuations.map((edge) => edge.edgeId)).toEqual(["hf_e_m1_m2", "hf_e_m2_m3"]);
-    expect(continuations.every((edge) => edge.semanticKind === "main")).toBe(true);
-    expect(continuations.every((edge) => !edge.labelAlwaysVisible)).toBe(true);
+    const reviewNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(reviewNode.status).toBe("blocked");
+    expect(reviewNode.description).toBe("2 轮有效评审 · 1 次失败重试 · 最近第 3 轮");
+    expect(region.nodes.filter((node) => node.label === "假说评审")).toHaveLength(1);
   });
 
-  it("collection in flight: decision_branch edge from the meeting to a pending collection card", () => {
+  it("aggregates collection requests behind one semantic evidence card", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [meeting(1, "closed", { digestRef: "digest-1", closedAt: "2026-08-19T02:00:00Z" })],
       collectionRequests: [request("req-1", "hf-review-sel-1-r1")],
       chainState: chainState({ meetingCount: 1, collectionRequestCount: 1, pendingCollectionCount: 1 }),
     })!;
-    const meetingNode = region.nodes.find((node) => node.nodeId === "hf_meeting_1")!;
-    expect(meetingNode.status).toBe("succeeded");
-    const collectionNode = region.nodes.find((node) => node.nodeId === "hf_collection_req-1")!;
+    const reviewNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(reviewNode.status).toBe("succeeded");
+    const collectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID)!;
     expect(collectionNode).toMatchObject({
-      label: "资料搜集 · 缺口 1",
+      label: "资料补充",
       visualKind: "system_task",
       status: "pending",
     });
-    const decision = region.edges.find((edge) => edge.edgeId === "hf_e_m1_creq-1")!;
+    const decision = region.edges.find((edge) => edge.edgeId === "hf_e_review_collection")!;
     expect(decision).toMatchObject({
-      fromNodeId: "hf_meeting_1",
-      toNodeId: "hf_collection_req-1",
-      label: "搜集决策",
-      semanticKind: "decision_branch",
+      fromNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
+      toNodeId: HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
+      label: "补充证据",
+      semanticKind: "main",
       labelAlwaysVisible: true,
     });
-    // No handoff yet → no 知识包交接 edge, no second round.
-    expect(region.edges.some((edge) => edge.label === "知识包交接")).toBe(false);
-    expect(region.nodes.some((node) => node.nodeId === "hf_meeting_2")).toBe(false);
     expect(region.stage.progress).toEqual({ completed: 2, total: 4 });
     expect(region.showDownstreamPipeline).toBe(true);
   });
 
-  it("two closed rounds: handoff edge bridges collection to round 2 and progress counts completed cards", () => {
+  it("projects child-run failure even when the durable request remains pending", () => {
+    const region = regionOf({
+      selection: selection(),
+      meetings: [meeting(1, "closed", { digestRef: "digest-1" })],
+      collectionRequests: [request("req-1", "hf-review-sel-1-r1", {
+        status: "pending",
+        collectionRunStatus: "needs_continue",
+      })],
+      chainState: chainState({ meetingCount: 1, collectionRequestCount: 1, pendingCollectionCount: 1 }),
+    })!;
+    const collectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID)!;
+    expect(collectionNode.status).toBe("failed");
+    expect(collectionNode.description).toContain("需要恢复");
+  });
+
+  it("keeps multiple closed rounds and handoffs inside the semantic cards", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [
@@ -390,22 +416,11 @@ describe("hypothesisFirstCanvasRegion", () => {
       reviewRoundLinks: [link("hf-review-sel-1-r2", "hf-review-sel-1-r1", "req-1", 2)],
       chainState: chainState({ meetingCount: 2, collectionRequestCount: 1, collectionReady: true }),
     })!;
-    expect(region.nodes.find((node) => node.nodeId === "hf_collection_req-1")?.status).toBe("succeeded");
-    const handoff = region.edges.find((edge) => edge.edgeId === "hf_e_creq-1_m2")!;
-    expect(handoff).toMatchObject({
-      fromNodeId: "hf_collection_req-1",
-      toNodeId: "hf_meeting_2",
-      label: "知识包交接",
-      semanticKind: "main",
-      // knowledge_package gate kind keeps the handoff label narrative-visible.
-      gateKind: "knowledge_package",
-      labelAlwaysVisible: true,
-    });
-    // Bridged continuation must NOT also draw a direct 再讨论 edge.
-    expect(region.edges.some((edge) => edge.edgeId === "hf_e_m1_m2")).toBe(false);
-    // Latest meeting feeds the convergence gate.
-    expect(region.edges.some((edge) => edge.edgeId === "hf_e_m2_gate")).toBe(true);
-    expect(region.stage.progress).toEqual({ completed: 4, total: 5 });
+    expect(region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID)?.status).toBe("succeeded");
+    expect(region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)?.description).toContain("2 轮有效评审");
+    expect(region.nodes.filter((node) => node.nodeId.startsWith("hf_meeting_"))).toHaveLength(0);
+    expect(region.edges.some((edge) => edge.edgeId === "hf_e_semantic_tail_gate")).toBe(true);
+    expect(region.stage.progress).toEqual({ completed: 3, total: 4 });
     // All cards succeeded except the pending gate → no active/attention signal.
     expect(region.stage.stageTone).toBe("idle");
   });
@@ -450,7 +465,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     })!;
     expect(region.nodes.map((node) => node.nodeId)).toEqual([
       HYPOTHESIS_FIRST_SELECTION_NODE_ID,
-      "hf_meeting_1",
+      HYPOTHESIS_FIRST_REVIEW_NODE_ID,
     ]);
   });
 
@@ -462,10 +477,17 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(isHypothesisFirstCanvasNode("source_finding")).toBe(false);
     expect(isHypothesisFirstCanvasNode(null)).toBe(false);
   });
+
+  it("maps ledger instance ids to stable canvas node ids", () => {
+    expect(hypothesisFirstSemanticNodeId("hf_meeting_5")).toBe(HYPOTHESIS_FIRST_REVIEW_NODE_ID);
+    expect(hypothesisFirstSemanticNodeId("hf_collection_req-1")).toBe(HYPOTHESIS_FIRST_COLLECTION_NODE_ID);
+    expect(hypothesisFirstSemanticNodeId("source_finding")).toBe(HYPOTHESIS_FIRST_COLLECTION_NODE_ID);
+    expect(hypothesisFirstSemanticNodeId("hf_selection")).toBe(HYPOTHESIS_FIRST_SELECTION_NODE_ID);
+  });
 });
 
-describe("superseded review attempts fold into the next round (GitHub Actions attempt pattern)", () => {
-  it("folds an empty superseded round into the successor's retry badge", () => {
+describe("review attempts aggregate behind one semantic card", () => {
+  it("summarizes effective rounds, retries and the latest round", () => {
     const region = regionOf({
       meetings: [
         meeting(1, "closed", { digestRef: "digest-1" }),
@@ -473,55 +495,43 @@ describe("superseded review attempts fold into the next round (GitHub Actions at
         meeting(3, "open"),
       ],
     });
-    const labels = region!.nodes.map((node) => node.label);
-    expect(labels).toContain("第 1 轮讨论·评审");
-    expect(labels).not.toContain("第 2 轮讨论·评审");
-    expect(labels).toContain("第 3 轮讨论·评审");
-
-    const round3 = region!.nodes.find((node) => node.label === "第 3 轮讨论·评审")!;
-    expect(round3.description).toContain("含 1 次失败重试");
-    expect(round3.status).toBe("running");
-
-    // The chain edge hops over the folded round: r1 → r3, never a dangling r2.
-    const edgePairs = region!.edges.map((edge) => `${edge.fromNodeId}->${edge.toNodeId}`);
-    expect(edgePairs).toContain("hf_meeting_1->hf_meeting_3");
-    expect(edgePairs.join(" ")).not.toContain("hf_meeting_2");
+    const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.description).toBe("2 轮有效评审 · 1 次失败重试 · 最近第 3 轮");
+    expect(review.status).toBe("running");
+    expect(region!.nodes.filter((node) => node.label === "假说评审")).toHaveLength(1);
   });
 
-  it("keeps a trailing superseded round visible when no successor opened yet", () => {
+  it("surfaces a trailing failed attempt as the aggregate card status", () => {
     const region = regionOf({
       meetings: [
         meeting(1, "closed", { digestRef: "digest-1" }),
         meeting(2, "closed", { recoveryReason: "discussion_has_no_completed_messages" }),
       ],
     });
-    const round2 = region!.nodes.find((node) => node.label === "第 2 轮讨论·评审");
-    expect(round2).toBeDefined();
-    expect(round2!.description).toContain("发言失败已跳过，等待重试");
-    expect(round2!.status).toBe("blocked");
+    const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.description).toBe("1 轮有效评审 · 1 次失败重试 · 最近第 2 轮");
+    expect(review.status).toBe("blocked");
   });
 
-  it("does not fold normal closed rounds", () => {
+  it("counts normal closed rounds as effective", () => {
     const region = regionOf({
       meetings: [
         meeting(1, "closed", { digestRef: "digest-1" }),
         meeting(2, "closed", { digestRef: "digest-2" }),
       ],
     });
-    const labels = region!.nodes.map((node) => node.label);
-    expect(labels).toContain("第 1 轮讨论·评审");
-    expect(labels).toContain("第 2 轮讨论·评审");
-    const round2 = region!.nodes.find((node) => node.label === "第 2 轮讨论·评审")!;
-    expect(round2.description).not.toContain("失败重试");
+    const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.description).toBe("2 轮有效评审 · 0 次失败重试 · 最近第 2 轮");
+    expect(review.status).toBe("succeeded");
   });
 
   it("treats digestId (the real ledger field) as a closed round's digest", () => {
     const region = regionOf({
       meetings: [meeting(1, "closed", { digestId: "digest-2323357103026cb8", closedAt: "2026-08-20T03:41:47Z" })],
     });
-    const round1 = region!.nodes.find((node) => node.label === "第 1 轮讨论·评审")!;
-    expect(round1.status).toBe("succeeded");
-    expect(round1.description).toContain("已闭环");
+    const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.status).toBe("succeeded");
+    expect(review.description).toContain("1 轮有效评审");
   });
 
   it("folds a closed round without any digest into the successor as a failed attempt", () => {
@@ -532,22 +542,17 @@ describe("superseded review attempts fold into the next round (GitHub Actions at
         meeting(3, "summarizing"),
       ],
     });
-    const labels = region!.nodes.map((node) => node.label);
-    expect(labels).not.toContain("第 1 轮讨论·评审");
-    expect(labels).not.toContain("第 2 轮讨论·评审");
-    expect(labels).toContain("第 3 轮讨论·评审");
-    const round3 = region!.nodes.find((node) => node.label === "第 3 轮讨论·评审")!;
-    expect(round3.description).toContain("含 2 次失败重试");
-    expect(round3.status).toBe("waiting_human");
+    const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.description).toBe("1 轮有效评审 · 2 次失败重试 · 最近第 3 轮");
+    expect(review.status).toBe("waiting_human");
   });
 
   it("keeps a trailing closed round without a digest visible as blocked", () => {
     const region = regionOf({
       meetings: [meeting(1, "closed", { closedAt: "2026-08-20T07:56:48Z" })],
     });
-    const round1 = region!.nodes.find((node) => node.label === "第 1 轮讨论·评审");
-    expect(round1).toBeDefined();
-    expect(round1!.status).toBe("blocked");
-    expect(round1!.description).toContain("已关闭但缺少纪要");
+    const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.status).toBe("blocked");
+    expect(review.description).toBe("0 轮有效评审 · 1 次失败重试 · 最近第 1 轮");
   });
 });

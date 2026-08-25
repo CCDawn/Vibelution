@@ -260,6 +260,10 @@ class TurnOutcome:
     terminal_event_seen: bool = False
     error: str = ""
     replay_state: ProviderReplayState | None = None
+    # A bounded, serialized ModelInvocationReceipt captured at the provider
+    # boundary. It is optional for ordinary chat turns; official question
+    # flows only accept it when an explicit stage binding is present.
+    model_invocation_receipt: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in TURN_OUTCOME_KINDS:
@@ -268,6 +272,14 @@ class TurnOutcome:
         object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         object.__setattr__(self, "tool_results", tuple(self.tool_results))
         object.__setattr__(self, "pending_tool_call_ids", tuple(self.pending_tool_call_ids))
+        if self.model_invocation_receipt is not None:
+            if not isinstance(self.model_invocation_receipt, Mapping):
+                raise ValueError("model invocation receipt must be a mapping")
+            object.__setattr__(
+                self,
+                "model_invocation_receipt",
+                _freeze_json_value(self.model_invocation_receipt),
+            )
         if self.kind == "final_answer" and (not self.terminal_event_seen or self.pending_tool_call_ids):
             raise ValueError("final_answer requires a terminal event and no pending tool calls")
 

@@ -53,6 +53,7 @@ from .constants import (
 )
 from .hot_restart_backup import create_failure_package, create_stable_backup, latest_stable_backup, restore_stable_backup
 from .process_identity import (
+    capture_process_identity,
     is_runtime_manager_process as _is_runtime_manager_process,
     # Kept as a module attribute: tests monkeypatch this alias.
     runtime_manager_command_line_for_pid as _runtime_manager_command_line_for_pid,  # noqa: F401
@@ -1255,6 +1256,45 @@ def _electron_external_window_pending_ack(workbench: dict[str, Any], observation
 MAIN_LINE_QUEUE_OWNER_FILE = "main_line_queue_owner.json"
 
 
+def _normalized_process_executable(value: object) -> str:
+    text = str(value or "").strip()
+    return os.path.normcase(os.path.normpath(text)) if text else ""
+
+
+def _main_line_owner_marker_written_at(value: object) -> float:
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        return 0.0
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def _electron_queue_owner_identity_matches(payload: dict[str, object], owner_pid: int) -> bool:
+    expected_executable = _normalized_process_executable(payload.get("executable"))
+    marker_written_at = _main_line_owner_marker_written_at(payload.get("updatedAt"))
+    if not expected_executable or marker_written_at <= 0:
+        return False
+    identity = capture_process_identity(owner_pid)
+    actual_executable = _normalized_process_executable(identity.get("executable"))
+    try:
+        created_at = float(identity.get("createTime") or 0)
+    except (TypeError, ValueError):
+        return False
+    # A process created after the marker cannot be the Electron process that
+    # wrote it, even if Windows has already reused the same PID.
+    return bool(
+        actual_executable
+        and actual_executable == expected_executable
+        and created_at > 0
+        and created_at <= marker_written_at
+    )
+
+
 def electron_owns_main_line_queue() -> bool:
     """Return True when Electron main owns the main-line command queue (I4b).
 
@@ -1276,11 +1316,7 @@ def electron_owns_main_line_queue() -> bool:
         return False
     if owner_pid <= 0:
         return False
-    try:
-        os.kill(owner_pid, 0)
-    except OSError:
-        return False
-    return True
+    return _electron_queue_owner_identity_matches(payload, owner_pid)
 
 
 def should_run_workbench_idle_reconcile() -> bool:
@@ -3441,12 +3477,52 @@ class RuntimeManagerDaemon:
         no_browser = bool(args.get("noBrowser"))
         force_frontend_rebuild = bool(args.get("forceFrontendRebuild"))
         allow_dirty_launch = force_frontend_rebuild or bool(args.get("allowDirty"))
-        if force_frontend_rebuild:
-            # Rebuild before any already-open short-circuit so tray "rebuild and start"
-            # always refreshes static assets even when the workbench is already healthy.
-            _preflight_frontend_build_for_restart(command_id, force=True)
+        # Every ordinary open validates the content-addressed frontend release
+        # before considering the already-open fast path.  The shared builder
+        # skips work when the active BuildKey is current, and publishes a new
+        # immutable release before any new backend is launched otherwise.
+        build_preflight = _preflight_frontend_build_for_restart(
+            command_id,
+            force=force_frontend_rebuild,
+        )
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
         observation = _observe_workbench_for_open(workbench) if should_probe_before_launch else {}
+        frontend_release_changed = build_preflight.get("skipped") is False
+        if frontend_release_changed and observation and str(observation.get("observedState") or "closed") in {"open", "partial"}:
+            # Publishing a new release invalidates the already-open fast path:
+            # the running backend has pinned the previous dist.  Reuse the
+            # restart implementation so active-work protection and the normal
+            # close/retire verification remain in force.  The build just ran,
+            # therefore the restart must not build a second release.
+            blocked = self._block_lifecycle_command_if_active_work(
+                command_id=command_id,
+                command_type="restart_workbench",
+                args={
+                    **args,
+                    "reason": str(args.get("reason") or "frontend_release_changed"),
+                    "source": str(args.get("source") or "runtime_manager"),
+                },
+            )
+            if blocked is not None:
+                return blocked
+            restart_data = self._perform_restart_workbench(
+                command_id=command_id,
+                args={
+                    **args,
+                    "reason": str(args.get("reason") or "frontend_release_changed"),
+                    "source": str(args.get("source") or "runtime_manager"),
+                    "skipFrontendBuildPreflight": True,
+                },
+            )
+            return self._finish_command(
+                command_id,
+                ok=True,
+                message="Workbench restarted after publishing the latest frontend release.",
+                result_data={
+                    "buildPreflight": build_preflight,
+                    **restart_data,
+                },
+            )
         if (
             observation
             and _open_request_already_satisfied(observation, no_browser=no_browser)
@@ -3517,7 +3593,12 @@ class RuntimeManagerDaemon:
                     last_reason=str(workbench.get("lastReason") or args.get("reason") or "already_open"),
                     last_source=str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
                 )
-                return self._finish_command(command_id, ok=True, message="Workbench is already open.")
+                return self._finish_command(
+                    command_id,
+                    ok=True,
+                    message="Workbench is already open.",
+                    result_data={"buildPreflight": build_preflight},
+                )
             # Fall through to open_workbench() below.
 
         workbench.update(
@@ -3547,6 +3628,7 @@ class RuntimeManagerDaemon:
             },
         )
         lifecycle_timings_ms: dict[str, Any] = {}
+        lifecycle_timings_ms["frontendBuildPreflight"] = build_preflight
         if bool(observation.get("backendPortOwnerResidual")):
             cleanup_started = time.monotonic()
             cleanup_result = self._cleanup_residual_workbench_processes()

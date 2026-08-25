@@ -14,8 +14,7 @@ def test_fork_creates_child_thread_scheduled_at_resume_node(tmp_path: Path) -> N
     harness = GraphHarness(tmp_path)
     try:
         harness.seed(run_id="run-parent")
-        harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding", run_id="run-parent")
         harness.resume(
             run_id="run-parent",
             node_id="source_finding",
@@ -47,8 +46,7 @@ def test_fork_child_runs_independently(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed(run_id="run-parent")
-        harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding", run_id="run-parent")
         parent_snapshot = harness.coordinator.snapshot("run-parent")
         harness.coordinator.fork_from_checkpoint(
             source_thread_id="run-parent",
@@ -82,8 +80,7 @@ def test_fork_existing_child_thread_same_resume_is_idempotent(tmp_path: Path) ->
     harness = GraphHarness(tmp_path)
     try:
         harness.seed(run_id="run-parent")
-        harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding", run_id="run-parent")
         parent_snapshot = harness.coordinator.snapshot("run-parent")
         first = harness.coordinator.fork_from_checkpoint(
             source_thread_id="run-parent",

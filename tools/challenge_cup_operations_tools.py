@@ -8,6 +8,9 @@ from typing import Any
 
 
 _CANONICAL_EXPERIMENT_WRITEBACK_RULES: dict[str, dict[str, tuple[str, ...]]] = {
+    "challenge_cup_search": {
+        "record_problem_understanding": ("problem_understanding",),
+    },
     "challenge_cup_experiment_revision": {
         "record_hypothesis_fragment": ("hypothesis_design",),
         "record_hypothesis_set": ("hypothesis_design",),
@@ -129,6 +132,7 @@ def challenge_cup_experiment_context_tool(
             research_project_id=research_project_id,
             task_id=task_id,
             allowed_task_kinds=(
+                "problem_understanding",
                 "hypothesis_design",
                 "experiment_design",
                 "protocol_review",
@@ -198,12 +202,21 @@ def challenge_cup_experiment_writeback_tool(
     """Write experiment ledger records without executing training or smoke runners."""
 
     try:
+        from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+            assert_writes_allowed,
+        )
+
+        # Keep the canonical Agent tool fail-closed before task binding or any
+        # experiment/project writeback is attempted.
+        assert_writes_allowed(team_id, operation="experiment_writeback")
         from core.web.services import team_workflow_orchestration_service as workflow_service
 
         normalized_operation = _text(operation)
         if normalized_operation in {"run_smoke", "execute_smoke", "run_training", "execute_training", "full_run"}:
             return _unsupported_operation(normalized_operation, boundary="experiment_planning_ledger_only_not_training_execution")
-        if normalized_operation in {
+        if normalized_operation == "record_problem_understanding":
+            allowed_task_kinds = ("problem_understanding",)
+        elif normalized_operation in {
             "record_hypothesis_fragment",
             "record_hypothesis_set",
         }:
@@ -232,6 +245,7 @@ def challenge_cup_experiment_writeback_tool(
             recorded_by_agent=recorded_by_agent,
             load_context=normalized_operation
             in {
+                "record_problem_understanding",
                 "record_hypothesis_fragment",
                 "record_hypothesis_set",
                 "record_protocol_review",
@@ -269,7 +283,64 @@ def challenge_cup_experiment_writeback_tool(
             payload["createdFromTurnId"] = _text(
                 (task.get("turn") or {}).get("turnId")
             )
-        if normalized_operation == "record_hypothesis_fragment":
+        protocol_task_context = None
+        prepared_research_plan = None
+        if normalized_operation == "create_plan" and task and _text(
+            task.get("workflowNodeId")
+        ) == "protocol_design":
+            from core.web.services.team_workflow.research_project_protocol_context import (
+                build_protocol_input_context,
+            )
+            from core.web.services.team_workflow.research_runtime.protocol_artifact_writer import (
+                prepare_research_plan,
+            )
+
+            protocol_task_context = {
+                "task": task,
+                "protocolInput": build_protocol_input_context(team_id, task),
+            }
+            prepared_research_plan = prepare_research_plan(
+                team_id=team_id,
+                task_context=protocol_task_context,
+                research_plan=payload.get("researchPlan"),
+                final_summary=_payload_alias(
+                    payload, "finalSummary", "final_summary", field="finalSummary"
+                ),
+                competition_result_view=_payload_alias(
+                    payload,
+                    "competitionResultView",
+                    "competition_result_view",
+                    field="competitionResultView",
+                ),
+            )
+        if normalized_operation == "record_problem_understanding":
+            if not isinstance(task_binding, dict) or not isinstance(task, dict):
+                raise ValueError(
+                    "record_problem_understanding requires a bound problem-understanding task."
+                )
+            from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
+                write_problem_understanding_artifact,
+            )
+
+            problem_payload = payload.get("problemUnderstanding")
+            if not isinstance(problem_payload, dict):
+                problem_payload = {
+                    key: payload[key]
+                    for key in (
+                        "scope",
+                        "subquestions",
+                        "assumptions",
+                        "known_unknowns",
+                        "human_gate",
+                    )
+                    if key in payload
+                }
+            response = write_problem_understanding_artifact(
+                team_id=team_id,
+                task_context=task_binding,
+                problem_understanding=problem_payload,
+            )
+        elif normalized_operation == "record_hypothesis_fragment":
             if not isinstance(task_binding, dict) or not isinstance(task, dict):
                 raise ValueError(
                     "record_hypothesis_fragment requires a bound candidate task."
@@ -327,22 +398,20 @@ def challenge_cup_experiment_writeback_tool(
                         "Created experiment plan was not bound to the requested research project."
                     )
                 if _text(task.get("workflowNodeId")) == "protocol_design":
-                    from core.web.services.team_workflow.research_project_protocol_context import (
-                        build_protocol_input_context,
-                    )
                     from core.web.services.team_workflow.research_runtime.protocol_artifact_writer import (
                         record_protocol_draft,
+                        record_research_plan,
                     )
 
+                    response["researchPlan"] = record_research_plan(
+                        team_id=team_id,
+                        task_context=protocol_task_context or {"task": task},
+                        plan_id=_text(created_plan.get("planId")),
+                        prepared=prepared_research_plan,
+                    )
                     response["protocolDraft"] = record_protocol_draft(
                         team_id=team_id,
-                        task_context={
-                            "task": task,
-                            "protocolInput": build_protocol_input_context(
-                                team_id,
-                                task,
-                            ),
-                        },
+                        task_context=protocol_task_context or {"task": task},
                         plan=created_plan,
                     )
         elif normalized_operation in {
@@ -410,6 +479,10 @@ def challenge_cup_experiment_writeback_tool(
                     response=response,
                 )
                 )
+            if normalized_operation == "record_problem_understanding":
+                result_refs = [
+                    _text(response.get("contentHash")),
+                ]
             result_refs = [item for item in result_refs if item]
             task_status = (
                 workflow_service.update_research_project_agent_task_status(
@@ -1381,6 +1454,11 @@ def _experiment_writeback_result_refs(
             if isinstance(response.get("protocolDraft"), dict)
             else None
         ),
+        (
+            response.get("researchPlan", {}).get("artifact")
+            if isinstance(response.get("researchPlan"), dict)
+            else None
+        ),
     ]
     for record in candidate_records:
         if not isinstance(record, dict):
@@ -1692,6 +1770,23 @@ def _json_object(raw: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Expected JSON object.")
     return payload
+
+
+def _payload_alias(
+    payload: dict[str, Any],
+    *keys: str,
+    field: str,
+) -> Any:
+    present = [(key, payload[key]) for key in keys if key in payload]
+    if not present:
+        return None
+    _first_key, first_value = present[0]
+    if any(value != first_value for _key, value in present[1:]):
+        raise ValueError(
+            f"{field} contains conflicting aliases: "
+            + ", ".join(key for key, _value in present)
+        )
+    return first_value
 
 
 def _json_list(raw: str) -> list[Any]:

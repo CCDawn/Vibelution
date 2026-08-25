@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from core.logging.trace_context import (
+    bind_trace_context,
+    get_current_trace_context,
+    new_trace_context,
+)
 from core.web.services import session_service
 from core.web.services.session import worker
 
@@ -50,6 +55,122 @@ def test_ordinary_agent_inbox_does_not_gain_internal_continuation() -> None:
         worker._session_context_internal_auto_continue_max_turns(context)
         == session_service.INTERNAL_AUTO_CONTINUE_MAX_TURNS
     )
+
+
+def test_receipt_context_accepts_binding_without_research_project_id(
+    monkeypatch,
+) -> None:
+    task = {
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "researchProjectId": "project-1",
+        "turn": {"turnId": "turn-1"},
+        "modelInvocationReceiptBinding": {
+            "questionStage": "generation",
+            "questionId": "SCI-096",
+            "questionRunId": "run-1",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "taskId": "task-1",
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "modelPolicySha256": "a" * 64,
+            "outcomeKinds": ["candidate"],
+        },
+        "challengeTaskContract": {
+            "questionId": "SCI-096",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-run-1",
+            "nodeAttempt": 1,
+            "modelPolicySha256": "a" * 64,
+            "effectiveRoute": {
+                "modelRef": "default/qwen-alias",
+                "providerId": "default",
+                "modelId": "qwen-plus",
+            },
+        },
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda *_args, **_kwargs: task,
+    )
+
+    context = worker._model_invocation_receipt_context(
+        {
+            "message_metadata": {
+                "teamId": "team-1",
+                "researchProjectId": "project-1",
+                "taskId": "task-1",
+            }
+        },
+        session_id="session-1",
+        turn_id="turn-1",
+    )
+
+    assert context is not None
+    assert context["questionStageBinding"]["formalNodeRunId"] == "node-run-1"
+    assert context["modelPolicySha256"] == "a" * 64
+    assert context["expectedModelRoute"]["modelRef"] == "default/qwen-alias"
+
+
+def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:
+    task = {
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "researchProjectId": "project-authoritative",
+        "turn": {"turnId": "turn-1"},
+        "modelInvocationReceiptBinding": {},
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda *_args, **_kwargs: task,
+    )
+
+    assert (
+        worker._model_invocation_receipt_context(
+            {
+                "message_metadata": {
+                    "teamId": "team-1",
+                    "researchProjectId": "project-client",
+                    "taskId": "task-1",
+                }
+            },
+            session_id="session-1",
+            turn_id="turn-1",
+        )
+        is None
+    )
+
+
+def test_run_session_turn_binds_child_trace_span_and_restores_context(monkeypatch) -> None:
+    root = new_trace_context(request_id="worker-request")
+    observed: list[tuple[dict, object]] = []
+
+    def fake_impl(context: dict) -> None:
+        observed.append((dict(context), get_current_trace_context()))
+
+    monkeypatch.setattr(worker, "_run_session_turn_impl", fake_impl)
+
+    outer = new_trace_context(request_id="outer-request")
+    with bind_trace_context(outer):
+        worker._run_session_turn({"trace_context_carrier": root.to_carrier()})
+        assert get_current_trace_context() is outer
+
+    assert observed
+    child_context, bound = observed[0]
+    assert bound is not None
+    assert bound.trace_id == root.trace_id
+    assert bound.parent_span_id == root.span_id
+    assert bound.span_id != root.span_id
+    assert child_context["trace_context_carrier"] == bound.to_carrier()
+    assert get_current_trace_context() is None
 
 
 def test_run_session_turn_skips_stale_turn(monkeypatch) -> None:

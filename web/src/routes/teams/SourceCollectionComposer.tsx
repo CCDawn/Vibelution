@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import type { ResearchStageUnlock } from "./researchPrimaryActionModel";
 import type { ResearchWorkspaceView } from "./researchWorkspaceModel";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
@@ -95,7 +96,7 @@ export function SourceCollectionComposer(props: SourceCollectionComposerProps) {
     <ResearchStageWorkbenchShell
       lang={lang}
       current="knowledge_collection"
-      title={lang === "zh" ? "知识搜集工作台" : "Knowledge collection workspace"}
+      title={lang === "zh" ? `${RESEARCH_STAGE_TERMS.knowledge_collection.zh}工作台` : "Knowledge collection workspace"}
       statusBadge={statusBadge}
       statusBadgeClassName={statusBadgeClassName}
       unlock={unlock}
@@ -125,7 +126,7 @@ export function SourceCollectionComposer(props: SourceCollectionComposerProps) {
           runHistoryLabel={runHistoryLabel}
           phaseCloseGate={phaseCloseGate}
           stagePipelineId="source-collection-stage-status"
-          stagePipelineAriaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
+          stagePipelineAriaLabel={lang === "zh" ? `${RESEARCH_STAGE_TERMS.knowledge_collection.zh}内部模块` : "Knowledge collection modules"}
           modules={modules}
           activePanel={activePanel}
           compactActivePanel={compactActivePanel}

@@ -17,6 +17,7 @@ from .semantic_messages import (
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
+    SemanticOutputSchema,
     SemanticToolDefinition,
     TextPart,
     ToolCallPart,
@@ -44,6 +45,7 @@ class SemanticProjectionInput:
     system_message_policy: str = "preserve"
     allow_assistant_prefill: bool = True
     reasoning_roundtrip: bool = False
+    output_schema: SemanticOutputSchema | None = None
 
 
 def _value(owner: Any, name: str, default: Any = None) -> Any:
@@ -400,6 +402,7 @@ def project_semantic_request(input: SemanticProjectionInput) -> SemanticModelReq
         tools=tuple(_project_tools(input.tools, tool_to_schema=input.tool_to_schema)),
         settings=input.settings,
         replay_state=input.replay_state,
+        output_schema=input.output_schema,
     )
 
 

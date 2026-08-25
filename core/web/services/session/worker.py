@@ -21,6 +21,221 @@ from core.infrastructure.tool_execution_scope import (
 from core.orchestration.context_engine import AgentContextInterrupted
 
 
+_STRICT_RESEARCH_TASK_KINDS = frozenset(
+    {"hypothesis_design", "protocol_review", "result_evaluation"}
+)
+
+
+def _research_task_structured_output_contract(
+    context: dict[str, Any],
+    *,
+    session_id: str,
+    turn_id: str,
+):
+    """Resolve strict output only from the server-owned formal task record."""
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    if str(metadata.get("kind") or "").strip() != "research_project_agent_task":
+        return None
+    requested_task_kind = str(metadata.get("taskKind") or "").strip()
+    if requested_task_kind not in _STRICT_RESEARCH_TASK_KINDS:
+        return None
+    task_id = str(metadata.get("taskId") or "").strip()
+    team_id = str(metadata.get("teamId") or "").strip()
+    project_id = str(metadata.get("researchProjectId") or "").strip()
+    if not task_id or not team_id or not project_id:
+        raise RuntimeError("strict research task output binding is incomplete")
+    try:
+        from core.web.services.team_workflow.research_project_agent_tasks import (
+            _read_research_project_agent_task_record,
+        )
+
+        task = _read_research_project_agent_task_record(team_id, project_id, task_id)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise RuntimeError("strict research task output record is unavailable") from exc
+    if not isinstance(task, dict):
+        raise RuntimeError("strict research task output record is unavailable")
+    task_kind = str(task.get("taskKind") or "").strip()
+    task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    stored_turn_id = str(task_turn.get("turnId") or "").strip()
+    if (
+        task_kind not in _STRICT_RESEARCH_TASK_KINDS
+        or task_kind != requested_task_kind
+        or str(task.get("taskId") or "").strip() != task_id
+        or str(task.get("researchProjectId") or "").strip() != project_id
+        or str(task.get("sessionId") or "").strip() != str(session_id or "").strip()
+        or (stored_turn_id and stored_turn_id != str(turn_id or "").strip())
+    ):
+        raise RuntimeError("strict research task output binding does not match the turn")
+    from core.llm.semantic_messages import SemanticOutputSchema
+    from core.research.workflow.contracts import (
+        RESEARCH_TASK_OUTPUT_SCHEMA_VERSION,
+        canonical_research_task_output_schema_bundle,
+        parse_research_task_output,
+    )
+
+    schema = canonical_research_task_output_schema_bundle()["schemas"][task_kind]
+    return SemanticOutputSchema(
+        name=f"research_{task_kind}_v{RESEARCH_TASK_OUTPUT_SCHEMA_VERSION}",
+        schema=schema,
+        validator=lambda payload: parse_research_task_output(task_kind, payload),
+    )
+
+
+def _model_invocation_receipt_context(
+    context: dict[str, Any],
+    *,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any] | None:
+    """Complete a server-created binding seed with the canonical Task/Turn."""
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    task_id = str(metadata.get("taskId") or "").strip()
+    team_id = str(metadata.get("teamId") or "").strip()
+    project_id = str(metadata.get("researchProjectId") or "").strip()
+    if not task_id or not team_id or not project_id:
+        return None
+    # Metadata is only a locator. The binding itself must be read back from
+    # the server-owned project task record; a client-supplied metadata object
+    # must never become receipt authority.
+    source_task = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+    try:
+        if source_task and source_task == task_id:
+            from core.web.services.team_workflow.source_collection.stage_session import (
+                _read_source_collection_stage_session_task_record,
+            )
+
+            task = _read_source_collection_stage_session_task_record(
+                team_id,
+                task_id,
+            )
+        else:
+            from core.web.services.team_workflow.research_project_agent_tasks import (
+                _read_research_project_agent_task_record,
+            )
+
+            task = _read_research_project_agent_task_record(
+                team_id,
+                project_id,
+                task_id,
+            )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if task is None or str(task.get("sessionId") or "").strip() != str(session_id or "").strip():
+        return None
+    if str(task.get("researchProjectId") or "").strip() != project_id:
+        return None
+    task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    stored_turn_id = str(task_turn.get("turnId") or "").strip()
+    if stored_turn_id and stored_turn_id != str(turn_id or "").strip():
+        return None
+    seed = task.get("modelInvocationReceiptBinding")
+    if isinstance(seed, dict):
+        binding = dict(seed)
+    elif source_task:
+        contract = (
+            task.get("challengeTaskContract")
+            if isinstance(task.get("challengeTaskContract"), dict)
+            else {}
+        )
+        binding = {
+            "questionStage": str(contract.get("stageId") or ""),
+            "questionId": str(contract.get("questionId") or ""),
+            "questionRunId": str(contract.get("workflowRunId") or ""),
+            "workflowRunId": str(contract.get("workflowRunId") or ""),
+            "workflowId": str(contract.get("workflowId") or ""),
+            "workflowVersionId": str(contract.get("workflowVersionId") or ""),
+            "formalNodeId": str(contract.get("workflowNodeId") or ""),
+            "formalNodeRunId": str(contract.get("nodeRunId") or ""),
+            "formalNodeAttempt": int(contract.get("nodeAttempt") or 0),
+            "outcomeKinds": ["source_evidence"],
+            "modelPolicySha256": str(contract.get("modelPolicySha256") or ""),
+        }
+    else:
+        return None
+    contract = task.get("challengeTaskContract") if isinstance(task.get("challengeTaskContract"), dict) else {}
+    contract_fields = {
+        "questionId": ("questionId", "questionId"),
+        "workflowRunId": ("workflowRunId", "workflowRunId"),
+        "workflowId": ("workflowId", "workflowId"),
+        "workflowVersionId": ("workflowVersionId", "workflowVersionId"),
+        "formalNodeId": ("workflowNodeId", "formalNodeId"),
+        "formalNodeRunId": ("nodeRunId", "formalNodeRunId"),
+        "formalNodeAttempt": ("nodeAttempt", "formalNodeAttempt"),
+        "modelPolicySha256": ("modelPolicySha256", "modelPolicySha256"),
+    }
+    if not contract or any(
+        not str(contract.get(contract_key) or "").strip()
+        or str(binding.get(binding_key) or "").strip()
+        != str(contract.get(contract_key) or "").strip()
+        for contract_key, binding_key in contract_fields.values()
+    ):
+        return None
+    effective_route = contract.get("effectiveRoute") if isinstance(contract.get("effectiveRoute"), dict) else {}
+    expected_route = {
+        "modelRef": str(effective_route.get("modelRef") or "").strip(),
+        "providerId": str(effective_route.get("providerId") or "").strip(),
+        "modelId": str(effective_route.get("modelId") or "").strip(),
+    }
+    if (
+        not all(expected_route.values())
+        or expected_route["modelRef"].partition("/")[0].lower()
+        != expected_route["providerId"].lower()
+    ):
+        return None
+    binding.update(
+        {
+            "sessionId": str(session_id or "").strip(),
+            "turnId": str(turn_id or "").strip(),
+            "taskId": task_id,
+        }
+    )
+    try:
+        from core.research.workflow.contracts.question_stage_binding import (
+            QuestionStageBinding,
+        )
+
+        stage_binding = QuestionStageBinding.from_dict(binding).to_dict()
+    except (TypeError, ValueError, KeyError):
+        return None
+    required = (
+        "questionId",
+        "workflowRunId",
+        "workflowId",
+        "workflowVersionId",
+        "formalNodeId",
+        "formalNodeRunId",
+        "sessionId",
+        "taskId",
+        "turnId",
+    )
+    policy_sha256 = str(binding.pop("modelPolicySha256", "") or "").strip().lower()
+    if (
+        any(not str(binding.get(key) or "").strip() for key in required)
+        or len(policy_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in policy_sha256)
+    ):
+        return None
+    run_id = str(binding.get("workflowRunId") or "").strip()
+    return {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": run_id,
+        "modelPolicySha256": policy_sha256,
+        "questionStageBinding": stage_binding,
+        "outcomeKinds": list(binding.get("outcomeKinds") or []),
+        "expectedModelRoute": expected_route,
+    }
+
+
 def _service():
     """Late-bound facade module (avoids import cycles at package import time)."""
 
@@ -225,6 +440,26 @@ def _abort_session_turn_for_stop(
 
 
 def _run_session_turn(context: dict[str, Any]) -> None:
+    """Run one scheduled turn inside a scoped child trace span."""
+
+    from core.logging.trace_context import (
+        TraceContext,
+        bind_trace_context,
+        get_current_trace_context,
+        new_trace_context,
+    )
+
+    parent_context = TraceContext.from_carrier(context.get("trace_context_carrier"))
+    if parent_context is None:
+        parent_context = get_current_trace_context() or new_trace_context()
+    child_context = parent_context.child_span()
+    worker_context = dict(context)
+    worker_context["trace_context_carrier"] = child_context.to_carrier()
+    with bind_trace_context(child_context):
+        return _run_session_turn_impl(worker_context)
+
+
+def _run_session_turn_impl(context: dict[str, Any]) -> None:
     s = _service()
     prepare_started_at = s._perf_counter()
     session_id = str(context.get("session_id") or "").strip()
@@ -754,6 +989,19 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     if isinstance(agent_prompt_snapshot, dict)
                     else "",
                 )
+                structured_output_setter = getattr(
+                    runtime_agent,
+                    "set_turn_structured_output_contract",
+                    None,
+                )
+                if callable(structured_output_setter):
+                    structured_output_setter(
+                        _research_task_structured_output_contract(
+                            context,
+                            session_id=session_id,
+                            turn_id=turn_id,
+                        )
+                    )
                 agent_create_ms = s._elapsed_ms(stage_started_at)
                 attachments = s._normalize_message_attachments(context.get("attachments") or [])
                 resolved_llm_model_id = str(getattr(resolved_agent_llm, "model_id", "") or "").strip() or s._session_agent_llm_slot_model_id(
@@ -1179,6 +1427,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     try:
                         result = _run_session_continuation_loop(
                             runtime_agent,
+                            context=context,
                             session_id=session_id,
                             turn_control=turn_control,
                             initial_prompt=user_message,
@@ -1265,6 +1514,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
 def _run_session_continuation_loop(
     agent: Any,
     *,
+    context: dict[str, Any],
     session_id: str,
     turn_control: Any = None,
     initial_prompt: str,
@@ -1409,15 +1659,24 @@ def _run_session_continuation_loop(
             session_id,
             turn_id=getattr(turn_control, "turn_id", ""),
         )
-        result = s.run_existing_agent_single_turn(
-            agent,
-            initial_prompt=prompt,
-            attachments=turn_attachments,
-            disable_tools=disable_tools,
-            prompt_cache_partition=prompt_cache_partition,
-            turn_identity=str(getattr(turn_control, "turn_id", "") or "").strip(),
-            chat_history=history_messages if turn_index == 1 else None,
+        from core.llm.client import model_invocation_receipt_context_scope
+
+        canonical_turn_id = str(getattr(turn_control, "turn_id", "") or "").strip()
+        receipt_context = _model_invocation_receipt_context(
+            context,
+            session_id=session_id,
+            turn_id=canonical_turn_id,
         )
+        with model_invocation_receipt_context_scope(receipt_context):
+            result = s.run_existing_agent_single_turn(
+                agent,
+                initial_prompt=prompt,
+                attachments=turn_attachments,
+                disable_tools=disable_tools,
+                prompt_cache_partition=prompt_cache_partition,
+                turn_identity=canonical_turn_id,
+                chat_history=history_messages if turn_index == 1 else None,
+            )
         result = s._attach_session_prompt_cache_metadata(
             result,
             prompt_cache_scope=prompt_cache_scope,

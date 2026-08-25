@@ -4,6 +4,11 @@ import {
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import { RESEARCH_STAGE_TERMS } from "./researchTerminology";
+import type {
+  ResearchWorkflowWorkspaceModel,
+  ResearchWorkflowWorkspaceTask,
+} from "./researchWorkflowWorkspaceModel";
 
 export type ResearchWorkflowLoadState =
   | "idle"
@@ -11,6 +16,7 @@ export type ResearchWorkflowLoadState =
   | "ready"
   | "refreshing"
   | "error"
+  | "resync_required"
   | "scope_mismatch";
 
 export type ResearchWorkflowStageId =
@@ -131,11 +137,13 @@ export type BuildResearchWorkflowContextInput = {
   panel: ResearchProcessPanel;
   questionTitle?: string | null;
   roundProgress?: { current: number; total: number } | null;
+  /** Normalized formal/catalog/hypothesis authority from the workspace model. */
+  workspaceModel?: ResearchWorkflowWorkspaceModel | null;
 };
 
 const STAGES: Array<Pick<ResearchWorkflowStageSummary, "id" | "label" | "detail">> = [
   { id: "hypothesis_first", label: "假说先行", detail: "形成、选择并评审假说" },
-  { id: "knowledge_collection", label: "知识搜集", detail: "围绕收敛假说补充证据" },
+  { id: "knowledge_collection", label: RESEARCH_STAGE_TERMS.knowledge_collection.zh, detail: "围绕收敛假说补充证据" },
   { id: "experiment_design", label: "实验设计", detail: "形成并冻结可执行协议" },
   { id: "execution_iteration", label: "执行迭代", detail: "运行、评价并归档成果" },
 ];
@@ -429,9 +437,147 @@ function stageSummaries(currentTask: ResearchWorkflowCurrentTask | null): Resear
   }));
 }
 
+function stageIdForContext(stageId: string | null | undefined): ResearchWorkflowStageId {
+  if (stageId === "knowledge_collection" || stageId === "experiment_design" || stageId === "execution_iteration") {
+    return stageId;
+  }
+  return "hypothesis_first";
+}
+
+function contextTaskFromWorkspaceTask(
+  task: ResearchWorkflowWorkspaceTask | null,
+): ResearchWorkflowCurrentTask | null {
+  if (!task) return null;
+  if (task.source === "formal_runtime") {
+    return {
+      key: task.key,
+      stage: stageIdForContext(task.stageId),
+      step: "formal_runtime",
+      status: task.status,
+      title: task.label,
+      detail: task.detail,
+      targetNodeId: task.nodeId,
+      navigationAction: task.nodeId
+        ? { targetNodeId: task.nodeId, label: task.label }
+        : null,
+      commandAction: null,
+      blocker: task.blockedReason
+        ? {
+            code: task.blockedReason.code || "formal_runtime_blocked",
+            message: task.blockedReason.message || task.blockedReason.detail || "当前正式任务被阻塞",
+            retryable: task.recovery.retryable,
+          }
+        : undefined,
+      authority: "formal_runtime",
+    };
+  }
+  if (task.source === "catalog_authorization") {
+    return {
+      key: task.key,
+      stage: "hypothesis_first",
+      step: "launch",
+      status: task.status,
+      title: task.title,
+      detail: task.detail,
+      targetNodeId: null,
+      navigationAction: null,
+      commandAction: null,
+      blocker: task.permission === "denied"
+        ? { code: "catalog_authorization_denied", message: task.detail, retryable: false }
+        : undefined,
+      authority: "route",
+    };
+  }
+  if (task.source === "hypothesis_first") {
+    const presentation = presentationFor(task.nextAction);
+    return {
+      key: task.key,
+      ...presentation,
+      targetNodeId: task.targetNodeId,
+      navigationAction: task.targetNodeId
+        ? { targetNodeId: task.targetNodeId, label: task.nextAction.navigationLabel }
+        : null,
+      commandAction: task.nextAction.command && task.nextAction.commandLabel
+        ? {
+            command: task.nextAction.command,
+            label: task.nextAction.commandLabel,
+            detail: task.nextAction.commandDetail,
+            disabledReason: task.nextAction.disabledReason,
+          }
+        : null,
+      blocker: task.nextAction.disabledReason
+        ? {
+            code: task.nextAction.stage === "blocked" ? "workflow_blocked" : "command_blocked",
+            message: task.nextAction.disabledReason,
+            retryable: Boolean(task.nextAction.recovery),
+          }
+        : undefined,
+      meetingRoundId: task.nextAction.meetingRoundId,
+      collectionRequestId: task.nextAction.collectionRequestId,
+    };
+  }
+  return {
+    key: task.key,
+    stage: "hypothesis_first",
+    step: "launch",
+    status: task.status,
+    title: task.title,
+    detail: task.detail,
+    targetNodeId: null,
+    navigationAction: null,
+    commandAction: null,
+    authority: "route",
+  };
+}
+
+function stageSummariesFromWorkspaceModel(
+  model: ResearchWorkflowWorkspaceModel,
+  currentTask: ResearchWorkflowCurrentTask | null,
+): ResearchWorkflowStageSummary[] {
+  const progressById = new Map(
+    (model.progress?.stages ?? []).map((stage) => [stage.id, stage.state]),
+  );
+  const currentStage = currentTask?.stage;
+  return STAGES.map((stage) => ({
+    ...stage,
+    state: progressById.get(stage.id)
+      ?? (currentStage === stage.id
+        ? (currentTask?.status === "blocked" ? "blocked" : "current")
+        : "upcoming"),
+  }));
+}
+
 export function buildResearchWorkflowContext(
   input: BuildResearchWorkflowContextInput,
 ): ResearchWorkflowContext {
+  if (input.workspaceModel) {
+    const model = input.workspaceModel;
+    const currentTask = model.scopeMismatch ? null : contextTaskFromWorkspaceTask(model.currentTask);
+    const loadState: ResearchWorkflowLoadState = model.scopeMismatch
+      ? "scope_mismatch"
+      : model.loadState === "resync_required"
+        ? "resync_required"
+        : model.loadState;
+    return {
+      scope: {
+        key: model.scopeKey,
+        teamId: model.scope.teamId,
+        workflowId: model.scope.workflowId,
+        questionId: model.scope.questionId,
+        runId: model.scope.runId,
+        runVersion: model.scope.runVersion,
+      },
+      loadState,
+      currentTask,
+      stages: stageSummariesFromWorkspaceModel(model, currentTask),
+      view: {
+        panel: model.view.panel,
+        selectedNodeId: model.view.selectedNodeId,
+        selectedIsCurrentTask: model.view.selectedIsCurrentTask,
+        archiveMode: model.view.archiveMode,
+      },
+    };
+  }
   const teamId = normalized(input.teamId);
   const workflowId = normalized(input.workflowId);
   const questionId = normalizedQuestion(input.questionId) || null;

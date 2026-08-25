@@ -305,11 +305,11 @@ def test_package_fails_closed_when_stage_receipt_is_incomplete(mutation, message
         _create(payload)
 
 
-def test_package_rejects_non_qwen_or_unapproved_provider() -> None:
+def test_package_rejects_provider_outside_frozen_model_policy() -> None:
     payload = _valid_payload()
     payload["model_invocation_receipts"]["generation"]["provider"] = "offline-fake"
 
-    with pytest.raises(QuestionResultPackageError, match="Qwen"):
+    with pytest.raises(QuestionResultPackageError, match="authorized model policy"):
         _create(payload)
 
 
@@ -394,11 +394,14 @@ def test_receipt_stage_scope_must_match_the_stage_key() -> None:
         lambda receipt: receipt.update({"evidenceLocator": {}}),
     ],
 )
-def test_receipt_requires_exact_qwen_route_and_evidence(mutation) -> None:
+def test_receipt_requires_exact_frozen_route_and_evidence(mutation) -> None:
     payload = _valid_payload()
     mutation(payload["model_invocation_receipts"]["generation"])
 
-    with pytest.raises(QuestionResultPackageError, match="Qwen|evidence"):
+    with pytest.raises(
+        QuestionResultPackageError,
+        match="authorized model policy|evidence",
+    ):
         _create(payload)
 
 
@@ -595,8 +598,20 @@ def test_server_model_policy_canonicalization_is_order_and_case_stable() -> None
     )["policySha256"]
 
 
-def test_server_model_policy_rejects_non_qwen_model_ids() -> None:
-    with pytest.raises(QuestionResultPackageError, match="Qwen upstream model ids"):
+def test_server_model_policy_accepts_flash_and_rejects_family_mismatch() -> None:
+    flash = canonical_model_policy(
+        {
+            "family": "deepseek",
+            "providerIds": ["opencode_go"],
+            "modelIds": ["deepseek-v4-flash"],
+            "requireOfficialProvider": False,
+        }
+    )
+
+    assert flash["family"] == "deepseek"
+    assert flash["requireOfficialProvider"] is False
+
+    with pytest.raises(QuestionResultPackageError, match="match model_policy.family"):
         canonical_model_policy(
             {
                 "family": "qwen",

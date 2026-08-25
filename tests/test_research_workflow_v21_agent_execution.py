@@ -185,7 +185,9 @@ def test_each_source_agent_starts_exact_task_and_persists_node_session(
         }
         return {"run": {"runId": "source-run-1"}}
 
-    def fake_start_stage_task(team_id: str, source_run_id: str, payload: dict) -> dict:
+    def fake_start_stage_task(
+        team_id: str, source_run_id: str, payload: dict, **_kwargs
+    ) -> dict:
         task_calls.append(
             {"teamId": team_id, "sourceRunId": source_run_id, "payload": payload}
         )
@@ -456,6 +458,7 @@ def test_partial_agent_start_replays_persisted_key_and_budget(
         team_id: str,
         source_run_id: str,
         payload: dict,
+        **_kwargs,
     ) -> dict:
         task_keys.append(str(payload["idempotencyKey"]))
         if len(task_keys) == 1:
@@ -622,7 +625,9 @@ def test_parallel_task_limit_blocks_second_bundle_before_external_dispatch(
     )
     calls: list[dict] = []
 
-    def fake_start_stage_task(team_id: str, source_run_id: str, payload: dict) -> dict:
+    def fake_start_stage_task(
+        team_id: str, source_run_id: str, payload: dict, **_kwargs
+    ) -> dict:
         calls.append(payload)
         node_label = str(payload["stageId"])
         return {
@@ -699,7 +704,7 @@ def test_agent_task_does_not_bind_a_session_missing_from_chat_authority(
     )
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.stage_session.start_source_collection_stage_session_task",
-        lambda _team_id, _source_run_id, _payload: {
+        lambda _team_id, _source_run_id, _payload, **_kwargs: {
             "taskId": "task-missing-session",
             "agentId": SOURCE_AGENTS["source_finder"],
             "sessionId": "session-missing-session",

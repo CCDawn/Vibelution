@@ -503,6 +503,14 @@ def _team_chat_room_needs_sync(
     ]
     if participant_agent_ids != active_member_agent_ids:
         return True
+    expected_session_ids = s._active_member_session_ids(team, agent_refs=agent_refs)
+    participant_session_ids = [
+        str(participant.get("sessionId") or "").strip()
+        for participant in list(linked_room.get("participants") or [])
+        if isinstance(participant, dict) and str(participant.get("agentId") or "").strip()
+    ]
+    if participant_session_ids != expected_session_ids:
+        return True
     if s._team_chat_room_participant_contexts_need_sync(team, linked_room, agent_refs=agent_refs):
         return True
     historical_room_ids = [

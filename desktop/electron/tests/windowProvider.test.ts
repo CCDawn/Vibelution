@@ -30,6 +30,7 @@ class FakeWindow implements ElectronWindowLike {
   hideCount = 0;
   restoreCount = 0;
   destroyCount = 0;
+  reloadCount = 0;
   minimized = false;
   loadedUrls: string[] = [];
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
@@ -102,6 +103,10 @@ class FakeWindow implements ElectronWindowLike {
     }
     this.url = url;
     return Promise.resolve();
+  }
+
+  reload(): void {
+    this.reloadCount += 1;
   }
 
   blur(): void {
@@ -650,6 +655,72 @@ describe("Electron window provider state", () => {
       rendererProcessId: 7070,
       url: "http://127.0.0.1:8765/launcher"
     });
+  });
+
+  it("refreshLauncherIfReleaseChanged reloads an open window without reopening it", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    let version = "C:/repo/web/.vibelution-builds/release-a";
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      launcherContentVersion: () => version
+    });
+    await provider.openLauncher();
+    expect(launcherWindow.reloadCount).toBe(0);
+
+    version = "C:/repo/web/.vibelution-builds/release-b";
+    expect(provider.refreshLauncherIfReleaseChanged()).toBe(true);
+    expect(launcherWindow.reloadCount).toBe(1);
+
+    // Already on the current release — nothing further to do.
+    expect(provider.refreshLauncherIfReleaseChanged()).toBe(false);
+    expect(launcherWindow.reloadCount).toBe(1);
+  });
+
+  it("refreshLauncherIfReleaseChanged is a no-op without an open launcher window", () => {
+    let version = "C:/repo/web/.vibelution-builds/release-a";
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      launcherContentVersion: () => version
+    });
+    version = "C:/repo/web/.vibelution-builds/release-b";
+    expect(provider.refreshLauncherIfReleaseChanged()).toBe(false);
+  });
+
+  it("reloads an open launcher window when the active frontend release changes", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    let version = "C:/repo/web/.vibelution-builds/release-a";
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      launcherContentVersion: () => version
+    });
+
+    await provider.openLauncher();
+    expect(launcherWindow.reloadCount).toBe(0);
+
+    version = "C:/repo/web/.vibelution-builds/release-b";
+    await provider.openLauncher();
+
+    expect(launcherWindow.reloadCount).toBe(1);
+    expect(launcherWindow.isDestroyed()).toBe(false);
+
+    await provider.openLauncher();
+    expect(launcherWindow.reloadCount).toBe(1);
+  });
+
+  it("keeps the open launcher document when the content version is unavailable", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242)
+    });
+
+    await provider.openLauncher();
+    await provider.openLauncher();
+
+    expect(launcherWindow.reloadCount).toBe(0);
   });
 
   it("restores a hidden or minimized launcher instead of creating a second window", async () => {

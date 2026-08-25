@@ -12,13 +12,16 @@ GitHub-Desktop convention of not competing with user git operations.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.infrastructure.no_console_git import run_git
+from core.runtime_manager.process_identity import capture_process_identity
 
 FINGERPRINT_SCHEMA_VERSION = 1
 FINGERPRINT_RELATIVE = Path(".runtime") / "running-code-fingerprint.json"
@@ -39,6 +42,15 @@ def _capture_git_text(project_root: Path | str, args: list[str]) -> str:
     return str(result.stdout or "").strip()
 
 
+def _dirty_tree_summary(project_root: Path | str) -> dict[str, Any]:
+    raw = _capture_git_text(project_root, ["status", "--porcelain=v1", "--untracked-files=all"])
+    normalized = raw.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
+    return {
+        "dirty": bool(normalized),
+        "dirtyTreeDigest": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+    }
+
+
 def _short_sha(value: str) -> str:
     text = str(value or "").strip()
     return text[:12] if text else ""
@@ -46,6 +58,12 @@ def _short_sha(value: str) -> str:
 
 def running_code_fingerprint_path(project_root: Path | str) -> Path:
     return Path(project_root) / FINGERPRINT_RELATIVE
+
+
+def serving_frontend_lease_path(project_root: Path | str, *, pid: int, create_time: float) -> Path:
+    from core.launcher.frontend_build import serving_frontend_lease_path as _lease_path
+
+    return _lease_path(project_root, pid=pid, create_time=create_time)
 
 
 def frontend_build_provenance_path(project_root: Path | str) -> Path:
@@ -58,6 +76,7 @@ def write_running_code_fingerprint(
     *,
     project_root: Path | str,
     source: str = "web_workbench_lifespan",
+    serving_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Snapshot the git commit this backend process was started from.
 
@@ -68,14 +87,37 @@ def write_running_code_fingerprint(
     root = Path(project_root)
     head = _capture_git_text(root, ["rev-parse", "HEAD"])
     branch = _capture_git_text(root, ["branch", "--show-current"])
+    dirty = _dirty_tree_summary(root)
+    identity = capture_process_identity(os.getpid())
+    frontend_value = serving_metadata.get("frontend") if isinstance(serving_metadata, dict) else {}
+    backend_value = serving_metadata.get("backend") if isinstance(serving_metadata, dict) else {}
+    frontend = frontend_value if isinstance(frontend_value, dict) else {}
+    backend = backend_value if isinstance(backend_value, dict) else {}
+    started_at = str((backend or {}).get("startedAt") or _now_iso())
     payload: dict[str, Any] = {
         "schemaVersion": FINGERPRINT_SCHEMA_VERSION,
         "projectRoot": str(root.resolve()),
         "runningHead": head,
         "runningBranch": branch,
-        "startedAt": _now_iso(),
+        "dirty": bool(dirty["dirty"]),
+        "dirtyTreeDigest": str(dirty["dirtyTreeDigest"]),
+        "pid": int(os.getpid()),
+        "createTime": identity.get("createTime") or (backend or {}).get("createTime"),
+        "executable": str(identity.get("executable") or (backend or {}).get("executable") or ""),
+        "startedAt": started_at,
         "source": source,
     }
+    if isinstance(serving_metadata, dict) and isinstance(frontend_value, dict):
+        payload.update(
+            {
+                "servingFrontendBuildKey": str(frontend.get("buildKey") or ""),
+                "servingFrontendRelease": str(frontend.get("release") or ""),
+                "servingFrontendDist": str(frontend.get("dist") or ""),
+                "servingFrontendBuiltFromCommit": str(frontend.get("builtFromCommit") or ""),
+            }
+        )
+    if isinstance(serving_metadata, dict):
+        payload["apiContractVersion"] = str(serving_metadata.get("apiContractVersion") or "v1")
     path = running_code_fingerprint_path(root)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +126,36 @@ def write_running_code_fingerprint(
         tmp_path.replace(path)
         payload["written"] = True
         payload["path"] = str(path)
+        lease_release = str(payload.get("servingFrontendRelease") or "").strip()
+        try:
+            lease_create_time = float(payload.get("createTime") or 0)
+        except (TypeError, ValueError):
+            lease_create_time = 0.0
+        lease_executable = str(payload.get("executable") or "").strip()
+        if lease_release and lease_create_time > 0 and lease_executable:
+            try:
+                lease_path = serving_frontend_lease_path(
+                    root,
+                    pid=int(payload["pid"]),
+                    create_time=lease_create_time,
+                )
+                lease_path.parent.mkdir(parents=True, exist_ok=True)
+                lease_payload = {
+                    "schemaVersion": 1,
+                    "projectRoot": str(root.resolve()),
+                    "pid": int(payload["pid"]),
+                    "createTime": lease_create_time,
+                    "executable": lease_executable,
+                    "servingFrontendBuildKey": str(payload.get("servingFrontendBuildKey") or ""),
+                    "servingFrontendRelease": lease_release,
+                    "startedAt": started_at,
+                }
+                lease_tmp = lease_path.with_suffix(lease_path.suffix + ".tmp")
+                lease_tmp.write_text(json.dumps(lease_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                lease_tmp.replace(lease_path)
+                payload["servingLeasePath"] = str(lease_path)
+            except OSError as exc:
+                payload["servingLeaseErrorType"] = type(exc).__name__
     except OSError as exc:
         payload["written"] = False
         payload["errorType"] = type(exc).__name__
@@ -137,6 +209,7 @@ def resolve_backend_freshness(
     running = read_running_code_fingerprint(root)
     disk_head = _capture_git_text(root, ["rev-parse", "HEAD"])
     disk_branch = _capture_git_text(root, ["branch", "--show-current"])
+    disk_dirty = _dirty_tree_summary(root)
 
     running_head = str((running or {}).get("runningHead") or "").strip()
     if not running_head:
@@ -155,25 +228,44 @@ def resolve_backend_freshness(
                 "branch": str((running or {}).get("runningBranch") or "").strip(),
                 "startedAt": str((running or {}).get("startedAt") or "").strip(),
             },
-            "disk": {"head": "", "branch": ""},
+            "disk": {"head": "", "branch": "", **disk_dirty},
         }
 
     behind_count: int | None = None
+    running_dirty_digest = str((running or {}).get("dirtyTreeDigest") or "").strip()
+    dirty_differs = bool(running_dirty_digest) and running_dirty_digest != str(disk_dirty["dirtyTreeDigest"])
     if running_head != disk_head:
         behind_count = _parse_behind_count(
             _capture_git_text(root, ["rev-list", "--count", f"{running_head}..{disk_head}"])
         )
+    if not running_dirty_digest:
+        return {
+            "available": False,
+            "reason": "running_fingerprint_missing_dirty_digest",
+            "running": {
+                "head": running_head,
+                "branch": str((running or {}).get("runningBranch") or "").strip(),
+                "startedAt": str((running or {}).get("startedAt") or "").strip(),
+                "pid": int((running or {}).get("pid") or 0),
+            },
+            "disk": {"head": disk_head, "branch": disk_branch, **disk_dirty},
+        }
     return {
         "available": True,
         "reason": "",
-        "behind": running_head != disk_head,
+        "behind": running_head != disk_head or dirty_differs,
         "behindCount": behind_count,
         "running": {
             "head": running_head,
             "branch": str((running or {}).get("runningBranch") or "").strip(),
             "startedAt": str((running or {}).get("startedAt") or "").strip(),
+            "dirty": bool((running or {}).get("dirty")),
+            "dirtyTreeDigest": running_dirty_digest,
+            "pid": int((running or {}).get("pid") or 0),
+            "createTime": (running or {}).get("createTime"),
+            "executable": str((running or {}).get("executable") or ""),
         },
-        "disk": {"head": disk_head, "branch": disk_branch},
+        "disk": {"head": disk_head, "branch": disk_branch, **disk_dirty},
     }
 
 
@@ -195,13 +287,53 @@ def resolve_frontend_freshness(*, project_root: Path | str) -> dict[str, Any]:
         }
     built_from = str(provenance.get("builtFromCommit") or "").strip()
     frontend_tree = str(provenance.get("frontendTree") or "").strip()
+    active_build_key = str(provenance.get("buildKey") or "").strip()
+    running = read_running_code_fingerprint(root) or {}
+    serving_build_key = str(running.get("servingFrontendBuildKey") or "").strip()
+    serving_release = str(running.get("servingFrontendRelease") or "").strip()
+    active_release = ""
+    try:
+        from core.launcher.frontend_build import active_release_path
+
+        pointer = json.loads(active_release_path(root).read_text(encoding="utf-8"))
+        if isinstance(pointer, dict):
+            active_release = str(pointer.get("release") or "").strip()
+    except (OSError, ValueError, TypeError):
+        active_release = ""
+    serving_metadata_present = bool(
+        str(running.get("servingFrontendBuildKey") or "").strip()
+        and str(running.get("servingFrontendRelease") or "").strip()
+    )
+    if not serving_metadata_present:
+        return {
+            "available": False,
+            "reason": "serving_metadata_missing",
+            "stale": True,
+            "builtFromCommit": built_from,
+            "frontendTree": frontend_tree,
+            "buildKey": active_build_key,
+            "servingBuildKey": serving_build_key,
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    serving_mismatch = bool(
+        serving_metadata_present
+        and (
+            not serving_build_key
+            or serving_build_key != active_build_key
+            or (serving_release and active_release and serving_release != active_release)
+        )
+    )
     return {
         "available": True,
-        "reason": str(inspection.get("reason") or ""),
-        "stale": not bool(inspection.get("current")),
+        "reason": "serving release differs from active release" if serving_mismatch else str(inspection.get("reason") or ""),
+        "stale": not bool(inspection.get("current")) or serving_mismatch,
         "builtFromCommit": built_from,
         "frontendTree": frontend_tree,
-        "buildKey": str(provenance.get("buildKey") or ""),
+        "buildKey": active_build_key,
+        "servingBuildKey": serving_build_key,
+        "servingRelease": serving_release,
+        "activeRelease": active_release,
     }
 
 
@@ -244,5 +376,8 @@ def resolve_code_freshness(*, project_root: Path | str) -> dict[str, Any]:
             "builtFromCommit": _short_sha(str(frontend.get("builtFromCommit") or "")),
             "frontendTree": str(frontend.get("frontendTree") or ""),
             "buildKey": _short_sha(str(frontend.get("buildKey") or "")),
+            "servingBuildKey": _short_sha(str(frontend.get("servingBuildKey") or "")),
+            "servingRelease": str(frontend.get("servingRelease") or ""),
+            "activeRelease": str(frontend.get("activeRelease") or ""),
         },
     }

@@ -16,6 +16,14 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 # GET endpoints that must stay reachable without a token: the health probe
 # and the token bootstrap itself (requiring a token there deadlocks).
 _TOKEN_EXEMPT_GET_PATHS = {"/api/health", "/api/control-token"}
+# Browser-native image loads and CSS background URLs cannot attach a custom
+# control-token header. These routes serve only validated image files and keep
+# their trusted-source check; all other API reads still require the token.
+_SOURCE_ONLY_GET_PATH_PREFIXES = (
+    "/api/agents/avatar-image/",
+    "/api/config/avatar-image/",
+    "/api/config/theme-background-image/",
+)
 CONTROL_TOKEN_ENV = "VIBELUTION_WEB_CONTROL_TOKEN"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 
@@ -91,12 +99,23 @@ def validate_control_request(request: Request) -> ControlGuardError | None:
     return None
 
 
+def _is_source_only_get_path(path: str) -> bool:
+    normalized = str(path or "")
+    return normalized.startswith(_SOURCE_ONLY_GET_PATH_PREFIXES)
+
+
 class WebControlGuardMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         if not _is_guarded_path(request.url.path) or request.method.upper() == "OPTIONS":
             return await call_next(request)
 
         method = request.method.upper()
+        if method == "GET" and _is_source_only_get_path(request.url.path):
+            error = validate_control_source(request)
+            if error is not None:
+                return JSONResponse({"detail": error.detail}, status_code=error.status_code)
+            return await call_next(request)
+
         requires_token = method in _MUTATING_METHODS or (
             method == "GET"
             and request.url.path.rstrip("/") not in _TOKEN_EXEMPT_GET_PATHS

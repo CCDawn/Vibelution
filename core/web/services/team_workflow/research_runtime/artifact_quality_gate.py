@@ -18,13 +18,81 @@ from core.research.workflow.iteration_decisions import (
     validate_decision_payload,
 )
 
+from .agent_task_artifact_builder import load_canonical_problem_understanding_payload
+from .human_gate_artifacts import canonical_sha256
 from .node_execution_support import iso, utc_now
+from .problem_understanding_artifact_writer import validate_problem_understanding
 
 
 class ArtifactQualityError(ValueError):
     def __init__(self, message: str, *, code: str = "quality_gate_failed"):
         super().__init__(message)
         self.code = code
+
+
+def _canonical_problem_understanding_for_gate(
+    record: dict[str, Any],
+    manifests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate only the canonical artifact bound to the current NodeRun."""
+
+    from .node_execution_support import latest_node_run
+
+    try:
+        node_run = latest_node_run(record, "problem_understanding")
+        node_run_id = str(node_run.get("nodeRunId") or "").strip()
+        if not node_run_id:
+            raise ArtifactQualityError(
+                "problem_understanding current NodeRun is missing nodeRunId",
+                code="problem_understanding_canonical_missing",
+            )
+        matching = [
+            item
+            for item in manifests
+            if str(item.get("artifactId") or "").split(":", 1)[0]
+            == "problem_understanding"
+        ]
+        if len(matching) != 1:
+            raise ArtifactQualityError(
+                "problem_understanding requires one canonical artifact manifest",
+                code="problem_understanding_canonical_missing",
+            )
+        manifest = matching[0]
+        if (
+            str(manifest.get("producerNodeRunId") or "").strip() != node_run_id
+            or isinstance(manifest.get("producerAttempt"), bool)
+            or manifest.get("producerAttempt") != node_run.get("attempt")
+            or str(manifest.get("inputSnapshotHash") or "").strip()
+            != str(node_run.get("inputSnapshotHash") or "").strip()
+        ):
+            raise ArtifactQualityError(
+                "problem_understanding artifact provenance does not match current NodeRun",
+                code="problem_understanding_canonical_mismatch",
+            )
+
+        payload = load_canonical_problem_understanding_payload(
+            record=record,
+            node_run=node_run,
+        )
+        normalized = validate_problem_understanding(payload)
+        content_hash = canonical_sha256(normalized)
+        if (
+            str(manifest.get("contentHash") or "").strip() != content_hash
+            or str(manifest.get("artifactId") or "")
+            != f"problem_understanding:{content_hash[:16]}"
+        ):
+            raise ArtifactQualityError(
+                "problem_understanding manifest does not match canonical readback",
+                code="problem_understanding_canonical_mismatch",
+            )
+        return normalized
+    except ArtifactQualityError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ArtifactQualityError(
+            str(exc),
+            code="problem_understanding_canonical_missing",
+        ) from exc
 
 
 def _payload_for_kind(
@@ -73,7 +141,16 @@ def validate_artifact_quality(
     details: dict[str, Any] = {}
     records: dict[str, Any] = {}
     try:
-        if node_id == "source_finding":
+        if node_id == "problem_understanding":
+            payload = _canonical_problem_understanding_for_gate(record, manifests)
+            gate = payload.get("human_gate") or {}
+            details = {
+                "subquestionCount": len(payload["subquestions"]),
+                "assumptionCount": len(payload["assumptions"]),
+                "knownUnknownCount": len(payload["known_unknowns"]),
+                "humanGateDecision": gate["decision"],
+            }
+        elif node_id == "source_finding":
             payload = _payload_for_kind(manifests, payloads, "source_candidate_batch")
             perspectives = list(payload.get("perspectives") or [])
             queries = list(payload.get("queries") or [])

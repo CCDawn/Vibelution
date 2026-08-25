@@ -849,7 +849,7 @@ describe("systemStatus", () => {
 
     expect(indicator).toMatchObject({
       kind: "source_collection",
-      label: "知识搜集",
+      label: "资料搜集",
       status: "running",
       runId: "dprun-20260613-source",
       count: 2,
@@ -904,7 +904,7 @@ describe("systemStatus", () => {
 
     expect(indicator).toMatchObject({
       kind: "source_collection",
-      label: "知识搜集",
+      label: "资料搜集",
       runId: "dprun-20260614-source",
       status: "queued",
       tone: "caution",

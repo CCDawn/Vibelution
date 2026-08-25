@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from core.research.competition.result_set import CatalogScope, ResultSetContractError
+
 from ._validation import (
     ContractValidationError,
     canonical_sha256,
@@ -15,6 +17,7 @@ from ._validation import (
     require_mapping,
     require_text,
 )
+from .research_scope import ResearchScopeEnvelope, scope_hash_for, scope_locators_for
 
 _REQUIRED_FIELDS = (
     "teamId",
@@ -39,6 +42,71 @@ _REQUIRED_FIELDS = (
     "createdBy",
     "createdAt",
 )
+
+
+def _normalize_research_scope(
+    payload: Mapping[str, Any],
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Validate the immutable server-derived scope and its locators."""
+
+    raw = require_mapping(payload, "researchScopeEnvelope")
+    try:
+        parsed = ResearchScopeEnvelope.from_dict(raw)
+    except ContractValidationError as exc:
+        raise ContractValidationError(
+            f"researchScopeEnvelope is malformed: {exc}"
+        ) from exc
+    if parsed.question != question_id:
+        raise ContractValidationError(
+            "researchScopeEnvelope.question must match questionId"
+        )
+    expected_hash = scope_hash_for(
+        program=parsed.program,
+        theme=parsed.theme,
+        campaign=parsed.campaign,
+        question=parsed.question,
+        branch=parsed.branch,
+        workflow=parsed.workflow,
+        agent_id=parsed.agentId,
+        mode=parsed.mode.value,
+    )
+    if parsed.scopeHash != expected_hash:
+        raise ContractValidationError(
+            "researchScopeEnvelope.scopeHash does not match its identity"
+        )
+    expected_locators = scope_locators_for(
+        program=parsed.program,
+        theme=parsed.theme,
+        campaign=parsed.campaign,
+        question=parsed.question,
+        branch=parsed.branch,
+        agent_id=parsed.agentId,
+        scope_hash=parsed.scopeHash,
+    )
+    for field, expected in expected_locators.items():
+        if getattr(parsed, field) != expected:
+            raise ContractValidationError(
+                f"researchScopeEnvelope.{field} does not match its identity"
+            )
+    return parsed.to_dict()
+
+
+def _normalize_catalog_scope(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Require the exact scope of the tracked 125-question catalog."""
+
+    raw = require_mapping(payload, "catalogScope")
+    try:
+        parsed = CatalogScope.from_dict(raw)
+        expected = CatalogScope.from_tracked_resources()
+    except (ResultSetContractError, TypeError, ValueError, KeyError) as exc:
+        raise ContractValidationError(f"catalogScope is malformed: {exc}") from exc
+    if parsed != expected:
+        raise ContractValidationError(
+            "catalogScope must exactly match the tracked competition catalog"
+        )
+    return parsed.to_dict()
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +134,8 @@ class WorkflowRunInputSnapshot:
     createdAt: str
     evidenceRemediationContract: dict[str, Any]
     workflowSessionScopeV3: dict[str, str]
+    researchScopeEnvelope: dict[str, Any]
+    catalogScope: dict[str, Any]
     snapshotHash: str
 
     @classmethod
@@ -111,6 +181,18 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "evidenceRemediationContract",
             )
+        has_research_scope = "researchScopeEnvelope" in payload
+        has_catalog_scope = "catalogScope" in payload
+        if has_research_scope != has_catalog_scope:
+            raise ContractValidationError(
+                "researchScopeEnvelope and catalogScope must be provided together"
+            )
+        if has_research_scope:
+            canonical["researchScopeEnvelope"] = _normalize_research_scope(
+                payload,
+                question_id=canonical["questionId"],
+            )
+            canonical["catalogScope"] = _normalize_catalog_scope(payload)
         raw_scope_mode = payload.get("workflowSessionScopeV3")
         if raw_scope_mode is None:
             canonical["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
@@ -163,6 +245,10 @@ class WorkflowRunInputSnapshot:
             workflowSessionScopeV3=copy.deepcopy(
                 canonical["workflowSessionScopeV3"]
             ),
+            researchScopeEnvelope=copy.deepcopy(
+                canonical.get("researchScopeEnvelope") or {}
+            ),
+            catalogScope=copy.deepcopy(canonical.get("catalogScope") or {}),
             snapshotHash=snapshot_hash,
         )
 
@@ -192,6 +278,11 @@ class WorkflowRunInputSnapshot:
             "workflowSessionScopeV3": copy.deepcopy(self.workflowSessionScopeV3),
             "snapshotHash": self.snapshotHash,
         }
+        if self.researchScopeEnvelope or self.catalogScope:
+            payload["researchScopeEnvelope"] = copy.deepcopy(
+                self.researchScopeEnvelope
+            )
+            payload["catalogScope"] = copy.deepcopy(self.catalogScope)
         if self.evidenceRemediationContract:
             payload["evidenceRemediationContract"] = copy.deepcopy(
                 self.evidenceRemediationContract

@@ -319,6 +319,38 @@ def test_challenge_cup_managed_agents_default_to_full_access_without_changing_pe
     assert personal_agent["permissionPreset"] == "request_approval"
 
 
+def test_challenge_cup_managed_agents_repair_dialogue_binding_to_flash(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    initial = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    execution_member = next(
+        member
+        for member in initial["team"]["members"]
+        if member["role"] == "challenge_cup_execution_steward"
+    )
+    agent_directory_service.update_agent_instance(
+        execution_member["agentId"],
+        llm_bindings={"dialogue": {"modelId": "relay_openai/gpt-5.6-luna"}},
+    )
+
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+    repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    repaired_agents = [
+        agent_directory_service.get_agent(member["agentId"])
+        for member in repaired["team"]["members"]
+    ]
+
+    assert {
+        agent["llmBindings"]["dialogue"]["modelId"]
+        for agent in repaired_agents
+    } == {team_service.CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF}
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
 def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
@@ -733,6 +765,19 @@ def test_challenge_cup_research_team_repair_detects_exact_projection_and_room_dr
     )
     assert team_service.challenge_cup_research_team_agents_need_repair() is True
     team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+
+    member = team["members"][0]
+    agent_directory_service.update_agent_instance(
+        member["agentId"], direct_session_id="session-recreated-after-reset"
+    )
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+    team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    assert next(
+        participant["sessionId"]
+        for participant in room["participants"]
+        if participant["agentId"] == member["agentId"]
+    ) == "session-recreated-after-reset"
 
     extra = agent_directory_service.create_agent_instance(
         display_name="无关第七人",

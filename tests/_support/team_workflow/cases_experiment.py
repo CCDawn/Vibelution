@@ -678,10 +678,11 @@ def test_execute_experiment_full_run_uses_env_execution_config(tmp_path, monkeyp
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
     captured: dict[str, object] = {}
+    output_root = (tmp_path / "experiments" / "out").resolve()
 
     monkeypatch.setenv("VIBELUTION_FORMAL_PYTHON_EXECUTABLE", "C:/runner/python.exe")
     monkeypatch.setenv("VIBELUTION_FORMAL_DATA_ROOT", "C:/data/fashionmnist")
-    monkeypatch.setenv("VIBELUTION_FORMAL_OUTPUT_ROOT", "C:/experiments/out")
+    monkeypatch.setenv("VIBELUTION_FORMAL_OUTPUT_ROOT", str(output_root))
     monkeypatch.setenv("VIBELUTION_FORMAL_EPOCHS", "1")
     monkeypatch.setenv("VIBELUTION_FORMAL_TRAIN_SAMPLES", "256")
 
@@ -692,8 +693,8 @@ def test_execute_experiment_full_run_uses_env_execution_config(tmp_path, monkeyp
             "adapterId": adapter_id,
             "status": "completed",
             "seedCount": 3,
-            "resultPath": "C:/experiments/out/formal-run-result.json",
-            "logRef": "C:/experiments/out/formal-run-log.json",
+            "resultPath": str(output_root / "formal-run-result.json"),
+            "logRef": str(output_root / "formal-run-log.json"),
             "requiresResultReview": True,
             "automaticPromotion": False,
         }
@@ -713,7 +714,7 @@ def test_execute_experiment_full_run_uses_env_execution_config(tmp_path, monkeyp
     assert isinstance(config, dict)
     assert config["pythonExecutable"] == "C:/runner/python.exe"
     assert config["dataRoot"] == "C:/data/fashionmnist"
-    assert config["outputRoot"] == "C:/experiments/out"
+    assert Path(config["outputRoot"]) == output_root
     assert config["epochs"] == 1
     assert config["trainSamples"] == 256
     assert full_run_api.formal_execution_config_is_provisioned(config) is True
@@ -950,6 +951,8 @@ def test_prepare_experiment_full_run_records_preflight_without_starting_executio
     team = team_service.create_team(name="挑战杯科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
+    output_root = (tmp_path / "experiments" / "prepared").resolve()
+    data_root = (tmp_path / "formal-data").resolve()
 
     monkeypatch.setattr(
         team_workflow_orchestration_service.formal_runner,
@@ -963,7 +966,15 @@ def test_prepare_experiment_full_run_records_preflight_without_starting_executio
     )
 
     response = team_workflow_orchestration_service.prepare_experiment_full_run(
-        team["teamId"], plan_id, {"executionConfig": {"pythonExecutable": "C:/runner/python.exe"}}
+        team["teamId"],
+        plan_id,
+        {
+            "executionConfig": {
+                "pythonExecutable": "C:/runner/python.exe",
+                "dataRoot": str(data_root),
+                "outputRoot": str(output_root),
+            }
+        },
     )
 
     assert response["preparation"]["status"] == "prepared"
@@ -976,6 +987,8 @@ def test_execute_experiment_full_run_stores_review_only_artifacts_without_auto_p
     team = team_service.create_team(name="挑战杯科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
+    output_root = (tmp_path / "experiments" / "review-only").resolve()
+    data_root = (tmp_path / "formal-data").resolve()
 
     monkeypatch.setattr(
         team_workflow_orchestration_service.formal_runner,
@@ -984,15 +997,23 @@ def test_execute_experiment_full_run_stores_review_only_artifacts_without_auto_p
             "adapterId": args[0],
             "status": "completed",
             "seedCount": 3,
-            "resultPath": "C:/experiments/formal-run-result.json",
-            "logRef": "C:/experiments/formal-run-log.json",
+            "resultPath": str(output_root / "formal-run-result.json"),
+            "logRef": str(output_root / "formal-run-log.json"),
             "requiresResultReview": True,
             "automaticPromotion": False,
         },
     )
 
     response = team_workflow_orchestration_service.execute_experiment_full_run(
-        team["teamId"], plan_id, {"executionConfig": {"pythonExecutable": "C:/runner/python.exe"}}
+        team["teamId"],
+        plan_id,
+        {
+            "executionConfig": {
+                "pythonExecutable": "C:/runner/python.exe",
+                "dataRoot": str(data_root),
+                "outputRoot": str(output_root),
+            }
+        },
     )
 
     assert response["execution"]["status"] == "completed"

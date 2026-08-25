@@ -46,7 +46,7 @@ def test_rerun_same_protocol_creates_new_controlled_run_attempt(tmp_path: Path) 
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         harness.resume(
             run_id="run-test",
@@ -76,7 +76,7 @@ def test_promote_candidate_routes_through_governance_to_package(tmp_path: Path) 
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         harness.resume(
             run_id="run-test",
@@ -119,7 +119,7 @@ def test_stop_routes_to_result_package_without_promotion(tmp_path: Path) -> None
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         harness.resume(
             run_id="run-test",
@@ -161,7 +161,7 @@ def test_revise_protocol_ends_graph_for_fork(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         harness.resume(
             run_id="run-test",
@@ -184,7 +184,7 @@ def test_unknown_decision_blocks_run(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         harness.resume(
             run_id="run-test",
@@ -330,7 +330,7 @@ def test_stop_artifact_routes_when_graph_state_lacks_branch(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         put_workflow_artifact(
             "research-team",
@@ -397,7 +397,7 @@ def test_graph_error_does_not_rewind_succeeded_iteration_attempt(tmp_path: Path)
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         node_run_id = f"nr-run-test-iteration_decision-a{decision['attempt']}"
 
@@ -448,7 +448,7 @@ def test_repair_resumes_succeeded_iteration_interrupt_from_artifact(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         node_run_id = f"nr-run-test-iteration_decision-a{decision['attempt']}"
 
@@ -547,7 +547,7 @@ def test_enter_node_after_empty_decision_lands_on_version_governance(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         _strand_iteration_at_end(harness, decision)
         snap = harness.coordinator.snapshot("run-test")
@@ -580,7 +580,7 @@ def test_snapshot_heals_duplicate_run_id_pending_writes(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         _strand_iteration_at_end(harness, decision)
         graph, stack = harness.coordinator._compile()

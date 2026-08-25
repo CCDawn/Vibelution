@@ -8,6 +8,7 @@ export type MainLineQueueOwnerMarker = {
   schemaVersion: 1;
   owner: "electron";
   pid: number;
+  executable: string;
   updatedAt: string;
 };
 
@@ -17,12 +18,13 @@ export function mainLineQueueOwnerPath(runtimeManagerDir: string): string {
 
 export async function writeMainLineQueueOwnerMarker(
   runtimeManagerDir: string,
-  input: { pid?: number; nowMs?: number } = {},
+  input: { pid?: number; executable?: string; nowMs?: number } = {},
 ): Promise<MainLineQueueOwnerMarker> {
   const marker: MainLineQueueOwnerMarker = {
     schemaVersion: 1,
     owner: "electron",
     pid: Math.trunc(input.pid ?? process.pid),
+    executable: String(input.executable ?? process.execPath).trim(),
     updatedAt: new Date(input.nowMs ?? Date.now()).toISOString(),
   };
   const target = mainLineQueueOwnerPath(runtimeManagerDir);

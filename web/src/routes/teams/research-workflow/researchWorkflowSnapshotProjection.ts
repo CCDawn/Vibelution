@@ -16,6 +16,18 @@ import type {
   WorkflowRunStatus,
 } from "../../../api/types/researchWorkflow";
 
+/** Canvas projection with the formal v2 read-model fields kept intact. */
+export type ResearchWorkflowCanvasProjection = WorkflowCanvasProjection & {
+  formalSnapshot: ResearchWorkflowSnapshot;
+  currentTask: ResearchWorkflowSnapshot["currentTask"];
+  progress: ResearchWorkflowSnapshot["progress"];
+  retry: ResearchWorkflowSnapshot["retry"];
+  recovery: ResearchWorkflowSnapshot["recovery"];
+  artifactSummary: ResearchWorkflowSnapshot["artifactSummary"];
+  deliveryStatus: ResearchWorkflowSnapshot["deliveryStatus"];
+  launchContext: ResearchWorkflowSnapshot["launchContext"];
+};
+
 function asWorkflowDefinition(raw: Record<string, unknown>): WorkflowDefinition {
   return raw as unknown as WorkflowDefinition;
 }
@@ -62,9 +74,17 @@ function nodeRunsFromAttempts(
 
 export function snapshotToCanvasProjection(
   snapshot: ResearchWorkflowSnapshot,
-): WorkflowCanvasProjection {
+): ResearchWorkflowCanvasProjection {
   const run = snapshot.run;
   return {
+    formalSnapshot: snapshot,
+    currentTask: snapshot.currentTask,
+    progress: snapshot.progress,
+    retry: snapshot.retry,
+    recovery: snapshot.recovery,
+    artifactSummary: snapshot.artifactSummary,
+    deliveryStatus: snapshot.deliveryStatus,
+    launchContext: snapshot.launchContext,
     definition: asWorkflowDefinition(snapshot.definition),
     run: {
       runId: run.runId,

@@ -1,5 +1,8 @@
+import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
-import { VStatusChip, VSurface, VTooltip } from "../../../components/vui";
+import { VNativeButton, VStatusChip, VSurface, VTooltip } from "../../../components/vui";
 import {
   challengeDimensionLabel,
   challengeGateLabel,
@@ -12,10 +15,14 @@ import css from "./ChallengeQuestionDetailPanel.styles";
 type ChallengeQuestionAnalysisSectionProps = {
   output: ChallengeQuestionRunDetailPayload["output"];
   lang?: "zh" | "en";
+  summaryOnly?: boolean;
 };
 
-export function ChallengeQuestionAnalysisSection({ output, lang = "zh" }: ChallengeQuestionAnalysisSectionProps) {
+export function ChallengeQuestionAnalysisSection({ output, lang = "zh", summaryOnly = false }: ChallengeQuestionAnalysisSectionProps) {
   const isZh = lang === "zh";
+  const [expandedHypothesisId, setExpandedHypothesisId] = useState(
+    output.selection.selected_hypothesis_id || output.hypotheses[0]?.hypothesis_id || "",
+  );
   const selectedHypothesis = output.hypotheses.find(
     (hypothesis) => hypothesis.hypothesis_id === output.selection.selected_hypothesis_id,
   );
@@ -25,6 +32,55 @@ export function ChallengeQuestionAnalysisSection({ output, lang = "zh" }: Challe
     reviews.push(review);
     reviewsByHypothesis.set(review.hypothesis_id, reviews);
   });
+
+  if (summaryOnly) {
+    return (
+      <section className={css.section} id="hypotheses">
+        <ChallengeQuestionSectionHeading
+          index="01"
+          title={isZh ? "假说摘要" : "Hypothesis summary"}
+        />
+        <p className={css.archiveHint}>
+          {isZh ? "默认只展开一条，需要核验时再切换。" : "One item stays open; switch only when you need details."}
+        </p>
+        <div className={css.hypothesisSummaryList}>
+          {output.hypotheses.map((hypothesis, index) => {
+            const expanded = hypothesis.hypothesis_id === expandedHypothesisId;
+            const panelId = `question-archive-hypothesis-${index}`;
+            return (
+              <article className={css.hypothesisSummaryCard} key={hypothesis.hypothesis_id}>
+                <VNativeButton
+                  type="button"
+                  className={css.hypothesisToggle}
+                  aria-expanded={expanded}
+                  aria-controls={panelId}
+                  onClick={() => setExpandedHypothesisId((current) => current === hypothesis.hypothesis_id ? "" : hypothesis.hypothesis_id)}
+                >
+                  <span className={css.hypothesisToggleCopy}>
+                    <span className={css.hypothesisIndex}>{index + 1}</span>
+                    <strong>{hypothesis.statement}</strong>
+                    {hypothesis.hypothesis_id === output.selection.selected_hypothesis_id ? (
+                      <VStatusChip tone="accent">{isZh ? "最终选择" : "Selected"}</VStatusChip>
+                    ) : null}
+                  </span>
+                  {expanded ? <ChevronDown size={17} aria-hidden="true" /> : <ChevronRight size={17} aria-hidden="true" />}
+                </VNativeButton>
+                {expanded ? (
+                  <div className={css.hypothesisSummaryDetail} id={panelId}>
+                    <dl>
+                      <div><dt>{isZh ? "机制" : "Mechanism"}</dt><dd>{hypothesis.mechanism}</dd></div>
+                      <div><dt>{isZh ? "如何证伪" : "Falsifiability"}</dt><dd>{hypothesis.falsifiability}</dd></div>
+                      <div><dt>{isZh ? "适用边界" : "Boundary conditions"}</dt><dd><ChallengeStringList values={hypothesis.boundary_conditions} lang={lang} /></dd></div>
+                    </dl>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <>

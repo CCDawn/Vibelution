@@ -18,7 +18,10 @@ export function useResearchWorkflowEventStream(options: {
   runId: string;
   afterSequence: number;
   initialAfterSequence?: number;
-  onEvent: (event: WorkflowEventEnvelope) => void;
+  onEvent: (event: WorkflowEventEnvelope) =>
+    | void
+    | boolean
+    | { accepted: boolean; resyncRequired?: boolean };
   enabled?: boolean;
 }): { state: ResearchWorkflowEventStreamState; error: string | null } {
   const {
@@ -50,12 +53,13 @@ export function useResearchWorkflowEventStream(options: {
       setError(null);
       return;
     }
-    const controller = new AbortController();
+    let activeController: AbortController | null = null;
     let reconnectTimer: number | null = null;
     let stopped = false;
 
     const scheduleReconnect = () => {
-      if (stopped || controller.signal.aborted) return;
+      if (stopped) return;
+      if (reconnectTimer !== null) return;
       setState("reconnecting");
       setError("工作流实时连接中断，正在重连");
       reconnectTimer = window.setTimeout(() => {
@@ -65,7 +69,10 @@ export function useResearchWorkflowEventStream(options: {
     };
 
     const connect = async (reconnecting: boolean) => {
-      if (stopped || controller.signal.aborted) return;
+      if (stopped) return;
+      const controller = new AbortController();
+      activeController?.abort();
+      activeController = controller;
       setState(reconnecting ? "reconnecting" : "connecting");
       if (!reconnecting) setError(null);
       try {
@@ -86,23 +93,38 @@ export function useResearchWorkflowEventStream(options: {
           onFrame: (frame) => {
             try {
               if (frame.event === "snapshot") {
-                const payload = JSON.parse(frame.data) as { cursor?: number };
-                cursorRef.current = Math.max(cursorRef.current, Number(payload.cursor) || 0);
+                // The handshake advertises server position, not an accepted
+                // client event. Keep cursorRef at the reducer-confirmed cursor.
+                void (JSON.parse(frame.data) as { cursor?: number });
                 return;
               }
+              if (!KNOWN_EVENT_TYPES.has(frame.event)) return;
               const event = JSON.parse(frame.data) as WorkflowEventEnvelope;
               const sequence = Number(event.sequence) || 0;
               if (sequence <= cursorRef.current) return;
-              cursorRef.current = sequence;
-              if (KNOWN_EVENT_TYPES.has(frame.event)) onEventRef.current(event);
+              const result = onEventRef.current(event);
+              const accepted = typeof result === "object"
+                ? result.accepted
+                : result !== false;
+              if (accepted) {
+                cursorRef.current = sequence;
+              } else if (typeof result === "object" && result.resyncRequired) {
+                // Keep the last accepted cursor and force a fresh replay;
+                // otherwise the gap event would be silently skipped forever.
+                controller.abort();
+                scheduleReconnect();
+              }
             } catch {
               setError("工作流事件格式无效");
             }
           },
         });
-        scheduleReconnect();
       } catch {
-        if (!controller.signal.aborted) scheduleReconnect();
+        // Abort is expected both during cleanup and when a gap asks for a
+        // replay. The latter already scheduled a fresh controller above.
+      } finally {
+        if (activeController === controller) activeController = null;
+        if (!stopped && !controller.signal.aborted) scheduleReconnect();
       }
     };
 
@@ -110,7 +132,8 @@ export function useResearchWorkflowEventStream(options: {
 
     return () => {
       stopped = true;
-      controller.abort();
+      activeController?.abort();
+      activeController = null;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     };
   }, [enabled, runId, teamId]);

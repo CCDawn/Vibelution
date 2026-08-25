@@ -3,6 +3,7 @@
  * One-click stage switch; unlocked stages only.
  */
 import { VButton } from "../../components/vui";
+import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
 import type { ResearchStageUnlock } from "./researchPrimaryActionModel";
 
@@ -20,7 +21,7 @@ const STAGES: Array<{
   zh: string;
   en: string;
 }> = [
-  { id: "knowledge_collection", zh: "知识搜集", en: "Collection" },
+  { id: "knowledge_collection", zh: RESEARCH_STAGE_TERMS.knowledge_collection.zh, en: RESEARCH_STAGE_TERMS.knowledge_collection.en },
   { id: "experiment", zh: "实验设计", en: "Experiment" },
   { id: "iteration", zh: "执行迭代", en: "Iteration" },
 ];

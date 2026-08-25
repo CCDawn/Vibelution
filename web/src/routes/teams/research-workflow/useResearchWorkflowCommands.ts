@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type {
@@ -9,6 +9,14 @@ import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-wor
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
+
+function commandErrorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
+function isRunVersionConflict(reason: unknown): boolean {
+  return commandErrorMessage(reason).includes("run_version_conflict");
+}
 
 export function useResearchWorkflowCommands(options: {
   teamId: string;
@@ -33,6 +41,7 @@ export function useResearchWorkflowCommands(options: {
   } = options;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const offerPendingRef = useRef(false);
 
   const pendingTaskId = useCallback(
     (nodeId: string): string | null => {
@@ -73,15 +82,32 @@ export function useResearchWorkflowCommands(options: {
         setError(reason.message);
         throw reason;
       }
+      if (offerPendingRef.current) return;
+      offerPendingRef.current = true;
       setBusy(true);
       setError(null);
       try {
-        await submitFormalOffer(offer);
-        await refresh();
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : String(reason));
-        throw reason;
+        try {
+          await submitFormalOffer(offer);
+        } catch (reason) {
+          setError(commandErrorMessage(reason));
+          if (isRunVersionConflict(reason)) {
+            try {
+              await refresh();
+            } catch {
+              // The signed offer conflict remains authoritative even if resync also fails.
+            }
+          }
+          throw reason;
+        }
+        try {
+          await refresh();
+        } catch (reason) {
+          setError(commandErrorMessage(reason));
+          throw reason;
+        }
       } finally {
+        offerPendingRef.current = false;
         setBusy(false);
       }
     },

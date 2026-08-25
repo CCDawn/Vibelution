@@ -4,7 +4,7 @@ This module deliberately keeps the process boundary small:
 
 * it only invokes the repository-owned FashionMNIST script;
 * the Python executable, data root, and artifact root must be explicit;
-* output artifacts must live outside the repository; and
+* output artifacts must live under the current project's canonical data root; and
 * completed execution is evidence for review, never an automatic research claim.
 """
 
@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
+from vibelution_storage import resolve_project_data_home
 
 
 FASHION_MNIST_MULTI_SEED_ADAPTER = "fashion_mnist_predictive_coding_multi_seed"
@@ -58,7 +59,12 @@ def prepare_full_run(
     seeds = _validated_seeds(method.get("seeds"))
     python_executable = _required_path(execution.get("pythonExecutable"), "pythonExecutable", kind="file")
     data_root = _required_path(execution.get("dataRoot"), "dataRoot", kind="directory")
-    output_root = _external_output_root(execution.get("outputRoot"), root)
+    output_root = assert_canonical_project_data_path(
+        execution.get("outputRoot"),
+        project_root=root,
+        label="outputRoot",
+        create=True,
+    )
     timeout_seconds = _bounded_int(
         execution.get("timeoutSeconds", _DEFAULT_TIMEOUT_SECONDS),
         "timeoutSeconds",
@@ -192,7 +198,7 @@ def prepare_full_run(
             "trusted_repository_script_only",
             "shell_disabled",
             "windowless_subprocess",
-            "artifacts_outside_repository",
+            "artifacts_inside_current_instance_canonical_data_root",
             "user_triggered_only",
             "manual_result_review_required",
             "not_an_official_competition_submission",
@@ -311,20 +317,54 @@ def _required_path(value: Any, label: str, *, kind: str) -> Path:
     return resolved
 
 
-def _external_output_root(value: Any, project_root: Path) -> Path:
+def assert_canonical_project_data_path(
+    value: Any,
+    *,
+    project_root: Path | str,
+    label: str = "outputRoot",
+    create: bool = False,
+) -> Path:
+    """Resolve a path inside the current project's canonical data root.
+
+    The candidate is resolved before any directory is created so existing
+    symlink/reparse ancestors cannot redirect a run outside the active
+    instance. A missing leaf is valid when its resolved path remains inside
+    the canonical root; ``create=True`` creates it only after that check.
+    """
+
     raw = str(value or "").strip()
     if not raw:
-        raise FormalRunnerError("outputRoot is required.")
+        raise FormalRunnerError(f"{label} is required.")
     path = Path(raw).expanduser()
     if not path.is_absolute():
-        raise FormalRunnerError("outputRoot must be an absolute path.")
-    resolved = path.resolve()
+        raise FormalRunnerError(f"{label} must be an absolute path.")
+
+    root = _project_root(project_root)
     try:
-        resolved.relative_to(project_root)
-    except ValueError:
-        resolved.mkdir(parents=True, exist_ok=True)
-        return resolved
-    raise FormalRunnerError("outputRoot must be outside the repository.")
+        canonical_root = Path(resolve_project_data_home(root)).expanduser().resolve(strict=False)
+        resolved = path.resolve(strict=False)
+        resolved.relative_to(canonical_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise FormalRunnerError(
+            f"{label} must be inside the current project canonical data root."
+        ) from exc
+
+    if create and resolved.exists() and not resolved.is_dir():
+        raise FormalRunnerError(
+            f"{label} must be inside the current project canonical data root."
+        )
+    if create:
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+            post_create = resolved.resolve(strict=False)
+            post_create.relative_to(canonical_root)
+            if not post_create.is_dir():
+                raise OSError("resolved output path is not a directory")
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise FormalRunnerError(
+                f"{label} must be inside the current project canonical data root."
+            ) from exc
+    return resolved
 
 
 def _validated_seeds(value: Any) -> list[int]:

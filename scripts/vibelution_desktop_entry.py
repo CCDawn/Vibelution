@@ -44,6 +44,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from vibelution_storage import resolve_active_project_storage_paths, resolve_project_runtime_home
+from core.runtime_manager.process_identity import capture_process_identity, inspect_process_identity
 
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
 RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
@@ -866,6 +867,33 @@ def _launcher_pids_from_state(state: dict[str, object]) -> list[int]:
     return pids
 
 
+_LAUNCHER_STATE_IDENTITY_FIELDS = (
+    ("launcherBackendPid", "launcherBackendCreateTime", "launcherBackendExecutable"),
+    ("launcherBackendLaunchPid", "launcherBackendLaunchCreateTime", "launcherBackendLaunchExecutable"),
+    ("launcherBrowserWindowPid", "launcherBrowserWindowCreateTime", "launcherBrowserWindowExecutable"),
+    ("launcherBrowserLaunchPid", "launcherBrowserLaunchCreateTime", "launcherBrowserLaunchExecutable"),
+)
+
+
+def _launcher_process_identities_from_state(state: dict[str, object]) -> list[dict[str, object]]:
+    identities: list[dict[str, object]] = []
+    for pid_key, create_time_key, executable_key in _LAUNCHER_STATE_IDENTITY_FIELDS:
+        try:
+            pid = int(state.get(pid_key) or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid <= 0:
+            continue
+        identities.append(
+            {
+                "pid": pid,
+                "createTime": state.get(create_time_key),
+                "executable": state.get(executable_key),
+            }
+        )
+    return identities
+
+
 def _replace_stale_launcher_control(state: dict[str, object], port: int, current_signature: str) -> bool:
     backend_pid = int(state.get("launcherBackendPid") or 0)
     if not _launcher_control_healthy(port):
@@ -953,6 +981,8 @@ def _save_launcher_state(
     python_exe: str,
 ) -> None:
     control_url = _launcher_control_url(port)
+    backend_identity = capture_process_identity(int(backend_pid))
+    browser_identity = capture_process_identity(int(browser_pid))
     next_state = dict(previous_state)
     if str(next_state.get("sessionRole") or "") != "workbench":
         session_id = str(next_state.get("sessionId") or uuid.uuid4())
@@ -979,6 +1009,10 @@ def _save_launcher_state(
         {
             "launcherBackendPid": int(backend_pid),
             "launcherBackendLaunchPid": int(backend_pid),
+            "launcherBackendCreateTime": backend_identity.get("createTime", 0),
+            "launcherBackendExecutable": backend_identity.get("executable", ""),
+            "launcherBackendLaunchCreateTime": backend_identity.get("createTime", 0),
+            "launcherBackendLaunchExecutable": backend_identity.get("executable", ""),
             "launcherControlPort": int(port),
             "launcherControlUrl": control_url,
             "launcherControlSourceSignature": current_signature,
@@ -987,6 +1021,10 @@ def _save_launcher_state(
             "launcherBrowserProfileDir": str(LAUNCHER_BROWSER_PROFILE_DIR),
             "launcherBrowserLaunchPid": int(browser_pid),
             "launcherBrowserWindowPid": int(browser_pid),
+            "launcherBrowserLaunchCreateTime": browser_identity.get("createTime", 0),
+            "launcherBrowserLaunchExecutable": browser_identity.get("executable", ""),
+            "launcherBrowserWindowCreateTime": browser_identity.get("createTime", 0),
+            "launcherBrowserWindowExecutable": browser_identity.get("executable", ""),
             "browserManaged": True,
             "browserExecutable": str(next_state.get("browserExecutable") or ""),
             "pythonNoConsoleCommand": _select_no_console_python(python_exe),
@@ -1269,6 +1307,34 @@ def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
             "terminatedPids": [],
         }
     pids = _launcher_pids_from_state(state)
+    if bool(getattr(args, "use_state_owned_backend_pid", False)):
+        verified_pids: list[int] = []
+        for expected_identity in _launcher_process_identities_from_state(state):
+            inspection = inspect_process_identity(expected_identity)
+            identity_status = str(inspection.get("status") or "unknown")
+            if identity_status not in {"match", "dead"}:
+                reason = f"state_owned_process_identity_{identity_status}"
+                _append_log(
+                    "desktop_entry_python.stop.skipped",
+                    level="warning",
+                    reason=reason,
+                    launcher_backend_pid=backend_pid,
+                    launcher_backend_launch_pid=backend_launch_pid,
+                    identity_reason=str(inspection.get("reason") or ""),
+                )
+                return {
+                    "schemaVersion": 1,
+                    "status": "skipped",
+                    "reason": reason,
+                    "expectedBackendPid": expected_backend_pid,
+                    "launcherBackendPid": backend_pid,
+                    "terminatedPids": [],
+                }
+            if identity_status == "match":
+                pid = int(expected_identity["pid"])
+                if pid not in verified_pids:
+                    verified_pids.append(pid)
+        pids = verified_pids
     for pid in pids:
         _terminate_pid(pid)
     if port > 0:

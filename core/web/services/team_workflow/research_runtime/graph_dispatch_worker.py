@@ -46,9 +46,22 @@ from .iteration_route import branch_decision_from_run, routed_successors
 
 # A run is created before START_NODE is accepted so the request can be made
 # idempotent.  That window must nevertheless be bounded: after this deadline
-# a run with no attempt and no accepted dispatch is a failed dispatch, not an
-# indefinitely pending job.
+# a run with no durable node attempt is a failed dispatch, not an indefinitely
+# pending job.  Command/outbox rows alone do not prove that dispatch started.
 DEFAULT_START_DEADLINE_MS = 60_000
+
+
+def _is_hypothesis_first_prelude(run: Any) -> bool:
+    """Return whether a created run legitimately awaits hypothesis review."""
+
+    try:
+        snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(snapshot, Mapping):
+        return False
+    objective = snapshot.get("researchObjectiveContract")
+    return isinstance(objective, Mapping) and objective.get("hypothesisFirst") is True
 
 
 def _log_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
@@ -105,6 +118,10 @@ class GraphDispatchWorker:
         return self._store.submit(wrapped, force_flush=force_flush)
 
     def run_once(self, limit: int = 8) -> int:
+        # Terminalize stale created runs before leasing their dispatch actions.
+        # Otherwise this worker could lease an action for a run that the same
+        # reconciliation pass is supposed to dead-letter.
+        repaired = self._repair_created_without_start()
         leased = outbox_api.lease_ready_actions(
             self._store,
             owner=self._owner,
@@ -115,9 +132,8 @@ class GraphDispatchWorker:
         )
         for action in leased:
             self._handle(action)
-        repaired = self._repair_dispatching_without_adapter()
+        repaired += self._repair_dispatching_without_adapter()
         repaired += self._repair_starting_without_progress()
-        repaired += self._repair_created_without_start()
         repaired += self._repair_stranded_iteration_route()
         repaired += self._repair_stranded_terminal_package()
         return len(leased) + repaired
@@ -127,15 +143,47 @@ class GraphDispatchWorker:
 
         ``run_created`` is intentionally committed before command acceptance,
         so a process crash can leave a perfectly valid ``created`` row.  The
-        reconciliation is conservative: an attempt, an accepted START_NODE,
-        or a live graph-dispatch outbox action means that the run is still
-        claimable and must not be failed.  Everything else past the deadline
-        is closed atomically with a deterministic ``run_failed`` event.
+        only evidence that a run actually started is a durable node attempt;
+        command rows and graph-dispatch outbox rows can be stale, partially
+        committed, or replayable and therefore do not extend the deadline.
+        Hypothesis-first parent runs are a deliberate exception: their
+        prelude awaits candidate review and later submits the formal start
+        through its existing command path. Everything else past the deadline
+        is closed atomically with a deterministic ``run_failed`` event and any
+        still-live graph dispatch is cancelled in the same transaction.
         """
         now_ms = self._now()
         cutoff_ms = now_ms - self._start_deadline_ms
 
         def mutate(uow):
+            def cancel_live_dispatch(run_id: str, reason: str) -> None:
+                uow.repository.execute(
+                    """
+                    UPDATE outbox_actions
+                    SET status = 'cancelled',
+                        lease_owner = NULL,
+                        lease_expires_at_ms = NULL,
+                        last_problem_json = ?,
+                        updated_at_ms = ?
+                    WHERE run_id = ?
+                      AND action_kind = 'graph_dispatch'
+                      AND status IN ('pending', 'leased')
+                    """,
+                    (
+                        json.dumps(
+                            {
+                                "code": "dispatch_never_started",
+                                "reason": reason,
+                                "reconciliation": "created_without_start",
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        now_ms,
+                        run_id,
+                    ),
+                )
+
             rows = uow.repository.execute(
                 """
                 SELECT run_id, team_id, run_version
@@ -151,41 +199,19 @@ class GraphDispatchWorker:
                 team_id = str(row[1] or "")
                 if not run_id or not team_id:
                     continue
-                # A START_NODE command and its attempt are normally created in
-                # one writer transaction.  Check both facts because this
-                # reconciler must remain safe for older/partially restored DBs.
+                # A node attempt is the durable proof that dispatch started.
+                # Do not treat command acceptance or an outbox row as proof:
+                # either can survive a crash before the worker begins work.
                 attempt = uow.repository.execute(
                     "SELECT 1 FROM node_attempts WHERE run_id = ? LIMIT 1",
                     (run_id,),
                 ).fetchone()
                 if attempt is not None:
                     continue
-                command = uow.repository.execute(
-                    """
-                    SELECT 1 FROM workflow_commands
-                    WHERE run_id = ?
-                      AND command_kind = 'start_node'
-                      AND status IN ('accepted', 'completed')
-                    LIMIT 1
-                    """,
-                    (run_id,),
-                ).fetchone()
-                if command is not None:
-                    continue
-                live_dispatch = uow.repository.execute(
-                    """
-                    SELECT 1 FROM outbox_actions
-                    WHERE run_id = ?
-                      AND action_kind = 'graph_dispatch'
-                      AND status IN ('pending', 'leased')
-                    LIMIT 1
-                    """,
-                    (run_id,),
-                ).fetchone()
-                if live_dispatch is not None:
-                    continue
                 run = uow.repository.get_run(run_id)
                 if run is None or run.status != "created":
+                    continue
+                if _is_hypothesis_first_prelude(run):
                     continue
                 event_id = f"evt-dispatch-never-started-{run_id}"
                 event_payload = {
@@ -244,6 +270,7 @@ class GraphDispatchWorker:
                         blocked_problem_json=None,
                     ):
                         continue
+                    cancel_live_dispatch(run_id, event_payload["reason"])
                     repaired += 1
                     continue
                 expected_sequence = run.last_event_sequence + 1
@@ -258,6 +285,7 @@ class GraphDispatchWorker:
                     blocked_problem_json=None,
                 ):
                     continue
+                cancel_live_dispatch(run_id, event_payload["reason"])
                 sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
                 if sequence is None:
                     raise RuntimeError(
@@ -291,6 +319,23 @@ class GraphDispatchWorker:
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)
         dispatch = GraphDispatch.from_payload(payload)
+        from .challenge_cup_maintenance_fence import (
+            ChallengeCupMaintenanceError,
+            assert_writes_allowed,
+        )
+
+        # A graph dispatch accepted before the fence belongs to the drain set;
+        # a dispatch created afterwards is deferred without invoking the graph
+        # or mutating its node attempt.
+        try:
+            assert_writes_allowed(
+                dispatch.team_id,
+                operation="workflow_dispatch",
+                created_at_ms=getattr(action, "created_at_ms", None),
+            )
+        except ChallengeCupMaintenanceError as exc:
+            self._defer_for_maintenance(action, str(exc))
+            return
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
             and dispatch.receipt is not None
@@ -350,6 +395,19 @@ class GraphDispatchWorker:
             latest = self._store.latest_attempt(dispatch.run_id, pending.node_id)
             needs_successor = latest is None or latest.attempt != pending.attempt
             pending = self._pending_with_node_binding(pending)
+
+        if pending is not None and needs_successor:
+            # The graph may have been entered by a pre-fence action, but its
+            # successor is a new dispatch and must not be created during the
+            # reset drain.
+            try:
+                assert_writes_allowed(
+                    dispatch.team_id,
+                    operation="workflow_dispatch_successor",
+                )
+            except ChallengeCupMaintenanceError as exc:
+                self._defer_for_maintenance(action, str(exc))
+                return
 
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
@@ -655,6 +713,30 @@ class GraphDispatchWorker:
             _ = result
 
         self._submit(mutate, force_flush=True).result(timeout=30)
+
+    def _defer_for_maintenance(self, action: Any, detail: str) -> None:
+        """Leave a leased dispatch pending while a governed reset drains.
+
+        This is intentionally not ``_mark_blocked``: the maintenance fence
+        must not turn an already-running research object into a failed run.
+        The next worker pass can resume it after the fence is released.
+        """
+
+        now_ms = self._now()
+        outbox_api.requeue_action(
+            self._store,
+            action.action_id,
+            self._owner,
+            now_ms,
+            retry_at_ms=now_ms + 60_000,
+            problem_json=json.dumps(
+                {
+                    "code": "challenge_cup_maintenance_active",
+                    "detail": "workflow dispatch deferred by Challenge Cup maintenance",
+                },
+                ensure_ascii=False,
+            ),
+        )
 
     def _precheck_readiness(self, dispatch: GraphDispatch, pending: Any):
         """Evaluate readiness for an auto-advanced successor OUTSIDE the writer
@@ -1517,6 +1599,20 @@ class GraphDispatchWorker:
                 continue
             pending = self._pending_with_node_binding(pending)
             readiness_hint = self._precheck_readiness(dispatch, pending)
+            from .challenge_cup_maintenance_fence import (
+                ChallengeCupMaintenanceError,
+                assert_writes_allowed,
+            )
+
+            try:
+                assert_writes_allowed(
+                    dispatch.team_id,
+                    operation="workflow_dispatch_successor",
+                )
+            except ChallengeCupMaintenanceError:
+                # Keep the pre-fence run visible to the reset drain; do not
+                # synthesize a successor while maintenance is active.
+                continue
             self._commit_successor_dispatch(
                 dispatch,
                 result,

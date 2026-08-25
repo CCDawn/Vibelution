@@ -1,8 +1,10 @@
 export default {
   root: "space-y-3 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)]",
-  header: "flex min-w-0 items-baseline justify-between gap-3",
+  header: "flex min-w-0 items-center justify-between gap-3",
+  headerCopy: "flex min-w-0 items-baseline gap-2",
   title: "[font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-primary)]",
   total: "shrink-0 [font-size:var(--vui-font-2xs)] font-semibold tabular-nums text-[var(--fg-secondary)]",
+  details: "grid gap-3 border-t border-[var(--vui-border-subtle)] pt-3",
   presets: "flex flex-wrap gap-1.5",
   preset: "rounded-[var(--radius-control)]",
   stages: "space-y-1.5",

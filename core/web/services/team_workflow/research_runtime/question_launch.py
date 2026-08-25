@@ -28,10 +28,12 @@ from core.research.competition.resources import (
     load_full_catalog_execution_core,
     load_science_question_catalog,
 )
-from core.research.workflow.contracts import DEFAULT_PROGRAM_ID, scope_hash_for
+from core.research.competition.result_set import CatalogScope
+from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.challenge_question_runs import (
     REQUIRED_HUMAN_GATE_KEYS,
+    _package_bound_model_invocation_receipt_refs,
     challenge_question_run_summary,
     get_challenge_question_run_detail,
 )
@@ -41,14 +43,6 @@ from core.web.services.team_workflow.research_projects import (
     get_theme_activation,
 )
 
-_MODEL_REF = "relay_openai/gpt-5.6-luna"
-_MODEL_PURPOSES = (
-    "source_discovery",
-    "extraction",
-    "reasoning",
-    "review",
-    "governance",
-)
 _STAGES = (
     "knowledge_collection",
     "experiment_design",
@@ -76,12 +70,82 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _server_model_routing_policy(team_id: str) -> dict[str, Any]:
+    """Resolve the formal route snapshot from the server-owned Agent bindings."""
+
+    try:
+        from .catalog_run_authorization import (
+            resolve_catalog_model_routing_policy,
+        )
+
+        policy = resolve_catalog_model_routing_policy(_text(team_id))
+    except Exception as exc:
+        raise QuestionLaunchError(
+            "The formal six-Agent model routing policy is unavailable.",
+            code="challenge_model_routing_policy_unavailable",
+        ) from exc
+    if not isinstance(policy, Mapping):
+        raise QuestionLaunchError(
+            "The formal six-Agent model routing policy is invalid.",
+            code="challenge_model_routing_policy_invalid",
+        )
+    return dict(policy)
+
+
 def _output_identity(output: Mapping[str, Any]) -> dict[str, Any]:
     return _mapping(output.get("identity"))
 
 
 def _output_result_classification(output: Mapping[str, Any]) -> dict[str, Any]:
     return _mapping(output.get("result_classification"))
+
+
+def _formal_record_receipts_ready(record: Mapping[str, Any]) -> bool:
+    """Require package receipts plus the complete real-invocation trace."""
+
+    validation = _mapping(record.get("validation"))
+    if validation.get("modelInvocationReceipts") != "passed":
+        return False
+    try:
+        receipt_refs = _package_bound_model_invocation_receipt_refs(dict(record))
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    if not receipt_refs:
+        return False
+
+    team_id = _text(record.get("teamId"))
+    question_id = _text(record.get("questionId")).upper()
+    run_id = _text(record.get("runId"))
+    stored_trace_refs = record.get("modelInvocationReceiptTraceRefs")
+    stored_coverage = _mapping(record.get("modelInvocationReceiptCoverage"))
+    if (
+        not team_id
+        or not question_id
+        or not run_id
+        or not isinstance(stored_trace_refs, Sequence)
+        or isinstance(stored_trace_refs, (str, bytes))
+    ):
+        return False
+    try:
+        from .model_invocation_receipt_registry import (
+            model_invocation_receipt_coverage,
+            question_model_invocation_receipt_refs,
+        )
+
+        live_trace_refs = question_model_invocation_receipt_refs(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=run_id,
+        )
+        live_coverage = model_invocation_receipt_coverage(live_trace_refs)
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return (
+        bool(live_trace_refs)
+        and list(stored_trace_refs) == live_trace_refs
+        and stored_coverage == live_coverage
+        and live_coverage.get("status") == "passed"
+    )
 
 
 def _formal_record_eligible(record: Mapping[str, Any]) -> bool:
@@ -99,6 +163,8 @@ def _formal_record_eligible(record: Mapping[str, Any]) -> bool:
         and validation.get("schemaValidation") == "passed"
         and validation.get("citationValidation") == "passed"
         and validation.get("officialModelCall") is True
+        and isinstance(record.get("resultPackage"), Mapping)
+        and _formal_record_receipts_ready(record)
     )
 
 
@@ -208,58 +274,44 @@ def _dev_authorization_ready(team_id: str) -> bool:
 
         from .catalog_run_authorization import (
             find_catalog_run_authorization,
-            readiness_report_sha256,
-            require_readiness_report_sha256,
+            readiness_hash_from_snapshot,
             resolve_catalog_model_policy,
         )
 
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
-    except Exception:  # noqa: BLE001 - readiness probe is intentionally fail-closed.
+    except Exception:
         return False
     if not isinstance(snapshot, Mapping):
         return False
-    action = _text(snapshot.get("nextLegalAction")).upper()
-    report = snapshot.get("report")
-    if not isinstance(report, Mapping):
-        report = snapshot.get("readinessReport")
-    platform_ready = action.endswith("AUTHORIZATION_REQUIRED") or (
-        isinstance(report, Mapping)
-        and _text(report.get("status")).upper() == "READY"
-        and report.get("researchAuthorizationRequired") is True
-    )
-    if not platform_ready:
+    action = _text(snapshot.get("nextLegalAction"))
+    if action != "RESEARCH_AUTHORIZATION_REQUIRED":
         return False
-    report_hash = ""
-    for key in (
-        "readinessReportSha256",
-        "readinessReportHash",
-        "catalogReadinessReportSha256",
-    ):
-        if _text(snapshot.get(key)):
-            report_hash = require_readiness_report_sha256(_text(snapshot.get(key)))
-            break
-    if not report_hash and isinstance(report, (Mapping, list)):
-        report_hash = readiness_report_sha256(report)
-    if not report_hash:
+    snapshot_team = _text(snapshot.get("teamId"))
+    requested_team = _text(team_id)
+    if snapshot_team and snapshot_team != requested_team:
         return False
     try:
+        report_hash = readiness_hash_from_snapshot(
+            snapshot,
+            expected_team_id=requested_team,
+        )
         scope_plan = real_plan("real-1")
         scope = {
             "planId": "real-1",
             "gateId": str(scope_plan.gate_id),
             "questionIds": [str(question_id) for question_id in scope_plan.question_ids],
             "modelPolicy": resolve_catalog_model_policy(
-                _text(snapshot.get("teamId")) or _text(team_id)
+                requested_team
             ),
         }
         authorization = find_catalog_run_authorization(
-            _text(snapshot.get("teamId")) or _text(team_id),
+            requested_team,
             plan_id="real-1",
             batch_scope=scope,
             readiness_report_sha256_value=report_hash,
             require_model_policy=True,
         )
-    except Exception:  # noqa: BLE001 - stale or malformed authorization stays closed.
+    except Exception:
         return False
     return authorization is not None
 
@@ -352,6 +404,15 @@ def activate_experiment_campaign(
             "Experiment campaign activation requires explicit confirmation.",
             code="experiment_activation_confirmation_required",
         )
+    # Enforce the DEV authorization gate BEFORE the idempotent short-circuit:
+    # an already-active campaign must not bypass the gate when authorization
+    # has since been revoked (reset / maintenance fence), otherwise re-activation
+    # silently succeeds while the platform is not allowed to grant it.
+    if not _dev_authorization_ready(team_id):
+        raise QuestionLaunchError(
+            "Experiment activation requires completed DEV fixtures and RESEARCH_AUTHORIZATION_REQUIRED.",
+            code="experiment_activation_not_allowed",
+        )
     existing = get_theme_activation(team_id, record["themeId"])
     if (
         bool(existing)
@@ -359,11 +420,6 @@ def activate_experiment_campaign(
         and _text(existing.get("campaignId")) == record["campaignId"]
     ):
         return {"experimentId": normalized_experiment_id, **dict(existing)}
-    if not _dev_authorization_ready(team_id):
-        raise QuestionLaunchError(
-            "Experiment activation requires completed DEV fixtures and RESEARCH_AUTHORIZATION_REQUIRED.",
-            code="experiment_activation_not_allowed",
-        )
     from core.web.services.team_workflow.research_scope import (
         ResearchScopeError,
         activate_research_campaign,
@@ -656,14 +712,20 @@ def build_safety_budget_policy(safety_limits: Mapping[str, Any]) -> dict[str, An
 def _hypothesis_first_scope(team_id: str, question_id: str) -> dict[str, str]:
     """Resolve the server-authoritative full scope used by latest reads."""
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+    from core.web.services.team_workflow.research_scope import resolve_research_scope
 
-    scope = hypothesis_first_chain._question_scope_envelope(team_id, question_id)
-    scope["scopeHash"] = scope_hash_for(
-        **{field: scope[field] for field in hypothesis_first_chain._SCOPE_FIELDS},
-        agent_id=scope["agentId"],
-        mode=scope["mode"],
+    seed = hypothesis_first_chain._question_scope_envelope(team_id, question_id)
+    return resolve_research_scope(
+        team_id,
+        agent_id=seed["agentId"],
+        scope_seed=seed,
     )
-    return scope
+
+
+def _tracked_catalog_scope() -> dict[str, str]:
+    """Return the immutable identity of the tracked 125-question catalog."""
+
+    return CatalogScope.from_tracked_resources().to_dict()
 
 
 def _hypothesis_first_flag(
@@ -717,6 +779,7 @@ def _build_catalog_seed_run_input(
             code=getattr(exc, "code", "challenge_project_resolution_failed"),
         ) from exc
     competition_program_snapshot, program_body = _competition_program_snapshot()
+    model_routing_policy = _server_model_routing_policy(team_id)
     artifact_sha256 = _catalog_seed_hash(question_id)
     artifact_ref = (
         f"challenge-question-catalog://{CATALOG_ID}/{question_id}/"
@@ -728,6 +791,8 @@ def _build_catalog_seed_run_input(
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
         "questionId": question_id,
+        "researchScopeEnvelope": hypothesis_scope,
+        "catalogScope": _tracked_catalog_scope(),
         "researchBriefHash": artifact_sha256,
         "datasetRefs": [artifact_ref],
         "metricContract": {
@@ -768,7 +833,7 @@ def _build_catalog_seed_run_input(
         "budgetPolicy": build_safety_budget_policy(safety_limits),
         "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
         "environmentSnapshotRef": artifact_ref,
-        "modelRoutingPolicy": {purpose: _MODEL_REF for purpose in _MODEL_PURPOSES},
+        "modelRoutingPolicy": model_routing_policy,
         "evaluationContract": {
             "minimumClaimEvidenceCoverage": 0.9,
             "requiredSeeds": [11, 29, 47],
@@ -843,6 +908,7 @@ def build_question_run_input(
     final_summary = _mapping(_output_result_classification(output).get("final_summary"))
     research_plan = _mapping(output.get("research_plan"))
     competition_program_snapshot, program_body = _competition_program_snapshot()
+    model_routing_policy = _server_model_routing_policy(team_id)
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
     hypothesis_first = _hypothesis_first_flag(
@@ -854,6 +920,8 @@ def build_question_run_input(
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
         "questionId": normalized_question_id,
+        "researchScopeEnvelope": _hypothesis_first_scope(team_id, normalized_question_id),
+        "catalogScope": _tracked_catalog_scope(),
         "researchBriefHash": artifact_sha256,
         "datasetRefs": [artifact_ref],
         "metricContract": {
@@ -890,7 +958,7 @@ def build_question_run_input(
         "budgetPolicy": build_safety_budget_policy(safety_limits),
         "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
         "environmentSnapshotRef": artifact_ref,
-        "modelRoutingPolicy": {purpose: _MODEL_REF for purpose in _MODEL_PURPOSES},
+        "modelRoutingPolicy": model_routing_policy,
         "evaluationContract": {
             "minimumClaimEvidenceCoverage": 0.9,
             "requiredSeeds": [11, 29, 47],

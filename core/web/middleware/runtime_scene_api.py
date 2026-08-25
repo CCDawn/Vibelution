@@ -10,6 +10,13 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from core.logging.trace_context import (
+    TraceContext,
+    bind_trace_context,
+    get_current_trace_context,
+    new_trace_context,
+)
+
 SENSITIVE_QUERY_KEYWORDS = (
     "authorization",
     "api_key",
@@ -34,6 +41,8 @@ API_RUNTIME_EXCLUDED_PATHS = frozenset(
 )
 API_RUNTIME_ALWAYS_RECORD_REFERER_PATHS = frozenset({"/teams", "/agents/teams"})
 CLIENT_OPERATION_ID_HEADER = "X-Vibelution-Client-Operation-Id"
+REQUEST_ID_HEADER = "X-Request-ID"
+TRACEPARENT_HEADER = "traceparent"
 _API_RUNTIME_RECORD_FAILURES = 0
 _API_RUNTIME_RECORD_FAILURE_LOG_LIMIT = 3
 _API_RUNTIME_RECORD_FAILURE_LOG_EVERY = 50
@@ -41,28 +50,36 @@ _API_RUNTIME_RECORD_FAILURE_LOG_EVERY = 50
 
 class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
-        start = _api_runtime_perf_counter()
-        should_record = should_record_api_runtime_event(request)
-        try:
-            response = await call_next(request)
-        except Exception as exc:
-            if should_record:
+        trace_context = new_trace_context(
+            traceparent=request.headers.get(TRACEPARENT_HEADER),
+            request_id=request.headers.get(REQUEST_ID_HEADER),
+        )
+        request.state.trace_context = trace_context
+        with bind_trace_context(trace_context):
+            start = _api_runtime_perf_counter()
+            should_record = should_record_api_runtime_event(request)
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                if should_record:
+                    record_api_runtime_event(
+                        request,
+                        status_code=500,
+                        duration_ms=(_api_runtime_perf_counter() - start) * 1000,
+                        exception=exc,
+                    )
+                raise
+
+            duration_ms = (_api_runtime_perf_counter() - start) * 1000
+            if should_record and is_signal_api_response(request, response.status_code, duration_ms=duration_ms):
                 record_api_runtime_event(
                     request,
-                    status_code=500,
-                    duration_ms=(_api_runtime_perf_counter() - start) * 1000,
-                    exception=exc,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
                 )
-            raise
-
-        duration_ms = (_api_runtime_perf_counter() - start) * 1000
-        if should_record and is_signal_api_response(request, response.status_code, duration_ms=duration_ms):
-            record_api_runtime_event(
-                request,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-            )
-        return response
+            response.headers[TRACEPARENT_HEADER] = trace_context.to_traceparent()
+            response.headers[REQUEST_ID_HEADER] = trace_context.request_id
+            return response
 
 
 def should_record_api_runtime_event(request: Request) -> bool:
@@ -100,6 +117,7 @@ def record_api_runtime_event(
         path_template = _api_runtime_path_template(request_path, str(getattr(route, "path", "") or ""))
         client = request.client.host if request.client else ""
         query_diagnostics = _request_query_diagnostics(request)
+        trace_context = _request_trace_context(request)
         record_backend_api_event(
             {
                 "method": request.method.upper(),
@@ -119,6 +137,7 @@ def record_api_runtime_event(
                 "exception_type": type(exception).__name__ if exception else "",
                 "exception_message": str(exception or ""),
                 "client_operation_id": _client_operation_id(request),
+                "fields": trace_context.to_fields() if trace_context else {},
             }
         )
     except Exception as exc:  # noqa: BLE001 - diagnostics must never fail the API response
@@ -132,6 +151,13 @@ def api_runtime_record_failure_count() -> int:
 def reset_api_runtime_record_failure_count_for_tests() -> None:
     global _API_RUNTIME_RECORD_FAILURES
     _API_RUNTIME_RECORD_FAILURES = 0
+
+
+def _request_trace_context(request: Request) -> TraceContext | None:
+    context = getattr(request.state, "trace_context", None)
+    if isinstance(context, TraceContext):
+        return context
+    return get_current_trace_context()
 
 
 def _note_api_runtime_record_failure(exc: BaseException) -> None:

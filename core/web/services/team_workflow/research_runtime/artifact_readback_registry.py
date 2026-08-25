@@ -34,12 +34,16 @@ class ArtifactAuthoritySpec:
 
 
 ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
+    "problem_understanding": ArtifactAuthoritySpec("problem_understanding", "workflow_system"),
+    "dimension_reviews": ArtifactAuthoritySpec("dimension_reviews", "experiment"),
+    "feedback_iterations": ArtifactAuthoritySpec("feedback_iterations", "workflow_system"),
     "source_candidate_batch": ArtifactAuthoritySpec("source_candidate_batch", "source_collection"),
     "evidence_card_batch": ArtifactAuthoritySpec("evidence_card_batch", "source_collection"),
     "evidence_relation_graph": ArtifactAuthoritySpec("evidence_relation_graph", "evidence"),
     "knowledge_package_draft": ArtifactAuthoritySpec("knowledge_package_draft", "knowledge"),
     "knowledge_package": ArtifactAuthoritySpec("knowledge_package", "knowledge"),
     "hypothesis_set": ArtifactAuthoritySpec("hypothesis_set", "experiment"),
+    "research_plan": ArtifactAuthoritySpec("research_plan", "experiment"),
     "protocol_draft": ArtifactAuthoritySpec("protocol_draft", "experiment"),
     "protocol_review_report": ArtifactAuthoritySpec("protocol_review_report", "experiment"),
     "frozen_protocol": ArtifactAuthoritySpec("frozen_protocol", "experiment"),
@@ -485,11 +489,15 @@ def load_scoped_artifact_payload(
         "frozen_protocol",
         "evaluation_report",
         "hypothesis_set",
+        "research_plan",
         "protocol_draft",
         "protocol_review_report",
         "iteration_decision",
         "version_governance_record",
         "delivery_orchestration_result",
+        "problem_understanding",
+        "dimension_reviews",
+        "feedback_iterations",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 

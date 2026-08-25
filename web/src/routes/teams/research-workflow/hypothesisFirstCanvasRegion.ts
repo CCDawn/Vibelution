@@ -25,12 +25,17 @@ import {
   buildEdgePathStates,
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
+import {
+  effectiveCollectionRequestStatus,
+} from "./hypothesisFirstCollectionStatus";
 
 export const HYPOTHESIS_FIRST_NODE_PREFIX = "hf_";
 export const HYPOTHESIS_FIRST_STAGE_ID = "hypothesis_first";
 export const HYPOTHESIS_FIRST_STAGE_LABEL = "假说先行";
 export const HYPOTHESIS_FIRST_GENERATION_NODE_ID = "hf_generation";
 export const HYPOTHESIS_FIRST_SELECTION_NODE_ID = "hf_selection";
+export const HYPOTHESIS_FIRST_REVIEW_NODE_ID = "hf_review";
+export const HYPOTHESIS_FIRST_COLLECTION_NODE_ID = "hf_collection";
 export const HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID = "hf_convergence_gate";
 export const HYPOTHESIS_FIRST_STAGE1_EDGE_ID = "hf_e_m1_stage1";
 export const HYPOTHESIS_FIRST_STAGE2_EDGE_ID = "hf_e_gate_stage2";
@@ -62,6 +67,17 @@ export type HypothesisFirstCanvasRegion = {
 /** Canvas node ids of the hypothesis-first region always carry the `hf_` prefix. */
 export function isHypothesisFirstCanvasNode(nodeId: string | null | undefined): boolean {
   return Boolean(nodeId) && String(nodeId).startsWith(HYPOTHESIS_FIRST_NODE_PREFIX);
+}
+
+/** Maps ledger-instance ids to the stable semantic cards shown on the canvas. */
+export function hypothesisFirstSemanticNodeId(nodeId: string | null | undefined): string | null {
+  const normalized = String(nodeId ?? "").trim();
+  if (!normalized) return null;
+  if (normalized.startsWith("hf_meeting_")) return HYPOTHESIS_FIRST_REVIEW_NODE_ID;
+  if (normalized.startsWith("hf_collection_") || normalized === "source_finding") {
+    return HYPOTHESIS_FIRST_COLLECTION_NODE_ID;
+  }
+  return normalized;
 }
 
 function sameQuestion(left: string | undefined, right: string): boolean {
@@ -105,14 +121,47 @@ function meetingNodeDescription(meeting: MeetingRoundRecord): string {
   }
 }
 
+export function isHypothesisReviewRetryAttempt(meeting: MeetingRoundRecord): boolean {
+  return meeting.status === "closed"
+    && (meeting.recoveryReason === "discussion_has_no_completed_messages" || !meetingHasDigest(meeting));
+}
+
+export type HypothesisReviewSummary = {
+  effectiveRounds: number;
+  retryAttempts: number;
+  latestRound: number;
+};
+
+export function summarizeHypothesisReviewMeetings(
+  meetings: readonly MeetingRoundRecord[],
+): HypothesisReviewSummary {
+  const reviewMeetings = sortMeetings(
+    meetings.filter((meeting) => meeting.meetingType === HYPOTHESIS_REVIEW_MEETING_TYPE),
+  );
+  const effectiveRoundKeys = new Set(
+    reviewMeetings
+      .filter((meeting) => !isHypothesisReviewRetryAttempt(meeting))
+      .map((meeting) => meeting.roundIndex ?? `legacy:${meeting.meetingRoundId}`),
+  );
+  return {
+    effectiveRounds: effectiveRoundKeys.size,
+    retryAttempts: reviewMeetings.filter(isHypothesisReviewRetryAttempt).length,
+    latestRound: reviewMeetings.reduce(
+      (max, meeting, index) => Math.max(max, meeting.roundIndex ?? index + 1),
+      0,
+    ),
+  };
+}
+
 function collectionNodeStatus(request: CollectionRequestRecord): WorkflowNodeRunStatus {
   if (request.handoffRef || request.handedOffAt || request.status === "handed_off") {
     return "succeeded";
   }
-  if (request.status === "failed") {
+  const status = effectiveCollectionRequestStatus(request);
+  if (status === "failed" || status === "needs_continue" || status === "error" || status === "blocked") {
     return "failed";
   }
-  if (request.status === "running" || request.status === "collecting" || request.status === "in_progress") {
+  if (status === "running" || status === "collecting" || status === "in_progress" || status === "starting" || status === "dispatching") {
     return "running";
   }
   // Record-level statuses are pending / handed_off; unknown values stay pending.
@@ -121,9 +170,15 @@ function collectionNodeStatus(request: CollectionRequestRecord): WorkflowNodeRun
 
 function collectionNodeDescription(request: CollectionRequestRecord): string {
   const status = collectionNodeStatus(request);
+  const childStatus = effectiveCollectionRequestStatus(request);
   if (status === "succeeded") return "知识包已交接";
-  if (status === "failed") return "搜集子运行失败";
+  if (status === "failed") {
+    return childStatus === "needs_continue" ? "搜集子运行需要继续" : "搜集子运行失败";
+  }
   if (status === "running") return "搜集子运行在途";
+  if (childStatus === "completed" || childStatus === "succeeded" || childStatus === "handoff_pending") {
+    return "搜集已完成，等待交接";
+  }
   return request.collectionRunId ? "搜集子运行已触发，等待完成" : "等待搜集子运行";
 }
 
@@ -196,7 +251,6 @@ export function buildHypothesisFirstCanvasRegion(
   const requests = sortRequests(
     input.collectionRequests.filter((request) => sameQuestion(request.questionId, questionId)),
   );
-  const links = input.reviewRoundLinks.filter((link) => sameQuestion(link.questionId, questionId));
   const selection = input.selection && sameQuestion(input.selection.questionId, questionId)
     ? input.selection
     : null;
@@ -260,102 +314,44 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  const roundIndexByMeetingId = new Map<string, number>();
-  meetings.forEach((meeting, position) => {
-    roundIndexByMeetingId.set(meeting.meetingRoundId, meeting.roundIndex ?? position + 1);
-  });
-  const meetingNodeId = (meetingRoundId: string): string =>
-    `hf_meeting_${roundIndexByMeetingId.get(meetingRoundId) ?? 0}`;
-
-  // GitHub Actions / Temporal attempt pattern: a discussion round that never
-  // produced a usable outcome — abandoned with zero completed speeches, or
-  // closed without a digest — is a failed *attempt* of the review, not a peer
-  // round. Fold such rounds into the next effective round's node as a retry
-  // count instead of stacking error-state cards on the canvas.
-  const isSupersededAttempt = (meeting: MeetingRoundRecord): boolean =>
-    meeting.status === "closed"
-    && (meeting.recoveryReason === "discussion_has_no_completed_messages" || !meetingHasDigest(meeting));
-  const effectiveMeetings = meetings.filter((meeting) => !isSupersededAttempt(meeting));
-  const lastEffectiveRound = effectiveMeetings.reduce(
-    (max, meeting) => Math.max(max, roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0),
-    0,
-  );
-  // A trailing superseded round (reopen failed / not yet run) stays visible so
-  // the chain keeps a tail to act on; only rounds absorbed by a successor fold.
-  const visibleMeetings = [
-    ...effectiveMeetings,
-    ...meetings.filter(
-      (meeting) =>
-        isSupersededAttempt(meeting)
-        && (roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0) > lastEffectiveRound,
-    ),
-  ].sort(
-    (left, right) =>
-      (roundIndexByMeetingId.get(left.meetingRoundId) ?? 0)
-      - (roundIndexByMeetingId.get(right.meetingRoundId) ?? 0),
-  );
-  const retryCountByMeetingId = new Map<string, number>();
-  for (const meeting of visibleMeetings) {
-    if (isSupersededAttempt(meeting)) continue;
-    const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0;
-    const previousVisibleRound = Math.max(
-      0,
-      ...visibleMeetings
-        .filter(
-          (other) =>
-            !isSupersededAttempt(other)
-            && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) < roundIndex,
-        )
-        .map((other) => roundIndexByMeetingId.get(other.meetingRoundId) ?? 0),
-    );
-    const absorbed = meetings.filter(
-      (other) =>
-        isSupersededAttempt(other)
-        && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) < roundIndex
-        && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) > previousVisibleRound,
-    ).length;
-    if (absorbed > 0) retryCountByMeetingId.set(meeting.meetingRoundId, absorbed);
-  }
-
-  for (const meeting of visibleMeetings) {
-    const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId)!;
-    const retries = retryCountByMeetingId.get(meeting.meetingRoundId) ?? 0;
-    const baseDescription = isSupersededAttempt(meeting)
-      ? (meeting.recoveryReason === "discussion_has_no_completed_messages"
-        ? "发言失败已跳过，等待重试"
-        : "已关闭但缺少纪要，等待重试")
-      : meetingNodeDescription(meeting);
+  const reviewSummary = summarizeHypothesisReviewMeetings(meetings);
+  const latestReview = meetings[meetings.length - 1];
+  const showReview = Boolean(selection || latestReview);
+  if (showReview) {
+    const summaryParts = latestReview
+      ? [
+          `${reviewSummary.effectiveRounds} 轮有效评审`,
+          `${reviewSummary.retryAttempts} 次失败重试`,
+          `最近第 ${reviewSummary.latestRound} 轮`,
+        ]
+      : ["等待首次评审"];
     nodes.push({
-      nodeId: `hf_meeting_${roundIndex}`,
+      nodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
-      label: `第 ${roundIndex} 轮讨论·评审`,
+      label: "假说评审",
       actorKind: "agent",
       visualKind: "agent_task",
-      status: isSupersededAttempt(meeting) ? "blocked" : meetingNodeStatus(meeting),
-      description: retries > 0 ? `含 ${retries} 次失败重试 · ${baseDescription}` : baseDescription,
+      status: latestReview
+        ? (isHypothesisReviewRetryAttempt(latestReview) ? "blocked" : meetingNodeStatus(latestReview))
+        : "pending",
+      description: summaryParts.join(" · "),
     });
   }
 
-  const requestNodeId = (requestId: string): string => `hf_collection_${requestId}`;
-  const requestIndexById = new Map<string, number>();
-  requests.forEach((request, position) => {
-    requestIndexById.set(request.requestId, position + 1);
-  });
-  // Only ledger-consistent requests get a card: the triggering meeting must be
-  // a visible round in scope (superseded attempts never trigger collection),
-  // otherwise the card would dangle without its decision edge.
-  const cardedRequests = requests.filter((request) =>
-    visibleMeetings.some((meeting) => meeting.meetingRoundId === request.meetingRoundId));
-  for (const request of cardedRequests) {
-    const gapIndex = requestIndexById.get(request.requestId)!;
+  const latestRequest = requests[requests.length - 1];
+  if (latestRequest) {
+    const failedRequests = requests.filter((request) => collectionNodeStatus(request) === "failed").length;
+    const handedOffRequests = requests.filter((request) => collectionNodeStatus(request) === "succeeded").length;
     nodes.push({
-      nodeId: requestNodeId(request.requestId),
+      nodeId: HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
-      label: `资料搜集 · 缺口 ${gapIndex}`,
+      label: "资料补充",
       actorKind: "system",
       visualKind: "system_task",
-      status: collectionNodeStatus(request),
-      description: collectionNodeDescription(request),
+      status: collectionNodeStatus(latestRequest),
+      description: failedRequests > 0
+        ? `${failedRequests} 个资料请求需要恢复 · ${handedOffRequests} 个已交接`
+        : `${requests.length} 个资料请求 · ${collectionNodeDescription(latestRequest)}`,
     });
   }
 
@@ -389,90 +385,40 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  // --- edges (only associations that really exist in the ledger) -----------
-  const firstMeeting = visibleMeetings[0];
-  const lastMeeting = visibleMeetings[visibleMeetings.length - 1];
-  if (selection && firstMeeting) {
+  // --- semantic task edges -------------------------------------------------
+  // Attempt/round/request lineage remains in the read-only Inspector history;
+  // the canvas communicates stable work categories instead of ledger rows.
+  if (selection && showReview) {
     edges.push({
-      edgeId: "hf_e_sel_m1",
+      edgeId: "hf_e_sel_review",
       fromNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
-      toNodeId: meetingNodeId(firstMeeting.meetingRoundId),
+      toNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
       label: "选定假说",
       gateKind: "auto",
-      // decision_branch (not main): the selection is the human's branch into
-      // round 1, and the narrative kinds are the only ones whose labels stay
-      // visible in serpentine mode (workflowEdgeKeepsNarrativeLabel).
       semanticKind: "decision_branch",
       labelAlwaysVisible: true,
     });
   }
-
-  const cardedRequestIds = new Set(cardedRequests.map((request) => request.requestId));
-  for (const request of cardedRequests) {
+  if (showReview && latestRequest) {
     edges.push({
-      edgeId: `hf_e_m${roundIndexByMeetingId.get(request.meetingRoundId)}_c${request.requestId}`,
-      fromNodeId: meetingNodeId(request.meetingRoundId),
-      toNodeId: requestNodeId(request.requestId),
-      label: "搜集决策",
-      gateKind: "auto",
-      semanticKind: "decision_branch",
-      labelAlwaysVisible: true,
-    });
-  }
-
-  const visibleMeetingIds = new Set(visibleMeetings.map((meeting) => meeting.meetingRoundId));
-  const linkByTargetMeetingId = new Map<string, ReviewRoundLinkRecord>();
-  for (const link of links) {
-    linkByTargetMeetingId.set(link.meetingRoundId, link);
-  }
-  for (const link of links) {
-    // A recorded link IS the handoff fact: draw collection → next meeting.
-    if (!visibleMeetingIds.has(link.meetingRoundId) || !cardedRequestIds.has(link.collectionRequestId)) {
-      continue;
-    }
-    edges.push({
-      edgeId: `hf_e_c${link.collectionRequestId}_m${roundIndexByMeetingId.get(link.meetingRoundId)}`,
-      fromNodeId: requestNodeId(link.collectionRequestId),
-      toNodeId: meetingNodeId(link.meetingRoundId),
-      label: "知识包交接",
-      // knowledge_package gate: the handoff literally carries the knowledge
-      // package, and the gate kind keeps the label visible in serpentine mode.
+      edgeId: "hf_e_review_collection",
+      fromNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
+      toNodeId: HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
+      label: "补充证据",
       gateKind: "knowledge_package",
       semanticKind: "main",
       labelAlwaysVisible: true,
     });
   }
-
-  for (const meeting of visibleMeetings) {
-    if (meeting.meetingRoundId === firstMeeting?.meetingRoundId) {
-      continue;
-    }
-    if (linkByTargetMeetingId.has(meeting.meetingRoundId)) {
-      continue; // collection-bridged continuation already drawn
-    }
-    // The lineage ref may point at a folded (superseded) attempt; hop over it
-    // to the nearest visible predecessor so the edge always binds two cards.
-    const previousId = meeting.previousMeetingRoundId && visibleMeetingIds.has(meeting.previousMeetingRoundId)
-      ? meeting.previousMeetingRoundId
-      : visibleMeetings[visibleMeetings.indexOf(meeting) - 1]?.meetingRoundId;
-    if (!previousId) {
-      continue;
-    }
+  const semanticTailNodeId = latestRequest
+    ? HYPOTHESIS_FIRST_COLLECTION_NODE_ID
+    : showReview
+      ? HYPOTHESIS_FIRST_REVIEW_NODE_ID
+      : null;
+  if (semanticTailNodeId && showConvergence) {
     edges.push({
-      edgeId: `hf_e_m${roundIndexByMeetingId.get(previousId)}_m${roundIndexByMeetingId.get(meeting.meetingRoundId)}`,
-      fromNodeId: meetingNodeId(previousId),
-      toNodeId: meetingNodeId(meeting.meetingRoundId),
-      label: "再讨论",
-      gateKind: "auto",
-      semanticKind: "main",
-      labelAlwaysVisible: false,
-    });
-  }
-
-  if (lastMeeting && showConvergence) {
-    edges.push({
-      edgeId: `hf_e_m${roundIndexByMeetingId.get(lastMeeting.meetingRoundId)}_gate`,
-      fromNodeId: meetingNodeId(lastMeeting.meetingRoundId),
+      edgeId: "hf_e_semantic_tail_gate",
+      fromNodeId: semanticTailNodeId,
       toNodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
       label: "",
       gateKind: "auto",
@@ -480,10 +426,10 @@ export function buildHypothesisFirstCanvasRegion(
       labelAlwaysVisible: false,
     });
   }
-  if (lastMeeting && showDownstreamPipeline) {
+  if (showReview && showDownstreamPipeline) {
     edges.push({
       edgeId: HYPOTHESIS_FIRST_STAGE1_EDGE_ID,
-      fromNodeId: meetingNodeId(firstMeeting!.meetingRoundId),
+      fromNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
       toNodeId: "source_finding",
       label: "首轮搜集范围就绪",
       gateKind: "knowledge_package",

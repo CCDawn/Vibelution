@@ -36,6 +36,27 @@ def _isolate_live_desktop_session(monkeypatch):
     monkeypatch.setattr(desktop_session_store, "latest_active_window_provider_projection", lambda **_kwargs: {})
 
 
+@pytest.fixture(autouse=True)
+def _stub_frontend_build_preflight(monkeypatch):
+    """Keep open-workbench unit cases from invoking the real Node toolchain.
+
+    The production path validates/builds the content-addressed release before
+    every open.  These lifecycle tests already mock process/window behavior;
+    the builder contract is covered by ``test_frontend_build.py``.
+    """
+
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id, *, force=False, project_root=None: {
+            "ok": True,
+            "skipped": True,
+            "rebuilt": False,
+            "completedSteps": [],
+        },
+    )
+
+
 def _repeat_last(items):
     values = list(items)
     iterator = iter(values)
@@ -73,6 +94,31 @@ def _patch_command_queue_events(monkeypatch, events_path):
 def _patch_daemon_ownership_available(monkeypatch):
     monkeypatch.setattr(daemon, "_claim_daemon_ownership", lambda pid: True)
     monkeypatch.setattr(daemon, "_release_daemon_ownership", lambda pid: None)
+
+
+def _patch_process_inventory_processes(monkeypatch, process_infos):
+    """Model psutil's cheap process snapshot and later detail lookup separately."""
+
+    class FakeProc:
+        def __init__(self, info):
+            self._info = dict(info)
+
+        @property
+        def info(self):
+            return {key: self._info[key] for key in ("pid", "ppid", "name")}
+
+        def as_dict(self, attrs):
+            return {key: self._info.get(key) for key in attrs}
+
+    processes = [FakeProc(info) for info in process_infos]
+    by_pid = {proc.info["pid"]: proc for proc in processes}
+
+    def process_iter(attrs):
+        assert attrs == ["pid", "ppid", "name"]
+        return iter(processes)
+
+    monkeypatch.setattr(process_inventory.psutil, "process_iter", process_iter)
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: by_pid[pid])
 
 
 def test_safe_command_args_keeps_launcher_request_audit_bounded():
@@ -6775,6 +6821,7 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     assert result["ok"] is True
     assert result["message"] == "Workbench opened."
     assert opened == {"no_browser": False}
+    assert result["lifecycleTimingsMs"]["frontendBuildPreflight"]["skipped"] is True
     assert result["lifecycleTimingsMs"]["launcherStartup"] == {
         "startupTraceId": "launcher-startup-test",
         "outcome": "succeeded",
@@ -6818,6 +6865,107 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
         "last_reason": "explicit_open",
         "last_source": "runtime_manager",
     }
+
+
+def test_handle_open_workbench_restarts_when_frontend_release_was_published(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+    }
+    calls = []
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: {"skipped": False, "buildKey": "new-build"},
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_block_lifecycle_command_if_active_work",
+        lambda **kwargs: calls.append(("guard", kwargs)) or None,
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda **kwargs: calls.append(("restart", kwargs)) or {"closeStrategy": "verified"},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("published release must not use open fast path")),
+    )
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench restarted after publishing the latest frontend release."
+    assert calls[0][0] == "guard"
+    assert calls[0][1]["command_type"] == "restart_workbench"
+    assert calls[1][0] == "restart"
+    assert calls[1][1]["args"]["skipFrontendBuildPreflight"] is True
+    assert result["buildPreflight"]["skipped"] is False
+
+
+def test_handle_open_workbench_refuses_release_restart_while_active_work_is_present(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+    }
+    blocked = {"ok": False, "message": "有进行中的任务，无法重启 Vibelution。"}
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: {"skipped": False, "buildKey": "new-build"},
+    )
+    monkeypatch.setattr(runtime_daemon, "_block_lifecycle_command_if_active_work", lambda **_kwargs: blocked)
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("active work must block restart")),
+    )
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result is blocked
 
 
 def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_ready(monkeypatch):
@@ -10560,48 +10708,35 @@ def test_listening_pid_for_port_prefers_psutil(monkeypatch):
 
 
 def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
     other = tmp_path / "other"
     other.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 18860,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "-m", "core.runtime_manager.cli", "daemon"],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 3000,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "9001", "--no-browser"],
-                        "cwd": str(other),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 18860,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "-m", "core.runtime_manager.cli", "daemon"],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 3000,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "9001", "--no-browser"],
+                "cwd": str(other),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo, exclude_pids={18860})
@@ -10612,29 +10747,20 @@ def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, 
 
 
 def test_residual_process_payload_uses_configured_port_for_workbench_without_port_arg(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
     monkeypatch.setattr(process_inventory, "configured_backend_port", lambda: 8000)
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 31832,
-                        "ppid": 50404,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--no-browser"],
-                        "cwd": str(repo),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 31832,
+                "ppid": 50404,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--no-browser"],
+                "cwd": str(repo),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -10646,44 +10772,33 @@ def test_residual_process_payload_uses_configured_port_for_workbench_without_por
 
 
 def test_residual_process_payload_ignores_launcher_managed_backend(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 22416,
-                        "ppid": 1,
-                        "name": "pythonw.exe",
-                        "cmdline": [
-                            str(repo / ".venv" / "Scripts" / "pythonw.exe"),
-                            "scripts/web_workbench.py",
-                            "--port",
-                            "8001",
-                            "--no-browser",
-                            "--managed-by-launcher",
-                        ],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
-                        "cwd": str(repo),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 22416,
+                "ppid": 1,
+                "name": "pythonw.exe",
+                "cmdline": [
+                    str(repo / ".venv" / "Scripts" / "pythonw.exe"),
+                    "scripts/web_workbench.py",
+                    "--port",
+                    "8001",
+                    "--no-browser",
+                    "--managed-by-launcher",
+                ],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                "cwd": str(repo),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -10700,64 +10815,49 @@ def test_managed_browser_process_payload_groups_profile_children(monkeypatch, tm
             self.rss = rss
             self.private = private
 
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     profile_dir = tmp_path / "repo" / ".runtime" / "launcher" / "edge-app-profile"
     profile_dir.mkdir(parents=True)
     ordinary_profile = tmp_path / "Edge" / "User Data"
     ordinary_profile.mkdir(parents=True)
     mib = 1024 * 1024
 
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 100,
-                        "ppid": 1,
-                        "name": "msedge.exe",
-                        "cmdline": ["msedge.exe", f"--user-data-dir={profile_dir}", "--app=http://127.0.0.1:8000"],
-                        "memory_info": MemoryInfo(200 * mib, 180 * mib),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 101,
-                        "ppid": 100,
-                        "name": "msedge.exe",
-                        "cmdline": ["msedge.exe", "--type=gpu-process"],
-                        "memory_info": MemoryInfo(120 * mib, 110 * mib),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 102,
-                        "ppid": 100,
-                        "name": "msedge.exe",
-                        "cmdline": [
-                            "msedge.exe",
-                            "--type=renderer",
-                            "--renderer-sub-type=extension",
-                            f"--user-data-dir={profile_dir}",
-                        ],
-                        "memory_info": MemoryInfo(90 * mib, 80 * mib),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 200,
-                        "ppid": 1,
-                        "name": "msedge.exe",
-                        "cmdline": ["msedge.exe", f"--user-data-dir={ordinary_profile}"],
-                        "memory_info": MemoryInfo(500 * mib, 450 * mib),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 100,
+                "ppid": 1,
+                "name": "msedge.exe",
+                "cmdline": ["msedge.exe", f"--user-data-dir={profile_dir}", "--app=http://127.0.0.1:8000"],
+                "memory_info": MemoryInfo(200 * mib, 180 * mib),
+            },
+            {
+                "pid": 101,
+                "ppid": 100,
+                "name": "msedge.exe",
+                "cmdline": ["msedge.exe", "--type=gpu-process"],
+                "memory_info": MemoryInfo(120 * mib, 110 * mib),
+            },
+            {
+                "pid": 102,
+                "ppid": 100,
+                "name": "msedge.exe",
+                "cmdline": [
+                    "msedge.exe",
+                    "--type=renderer",
+                    "--renderer-sub-type=extension",
+                    f"--user-data-dir={profile_dir}",
+                ],
+                "memory_info": MemoryInfo(90 * mib, 80 * mib),
+            },
+            {
+                "pid": 200,
+                "ppid": 1,
+                "name": "msedge.exe",
+                "cmdline": ["msedge.exe", f"--user-data-dir={ordinary_profile}"],
+                "memory_info": MemoryInfo(500 * mib, 450 * mib),
+            },
+        ],
     )
 
     payload = process_inventory.managed_browser_process_payload(profile_dir=profile_dir)
@@ -10772,37 +10872,26 @@ def test_managed_browser_process_payload_groups_profile_children(monkeypatch, tm
 
 
 def test_unmanaged_backend_cleanup_payload_leaves_frontend_dev_servers_out(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8013", "--no-browser"],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 51518,
-                        "ppid": 1,
-                        "name": "node.exe",
-                        "cmdline": ["node", "node_modules/.bin/vite", "--host", "127.0.0.1"],
-                        "cwd": str(repo),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "8013", "--no-browser"],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 51518,
+                "ppid": 1,
+                "name": "node.exe",
+                "cmdline": ["node", "node_modules/.bin/vite", "--host", "127.0.0.1"],
+                "cwd": str(repo),
+            },
+        ],
     )
 
     payload = process_inventory.unmanaged_workbench_process_payload(project_root=repo)
@@ -10814,77 +10903,62 @@ def test_unmanaged_backend_cleanup_payload_leaves_frontend_dev_servers_out(monke
 
 
 def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 13492,
-                        "ppid": 1,
-                        "name": "cmd.exe",
-                        "cmdline": [
-                            "cmd.exe",
-                            "/d",
-                            "/s",
-                            "/c",
-                            str(repo / ".venv" / "Scripts" / "python.exe"),
-                            "scripts/web_workbench.py",
-                            "--port",
-                            "8000",
-                            "--no-browser",
-                        ],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 31408,
-                        "ppid": 13492,
-                        "name": "python.exe",
-                        "cmdline": [
-                            str(repo / ".venv" / "Scripts" / "python.exe"),
-                            "scripts/web_workbench.py",
-                            "--port",
-                            "8000",
-                            "--no-browser",
-                        ],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 41160,
-                        "ppid": 31408,
-                        "name": "python.exe",
-                        "cmdline": [
-                            "python.exe",
-                            "scripts/web_workbench.py",
-                            "--port",
-                            "8000",
-                            "--no-browser",
-                        ],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
-                        "cwd": str(repo),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 13492,
+                "ppid": 1,
+                "name": "cmd.exe",
+                "cmdline": [
+                    "cmd.exe",
+                    "/d",
+                    "/s",
+                    "/c",
+                    str(repo / ".venv" / "Scripts" / "python.exe"),
+                    "scripts/web_workbench.py",
+                    "--port",
+                    "8000",
+                    "--no-browser",
+                ],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 31408,
+                "ppid": 13492,
+                "name": "python.exe",
+                "cmdline": [
+                    str(repo / ".venv" / "Scripts" / "python.exe"),
+                    "scripts/web_workbench.py",
+                    "--port",
+                    "8000",
+                    "--no-browser",
+                ],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 41160,
+                "ppid": 31408,
+                "name": "python.exe",
+                "cmdline": [
+                    "python.exe",
+                    "scripts/web_workbench.py",
+                    "--port",
+                    "8000",
+                    "--no-browser",
+                ],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                "cwd": str(repo),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo, exclude_pids={13492, 31408})
@@ -10894,37 +10968,26 @@ def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypa
 
 
 def test_residual_process_payload_reports_unmanaged_frontend_dev_server(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 51517,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", "-m", "http.server", "5173", "-d", "frontend"],
-                        "cwd": str(repo),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 51518,
-                        "ppid": 1,
-                        "name": "node.exe",
-                        "cmdline": ["node", "node_modules/.bin/vite", "--host", "127.0.0.1"],
-                        "cwd": str(repo),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 51517,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", "-m", "http.server", "5173", "-d", "frontend"],
+                "cwd": str(repo),
+            },
+            {
+                "pid": 51518,
+                "ppid": 1,
+                "name": "node.exe",
+                "cmdline": ["node", "node_modules/.bin/vite", "--host", "127.0.0.1"],
+                "cwd": str(repo),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -10936,29 +10999,20 @@ def test_residual_process_payload_reports_unmanaged_frontend_dev_server(monkeypa
 
 
 def test_residual_process_payload_reports_bun_frontend_dev_server(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     web = repo / "web"
     web.mkdir(parents=True)
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 51522,
-                        "ppid": 1,
-                        "name": "bun.exe",
-                        "cmdline": ["bun", "run", "bun:dev", "--host", "127.0.0.1"],
-                        "cwd": str(web),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 51522,
+                "ppid": 1,
+                "name": "bun.exe",
+                "cmdline": ["bun", "run", "bun:dev", "--host", "127.0.0.1"],
+                "cwd": str(web),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -10970,47 +11024,34 @@ def test_residual_process_payload_reports_bun_frontend_dev_server(monkeypatch, t
 
 
 def test_residual_process_payload_ignores_one_shot_frontend_build(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     web = repo / "web"
     web.mkdir(parents=True)
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 51520,
-                        "ppid": 1,
-                        "name": "cmd.exe",
-                        "cmdline": ["cmd.exe", "/d", "/s", "/c", "tsc", "-b", "&&", "vite", "build"],
-                        "cwd": str(web),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 51521,
-                        "ppid": 51520,
-                        "name": "node.exe",
-                        "cmdline": ["node", "node_modules/.bin/vite", "build"],
-                        "cwd": str(web),
-                    }
-                ),
-                FakeProc(
-                    {
-                        "pid": 51523,
-                        "ppid": 1,
-                        "name": "bun.exe",
-                        "cmdline": ["bun", "run", "bun:build"],
-                        "cwd": str(web),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 51520,
+                "ppid": 1,
+                "name": "cmd.exe",
+                "cmdline": ["cmd.exe", "/d", "/s", "/c", "tsc", "-b", "&&", "vite", "build"],
+                "cwd": str(web),
+            },
+            {
+                "pid": 51521,
+                "ppid": 51520,
+                "name": "node.exe",
+                "cmdline": ["node", "node_modules/.bin/vite", "build"],
+                "cwd": str(web),
+            },
+            {
+                "pid": 51523,
+                "ppid": 1,
+                "name": "bun.exe",
+                "cmdline": ["bun", "run", "bun:build"],
+                "cwd": str(web),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -11019,32 +11060,23 @@ def test_residual_process_payload_ignores_one_shot_frontend_build(monkeypatch, t
 
 
 def test_residual_process_payload_ignores_inline_diagnostics_mentioning_frontend_tools(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 51519,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": [
-                            "python",
-                            "-c",
-                            "print('diagnose http.server vite 5173 frontend')",
-                        ],
-                        "cwd": str(repo),
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 51519,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": [
+                    "python",
+                    "-c",
+                    "print('diagnose http.server vite 5173 frontend')",
+                ],
+                "cwd": str(repo),
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -11053,36 +11085,27 @@ def test_residual_process_payload_ignores_inline_diagnostics_mentioning_frontend
 
 
 def test_residual_process_payload_ignores_adjacent_repo_prefix_match(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     repo.mkdir()
     adjacent_repo = tmp_path / "repo-backup"
     adjacent_repo.mkdir()
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": [
-                            "python",
-                            str(adjacent_repo / "scripts" / "web_workbench.py"),
-                            "--port",
-                            "8001",
-                            "--no-browser",
-                        ],
-                        "cwd": "",
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": [
+                    "python",
+                    str(adjacent_repo / "scripts" / "web_workbench.py"),
+                    "--port",
+                    "8001",
+                    "--no-browser",
+                ],
+                "cwd": "",
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)
@@ -11091,30 +11114,21 @@ def test_residual_process_payload_ignores_adjacent_repo_prefix_match(monkeypatch
 
 
 def test_residual_process_payload_uses_command_line_path_when_cwd_is_unavailable(monkeypatch, tmp_path):
-    class FakeProc:
-        def __init__(self, info):
-            self.info = info
-
     repo = tmp_path / "repo"
     script_path = repo / "scripts" / "web_workbench.py"
     script_path.parent.mkdir(parents=True)
     script_path.write_text("", encoding="utf-8")
-    monkeypatch.setattr(
-        process_inventory.psutil,
-        "process_iter",
-        lambda attrs: iter(
-            [
-                FakeProc(
-                    {
-                        "pid": 49780,
-                        "ppid": 1,
-                        "name": "python.exe",
-                        "cmdline": ["python", str(script_path), "--port", "8001", "--no-browser"],
-                        "cwd": "",
-                    }
-                ),
-            ]
-        ),
+    _patch_process_inventory_processes(
+        monkeypatch,
+        [
+            {
+                "pid": 49780,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmdline": ["python", str(script_path), "--port", "8001", "--no-browser"],
+                "cwd": "",
+            },
+        ],
     )
 
     payload = process_inventory.residual_process_payload(project_root=repo)

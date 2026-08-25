@@ -6,6 +6,10 @@ from copy import deepcopy
 import pytest
 
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED, append_turn_event
+from core.research.competition.question_result_package import canonical_model_policy
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+)
 from core.web.services.team_workflow import challenge_question_runs
 
 
@@ -262,6 +266,15 @@ def _challenge_task() -> dict:
                 "providerId": "dashscope_main",
                 "modelId": "qwen3.6-plus",
             },
+            "requiredModelPolicy": canonical_model_policy(
+                {
+                    "family": "qwen",
+                    "providerIds": ["dashscope_main"],
+                    "modelIds": ["qwen3.6-plus"],
+                    "requireOfficialProvider": True,
+                }
+            ),
+            "evidencePolicy": {"officialEvidenceEligible": True},
         },
     }
 
@@ -291,7 +304,16 @@ def _append_canonical_turn_output(project_root, task: dict, output: dict) -> Non
 
 
 def _isolate_store(tmp_path, monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
     monkeypatch.setattr(challenge_question_runs, "_workflow_root", lambda _team_id: tmp_path)
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "resolve_team_program_root",
+        lambda _team_id: tmp_path,
+    )
     monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
     monkeypatch.setattr(challenge_question_runs, "record_runtime_scene_event", lambda *args, **kwargs: None)
     evidence_path = tmp_path / "official_model_evidence" / "index.json"
@@ -369,6 +391,168 @@ def test_task_model_evidence_requires_success_and_is_idempotent(tmp_path, monkey
     assert store["evidence"][0]["outputRef"] != task["result"]["outputRef"]
 
 
+def test_flash_task_route_cannot_record_official_canonical_receipt(tmp_path, monkeypatch):
+    monkeypatch.setattr(challenge_question_runs, "_project_root", lambda: tmp_path)
+    project_root = tmp_path / "project-sci-096"
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: project_root,
+    )
+    task = _challenge_task()
+    task["challengeTaskContract"].update(
+        {
+            "requiredModelPolicy": {
+                "providerIds": ["opencode_go"],
+                "modelIds": ["deepseek-v4-flash"],
+                "requireOfficialProvider": False,
+            },
+            "effectiveRoute": {
+                "modelRef": "opencode_go/deepseek-v4-flash",
+                "providerId": "opencode_go",
+                "modelId": "deepseek-v4-flash",
+            },
+            "evidencePolicy": {"officialEvidenceEligible": True},
+        }
+    )
+    output = _output()
+    output["run"].update(
+        {
+            "run_id": task["runId"],
+            "model_provider": "opencode_go",
+            "model_id": "opencode_go/deepseek-v4-flash",
+            "platform": "other_official_tool",
+        }
+    )
+    _append_canonical_turn_output(tmp_path, task, output)
+    source_binding = challenge_question_runs._read_canonical_turn_output(
+        session_id=task["sessionId"],
+        source_run_id=task["runId"],
+        task_id=task["taskId"],
+        turn_id=task["turn"]["turnId"],
+    )
+    assert source_binding is not None
+    policy_sha256 = "a" * 64
+    receipt = ModelInvocationReceipt.from_invocation(
+        receipt_id="receipt-flash-generation",
+        run_id=task["runId"],
+        node_run_id="node-flash-generation",
+        scope={
+            "questionId": "SCI-096",
+            "runId": task["runId"],
+            "taskId": task["taskId"],
+            "turnId": task["turn"]["turnId"],
+            "stageId": "generation",
+            "modelPolicySha256": policy_sha256,
+        },
+        provider="opencode_go",
+        model="deepseek-v4-flash",
+        requested_model="deepseek-v4-flash",
+        request_content={"kind": "bounded-test-request"},
+        response_content={"kind": "bounded-test-response"},
+        started_at_ms=100,
+        finished_at_ms=125,
+        token_usage={"input": 20, "output": 10, "total": 30},
+        evidence_locator={
+            "outputSha256": source_binding["outputSha256"],
+            "outputRef": source_binding["outputRef"],
+        },
+    )
+    usage = {
+        "source": "provider",
+        "provider": "opencode_go",
+        "model": "deepseek-v4-flash",
+        "llmModelId": "opencode_go/deepseek-v4-flash",
+        "inputTokens": 20,
+        "outputTokens": 10,
+        "totalTokens": 30,
+    }
+
+    evidence = challenge_question_runs.register_challenge_task_model_evidence(
+        "research-team",
+        task,
+        final_status="completed",
+        llm_usage=usage,
+        model_invocation_receipt=receipt,
+        stage_id="generation",
+        model_policy_sha256=policy_sha256,
+    )
+
+    assert evidence is None
+    assert not (project_root / "official_model_evidence" / "index.json").exists()
+
+
+def test_flash_task_policy_is_derived_and_bound_without_qwen_gate(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: tmp_path,
+    )
+    policy = challenge_question_runs.derive_challenge_required_model_policy(
+        "opencode_go/deepseek-v4-flash"
+    )
+
+    contract = challenge_question_runs.bind_challenge_research_task_model(
+        team_id="research-team",
+        research_project_id="project-sci-096",
+        question_id="SCI-096",
+        required_model_policy=policy,
+        dialogue_model_id="opencode_go/deepseek-v4-flash",
+        model_library={
+            "opencode_go/deepseek-v4-flash": {
+                "provider_id": "opencode_go",
+                "upstream_id": "deepseek-v4-flash",
+            }
+        },
+    )
+
+    assert contract["requiredModelPolicy"] == {
+        "providerIds": ["opencode_go"],
+        "modelIds": ["deepseek-v4-flash"],
+        "requireOfficialProvider": False,
+    }
+    assert contract["evidencePolicy"]["officialEvidenceEligible"] is False
+
+
+def test_formal_flash_task_policy_preserves_server_hash_authority(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: tmp_path,
+    )
+    required_policy = canonical_model_policy(
+        {
+            "family": "deepseek",
+            "providerIds": ["opencode_go"],
+            "modelIds": ["deepseek-v4-flash"],
+            "requireOfficialProvider": False,
+        }
+    )
+
+    contract = challenge_question_runs.bind_challenge_research_task_model(
+        team_id="research-team",
+        research_project_id="project-sci-096",
+        question_id="SCI-096",
+        required_model_policy=required_policy,
+        dialogue_model_id="opencode_go/deepseek-v4-flash",
+        model_library={
+            "opencode_go/deepseek-v4-flash": {
+                "provider_id": "opencode_go",
+                "upstream_id": "deepseek-v4-flash",
+            }
+        },
+    )
+
+    assert contract["requiredModelPolicy"] == required_policy
+    assert contract["modelPolicySha256"] == required_policy["policySha256"]
+
+
 def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     output = _output()
@@ -386,9 +570,29 @@ def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_p
     assert record["validation"]["schemaValidation"] == "passed"
     assert record["validation"]["citationValidation"] == "passed"
     assert record["validation"]["officialModelCall"] is True
+    assert record["validation"]["modelInvocationReceipts"] == "failed"
+    assert record["validation"]["modelInvocationReceiptIssue"] == (
+        "canonical_result_package_missing"
+    )
+    assert record["modelInvocationReceiptRefs"] == {}
     assert record["humanGates"]["approvedCount"] == 0
     assert response["summary"]["validCandidateCount"] == 1
+    assert response["summary"]["receiptReadyQuestionCount"] == 0
     assert response["summary"]["completedCount"] == 0
+
+    store_path = challenge_question_runs._store_path("research-team")
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["records"][0]["validation"]["modelInvocationReceipts"] = "passed"
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    summary = challenge_question_runs.challenge_question_run_summary("research-team")
+    assert summary["receiptReadyQuestionIds"] == []
+    assert summary["latestCandidate"]["validation"][
+        "modelInvocationReceipts"
+    ] == "failed"
+    assert summary["latestCandidate"]["validation"][
+        "modelInvocationReceiptIssue"
+    ] == "canonical_result_package_missing"
 
 
 def test_get_question_detail_returns_latest_immutable_artifact(tmp_path, monkeypatch):
@@ -588,9 +792,9 @@ def test_revised_question_run_requires_existing_parent(tmp_path, monkeypatch):
         )
 
 
-def test_summary_produces_approved_deep_experiment_ids_from_real_records(tmp_path, monkeypatch):
-    """Production summaries must derive approvedDeepExperimentQuestionIds
-    (the program projection reads it; only tests used to inject it)."""
+def test_summary_excludes_approved_runs_without_receipts_from_completion(
+    tmp_path, monkeypatch
+):
     _isolate_store(tmp_path, monkeypatch)
     for question_number in (1, 91, 96):
         output = _output(question_number, approved=True)
@@ -615,11 +819,14 @@ def test_summary_produces_approved_deep_experiment_ids_from_real_records(tmp_pat
         )
 
     summary = challenge_question_runs.challenge_question_run_summary("research-team")
-    assert summary["completedQuestionIds"] == ["SCI-001", "SCI-091", "SCI-096"]
-    assert summary["approvedDeepExperimentQuestionIds"] == ["SCI-091", "SCI-096"]
+    assert summary["receiptReadyQuestionIds"] == []
+    assert summary["completedQuestionIds"] == []
+    assert summary["approvedDeepExperimentQuestionIds"] == []
 
 
-def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypatch):
+def test_five_approved_questions_without_receipts_fail_completion_gate(
+    tmp_path, monkeypatch
+):
     _isolate_store(tmp_path, monkeypatch)
     for question_number in range(96, 101):
         output = _output(question_number, approved=True)
@@ -648,8 +855,9 @@ def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypat
     assert summary["validatedQuestionCount"] == 5
     assert summary["validatedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
     assert summary["validatedOutcomeCounts"] == {"approved": 5}
-    assert summary["completedCount"] == 5
-    assert summary["completedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
+    assert summary["receiptReadyQuestionCount"] == 0
+    assert summary["completedCount"] == 0
+    assert summary["completedQuestionIds"] == []
 
 
 def test_deferred_h4_review_preserves_revision_requested_decision(tmp_path, monkeypatch):
@@ -838,6 +1046,33 @@ def test_publish_promotes_only_bound_project_evidence_and_keeps_human_gates_pend
     assert len(program_store["evidence"]) == 1
     assert program_store["evidence"][0]["status"] == "published_to_challenge_program"
     assert program_store["evidence"][0]["officialBoundary"]["humanApprovalGranted"] is False
+
+    captured_registration: dict = {}
+
+    def capture_registration(_team_id: str, payload: dict) -> dict:
+        captured_registration.update(deepcopy(payload))
+        return {"record": {"recordId": "captured"}, "summary": {}}
+
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "register_challenge_question_output",
+        capture_registration,
+    )
+    package_payload = {
+        "schema_version": 2,
+        "package_id": "pkg-sci-096-publish-boundary",
+    }
+    challenge_question_runs.publish_research_project_challenge_question_output(
+        "research-team",
+        {
+            **publish_payload,
+            "resultPackage": package_payload,
+            "authorizedModelPolicySha256": "f" * 64,
+        },
+    )
+
+    assert captured_registration["resultPackage"] == package_payload
+    assert captured_registration["authorizedModelPolicySha256"] == "f" * 64
 
 
 def test_publish_rejects_project_evidence_bound_to_another_turn(tmp_path, monkeypatch):

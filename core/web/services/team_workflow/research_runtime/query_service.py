@@ -137,7 +137,21 @@ class WorkflowQueryService:
                 raise RunNotFoundError(run_id)
             raise TeamScopeMismatchError()
 
-        run, attempts, human_tasks, handoffs, budget_receipts, latest_seq = bundle
+        (
+            run,
+            attempts,
+            human_tasks,
+            handoffs,
+            budget_receipts,
+            artifact_receipts,
+            delivery_status,
+            delivery_artifact,
+            launch_context,
+            discussion_projection,
+            discussion_meetings,
+            discussion_rooms,
+            latest_seq,
+        ) = bundle
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
 
@@ -163,6 +177,13 @@ class WorkflowQueryService:
                 handoffs=tuple(handoffs),
                 budget_receipts=tuple(budget_receipts),
                 command_offers=tuple(offers),
+                artifact_receipts=tuple(artifact_receipts),
+                delivery_status=delivery_status,
+                delivery_artifact=delivery_artifact,
+                launch_context=launch_context,
+                discussion_projection=discussion_projection,
+                discussion_meetings=discussion_meetings,
+                discussion_rooms=discussion_rooms,
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )
@@ -316,13 +337,40 @@ class WorkflowQueryService:
                 _budget_receipt_summary(row)
                 for row in repo.list_budget_receipts_for_run(run_id)
             ]
+            artifact_receipts = repo.list_artifact_receipts_for_run(run_id)
             latest_seq = repo.latest_event_sequence(run_id)
+            events = _read_bounded_events(
+                repo,
+                run_id,
+                latest_sequence=latest_seq,
+            )
+            delivery_status, delivery_artifact = _delivery_projection_from_events(
+                events,
+                run_status=run.status,
+            )
+            launch_context = _launch_context_from_run(run, events)
+            (
+                discussion_projection,
+                discussion_meetings,
+                discussion_rooms,
+            ) = _discussion_inputs_from_run(
+                run,
+                events,
+                launch_context,
+            )
             return (
                 run,
                 attempts,
                 human_tasks,
                 handoffs,
                 budget_receipts,
+                artifact_receipts,
+                delivery_status,
+                delivery_artifact,
+                launch_context,
+                discussion_projection,
+                discussion_meetings,
+                discussion_rooms,
                 latest_seq,
             )
 
@@ -419,6 +467,347 @@ def _artifact_ref_from_receipt(row: tuple) -> dict[str, Any]:
         "contentHash": str(row[5] or ""),
         "uri": canonical_ref,
     }
+
+
+def _event_sequence(event: Any) -> int:
+    value = getattr(event, "sequence", event)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _read_bounded_events(
+    repo: WorkflowLedgerRepository,
+    run_id: str,
+    *,
+    latest_sequence: int | None = None,
+) -> list[Any]:
+    """Read a bounded head+tail window from the capped Ledger event query.
+
+    The head preserves launch/authorization facts while the tail preserves
+    the newest delivery/recovery fact. Two bounded reads avoid both the
+    repository's 500-row cap and an unbounded timeline scan.
+    """
+    latest = int(
+        latest_sequence
+        if latest_sequence is not None
+        else repo.latest_event_sequence(run_id)
+    )
+    head = repo.list_events(run_id, 0, 250)
+    tail_after = max(0, latest - 250)
+    tail = repo.list_events(run_id, tail_after, 500)
+    merged: dict[tuple[int, str], Any] = {}
+    for event in (*head, *tail):
+        key = (_event_sequence(event), str(getattr(event, "event_id", "")))
+        merged[key] = event
+    return sorted(merged.values(), key=_event_sequence)
+
+
+def _event_payload(event: Any) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(str(getattr(event, "payload_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    return payload if isinstance(payload, Mapping) else {}
+
+
+def _delivery_projection_from_events(
+    events: list[Any],
+    *,
+    run_status: str | None = None,
+) -> tuple[str | None, Mapping[str, Any] | None]:
+    """Read delivery status and only the event-authoritative final artifact."""
+    for event in reversed(events or []):
+        event_type = str(getattr(event, "event_type", "") or "")
+        if not event_type.startswith("delivery_orchestration_"):
+            continue
+        payload = _event_payload(event)
+        status = str(
+            payload.get("deliveryStatus")
+            or {
+                "delivery_orchestration_completed": "succeeded",
+                "delivery_orchestration_blocked": "blocked",
+                "delivery_orchestration_failed": "failed",
+            }.get(event_type, "")
+        ).strip().lower()
+        artifact = None
+        if event_type == "delivery_orchestration_completed":
+            artifact_ref = str(payload.get("artifactRef") or "").strip()
+            artifact_kind = str(payload.get("artifactKind") or "").strip()
+            if artifact_ref and artifact_kind:
+                artifact = {
+                    "artifactKind": artifact_kind,
+                    "artifactRef": artifact_ref,
+                    "artifactId": payload.get("artifactId"),
+                }
+        return status or None, artifact
+    # A successful run atomically enqueues delivery orchestration.  Until its
+    # terminal delivery event appears, expose that durable lifecycle fact as
+    # pending rather than claiming success or inventing a result.
+    return (
+        "pending" if str(run_status or "").strip() == "succeeded" else None,
+        None,
+    )
+
+
+def _delivery_status_from_events(
+    events: list[Any],
+    *,
+    run_status: str | None = None,
+) -> str | None:
+    """Compatibility helper returning only the delivery status."""
+    return _delivery_projection_from_events(events, run_status=run_status)[0]
+
+
+def _launch_context_from_run(run: Any, events: list[Any]) -> dict[str, Any]:
+    try:
+        snapshot = json.loads(str(run.input_snapshot_json or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        snapshot = {}
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    constraint = snapshot.get("constraintSnapshot")
+    constraint = constraint if isinstance(constraint, Mapping) else {}
+    source = str(
+        snapshot.get("launchSource")
+        or constraint.get("launchSource")
+        or ("catalog" if snapshot.get("competitionRuleRef") else "")
+    ).strip() or None
+    context: dict[str, Any] = {
+        "source": source,
+        "sourceCollectionRunId": str(snapshot.get("sourceCollectionRunId") or "").strip() or None,
+        "authorizationId": str(
+            snapshot.get("authorizationId") or snapshot.get("catalogAuthorizationId") or ""
+        ).strip() or None,
+        "planId": str(snapshot.get("planId") or "").strip() or None,
+        "questionId": str(
+            snapshot.get("questionId") or getattr(run, "question_id", "") or ""
+        ).strip() or None,
+        "hypothesisSelectionId": str(
+            snapshot.get("hypothesisSelectionId")
+            or snapshot.get("selectionId")
+            or ""
+        ).strip() or None,
+        "catalogAuthorizationId": str(
+            snapshot.get("catalogAuthorizationId")
+            or snapshot.get("authorizationId")
+            or ""
+        ).strip() or None,
+        "readinessReportSha256": str(
+            snapshot.get("readinessReportSha256") or ""
+        ).strip() or None,
+        "chainCorrelationId": str(
+            snapshot.get("chainCorrelationId") or ""
+        ).strip() or None,
+        "inputSnapshotHash": str(
+            getattr(run, "input_snapshot_hash", "") or ""
+        ).strip() or None,
+    }
+    for event in events or []:
+        if str(getattr(event, "event_type", "") or "") != "catalog_run_authorized":
+            continue
+        payload = _event_payload(event)
+        authorization_id = payload.get("authorizationId")
+        if authorization_id is not None:
+            context["authorizationId"] = authorization_id
+            context["catalogAuthorizationId"] = authorization_id
+        for key in (
+            "planId",
+            "scopeHash",
+            "readinessReportSha256",
+            "recordHash",
+            "approvedBy",
+            "approvedAtMs",
+        ):
+            if key in payload and payload.get(key) is not None:
+                context[key] = payload.get(key)
+        if "chainCorrelationId" in payload:
+            context["chainCorrelationId"] = str(
+                payload.get("chainCorrelationId") or ""
+            ).strip() or None
+        break
+    return context
+
+
+def _discussion_inputs_from_run(
+    run: Any,
+    events: list[Any],
+    launch_context: Mapping[str, Any],
+) -> tuple[Mapping[str, Any] | None, Any, Any]:
+    """Read only the canonical discussion authorities needed by projection.
+
+    The formal ledger owns the workflow run, while hypothesis-first meetings
+    and chat rooms remain append-only domain authorities.  This adapter keeps
+    those reads out of ``projection_builder`` (which must stay pure) and never
+    calls public room APIs that reconcile or repair state.  If no explicit
+    discussion scope is present, no anchor is emitted for an ordinary run.
+    A scoped run with missing authorities receives empty projections so the
+    anchor returns a visible degraded reason instead of falling back to a team
+    room.
+    """
+
+    projection = _discussion_projection_from_sources(run, events, launch_context)
+    snapshot = _run_input_snapshot(run)
+    objective = snapshot.get("researchObjectiveContract")
+    hypothesis_first = isinstance(objective, Mapping) and objective.get(
+        "hypothesisFirst"
+    ) is True
+    if projection is None and not hypothesis_first:
+        return None, None, None
+    if projection is None and hypothesis_first:
+        try:
+            from . import hypothesis_first_chain
+
+            chain = hypothesis_first_chain.chain_state(
+                str(getattr(run, "team_id", "") or ""),
+                str(snapshot.get("questionId") or getattr(run, "question_id", "") or ""),
+            )
+            active = chain.get("activeDiscussionAnchor")
+            if isinstance(active, Mapping):
+                projection = dict(active)
+        except Exception:  # noqa: BLE001 - missing authority stays degraded
+            projection = None
+
+    snapshot_authority = snapshot.get("discussionAuthority")
+    if isinstance(snapshot_authority, Mapping):
+        authority_projection = snapshot_authority.get("projection")
+        if projection is None and isinstance(authority_projection, Mapping):
+            projection = dict(authority_projection)
+        meetings = snapshot_authority.get("meetings")
+        rooms = snapshot_authority.get("rooms")
+        if meetings is not None or rooms is not None:
+            return projection or {}, meetings if meetings is not None else [], rooms if rooms is not None else []
+
+    # Some adapters carry authority beside the scope in the event payload or
+    # launch context.  Accept only the explicit discussion envelope.
+    for source in (
+        launch_context,
+        *(payload for payload in (_event_payload(event) for event in events) if payload),
+    ):
+        if not isinstance(source, Mapping):
+            continue
+        authority = source.get("discussionAuthority")
+        if not isinstance(authority, Mapping):
+            continue
+        meetings = authority.get("meetings")
+        rooms = authority.get("rooms")
+        if meetings is not None or rooms is not None:
+            return projection or {}, meetings if meetings is not None else [], rooms if rooms is not None else []
+
+    # Read the two append-only authorities without invoking their public
+    # service methods: those methods reconcile active rounds/participants and
+    # are therefore not suitable for a zero-write snapshot query.
+    meetings: list[Mapping[str, Any]] = []
+    rooms: list[Mapping[str, Any]] = []
+    try:
+        from core.web.services.team_workflow import meeting_rounds
+
+        # Meeting rounds already have a formal read facade.  It folds the
+        # append-only log and validates the team scope without writing, so do
+        # not bypass that owner through its private path helpers.
+        meeting_payload = meeting_rounds.list_meeting_rounds(
+            str(getattr(run, "team_id", ""))
+        )
+        raw_meetings = (
+            meeting_payload.get("meetings")
+            if isinstance(meeting_payload, Mapping)
+            else meeting_payload
+        )
+        raw_meetings = raw_meetings if isinstance(raw_meetings, list) else []
+        latest: dict[str, Mapping[str, Any]] = {}
+        for item in raw_meetings:
+            if not isinstance(item, Mapping):
+                continue
+            meeting_id = str(item.get("meetingRoundId") or "").strip()
+            if meeting_id:
+                latest[meeting_id] = item
+        meetings = list(latest.values())
+    except Exception:  # noqa: BLE001 - missing legacy authority is degraded
+        meetings = []
+    try:
+        from core.web.services import chat_room_service
+
+        rooms = chat_room_service.read_chat_rooms_snapshot()
+    except Exception:  # noqa: BLE001 - missing legacy authority is degraded
+        rooms = []
+    return projection or {}, meetings, rooms
+
+
+def _discussion_projection_from_sources(
+    run: Any,
+    events: list[Any],
+    launch_context: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Extract explicit active discussion identity from immutable envelopes."""
+
+    sources: list[Mapping[str, Any]] = []
+    snapshot = _run_input_snapshot(run)
+    if snapshot:
+        sources.append(snapshot)
+    if isinstance(launch_context, Mapping):
+        sources.append(launch_context)
+    for event in events:
+        payload = _event_payload(event)
+        if payload:
+            sources.append(payload)
+
+    for source in sources:
+        active = source.get("activeDiscussionAnchor")
+        if isinstance(active, Mapping):
+            return dict(active)
+        for key in (
+            "activeDiscussion",
+            "discussionProjection",
+            "discussionScope",
+            "activeDiscussionScope",
+        ):
+            candidate = source.get(key)
+            if isinstance(candidate, Mapping):
+                if key in {"discussionScope", "activeDiscussionScope"}:
+                    projection: dict[str, Any] = {"scope": dict(candidate)}
+                else:
+                    projection = dict(candidate)
+                _copy_discussion_refs(source, projection)
+                return projection
+        binding = source.get("scopeBinding")
+        if isinstance(binding, Mapping):
+            scope = binding.get("discussionScope") or binding.get("scope")
+            if isinstance(scope, Mapping):
+                projection = {"scope": dict(scope)}
+                _copy_discussion_refs(source, projection)
+                _copy_discussion_refs(binding, projection)
+                return projection
+    return None
+
+
+def _copy_discussion_refs(source: Mapping[str, Any], target: dict[str, Any]) -> None:
+    for key in (
+        "scopeHash",
+        "discussionScopeHash",
+        "activeMeetingRoundId",
+        "currentMeetingRoundId",
+        "meetingRoundId",
+        "activeRoomId",
+        "currentRoomId",
+        "discussionRoomId",
+        "roomId",
+        "activeSelectionId",
+        "currentSelectionId",
+        "selectionId",
+        "activeCandidateId",
+        "currentCandidateId",
+        "candidateId",
+    ):
+        if key in source and key not in target:
+            target[key] = source.get(key)
+
+
+def _run_input_snapshot(run: Any) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 def _node_blocked_reason(latest: Any, run_blocked_reason: str | None) -> str:

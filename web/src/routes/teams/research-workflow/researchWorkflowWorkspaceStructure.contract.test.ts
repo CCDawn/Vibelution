@@ -44,19 +44,42 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("ResearchProcessInspectorPane");
   });
 
-  it("renders question archives in the wide canvas region instead of the narrow inspector", () => {
+  it("keeps live operations in the fixed inspector and opens the read-only archive in the wide canvas", () => {
     const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
     expect(source).toContain('const archiveOpen = location.panel === "question"');
-    expect(source).toContain('data-vui="research-question-archive-workspace"');
-    expect(source).toContain("canvas={archiveOpen && inspectorPane");
-    expect(source).toContain("inspector={!archiveOpen && inspectorPane");
+    expect(source).toContain("canvas={archiveOpen ? (");
+    expect(source).toContain('data-vui="research-question-archive-canvas"');
+    expect(source).toContain("inspector={archiveOpen ? null : (");
+    expect(source).not.toContain("inspector={inspectorPane ? (");
+    expect(source).toContain("<ResearchCurrentTaskInspector");
+    expect(source).toContain("{inspectorPane}");
+  });
+
+  it("submits the workspace model offer unchanged from the sole formal primary action", () => {
+    const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    expect(source).toContain("const formalPrimaryAction = workspaceModel.primaryAction");
+    expect(source).toContain("commands.submitOffer(formalPrimaryAction.offer)");
+    expect(source).toContain("if (commandBusy) return");
+    expect(source).toContain("isDisabled={commandBusy}");
+    expect(source).toContain("primaryActionOwnedByWorkspace={workspaceModel.source === \"formal_runtime\"}");
+    expect(source).not.toContain("idempotencyKey: formalPrimaryAction");
+    expect(source).not.toContain("expectedRunVersion: formalPrimaryAction");
   });
 
   it("opts into the approved tablet and compact drawer contract", () => {
     const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    const workspaceStyles = readFileSync(resolve(root, "ResearchProcessWorkspace.styles.ts"), "utf8");
+    const toolbarStyles = readFileSync(resolve(root, "ResearchWorkflowToolbar.styles.ts"), "utf8");
     expect(source).toContain("responsive={{");
     expect(source).toContain('rail: { label: "研究阶段" }');
     expect(source).toContain('inspector: { label: "当前任务" }');
+    expect(source).toContain("layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}");
+    expect(source).toContain("toolbarClassName={styles.toolbar}");
+    expect(workspaceStyles).toContain('toolbar: "!flex-nowrap overflow-hidden"');
+    expect(workspaceStyles).toContain("max-w-full");
+    expect(toolbarStyles).toContain("flex-col");
+    expect(toolbarStyles).toContain("xl:flex-row");
+    expect(toolbarStyles.match(/overflow-x-auto/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
   it("mounts inspector panel leaves through the research workflow lazy pack", () => {

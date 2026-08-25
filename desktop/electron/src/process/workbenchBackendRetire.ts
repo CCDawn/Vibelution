@@ -35,6 +35,79 @@ export function collectRegisteredHandles(
   return [...handles].sort((left, right) => right - left);
 }
 
+export type DeadRegisteredHandleReconcileResult = {
+  reconciledPids: number[];
+  retainedPids: number[];
+  reason: string;
+};
+
+/**
+ * Reconcile a persisted process handle after an unclean owner exit without
+ * sending a signal to any process.
+ *
+ * The normal process-tree terminator deliberately treats a missing root as an
+ * unverified tree: a child may have been re-parented before the next pass.
+ * That rule remains the kill authority.  Recovery has a different, narrower
+ * contract: the historical PID must be dead, the persisted identity must be
+ * structurally complete and bound to that PID, and the owned backend port must
+ * no longer have a listener.  Only then may the registration be released.
+ */
+export async function reconcileDeadRegisteredHandles(input: {
+  pids: readonly number[];
+  port: number;
+  host?: string;
+  expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  pidAlive?: (pid: number) => boolean;
+  connect?: (port: number, host: string) => Promise<boolean>;
+}): Promise<DeadRegisteredHandleReconcileResult> {
+  const normalizedPids = [...new Set(input.pids
+    .map((pid) => Math.trunc(Number(pid)))
+    .filter((pid) => Number.isFinite(pid) && pid > 0))];
+  const retainedPids: number[] = [];
+  const pidAlive = input.pidAlive ?? knownPidIsAlive;
+  const host = input.host?.trim() || "127.0.0.1";
+  const port = Math.trunc(Number(input.port));
+  if (!Number.isFinite(port) || port <= 0) {
+    return {
+      reconciledPids: [],
+      retainedPids: normalizedPids,
+      reason: "owned backend port is unavailable; dead handles remain registered"
+    };
+  }
+  const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
+  if (await connect(port, host)) {
+    return {
+      reconciledPids: [],
+      retainedPids: normalizedPids,
+      reason: `owned backend port ${port} is still listening`
+    };
+  }
+
+  const reconciledPids: number[] = [];
+  for (const pid of normalizedPids) {
+    const identity = input.expectedIdentities?.[String(pid)];
+    const identityMatchesHandle = Boolean(
+      identity
+      && Math.trunc(Number(identity.pid)) === pid
+      && Number.isFinite(Number(identity.createTime))
+      && Number(identity.createTime) > 0
+      && String(identity.executable || "").trim()
+    );
+    if (!identityMatchesHandle || pidAlive(pid)) {
+      retainedPids.push(pid);
+      continue;
+    }
+    reconciledPids.push(pid);
+  }
+  return {
+    reconciledPids,
+    retainedPids,
+    reason: reconciledPids.length > 0
+      ? `reconciled ${reconciledPids.length} dead registered handle(s) after port ${port} was released`
+      : "dead registered handles lack a matching persisted identity"
+  };
+}
+
 export function terminatePid(pid: number): void {
   if (!Number.isFinite(pid) || pid <= 0) {
     return;

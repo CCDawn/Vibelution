@@ -46,16 +46,43 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
         start = GraphDispatch(
             action_id="act-driver",
             run_id="run-restart",
-            node_run_id="nr-run-restart-source_finding-a1",
-            node_id="source_finding",
+            node_run_id="nr-run-restart-problem_understanding-a1",
+            node_id="problem_understanding",
             attempt=1,
             dispatch_kind="start",
             input_snapshot_hash="a" * 64,
             workflow_version_id="challenge-cup-research-v2.1.0",
             team_id="research-team",
         )
-        finding = harness.coordinator.start_attempt(start)
+        entered = harness.coordinator.start_attempt(start)
+        assert entered.pending_action is not None
+        assert entered.pending_action.node_id == "problem_understanding"
+
+        # 图入口是 problem_understanding：先走通入口节点，线程才中断在
+        # source_finding，与生产首发 dispatch 路径一致。
+        entry_receipt = ExecutionReceipt(
+            action_id=action_id_for("run-restart", "problem_understanding", 1),
+            node_run_id="nr-run-restart-problem_understanding-a1",
+            outcome="succeeded",
+            artifact_receipt_ids=(),
+            execution_anchor_id=None,
+            budget_receipt_id=None,
+            problem=None,
+            completed_at_ms=FIXED_NOW_MS,
+        )
+        finding = harness.coordinator.resume_action(
+            GraphDispatch(
+                action_id=entry_receipt.action_id,
+                run_id="run-restart",
+                node_run_id=entry_receipt.node_run_id,
+                node_id="problem_understanding",
+                attempt=1,
+                dispatch_kind="resume_action",
+                receipt=entry_receipt,
+            )
+        )
         assert finding.pending_action is not None
+        assert finding.pending_action.node_id == "source_finding"
 
         finding_receipt = ExecutionReceipt(
             action_id=action_id_for("run-restart", "source_finding", 1),
@@ -172,8 +199,7 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)

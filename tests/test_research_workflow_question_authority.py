@@ -1,24 +1,97 @@
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from core.research.competition.question_result_package import (
+    QuestionResultPackage,
+    canonical_model_policy,
+)
+from core.research.competition.result_set import (
+    CatalogScope,
+    QuestionResult,
+    compute_scope_hash,
+)
+from core.research.workflow.contracts import (
+    ContractValidationError,
+    WorkflowRunInputSnapshot,
+)
+from core.research.workflow.contracts.research_scope import (
+    scope_hash_for,
+    scope_locators_for,
+)
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import team_service
 from core.web.services.team_workflow import research_projects
-from core.web.services.team_workflow.research_runtime import question_launch
+from core.web.services.team_workflow.research_runtime import (
+    model_routing,
+    question_launch,
+)
 from core.web.services.team_workflow.research_runtime import (
     service as runtime_service_module,
 )
-from core.web.services.team_workflow.research_runtime.runtime_factory import build_workflow_runtime
+from core.web.services.team_workflow.research_runtime.runtime_factory import (
+    build_workflow_runtime,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     reset_research_workflow_runtime_service_for_tests,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+from tests.test_catalog_execution_state_machine import _package
+
+
+def test_formal_model_routing_accepts_flash_but_rejects_route_override() -> None:
+    required_policy = canonical_model_policy(
+        {
+            "family": "deepseek",
+            "providerIds": ["opencode_go"],
+            "modelIds": ["deepseek-v4-flash"],
+            "requireOfficialProvider": False,
+        }
+    )
+    route = {
+        "agentId": "agent-search",
+        "productRoleId": "challenge_cup_search",
+        "modelRef": "opencode_go/deepseek-v4-flash",
+        "providerId": "opencode_go",
+        "modelId": "deepseek-v4-flash",
+    }
+    record = {
+        "runId": "run-sci-096",
+        "inputSnapshot": {
+            "modelRoutingPolicy": {
+                "requiredModelPolicy": required_policy,
+                "modelPolicySha256": required_policy["policySha256"],
+                "routes": {
+                    "source_discovery": {
+                        "byProductRole": {"challenge_cup_search": route}
+                    }
+                },
+            }
+        },
+    }
+    node_run = {
+        "nodeId": "problem_understanding",
+        "nodeRunId": "node-problem-1",
+        "agentId": "agent-search",
+    }
+
+    decision = model_routing.select_model_route(record, node_run, {})
+
+    assert decision["modelRef"] == "opencode_go/deepseek-v4-flash"
+    assert decision["modelId"] == "deepseek-v4-flash"
+    with pytest.raises(model_routing.ModelRoutingError, match="frozen"):
+        model_routing.select_model_route(
+            record,
+            node_run,
+            {"modelRef": "opencode_go/deepseek-v3.2"},
+        )
 
 
 def _approved_detail(question_id: str = "SCI-096") -> dict:
@@ -92,7 +165,353 @@ def _safety_limits() -> dict:
     }
 
 
+def _package_bound_record(tmp_path: Path) -> dict:
+    package = _package(CatalogScope.from_tracked_resources(), "SCI-096")
+    package_path = tmp_path / "question-result-package.json"
+    package_path.write_text(
+        json.dumps(package.to_dict(), ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    receipt_refs = QuestionResult.from_package(package).manifest_entry()["receipts"]
+    trace_refs = _full_trace_refs()
+    return {
+        "teamId": "research-team",
+        "recordId": "SCI-096:run-sci-096-r1",
+        "questionId": "SCI-096",
+        "runId": "run-sci-096-r1",
+        "schemaVersion": 2,
+        "submissionEligible": True,
+        "status": "approved",
+        "humanGates": {
+            "allApproved": True,
+            "decisions": {
+                "H1_problem_understanding": "approved",
+                "H2_hypothesis_selection": "approved",
+                "H3_research_plan": "approved",
+                "H4_external_output": "approved",
+            },
+        },
+        "validation": {
+            "schemaValidation": "passed",
+            "citationValidation": "passed",
+            "officialModelCall": True,
+            "modelInvocationReceipts": "passed",
+        },
+        "modelInvocationReceiptRefs": receipt_refs,
+        "modelInvocationReceiptTraceRefs": trace_refs,
+        "modelInvocationReceiptCoverage": {
+            "status": "passed",
+            "coveredKinds": ["candidate", "final_output", "plan", "review", "revision"],
+            "missingKinds": [],
+            "receiptCount": 5,
+        },
+        "resultPackage": {
+            "schemaVersion": package.schema_version,
+            "packageId": package.package_id,
+            "canonicalHash": package.canonical_hash,
+            "idempotencyKey": package.idempotency_key,
+            "modelPolicySha256": package.model_policy["policySha256"],
+            "locator": str(package_path),
+        },
+    }
+
+
+def _full_trace_refs() -> list[dict]:
+    return [
+        {
+            "receiptId": f"trace-{kind}",
+            "receiptSha256": "a" * 64,
+            "nodeRunId": f"node-{kind}",
+            "sessionId": f"session-{kind}",
+            "turnId": f"turn-{kind}",
+            "outcomeKinds": [kind],
+            "evidenceLocator": {"kind": "turn_journal", "turnId": f"turn-{kind}"},
+            "evidenceLocatorSha256": "b" * 64,
+        }
+        for kind in ("candidate", "review", "revision", "plan", "final_output")
+    ]
+
+
+def _replace_record_package(
+    record: dict,
+    tmp_path: Path,
+    package: QuestionResultPackage,
+    *,
+    filename: str,
+) -> dict:
+    replaced = deepcopy(record)
+    package_path = tmp_path / filename
+    package_path.write_text(
+        json.dumps(package.to_dict(), ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    replaced["modelInvocationReceiptRefs"] = QuestionResult.from_package(
+        package
+    ).manifest_entry()["receipts"]
+    replaced["resultPackage"] = {
+        "schemaVersion": package.schema_version,
+        "packageId": package.package_id,
+        "canonicalHash": package.canonical_hash,
+        "idempotencyKey": package.idempotency_key,
+        "modelPolicySha256": package.model_policy["policySha256"],
+        "locator": str(package_path),
+    }
+    return replaced
+
+
+def test_formal_record_requires_canonical_package_and_matching_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
+    record = _package_bound_record(tmp_path)
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(_full_trace_refs()),
+    )
+
+    assert question_launch._formal_record_eligible(record) is True
+
+    missing_package = deepcopy(record)
+    missing_package.pop("resultPackage")
+    assert question_launch._formal_record_eligible(missing_package) is False
+
+    mismatched_refs = deepcopy(record)
+    mismatched_refs["modelInvocationReceiptRefs"]["generation"]["receipt_id"] = "forged"
+    assert question_launch._formal_record_eligible(mismatched_refs) is False
+
+    failed_receipt_validation = deepcopy(record)
+    failed_receipt_validation["validation"]["modelInvocationReceipts"] = "failed"
+    assert question_launch._formal_record_eligible(failed_receipt_validation) is False
+
+    mismatched_metadata = deepcopy(record)
+    mismatched_metadata["resultPackage"]["schemaVersion"] = 1
+    assert question_launch._formal_record_eligible(mismatched_metadata) is False
+    mismatched_metadata = deepcopy(record)
+    mismatched_metadata["resultPackage"]["packageId"] = "pkg-forged"
+    assert question_launch._formal_record_eligible(mismatched_metadata) is False
+
+    wrong_question_package = _package(
+        CatalogScope.from_tracked_resources(), "SCI-091"
+    )
+    wrong_question_record = _replace_record_package(
+        record,
+        tmp_path,
+        wrong_question_package,
+        filename="wrong-question-result-package.json",
+    )
+    assert question_launch._formal_record_eligible(wrong_question_record) is False
+
+    wrong_run_payload = deepcopy(
+        _package(CatalogScope.from_tracked_resources(), "SCI-096").to_dict()
+    )
+    wrong_run_payload.pop("canonical_sha256")
+    wrong_run_payload.pop("idempotency_key")
+    wrong_run_payload["package_id"] = "pkg-sci-096-r2"
+    wrong_run_payload["run_id"] = "run-sci-096-r2"
+    for receipt in wrong_run_payload["model_invocation_receipts"].values():
+        receipt["runId"] = "run-sci-096-r2"
+        receipt["nodeRunId"] = f"{receipt['nodeRunId']}-r2"
+        receipt["scope"]["runId"] = "run-sci-096-r2"
+    wrong_run_package = QuestionResultPackage.create(wrong_run_payload)
+    wrong_run_record = _replace_record_package(
+        record,
+        tmp_path,
+        wrong_run_package,
+        filename="wrong-run-result-package.json",
+    )
+    assert question_launch._formal_record_eligible(wrong_run_record) is False
+
+    alternate_scope = CatalogScope(
+        catalog_id="science-125-questions-alternate",
+        catalog_version="1",
+        catalog_sha256="e" * 64,
+        scope_hash=compute_scope_hash(
+            "science-125-questions-alternate",
+            "1",
+            "e" * 64,
+        ),
+    )
+    with monkeypatch.context() as scope_patch:
+        scope_patch.setattr(
+            CatalogScope,
+            "from_tracked_resources",
+            classmethod(lambda _cls: alternate_scope),
+        )
+        alternate_scope_package = _package(alternate_scope, "SCI-096")
+    alternate_scope_record = _replace_record_package(
+        record,
+        tmp_path,
+        alternate_scope_package,
+        filename="alternate-scope-result-package.json",
+    )
+    assert question_launch._formal_record_eligible(alternate_scope_record) is False
+
+    missing_final = deepcopy(record)
+    missing_final["modelInvocationReceiptTraceRefs"] = [
+        ref
+        for ref in missing_final["modelInvocationReceiptTraceRefs"]
+        if ref["outcomeKinds"] != ["final_output"]
+    ]
+    missing_final["modelInvocationReceiptCoverage"] = (
+        model_invocation_receipt_registry.model_invocation_receipt_coverage(
+            missing_final["modelInvocationReceiptTraceRefs"]
+        )
+    )
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(
+            missing_final["modelInvocationReceiptTraceRefs"]
+        ),
+    )
+    assert question_launch._formal_record_eligible(missing_final) is False
+
+
 def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+
+    fixture_receipt_refs = {
+        stage_id: {
+            "receipt_id": f"fixture-{stage_id}",
+            "node_run_id": f"fixture-node-{stage_id}",
+            "evidence_locator": {
+                "kind": "fixture",
+                "evidenceId": f"fixture-evidence-{stage_id}",
+                "outputRef": f"fixture://{stage_id}",
+                "outputSha256": "a" * 64,
+            },
+            "evidence_locator_sha256": "b" * 64,
+        }
+        for stage_id in ("generation", "review", "revision")
+    }
+    fixture_package = {
+        "schemaVersion": 2,
+        "packageId": "fixture-question-result-package",
+        "canonicalHash": "c" * 64,
+        "idempotencyKey": "fixture-idempotency-key",
+        "modelPolicySha256": "d" * 64,
+        "locator": "fixture://question-result-package",
+    }
+    fixture_trace_refs = _full_trace_refs()
+    required_model_policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+    role_routes = {
+        role_id: {
+            "agentId": f"agent-{role_id}",
+            "productRoleId": role_id,
+            "modelRef": "dashscope_main/qwen3.6-plus",
+            "providerId": "dashscope_main",
+            "modelId": "qwen3.6-plus",
+        }
+        for role_id in (
+            "challenge_cup_search",
+            "challenge_cup_extractor",
+            "challenge_cup_knowledge_manager",
+            "challenge_cup_experiment_revision",
+            "challenge_cup_evaluator",
+            "challenge_cup_execution_steward",
+        )
+    }
+    model_routing_policy = {
+        "requiredModelPolicy": required_model_policy,
+        "modelPolicySha256": required_model_policy["policySha256"],
+        "routes": {
+            "source_discovery": {
+                "byProductRole": {
+                    "challenge_cup_search": role_routes["challenge_cup_search"]
+                }
+            },
+            "extraction": {
+                "byProductRole": {
+                    role_id: role_routes[role_id]
+                    for role_id in (
+                        "challenge_cup_extractor",
+                        "challenge_cup_knowledge_manager",
+                    )
+                }
+            },
+            "reasoning": {
+                "byProductRole": {
+                    "challenge_cup_experiment_revision": role_routes[
+                        "challenge_cup_experiment_revision"
+                    ]
+                }
+            },
+            "review": {
+                "byProductRole": {
+                    "challenge_cup_evaluator": role_routes[
+                        "challenge_cup_evaluator"
+                    ]
+                }
+            },
+            "governance": {
+                "byProductRole": {
+                    "challenge_cup_knowledge_manager": role_routes[
+                        "challenge_cup_knowledge_manager"
+                    ]
+                }
+            },
+            "execution": {
+                "byProductRole": {
+                    "challenge_cup_execution_steward": role_routes[
+                        "challenge_cup_execution_steward"
+                    ]
+                }
+            },
+        },
+    }
+    original_formal_record_eligible = question_launch._formal_record_eligible
+
+    def fixture_formal_record_eligible(record: dict) -> bool:
+        enriched = dict(record)
+        enriched.setdefault("teamId", "research-team")
+        enriched.setdefault("resultPackage", fixture_package)
+        enriched.setdefault("modelInvocationReceiptRefs", fixture_receipt_refs)
+        enriched.setdefault("modelInvocationReceiptTraceRefs", fixture_trace_refs)
+        enriched.setdefault(
+            "modelInvocationReceiptCoverage",
+            model_invocation_receipt_registry.model_invocation_receipt_coverage(
+                fixture_trace_refs
+            ),
+        )
+        validation = dict(enriched.get("validation") or {})
+        validation.setdefault("modelInvocationReceipts", "passed")
+        enriched["validation"] = validation
+        return original_formal_record_eligible(enriched)
+
+    monkeypatch.setattr(
+        question_launch,
+        "_package_bound_model_invocation_receipt_refs",
+        lambda _record: fixture_receipt_refs,
+    )
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(fixture_trace_refs),
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_formal_record_eligible",
+        fixture_formal_record_eligible,
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_server_model_routing_policy",
+        lambda _team_id: deepcopy(model_routing_policy),
+    )
     monkeypatch.setattr(
         question_launch,
         "challenge_question_run_summary",
@@ -201,7 +620,13 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     ]
     assert run_input["researchObjectiveContract"]["question"] == "How does the brain retrieve memories?"
     assert run_input["budgetPolicy"]["stageBudgets"]["execution_iteration"]["tokens"] == 250000
-    assert set(run_input["modelRoutingPolicy"].values()) == {"relay_openai/gpt-5.6-luna"}
+    assert run_input["modelRoutingPolicy"]["requiredModelPolicy"]["family"] == "qwen"
+    assert run_input["modelRoutingPolicy"]["modelPolicySha256"] == run_input[
+        "modelRoutingPolicy"
+    ]["requiredModelPolicy"]["policySha256"]
+    assert run_input["modelRoutingPolicy"]["routes"]["review"]["byProductRole"][
+        "challenge_cup_evaluator"
+    ]["modelRef"] == "dashscope_main/qwen3.6-plus"
     assert run_input["competitionProgramSnapshot"]["programContractVersion"] == "2.2.0"
     assert run_input["competitionProgramSnapshot"]["fullCatalogPolicyVersion"] == "1.2.0"
     assert run_input["competitionProgramSnapshot"]["catalogQuestionCount"] == 125
@@ -210,6 +635,146 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     assert len(run_input["competitionProgramSnapshot"]["directions"]) == 2
     assert run_input["constraintSnapshot"]["competitionProgramSnapshot"] == run_input["competitionProgramSnapshot"]
     assert "projectId" not in options["questions"][0]
+
+
+def test_new_question_input_freezes_typed_research_and_catalog_scopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_research_team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+
+    run_input = question_launch.build_question_run_input(
+        "research-team",
+        question_id="SCI-096",
+        safety_limits=_safety_limits(),
+    )
+
+    scope = run_input["researchScopeEnvelope"]
+    assert scope["question"] == "SCI-096"
+    assert scope["agentId"] == "operator"
+    assert scope["mode"] == "platform"
+    assert len(scope["scopeHash"]) == 64
+    assert scope["scopeHash"] in scope["artifactLocator"]
+    assert scope["scopeHash"] in scope["ledgerRoot"]
+    assert scope["scopeHash"] in scope["cacheKey"]
+    assert run_input["catalogScope"] == CatalogScope.from_tracked_resources().to_dict()
+
+    frozen = WorkflowRunInputSnapshot.from_dict(
+        {
+            **run_input,
+            "workflowVersionId": "wv-test",
+            "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "agent-source"}],
+            "createdAt": "2026-08-23T00:00:00Z",
+        }
+    )
+    assert frozen.researchScopeEnvelope == scope
+    assert frozen.catalogScope == run_input["catalogScope"]
+    assert frozen.to_dict()["researchScopeEnvelope"] == scope
+    assert frozen.to_dict()["catalogScope"] == run_input["catalogScope"]
+
+
+def test_typed_scope_snapshot_rejects_tampering_and_partial_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_research_team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    run_input = question_launch.build_question_run_input(
+        "research-team",
+        question_id="SCI-096",
+        safety_limits=_safety_limits(),
+    )
+    base = {
+        **run_input,
+        "workflowVersionId": "wv-test",
+        "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "agent-source"}],
+        "createdAt": "2026-08-23T00:00:00Z",
+    }
+
+    tampered_scope = {
+        **base,
+        "researchScopeEnvelope": {
+            **base["researchScopeEnvelope"],
+            "scopeHash": "0" * 64,
+        },
+    }
+    with pytest.raises(ContractValidationError, match="researchScopeEnvelope"):
+        WorkflowRunInputSnapshot.from_dict(tampered_scope)
+
+    case_tampered_scope = dict(base["researchScopeEnvelope"])
+    case_tampered_scope["question"] = "sci-096"
+    case_tampered_scope["scopeHash"] = scope_hash_for(
+        program=case_tampered_scope["program"],
+        theme=case_tampered_scope["theme"],
+        campaign=case_tampered_scope["campaign"],
+        question=case_tampered_scope["question"],
+        branch=case_tampered_scope["branch"],
+        workflow=case_tampered_scope["workflow"],
+        agent_id=case_tampered_scope["agentId"],
+        mode=case_tampered_scope["mode"],
+    )
+    case_tampered_scope.update(
+        scope_locators_for(
+            program=case_tampered_scope["program"],
+            theme=case_tampered_scope["theme"],
+            campaign=case_tampered_scope["campaign"],
+            question=case_tampered_scope["question"],
+            branch=case_tampered_scope["branch"],
+            agent_id=case_tampered_scope["agentId"],
+            scope_hash=case_tampered_scope["scopeHash"],
+        )
+    )
+    with pytest.raises(ContractValidationError, match="question must match"):
+        WorkflowRunInputSnapshot.from_dict(
+            {**base, "researchScopeEnvelope": case_tampered_scope}
+        )
+
+    tampered_catalog = {
+        **base,
+        "catalogScope": {
+            **base["catalogScope"],
+            "scope_hash": "0" * 64,
+        },
+    }
+    with pytest.raises(ContractValidationError, match="catalogScope"):
+        WorkflowRunInputSnapshot.from_dict(tampered_catalog)
+
+    partial = dict(base)
+    partial.pop("catalogScope")
+    with pytest.raises(ContractValidationError, match="catalogScope"):
+        WorkflowRunInputSnapshot.from_dict(partial)
+
+
+def test_legacy_run_input_snapshot_without_typed_scopes_remains_readable() -> None:
+    payload = {
+        "teamId": "legacy-team",
+        "projectId": "legacy-project",
+        "questionId": "legacy-question",
+        "workflowVersionId": "legacy-workflow",
+        "researchBriefHash": "a" * 64,
+        "datasetRefs": ["fixture://legacy"],
+        "metricContract": {"primary": "coverage"},
+        "constraintSnapshot": {},
+        "competitionRuleRef": "legacy-rule",
+        "competitionRuleVersion": "1",
+        "trackAndRubricSnapshot": {"track": "legacy"},
+        "researchObjectiveContract": {"question": "legacy"},
+        "sourcePolicy": {"minimumPrimarySources": 1},
+        "budgetPolicy": {"tokens": 1},
+        "stopPolicy": {"stopOnBudgetExhaustion": True},
+        "environmentSnapshotRef": "fixture://legacy-env",
+        "modelRoutingPolicy": {"reasoning": "fixture"},
+        "evaluationContract": {"minimumClaimEvidenceCoverage": 0.0},
+        "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "legacy-agent"}],
+        "createdBy": "legacy",
+        "createdAt": "2026-08-22T00:00:00Z",
+    }
+    snapshot = WorkflowRunInputSnapshot.from_dict(payload)
+    assert snapshot.researchScopeEnvelope == {}
+    assert snapshot.catalogScope == {}
+    assert "researchScopeEnvelope" not in snapshot.to_dict()
+    assert "catalogScope" not in snapshot.to_dict()
 
 
 def test_question_launch_rejects_unknown_questions_and_invalid_limits(
@@ -236,6 +801,8 @@ def test_question_launch_rejects_unknown_questions_and_invalid_limits(
         )
 
     assert catalog_seed["questionId"] == "SCI-097"
+    assert catalog_seed["researchScopeEnvelope"]["question"] == "SCI-097"
+    assert catalog_seed["catalogScope"] == CatalogScope.from_tracked_resources().to_dict()
     assert catalog_seed["constraintSnapshot"]["launchSource"] == "catalog"
     assert catalog_seed["constraintSnapshot"]["formalWrites"] is False
     assert "catalog_seed_not_submission_eligible" in catalog_seed["trackAndRubricSnapshot"]["blockingRules"]
@@ -271,9 +838,9 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     assert attached[0]["checkpoint"]["runId"] == "run-new"
     assert attached[0]["checkpoint"]["currentNodeId"] == "protocol_design"
     assert attached[0]["checkpoint"]["currentNodeLabel"] == "协议设计"
-    assert attached[0]["checkpoint"]["completedCount"] == 6
+    assert attached[0]["checkpoint"]["completedCount"] == 7
     assert attached[0]["checkpoint"]["resumable"] is True
-    assert attached[0]["checkpoint"]["totalSteps"] == 16
+    assert attached[0]["checkpoint"]["totalSteps"] == 17
     assert attached[1]["checkpoint"] is None
 
     finished = question_launch.attach_question_run_checkpoints(
@@ -290,7 +857,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     )
     assert finished[0]["checkpoint"]["runId"] == "run-iso"
     assert finished[0]["checkpoint"]["resumable"] is False
-    assert finished[0]["checkpoint"]["completedCount"] == 16
+    assert finished[0]["checkpoint"]["completedCount"] == 17
 
 
 def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
@@ -317,7 +884,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
     checkpoint = attached[0]["checkpoint"]
     assert checkpoint["runId"] == "run-won"
     assert checkpoint["status"] == "succeeded"
-    assert checkpoint["completedCount"] == 16
+    assert checkpoint["completedCount"] == 17
     assert checkpoint["resumable"] is False
 
     # An in-flight retry still surfaces as running/resumable.
@@ -530,9 +1097,13 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
 def _isolate_research_projects_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(research_projects.team_service, "get_team", lambda _team_id: {})
     monkeypatch.setattr(research_projects.team_service, "assert_team_exists", lambda _team_id: None)
+    # Patch the formal workspace root: the activation store lives under
+    # formal_team_workspace_root/research_projects, not the DEV sandbox root.
+    # Using team_workspace_root here leaked test data into the live formal
+    # store and also made the gate read stale activation state.
     monkeypatch.setattr(
         research_projects,
-        "team_workspace_root",
+        "formal_team_workspace_root",
         lambda team_id: tmp_path / "teams" / str(team_id),
     )
     monkeypatch.setattr(research_projects, "_record_project_event", lambda *args, **kwargs: None)

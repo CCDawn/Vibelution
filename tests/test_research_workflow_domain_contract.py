@@ -45,10 +45,10 @@ def test_definition_hash_is_stable() -> None:
     assert a.workflowId == CHALLENGE_CUP_WORKFLOW_ID
 
 
-def test_definition_has_three_stages_and_sixteen_nodes() -> None:
+def test_definition_has_three_stages_and_seventeen_nodes() -> None:
     d = build_challenge_cup_workflow_definition()
     assert len(d.stages) == 3
-    assert len(d.nodes) == 16
+    assert len(d.nodes) == 17
     assert {s.stageId.value for s in d.stages} == {
         "knowledge_collection",
         "experiment_design",
@@ -56,6 +56,7 @@ def test_definition_has_three_stages_and_sixteen_nodes() -> None:
     }
     node_ids = [n.nodeId for n in d.nodes]
     assert node_ids == [
+        "problem_understanding",
         "source_finding",
         "source_extraction",
         "evidence_relations",

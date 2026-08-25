@@ -361,7 +361,7 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
         (
             "npm --prefix web exec -- tsc -b --pretty false",
             "web-typecheck",
-            ["npm", "--prefix", "web", "exec", "--", "tsc", "-b", "--pretty", "false"],
+            ["npm", "exec", "--", "tsc", "-b", "--pretty", "false"],
         ),
         (
             "npm --prefix web run check:bundle",
@@ -390,7 +390,7 @@ def test_parse_allowed_command(
 
     assert spec.kind == kind
     assert spec.argv[: len(argv_prefix)] == argv_prefix
-    expected_cwd = git_repo / "web" if kind == "web-test" else git_repo
+    expected_cwd = git_repo / "web" if kind in {"web-test", "web-typecheck"} else git_repo
     assert spec.cwd == expected_cwd
 
 

@@ -687,6 +687,89 @@ def test_registration_persists_canonical_package_and_rejects_tampered_replay(
         )
 
 
+def test_registration_projects_verified_receipt_refs_into_record_summary_and_detail(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _output_value, _package, _evidence, request = _registration_request(
+        tmp_path, monkeypatch
+    )
+
+    registered = challenge_question_runs.register_challenge_question_output(
+        "research-team", request
+    )
+
+    refs = registered["record"]["modelInvocationReceiptRefs"]
+    assert list(refs) == [
+        "generation",
+        "review",
+        "revision",
+    ]
+    assert all(item["receipt_id"] for item in refs.values())
+    assert all(item["node_run_id"] for item in refs.values())
+    assert all(item["evidence_locator"] for item in refs.values())
+    assert all(
+        len(item["evidence_locator_sha256"]) == 64 for item in refs.values()
+    )
+    assert registered["record"]["validation"]["modelInvocationReceipts"] == "passed"
+    # The legacy three-stage package projection remains available, but formal
+    # readiness now also requires the complete five-kind real invocation trace.
+    assert registered["summary"]["receiptReadyQuestionIds"] == []
+    assert registered["record"]["modelInvocationReceiptCoverage"]["status"] == "failed"
+    assert registered["summary"]["validatedQuestionResults"][0][
+        "modelInvocationReceiptRefs"
+    ] == refs
+
+    detail = challenge_question_runs.get_challenge_question_run_detail(
+        "research-team", "SCI-001", run_id="run-sci-001"
+    )
+    assert detail["record"]["modelInvocationReceiptRefs"] == refs
+
+    store_path = challenge_question_runs._store_path("research-team")
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    del store["records"][0]["modelInvocationReceiptRefs"]
+    del store["records"][0]["validation"]["modelInvocationReceipts"]
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    replayed = challenge_question_runs.register_challenge_question_output(
+        "research-team", request
+    )
+    assert replayed["idempotent"] is True
+    assert replayed["record"]["modelInvocationReceiptRefs"] == refs
+
+    with pytest.raises(ValueError, match="canonical result package"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            {
+                "output": request["output"],
+                "citationChecks": request["citationChecks"],
+            },
+        )
+
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["records"][0]["modelInvocationReceiptRefs"]["generation"][
+        "receipt_id"
+    ] = "forged-receipt"
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    summary = challenge_question_runs.challenge_question_run_summary(
+        "research-team"
+    )
+    assert summary["receiptReadyQuestionIds"] == []
+    assert summary["validatedQuestionResults"][0][
+        "modelInvocationReceiptRefs"
+    ] == {}
+    assert summary["latestCandidate"]["modelInvocationReceiptRefs"] == {}
+    assert summary["latestCandidate"]["validation"][
+        "modelInvocationReceipts"
+    ] == "failed"
+
+    with pytest.raises(ValueError, match="receipt"):
+        challenge_question_runs.get_challenge_question_run_detail(
+            "research-team", "SCI-001", run_id="run-sci-001"
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [("schemaVersion", 1), ("storeKind", "legacy_official_evidence_store")],

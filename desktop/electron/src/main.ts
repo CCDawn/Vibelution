@@ -1,7 +1,7 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { deflateSync } from "node:zlib";
 import {
@@ -19,6 +19,10 @@ import {
   type DesktopLaunchSettings
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
+import {
+  startLauncherActiveReleaseWatcher,
+  type LauncherActiveReleaseWatcherHandle
+} from "./process/launcherActiveReleaseWatcher.js";
 import {
   LauncherLifecycleSupervisor,
   type LauncherDesiredState,
@@ -96,10 +100,12 @@ import {
 } from "./process/workbenchLifecycle.js";
 import {
   ensureFrontendRelease,
+  mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
+import { inspectWorkbenchServingVersion } from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
 import {
@@ -254,7 +260,12 @@ let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
 let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
+let resolveLauncherControlPlaneReady: (() => void) | null = null;
+const launcherControlPlaneReady = new Promise<void>((resolve) => {
+  resolveLauncherControlPlaneReady = resolve;
+});
 let launcherStateWatchers: FSWatcher[] = [];
+let launcherActiveReleaseWatcher: LauncherActiveReleaseWatcherHandle | null = null;
 let launcherStateHintTimer: ReturnType<typeof setTimeout> | null = null;
 let launcherStateStatTimer: ReturnType<typeof setInterval> | null = null;
 const launcherStateStatSignatures = new Map<string, string>();
@@ -466,6 +477,12 @@ async function recordElectronStartupSummaryOnce(
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
   const desktopEnv = desktopEnvironment();
   conversationNotificationService = null;
+  const launcherDistRootInput = {
+    resourcesRoot: paths.resourcesRoot,
+    workspaceRoot: paths.workspaceRoot,
+    packaged: app.isPackaged,
+    env: desktopEnv
+  };
   return new ElectronWindowProvider(
     paths,
     resolveLauncherWindowUrl(desktopEnv),
@@ -473,6 +490,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     {
       createLauncherWindow,
       createWorkbenchWindow,
+      launcherContentVersion: () => resolveLauncherDistRoot(launcherDistRootInput),
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
@@ -2890,11 +2908,63 @@ async function orchestrateLauncherLifecycle(
   const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
   const paths = createDesktopPathsForApp();
+  const startsWorkbench = supervisedOperation === "start"
+    || supervisedOperation === "restart"
+    || supervisedOperation === "rebuild-and-start";
+  let frontendReleaseChanged = false;
+  let unpackagedElectronRebuilt = false;
+
+  if (startsWorkbench && !app.isPackaged) {
+    // This is deliberately before every reuse decision.  The Python bridge owns
+    // the content-addressed release lock, staging validation and atomic pointer
+    // publication, while this Electron process owns the lifecycle decision.
+    const latest = await ensureLatestLauncher({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath
+    });
+    frontendReleaseChanged = latest.frontend?.skipped !== true;
+    unpackagedElectronRebuilt = latest.electron?.rebuilt === true;
+  } else if (startsWorkbench) {
+    const frontend = await ensureFrontendRelease({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath
+    });
+    // Missing freshness fields must not authorize a stale backend reuse.
+    frontendReleaseChanged = !frontend.skipped;
+  }
+
+  let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
+  const intentLease = launcherLifecycleSupervisor.beginIntent({
+    instanceId: "main",
+    operation: lifecycleOperation,
+    desiredState
+  });
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
-    if (!packagedShellStale && await mainLineBackendIsReusable(paths.workspaceRoot)) {
+    const servingVersion = !frontendReleaseChanged && !unpackagedElectronRebuilt && !packagedShellStale
+      ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot })
+      : { ok: false, reason: "release_or_shell_changed" };
+    if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
+      console.warn(`main-line backend reuse rejected: ${servingVersion.reason}`);
+    }
+    if (
+      !frontendReleaseChanged
+      && !unpackagedElectronRebuilt
+      && !packagedShellStale
+      && servingVersion.ok
+      && await mainLineBackendIsReusable(paths.workspaceRoot)
+    ) {
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       const url = await refreshLiveWorkbenchUrl(paths);
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       await openWorkbenchAtCurrentLauncherUrl(paths, launcherBootstrap, windowProvider, { workbenchUrl: url });
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       scheduleLauncherStatusCliRefresh();
       return {
         schemaVersion: 1,
@@ -2908,21 +2978,25 @@ async function orchestrateLauncherLifecycle(
         message: "已打开工作台窗口。"
       };
     }
+    // A reachable but non-reusable backend may be serving an older immutable
+    // release.  Route it through restart instead of the destructive start path
+    // so the active-work guard can preserve an in-progress formal task.
+    if (await mainLineBackendIsReachable(paths.workspaceRoot)) {
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
+      lifecycleOperation = "restart";
+    }
   }
-  const intentLease = launcherLifecycleSupervisor.beginIntent({
-    instanceId: "main",
-    operation: supervisedOperation,
-    desiredState
-  });
   if (app.isPackaged) {
     try {
       const status = await inspectCurrentDesktopShell();
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
-      if (shouldRefreshBeforeLifecycle(operation, { isPackaged: true, stale: status.stale })) {
+      if (shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, stale: status.stale })) {
         notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新后再执行…");
-        await scheduleCurrentDesktopShellRefresh(operation);
+        await scheduleCurrentDesktopShellRefresh(lifecycleOperation);
         if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
           return supersededLifecycleResult(operation);
         }
@@ -2953,7 +3027,7 @@ async function orchestrateLauncherLifecycle(
       pythonPath,
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-      operation: operation as WorkbenchLifecycleOperation,
+      operation: lifecycleOperation,
       signal: intentLease.signal
     }),
     reconcile: async () => {
@@ -2984,10 +3058,26 @@ async function orchestrateLauncherLifecycle(
   if (lease === null || !launcherLifecycleSupervisor.isCurrent(lease)) {
     return supersededLifecycleResult(operation, result.commandId);
   }
-  if (result.accepted && (operation === "start" || operation === "restart" || operation === "rebuild-and-start")) {
+  if (result.accepted && unpackagedElectronRebuilt) {
+    // The current process executed an old compiled Electron main.  Its backend
+    // has now been safely refreshed, so relaunch the shell before any window is
+    // opened from the stale process.  A rejected restart never reaches here.
+    app.relaunch();
+    shutdownApproved = true;
+    app.exit(0);
+    return {
+      ...result,
+      message: "已准备最新 Launcher，正在重新打开工作台。",
+      ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})
+    };
+  }
+  if (
+    result.accepted
+    && (lifecycleOperation === "start" || lifecycleOperation === "restart" || lifecycleOperation === "rebuild-and-start")
+  ) {
     const provider = windowProvider;
     if (provider !== null && result.commandId) {
-      const readyWaitMs = operation === "rebuild-and-start"
+      const readyWaitMs = lifecycleOperation === "rebuild-and-start"
         ? WORKBENCH_REBUILD_READY_WAIT_MS
         : WORKBENCH_START_READY_WAIT_MS;
       void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, lease, readyWaitMs)
@@ -3518,6 +3608,7 @@ async function runIsolatedRegistryMutation(input: {
       pythonPath: input.pythonPath,
       signal: input.signal,
       isCurrent: input.isCurrent,
+      forceRetireOnActiveWorkRefusal: input.operation === "force-stop",
       desiredStateOnFailure: "closed"
     });
     const commandId = String(claimed.entry.commandId || stopCommandId);
@@ -3904,6 +3995,8 @@ function startLauncherStateFileHints(paths: DesktopPaths): void {
 }
 
 function stopLauncherStateFileHints(): void {
+  launcherActiveReleaseWatcher?.stop();
+  launcherActiveReleaseWatcher = null;
   if (launcherStateHintTimer !== null) {
     clearTimeout(launcherStateHintTimer);
     launcherStateHintTimer = null;
@@ -3993,15 +4086,8 @@ async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
   }
   pendingOpenWorkbenchRequest = false;
   markWorkbenchOpenRequested();
-  const paths = createDesktopPathsForApp();
-  const url = launcherBootstrap !== null
-    ? await refreshLiveWorkbenchUrl(paths)
-    : resolveOrchestratedWorkbenchUrl();
   try {
     await startOrFocusWorkbenchFromProductEntry({
-      url,
-      waitForHttp: (opts) => waitForWorkbenchHttp(opts),
-      openOrFocus: (target) => provider.openOrFocusWorkbench(target),
       startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })
     });
   } finally {
@@ -4027,6 +4113,12 @@ async function applyPendingProjectSlot(projectRoot: string, lifecycleCommand = "
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
+  }
+  if (windowProvider === null || launcherBootstrap === null) {
+    // A second-instance launch can arrive while the primary Electron shell is
+    // still bootstrapping. Wait for the same control-plane boundary instead of
+    // dropping the lifecycle command after merely starting Electron.
+    await launcherControlPlaneReady;
   }
   const provider = windowProvider;
   if (provider === null || launcherBootstrap === null) {
@@ -4107,13 +4199,16 @@ app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
     claimElectronDesktopShellOwner(paths.workspaceRoot);
+    const launcherDistRootInput = {
+      resourcesRoot: paths.resourcesRoot,
+      workspaceRoot: paths.workspaceRoot,
+      packaged: app.isPackaged,
+      env: desktopEnvironment()
+    };
     registerLauncherAppProtocolHandle({
-      distRoot: resolveLauncherDistRoot({
-        resourcesRoot: paths.resourcesRoot,
-        workspaceRoot: paths.workspaceRoot,
-        packaged: app.isPackaged,
-        env: desktopEnvironment()
-      })
+      // Resolve per request: the shell stays resident in the tray while
+      // frontend rebuilds switch the active release pointer.
+      resolveDistRoot: () => resolveLauncherDistRoot(launcherDistRootInput)
     });
     await reapManagedRuntimeOnDesktopStart({
       stopManagedRuntime,
@@ -4135,8 +4230,21 @@ app.whenReady()
     electronStartupStage = "tray_ready";
     const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
+    resolveLauncherControlPlaneReady?.();
+    resolveLauncherControlPlaneReady = null;
     updateLauncherWindowTruth();
     startLauncherStateFileHints(paths);
+    if (!app.isPackaged) {
+      // Follow active.json switches while the shell stays resident so an
+      // already-open launcher window reloads onto the fresh release; the
+      // protocol layer alone only helps the next navigation.
+      launcherActiveReleaseWatcher = startLauncherActiveReleaseWatcher({
+        buildsRoot: join(paths.workspaceRoot, "web", ".vibelution-builds"),
+        onChange: () => {
+          windowProvider?.refreshLauncherIfReleaseChanged();
+        }
+      });
+    }
     scheduleLauncherStatusCliRefresh();
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {
@@ -4237,9 +4345,7 @@ app.whenReady()
           console.warn(error instanceof Error ? error.message : String(error));
         });
       } else {
-        void handleSecondInstanceLifecycleCommand(firstLifecycle).catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
+        await handleSecondInstanceLifecycleCommand(firstLifecycle);
       }
     }
     // T6: window actions are orchestrated by Electron main; the Python desktop
@@ -4305,6 +4411,11 @@ app.on("second-instance", (_event, argv) => {
 });
 
 async function handleSecondInstanceLifecycleCommand(command: string): Promise<void> {
+  if (launcherBootstrap === null || windowProvider === null) {
+    // Electron emits second-instance after ready, but the primary app may not
+    // have finished its asynchronous Launcher bootstrap yet.
+    await launcherControlPlaneReady;
+  }
   if (command === "status") {
     focusExistingDesktopShell();
     return;

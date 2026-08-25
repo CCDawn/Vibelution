@@ -210,10 +210,15 @@ def build_challenge_program_projection(
     provider = _dashscope_qwen_configuration(public_config)
     call_evidence = _official_dashscope_evidence(official_model_evidence)
     run_summary = question_run_summary if isinstance(question_run_summary, dict) else {}
+    receipt_ready_question_ids = {
+        str(question_id)
+        for question_id in run_summary.get("receiptReadyQuestionIds") or []
+        if str(question_id)
+    }
     completed_question_ids = [
         str(question_id)
         for question_id in run_summary.get("completedQuestionIds") or []
-        if str(question_id)
+        if str(question_id) and str(question_id) in receipt_ready_question_ids
     ]
     validated_question_ids = [
         str(question_id)
@@ -225,29 +230,45 @@ def build_challenge_program_projection(
         for item in run_summary.get("validatedQuestionResults") or []
         if isinstance(item, dict)
     ]
+    receipt_ready_validated_question_ids = [
+        question_id
+        for question_id in validated_question_ids
+        if question_id in receipt_ready_question_ids
+    ]
+    receipt_ready_validated_question_results = [
+        item
+        for item in validated_question_results
+        if str(item.get("questionId") or "") in receipt_ready_question_ids
+    ]
     golden_sample_completed = int(MVP_GOLDEN_SAMPLE_QUESTION_ID in completed_question_ids)
-    mvp_trial_question_ids = [
+    factual_mvp_trial_question_ids = [
         question_id
         for question_id in validated_question_ids
         if question_id != MVP_GOLDEN_SAMPLE_QUESTION_ID
     ][:MVP_TRIAL_QUESTION_COUNT]
-    mvp_question_ids = [MVP_GOLDEN_SAMPLE_QUESTION_ID, *mvp_trial_question_ids]
+    mvp_trial_question_ids = [
+        question_id
+        for question_id in receipt_ready_validated_question_ids
+        if question_id != MVP_GOLDEN_SAMPLE_QUESTION_ID
+    ][:MVP_TRIAL_QUESTION_COUNT]
+    mvp_question_ids = [
+        MVP_GOLDEN_SAMPLE_QUESTION_ID,
+        *factual_mvp_trial_question_ids,
+    ]
     validated_result_by_question_id = {
         str(item.get("questionId") or ""): item
         for item in validated_question_results
         if str(item.get("questionId") or "")
     }
-    human_review_approved_question_ids = [
-        question_id for question_id in mvp_question_ids if question_id in completed_question_ids
-    ]
+    human_review_approved_question_ids: list[str] = []
     human_review_pending_question_ids: list[str] = []
     human_review_revision_required_question_ids: list[str] = []
     human_review_rejected_question_ids: list[str] = []
     for question_id in mvp_question_ids:
-        if question_id in human_review_approved_question_ids:
-            continue
         review_status = str((validated_result_by_question_id.get(question_id) or {}).get("status") or "")
-        if review_status == "needs_revision":
+        if review_status == "approved":
+            human_review_approved_question_ids.append(question_id)
+        elif review_status == "needs_revision":
             human_review_revision_required_question_ids.append(question_id)
         elif review_status == "rejected":
             human_review_rejected_question_ids.append(question_id)
@@ -256,17 +277,40 @@ def build_challenge_program_projection(
     all_mvp_questions_human_approved = (
         len(human_review_approved_question_ids) == MVP_TOTAL_QUESTION_COUNT
     )
-    golden_sample_candidate_count = int(MVP_GOLDEN_SAMPLE_QUESTION_ID in validated_question_ids)
+    receipt_missing_question_ids = [
+        question_id
+        for question_id in mvp_question_ids
+        if question_id in validated_question_ids
+        and question_id not in receipt_ready_question_ids
+    ]
+    factual_golden_sample_candidate_count = int(
+        MVP_GOLDEN_SAMPLE_QUESTION_ID in validated_question_ids
+    )
+    golden_sample_candidate_count = int(
+        MVP_GOLDEN_SAMPLE_QUESTION_ID in receipt_ready_validated_question_ids
+    )
     mvp_trial_completed = len(mvp_trial_question_ids)
     latest_candidate = run_summary.get("latestCandidate") if isinstance(run_summary.get("latestCandidate"), dict) else {}
     golden_sample_candidate = next(
         (
             item
-            for item in validated_question_results
+            for item in receipt_ready_validated_question_results
             if str(item.get("questionId") or "") == MVP_GOLDEN_SAMPLE_QUESTION_ID
         ),
-        latest_candidate if str(latest_candidate.get("questionId") or "") == MVP_GOLDEN_SAMPLE_QUESTION_ID else {},
+        latest_candidate
+        if str(latest_candidate.get("questionId") or "") == MVP_GOLDEN_SAMPLE_QUESTION_ID
+        and str(latest_candidate.get("questionId") or "") in receipt_ready_question_ids
+        else {},
     )
+    validated_outcome_counts = dict(
+        run_summary.get("validatedOutcomeCounts") or {}
+    )
+    if not validated_outcome_counts:
+        for result in validated_question_results:
+            status = str(result.get("status") or "unknown")
+            validated_outcome_counts[status] = (
+                validated_outcome_counts.get(status, 0) + 1
+            )
     latest_validation = (
         golden_sample_candidate.get("validation")
         if isinstance(golden_sample_candidate.get("validation"), dict)
@@ -280,13 +324,15 @@ def build_challenge_program_projection(
         stage1_blockers.append("dashscope_qwen_provider_missing")
     if call_evidence["count"] == 0:
         stage1_blockers.append("dashscope_qwen_call_evidence_missing")
+    if receipt_missing_question_ids:
+        stage1_blockers.append("mvp_model_invocation_receipts_missing")
     if golden_sample_completed < MVP_GOLDEN_SAMPLE_COUNT:
         stage1_blockers.append("mvp_golden_sample_not_approved")
     if mvp_trial_completed < MVP_TRIAL_QUESTION_COUNT:
         stage1_blockers.append("mvp_three_trial_questions_missing")
     if (
-        golden_sample_candidate_count >= MVP_GOLDEN_SAMPLE_COUNT
-        and mvp_trial_completed >= MVP_TRIAL_QUESTION_COUNT
+        factual_golden_sample_candidate_count >= MVP_GOLDEN_SAMPLE_COUNT
+        and len(factual_mvp_trial_question_ids) >= MVP_TRIAL_QUESTION_COUNT
         and not all_mvp_questions_human_approved
     ):
         if human_review_revision_required_question_ids or human_review_rejected_question_ids:
@@ -320,6 +366,7 @@ def build_challenge_program_projection(
             "status": "blocked" if stage1_blockers else "completed",
             "completionDefinition": "one_golden_sample_and_three_trial_questions_pass_mvp_gates",
             "blockers": stage1_blockers,
+            "receiptMissingQuestionIds": receipt_missing_question_ids,
             "dashscopeQwenProvider": provider,
             "officialModelCallEvidence": call_evidence,
             "singleQuestionSample": {
@@ -335,7 +382,7 @@ def build_challenge_program_projection(
                 "completed": mvp_trial_completed,
                 "realCallsRequired": True,
                 "completedQuestionIds": mvp_trial_question_ids,
-                "outcomeCounts": dict(run_summary.get("validatedOutcomeCounts") or {}),
+                "outcomeCounts": dict(sorted(validated_outcome_counts.items())),
             },
             "mvpManifest": {
                 "requiredQuestionCount": MVP_TOTAL_QUESTION_COUNT,

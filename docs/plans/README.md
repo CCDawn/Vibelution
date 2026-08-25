@@ -7,8 +7,10 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
-| [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
+| [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯按题目/假说隔离群聊与 Child Session、三类 checkpoint 绑定、旧数据清空及 SCI-096 初始化重建 |
 | [2026-08-21-research-workflow-three-pane-current-task-redesign.md](2026-08-21-research-workflow-three-pane-current-task-redesign.md) | user-approved | 科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
+| [2026-08-20-physical-retirement-of-python-lifecycle.md](2026-08-20-physical-retirement-of-python-lifecycle.md) | ACTIVE | Python lifecycle 退役代码物理清理；批次 D 仍未完成 |
+| [2026-08-20-physical-retirement-of-python-lifecycle.prompt.md](2026-08-20-physical-retirement-of-python-lifecycle.prompt.md) | execution attachment | 随上述 Active 计划保留，主计划关闭后一起归档 |
 | [2026-08-15-deep-architecture-decoupling-plan.md](2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE PLAN | Agent / Chat / API 契约分 Gate；全部 Gate 关闭后归档 |
 | [2026-08-15-research-graph-outcome-memory.md](2026-08-15-research-graph-outcome-memory.md) | 草案 | 三层记忆 + 公共结构策展/保鲜 + 研究成败图 v2.3（非正式规范） |
 | [2026-08-14-llm-config-runtime-routing-optimization-plan.md](2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan | 模型配置与运行时协议路由 |

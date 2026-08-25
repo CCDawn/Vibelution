@@ -1182,7 +1182,7 @@ def test_result_evaluation_binding_heals_from_sibling_freeze(
                     {
                         "nodeId": "protocol_review",
                         "agentId": "agent-from-freeze",
-                        "roleKey": "protocol_reviewer",
+                        "roleKey": "experiment_ledger",
                         "snapshotId": "snap:review",
                     },
                     {

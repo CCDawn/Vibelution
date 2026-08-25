@@ -10,17 +10,19 @@
 - 自动清理旧会话文件（保留最近 5 个）
 """
 
-import hashlib
-import os
-import re
 import glob
+import hashlib
+import json
+import os
 import queue
+import re
 import threading
 from datetime import datetime
-from typing import Optional, List, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from config.paths import resolve_workspace_home
+from core.logging.safe_payload import summarize_tool_arguments
 
 
 class TranscriptLogger:
@@ -143,21 +145,8 @@ session: {self._session_id}
         return text[:max_length].rstrip() + suffix
 
     def _format_tool_args(self, args: Dict[str, Any]) -> str:
-        """格式化工具参数为可读形式"""
-        if not args:
-            return "{}"
-
-        formatted = []
-        for key, value in args.items():
-            if isinstance(value, str) and len(value) > 100:
-                formatted.append(f'  "{key}": "{self._truncate_text(value, 80)}"')
-            elif isinstance(value, dict):
-                formatted.append(f'  "{key}": {str(value)[:100]}...')
-            elif isinstance(value, bool):
-                formatted.append(f'  "{key}": {"true" if value else "false"}')
-            else:
-                formatted.append(f'  "{key}": {repr(value)}')
-        return "{\n" + ",\n".join(formatted) + "\n}"
+        """格式化仅含 keys/shape/length/hash 的工具参数摘要。"""
+        return json.dumps(summarize_tool_arguments(args), ensure_ascii=False, indent=2)
 
     # ==================== 主要 API ====================
 

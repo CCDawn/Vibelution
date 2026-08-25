@@ -14,24 +14,30 @@ import {
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import {
   VButton,
   VEmptyState,
   VErrorSummary,
   VStateRow,
   VStateSurface,
+  VStatusChip,
   VSurface,
 } from "../../../components/vui";
 import { HypothesisSelectionList } from "../challenge-cup/HypothesisSelectionList";
 import {
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+  HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+  HYPOTHESIS_FIRST_REVIEW_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+  isHypothesisReviewRetryAttempt,
 } from "./hypothesisFirstCanvasRegion";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import {
   buildHypothesisFirstReviewProjection,
   currentProjectedReview,
+  type ProjectedReviewMeeting,
 } from "./hypothesisFirstMeetingProjection";
 import {
   boundChatRoundsAreTerminal,
@@ -41,6 +47,7 @@ import {
 } from "./hypothesisFirstNextAction";
 import { invalidateHypothesisFirstQueries, useHypothesisFirstChain } from "./useHypothesisFirstChain";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import styles from "./HypothesisFirstNodeInspector.styles";
 
 type Language = "zh" | "en";
@@ -55,7 +62,30 @@ export type HypothesisFirstNodeInspectorProps = {
   collectionChildStatus?: string | null;
   onNavigateToNode?: (nodeId: string) => void;
   onRetryCollection?: () => Promise<void>;
+  discussionModel?: ScopedDiscussionModel;
 };
+
+export function inspectorScopedRoomId(
+  discussionModel: ScopedDiscussionModel | undefined,
+  meeting: MeetingRoundRecord | null,
+  questionId: string,
+): string {
+  if (
+    !discussionModel
+    || discussionModel.status !== "ready"
+    || !discussionModel.roomId
+    || !discussionModel.meetingRoundId
+    || discussionModel.questionId !== questionId
+    || discussionModel.scope?.questionId !== questionId
+    || discussionModel.meetingRoundId !== meeting?.meetingRoundId
+  ) {
+    return "";
+  }
+  const expectedMeetingType = discussionModel.scope?.kind === "question_generation"
+    ? "hypothesis_candidate_generation"
+    : "hypothesis_review";
+  return meeting.meetingType === expectedMeetingType ? discussionModel.roomId : "";
+}
 
 function pickGeneration(meetings: ReturnType<typeof useHypothesisFirstChain>["meetings"]) {
   const sorted = [...meetings]
@@ -84,13 +114,29 @@ function pickReview(
   return currentProjectedReview(projection)?.meeting ?? null;
 }
 
+function checklistRoundIndex(
+  projection: ReturnType<typeof buildHypothesisFirstReviewProjection>,
+  currentTargetNodeId: string | null | undefined,
+  selectedNodeId: string,
+): number | null {
+  return projection.byNodeId.get(String(currentTargetNodeId ?? ""))?.roundIndex
+    ?? projection.byNodeId.get(selectedNodeId)?.roundIndex
+    ?? currentProjectedReview(projection)?.roundIndex
+    ?? null;
+}
+
 export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: string | null): boolean {
   // A missing target is not proof that this card owns the live command.
   // Fail closed so stale/history cards never expose write operations while
   // the chain scope is loading or cannot resolve the current step.
   if (!targetNodeId) return false;
   if (nodeId === targetNodeId) return true;
-  return nodeId.startsWith("hf_collection_") && targetNodeId === "source_finding";
+  if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID && targetNodeId.startsWith("hf_meeting_")) return true;
+  if (
+    (nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID || nodeId.startsWith("hf_collection_"))
+    && (targetNodeId === "source_finding" || targetNodeId.startsWith("hf_collection_"))
+  ) return true;
+  return false;
 }
 
 export function HypothesisFirstNodeInspector({
@@ -103,6 +149,7 @@ export function HypothesisFirstNodeInspector({
   collectionChildStatus = null,
   onNavigateToNode,
   onRetryCollection,
+  discussionModel,
 }: HypothesisFirstNodeInspectorProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -111,13 +158,19 @@ export function HypothesisFirstNodeInspector({
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
   const generation = pickGeneration(questionMeetings);
   const currentSelectionId = chain.selection?.selectionId || chain.chainState?.selectionId || "";
+  const reviewProjection = buildHypothesisFirstReviewProjection(
+    questionMeetings,
+    chain.reviewRoundLinks,
+    currentSelectionId,
+  );
   const review = pickReview(questionMeetings, nodeId, chain.reviewRoundLinks, currentSelectionId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
+  const scopedRoomId = inspectorScopedRoomId(discussionModel, activeMeeting, questionId);
   const pageVisible = usePageVisibility();
   const roomQuery = useQuery({
-    queryKey: queryKeys.chatRoom(activeMeeting?.linkedChatRoomId || ""),
-    queryFn: ({ signal }) => fetchChatRoomDetail(activeMeeting?.linkedChatRoomId || "", { signal }),
-    enabled: Boolean(activeMeeting?.linkedChatRoomId) && activeMeeting?.status === "open",
+    queryKey: queryKeys.chatRoom(scopedRoomId),
+    queryFn: ({ signal }) => fetchChatRoomDetail(scopedRoomId, { signal }),
+    enabled: Boolean(scopedRoomId) && activeMeeting?.status === "open",
     refetchInterval: activeMeeting?.status === "open"
       ? resolvePollingInterval(pageVisible, 4_000)
       : false,
@@ -137,10 +190,18 @@ export function HypothesisFirstNodeInspector({
     collectionChildStatus,
     selectedNodeId: nodeId,
   });
+  const currentChecklistRoundIndex = checklistRoundIndex(
+    reviewProjection,
+    nextAction.targetNodeId,
+    nodeId,
+  );
   const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
   const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
   );
+  const reviewHistory = reviewMeetings
+    .filter((meeting) => !isHypothesisReviewRetryAttempt(meeting))
+    .sort((left, right) => (left.roundIndex ?? 0) - (right.roundIndex ?? 0));
   const stageSummary = chain.chainState?.hypothesisConverged && reviewMeetings.length > 0
     ? {
         rounds: reviewMeetings.filter((meeting) => meeting.status === "closed").length,
@@ -223,18 +284,37 @@ export function HypothesisFirstNodeInspector({
         <VStateRow tone="warning">{nextAction.disabledReason}</VStateRow>
       ) : null}
       {nodeOwnsCurrentStep ? (
-        <InspectorBody
-          teamId={teamId}
-          questionId={questionId}
-          nodeId={nodeId}
-          liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
-          nextAction={nextAction}
-          lang={lang}
-          stageSummary={stageSummary}
-          onRetryCollection={onRetryCollection}
-          onNavigateToNode={onNavigateToNode}
-          onOpenQuestion={onOpenQuestion}
-        />
+        <>
+          <InspectorBody
+            teamId={teamId}
+            questionId={questionId}
+            nodeId={nodeId}
+            liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
+            nextAction={nextAction}
+            lang={lang}
+            stageSummary={stageSummary}
+            onRetryCollection={onRetryCollection}
+            onNavigateToNode={onNavigateToNode}
+            onOpenQuestion={onOpenQuestion}
+          />
+          {(
+            nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID
+            || nodeId.startsWith("hf_meeting_")
+            || nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID
+          ) ? (
+            <ReviewCandidateChecklist
+              rounds={reviewProjection.rounds}
+              currentRoundIndex={currentChecklistRoundIndex}
+              lang={lang}
+              onNavigateToNode={onNavigateToNode}
+            />
+          ) : null}
+          {nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID ? (
+            <ReviewHistory meetings={reviewHistory} allMeetings={reviewMeetings} lang={lang} />
+          ) : null}
+        </>
+      ) : nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID ? (
+        <ReviewHistory meetings={reviewHistory} allMeetings={reviewMeetings} lang={lang} />
       ) : (
         <div className={styles.task} data-testid="hypothesis-first-previous-step-pending">
           <VStateRow tone="warning">
@@ -258,20 +338,106 @@ export function HypothesisFirstNodeInspector({
       )}
       <div className={styles.secondary}>
         <VButton type="button" variant="ghost" density="compact" onClick={() => onOpenQuestion(questionId)}>
-          {isZh ? "打开赛题详情" : "Open question details"}
+          {isZh ? "打开题目档案" : "Open question archive"}
         </VButton>
       </div>
     </VSurface>
   );
 }
 
+function reviewCandidateState(meeting: MeetingRoundRecord, lang: Language): {
+  kind: "confirmed" | "blocked" | "pending";
+  label: string;
+  tone: "neutral" | "warning" | "success";
+} {
+  if (meeting.status === "closed") {
+    return { kind: "confirmed", label: lang === "zh" ? "已确认" : "Confirmed", tone: "success" };
+  }
+  if (["failed", "blocked", "cancelled", "canceled"].includes(meeting.status)) {
+    return { kind: "blocked", label: lang === "zh" ? "已阻塞" : "Blocked", tone: "warning" };
+  }
+  return { kind: "pending", label: lang === "zh" ? "待确认" : "Pending", tone: "neutral" };
+}
+
+function ReviewCandidateChecklist({
+  rounds,
+  currentRoundIndex,
+  lang,
+  onNavigateToNode,
+}: {
+  rounds: readonly ProjectedReviewMeeting[];
+  currentRoundIndex: number | null;
+  lang: Language;
+  onNavigateToNode?: (nodeId: string) => void;
+}) {
+  const currentRounds = currentRoundIndex === null
+    ? []
+    : rounds.filter((round) => round.roundIndex === currentRoundIndex);
+  if (!currentRounds.length) return null;
+  const states = currentRounds.map((round) => reviewCandidateState(round.meeting, lang));
+  const confirmed = states.filter((state) => state.kind === "confirmed").length;
+  const blocked = states.filter((state) => state.kind === "blocked").length;
+  const pending = currentRounds.length - confirmed - blocked;
+  const isZh = lang === "zh";
+  return (
+    <section className={styles.candidateChecklist} aria-label={isZh ? "候选确认清单" : "Candidate confirmation checklist"} data-testid="candidate-confirmation-checklist">
+      <div className={styles.candidateChecklistSummary}>
+        <strong>{isZh ? "候选确认清单" : "Candidate confirmation checklist"}</strong>
+        <span>{isZh
+          ? `共 ${currentRounds.length} · 已确认 ${confirmed} · 待确认 ${pending}${blocked ? ` · 已阻塞 ${blocked}` : ""}`
+          : `${currentRounds.length} total · ${confirmed} confirmed · ${pending} pending${blocked ? ` · ${blocked} blocked` : ""}`}
+        </span>
+      </div>
+      <ol className={styles.candidateChecklistList}>
+        {currentRounds.map((round, index) => {
+          const state = states[index]!;
+          const identity = isZh ? `候选 ${round.candidateId}` : `Candidate ${round.candidateId}`;
+          return (
+            <li className={styles.candidateChecklistItem} key={round.nodeId}>
+              <div className={styles.candidateChecklistIdentity}>
+                <strong>{identity}</strong>
+                <span>{isZh ? `第 ${round.roundIndex} 轮` : `Round ${round.roundIndex}`}</span>
+              </div>
+              <VStatusChip tone={state.tone}>{state.label}</VStatusChip>
+              {onNavigateToNode ? (
+                <VButton
+                  type="button"
+                  variant={state.kind === "pending" ? "primary" : "ghost"}
+                  density="compact"
+                  onPress={() => onNavigateToNode(round.nodeId)}
+                >
+                  {isZh ? "进入对应会议" : "Open meeting"}
+                </VButton>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function inspectorTitle(nodeId: string, lang: Language): string {
   if (nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID) return lang === "zh" ? "候选假说生成" : "Candidate generation";
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) return lang === "zh" ? "假说选择" : "Hypothesis selection";
-  if (nodeId.startsWith("hf_meeting_")) return lang === "zh"
-    ? `第 ${nodeId.slice("hf_meeting_".length)} 轮讨论·评审`
-    : `Review discussion · round ${nodeId.slice("hf_meeting_".length)}`;
+  if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID) return lang === "zh" ? "假说评审" : "Hypothesis review";
+  if (nodeId.startsWith("hf_meeting_")) {
+    const reviewTarget = nodeId.slice("hf_meeting_".length);
+    const separator = reviewTarget.indexOf("_");
+    const round = separator >= 0 ? reviewTarget.slice(0, separator) : reviewTarget;
+    const encodedCandidate = separator >= 0 ? reviewTarget.slice(separator + 1) : "";
+    let candidateId = encodedCandidate;
+    try {
+      candidateId = decodeURIComponent(encodedCandidate);
+    } catch {
+      // The id is display-only. Preserve the raw server token if it is malformed.
+    }
+    return lang === "zh"
+      ? `第 ${round} 轮讨论·${candidateId ? `候选 ${candidateId}` : "评审"}`
+      : `Review discussion · round ${round}${candidateId ? ` · candidate ${candidateId}` : ""}`;
+  }
   if (nodeId.startsWith("hf_collection_")) return lang === "zh" ? "资料搜集" : "Evidence collection";
+  if (nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID) return lang === "zh" ? "资料补充" : "Evidence collection";
   if (nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID) return lang === "zh" ? "假说收敛门" : "Hypothesis convergence gate";
   return lang === "zh" ? "当前任务" : "Current task";
 }
@@ -340,7 +506,7 @@ function InspectorBody(props: {
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
     return <HypothesisSelectionList teamId={teamId} questionId={questionId} compact lang={lang} />;
   }
-  if (nodeId.startsWith("hf_meeting_")) {
+  if (nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID || nodeId.startsWith("hf_meeting_")) {
     if (!liveMeetingRoundId && !nextAction.meetingRoundId) {
       return <p className={styles.description}>{isZh ? "尚未找到对应评审讨论。" : "The matching review discussion was not found."}</p>;
     }
@@ -406,7 +572,7 @@ function InspectorBody(props: {
               density="compact"
               onClick={() => props.onOpenQuestion(questionId)}
             >
-              {isZh ? "打开赛题详情" : "Open question details"}
+              {isZh ? "打开题目档案" : "Open question archive"}
             </VButton>
           </div>
         ) : null}
@@ -420,6 +586,77 @@ function InspectorBody(props: {
       </p>
     </VEmptyState>
   );
+}
+
+function ReviewHistory({
+  meetings,
+  allMeetings,
+  lang,
+}: {
+  meetings: MeetingRoundRecord[];
+  allMeetings: MeetingRoundRecord[];
+  lang: Language;
+}) {
+  const isZh = lang === "zh";
+  const retryCount = allMeetings.filter(isHypothesisReviewRetryAttempt).length;
+  if (!meetings.length) {
+    return (
+      <VEmptyState title={isZh ? "尚无有效评审" : "No effective reviews yet"}>
+        <p className={styles.description}>
+          {isZh ? "失败 attempt 会计入重试统计，但不会占用新的画布节点。" : "Failed attempts count as retries without creating more canvas nodes."}
+        </p>
+      </VEmptyState>
+    );
+  }
+  return (
+    <section className={styles.history} aria-label={isZh ? "假说评审历史" : "Hypothesis review history"}>
+      <div className={styles.historySummary}>
+        <strong>{isZh ? `${meetings.length} 轮有效评审` : `${meetings.length} effective reviews`}</strong>
+        <VStatusChip tone="neutral">
+          {isZh ? `${retryCount} 次失败重试` : `${retryCount} failed retries`}
+        </VStatusChip>
+      </div>
+      <ol className={styles.historyList}>
+        {meetings.map((meeting, index) => {
+          const round = meeting.roundIndex ?? index + 1;
+          const previousRound = index > 0 ? (meetings[index - 1]?.roundIndex ?? index) : 0;
+          const retries = allMeetings.filter((candidate) => {
+            const candidateRound = candidate.roundIndex ?? 0;
+            return isHypothesisReviewRetryAttempt(candidate)
+              && candidateRound > previousRound
+              && candidateRound < round;
+          }).length;
+          const label = meeting.status === "closed"
+            ? (isZh ? "已闭环" : "Closed")
+            : meeting.status === "open"
+              ? (isZh ? "进行中" : "Active")
+              : (isZh ? "待确认" : "Awaiting review");
+          return (
+            <li className={styles.historyItem} key={meeting.meetingRoundId}>
+              <div className={styles.historyTopline}>
+                <strong>{isZh ? `第 ${round} 轮` : `Round ${round}`}</strong>
+                <VStatusChip tone={meeting.status === "closed" ? "success" : "accent"}>{label}</VStatusChip>
+              </div>
+              <p className={styles.historyCopy}>
+                {meetingHasDigestForHistory(meeting)
+                  ? (isZh ? "评审结论与纪要已归档。" : "Review conclusion and digest archived.")
+                  : (isZh ? "评审仍在进行或等待纪要。" : "Review is active or awaiting its digest.")}
+              </p>
+              {retries > 0 ? (
+                <span className={styles.historyRetry}>
+                  {isZh ? `包含 ${retries} 次失败重试` : `Includes ${retries} failed retries`}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function meetingHasDigestForHistory(meeting: MeetingRoundRecord): boolean {
+  return Boolean(meeting.digestId || meeting.digestRef);
 }
 
 function NextReviewRoundButton(props: { teamId: string; questionId: string; meetingRoundId: string; lang: Language }) {

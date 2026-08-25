@@ -15,6 +15,8 @@ import threading
 import time
 import hashlib
 import os
+import copy
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -1027,6 +1029,1576 @@ def restore_agent_sessions_archive(restore_token: dict[str, Any] | None) -> dict
     }
 
 
+# ---------------------------------------------------------------------------
+# Challenge Cup team-scoped session reset
+# ---------------------------------------------------------------------------
+#
+# This is intentionally kept in the session lifecycle owner.  The Challenge
+# Cup reset coordinator can compose it with room/artifact/checkpoint ports,
+# while this module remains responsible for exactly one source of truth:
+# chat_state plus the session workspaces.  Agent definitions are never edited
+# here.  A reset stage removes selected rows from the active projection, but
+# keeps a private in-process restore token and managed staging directories
+# until the coordinator explicitly purges and destroys them.
+
+_TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION = 1
+_TEAM_AGENT_SESSION_RESET_OPERATION = "challenge_cup_team_agent_session_reset"
+_TEAM_AGENT_SESSION_RESET_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$")
+_TEAM_AGENT_SESSION_RESET_ACTIVE_PHASES = frozenset(
+    {
+        "queued",
+        "starting",
+        "dispatching",
+        "running",
+        "stopping",
+        "paused",
+        "waiting_human",
+        "summarizing",
+        "awaiting_approval",
+        "collecting",
+    }
+)
+_TEAM_AGENT_SESSION_RESET_STATES = frozenset(
+    {"staged", "purged", "restored", "destroyed"}
+)
+_TEAM_AGENT_SESSION_RESET_STAGING_PREFIX = ".challenge-cup-session-reset-"
+_TEAM_AGENT_SESSION_RESET_MANIFEST_NAME = "manifest.json"
+
+
+class TeamAgentSessionResetError(RuntimeError):
+    """Base error for the governed Challenge Cup session reset port."""
+
+    code = "team_agent_session_reset_error"
+
+
+class TeamAgentSessionResetValidationError(TeamAgentSessionResetError):
+    code = "team_agent_session_reset_validation_error"
+
+
+class TeamAgentSessionResetConflictError(TeamAgentSessionResetError):
+    code = "team_agent_session_reset_conflict"
+
+
+class TeamAgentSessionResetBusyError(TeamAgentSessionResetError):
+    code = "team_agent_session_reset_busy"
+
+
+def _team_agent_session_reset_scope(team_id: Any, reset_id: Any) -> tuple[str, str]:
+    team = str(team_id or "").strip()
+    reset = str(reset_id or "").strip()
+    if not team or not _TEAM_AGENT_SESSION_RESET_KEY.fullmatch(team):
+        raise TeamAgentSessionResetValidationError(
+            "A safe team_id is required for the Agent session reset."
+        )
+    if not reset or not _TEAM_AGENT_SESSION_RESET_KEY.fullmatch(reset):
+        raise TeamAgentSessionResetValidationError(
+            "A safe reset_id is required for the Agent session reset."
+        )
+    return team, reset
+
+
+def _team_agent_session_reset_agent_ids(agent_ids: Any) -> list[str]:
+    if isinstance(agent_ids, (str, bytes, bytearray)):
+        values = [agent_ids]
+    elif isinstance(agent_ids, (list, tuple, set, frozenset)):
+        values = list(agent_ids)
+    else:
+        values = []
+    normalized = [str(value or "").strip() for value in values]
+    if not normalized or any(
+        not value or not _TEAM_AGENT_SESSION_RESET_KEY.fullmatch(value)
+        for value in normalized
+    ):
+        raise TeamAgentSessionResetValidationError(
+            "Explicit trusted Agent ids are required for the session reset."
+        )
+    if len(set(normalized)) != len(normalized):
+        raise TeamAgentSessionResetValidationError(
+            "Agent ids must be unique for the session reset."
+        )
+    return normalized
+
+
+def _team_agent_session_reset_nested(item: Any, *keys: str) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in keys:
+        value = str(item.get(key) or "").strip()
+        if value:
+            return value
+    for container_key in (
+        "metadata",
+        "scope",
+        "binding",
+        "teamBinding",
+        "experimentBinding",
+    ):
+        nested = item.get(container_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in keys:
+            value = str(nested.get(key) or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _team_agent_session_reset_agent_owner(agent: dict[str, Any]) -> str:
+    return _team_agent_session_reset_nested(
+        agent,
+        "teamId",
+        "team_id",
+        "ownerTeamId",
+        "owner_team_id",
+        "researchTeamId",
+        "challengeCupTeamId",
+    )
+
+
+def _team_agent_session_reset_list_agents(s: Any, *, include_archived: bool) -> list[dict[str, Any]]:
+    directory = getattr(s, "agent_directory_service", None)
+    list_agents = getattr(directory, "list_agents", None)
+    if not callable(list_agents):
+        raise TeamAgentSessionResetValidationError(
+            "Agent directory authority is unavailable."
+        )
+    try:
+        rows = list_agents(include_archived=include_archived, detail="full")
+    except TypeError:
+        rows = list_agents(include_archived=include_archived)
+    if not isinstance(rows, list):
+        raise TeamAgentSessionResetValidationError(
+            "Agent directory authority is malformed."
+        )
+    return [dict(row) for row in rows if isinstance(row, dict)]
+
+
+def _team_agent_session_reset_validate_agents(
+    s: Any,
+    *,
+    team_id: str,
+    agent_ids: list[str],
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    all_agents = _team_agent_session_reset_list_agents(s, include_archived=True)
+    by_id = {
+        str(row.get("agentId") or row.get("agent_id") or "").strip(): row
+        for row in all_agents
+        if str(row.get("agentId") or row.get("agent_id") or "").strip()
+    }
+    requested: dict[str, dict[str, Any]] = {}
+    owners: dict[str, str] = {}
+    for agent_id in agent_ids:
+        agent = by_id.get(agent_id)
+        if agent is None:
+            getter = getattr(getattr(s, "agent_directory_service", None), "get_agent", None)
+            if callable(getter):
+                try:
+                    candidate = getter(agent_id, include_archived=True)
+                except TypeError:
+                    candidate = getter(agent_id)
+                if isinstance(candidate, dict):
+                    agent = dict(candidate)
+                    by_id[agent_id] = agent
+        if agent is None:
+            raise TeamAgentSessionResetValidationError(
+                f"Trusted Agent is missing from the directory: {agent_id}"
+            )
+        owner = _team_agent_session_reset_agent_owner(agent)
+        if not owner or owner != team_id:
+            raise TeamAgentSessionResetValidationError(
+                f"Agent {agent_id} has incomplete or mismatched team authority."
+            )
+        status = str(agent.get("status") or "active").strip().lower()
+        if status in {"archived", "deleted", "inactive"}:
+            raise TeamAgentSessionResetValidationError(
+                f"Agent {agent_id} is not an active retained Agent."
+            )
+        direct_session_id = str(
+            agent.get("directSessionId") or agent.get("direct_session_id") or ""
+        ).strip()
+        if not direct_session_id:
+            raise TeamAgentSessionResetValidationError(
+                f"Agent {agent_id} has no authoritative direct session binding."
+            )
+        requested[agent_id] = agent
+        owners[agent_id] = owner
+    # The owner map is also used to reject a selected child row whose Agent id
+    # is known to belong to another team.  Do not infer ownership from a role
+    # label or from a session id.
+    for row in all_agents:
+        row_id = str(row.get("agentId") or row.get("agent_id") or "").strip()
+        owner = _team_agent_session_reset_agent_owner(row)
+        if row_id and owner:
+            owners.setdefault(row_id, owner)
+    return requested, owners
+
+
+def _team_agent_session_reset_session_id(row: Any) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("conversation_id") or row.get("conversationId") or row.get("id") or "").strip()
+
+
+def _team_agent_session_reset_agent_id(row: Any) -> str:
+    return _team_agent_session_reset_nested(row, "agentId", "agent_id")
+
+
+def _team_agent_session_reset_parent_id(row: Any) -> str:
+    return _team_agent_session_reset_nested(row, "parentSessionId", "parent_session_id")
+
+
+def _team_agent_session_reset_root_id(row: Any) -> str:
+    return _team_agent_session_reset_nested(row, "rootSessionId", "root_session_id")
+
+
+def _team_agent_session_reset_team_id(row: Any) -> str:
+    return _team_agent_session_reset_nested(
+        row,
+        "teamId",
+        "team_id",
+        "ownerTeamId",
+        "owner_team_id",
+        "researchTeamId",
+    )
+
+
+def _team_agent_session_reset_phase(s: Any, session_id: str, row: dict[str, Any]) -> str:
+    raw_status = str(
+        row.get("last_turn_status")
+        or row.get("lastTurnStatus")
+        or row.get("status")
+        or row.get("state")
+        or ""
+    ).strip().lower()
+    if raw_status in _TEAM_AGENT_SESSION_RESET_ACTIVE_PHASES:
+        return raw_status
+    phase_fn = getattr(s, "_conversation_phase", None)
+    normalize_fn = getattr(s, "_normalize_conversation", None)
+    if not callable(phase_fn):
+        return raw_status
+    normalized = row
+    if callable(normalize_fn):
+        try:
+            normalized = normalize_fn(
+                row,
+                agent_by_id=s._agent_lookup_for_conversations(),
+                ensure_workspace=False,
+                lightweight=True,
+            ) or row
+        except TypeError:
+            normalized = normalize_fn(row, ensure_workspace=False, lightweight=True) or row
+    try:
+        return str(phase_fn(session_id, normalized) or raw_status).strip().lower()
+    except Exception as exc:
+        raise TeamAgentSessionResetValidationError(
+            f"Session activity authority is unavailable for {session_id}."
+        ) from exc
+
+
+def _team_agent_session_reset_active_work(s: Any, selected: set[str]) -> None:
+    list_active = getattr(s, "list_active_session_work_runs", None)
+    if not callable(list_active):
+        return
+    try:
+        raw = list_active(reconcile=False)
+    except TypeError:
+        raw = list_active()
+    except Exception as exc:
+        raise TeamAgentSessionResetValidationError(
+            "Active-session authority is unavailable."
+        ) from exc
+    if isinstance(raw, dict):
+        items = raw.get("activeItems") or raw.get("items") or raw.get("runs") or []
+        try:
+            reported_count = int(raw.get("activeCount") or raw.get("count") or 0)
+        except (TypeError, ValueError):
+            raise TeamAgentSessionResetValidationError(
+                "Active-session authority has an invalid count."
+            )
+        if reported_count > 0 and not items:
+            raise TeamAgentSessionResetValidationError(
+                "Active-session authority reports work without session identities."
+            )
+    elif isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        raise TeamAgentSessionResetValidationError(
+            "Active-session authority is malformed."
+        )
+    for item in items:
+        if not isinstance(item, dict):
+            raise TeamAgentSessionResetValidationError(
+                "Active-session authority contains an invalid record."
+            )
+        session_id = str(
+            item.get("sessionId")
+            or item.get("session_id")
+            or item.get("conversationId")
+            or item.get("conversation_id")
+            or ""
+        ).strip()
+        if session_id in selected:
+            raise TeamAgentSessionResetBusyError(
+                f"Session {session_id} still has active work."
+            )
+
+
+def _team_agent_session_reset_manifest_hash(manifest: dict[str, Any]) -> str:
+    stable = {
+        key: value
+        for key, value in manifest.items()
+        if key not in {
+            "manifestHash",
+            "status",
+            "createdAt",
+            "updatedAt",
+            "purgedAt",
+            "restoredAt",
+            "destroyedAt",
+            "previousConversations",
+        }
+    }
+    return hashlib.sha256(
+        json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _team_agent_session_reset_manifest_path(staging_root: Path) -> Path:
+    return staging_root / _TEAM_AGENT_SESSION_RESET_MANIFEST_NAME
+
+
+def _team_agent_session_reset_staging_root(
+    sessions_root: Path,
+    *,
+    team_id: str,
+    reset_id: str,
+) -> Path:
+    s = _service()
+    root = Path(sessions_root).resolve()
+    token = f"{_TEAM_AGENT_SESSION_RESET_STAGING_PREFIX}{_safe_session_workspace_token(team_id)}-{_safe_session_workspace_token(reset_id)}"
+    staging = (root / token).resolve()
+    if not staging.is_relative_to(root):
+        raise TeamAgentSessionResetValidationError(
+            f"Invalid session reset staging path: {staging}"
+        )
+    return staging
+
+
+def _team_agent_session_reset_staging_root_is_safe(
+    staging_root: Path,
+    *,
+    allowed_roots: list[Path],
+) -> bool:
+    s = _service()
+    return bool(
+        staging_root.name.startswith(_TEAM_AGENT_SESSION_RESET_STAGING_PREFIX)
+        and any(staging_root.parent == Path(root).resolve() for root in allowed_roots)
+        and not staging_root.is_symlink()
+        and not bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(staging_root))
+    )
+
+
+def _team_agent_session_reset_write_manifest(
+    staging_root: Path,
+    manifest: dict[str, Any],
+) -> None:
+    s = _service()
+    if not _team_agent_session_reset_staging_root_is_safe(
+        staging_root,
+        allowed_roots=s._agent_session_workspace_roots(),
+    ):
+        raise TeamAgentSessionResetValidationError(
+            f"Unsafe session reset staging root: {staging_root}"
+        )
+    staging_root.mkdir(parents=True, exist_ok=True)
+    path = _team_agent_session_reset_manifest_path(staging_root)
+    temporary = path.with_name(f"{path.name}.{s.secrets.token_hex(4)}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _team_agent_session_reset_read_manifest(staging_root: Path) -> dict[str, Any]:
+    path = _team_agent_session_reset_manifest_path(staging_root)
+    if not path.is_file() or path.is_symlink():
+        raise TeamAgentSessionResetValidationError(
+            "Session reset staging manifest is missing."
+        )
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TeamAgentSessionResetValidationError(
+            "Session reset staging manifest is unreadable."
+        ) from exc
+    if not isinstance(value, dict):
+        raise TeamAgentSessionResetValidationError(
+            "Session reset staging manifest must be an object."
+        )
+    return value
+
+
+def _team_agent_session_reset_validate_token(
+    stage: Any,
+    *,
+    team_id: str,
+    reset_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not isinstance(stage, dict):
+        raise TeamAgentSessionResetValidationError(
+            "A staged Agent session reset handle is required."
+        )
+    token = stage.get("restoreToken") if isinstance(stage.get("restoreToken"), dict) else stage
+    if not isinstance(token, dict):
+        raise TeamAgentSessionResetValidationError(
+            "A staged Agent session reset restore token is missing."
+        )
+    if str(token.get("teamId") or "").strip() != team_id:
+        raise TeamAgentSessionResetValidationError(
+            "Agent session reset belongs to another team."
+        )
+    if str(token.get("resetId") or "").strip() != reset_id:
+        raise TeamAgentSessionResetValidationError(
+            "Agent session reset belongs to another reset."
+        )
+    if token.get("schemaVersion") != _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION:
+        raise TeamAgentSessionResetValidationError(
+            "Agent session reset schema version is invalid."
+        )
+    if token.get("operation") != _TEAM_AGENT_SESSION_RESET_OPERATION:
+        raise TeamAgentSessionResetValidationError(
+            "Agent session reset operation is invalid."
+        )
+    status = str(token.get("status") or "").strip().lower()
+    if status not in _TEAM_AGENT_SESSION_RESET_STATES:
+        raise TeamAgentSessionResetValidationError(
+            f"Unsupported Agent session reset state: {status or 'missing'}"
+        )
+    expected_hash = str(token.get("manifestHash") or "").strip()
+    if not expected_hash or expected_hash != _team_agent_session_reset_manifest_hash(token):
+        raise TeamAgentSessionResetConflictError(
+            "Agent session reset manifest hash is invalid."
+        )
+    session_ids = [str(value or "").strip() for value in list(token.get("sessionIds") or [])]
+    if len(session_ids) != len(set(session_ids)) or any(not value for value in session_ids):
+        raise TeamAgentSessionResetValidationError(
+            "Agent session reset session identities are incomplete."
+        )
+    previous = list(token.get("previousConversations") or [])
+    if len(previous) != len(session_ids):
+        raise TeamAgentSessionResetValidationError(
+            "Agent session reset restore authority is incomplete."
+        )
+    for item in previous:
+        if not isinstance(item, dict) or not isinstance(item.get("conversation"), dict):
+            raise TeamAgentSessionResetValidationError(
+                "Agent session reset restore authority contains an invalid row."
+            )
+        if _team_agent_session_reset_session_id(item["conversation"]) not in session_ids:
+            raise TeamAgentSessionResetConflictError(
+                "Agent session reset restore row does not match its staged identity."
+            )
+    manifest = {
+        key: value
+        for key, value in token.items()
+        if key not in {"previousConversations", "workspaceMoves"}
+    }
+    manifest["workspaceMoves"] = list(token.get("workspaceMoves") or [])
+    return token, manifest
+
+
+def _team_agent_session_reset_update_manifests(
+    token: dict[str, Any],
+    *,
+    status: str,
+    timestamp_key: str,
+) -> None:
+    manifest = {
+        key: value
+        for key, value in token.items()
+        if key not in {"previousConversations", "workspaceMoves", "manifestHash"}
+    }
+    manifest["workspaceMoves"] = list(token.get("workspaceMoves") or [])
+    manifest["status"] = status
+    manifest[timestamp_key] = _service()._now_timestamp()
+    manifest["updatedAt"] = manifest[timestamp_key]
+    manifest["manifestHash"] = _team_agent_session_reset_manifest_hash(manifest)
+    token["status"] = status
+    token["manifestHash"] = manifest["manifestHash"]
+    token[timestamp_key] = manifest[timestamp_key]
+    token["updatedAt"] = manifest["updatedAt"]
+    for staging_root_value in list(token.get("stagingRoots") or []):
+        staging_root = Path(str(staging_root_value or "")).resolve()
+        if staging_root.exists():
+            _team_agent_session_reset_write_manifest(staging_root, manifest)
+
+
+def _team_agent_session_reset_restore_chat_state(token: dict[str, Any]) -> bool:
+    s = _service()
+    session_ids = {
+        str(value or "").strip()
+        for value in list(token.get("sessionIds") or [])
+        if str(value or "").strip()
+    }
+    if not session_ids:
+        return False
+    with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        conversations = [
+            raw
+            for raw in list(payload.get("conversations") or [])
+            if isinstance(raw, dict)
+            and _team_agent_session_reset_session_id(raw) not in session_ids
+            and _team_agent_session_reset_session_id(raw)
+            != str(token.get("createdReplacementSessionId") or "").strip()
+        ]
+        existing_ids = {
+            _team_agent_session_reset_session_id(raw)
+            for raw in conversations
+            if _team_agent_session_reset_session_id(raw)
+        }
+        for item in sorted(
+            (entry for entry in list(token.get("previousConversations") or []) if isinstance(entry, dict)),
+            key=lambda entry: int(entry.get("index") or 0),
+        ):
+            raw = item.get("conversation")
+            if not isinstance(raw, dict):
+                continue
+            session_id = _team_agent_session_reset_session_id(raw)
+            if session_id in existing_ids:
+                raise TeamAgentSessionResetConflictError(
+                    f"Session {session_id} already exists during reset restore."
+                )
+            index = max(0, min(int(item.get("index") or 0), len(conversations)))
+            conversations.insert(index, copy.deepcopy(raw))
+            existing_ids.add(session_id)
+        payload["conversations"] = conversations
+        previous_active = str(token.get("previousActiveConversationId") or "").strip()
+        payload["active_conversation_id"] = previous_active if previous_active in existing_ids else (
+            str(payload.get("active_conversation_id") or "").strip()
+            if str(payload.get("active_conversation_id") or "").strip() in existing_ids
+            else (sorted(existing_ids)[0] if existing_ids else "")
+        )
+        previous_updated_at = str(token.get("previousUpdatedAt") or "").strip()
+        payload["updated_at"] = previous_updated_at or s._now_timestamp()
+        previous_version = token.get("previousVersion")
+        payload["version"] = previous_version if isinstance(previous_version, int) else int(
+            payload.get("version") or s.CHAT_STATE_VERSION
+        )
+        s.save_chat_state(s.PROJECT_ROOT, payload)
+        restored_rows = [
+            dict(raw)
+            for raw in conversations
+            if isinstance(raw, dict)
+            and _team_agent_session_reset_session_id(raw) in session_ids
+        ]
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_records(restored_rows)
+    s._invalidate_session_list_cache()
+    return True
+
+
+def _team_agent_session_reset_move_workspaces_back(token: dict[str, Any]) -> None:
+    for move in reversed(list(token.get("workspaceMoves") or [])):
+        if not isinstance(move, dict):
+            raise TeamAgentSessionResetValidationError(
+                "Agent session reset workspace move is invalid."
+            )
+        source = Path(str(move.get("source") or "")).resolve()
+        staged = Path(str(move.get("staged") or "")).resolve()
+        source_exists = source.exists()
+        staged_exists = staged.exists()
+        if source_exists and staged_exists:
+            raise TeamAgentSessionResetConflictError(
+                f"Session workspace restore conflicts at {source}."
+            )
+        if source_exists and not staged_exists:
+            continue
+        if not staged_exists:
+            raise TeamAgentSessionResetConflictError(
+                f"Session workspace is missing from source and staging: {source}"
+            )
+        source.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(staged), str(source))
+        if not source.exists() or staged.exists():
+            raise TeamAgentSessionResetConflictError(
+                f"Session workspace restore did not converge: {source}"
+            )
+
+
+def _team_agent_session_reset_move_workspaces_to_stage(token: dict[str, Any]) -> None:
+    """Compensate a partial restore by moving already-restored roots back."""
+
+    for move in list(token.get("workspaceMoves") or []):
+        if not isinstance(move, dict):
+            continue
+        source = Path(str(move.get("source") or "")).resolve()
+        staged = Path(str(move.get("staged") or "")).resolve()
+        source_exists = source.exists()
+        staged_exists = staged.exists()
+        if source_exists and staged_exists:
+            raise TeamAgentSessionResetConflictError(
+                f"Session workspace compensation conflicts at {source}."
+            )
+        if not source_exists:
+            continue
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(staged))
+        if source.exists() or not staged.exists():
+            raise TeamAgentSessionResetConflictError(
+                f"Session workspace compensation did not converge: {staged}"
+            )
+
+
+def stage_team_agent_session_reset(
+    team_id: str,
+    agent_ids: list[str] | tuple[str, ...] | set[str],
+    reset_id: str,
+) -> dict[str, Any]:
+    """Stage all direct/child sessions for explicit trusted team Agents.
+
+    The operation is fail-closed: every Agent must have a current team owner
+    and direct-session binding, every selected row must have an unambiguous
+    identity, and any active turn/work-run blocks the stage.  Only chat rows
+    and their session workspaces are touched; Agent definitions remain intact.
+    """
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    requested_ids = _team_agent_session_reset_agent_ids(agent_ids)
+    requested, owners = _team_agent_session_reset_validate_agents(
+        s,
+        team_id=team,
+        agent_ids=requested_ids,
+    )
+    roots = [Path(root).resolve() for root in s._agent_session_workspace_roots()]
+    staging_roots = [
+        _team_agent_session_reset_staging_root(root, team_id=team, reset_id=reset)
+        for root in roots
+    ]
+    for staging_root in staging_roots:
+        if staging_root.exists() or staging_root.is_symlink():
+            raise TeamAgentSessionResetConflictError(
+                f"A session reset staging area already exists: {staging_root}"
+            )
+
+    timestamp = s._now_timestamp()
+    previous_payload: dict[str, Any] | None = None
+    workspace_moves: list[dict[str, str]] = []
+    restore_token: dict[str, Any] | None = None
+    session_ids: list[str] = []
+    direct_session_ids = {
+        agent_id: str(
+            requested[agent_id].get("directSessionId")
+            or requested[agent_id].get("direct_session_id")
+            or ""
+        ).strip()
+        for agent_id in requested_ids
+    }
+    try:
+        with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+            payload = s.load_chat_state(s.PROJECT_ROOT)
+            previous_payload = copy.deepcopy(payload)
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                raise TeamAgentSessionResetValidationError(
+                    "Chat-state authority is missing its conversations list."
+                )
+            by_session: dict[str, dict[str, Any]] = {}
+            for raw in conversations:
+                if not isinstance(raw, dict):
+                    raise TeamAgentSessionResetValidationError(
+                        "Chat-state authority contains a non-object conversation."
+                    )
+                session_id = _team_agent_session_reset_session_id(raw)
+                if not session_id:
+                    raise TeamAgentSessionResetValidationError(
+                        "Chat-state authority contains a conversation without an id."
+                    )
+                if session_id in by_session:
+                    raise TeamAgentSessionResetConflictError(
+                        f"Chat-state authority duplicates session {session_id}."
+                    )
+                by_session[session_id] = raw
+            for agent_id, direct_id in direct_session_ids.items():
+                if direct_id not in by_session:
+                    raise TeamAgentSessionResetValidationError(
+                        f"Direct session authority is missing for Agent {agent_id}: {direct_id}"
+                    )
+                row_agent_id = _team_agent_session_reset_agent_id(by_session[direct_id])
+                if row_agent_id and row_agent_id != agent_id:
+                    raise TeamAgentSessionResetConflictError(
+                        f"Direct session {direct_id} is bound to another Agent."
+                    )
+                row_team_id = _team_agent_session_reset_team_id(by_session[direct_id])
+                if row_team_id and row_team_id != team:
+                    raise TeamAgentSessionResetConflictError(
+                        f"Direct session {direct_id} belongs to another team."
+                    )
+
+            selected: set[str] = set(direct_session_ids.values())
+            changed = True
+            while changed:
+                changed = False
+                for session_id, raw in by_session.items():
+                    row_agent_id = _team_agent_session_reset_agent_id(raw)
+                    parent_id = _team_agent_session_reset_parent_id(raw)
+                    root_id = _team_agent_session_reset_root_id(raw)
+                    linked = row_agent_id in requested or parent_id in selected or root_id in selected
+                    if not linked or session_id in selected:
+                        continue
+                    selected.add(session_id)
+                    changed = True
+            for session_id in sorted(selected):
+                raw = by_session.get(session_id)
+                if raw is None:
+                    raise TeamAgentSessionResetValidationError(
+                        f"Selected session authority is missing: {session_id}"
+                    )
+                row_team_id = _team_agent_session_reset_team_id(raw)
+                if row_team_id and row_team_id != team:
+                    raise TeamAgentSessionResetConflictError(
+                        f"Session {session_id} belongs to another team."
+                    )
+                row_agent_id = _team_agent_session_reset_agent_id(raw)
+                owner = owners.get(row_agent_id) if row_agent_id else team
+                if row_agent_id and not owner:
+                    raise TeamAgentSessionResetValidationError(
+                        f"Session {session_id} has an Agent without team authority."
+                    )
+                if owner and owner != team:
+                    raise TeamAgentSessionResetConflictError(
+                        f"Session {session_id} is attached to another team Agent."
+                    )
+                phase = _team_agent_session_reset_phase(s, session_id, raw)
+                if phase in _TEAM_AGENT_SESSION_RESET_ACTIVE_PHASES:
+                    raise TeamAgentSessionResetBusyError(
+                        f"Session {session_id} still has active work ({phase})."
+                    )
+            _team_agent_session_reset_active_work(s, selected)
+            session_ids = [
+                _team_agent_session_reset_session_id(raw)
+                for raw in conversations
+                if _team_agent_session_reset_session_id(raw) in selected
+            ]
+            restore_token = {
+                "schemaVersion": _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION,
+                "operation": _TEAM_AGENT_SESSION_RESET_OPERATION,
+                "teamId": team,
+                "resetId": reset,
+                "status": "staged",
+                "agentIds": list(requested_ids),
+                "directSessionIds": dict(direct_session_ids),
+                "sessionIds": list(session_ids),
+                "sessionCount": len(session_ids),
+                "previousConversations": [
+                    {
+                        "index": index,
+                        "conversation": copy.deepcopy(raw),
+                    }
+                    for index, raw in enumerate(conversations)
+                    if isinstance(raw, dict)
+                    and _team_agent_session_reset_session_id(raw) in selected
+                ],
+                "previousActiveConversationId": str(payload.get("active_conversation_id") or "").strip(),
+                "previousUpdatedAt": str(payload.get("updated_at") or "").strip(),
+                "previousVersion": payload.get("version"),
+                "createdReplacementSessionId": "",
+                "workspaceMoves": [],
+                "stagingRoots": [str(root) for root in staging_roots],
+                "createdAt": timestamp,
+                "updatedAt": timestamp,
+            }
+            payload["conversations"] = [
+                raw
+                for raw in conversations
+                if _team_agent_session_reset_session_id(raw) not in selected
+            ]
+            active_id = str(payload.get("active_conversation_id") or "").strip()
+            if active_id in selected:
+                replacement_id = _replacement_session_after_agent_session_removal(
+                    payload,
+                    removed_session_ids=selected,
+                    timestamp=timestamp,
+                )
+                payload["active_conversation_id"] = replacement_id
+                if replacement_id not in selected and replacement_id not in by_session:
+                    restore_token["createdReplacementSessionId"] = replacement_id
+            payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
+            payload["updated_at"] = timestamp
+            s.save_chat_state(s.PROJECT_ROOT, payload)
+
+        for session_id in session_ids:
+            s._set_session_running(session_id, False)
+            s._clear_session_turn_control(session_id)
+            s._clear_session_live_output(session_id)
+            s._invalidate_session_agent_runtime_cache(session_id)
+            s._invalidate_session_conversation_events_cache(session_id)
+        for sessions_root, staging_root in zip(roots, staging_roots, strict=True):
+            root_moves: list[dict[str, str]] = []
+            for session_id in session_ids:
+                source = (sessions_root / s._safe_session_workspace_token(session_id)).resolve()
+                if not source.is_relative_to(sessions_root):
+                    raise TeamAgentSessionResetValidationError(
+                        f"Invalid session workspace path: {source}"
+                    )
+                if not source.exists():
+                    continue
+                if source.is_symlink() or bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(source)):
+                    raise TeamAgentSessionResetValidationError(
+                        f"Session workspace is a reparse point: {source}"
+                    )
+                staging_root.mkdir(parents=True, exist_ok=True)
+                destination = (staging_root / source.name).resolve()
+                if not destination.is_relative_to(staging_root) or destination.exists():
+                    raise TeamAgentSessionResetConflictError(
+                        f"Session workspace staging destination is unsafe: {destination}"
+                    )
+                move = {"source": str(source), "staged": str(destination)}
+                root_moves.append(move)
+                workspace_moves.append(move)
+                shutil.move(str(source), str(destination))
+        restore_token["workspaceMoves"] = workspace_moves
+        restore_token["manifestHash"] = _team_agent_session_reset_manifest_hash(restore_token)
+        manifest = dict(restore_token)
+        manifest.pop("previousConversations", None)
+        for staging_root in staging_roots:
+            _team_agent_session_reset_write_manifest(staging_root, manifest)
+    except Exception as exc:
+        for move in reversed(workspace_moves):
+            try:
+                source = Path(move["source"])
+                staged = Path(move["staged"])
+                if not source.exists() and staged.exists():
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(staged), str(source))
+            except Exception:
+                pass
+        if previous_payload is not None:
+            try:
+                with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+                    s.save_chat_state(s.PROJECT_ROOT, previous_payload)
+            except Exception as rollback_error:
+                raise TeamAgentSessionResetConflictError(
+                    "Session reset staging failed and chat-state rollback was incomplete."
+                ) from rollback_error
+        for staging_root in staging_roots:
+            try:
+                if staging_root.exists():
+                    shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
+            except Exception:
+                pass
+        raise exc
+
+    for session_id in session_ids:
+        try:
+            from . import directory_bridge
+
+            directory_bridge.archive_directory_session_safe(session_id)
+        except Exception:
+            pass
+    s._invalidate_session_list_cache()
+    _team_agent_session_reset_event(
+        s,
+        "staged",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=requested_ids,
+        session_ids=session_ids,
+    )
+    return {
+        "status": "staged",
+        "schemaVersion": _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION,
+        "operation": _TEAM_AGENT_SESSION_RESET_OPERATION,
+        "teamId": team,
+        "resetId": reset,
+        "agentIds": list(requested_ids),
+        "sessionIds": list(session_ids),
+        "directSessionIds": dict(direct_session_ids),
+        "sessionCount": len(session_ids),
+        "workspaceStagedCount": len(workspace_moves),
+        "workspaceMoves": list(workspace_moves),
+        "stagingRoots": [str(root) for root in staging_roots],
+        "manifestHash": restore_token["manifestHash"],
+        "restoreToken": restore_token,
+    }
+
+
+def purge_team_agent_session_reset(
+    team_id: str,
+    reset_id: str,
+    stage: dict[str, Any],
+) -> dict[str, Any]:
+    """Commit a staged team session reset while keeping restore material."""
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    token, _manifest = _team_agent_session_reset_validate_token(
+        stage,
+        team_id=team,
+        reset_id=reset,
+    )
+    status = str(token.get("status") or "").strip().lower()
+    if status == "purged":
+        return _team_agent_session_reset_summary(token)
+    if status != "staged":
+        raise TeamAgentSessionResetValidationError(
+            "Only a staged Agent session reset can be purged."
+        )
+    selected = set(str(value or "").strip() for value in list(token.get("sessionIds") or []))
+    with s._CHAT_STATE_LOCK:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    current_ids = {
+        _team_agent_session_reset_session_id(raw)
+        for raw in list(payload.get("conversations") or [])
+        if isinstance(raw, dict)
+    }
+    if selected & current_ids:
+        raise TeamAgentSessionResetConflictError(
+            "A staged Agent session was recreated before purge."
+        )
+    _team_agent_session_reset_active_work(s, selected)
+    _team_agent_session_reset_update_manifests(
+        token,
+        status="purged",
+        timestamp_key="purgedAt",
+    )
+    _team_agent_session_reset_event(
+        s,
+        "purged",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=list(token.get("agentIds") or []),
+        session_ids=list(token.get("sessionIds") or []),
+    )
+    return _team_agent_session_reset_summary(token)
+
+
+def restore_team_agent_session_reset(
+    team_id: str,
+    reset_id: str,
+    stage: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore chat rows and workspaces from a staged or purged reset."""
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    token, _manifest = _team_agent_session_reset_validate_token(
+        stage,
+        team_id=team,
+        reset_id=reset,
+    )
+    status = str(token.get("status") or "").strip().lower()
+    if status == "restored":
+        return _team_agent_session_reset_summary(token)
+    if status in {"destroyed"}:
+        raise TeamAgentSessionResetValidationError(
+            "A destroyed Agent session reset cannot be restored."
+        )
+    if status not in {"staged", "purged"}:
+        raise TeamAgentSessionResetValidationError(
+            "Only a staged or purged Agent session reset can be restored."
+        )
+    before_restore_payload: dict[str, Any] | None = None
+    try:
+        with s._CHAT_STATE_LOCK:
+            before_restore_payload = copy.deepcopy(s.load_chat_state(s.PROJECT_ROOT))
+        _team_agent_session_reset_restore_chat_state(token)
+        _team_agent_session_reset_move_workspaces_back(token)
+    except Exception as exc:
+        compensation_errors: list[str] = []
+        try:
+            _team_agent_session_reset_move_workspaces_to_stage(token)
+        except Exception as compensation_error:
+            compensation_errors.append(type(compensation_error).__name__)
+        if before_restore_payload is not None:
+            try:
+                with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+                    s.save_chat_state(s.PROJECT_ROOT, before_restore_payload)
+            except Exception as compensation_error:
+                compensation_errors.append(type(compensation_error).__name__)
+        if compensation_errors:
+            raise TeamAgentSessionResetConflictError(
+                "Agent session reset restore failed and compensation was incomplete: "
+                + ", ".join(compensation_errors)
+            ) from exc
+        raise TeamAgentSessionResetConflictError(
+            "Agent session reset restore failed; staged authority was retained."
+        ) from exc
+    _team_agent_session_reset_update_manifests(
+        token,
+        status="restored",
+        timestamp_key="restoredAt",
+    )
+    _team_agent_session_reset_event(
+        s,
+        "restored",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=list(token.get("agentIds") or []),
+        session_ids=list(token.get("sessionIds") or []),
+    )
+    return _team_agent_session_reset_summary(token)
+
+
+def discard_restored_team_agent_session_reset_staging(
+    team_id: str,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Remove only verified-restored session staging before the same reset retries.
+
+    A failed cross-store reset restores the selected chat rows and workspace
+    roots, but its private session token is deliberately not durable.  This
+    recovery entry therefore verifies the durable, redacted manifests plus the
+    restored live state before removing the reset-owned directories.  It never
+    deletes a staged or purged reset.
+    """
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    allowed_roots = [Path(root).resolve() for root in s._agent_session_workspace_roots()]
+    staging_roots = [
+        _team_agent_session_reset_staging_root(root, team_id=team, reset_id=reset)
+        for root in allowed_roots
+    ]
+    existing_roots = [root for root in staging_roots if root.exists()]
+    if not existing_roots:
+        return {
+            "status": "absent",
+            "teamId": team,
+            "resetId": reset,
+            "stagingRootCount": 0,
+        }
+
+    expected_session_ids: set[str] | None = None
+    workspace_moves: list[dict[str, Any]] | None = None
+    expected_root_paths = {str(root) for root in staging_roots}
+    for staging_root in existing_roots:
+        if not _team_agent_session_reset_staging_root_is_safe(
+            staging_root,
+            allowed_roots=allowed_roots,
+        ):
+            raise TeamAgentSessionResetValidationError(
+                f"Unsafe session reset staging root: {staging_root}"
+            )
+        manifest = _team_agent_session_reset_read_manifest(staging_root)
+        if (
+            manifest.get("schemaVersion") != _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION
+            or manifest.get("operation") != _TEAM_AGENT_SESSION_RESET_OPERATION
+            or str(manifest.get("teamId") or "").strip() != team
+            or str(manifest.get("resetId") or "").strip() != reset
+            or str(manifest.get("status") or "").strip().lower() != "restored"
+        ):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging is not a verified restored reset."
+            )
+        if str(manifest.get("manifestHash") or "").strip() != _team_agent_session_reset_manifest_hash(manifest):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifest hash is invalid."
+            )
+        manifest_roots = {
+            str(Path(str(value or "")).resolve())
+            for value in list(manifest.get("stagingRoots") or [])
+        }
+        if manifest_roots != expected_root_paths:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging roots do not match the reset scope."
+            )
+        session_ids = {
+            str(value or "").strip()
+            for value in list(manifest.get("sessionIds") or [])
+            if str(value or "").strip()
+        }
+        moves = list(manifest.get("workspaceMoves") or [])
+        if not session_ids or any(not isinstance(move, dict) for move in moves):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset staging recovery authority is incomplete."
+            )
+        if expected_session_ids is None:
+            expected_session_ids = session_ids
+            workspace_moves = moves
+        elif expected_session_ids != session_ids or workspace_moves != moves:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifests do not agree."
+            )
+
+    with s._CHAT_STATE_LOCK:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    live_session_ids = {
+        _team_agent_session_reset_session_id(row)
+        for row in list(payload.get("conversations") or [])
+        if isinstance(row, dict)
+    }
+    if not expected_session_ids or not expected_session_ids.issubset(live_session_ids):
+        raise TeamAgentSessionResetConflictError(
+            "Session reset staging cannot be discarded before all sessions are restored."
+        )
+
+    for move in workspace_moves or []:
+        source = Path(str(move.get("source") or "")).resolve()
+        staged = Path(str(move.get("staged") or "")).resolve()
+        if not any(source.is_relative_to(root) for root in allowed_roots) or not any(
+            staged.is_relative_to(root) for root in staging_roots
+        ):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset workspace recovery path is unsafe."
+            )
+        if not source.exists() or staged.exists():
+            raise TeamAgentSessionResetConflictError(
+                "Session reset workspace was not fully restored."
+            )
+
+    for staging_root in existing_roots:
+        unexpected = [
+            path
+            for path in staging_root.iterdir()
+            if path.name != _TEAM_AGENT_SESSION_RESET_MANIFEST_NAME
+        ]
+        if unexpected:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging still contains recoverable workspace data."
+            )
+    try:
+        for staging_root in existing_roots:
+            shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
+    except Exception as exc:
+        raise TeamAgentSessionResetConflictError(
+            "Session reset recovered staging cleanup is incomplete."
+        ) from exc
+    _team_agent_session_reset_event(
+        s,
+        "recovered_staging_discarded",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=[],
+        session_ids=sorted(expected_session_ids),
+    )
+    return {
+        "status": "discarded",
+        "teamId": team,
+        "resetId": reset,
+        "sessionCount": len(expected_session_ids),
+        "stagingRootCount": len(existing_roots),
+    }
+
+
+def destroy_orphaned_purged_team_agent_session_reset_staging(
+    team_id: str,
+    reset_id: str,
+) -> dict[str, Any]:
+    """Destroy durable purged staging after its live session authority is gone.
+
+    This recovery port deliberately has no in-memory restore token.  It is
+    only for a reset that reached the irreversible purge state and then lost
+    its coordinator before staging could be finalized.  Every durable manifest
+    must agree, selected sessions must remain absent from chat authority, and
+    every workspace must still be contained in a safe managed staging root.
+    """
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    allowed_roots = [Path(root).resolve() for root in s._agent_session_workspace_roots()]
+    staging_roots = [
+        _team_agent_session_reset_staging_root(root, team_id=team, reset_id=reset)
+        for root in allowed_roots
+    ]
+    existing_roots = [root for root in staging_roots if root.exists()]
+    if not existing_roots:
+        return {
+            "status": "absent",
+            "teamId": team,
+            "resetId": reset,
+            "stagingRootCount": 0,
+        }
+
+    expected_root_paths = {str(root) for root in staging_roots}
+    expected_session_ids: set[str] | None = None
+    workspace_moves: list[dict[str, Any]] | None = None
+    direct_session_ids: set[str] | None = None
+    for staging_root in existing_roots:
+        if not _team_agent_session_reset_staging_root_is_safe(
+            staging_root,
+            allowed_roots=allowed_roots,
+        ):
+            raise TeamAgentSessionResetValidationError(
+                f"Unsafe session reset staging root: {staging_root}"
+            )
+        manifest = _team_agent_session_reset_read_manifest(staging_root)
+        if (
+            manifest.get("schemaVersion") != _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION
+            or manifest.get("operation") != _TEAM_AGENT_SESSION_RESET_OPERATION
+            or str(manifest.get("teamId") or "").strip() != team
+            or str(manifest.get("resetId") or "").strip() != reset
+            or str(manifest.get("status") or "").strip().lower() != "purged"
+        ):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging is not a verified purged reset."
+            )
+        if str(manifest.get("manifestHash") or "").strip() != _team_agent_session_reset_manifest_hash(manifest):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifest hash is invalid."
+            )
+        manifest_roots = {
+            str(Path(str(value or "")).resolve())
+            for value in list(manifest.get("stagingRoots") or [])
+        }
+        if manifest_roots != expected_root_paths:
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging roots do not match the reset scope."
+            )
+        session_ids = {
+            str(value or "").strip()
+            for value in list(manifest.get("sessionIds") or [])
+            if str(value or "").strip()
+        }
+        manifest_direct_session_ids = {
+            str(session_id or "").strip()
+            for session_id in dict(manifest.get("directSessionIds") or {}).values()
+            if str(session_id or "").strip()
+        }
+        moves = list(manifest.get("workspaceMoves") or [])
+        if (
+            not session_ids
+            or not manifest_direct_session_ids
+            or not manifest_direct_session_ids.issubset(session_ids)
+            or any(not isinstance(move, dict) for move in moves)
+        ):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset destruction authority is incomplete."
+            )
+        if expected_session_ids is None:
+            expected_session_ids = session_ids
+            workspace_moves = moves
+            direct_session_ids = manifest_direct_session_ids
+        elif (
+            expected_session_ids != session_ids
+            or workspace_moves != moves
+            or direct_session_ids != manifest_direct_session_ids
+        ):
+            raise TeamAgentSessionResetConflictError(
+                "Session reset staging manifests do not agree."
+            )
+
+    with s._CHAT_STATE_LOCK:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    live_session_ids = {
+        _team_agent_session_reset_session_id(row)
+        for row in list(payload.get("conversations") or [])
+        if isinstance(row, dict)
+    }
+    if (
+        expected_session_ids is None
+        or direct_session_ids is None
+        or expected_session_ids & live_session_ids
+    ):
+        raise TeamAgentSessionResetConflictError(
+            "Orphaned session staging cannot be destroyed while its sessions are live."
+        )
+    _team_agent_session_reset_active_work(s, expected_session_ids)
+
+    for move in workspace_moves or []:
+        source = Path(str(move.get("source") or "")).resolve()
+        staged = Path(str(move.get("staged") or "")).resolve()
+        if not any(source.is_relative_to(root) for root in allowed_roots) or not any(
+            staged.is_relative_to(root) for root in staging_roots
+        ):
+            raise TeamAgentSessionResetValidationError(
+                "Session reset workspace destruction path is unsafe."
+            )
+        if not staged.exists():
+            raise TeamAgentSessionResetConflictError(
+                "Orphaned session staging is incomplete."
+            )
+        if source.exists():
+            if source.name not in direct_session_ids:
+                raise TeamAgentSessionResetConflictError(
+                    "Orphaned session staging has a non-direct workspace source."
+                )
+            if source.is_symlink() or bool(
+                getattr(s, "_path_is_reparse_point", lambda _path: False)(source)
+            ):
+                raise TeamAgentSessionResetValidationError(
+                    f"Session workspace source is a reparse point: {source}"
+                )
+            shutil.rmtree(_team_agent_session_reset_native_path(source))
+        if staged.is_symlink() or bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(staged)):
+            raise TeamAgentSessionResetValidationError(
+                f"Session workspace staging is a reparse point: {staged}"
+            )
+
+    try:
+        for staging_root in existing_roots:
+            shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
+    except Exception as exc:
+        raise TeamAgentSessionResetConflictError(
+            "Agent session orphaned staging cleanup is incomplete."
+        ) from exc
+    _team_agent_session_reset_event(
+        s,
+        "orphaned_purged_staging_destroyed",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=[],
+        session_ids=sorted(expected_session_ids),
+    )
+    return {
+        "status": "destroyed",
+        "teamId": team,
+        "resetId": reset,
+        "sessionCount": len(expected_session_ids),
+        "stagingRootCount": len(existing_roots),
+    }
+
+
+def destroy_team_agent_session_reset(
+    team_id: str,
+    reset_id: str,
+    stage: dict[str, Any],
+) -> dict[str, Any]:
+    """Permanently destroy staged workspace data after a successful purge."""
+
+    s = _service()
+    team, reset = _team_agent_session_reset_scope(team_id, reset_id)
+    token, _manifest = _team_agent_session_reset_validate_token(
+        stage,
+        team_id=team,
+        reset_id=reset,
+    )
+    status = str(token.get("status") or "").strip().lower()
+    if status == "destroyed":
+        return _team_agent_session_reset_summary(token)
+    if status != "purged":
+        raise TeamAgentSessionResetValidationError(
+            "Only a purged Agent session reset can be destroyed."
+        )
+    selected = {
+        str(value or "").strip() for value in list(token.get("sessionIds") or [])
+    }
+    with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            raise TeamAgentSessionResetValidationError(
+                "Chat-state authority is missing its conversations list."
+            )
+        current_ids = {
+            _team_agent_session_reset_session_id(raw)
+            for raw in conversations
+            if isinstance(raw, dict)
+        }
+        recreated_direct_ids = _team_agent_session_reset_recreated_empty_direct_session_ids(
+            conversations,
+            direct_session_ids=token.get("directSessionIds"),
+        )
+        recreated_direct_ids &= selected
+        conflicting_ids = (selected & current_ids) - recreated_direct_ids
+        if conflicting_ids:
+            raise TeamAgentSessionResetConflictError(
+                "Active chat state still contains a session selected for destruction."
+            )
+        if recreated_direct_ids:
+            payload["conversations"] = [
+                raw
+                for raw in conversations
+                if _team_agent_session_reset_session_id(raw) not in recreated_direct_ids
+            ]
+            if str(payload.get("active_conversation_id") or "").strip() in recreated_direct_ids:
+                payload["active_conversation_id"] = _replacement_session_after_agent_session_removal(
+                    payload,
+                    removed_session_ids=recreated_direct_ids,
+                    timestamp=s._now_timestamp(),
+                )
+            payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
+            payload["updated_at"] = s._now_timestamp()
+            s.save_chat_state(s.PROJECT_ROOT, payload)
+    for move in list(token.get("workspaceMoves") or []):
+        staged = Path(str(move.get("staged") or "")).resolve()
+        if staged.exists() and (staged.is_symlink() or bool(getattr(s, "_path_is_reparse_point", lambda _path: False)(staged))):
+            raise TeamAgentSessionResetValidationError(
+                f"Session workspace staging is a reparse point: {staged}"
+            )
+    destroyed_count = 0
+    try:
+        for staging_root_value in list(token.get("stagingRoots") or []):
+            staging_root = Path(str(staging_root_value or "")).resolve()
+            if not _team_agent_session_reset_staging_root_is_safe(
+                staging_root,
+                allowed_roots=s._agent_session_workspace_roots(),
+            ):
+                raise TeamAgentSessionResetValidationError(
+                    f"Unsafe session reset staging root: {staging_root}"
+                )
+            if staging_root.exists():
+                shutil.rmtree(_team_agent_session_reset_native_path(staging_root))
+                destroyed_count += 1
+    except Exception as exc:
+        raise TeamAgentSessionResetConflictError(
+            "Agent session reset staging cleanup is incomplete."
+        ) from exc
+    _team_agent_session_reset_update_manifests(
+        token,
+        status="destroyed",
+        timestamp_key="destroyedAt",
+    )
+    _team_agent_session_reset_event(
+        s,
+        "destroyed",
+        team_id=team,
+        reset_id=reset,
+        agent_ids=list(token.get("agentIds") or []),
+        session_ids=list(token.get("sessionIds") or []),
+    )
+    result = _team_agent_session_reset_summary(token)
+    result["workspaceDestroyedCount"] = destroyed_count
+    return result
+
+
+def _team_agent_session_reset_recreated_empty_direct_session_ids(
+    conversations: list[Any],
+    *,
+    direct_session_ids: Any,
+) -> set[str]:
+    """Identify only disposable direct rows recreated during reset finalization.
+
+    Directory reads can materialize an Agent's old direct-session id after it
+    was staged but before the reset coordinator clears the durable stage.  That
+    row is safe to remove only when it is an unscoped, relationship-free empty
+    shell for the exact Agent/direct-session binding in the signed stage token.
+    Every other selected row remains a hard conflict.
+    """
+
+    if not isinstance(direct_session_ids, dict):
+        return set()
+    direct_to_agent: dict[str, str] = {}
+    for raw_agent_id, raw_session_id in direct_session_ids.items():
+        agent_id = str(raw_agent_id or "").strip()
+        session_id = str(raw_session_id or "").strip()
+        if not agent_id or not session_id or session_id in direct_to_agent:
+            return set()
+        direct_to_agent[session_id] = agent_id
+
+    rows_by_id = {
+        _team_agent_session_reset_session_id(row): row
+        for row in conversations
+        if isinstance(row, dict) and _team_agent_session_reset_session_id(row)
+    }
+    recreated: set[str] = set()
+    for session_id, expected_agent_id in direct_to_agent.items():
+        row = rows_by_id.get(session_id)
+        if not isinstance(row, dict):
+            continue
+        has_messages = "messages" in row
+        messages = row.get("messages")
+        if (
+            _team_agent_session_reset_agent_id(row) != expected_agent_id
+            or (has_messages and (not isinstance(messages, list) or messages))
+            or _team_agent_session_reset_parent_id(row)
+            or _team_agent_session_reset_root_id(row)
+            or _team_agent_session_reset_team_id(row)
+            or _team_agent_session_reset_nested(row, "createdBy", "created_by")
+            or _team_agent_session_reset_child_ids(row)
+        ):
+            continue
+        if any(
+            _team_agent_session_reset_parent_id(candidate) == session_id
+            or _team_agent_session_reset_root_id(candidate) == session_id
+            for candidate in rows_by_id.values()
+        ):
+            continue
+        recreated.add(session_id)
+    return recreated
+
+
+def _team_agent_session_reset_child_ids(row: Any) -> list[str]:
+    if not isinstance(row, dict):
+        return []
+    values: list[str] = []
+    containers: list[dict[str, Any]] = [row]
+    for key in ("metadata", "scope", "binding", "teamBinding", "experimentBinding"):
+        nested = row.get(key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in ("childSessionIds", "child_session_ids"):
+            raw = container.get(key)
+            if isinstance(raw, (list, tuple, set)):
+                values.extend(str(value or "").strip() for value in raw if str(value or "").strip())
+            elif str(raw or "").strip():
+                values.append(str(raw).strip())
+    return values
+
+
+def _team_agent_session_reset_native_path(path: Path) -> str:
+    """Return a Windows extended path only after the reset root was validated."""
+
+    value = str(path.resolve(strict=False))
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    return "\\\\?\\" + value
+
+
+def _team_agent_session_reset_summary(token: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(token.get("status") or "").strip(),
+        "schemaVersion": _TEAM_AGENT_SESSION_RESET_SCHEMA_VERSION,
+        "operation": _TEAM_AGENT_SESSION_RESET_OPERATION,
+        "teamId": str(token.get("teamId") or "").strip(),
+        "resetId": str(token.get("resetId") or "").strip(),
+        "agentIds": list(token.get("agentIds") or []),
+        "sessionIds": list(token.get("sessionIds") or []),
+        "directSessionIds": dict(token.get("directSessionIds") or {}),
+        "sessionCount": len(list(token.get("sessionIds") or [])),
+        "workspaceStagedCount": len(list(token.get("workspaceMoves") or [])),
+        "stagingRoots": list(token.get("stagingRoots") or []),
+        "manifestHash": str(token.get("manifestHash") or "").strip(),
+        "restoreToken": token,
+    }
+
+
+def _team_agent_session_reset_event(
+    s: Any,
+    phase: str,
+    *,
+    team_id: str,
+    reset_id: str,
+    agent_ids: list[str],
+    session_ids: list[str],
+) -> None:
+    try:
+        s._record_agent_session_lifecycle_event(
+            "challenge_cup_team_reset",
+            f"conversation.agent_sessions.team_reset_{phase}",
+            fields={
+                "teamId": team_id,
+                "resetId": reset_id,
+                "agentIds": list(agent_ids)[:20],
+                "sessionCount": len(session_ids),
+                "sessionIds": list(session_ids)[:20],
+            },
+        )
+    except Exception:
+        return
+
+
+# Names used by reset adapters.  Keep one implementation and expose explicit
+# aliases so the cross-store coordinator can call the same lifecycle vocabulary
+# as the artifact/checkpoint ports without reaching into private helpers.
+stage_team_agent_sessions = stage_team_agent_session_reset
+purge_team_agent_sessions = purge_team_agent_session_reset
+commit_team_agent_session_reset = purge_team_agent_session_reset
+commit_team_agent_sessions = purge_team_agent_session_reset
+restore_team_agent_sessions = restore_team_agent_session_reset
+discard_restored_team_agent_sessions = discard_restored_team_agent_session_reset_staging
+destroy_orphaned_purged_team_agent_sessions = destroy_orphaned_purged_team_agent_session_reset_staging
+destroy_team_agent_sessions = destroy_team_agent_session_reset
+
+
 def create_child_session(
     parent_session_id: str,
     *,
@@ -1148,6 +2720,25 @@ def create_child_session(
                 }
                 if scope:
                     normalized_experiment_binding["scope"] = scope
+            from .discussion_scope_binding import (
+                DiscussionScopeBindingError,
+                normalize_discussion_scope_binding,
+            )
+
+            try:
+                normalized_experiment_binding.update(
+                    normalize_discussion_scope_binding(
+                        raw_experiment_binding,
+                        team_id=normalized_experiment_binding["teamId"],
+                        research_project_id=normalized_experiment_binding["researchProjectId"],
+                        workflow_run_id=workflow_run_id,
+                        workflow_node_id=workflow_node_id,
+                        selection_id=selection_id,
+                        candidate_id=candidate_id,
+                    )
+                )
+            except DiscussionScopeBindingError as exc:
+                raise s.SessionValidationError(str(exc)) from exc
             binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
             if binding_agent_id and binding_agent_id != agent_id:
                 raise s.SessionValidationError(

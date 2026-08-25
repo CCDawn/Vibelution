@@ -2,7 +2,7 @@
 
 **规则：** 先定表内 owner，再编辑。无 owner → 搜 facade/`README` → 仍无则停并问用户，勿新建平行树。
 
-**后端 service 全量索引（70 facades）：** [`core/web/services/README.md`](../../core/web/services/README.md)
+**后端 service 全量索引（71 facades）：** [`core/web/services/README.md`](../../core/web/services/README.md)
 
 ---
 
@@ -31,7 +31,7 @@
 
 | Domain | routes | pack / facade | README |
 | --- | --- | --- | --- |
-| **全量 70 facades** | — | 全部 `*_service.py` | **[`services/README.md`](../../core/web/services/README.md)** |
+| **全量 71 facades** | — | 全部 `*_service.py` | **[`services/README.md`](../../core/web/services/README.md)** |
 | Session 热路径 | `core/web/routes/sessions.py` | `session/*` · `session_service.py` | `session/README.md` |
 | Team workflow | `core/web/routes/team_workflows/` | `team_workflow/*` · facade | `team_workflow/README.md` |
 | Team CRUD | `core/web/routes/teams.py` | `team/*` · `team_service.py` | `team/README.md` |

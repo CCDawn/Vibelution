@@ -14,15 +14,16 @@ from the bound room messages (deterministic DEV fixture drafter by default;
 a real Coordinator model drafter can be injected through ``drafter``) and
 moves the meeting to ``awaiting_approval`` for the human closure gate.
 
-Only hypothesis-first ``hypothesis_review`` rounds are auto-opened here;
-stage coordination elsewhere stays ``manual_only``.  The discussion driver is
-synchronous (DEV/fixture path); asynchronous production wiring belongs to the
-orchestration batch.  No real model is called unless the caller injects one.
+Only hypothesis-first discussion rounds are auto-opened here; stage
+coordination elsewhere stays ``manual_only``. The discussion driver remains
+synchronous for DEV/fixture callers, while production's default chat runner
+queues its post-opening rounds on a bounded in-process executor.
 """
 
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -36,7 +37,17 @@ from core.research.workflow.contracts import (
     ContractValidationError,
     sha256_hex,
 )
+from core.research.workflow.contracts.discussion_scope import (
+    CANDIDATE_REVIEW_SCOPE_KIND,
+    QUESTION_GENERATION_SCOPE_KIND,
+    WorkflowDiscussionScopeV1,
+    parse_discussion_scope,
+    session_scope_key,
+)
 from core.web.services.team_workflow import meeting_rounds
+from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
+    assert_writes_allowed,
+)
 
 DEFAULT_MAX_MESSAGES = 40
 MAX_SELECTED_CANDIDATES = 16
@@ -45,6 +56,7 @@ MEETING_SOURCE = "hypothesis_first_meeting"
 # lines), so meeting rounds need a line budget beyond the generic chat-room
 # topic cap: 3 framing lines + rules + host line + one line per candidate.
 MEETING_TOPIC_MAX_LINES = MAX_SELECTED_CANDIDATES + 8
+_MEETING_RECEIPT_AUTHORITY_SCHEMA_VERSION = 1
 
 _DEFAULT_AGENDA = (
     "回顾入选假说候选与赛题已有证据",
@@ -111,8 +123,16 @@ _ROLE_METADATA_FIELDS = (
     "challengeCupTeamRole",
 )
 _DISCUSSION_DRIVER = threading.local()
+_MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="hypothesis-meeting",
+)
+_MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()
+_MEETING_DISCUSSION_JOBS: set[tuple[str, str]] = set()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
+_SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
+_PREFORMAL_CANDIDATE_ROOM_SOURCE = "hypothesis_first_candidate_review.v1"
 
 
 @contextmanager
@@ -216,6 +236,435 @@ def _ensure_linked_room(team_id: str) -> tuple[dict[str, Any], str]:
             "Team linked chat room is missing; sync the team chat room first."
         )
     return team, room_id
+
+
+def _discussion_scope_candidate(request: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Return an explicitly supplied v1 discussion scope, if present.
+
+    The legacy hypothesis-first payload has a ``scope`` made of the six
+    meeting fields (program/theme/...).  It must not be mistaken for the v1
+    room identity.  Formal workflow callers instead send the canonical scope
+    directly or under a checkpoint ``scopeBinding`` envelope.
+    """
+
+    for key in ("discussionScope", "activeDiscussionScope", "workflowScope"):
+        value = request.get(key)
+        if isinstance(value, Mapping):
+            return value
+    binding = request.get("scopeBinding")
+    if isinstance(binding, Mapping):
+        for key in ("discussionScope", "scope"):
+            value = binding.get(key)
+            if isinstance(value, Mapping):
+                return value
+    value = request.get("discussion_scope")
+    return value if isinstance(value, Mapping) else None
+
+
+def _discussion_scope_for_request(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    question_id: str,
+    meeting_type: str,
+    selection: Mapping[str, Any] | None = None,
+) -> WorkflowDiscussionScopeV1 | None:
+    """Resolve the formal room scope without changing the legacy DEV path.
+
+    A scope is enabled only by an explicit v1 envelope or by the complete
+    workflowRunId/workflowNodeId/researchProjectId tuple.  A receipt alone is
+    deliberately insufficient: it identifies a model invocation, not the
+    discussion node that owns a room.
+    """
+
+    request_scope = _discussion_scope_candidate(request)
+    raw_kind = str(request_scope.get("kind") or "").strip() if request_scope else ""
+    raw_version = request_scope.get("version") if request_scope else None
+    # ``researchProjectId`` may already be present on a legacy payload for
+    # project routing. It becomes a formal-room signal only together with the
+    # workflow node/run identity (or an explicit v1 envelope).
+    has_scope_signal = bool(request_scope) or any(
+        str(request.get(key) or "").strip()
+        for key in ("workflowRunId", "workflowNodeId")
+    )
+    if not has_scope_signal:
+        return None
+
+    selection_payload = selection or {}
+    selected_candidate_ids = _normalized_str_list(
+        selection_payload.get("selectedCandidateIds")
+    )
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_team_id = str(team_id or "").strip()
+
+    if request_scope is not None and (
+        raw_kind in {QUESTION_GENERATION_SCOPE_KIND, CANDIDATE_REVIEW_SCOPE_KIND}
+        or raw_version == 1
+    ):
+        try:
+            scope = parse_discussion_scope(request_scope)
+        except ContractValidationError as exc:
+            raise ResearchMeetingRuntimeError(
+                f"formal discussion scope is invalid: {exc}"
+            ) from exc
+    else:
+        workflow_run_id = str(
+            request.get("workflowRunId") or request.get("workflow_run_id") or ""
+        ).strip()
+        workflow_node_id = str(
+            request.get("workflowNodeId") or request.get("workflow_node_id") or ""
+        ).strip()
+        research_project_id = str(
+            request.get("researchProjectId")
+            or request.get("research_project_id")
+            or ""
+        ).strip()
+        if workflow_run_id and workflow_node_id and not research_project_id:
+            from core.web.services.team_workflow.research_project_agent_sessions import (
+                resolve_research_project_identity,
+            )
+
+            try:
+                project = resolve_research_project_identity(normalized_team_id)
+            except Exception as exc:  # noqa: BLE001 - retain fail-closed domain error
+                raise ResearchMeetingRuntimeError(
+                    "formal discussion scope requires a resolvable research project"
+                ) from exc
+            research_project_id = str(project.get("projectId") or "").strip()
+        if not (workflow_run_id and workflow_node_id and research_project_id):
+            raise ResearchMeetingRuntimeError(
+                "formal discussion scope requires workflowRunId, workflowNodeId and researchProjectId"
+            )
+        selection_id = str(selection_payload.get("selectionId") or "").strip()
+        candidate_id = str(
+            request.get("candidateId")
+            or request.get("candidate_id")
+            or ""
+        ).strip()
+        if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+            scope = WorkflowDiscussionScopeV1.generation(
+                teamId=normalized_team_id,
+                researchProjectId=research_project_id,
+                workflowRunId=workflow_run_id,
+                workflowNodeId=workflow_node_id,
+                questionId=normalized_question_id,
+            )
+        else:
+            if not candidate_id and len(selected_candidate_ids) == 1:
+                candidate_id = selected_candidate_ids[0]
+            if not selection_id or not candidate_id:
+                raise ResearchMeetingRuntimeError(
+                    "formal hypothesis review scope requires selectionId and one candidateId"
+                )
+            scope = WorkflowDiscussionScopeV1.review(
+                teamId=normalized_team_id,
+                researchProjectId=research_project_id,
+                workflowRunId=workflow_run_id,
+                workflowNodeId=workflow_node_id,
+                questionId=normalized_question_id,
+                selectionId=selection_id,
+                candidateId=candidate_id,
+            )
+
+    if scope.teamId != normalized_team_id or scope.questionId.upper() != normalized_question_id:
+        raise ResearchMeetingRuntimeError(
+            "formal discussion scope does not match the meeting team or question"
+        )
+    if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+        if scope.kind != QUESTION_GENERATION_SCOPE_KIND:
+            raise ResearchMeetingRuntimeError(
+                "candidate generation requires a question_generation discussion scope"
+            )
+    elif scope.kind != CANDIDATE_REVIEW_SCOPE_KIND:
+        raise ResearchMeetingRuntimeError(
+            "hypothesis review requires a candidate_review discussion scope"
+        )
+    try:
+        scope.validate_candidate_membership(
+            selected_candidate_ids if scope.is_candidate_review else None
+        )
+    except ContractValidationError as exc:
+        raise ResearchMeetingRuntimeError(str(exc)) from exc
+    return scope
+
+
+def _resolve_scoped_meeting_room(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    base_room_id: str,
+    scope: WorkflowDiscussionScopeV1 | None,
+    participant_resolution: Mapping[str, Any],
+    meeting_type: str,
+    selected_candidate_ids: Sequence[str] = (),
+) -> tuple[str, WorkflowDiscussionScopeV1 | None]:
+    """Bind role-resolved Agents to hidden Child Sessions and one room."""
+
+    if scope is None:
+        return (
+            _resolve_preformal_candidate_review_room(
+                team_id,
+                request,
+                base_room_id=base_room_id,
+                participant_resolution=participant_resolution,
+                meeting_type=meeting_type,
+                selected_candidate_ids=selected_candidate_ids,
+            ),
+            None,
+        )
+
+    from core.web.services.team_workflow.discussion_room_runtime import (
+        resolve_scoped_discussion_room,
+    )
+    from core.web.services.team_workflow.research_project_agent_sessions import (
+        resolve_research_project_agent_session,
+    )
+
+    role_snapshot = [
+        dict(item)
+        for item in list(participant_resolution.get("participantRoleSnapshot") or [])
+        if isinstance(item, Mapping)
+    ]
+    role_by_agent_id = {
+        str(item.get("agentId") or "").strip(): item
+        for item in role_snapshot
+        if str(item.get("agentId") or "").strip()
+    }
+    if set(role_by_agent_id) != set(
+        str(item or "").strip()
+        for item in list(participant_resolution.get("participants") or [])
+        if str(item or "").strip()
+    ):
+        raise ResearchMeetingRuntimeError(
+            "formal discussion participant role snapshot is incomplete"
+        )
+
+    created_from_task_id = str(
+        request.get("createdFromTaskId")
+        or request.get("taskId")
+        or request.get("workflowTaskId")
+        or ""
+    ).strip()
+    selected = list(selected_candidate_ids or [])
+    bindings: list[dict[str, Any]] = []
+    for agent_id in participant_resolution.get("participants") or []:
+        normalized_agent_id = str(agent_id or "").strip()
+        role = role_by_agent_id[normalized_agent_id]
+        resolved = resolve_research_project_agent_session(
+            team_id,
+            research_project_id=scope.researchProjectId,
+            agent_id=normalized_agent_id,
+            role_key=str(role.get("roleId") or "").strip(),
+            role_label=str(role.get("observedRole") or "").strip(),
+            created_from_task_id=created_from_task_id,
+            workflow_run_id=scope.workflowRunId,
+            workflow_node_id=scope.workflowNodeId,
+            discussion_scope=scope,
+            selected_candidate_ids=selected if scope.is_candidate_review else None,
+            question_id=scope.questionId,
+        )
+        session_id = str(resolved.get("sessionId") or "").strip()
+        if not session_id or str(resolved.get("sessionKind") or "").lower() != "child":
+            raise ResearchMeetingRuntimeError(
+                "formal discussion participant did not resolve to a hidden Child Session"
+            )
+        bindings.append(
+            {
+                "agentId": normalized_agent_id,
+                "sessionId": session_id,
+                "discussionScope": scope.to_dict(),
+                "discussionScopeHash": scope.scope_hash,
+                "discussionSessionScopeKey": session_scope_key(scope, normalized_agent_id),
+            }
+        )
+
+    title_suffix = (
+        f" | {scope.candidateId}" if scope.is_candidate_review else " | 候选生成"
+    )
+    room = resolve_scoped_discussion_room(
+        scope,
+        bindings,
+        title=f"{scope.questionId}{title_suffix}",
+    )
+    room_id = str(room.get("roomId") or "").strip()
+    if not room_id:
+        raise ResearchMeetingRuntimeError("formal discussion room resolver returned no roomId")
+    return room_id, scope
+
+
+def _resolve_preformal_candidate_review_room(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    base_room_id: str,
+    participant_resolution: Mapping[str, Any],
+    meeting_type: str,
+    selected_candidate_ids: Sequence[str],
+) -> str:
+    """Allocate one deterministic room for an unscoped candidate review.
+
+    Candidate selection normally precedes creation of the formal research
+    runtime, so it intentionally has no ``WorkflowDiscussionScopeV1`` yet.
+    It must nevertheless not reuse the team room: a background round makes
+    that room busy and prevents sibling candidate reviews from ever opening.
+    These rooms retain the exact server-resolved roster and carry a compact
+    preformal binding, while formal flows continue to use child-session rooms
+    through ``_resolve_scoped_meeting_room`` above.
+    """
+
+    selected = _normalized_str_list(selected_candidate_ids)
+    if (
+        str(meeting_type or "").strip().lower() != "hypothesis_review"
+        or len(selected) != 1
+    ):
+        return base_room_id
+
+    from core.web.services import chat_room_service
+
+    selection_id = str(request.get("selectionId") or "").strip()
+    question_id = str(request.get("questionId") or "").strip().upper()
+    meeting_round_id = str(request.get("meetingRoundId") or "").strip()
+    candidate_id = selected[0]
+    if not selection_id or not question_id or not meeting_round_id:
+        raise ResearchMeetingRuntimeError(
+            "preformal candidate review room requires selection, question and meeting ids"
+        )
+
+    room_id = "room-hf-review-" + sha256_hex(
+        {
+            "teamId": str(team_id or "").strip(),
+            "meetingRoundId": meeting_round_id,
+            "selectionId": selection_id,
+            "candidateId": candidate_id,
+        }
+    )[:24]
+    expected_config = {
+        "source": _PREFORMAL_CANDIDATE_ROOM_SOURCE,
+        "teamId": str(team_id or "").strip(),
+        "meetingRoundId": meeting_round_id,
+        "selectionId": selection_id,
+        "questionId": question_id,
+        "candidateId": candidate_id,
+    }
+    existing = chat_room_service.get_chat_room_detail(room_id)
+    if isinstance(existing, Mapping):
+        config = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+        if any(str(config.get(key) or "") != value for key, value in expected_config.items()):
+            raise ResearchMeetingRuntimeError(
+                "preformal candidate review room is already bound to different content"
+            )
+        return room_id
+
+    participant_agent_ids = _normalized_str_list(participant_resolution.get("participants"))
+    if not participant_agent_ids:
+        raise ResearchMeetingRuntimeError(
+            "preformal candidate review room requires a resolved participant roster"
+        )
+    participant_contexts = _preformal_candidate_room_participant_contexts(
+        chat_room_service.get_chat_room_detail(base_room_id),
+        participant_resolution,
+        participant_agent_ids,
+    )
+    created = chat_room_service.create_chat_room(
+        room_id=room_id,
+        title=f"{question_id} | 候选评审 | {candidate_id}",
+        participant_agent_ids=participant_agent_ids,
+        participant_contexts_by_agent_id=participant_contexts,
+        mode="round_robin",
+        purpose="meeting",
+        config=expected_config,
+    )
+    created_room_id = str(created.get("roomId") or "").strip()
+    if created_room_id != room_id:
+        raise ResearchMeetingRuntimeError("preformal candidate room resolver returned no roomId")
+    return room_id
+
+
+def _preformal_candidate_room_participant_contexts(
+    base_room: Mapping[str, Any] | None,
+    participant_resolution: Mapping[str, Any],
+    participant_agent_ids: Sequence[str],
+) -> dict[str, dict[str, Any]]:
+    """Copy the fixed roster's team context into a derived candidate room."""
+
+    allowed_agent_ids = set(_normalized_str_list(participant_agent_ids))
+    role_by_agent_id = {
+        str(item.get("agentId") or "").strip(): str(item.get("observedRole") or "").strip()
+        for item in list(participant_resolution.get("participantRoleSnapshot") or [])
+        if isinstance(item, Mapping) and str(item.get("agentId") or "").strip()
+    }
+    context_fields = (
+        "teamId",
+        "teamName",
+        "teamPurpose",
+        "teamRole",
+        "teamMemberPurpose",
+        "teamResponsibilities",
+    )
+    contexts: dict[str, dict[str, Any]] = {}
+    for participant in list((base_room or {}).get("participants") or []):
+        if not isinstance(participant, Mapping):
+            continue
+        agent_id = str(participant.get("agentId") or "").strip()
+        if agent_id not in allowed_agent_ids:
+            continue
+        context = {
+            field: participant.get(field)
+            for field in context_fields
+            if participant.get(field) not in (None, "")
+        }
+        if not context.get("teamRole") and role_by_agent_id.get(agent_id):
+            context["teamRole"] = role_by_agent_id[agent_id]
+        contexts[agent_id] = context
+    return contexts
+
+
+def _persist_discussion_scope_projection(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    scope: WorkflowDiscussionScopeV1 | None,
+) -> dict[str, Any]:
+    """Persist the v1 scope beside the legacy MeetingRound contract.
+
+    ``MeetingRound`` predates the v1 discussion identity and intentionally
+    ignores unknown projection fields.  Append the validated projection using
+    its owning append helper so reads of ``meeting_rounds.jsonl`` retain the
+    exact room scope without altering the public DTO.
+    """
+
+    record = dict(meeting_round)
+    if scope is None:
+        return record
+    existing_scope = record.get("discussionScope")
+    if existing_scope is not None:
+        try:
+            existing = parse_discussion_scope(existing_scope)
+        except ContractValidationError as exc:
+            raise ResearchMeetingRuntimeError(
+                "existing meeting has an invalid discussion scope"
+            ) from exc
+        if existing.key != scope.key or str(record.get("discussionScopeHash") or "").lower() != scope.scope_hash:
+            raise ResearchMeetingRuntimeError(
+                "existing meeting is bound to a different discussion scope"
+            )
+        return record
+    record.update(
+        {
+            "discussionScope": scope.to_dict(),
+            "discussionScopeHash": scope.scope_hash,
+            "scopeAuthority": _SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+            "researchProjectId": scope.researchProjectId,
+            "workflowRunId": scope.workflowRunId,
+            "workflowNodeId": scope.workflowNodeId,
+        }
+    )
+    return meeting_rounds.persist_meeting_discussion_scope(
+        str(team_id or "").strip(),
+        str(record.get("meetingRoundId") or "").strip(),
+        discussion_scope=scope.to_dict(),
+        discussion_scope_hash=scope.scope_hash,
+        scope_authority=_SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+    )
 
 
 def _role_owner_index() -> dict[str, str]:
@@ -530,7 +979,12 @@ def _round_config(
     *,
     discussion_round_index: int,
     team_id: str = "",
+    auto_drive_discussion: bool = False,
 ) -> dict[str, Any]:
+    discussion_scope = meeting_round.get("discussionScope")
+    discussion_scope_hash = str(
+        meeting_round.get("discussionScopeHash") or ""
+    ).strip().lower()
     return {
         "source": MEETING_SOURCE,
         "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
@@ -538,18 +992,104 @@ def _round_config(
         "meetingStage": str(meeting_round.get("stage") or ""),
         "meetingRoundType": str(meeting_round.get("roundType") or ""),
         "selectionId": str(selection.get("selectionId") or ""),
-        "scopeHash": str(meeting_round.get("scopeHash") or ""),
+        # The legacy MeetingRound scopeHash is retained for compatibility. A
+        # formal room has its own canonical v1 hash and must not be overwritten
+        # by the legacy six-field meeting hash when the round config is merged.
+        "scopeHash": discussion_scope_hash
+        or str(meeting_round.get("scopeHash") or ""),
+        **(
+            {
+                "scopeAuthority": _SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+                "discussionScope": dict(discussion_scope),
+                "discussionScopeHash": discussion_scope_hash,
+            }
+            if isinstance(discussion_scope, Mapping)
+            else {}
+        ),
         **{field: str(meeting_round.get(field) or "") for field in _SCOPE_FIELDS},
         "agentId": str(meeting_round.get("agentId") or ""),
         "mode": str(meeting_round.get("mode") or ""),
         "teamId": str(team_id or meeting_round.get("teamId") or "").strip(),
         "discussionRoundIndex": discussion_round_index,
+        # Only production's default runner opts into the background driver.
+        # Fixture/custom runners deliberately keep the synchronous contract so
+        # callers can inspect and control every discussion round themselves.
+        "autoDriveDiscussion": bool(auto_drive_discussion),
         "agenda": list(meeting_round.get("agenda") or []),
         "agendaQuestions": list(meeting_round.get("agendaQuestions") or []),
         "agendaRules": list(meeting_round.get("agendaRules") or []),
         "selectedCandidateIds": list(selection.get("selectedCandidateIds") or []),
         "participantAgentIds": _frozen_participant_agent_ids(meeting_round),
     }
+
+
+def _normalized_model_invocation_receipt_authority(
+    authority: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    question_id: str,
+) -> dict[str, Any] | None:
+    """Validate the private server-owned run binding before it reaches chat."""
+
+    if authority is None:
+        return None
+    if not isinstance(authority, Mapping):
+        raise ResearchMeetingRuntimeError("meeting receipt authority must be an object")
+    normalized = {
+        "schemaVersion": authority.get("schemaVersion"),
+        "authorityKind": str(authority.get("authorityKind") or "").strip(),
+        "teamId": str(authority.get("teamId") or "").strip(),
+        "questionId": str(authority.get("questionId") or "").strip().upper(),
+        "workflowRunId": str(authority.get("workflowRunId") or "").strip(),
+        "workflowId": str(authority.get("workflowId") or "").strip(),
+        "workflowVersionId": str(authority.get("workflowVersionId") or "").strip(),
+        "modelPolicySha256": str(authority.get("modelPolicySha256") or "")
+        .strip()
+        .lower(),
+    }
+    expected_team = str(team_id or "").strip()
+    expected_question = str(question_id or "").strip().upper()
+    if (
+        normalized["schemaVersion"] != _MEETING_RECEIPT_AUTHORITY_SCHEMA_VERSION
+        or normalized["authorityKind"] != "workflow_run"
+        or normalized["teamId"] != expected_team
+        or normalized["questionId"] != expected_question
+        or any(
+            not normalized[key]
+            for key in ("workflowRunId", "workflowId", "workflowVersionId")
+        )
+    ):
+        raise ResearchMeetingRuntimeError("meeting receipt authority scope is invalid")
+    policy_sha256 = normalized["modelPolicySha256"]
+    if len(policy_sha256) != 64 or any(
+        char not in "0123456789abcdef" for char in policy_sha256
+    ):
+        raise ResearchMeetingRuntimeError("meeting receipt authority policy hash is invalid")
+    return normalized
+
+
+def _require_matching_model_invocation_receipt_authority(
+    meeting_round: Mapping[str, Any],
+    authority: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    question_id: str,
+) -> dict[str, Any] | None:
+    """Refuse to rebind a deterministic meeting id to another formal run."""
+
+    if authority is None:
+        return None
+    normalized = _normalized_model_invocation_receipt_authority(
+        authority,
+        team_id=team_id,
+        question_id=question_id,
+    )
+    stored = meeting_round.get("modelInvocationReceiptAuthority")
+    if not isinstance(stored, Mapping) or dict(stored) != normalized:
+        raise ResearchMeetingRuntimeError(
+            "existing meeting is not bound to this formal workflow run"
+        )
+    return normalized
 
 
 def _round_id_from_start_result(result: Mapping[str, Any], meeting_round_id: str) -> str:
@@ -580,6 +1120,7 @@ def open_hypothesis_review_meeting(
     agent_runner: Callable[..., dict[str, Any]] | None = None,
     background: bool = True,
     candidate_contexts: Sequence[Mapping[str, Any]] = (),
+    _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open a hypothesis-review meeting from a hypothesis selection payload.
 
@@ -589,14 +1130,41 @@ def open_hypothesis_review_meeting(
     Reopening with an identical payload reuses the existing meeting and its
     bound discussion round instead of starting a duplicate.
     """
+    # This must run before linked-room/session resolution: both can create
+    # durable Challenge Cup objects when the reset fence is active.
+    assert_writes_allowed(team_id, operation="meeting_open")
     from core.web.services import chat_room_service
 
     request = dict(payload) if isinstance(payload, Mapping) else {}
     selection = _validated_selection(request)
-    team, room_id = _ensure_linked_room(str(team_id or "").strip())
-    participant_resolution = _validated_participant_resolution(
-        team["teamId"], room_id, "hypothesis_review", request
+    team, base_room_id = _ensure_linked_room(str(team_id or "").strip())
+    receipt_authority = _normalized_model_invocation_receipt_authority(
+        _model_invocation_receipt_authority,
+        team_id=team["teamId"],
+        question_id=str(selection.get("questionId") or ""),
     )
+    participant_resolution = _validated_participant_resolution(
+        team["teamId"], base_room_id, "hypothesis_review", request
+    )
+    discussion_scope = _discussion_scope_for_request(
+        team["teamId"],
+        request,
+        question_id=str(selection.get("questionId") or ""),
+        meeting_type="hypothesis_review",
+        selection=selection,
+    )
+    room_id, discussion_scope = _resolve_scoped_meeting_room(
+        team["teamId"],
+        request,
+        base_room_id=base_room_id,
+        scope=discussion_scope,
+        participant_resolution=participant_resolution,
+        meeting_type="hypothesis_review",
+        selected_candidate_ids=selection["selectedCandidateIds"],
+    )
+    effective_selection = dict(selection)
+    if discussion_scope is not None and discussion_scope.is_candidate_review:
+        effective_selection["selectedCandidateIds"] = [discussion_scope.candidateId]
 
     agenda = _normalized_str_list(request.get("agenda")) or list(_DEFAULT_AGENDA)
     agenda_questions = _normalized_str_list(request.get("agendaQuestions")) or list(
@@ -625,7 +1193,7 @@ def open_hypothesis_review_meeting(
             "roundType": str(request.get("roundType") or "decision_gate").strip().lower(),
             "discussionItemRefs": [
                 f"hypothesis_candidate:{candidate_id}"
-                for candidate_id in selection["selectedCandidateIds"]
+                for candidate_id in effective_selection["selectedCandidateIds"]
             ],
             "inputArtifactRefs": [
                 f"hypothesis_selection:{selection['selectionId']}",
@@ -635,9 +1203,16 @@ def open_hypothesis_review_meeting(
             "agendaQuestions": agenda_questions,
             "agendaRules": agenda_rules,
             "linkedChatRoomId": room_id,
+            **(
+                {"modelInvocationReceiptAuthority": receipt_authority}
+                if receipt_authority is not None
+                else {}
+            ),
         },
     )
-    meeting_round = created["meetingRound"]
+    meeting_round = _persist_discussion_scope_projection(
+        team["teamId"], created["meetingRound"], discussion_scope
+    )
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     if created["status"] == "reused":
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
@@ -654,24 +1229,34 @@ def open_hypothesis_review_meeting(
             }
 
     topic = str(request.get("topic") or "").strip() or _opening_topic(
-        meeting_round_id, selection, agenda, candidate_contexts
+        meeting_round_id, effective_selection, agenda, candidate_contexts
     )
     result = chat_room_service.start_chat_room_round(
         room_id,
         topic,
         purpose="meeting",
         config=_round_config(
-            meeting_round, selection, discussion_round_index=1, team_id=str(team_id or "")
+            meeting_round,
+            effective_selection,
+            discussion_round_index=1,
+            team_id=str(team_id or ""),
+            auto_drive_discussion=background and agent_runner is None,
         ),
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
+        _model_invocation_receipt_authority=receipt_authority,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
     bound = meeting_rounds.bind_meeting_chat_room_round(
         team["teamId"], meeting_round_id, room_id, round_id
     )
+    if background and agent_runner is None:
+        # The first room round can finish before its meeting binding is
+        # persisted. Scheduling after the bind closes that race; the scheduler
+        # remains a no-op until the opening round is terminal.
+        schedule_meeting_discussion(team["teamId"], meeting_round_id)
     return {
         "schemaVersion": meeting_rounds.SCHEMA_VERSION,
         "teamId": team["teamId"],
@@ -694,6 +1279,7 @@ def open_candidate_generation_meeting(
     *,
     agent_runner: Callable[..., dict[str, Any]] | None = None,
     background: bool = True,
+    _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open the round-0 candidate-generation discussion for a question.
 
@@ -705,6 +1291,7 @@ def open_candidate_generation_meeting(
     is deterministic per scope/question so replays reuse instead of
     duplicating.
     """
+    assert_writes_allowed(team_id, operation="meeting_open")
     from core.web.services import chat_room_service
 
     request = dict(payload) if isinstance(payload, Mapping) else {}
@@ -713,9 +1300,28 @@ def open_candidate_generation_meeting(
         raise ContractValidationError(
             "opening a candidate generation meeting requires a questionId"
         )
-    team, room_id = _ensure_linked_room(str(team_id or "").strip())
+    team, base_room_id = _ensure_linked_room(str(team_id or "").strip())
+    receipt_authority = _normalized_model_invocation_receipt_authority(
+        _model_invocation_receipt_authority,
+        team_id=team["teamId"],
+        question_id=question_id,
+    )
     participant_resolution = _validated_participant_resolution(
-        team["teamId"], room_id, CANDIDATE_GENERATION_MEETING_TYPE, request
+        team["teamId"], base_room_id, CANDIDATE_GENERATION_MEETING_TYPE, request
+    )
+    discussion_scope = _discussion_scope_for_request(
+        team["teamId"],
+        request,
+        question_id=question_id,
+        meeting_type=CANDIDATE_GENERATION_MEETING_TYPE,
+    )
+    room_id, discussion_scope = _resolve_scoped_meeting_room(
+        team["teamId"],
+        request,
+        base_room_id=base_room_id,
+        scope=discussion_scope,
+        participant_resolution=participant_resolution,
+        meeting_type=CANDIDATE_GENERATION_MEETING_TYPE,
     )
 
     agenda = _normalized_str_list(request.get("agenda")) or list(_GENERATION_AGENDA)
@@ -751,9 +1357,16 @@ def open_candidate_generation_meeting(
             "agendaQuestions": agenda_questions,
             "agendaRules": agenda_rules,
             "linkedChatRoomId": room_id,
+            **(
+                {"modelInvocationReceiptAuthority": receipt_authority}
+                if receipt_authority is not None
+                else {}
+            ),
         },
     )
-    meeting_round = created["meetingRound"]
+    meeting_round = _persist_discussion_scope_projection(
+        team["teamId"], created["meetingRound"], discussion_scope
+    )
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     if created["status"] == "reused":
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
@@ -789,16 +1402,20 @@ def open_candidate_generation_meeting(
             selection_shim,
             discussion_round_index=1,
             team_id=str(team_id or ""),
+            auto_drive_discussion=background and agent_runner is None,
         ),
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
+        _model_invocation_receipt_authority=receipt_authority,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
     bound = meeting_rounds.bind_meeting_chat_room_round(
         team["teamId"], meeting_round_id, room_id, round_id
     )
+    if background and agent_runner is None:
+        schedule_meeting_discussion(team["teamId"], meeting_round_id)
     return {
         "schemaVersion": meeting_rounds.SCHEMA_VERSION,
         "teamId": team["teamId"],
@@ -870,6 +1487,146 @@ def run_meeting_discussion(
         _DISCUSSION_DRIVER.active = False
 
 
+def _record_meeting_discussion_driver_event(
+    team_id: str,
+    meeting_round_id: str,
+    event_code: str,
+    *,
+    outcome: str,
+    error: Exception | None = None,
+) -> None:
+    """Emit bounded scheduler evidence without turning logs into authority."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_discussion",
+            event_code,
+            message=(
+                "Hypothesis meeting discussion driver failed."
+                if error is not None
+                else "Hypothesis meeting discussion driver scheduled."
+            ),
+            level="error" if error is not None else "info",
+            outcome=outcome,
+            fields={
+                "teamId": team_id,
+                "meetingRoundId": meeting_round_id,
+                "errorType": type(error).__name__ if error is not None else "",
+                "error": str(error)[:240] if error is not None else "",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        # A diagnostic outage must not alter the meeting lifecycle.
+        return
+
+
+def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> None:
+    key = (team_id, meeting_round_id)
+    try:
+        result = run_meeting_discussion(team_id, meeting_round_id)
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_discussion.driver.completed",
+            outcome=str(result.get("stopReason") or "completed"),
+        )
+    except Exception as exc:  # noqa: BLE001 - background failures need durable evidence
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_discussion.driver.failed",
+            outcome="failed",
+            error=exc,
+        )
+    finally:
+        with _MEETING_DISCUSSION_JOBS_LOCK:
+            _MEETING_DISCUSSION_JOBS.discard(key)
+
+
+def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str, Any]:
+    """Queue the post-opening discussion driver exactly once when it is ready.
+
+    Opening chat rounds run in the chat executor. A separate bounded meeting
+    executor avoids blocking that worker while each candidate completes its
+    own second/third round and reaches the human approval gate.
+    """
+
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRuntimeError("Meeting round id is required.")
+    meeting_round = meeting_rounds.get_meeting_round(
+        normalized_team_id, normalized_round_id
+    )["meetingRound"]
+    if str(meeting_round.get("status") or "").strip().lower() != "open":
+        return {
+            "status": "not_open",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+    if not bound_round_ids:
+        return {
+            "status": "waiting_for_binding",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    if meeting_rounds.running_bound_round_ids(meeting_round):
+        return {
+            "status": "waiting_for_opening_round",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    latest_messages = _latest_bound_round_messages(meeting_round)
+    if not any(
+        str(message.get("status") or "").strip().lower() == "completed"
+        for message in latest_messages
+    ):
+        return {
+            "status": "waiting_for_completed_speech",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+        }
+    key = (normalized_team_id, normalized_round_id)
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        if key in _MEETING_DISCUSSION_JOBS:
+            return {
+                "status": "already_scheduled",
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+            }
+        _MEETING_DISCUSSION_JOBS.add(key)
+    try:
+        _MEETING_DISCUSSION_EXECUTOR.submit(
+            _run_scheduled_meeting_discussion,
+            normalized_team_id,
+            normalized_round_id,
+        )
+    except Exception:
+        with _MEETING_DISCUSSION_JOBS_LOCK:
+            _MEETING_DISCUSSION_JOBS.discard(key)
+        raise
+    _record_meeting_discussion_driver_event(
+        normalized_team_id,
+        normalized_round_id,
+        "meeting_discussion.driver.scheduled",
+        outcome="scheduled",
+    )
+    return {
+        "status": "scheduled",
+        "teamId": normalized_team_id,
+        "meetingRoundId": normalized_round_id,
+    }
+
+
 def _run_meeting_discussion_impl(
     team_id: str,
     meeting_round_id: str,
@@ -905,6 +1662,11 @@ def _run_meeting_discussion_impl(
         )
     _frozen_participant_agent_ids(meeting_round)
     selection = _selection_from_meeting(meeting_round)
+    receipt_authority = (
+        dict(meeting_round.get("modelInvocationReceiptAuthority"))
+        if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+        else None
+    )
     budget = int(meeting_round.get("rounds") or 3)
     stop_reason = ""
     while len(bound_round_ids) < budget:
@@ -929,6 +1691,9 @@ def _run_meeting_discussion_impl(
             stop_reason = "converged"
             break
         discussion_round_index = len(bound_round_ids) + 1
+        # Existing meetings may drain, but they cannot create another room
+        # round after maintenance starts.
+        assert_writes_allowed(normalized_team_id, operation="meeting_round_start")
         result = chat_room_service.start_chat_room_round(
             room_id,
             _follow_up_topic(discussion_round_index),
@@ -942,6 +1707,7 @@ def _run_meeting_discussion_impl(
             agent_runner=agent_runner,
             background=False,
             max_topic_lines=MEETING_TOPIC_MAX_LINES,
+            _model_invocation_receipt_authority=receipt_authority,
         )
         round_id = _round_id_from_start_result(result, normalized_round_id)
         bound = meeting_rounds.bind_meeting_chat_room_round(
@@ -1495,6 +2261,8 @@ def maybe_auto_draft_after_chat_round(
     team_id = _team_id_for_auto_draft(room, round_payload)
     if not team_id:
         return None
+    if bool(config.get("autoDriveDiscussion")):
+        return schedule_meeting_discussion(team_id, meeting_round_id)
     return maybe_auto_draft_meeting(
         team_id,
         meeting_round_id,

@@ -23,7 +23,9 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 }));
 
 import { recordCollectionHandoff } from "../../../api/hypothesisFirst";
+import { fetchChatRoomDetail } from "../../../api/chat";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
+const mockedFetchChatRoomDetail = vi.mocked(fetchChatRoomDetail);
 
 vi.mock("./HypothesisFirstMeetingOps", () => ({
   HypothesisFirstMeetingOps: (props: {
@@ -110,6 +112,7 @@ function scopeReviewLink(meetingRoundId: string, roundIndex: number) {
     collectionRequestId: "",
     questionId: "Q-01",
     roundIndex,
+    candidateId: "cand-1",
     createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
   };
 }
@@ -129,6 +132,8 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", null)).toBe(false);
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_meeting_1")).toBe(true);
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_collection_1")).toBe(false);
+    expect(inspectorNodeOwnsCurrentStep("hf_review", "hf_meeting_5")).toBe(true);
+    expect(inspectorNodeOwnsCurrentStep("hf_collection", "source_finding")).toBe(true);
   });
 
   beforeEach(() => {
@@ -159,6 +164,86 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("候选假说生成");
     expect(container.textContent).toContain("生成候选假说");
     expect(container.textContent).not.toContain("前往候选生成");
+  });
+
+  it("loads only the server-authored scoped room and never the meeting fallback room", async () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        discussionModel={{
+          status: "ready",
+          degradedReason: "",
+          scope: {
+            version: 1,
+            kind: "question_generation",
+            teamId: "team-1",
+            researchProjectId: "project-1",
+            workflowRunId: "run-1",
+            workflowNodeId: "hf_generation",
+            questionId: "Q-01",
+          },
+          scopeHash: "scope-hash",
+          roomId: "scoped-room-1",
+          meetingRoundId: "hf-gen-1",
+          questionId: "Q-01",
+          selectionId: "",
+          candidateId: "",
+          query: { kind: "room", room: "scoped-room-1" },
+          search: "?room=scoped-room-1",
+          deepLink: "/chat?room=scoped-room-1",
+          selectedRoundId: "",
+        }}
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const queriedRoomIds = mockedFetchChatRoomDetail.mock.calls.map(([roomId]) => roomId);
+    expect(queriedRoomIds).toContain("scoped-room-1");
+    expect(queriedRoomIds).not.toContain("team-public-room");
+  });
+
+  it("does not read any room when the canonical anchor is degraded", async () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        discussionModel={{
+          status: "degraded",
+          degradedReason: "active_discussion_room_missing",
+          scope: null,
+          scopeHash: "",
+          roomId: "",
+          meetingRoundId: "",
+          questionId: "Q-01",
+          selectionId: "",
+          candidateId: "",
+          query: null,
+          search: "",
+          deepLink: "",
+          selectedRoundId: "",
+        }}
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockedFetchChatRoomDetail).not.toHaveBeenCalled();
   });
 
   it("renders the empty inspector state in English without Chinese chrome", () => {
@@ -262,7 +347,7 @@ describe("HypothesisFirstNodeInspector", () => {
       <HypothesisFirstNodeInspector
         teamId="team-1"
         questionId="Q-01"
-        nodeId="hf_meeting_5"
+        nodeId="hf_meeting_5_cand-1"
         onOpenQuestion={() => {}}
       />,
     );
@@ -305,12 +390,56 @@ describe("HypothesisFirstNodeInspector", () => {
       <HypothesisFirstNodeInspector
         teamId="team-1"
         questionId="Q-01"
-        nodeId="hf_meeting_2"
+        nodeId="hf_meeting_2_cand-1"
         onOpenQuestion={() => {}}
       />,
     );
 
     expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("current-r2");
+  });
+
+  it("keeps every candidate confirmation visible after one sibling closes", () => {
+    const onNavigateToNode = vi.fn();
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        selectionId: "sel-1",
+        candidateCount: 2,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        selectionId: "sel-1",
+        selectedCandidateIds: ["cand-a", "cand-b"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r4-old", meetingType: "hypothesis_review", roundIndex: 4, status: "closed" }),
+        scopeMeeting({ meetingRoundId: "r5-a", meetingType: "hypothesis_review", roundIndex: 5, status: "closed" }),
+        scopeMeeting({ meetingRoundId: "r5-b", meetingType: "hypothesis_review", roundIndex: 5, status: "awaiting_approval" }),
+      ],
+      reviewRoundLinks: [
+        { ...scopeReviewLink("r4-old", 4), candidateId: "cand-old" },
+        { ...scopeReviewLink("r5-a", 5), candidateId: "cand-a" },
+        { ...scopeReviewLink("r5-b", 5), candidateId: "cand-b" },
+      ],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        onOpenQuestion={() => {}}
+        onNavigateToNode={onNavigateToNode}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).toContain("共 2 · 已确认 1 · 待确认 1");
+    expect(container.textContent).toContain("候选 cand-a");
+    expect(container.textContent).toContain("候选 cand-b");
+    expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).not.toContain("cand-old");
+    const candidateButtons = Array.from(container.querySelectorAll("button"))
+      .filter((button) => button.textContent === "进入对应会议");
+    act(() => {
+      candidateButtons[0]?.click();
+    });
+    expect(onNavigateToNode).toHaveBeenCalledWith("hf_meeting_5_cand-a");
   });
 
   it("does not let another question's later meeting mask the current r5 inspector", () => {
@@ -428,7 +557,42 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("假说选择");
     expect(container.querySelector('[data-testid="selection-list"]')?.textContent).toContain("记录选择并开启评审");
     expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ compact: true }));
-    expect(container.textContent).toContain("打开赛题详情");
+    expect(container.textContent).toContain("打开题目档案");
+  });
+
+  it("shows effective review rounds as read-only history on the semantic review node", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        hypothesisConverged: true,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        selectedCandidateIds: ["c1"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r1", meetingType: "hypothesis_review", status: "closed", roundIndex: 1, digestId: "d1" }),
+        scopeMeeting({ meetingRoundId: "r2", meetingType: "hypothesis_review", status: "closed", roundIndex: 2, recoveryReason: "discussion_has_no_completed_messages" }),
+        scopeMeeting({ meetingRoundId: "r3", meetingType: "hypothesis_review", status: "closed", roundIndex: 3, digestId: "d3" }),
+      ] as HypothesisFirstChainData["meetings"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("2 轮有效评审");
+    expect(container.textContent).toContain("1 次失败重试");
+    expect(container.textContent).toContain("第 1 轮");
+    expect(container.textContent).toContain("第 3 轮");
+    expect(container.textContent).not.toContain("第 2 轮");
   });
 
   it("shows 资料搜集中 without a start-collection command", () => {

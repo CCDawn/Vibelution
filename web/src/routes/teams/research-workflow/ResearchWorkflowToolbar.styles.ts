@@ -1,13 +1,11 @@
 export default {
-  root: "flex w-full min-w-0 flex-nowrap items-center gap-x-3 overflow-hidden",
-  context: "flex min-w-0 flex-1 items-center gap-2 overflow-hidden",
+  root: "flex w-full min-w-0 flex-col flex-nowrap items-stretch gap-2 overflow-hidden xl:flex-row xl:items-center xl:gap-x-3",
+  context: "flex w-full min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden xl:flex-1 xl:overflow-hidden",
   leading:
-    "min-w-0 w-[min(18rem,36%)] shrink-0 [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
+    "w-[min(18rem,70vw)] min-w-[10rem] shrink-0 xl:w-[min(18rem,36%)] xl:min-w-0 [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
   switcher:
-    "min-w-0 flex-1 basis-[10rem] max-w-[20rem] md:max-w-[24rem] [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
+    "w-[min(20rem,70vw)] min-w-[10rem] shrink-0 xl:min-w-0 xl:flex-1 xl:basis-[10rem] xl:max-w-[24rem] [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
   empty: "block min-w-0 truncate [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
-  phase: "min-w-0 shrink truncate [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
-  actions: "ms-auto flex shrink-0 items-center justify-end gap-2",
-  details: "min-w-0 shrink",
-  primary: "min-w-0 max-w-[16rem]",
+  actions: "flex w-full min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden xl:ms-auto xl:w-auto xl:shrink-0 xl:justify-end",
+  trailing: "min-w-0 max-w-[16rem] shrink-0",
 } as const;

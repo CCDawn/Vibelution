@@ -134,6 +134,19 @@ def _failed_runner(participant, prompt, context):
     }
 
 
+def _receipt_authority(team_id: str, *, run_id: str = "run-formal") -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": team_id,
+        "questionId": "SCI-096",
+        "workflowRunId": run_id,
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+
+
 def _open_meeting(tmp_path, monkeypatch, *, runner=None, background=False, **overrides):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
     opened = meeting_runtime.open_hypothesis_review_meeting(
@@ -143,6 +156,45 @@ def _open_meeting(tmp_path, monkeypatch, *, runner=None, background=False, **ove
         background=background,
     )
     return team_id, agents, opened
+
+
+def test_candidate_generation_persists_server_receipt_authority_and_refuses_rebind(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    contexts: list[dict[str, object]] = []
+
+    def capture_runner(participant, prompt, context):
+        contexts.append(dict(context))
+        return {
+            "status": "completed",
+            "raw_output": "CANDIDATE: cand-a | 可证伪机制 | 正式运行",
+            "summary": "ok",
+        }
+
+    payload = _selection_payload(list(agents.values()), meetingRoundId="meeting-cand-auth")
+    opened = meeting_runtime.open_candidate_generation_meeting(
+        team_id,
+        payload,
+        agent_runner=capture_runner,
+        background=False,
+        _model_invocation_receipt_authority=_receipt_authority(team_id),
+    )
+
+    assert opened["meetingRound"]["modelInvocationReceiptAuthority"]["workflowRunId"] == "run-formal"
+    assert contexts
+    assert contexts[0]["_modelInvocationReceiptAuthority"]["workflowRunId"] == "run-formal"
+    with pytest.raises(meetings.ResearchMeetingRoundError, match="different content"):
+        meeting_runtime.open_candidate_generation_meeting(
+            team_id,
+            payload,
+            agent_runner=capture_runner,
+            background=False,
+            _model_invocation_receipt_authority=_receipt_authority(
+                team_id,
+                run_id="run-other",
+            ),
+        )
 
 
 def test_candidate_generation_prompt_includes_canonical_question_context(
@@ -740,6 +792,101 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
         assert [message["agentId"] for message in bound["messages"]] == list(
             agents.values()
         )
+
+
+def test_background_discussion_scheduler_deduplicates_one_ready_meeting(monkeypatch):
+    class DeferredExecutor:
+        def __init__(self):
+            self.submissions: list[tuple[object, tuple[object, ...]]] = []
+
+        def submit(self, callback, *args):
+            self.submissions.append((callback, args))
+            return object()
+
+    team_id = "team-scheduled-discussion"
+    meeting_id = "meeting-scheduled-discussion"
+    executor = DeferredExecutor()
+    meeting = {
+        "meetingRoundId": meeting_id,
+        "status": "open",
+        "chatRoomRoundIds": ["room-round-1"],
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args: {"meetingRound": dict(meeting)},
+    )
+    monkeypatch.setattr(meetings, "running_bound_round_ids", lambda *_args: [])
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_latest_bound_round_messages",
+        lambda *_args: [{"status": "completed"}],
+    )
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+    monkeypatch.setattr(
+        meeting_runtime,
+        "run_meeting_discussion",
+        lambda *_args, **_kwargs: {"stopReason": "converged"},
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_record_meeting_discussion_driver_event",
+        lambda *_args, **_kwargs: None,
+    )
+    key = (team_id, meeting_id)
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        meeting_runtime._MEETING_DISCUSSION_JOBS.discard(key)
+    try:
+        first = meeting_runtime.schedule_meeting_discussion(team_id, meeting_id)
+        duplicate = meeting_runtime.schedule_meeting_discussion(team_id, meeting_id)
+
+        assert first["status"] == "scheduled"
+        assert duplicate["status"] == "already_scheduled"
+        assert len(executor.submissions) == 1
+
+        callback, args = executor.submissions[0]
+        callback(*args)
+        with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+            assert key not in meeting_runtime._MEETING_DISCUSSION_JOBS
+    finally:
+        with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+            meeting_runtime._MEETING_DISCUSSION_JOBS.discard(key)
+
+
+def test_auto_drive_hook_queues_discussion_instead_of_drafting(monkeypatch):
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        meeting_runtime,
+        "schedule_meeting_discussion",
+        lambda team_id, meeting_id: captured.update(
+            {"teamId": team_id, "meetingRoundId": meeting_id}
+        )
+        or {"status": "scheduled", "meetingRoundId": meeting_id},
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "maybe_auto_draft_meeting",
+        lambda *_args, **_kwargs: pytest.fail("auto-drive must not draft after round one"),
+    )
+
+    result = meeting_runtime.maybe_auto_draft_after_chat_round(
+        {"roomId": "room-auto-drive", "config": {"teamId": "team-auto-drive"}},
+        {
+            "roundId": "round-auto-drive",
+            "config": {
+                "teamId": "team-auto-drive",
+                "meetingRoundId": "meeting-auto-drive",
+                "autoDriveDiscussion": True,
+            },
+        },
+    )
+
+    assert result == {"status": "scheduled", "meetingRoundId": "meeting-auto-drive"}
+    assert captured == {
+        "teamId": "team-auto-drive",
+        "meetingRoundId": "meeting-auto-drive",
+    }
 
 
 def test_discussion_driver_stops_at_round_budget(tmp_path, monkeypatch):

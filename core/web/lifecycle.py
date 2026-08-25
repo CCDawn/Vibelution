@@ -166,7 +166,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         startup_routes_task = asyncio.create_task(warm_web_routes_in_background(app))
     # Snapshot the git commit this backend was started from (best effort, never
     # blocks health). The UI compares it with disk HEAD to flag stale instances.
-    startup_code_fingerprint_task = asyncio.create_task(asyncio.to_thread(_write_running_code_fingerprint_on_startup))
+    startup_code_fingerprint_task = asyncio.create_task(
+        asyncio.to_thread(_write_running_code_fingerprint_on_startup, app)
+    )
     # Do not await terminal reconcile before yield — it blocked /api/health readiness
     # and stretched launcher open_launcher_action by the full reconcile cost.
     startup_cli_reconcile_task = asyncio.create_task(
@@ -318,11 +320,16 @@ def _stop_research_workflow_runtime() -> None:
     stop_production_workflow_runtime()
 
 
-def _write_running_code_fingerprint_on_startup() -> None:
+def _write_running_code_fingerprint_on_startup(app: Any | None = None) -> None:
     from .services.code_freshness import write_running_code_fingerprint
 
-    project_root = Path(__file__).resolve().parents[2]
-    write_running_code_fingerprint(project_root=project_root, source="web_workbench_lifespan")
+    project_root = Path(str(os.environ.get("VIBELUTION_WORKSPACE_ROOT") or Path(__file__).resolve().parents[2])).resolve()
+    serving = getattr(getattr(app, "state", None), "serving_metadata", None)
+    write_running_code_fingerprint(
+        project_root=project_root,
+        source="web_workbench_lifespan",
+        serving_metadata=serving if isinstance(serving, dict) else None,
+    )
 
 
 def _prewarm_git_memory_on_startup() -> tuple[Any, int]:
