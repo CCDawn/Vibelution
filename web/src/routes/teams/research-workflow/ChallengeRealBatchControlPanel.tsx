@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -186,6 +186,7 @@ export function ChallengeRealBatchControlPanel({
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [authorization, setAuthorization] = useState<ChallengeCupRealBatchAuthorization | null>(null);
   const [pollingEnabled, setPollingEnabled] = useState(false);
+  const pollingEnabledRef = useRef(false);
   const [events, setEvents] = useState<RecentEvent[]>([]);
   const selectedPlan = REAL_BATCH_PLANS.find((item) => item.planId === selectedPlanId) ?? REAL_BATCH_PLANS[3];
   const statusKey = queryKeys.challengeCupRealBatchStatus(teamId, selectedPlanId);
@@ -209,6 +210,11 @@ export function ChallengeRealBatchControlPanel({
 
   function updateProjection(next: ChallengeCupRealBatchProjection) {
     queryClient.setQueryData(statusKey, next);
+  }
+
+  function setPollingState(enabled: boolean) {
+    pollingEnabledRef.current = enabled;
+    setPollingEnabled(enabled);
   }
 
   const authorizeMutation = useMutation({
@@ -243,14 +249,14 @@ export function ChallengeRealBatchControlPanel({
       const next = normalizeProjection(result, selectedPlanId);
       if (!next) {
         setAuthorization(null);
-        setPollingEnabled(false);
+        setPollingState(false);
         setConfirmAction(null);
         addEvent(zh ? "启动响应异常 · 状态保持关闭" : "Start response invalid · state remains closed");
         return;
       }
       updateProjection(next);
       setConfirmAction(null);
-      setPollingEnabled(!next.gateComplete && !next.cancelled && next.canResume);
+      setPollingState(!next.gateComplete && !next.cancelled && next.canResume);
       const launched = result.launched ?? [];
       addEvent(zh ? `启动完成 · 新派遣 ${launched.length} 个问题` : `Start completed · launched ${launched.length} questions`);
     },
@@ -267,12 +273,12 @@ export function ChallengeRealBatchControlPanel({
     onSuccess: (result: ChallengeCupRealBatchPollResponse) => {
       const next = normalizeProjection(result, selectedPlanId);
       if (!next) {
-        setPollingEnabled(false);
+        setPollingState(false);
         addEvent(zh ? "后台刷新响应异常 · 状态保持关闭" : "Background poll response invalid · state remains closed");
         return;
       }
       updateProjection(next);
-      if (next.gateComplete || next.cancelled || !next.canResume) setPollingEnabled(false);
+      if (next.gateComplete || next.cancelled || !next.canResume) setPollingState(false);
       const harvested = result.harvested ?? [];
       const launched = result.launched ?? [];
       if (harvested.length || launched.length) {
@@ -282,7 +288,7 @@ export function ChallengeRealBatchControlPanel({
       }
     },
     onError: (reason: unknown) => {
-      setPollingEnabled(false);
+      setPollingState(false);
       addEvent(zh ? `后台刷新失败 · ${errorText(reason, "状态不可用")}` : `Background poll failed · ${errorText(reason, "Status unavailable")}`);
     },
   });
@@ -293,14 +299,14 @@ export function ChallengeRealBatchControlPanel({
     onSuccess: (result: ChallengeCupRealBatchProjection) => {
       const next = normalizeProjection(result, selectedPlanId);
       if (!next) {
-        setPollingEnabled(false);
+        setPollingState(false);
         setConfirmAction(null);
         addEvent(zh ? "取消响应异常 · 状态保持关闭" : "Cancel response invalid · state remains closed");
         return;
       }
       updateProjection(next);
       setConfirmAction(null);
-      setPollingEnabled(false);
+      setPollingState(false);
       addEvent(zh ? "批次已取消 · 运行中的问题未被强制终止" : "Batch cancelled · running questions were not force-stopped");
     },
     onError: (reason: unknown) => {
@@ -311,16 +317,37 @@ export function ChallengeRealBatchControlPanel({
   useEffect(() => {
     setAuthorization(null);
     setConfirmAction(null);
-    setPollingEnabled(false);
+    setPollingState(false);
     setEvents([]);
   }, [selectedPlanId, teamId]);
 
   useEffect(() => {
     if (!pollingEnabled || !teamId.trim()) return undefined;
-    const timer = window.setInterval(() => {
-      pollMutation.mutate({ teamId, planId: selectedPlanId });
-    }, 15_000);
-    return () => window.clearInterval(timer);
+    let disposed = false;
+    let timer: number | undefined;
+
+    const scheduleNextPoll = () => {
+      if (disposed || !pollingEnabledRef.current) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        if (disposed || !pollingEnabledRef.current) return;
+        void (async () => {
+          try {
+            await pollMutation.mutateAsync({ teamId, planId: selectedPlanId });
+          } catch {
+            // onError closes the polling loop; the rejection is already surfaced there.
+          } finally {
+            scheduleNextPoll();
+          }
+        })();
+      }, 15_000);
+    };
+
+    scheduleNextPoll();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [pollingEnabled, selectedPlanId, teamId]);
 
   const anyMutationPending = authorizeMutation.isPending || startMutation.isPending || pollMutation.isPending || cancelMutation.isPending;

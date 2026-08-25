@@ -41,6 +41,11 @@ vi.mock("@tanstack/react-query", () => ({
     mutate: (variables: any) => {
       void options.mutationFn(variables).then((data) => options.onSuccess?.(data, variables));
     },
+    mutateAsync: async (variables: any) => {
+      const data = await options.mutationFn(variables);
+      options.onSuccess?.(data, variables);
+      return data;
+    },
   }),
 }));
 
@@ -222,5 +227,101 @@ describe("ChallengeRealBatchControlPanel", () => {
     await act(async () => button("确认取消").click());
     expect(apiMock.cancelChallengeCupRealBatch).toHaveBeenCalledWith("team-1", "real-125", { confirmed: true });
     await view.unmount();
+  });
+
+  it("waits for each background poll to settle before scheduling the next one", async () => {
+    vi.useFakeTimers();
+    let resolveFirstPoll!: (value: ReturnType<typeof projection>) => void;
+    let resolveSecondPoll!: (value: ReturnType<typeof projection>) => void;
+    const firstPoll = new Promise<ReturnType<typeof projection>>((resolve) => {
+      resolveFirstPoll = resolve;
+    });
+    const secondPoll = new Promise<ReturnType<typeof projection>>((resolve) => {
+      resolveSecondPoll = resolve;
+    });
+    apiMock.authorizeChallengeCupRealBatch.mockResolvedValue(authorization());
+    apiMock.startChallengeCupRealBatch.mockResolvedValue(projection());
+    apiMock.pollChallengeCupRealBatch
+      .mockImplementationOnce(() => firstPoll)
+      .mockImplementationOnce(() => secondPoll);
+    const view = await mountPanel();
+
+    await act(async () => button("申请科研授权").click());
+    await act(async () => {
+      button("确认授权").click();
+      await Promise.resolve();
+    });
+    await act(async () => button("继续真实批次").click());
+    await act(async () => {
+      button("确认启动").click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(apiMock.pollChallengeCupRealBatch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(apiMock.pollChallengeCupRealBatch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirstPoll(projection());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(apiMock.pollChallengeCupRealBatch).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await view.unmount();
+      resolveSecondPoll(projection());
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(apiMock.pollChallengeCupRealBatch).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("stops scheduling when a poll response disables background polling", async () => {
+    vi.useFakeTimers();
+    apiMock.authorizeChallengeCupRealBatch.mockResolvedValue(authorization());
+    apiMock.startChallengeCupRealBatch.mockResolvedValue(projection());
+    apiMock.pollChallengeCupRealBatch.mockResolvedValue(projection({ gateComplete: true, canResume: false }));
+    const view = await mountPanel();
+
+    await act(async () => button("申请科研授权").click());
+    await act(async () => {
+      button("确认授权").click();
+      await Promise.resolve();
+    });
+    await act(async () => button("继续真实批次").click());
+    await act(async () => {
+      button("确认启动").click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMock.pollChallengeCupRealBatch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(apiMock.pollChallengeCupRealBatch).toHaveBeenCalledTimes(1);
+    await view.unmount();
+    vi.useRealTimers();
   });
 });
