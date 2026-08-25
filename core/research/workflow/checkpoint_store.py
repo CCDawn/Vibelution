@@ -474,6 +474,7 @@ def assert_not_memory_saver(checkpointer: Any) -> None:
 
 CHECKPOINT_RESET_PORT_SCHEMA_VERSION = 1
 CHECKPOINT_RESET_PORT_KIND = "challenge_cup_checkpoint_reset"
+CHECKPOINT_FULL_PURGE_PORT_KIND = "challenge_cup_checkpoint_full_purge"
 
 
 class CheckpointResetPortError(ValueError):
@@ -889,6 +890,259 @@ def _checkpoint_open_connection(path: Path, *, read_only: bool) -> sqlite3.Conne
         raise CheckpointResetPortError(
             "checkpoint store cannot be opened", code="checkpoint_store_unavailable"
         ) from exc
+
+
+def _checkpoint_full_purge_snapshot(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Return a payload-free fingerprint for an operator-authorized full purge.
+
+    This intentionally does not decode checkpoint state or infer ownership.
+    It is reserved for clearing a store that an operator has explicitly
+    classified as disposable, including rows that cannot satisfy the normal
+    team-scoped authority contract. Blob values contribute only their digest
+    to the preflight fingerprint and are never returned or retained.
+    """
+
+    tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    required_tables = {"checkpoints", "writes"}
+    if not required_tables <= tables:
+        raise CheckpointResetPortError(
+            "checkpoint store schema is incomplete", code="checkpoint_store_corrupt"
+        )
+
+    checkpoint_columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(checkpoints)").fetchall()
+    }
+    write_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(writes)").fetchall()
+    }
+    required_checkpoints = {
+        "thread_id",
+        "checkpoint_ns",
+        "checkpoint_id",
+        "parent_checkpoint_id",
+        "type",
+        "checkpoint",
+        "metadata",
+    }
+    required_writes = {
+        "thread_id",
+        "checkpoint_ns",
+        "checkpoint_id",
+        "task_id",
+        "idx",
+        "channel",
+        "type",
+        "value",
+    }
+    if not required_checkpoints <= checkpoint_columns or not required_writes <= write_columns:
+        raise CheckpointResetPortError(
+            "checkpoint store schema is unsupported", code="checkpoint_store_corrupt"
+        )
+
+    checkpoint_rows = connection.execute(
+        "SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, "
+        "type, checkpoint, metadata FROM checkpoints "
+        "ORDER BY thread_id, checkpoint_ns, checkpoint_id"
+    ).fetchall()
+    write_rows = connection.execute(
+        "SELECT thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value "
+        "FROM writes ORDER BY thread_id, checkpoint_ns, checkpoint_id, task_id, idx"
+    ).fetchall()
+    checkpoints = [
+        {
+            "threadId": str(row[0]),
+            "checkpointNs": str(row[1]),
+            "checkpointId": str(row[2]),
+            "parentCheckpointId": row[3],
+            "type": row[4],
+            "checkpointSha256": _reset_json_hash(_checkpoint_blob(row[5])),
+            "metadataSha256": _reset_json_hash(_checkpoint_blob(row[6])),
+        }
+        for row in checkpoint_rows
+    ]
+    writes = [
+        {
+            "threadId": str(row[0]),
+            "checkpointNs": str(row[1]),
+            "checkpointId": str(row[2]),
+            "taskId": str(row[3]),
+            "idx": int(row[4]),
+            "channel": str(row[5]),
+            "type": row[6],
+            "valueSha256": _reset_json_hash(_checkpoint_blob(row[7])),
+        }
+        for row in write_rows
+    ]
+    return {
+        "checkpointCount": len(checkpoints),
+        "writeCount": len(writes),
+        "threadCount": len({row["threadId"] for row in checkpoints}),
+        "storeFingerprint": _reset_json_hash(
+            {"checkpoints": checkpoints, "writes": writes}
+        ),
+    }
+
+
+def prepare_operator_checkpoint_full_purge(
+    reset_id: str,
+    *,
+    checkpoint_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Capture an exact, payload-free preflight for a full checkpoint purge.
+
+    This is deliberately separate from the normal scoped reset port. It may
+    only be used when an operator has explicitly authorized discarding every
+    checkpoint in this one store; the returned preflight must be presented
+    unchanged to :func:`purge_operator_checkpoint_full_purge`.
+    """
+
+    normalized_reset_id = _reset_text(reset_id, field="resetId")
+    path = _reset_path(checkpoint_path)
+    if not path.exists():
+        snapshot = {
+            "checkpointCount": 0,
+            "writeCount": 0,
+            "threadCount": 0,
+            "storeFingerprint": _reset_json_hash({"checkpoints": [], "writes": []}),
+        }
+        store_missing = True
+    else:
+        connection = _checkpoint_open_connection(path, read_only=True)
+        try:
+            snapshot = _checkpoint_full_purge_snapshot(connection)
+        finally:
+            connection.close()
+        store_missing = False
+    return {
+        "schemaVersion": CHECKPOINT_RESET_PORT_SCHEMA_VERSION,
+        "kind": CHECKPOINT_FULL_PURGE_PORT_KIND,
+        "resetId": normalized_reset_id,
+        "checkpointPath": str(path),
+        "storeMissing": store_missing,
+        **snapshot,
+    }
+
+
+def purge_operator_checkpoint_full_purge(
+    preflight: Mapping[str, Any],
+    *,
+    checkpoint_path: Path | str | None = None,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    """Atomically clear every checkpoint and write captured by a preflight."""
+
+    if not isinstance(preflight, Mapping):
+        raise CheckpointResetPortError(
+            "checkpoint full purge preflight must be an object",
+            code="checkpoint_full_purge_invalid",
+        )
+    if (
+        preflight.get("schemaVersion") != CHECKPOINT_RESET_PORT_SCHEMA_VERSION
+        or preflight.get("kind") != CHECKPOINT_FULL_PURGE_PORT_KIND
+    ):
+        raise CheckpointResetPortError(
+            "checkpoint full purge preflight schema is invalid",
+            code="checkpoint_full_purge_invalid",
+        )
+    expected_reset_id = _reset_text(preflight.get("resetId"), field="resetId")
+    if reset_id is not None and _reset_text(reset_id, field="resetId") != expected_reset_id:
+        raise CheckpointResetPortError(
+            "checkpoint full purge resetId does not match preflight",
+            code="checkpoint_full_purge_invalid",
+        )
+    path = _reset_path(checkpoint_path or preflight.get("checkpointPath"))
+    if str(path) != str(preflight.get("checkpointPath") or ""):
+        raise CheckpointResetPortError(
+            "checkpoint full purge path does not match preflight",
+            code="checkpoint_full_purge_invalid",
+        )
+    expected = {
+        key: preflight.get(key)
+        for key in ("checkpointCount", "writeCount", "threadCount", "storeFingerprint")
+    }
+    if (
+        not isinstance(expected["checkpointCount"], int)
+        or not isinstance(expected["writeCount"], int)
+        or not isinstance(expected["threadCount"], int)
+        or not isinstance(expected["storeFingerprint"], str)
+    ):
+        raise CheckpointResetPortError(
+            "checkpoint full purge preflight is incomplete",
+            code="checkpoint_full_purge_invalid",
+        )
+    expected_missing = bool(preflight.get("storeMissing"))
+    if not path.exists():
+        if expected_missing and expected["checkpointCount"] == expected["writeCount"] == 0:
+            return {
+                "ok": True,
+                "kind": CHECKPOINT_FULL_PURGE_PORT_KIND,
+                "resetId": expected_reset_id,
+                "checkpointCount": 0,
+                "writeCount": 0,
+                "deletedCheckpoints": 0,
+                "deletedWrites": 0,
+                "alreadyAbsent": True,
+            }
+        raise CheckpointResetPortError(
+            "checkpoint store changed after full purge preflight",
+            code="checkpoint_full_purge_stale",
+        )
+    if expected_missing:
+        raise CheckpointResetPortError(
+            "checkpoint store appeared after full purge preflight",
+            code="checkpoint_full_purge_stale",
+        )
+
+    connection = _checkpoint_open_connection(path, read_only=False)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        observed = _checkpoint_full_purge_snapshot(connection)
+        if observed != expected:
+            raise CheckpointResetPortError(
+                "checkpoint store changed after full purge preflight",
+                code="checkpoint_full_purge_stale",
+            )
+        deleted_writes = int(connection.execute("DELETE FROM writes").rowcount or 0)
+        deleted_checkpoints = int(connection.execute("DELETE FROM checkpoints").rowcount or 0)
+        remaining = _checkpoint_full_purge_snapshot(connection)
+        if remaining["checkpointCount"] or remaining["writeCount"]:
+            raise CheckpointResetPortError(
+                "checkpoint full purge verification failed",
+                code="checkpoint_full_purge_failed",
+            )
+        connection.execute("COMMIT")
+    except CheckpointResetPortError:
+        try:
+            connection.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    except sqlite3.Error as exc:
+        try:
+            connection.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise CheckpointResetPortError(
+            "checkpoint full purge failed", code="checkpoint_full_purge_failed"
+        ) from exc
+    finally:
+        connection.close()
+    return {
+        "ok": True,
+        "kind": CHECKPOINT_FULL_PURGE_PORT_KIND,
+        "resetId": expected_reset_id,
+        "checkpointCount": expected["checkpointCount"],
+        "writeCount": expected["writeCount"],
+        "deletedCheckpoints": deleted_checkpoints,
+        "deletedWrites": deleted_writes,
+        "alreadyAbsent": False,
+    }
 
 
 def _checkpoint_store_rows(
@@ -1412,7 +1666,10 @@ __all__ = [
     "open_sqlite_checkpointer",
     "CHECKPOINT_RESET_PORT_KIND",
     "CHECKPOINT_RESET_PORT_SCHEMA_VERSION",
+    "CHECKPOINT_FULL_PURGE_PORT_KIND",
     "CheckpointResetPortError",
+    "prepare_operator_checkpoint_full_purge",
+    "purge_operator_checkpoint_full_purge",
     "list_team_scoped_checkpoints",
     "list_checkpoint_thread_ids",
     "prepare_checkpoint_reset_stage",

@@ -80,6 +80,20 @@ def _evidence_runner(participant, prompt, context):
     }
 
 
+def _mixed_source_type_evidence_runner(participant, prompt, context):
+    result = _evidence_runner(participant, prompt, context)
+    raw_output = str(result.get("raw_output") or "")
+    if "EVIDENCE_REQUEST:" in raw_output:
+        result = {
+            **result,
+            "raw_output": raw_output.replace(
+                '"sourceTypes": ["paper"]',
+                '"sourceTypes": ["paper", "reference"]',
+            ),
+        }
+    return result
+
+
 def _invalid_evidence_runner(participant, prompt, context):
     if "批评与修订" in str(prompt):
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
@@ -385,7 +399,7 @@ def test_approve_review_digest_starts_one_collection(
                 "selectedCandidateIds": ["hyp-a", "hyp-b"],
                 "decidedBy": agent_ids[0],
             },
-            agent_runner=_evidence_runner,
+            agent_runner=_mixed_source_type_evidence_runner,
         )
         # The selection now fans out into one room per candidate. This fixture
         # asks for evidence about hyp-b, so approve hyp-b's own review rather
@@ -402,6 +416,15 @@ def test_approve_review_digest_starts_one_collection(
         )
         assert drafted["status"] == "awaiting_approval"
         assert drafted["digestDraft"]["evidenceRequests"]
+        assert drafted["digestDraft"]["evidenceRequests"][0]["searchEnvelope"][
+            "sourceTypes"
+        ] == ["paper"]
+        assert drafted["digestDraft"]["validationErrors"] == [
+            {
+                "code": "search_source_types_dropped",
+                "message": "已忽略不支持的 sourceTypes：reference",
+            }
+        ]
         approved = chain.approve_meeting_digest(
             team_id,
             meeting_id,
@@ -446,6 +469,7 @@ def test_approve_review_digest_without_keywords_stays_open(
             team_id, meeting_id, actor=agent_ids[0], force=False
         )
         assert drafted["digestDraft"]["validationErrors"]
+        assert drafted["digestDraft"]["evidenceRequests"] == []
         approved = chain.approve_meeting_digest(
             team_id,
             meeting_id,
@@ -454,9 +478,72 @@ def test_approve_review_digest_without_keywords_stays_open(
         )
         assert approved["closed"] is False
         assert approved["status"] == "awaiting_approval"
+        assert approved["validationErrors"] == drafted["digestDraft"]["validationErrors"]
+        assert len(
+            {
+                (str(item.get("code") or ""), str(item.get("message") or ""))
+                for item in approved["validationErrors"]
+            }
+        ) == len(approved["validationErrors"])
         meeting = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
         assert meeting["status"] == "awaiting_approval"
         assert collection_calls == []
+
+
+def test_mixed_source_types_keep_valid_values_and_report_dropped_tokens() -> None:
+    normalized, warnings = meeting_runtime.validate_evidence_request_draft(
+        {
+            "rationale": "需要补充同行评审论文。",
+            "candidateRefs": ["hyp-a"],
+            "evidenceRefs": ["evidence:review-gap"],
+            "searchEnvelope": {
+                "keywords": ["neuronal spike coding"],
+                "sourceTypes": ["paper", "reference"],
+                "evidenceLevels": ["peer_reviewed"],
+            },
+            "requirements": {"minEvidenceLevel": "medium"},
+            "writebackPolicy": {},
+        },
+        {
+            "meetingType": "hypothesis_review",
+            "selectedCandidateIds": ["hyp-a"],
+            "discussionItemRefs": ["hypothesis_candidate:hyp-a"],
+        },
+    )
+
+    assert normalized is not None
+    assert normalized["searchEnvelope"]["sourceTypes"] == ["paper"]
+    assert warnings == [
+        {
+            "code": "search_source_types_dropped",
+            "message": "已忽略不支持的 sourceTypes：reference",
+        }
+    ]
+
+
+def test_all_unsupported_source_types_keep_evidence_request_blocked() -> None:
+    normalized, errors = meeting_runtime.validate_evidence_request_draft(
+        {
+            "rationale": "需要补充资料。",
+            "candidateRefs": ["hyp-a"],
+            "searchEnvelope": {
+                "keywords": ["neuronal spike coding"],
+                "sourceTypes": ["reference"],
+            },
+        },
+        {
+            "meetingType": "hypothesis_review",
+            "selectedCandidateIds": ["hyp-a"],
+        },
+    )
+
+    assert normalized is None
+    assert errors == [
+        {
+            "code": "search_source_types_invalid",
+            "message": "sourceTypes 未包含支持的来源类型：reference",
+        }
+    ]
 
 
 def test_build_round_candidates_falls_back_to_ledger(
@@ -711,6 +798,38 @@ def test_candidate_markers_accept_common_markdown_emphasis() -> None:
             "proposedBy": "A003",
         },
     ]
+
+
+def test_candidate_generation_digest_reports_proposed_candidate_count() -> None:
+    messages = [
+        {
+            "status": "completed",
+            "content": (
+                "CANDIDATE: 1 | 候选一 | 理由一\n"
+                "CANDIDATE: 2 | 候选二 | 理由二"
+            ),
+            "roomId": "room-generation",
+            "roundId": "round-generation",
+            "messageId": "message-generation",
+            "speakerTitle": "A001",
+        }
+    ]
+    draft = meeting_runtime.build_meeting_digest_draft(
+        {
+            "meetingRoundId": "mr-generation",
+            "meetingType": meeting_runtime.CANDIDATE_GENERATION_MEETING_TYPE,
+            "agenda": ["提出候选"],
+            "discussionItemRefs": [],
+            "participants": ["a", "b", "c", "d"],
+            "chatRoomRoundIds": ["round-generation"],
+        },
+        messages,
+    )
+
+    assert len(draft["proposedCandidates"]) == 2
+    assert "候选生成会议 mr-generation" in draft["summary"]
+    assert "围绕 2 个候选" in draft["summary"]
+    assert "0 个入选候选" not in draft["summary"]
 
 
 def test_empty_digest_with_completed_speech_is_blocked() -> None:

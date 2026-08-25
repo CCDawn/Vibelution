@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MeetingDigestDraft } from "../../api/types/hypothesisFirst";
 import { DigestDraftView, MeetingRoundDisplay } from "./meetingRoundDisplay";
 import css from "./meetingRoundDisplay.styles";
+import inspectorCss from "./research-workflow/HypothesisFirstNodeInspector.styles";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -291,7 +292,11 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
               content: "确认：本轮评审输入已闭合。\n**分布/密度组** artifactPath（素数计数数据集） metricValue 与 reproductionCommand。",
             },
           ]}
-          actions={<button type="button">退回重新整理</button>}
+          actions={(
+            <div className={inspectorCss.actions} data-testid="meeting-round-actions">
+              <button type="button">退回重新整理</button>
+            </div>
+          )}
         />,
       );
     });
@@ -304,9 +309,15 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
     expect(digestAt).toBeGreaterThan(-1);
     expect(actionsAt).toBeGreaterThan(digestAt);
     expect(speechesAt).toBeGreaterThan(actionsAt);
-    const actionFooter = rootEl?.querySelector("div.sticky");
-    expect(actionFooter?.className).toContain("bottom-0");
+    const actionFooter = Array.from(rootEl?.children ?? []).find((element) => (
+      String(element.className).includes("border-t")
+    ));
+    expect(actionFooter?.className).not.toContain("sticky");
+    expect(actionFooter?.className).not.toContain("bottom-0");
     expect(actionFooter?.className).toContain("border-t");
+    const actionBar = rootEl?.querySelector('[data-testid="meeting-round-actions"]');
+    expect(actionBar?.className).not.toContain("sticky");
+    expect(actionBar?.className).not.toContain("bottom-0");
     expect(container.querySelector('[data-testid="meeting-source-messages"]')?.getAttribute("open")).toBeNull();
     expect(container.textContent).not.toContain("更早的");
     expect(container.textContent).not.toContain("agent-20260722-220514-082385");

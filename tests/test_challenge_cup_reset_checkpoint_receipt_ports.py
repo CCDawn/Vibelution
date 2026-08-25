@@ -11,7 +11,9 @@ from core.research.workflow.checkpoint_store import (
     CheckpointResetPortError,
     list_checkpoint_thread_ids,
     list_team_scoped_checkpoints,
+    prepare_operator_checkpoint_full_purge,
     prepare_checkpoint_reset_stage,
+    purge_operator_checkpoint_full_purge,
     purge_checkpoint_reset_stage,
     restore_checkpoint_reset_stage,
 )
@@ -147,6 +149,29 @@ def test_checkpoint_reset_rejects_unmapped_or_changed_candidates(tmp_path: Path)
     _checkpoint(path, thread_id="run-a", team_id="research-team", checkpoint_id="ck-new")
     with pytest.raises(CheckpointResetPortError, match="changed after stage"):
         purge_checkpoint_reset_stage(stage, checkpoint_path=path)
+
+
+def test_operator_checkpoint_full_purge_requires_exact_payload_free_preflight(tmp_path: Path) -> None:
+    path = tmp_path / "checkpoints.sqlite"
+    _checkpoint(path, thread_id="orphan-thread", team_id="research-team", checkpoint_id="ck-orphan")
+
+    preflight = prepare_operator_checkpoint_full_purge("reset-full-1", checkpoint_path=path)
+    assert preflight["checkpointCount"] == 1
+    assert preflight["writeCount"] == 0
+    assert preflight["threadCount"] == 1
+    assert "checkpointSha256" not in json.dumps(preflight)
+    assert "ck-orphan" not in json.dumps(preflight)
+
+    purged = purge_operator_checkpoint_full_purge(
+        preflight, checkpoint_path=path, reset_id="reset-full-1"
+    )
+    assert purged["deletedCheckpoints"] == 1
+    assert purged["deletedWrites"] == 0
+    assert list_checkpoint_thread_ids(path) == []
+
+    _checkpoint(path, thread_id="new-thread", team_id="research-team", checkpoint_id="ck-new")
+    with pytest.raises(CheckpointResetPortError, match="changed after full purge preflight"):
+        purge_operator_checkpoint_full_purge(preflight, checkpoint_path=path)
 
 
 def test_receipt_reset_stage_is_scoped_and_restorable(tmp_path: Path, monkeypatch) -> None:

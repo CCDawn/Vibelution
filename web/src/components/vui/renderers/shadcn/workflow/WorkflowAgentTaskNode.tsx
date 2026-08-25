@@ -29,7 +29,8 @@ export function WorkflowAgentTaskNode(props: NodeProps) {
       primaryAgentId={agent || undefined}
       primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
       attempt={attempt}
-      subtitle={layoutMode === "serpentine" ? description || (agent ? "科研 Agent 已绑定" : "等待 Agent 绑定") : agent ? agent : "未绑定"}
+      // stage-columns 模式不再透出原始 agentId（机器标识）；绑定状态用本地化文案表达。
+      subtitle={layoutMode === "serpentine" ? description || (agent ? "科研 Agent 已绑定" : "等待 Agent 绑定") : agent ? "Agent 已绑定" : "未绑定"}
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, primaryAgentId: agent || undefined, attempt })}
       layoutMode={layoutMode}
