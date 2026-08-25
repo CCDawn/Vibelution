@@ -2535,23 +2535,70 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
             stage_started_at = _perf_counter()
-            from core.llm.client import model_invocation_receipt_context_scope
+            from core.llm.client import llm_status_context, model_invocation_receipt_context_scope
 
-            with model_invocation_receipt_context_scope(receipt_context):
-                result = run_existing_agent_single_turn(
-                    agent_runtime,
-                    initial_prompt=prompt,
-                    disable_tools=True,
-                    turn_identity=turn_identity,
-                    interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
-                    chat_history=canonical_chat_history,
+            meeting_outcomes: list[Any] = []
+            llm_response_callback_id = ""
+            if receipt_context is not None:
+                # Formal meeting turns bypass the session UI stream, so nothing
+                # journals their canonical TurnOutcome. Without the journal the
+                # receipt readback below always fails closed; capture the
+                # outcomes here and commit them to the speaker Child Session
+                # ledger before registration, mirroring stream_capture.
+                from core.infrastructure.event_bus import EventNames, get_event_bus
+
+                def _capture_meeting_llm_outcome(event: Any) -> None:
+                    data = getattr(event, "data", None)
+                    outcome = data.get("turn_outcome") if isinstance(data, dict) else None
+                    identity = getattr(outcome, "identity", None)
+                    if (
+                        outcome is not None
+                        and str(getattr(identity, "session_id", "") or "").strip() == session_id
+                        and str(getattr(identity, "turn_id", "") or "").strip() == turn_identity
+                    ):
+                        meeting_outcomes.append(outcome)
+
+                llm_response_callback_id = get_event_bus().subscribe(
+                    EventNames.LLM_RESPONSE,
+                    _capture_meeting_llm_outcome,
+                    callback_id=f"chat_room_meeting_{session_id}_{round_id}_{participant_id}",
                 )
+            try:
+                # The status context is the only meeting-side source for the
+                # invocation session/turn identity; without it the LLM scope
+                # degrades to a synthetic namespace whose outcomes can never
+                # match the speaker Child Session journal.
+                with model_invocation_receipt_context_scope(receipt_context), llm_status_context(
+                    session_id=session_id,
+                    turn_id=turn_identity,
+                ):
+                    result = run_existing_agent_single_turn(
+                        agent_runtime,
+                        initial_prompt=prompt,
+                        disable_tools=True,
+                        turn_identity=turn_identity,
+                        interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                        chat_history=canonical_chat_history,
+                    )
+            finally:
+                if llm_response_callback_id:
+                    from core.infrastructure.event_bus import get_event_bus as _get_event_bus
+
+                    _get_event_bus().unsubscribe_by_id(llm_response_callback_id)
             timings["llmElapsedMs"] = _elapsed_ms(stage_started_at)
             if receipt_context is not None:
+                from core.chat.conversation_ledger import append_conversation_turn_outcome
                 from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
                     register_speaker_receipts,
                 )
 
+                for outcome in meeting_outcomes:
+                    append_conversation_turn_outcome(
+                        PROJECT_ROOT,
+                        session_id,
+                        turn_identity,
+                        outcome,
+                    )
                 register_speaker_receipts(
                     project_root=PROJECT_ROOT,
                     team_id=str(context.get("teamId") or "").strip(),
