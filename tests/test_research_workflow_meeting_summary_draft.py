@@ -387,7 +387,16 @@ def test_approve_review_digest_starts_one_collection(
             },
             agent_runner=_evidence_runner,
         )
-        meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+        # The selection now fans out into one room per candidate. This fixture
+        # asks for evidence about hyp-b, so approve hyp-b's own review rather
+        # than the primary (hyp-a) room.
+        review = next(
+            item
+            for item in recorded["reviewMeeting"]["reviewMeetings"]
+            if "hypothesis_candidate:hyp-b"
+            in list(item["meetingRound"].get("discussionItemRefs") or [])
+        )
+        meeting_id = review["meetingRound"]["meetingRoundId"]
         drafted = meeting_runtime.prepare_meeting_summary_draft(
             team_id, meeting_id, actor=agent_ids[0], force=False
         )
