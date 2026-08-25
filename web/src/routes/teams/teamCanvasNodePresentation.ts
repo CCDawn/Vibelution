@@ -64,9 +64,14 @@ export function canvasNodeAgentLine(
   lang: "zh" | "en",
 ) {
   const name = String(displayName || "").trim()
-    || String(node.agentName || "").trim()
-    || String(node.agentCode || "").trim();
-  return name || canvasNodeStatusLabel(node, lang);
+    || String(node.agentName || "").trim();
+  if (name) return name;
+  const code = String(node.agentCode || "").trim();
+  if (node.agentId && code) {
+    const suffix = code.slice(-4);
+    return lang === "zh" ? `未命名 Agent ${suffix}` : `Unnamed agent ${suffix}`;
+  }
+  return canvasNodeStatusLabel(node, lang);
 }
 
 export type CanvasNodeRoleBadgeStyles = Record<CanvasNodeRoleBadgeKind, string> & {

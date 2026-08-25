@@ -162,6 +162,13 @@ function KindGlyph({
 }
 
 const ROLE_LABELS: Record<string, string> = {
+  challenge_cup_coordinator: "科研协调",
+  challenge_cup_search: "搜索",
+  challenge_cup_extractor: "提炼",
+  challenge_cup_knowledge_manager: "知识管理",
+  challenge_cup_execution_steward: "执行",
+  challenge_cup_experiment_revision: "实验修订",
+  challenge_cup_evaluator: "评估",
   source_finder: "资料搜集",
   source_extractor: "证据提炼",
   source_relation_mapper: "证据关系",

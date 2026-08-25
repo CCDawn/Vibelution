@@ -78,7 +78,7 @@ export type VCanvasWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">
 };
 
 const RESPONSIVE_CONTROLS_CLASS =
-  "flex min-w-0 shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5 min-[1280px]:hidden";
+  "relative z-30 flex min-w-0 shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5 min-[1280px]:hidden";
 
 function viewportMode(): VCanvasWorkbenchResponsiveMode {
   if (typeof window === "undefined") return "wide";
