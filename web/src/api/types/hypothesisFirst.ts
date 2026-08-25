@@ -443,6 +443,350 @@ export type HypothesisFirstChainState = {
   generationMeetingStatus?: string;
 };
 
+// ---------------------------------------------------------------------------
+// Canonical workflow state V2
+// ---------------------------------------------------------------------------
+
+export type WorkflowLifecycle =
+  | "not_started"
+  | "queued"
+  | "running"
+  | "waiting_human"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "superseded";
+
+export type WorkflowOutcome =
+  | "none"
+  | "succeeded"
+  | "empty"
+  | "partial"
+  | "rejected"
+  | "exhausted";
+
+export type WorkflowActionability =
+  | "idle"
+  | "available"
+  | "executing"
+  | "waiting_user"
+  | "waiting_system"
+  | "blocked"
+  | "terminal";
+
+export type HypothesisFirstPhase =
+  | "generation"
+  | "selection"
+  | "review"
+  | "collection"
+  | "convergence"
+  | "formal_runtime"
+  | "program_delivery"
+  | "completed";
+
+export type WorkflowProblem = {
+  code: string;
+  category: "validation" | "execution" | "integrity" | "dependency" | "stale";
+  severity: "info" | "warning" | "error" | "fatal";
+  message: string;
+  recoverable: boolean;
+  sourceKind: string;
+  sourceId: string | null;
+  detectedAt: string;
+};
+
+export type WorkflowAttempt = {
+  attemptId: string;
+  number: number;
+  lifecycle: WorkflowLifecycle;
+  queuedAt: string | null;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+  finishedAt: string | null;
+  supersedesAttemptId: string | null;
+};
+
+export type PhaseState = {
+  lifecycle: WorkflowLifecycle;
+  outcome: WorkflowOutcome;
+  actionability: WorkflowActionability;
+  attempt: WorkflowAttempt | null;
+  updatedAt: string | null;
+  problems: WorkflowProblem[];
+};
+
+export type ActionCommand =
+  | "open_generation"
+  | "retry_generation"
+  | "record_selection"
+  | "retry_review_dispatch"
+  | "resume_discussion"
+  | "stop_discussion"
+  | "regenerate_summary"
+  | "approve_summary"
+  | "retry_collection"
+  | "continue_collection"
+  | "handoff_collection"
+  | "human_adjudication"
+  | "create_formal_run"
+  | "reconcile_formal_run"
+  | "retry_program_handoff"
+  | "record_program_review"
+  | "create_formal_revision";
+
+export type ActionPayloadByCommand = {
+  open_generation: { questionId: string };
+  retry_generation: { questionId: string; previousAttemptId: string };
+  record_selection: { questionId: string; generationAttemptId: string };
+  retry_review_dispatch: { selectionId: string; candidateIds: string[] };
+  resume_discussion: { meetingRoundId: string };
+  stop_discussion: { meetingRoundId: string };
+  regenerate_summary: { meetingRoundId: string };
+  approve_summary: { meetingRoundId: string };
+  retry_collection: { requestId: string; childRunId: string | null };
+  continue_collection: { requestId: string; childRunId: string };
+  handoff_collection: { requestId: string; childRunId: string };
+  human_adjudication: { hypothesisRoundId: string };
+  create_formal_run: { questionId: string; hypothesisRoundId: string };
+  reconcile_formal_run: { runId: string };
+  retry_program_handoff: { runId: string; deliveryArtifactRef: string | null };
+  record_program_review: { questionId: string; outputRunId: string };
+  create_formal_revision: { runId: string; outputRecordId: string };
+};
+
+export type ProgramHumanGateKey =
+  | "H1_problem_understanding"
+  | "H2_hypothesis_selection"
+  | "H3_research_plan"
+  | "H4_external_output";
+
+export type ProgramHumanGateDecision =
+  | "pending"
+  | "approved"
+  | "revision_requested"
+  | "rejected";
+
+export type ActionInputByCommand = {
+  record_selection: { candidateIds: string[] };
+  approve_summary: { decision: "accepted" | "rejected" | "revised" };
+  human_adjudication: { decision: string; rationale: string };
+  record_program_review: {
+    reviewer: string;
+    rationale: string;
+    decisions: Record<
+      ProgramHumanGateKey,
+      Exclude<ProgramHumanGateDecision, "pending">
+    >;
+  };
+};
+
+export type ActionCommon = {
+  actionId: string;
+  label: string;
+  enabled: boolean;
+  disabledReason: string | null;
+  targetPhase: HypothesisFirstPhase;
+  targetNodeId: string | null;
+};
+
+export type CommandAction = {
+  [C in ActionCommand]: ActionCommon & {
+    kind: "command";
+    command: C;
+    payload: ActionPayloadByCommand[C];
+    inputSchemaRef: string | null;
+    idempotencyKey: string;
+    expectedStateVersion: string;
+    requiresConfirmation: boolean;
+    confirmationText: string | null;
+  };
+}[ActionCommand];
+
+export type WorkflowNavigationAnchor = {
+  status: "ready" | "degraded";
+  degradedReason: string | null;
+  roomId: string | null;
+  meetingRoundId: string | null;
+  questionId: string;
+  selectionId: string | null;
+  candidateId: string | null;
+  deepLink: string | null;
+  returnTo: string;
+  returnLabel: string;
+};
+
+export type NavigationAction = ActionCommon & {
+  kind: "navigation";
+  navigation: WorkflowNavigationAnchor;
+};
+
+export type AllowedAction = CommandAction | NavigationAction;
+
+export type CommandRequest<C extends ActionCommand> = {
+  actionId: string;
+  idempotencyKey: string;
+  expectedStateVersion: string;
+  payload: ActionPayloadByCommand[C];
+} & (C extends keyof ActionInputByCommand
+  ? { input: ActionInputByCommand[C] }
+  : { input?: never });
+
+export type ReviewCandidateState = PhaseState & {
+  candidateId: string;
+  candidateOrder: number;
+  selectionId: string;
+  roundIndex: number;
+  meetingRoundId: string | null;
+  discussionAnchor: WorkflowNavigationAnchor | null;
+  discussion: PhaseState;
+  summarization: PhaseState;
+  approval: PhaseState;
+};
+
+export type CollectionSourceState = PhaseState & {
+  sourceId: string;
+  label: string;
+  itemCount: number;
+  error: WorkflowProblem | null;
+};
+
+export type CollectionRequestState = PhaseState & {
+  requestId: string;
+  queryCount: number;
+  childRun: PhaseState & { runId: string | null };
+  sources: CollectionSourceState[];
+  handoff: PhaseState & {
+    handoffId: string | null;
+    targetRoundIndex: number | null;
+  };
+};
+
+export type FormalRunViewStatus =
+  | "queued"
+  | "running"
+  | "waiting_human"
+  | "blocked"
+  | "reconciliation_required"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "archived";
+
+export type FormalRunLineageDisposition =
+  | "current"
+  | "branched_parent"
+  | "historical"
+  | "conflicted";
+
+export type ProgramDeliveryStatus =
+  | "not_started"
+  | "queued"
+  | "running"
+  | "blocked"
+  | "succeeded"
+  | "failed";
+
+export type ProgramCandidateHandoffStatus =
+  | "not_started"
+  | "needs_context"
+  | "registered"
+  | "idempotent"
+  | "failed";
+
+export type ProgramHumanReviewStatus =
+  | "not_started"
+  | "waiting_human"
+  | "revision_requested"
+  | "rejected"
+  | "approved";
+
+export type ProgramHumanGateState = {
+  decisions: Record<ProgramHumanGateKey, ProgramHumanGateDecision>;
+  reviewer: string | null;
+  rationale: string | null;
+  decidedAt: string | null;
+};
+
+export type HypothesisFirstStateV2 = {
+  schemaVersion: 2;
+  contract: "hypothesis-first-state/v2";
+  teamId: string;
+  questionId: string;
+  stateVersion: string;
+  representationVersion: string;
+  computedAt: string;
+  scope: {
+    questionInOfficialCatalog: true;
+    catalogId: string;
+    catalogSha256: string;
+  };
+  resetBoundary: {
+    resetId: string;
+    resetAt: string | null;
+    source: "question_reset_audit" | "origin";
+  };
+  isInitial: boolean;
+  currentPhase: HypothesisFirstPhase;
+  overall: PhaseState;
+  generation: PhaseState & {
+    generationMeetingId: string | null;
+    candidateCount: number;
+    candidateIds: string[];
+  };
+  selection: PhaseState & {
+    selectionId: string | null;
+    selectedCandidateIds: string[];
+  };
+  review: PhaseState & {
+    activeRoundIndex: number | null;
+    aggregate: StateAggregate;
+    candidates: ReviewCandidateState[];
+  };
+  collection: PhaseState & {
+    aggregate: StateAggregate;
+    requests: CollectionRequestState[];
+  };
+  convergence: PhaseState & {
+    latestHypothesisRoundId: string | null;
+    accepted: boolean;
+    roundIndex: number;
+    roundBudget: number;
+  };
+  formalRuntime: PhaseState & {
+    runId: string | null;
+    runVersion: number | null;
+    runStatus: FormalRunViewStatus | null;
+    completionKind: string | null;
+    lineageDisposition: FormalRunLineageDisposition | null;
+    isCurrentRevision: boolean;
+    parentRunId: string | null;
+    childRunIds: string[];
+    currentNodeIds: string[];
+  };
+  programDelivery: PhaseState & {
+    deliveryStatus: ProgramDeliveryStatus;
+    deliveryArtifactRef: string | null;
+    handoffStatus: ProgramCandidateHandoffStatus;
+    outputRecordId: string | null;
+    outputRunId: string | null;
+    humanReviewStatus: ProgramHumanReviewStatus;
+    humanGates: ProgramHumanGateState;
+    approvedGateCount: number;
+    requiredGateCount: 4;
+  };
+  allowedActions: AllowedAction[];
+  problems: WorkflowProblem[];
+  sourceCursor?: Record<string, string>;
+};
+
+export type StateAggregate = {
+  total: number;
+  completed: number;
+  pending: number;
+  failed: number;
+  blocked: number;
+};
+
 export type CollectionRequestListResponse = {
   schemaVersion: number;
   teamId: string;
