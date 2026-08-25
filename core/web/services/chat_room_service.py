@@ -1083,6 +1083,18 @@ def start_chat_room_round(
         if isinstance(_model_invocation_receipt_authority, Mapping)
         else None
     )
+    if receipt_authority is None and _is_scoped_discussion_room(existing_room):
+        # A workflow-scoped meeting room only exists for formal hypothesis
+        # stages; its speaker turns must stay receipt-bound. Failing closed
+        # here keeps every driving path (reopen, direct round API, scheduler)
+        # from landing unverified formal content.
+        raise ChatRoomValidationError(
+            text_for(
+                lang,
+                zh="该群聊绑定正式工作流阶段，必须携带模型调用回执授权才能发起轮次。",
+                en="This room is bound to a formal workflow stage; rounds require model invocation receipt authority.",
+            )
+        )
     if background and not _try_acquire_chat_room_inflight():
         # Reject before any durable round write so the room stays clean.
         raise ChatRoomBusyError(

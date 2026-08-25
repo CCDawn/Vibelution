@@ -54,6 +54,40 @@ def _receipt(kind: str) -> dict:
     ).to_dict()
 
 
+def test_receipt_store_survives_windows_max_path_overflow(tmp_path, monkeypatch) -> None:
+    # Real deployments nest the store under a long AppData workspace root; the
+    # final `<sha256>/<sha256>.json` file then crosses the legacy MAX_PATH
+    # boundary and os.replace fails with WinError 3 unless the path is
+    # normalized to the extended-length form.
+    deep_root = tmp_path
+    for index in range(4):
+        deep_root = deep_root / (f"very-long-team-segment-{index}-" + "x" * 40)
+    monkeypatch.setattr(registry, "resolve_team_program_root", lambda _team_id: deep_root)
+    receipts = [_receipt(kind) for kind in ("candidate", "review")]
+
+    refs = registry.register_question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-096",
+        receipts=receipts,
+    )
+    replayed = registry.register_question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-096",
+        receipts=receipts,
+    )
+
+    assert replayed == refs
+    store_path = registry._io_path(registry._path("research-team", "SCI-096", "run-096"))
+    assert len(str(store_path)) > 260 or store_path.exists()
+    payload = json.loads(store_path.read_text(encoding="utf-8"))
+    assert [item["receiptId"] for item in payload["receipts"]] == [
+        "receipt-candidate",
+        "receipt-review",
+    ]
+
+
 def test_full_trace_is_idempotent_and_immutable_projection_detects_tamper(
     tmp_path, monkeypatch
 ) -> None:
