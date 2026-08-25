@@ -12,13 +12,14 @@ import argparse
 import copy
 import fnmatch
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MATRIX = Path(__file__).with_name("test_matrix.yaml")
+MAX_SELECTED_PYTEST_WORKERS = 4
 LOCAL_PARALLEL_COMMAND = (
     '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q'
 )
@@ -249,6 +250,31 @@ def _dedupe_commands(commands: list[str]) -> list[str]:
     return deduped
 
 
+def _parallelize_pytest_command(command: str) -> str:
+    if " -m pytest " not in command:
+        return command
+    if re.search(r"(?:^|\s)(?:-n|--numprocesses)(?:\s|=)", command):
+        return command
+    pytest_arguments = command.split(" -m pytest ", 1)[1].split()
+    test_files: set[str] = set()
+    for token in pytest_arguments:
+        normalized = token.strip("'\"").replace("\\", "/")
+        if normalized.startswith("tests/") and normalized.lower().endswith(".py"):
+            test_files.add(normalized)
+    workers = min(MAX_SELECTED_PYTEST_WORKERS, len(test_files))
+    if workers < 2:
+        return command
+    return f'{command} -n {workers} --dist loadfile -m "not serial"'
+
+
+def _rule_commands(rule: dict[str, Any]) -> list[str]:
+    commands = [str(command) for command in rule.get("commands", [])]
+    layers = _execution_layers(rule, ["focused"])
+    if "local-parallel" not in layers or "local-serial" in layers:
+        return commands
+    return [_parallelize_pytest_command(command) for command in commands]
+
+
 def _execution_layers(source: dict[str, Any], fallback: list[str]) -> list[str]:
     raw_layers = source.get("executionLayers", fallback)
     if isinstance(raw_layers, list):
@@ -366,7 +392,7 @@ def select_tests(
             "matchedFiles": matched_files,
         }
         matched_rules.append(matched_rule)
-        commands.extend(str(command) for command in rule.get("commands", []))
+        commands.extend(_rule_commands(rule))
         notes.extend(str(note) for note in rule.get("notes", []))
         validation_layers.extend(_execution_layers(rule, ["focused"]))
 

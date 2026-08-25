@@ -434,6 +434,68 @@ def test_selector_recommends_remote_distributed_only_for_parallel_safe_python_ru
     assert result["executionPlan"]["localSerial"]["required"] is False
 
 
+def test_selector_executes_pure_local_parallel_pytest_rules_with_xdist():
+    result = select_tests.select_tests(
+        ["core/web/services/agent_directory_service.py"],
+        select_tests.load_matrix(),
+    )
+
+    pytest_commands = [
+        command for command in result["commands"] if " -m pytest " in command
+    ]
+    assert len(pytest_commands) == 1
+    assert "-n 4 --dist loadfile" in pytest_commands[0]
+    assert '-m "not serial"' in pytest_commands[0]
+
+
+def test_selector_keeps_mixed_serial_parallel_rules_serial():
+    result = select_tests.select_tests(
+        ["config/model_catalog.py"],
+        select_tests.load_matrix(),
+    )
+
+    pytest_commands = [
+        command for command in result["commands"] if " -m pytest " in command
+    ]
+    assert pytest_commands
+    assert all(" -n " not in command for command in pytest_commands)
+
+
+def test_selector_does_not_duplicate_existing_xdist_arguments():
+    result = select_tests.select_tests(
+        ["core/web/services/team_workflow/command_service.py"],
+        select_tests.load_matrix(),
+    )
+
+    pytest_commands = [
+        command for command in result["commands"] if " -m pytest " in command
+    ]
+    assert len(pytest_commands) == 2
+    assert all(command.count(" -n ") == 1 for command in pytest_commands)
+    assert all(command.count(" --dist ") == 1 for command in pytest_commands)
+
+
+def test_selector_bounds_workers_by_test_files_and_keeps_single_file_serial():
+    result = select_tests.select_tests(
+        ["scripts/remote_test_runner.py"],
+        select_tests.load_matrix(),
+    )
+
+    pytest_commands = [
+        command for command in result["commands"] if " -m pytest " in command
+    ]
+    two_file_command = next(
+        command for command in pytest_commands if "tests/test_runner.py" in command
+    )
+    single_file_command = next(
+        command
+        for command in pytest_commands
+        if "tests/test_remote_test_runner.py" in command
+    )
+    assert "-n 2 --dist loadfile" in two_file_command
+    assert " -n " not in single_file_command
+
+
 def test_selector_keeps_frontend_validation_separate_from_remote_distributed():
     result = select_tests.select_tests(
         ["web/src/app/router.tsx"],

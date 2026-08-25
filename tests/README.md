@@ -95,8 +95,8 @@ python tests/select_tests.py --from-git main --commands-only
 
 推荐顺序：
 
-1. 先跑 selector 输出的 focused 命令；小改动不要因为迭代次数多而重复跑无关重量测试。
-2. 如果输出 `local-parallel`，再跑本地 `pytest-xdist` 的 `not serial` 并发层。
+1. 先跑 selector 输出的 focused 命令；纯 `local-parallel` 规则中包含至少两个测试文件的 pytest 命令会自动带 `--dist loadfile -m "not serial"`，worker 数不超过文件数且最多为 4；单文件命令保持串行。小改动不要因为迭代次数多而重复跑无关重量测试。
+2. 如果输出 `local-parallel` 且需要扩大到 Python 全量回归，再跑本地 `pytest-xdist` 的完整 `not serial` 并发层。
 3. 如果输出 `local-serial`，必须在本机串行补跑对应 Launcher、端口、真实进程、Git、config 或共享 workspace 测试。
 4. 如果输出 `remote-distributed`，可以用服务器/Docker 分片加速 Python `not serial` 回归，但它不是完整 gate。
 5. 如果输出 `frontend`，必须单独跑对应 Vitest/typecheck/build；Python 本地或远端测试都不能替代前端验证。普通 Web TS/TSX 使用增量 typecheck 和 changed-file Vitest；只有依赖、编译器、bundler、入口或静态资源等构建输入变化时才跑全量 Vitest + build。
@@ -162,7 +162,7 @@ python tests/test_runner.py --per-file
 
 ### 3.4 进程级并行策略
 
-Vibelution 支持通过 `pytest-xdist` 做进程级并行，但默认测试命令仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行。
+Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 和 `test_runner.py` 的默认入口仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行；影响面 selector 对只标记 `local-parallel` 的规则会自动输出 4-worker 并行命令，同时含 `local-serial` 的规则保持串行。
 
 推荐入口：
 
@@ -189,7 +189,7 @@ python tests/test_runner.py --hybrid --workers 4
 
 ### 3.5 使用影响面测试选择器
 
-`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它只做选择和解释，不自动执行命令，也不改变默认 pytest 串行策略。
+`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，会把包含至少两个显式测试文件且尚未配置 xdist 的 pytest 命令改写为最多 4-worker 的 `loadfile` 并行执行，单文件、非 pytest 命令和已有 xdist 参数保持不变。
 
 选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。
 
@@ -207,7 +207,7 @@ python tests/select_tests.py --from-git main --commands-only
 使用原则：
 
 - 先运行 selector 给出的聚焦命令，再按风险扩大到相关文件或全量回归。
-- `validationLayers` 是验证边界提示：`local-parallel` 可并发，`local-serial` 必须本地串行，`remote-distributed` 只是服务器加速，`frontend` 必须单独跑前端测试、typecheck 或构建。
+- `validationLayers` 是验证边界和执行策略：纯 `local-parallel` 的 focused pytest 自动并发，`local-serial` 必须本地串行，`remote-distributed` 只是服务器加速，`frontend` 必须单独跑前端测试、typecheck 或构建。
 - selector 输出的是建议，不替代工程判断；涉及 Launcher、真实进程、外部 config、Git 副作用或共享 workspace 的测试仍按 `serial` 边界处理。
 - 没有规则命中时，默认只输出轻量 runner smoke 和 `git diff --check`；需要了解收集问题时再对明确的测试目标执行 `collect-only`，不把全树收集作为日常门。
 - 新增高频模块或拆分测试文件后，同步补充 `tests/test_matrix.yaml` 和 `tests/test_select_tests.py`。
