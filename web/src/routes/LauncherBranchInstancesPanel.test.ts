@@ -190,9 +190,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("GitBranch");
   });
 
-  it("keeps maintenance cleanup and batch stop/close surfaces intact", () => {
-    expect(panelSource).toContain("<details");
-    expect(panelSource).toContain("维护与清理");
+  it("keeps integrated cleanup and batch stop/close surfaces intact", () => {
+    expect(panelSource).not.toContain("maintenanceFold");
+    expect(panelSource).not.toContain("maintenanceBody");
+    expect(panelSource).not.toContain("维护与清理");
     expect(panelSource).toContain("<VCheckbox");
     expect(panelSource).toContain("<VConfirmDialog");
     expect(panelSource).toContain("askCleanup");
@@ -210,15 +211,13 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("waitingCleanupConfirmMetadata");
   });
 
-  it("bounds expanded maintenance cleanup without collapsing the primary branch table", () => {
-    expect(panelStyles.maintenanceFold).toContain("max-h-[min(42%,22rem)]");
-    expect(panelStyles.maintenanceFold).toContain("[&[open]]:flex");
-    expect(panelStyles.maintenanceFold).toContain("[&[open]]:flex-col");
-    expect(panelStyles.maintenanceBody).toContain("min-h-0");
-    expect(panelStyles.maintenanceBody).toContain("flex-1");
-    expect(panelStyles.maintenanceBody).toContain("overflow-y-auto");
-    expect(panelStyles.maintenanceBody).toContain("overscroll-contain");
-    expect(panelStyles.maintenanceBody).toContain("[scrollbar-gutter:stable]");
+  it("folds cleanup into the all-tab table so the full list owns maintenance", () => {
+    expect(panelSource).toContain("...grouped.maintenance]");
+    expect(panelSource).toContain('activeTab === "all" ? [selectColumn, ...primaryColumns] : primaryColumns');
+    expect(panelSource).toContain("isCleanupEligible(item) ? (");
+    expect(panelSource).toContain("labels.cleanupSelected");
+    expect(panelSource).toContain("pageEligible = pagedAll.items.filter(isCleanupEligible)");
+    expect(panelStyles.selectCell).toContain("w-9");
   });
 
   it("overlays cleanup metadata onto fast list rows by id", () => {

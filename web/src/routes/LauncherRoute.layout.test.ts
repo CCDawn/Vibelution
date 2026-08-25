@@ -244,7 +244,7 @@ describe("LauncherRoute layout contract", () => {
     expect(branchInstancesPanelSource).toContain("isDisabled={lifecyclePending}");
     const forceStopStart = branchInstancesPanelSource.indexOf("{showForceStop ? (");
     expect(forceStopStart).toBeGreaterThanOrEqual(0);
-    const forceStopEnd = branchInstancesPanelSource.indexOf("</VActionGroup>", forceStopStart);
+    const forceStopEnd = branchInstancesPanelSource.indexOf('onPress={() => onLifecycle?.(item.id, "force-stop")}', forceStopStart);
     expect(forceStopEnd).toBeGreaterThan(forceStopStart);
     expect(branchInstancesPanelSource.slice(forceStopStart, forceStopEnd)).not.toContain("stopBusy");
   });
