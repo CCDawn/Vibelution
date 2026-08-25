@@ -60,8 +60,7 @@ def test_dispatch_mismatch_writes_blocked_event_and_run_status(tmp_path: Path) -
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         harness.enqueue_graph_dispatch("run-test", "source_extraction", 1)
         harness.worker.run_once()
 
@@ -96,8 +95,7 @@ def test_retry_advances_lagging_source_finding_checkpoint(tmp_path: Path) -> Non
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
@@ -196,8 +194,7 @@ def test_retry_advances_multi_hop_lagging_checkpoint(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -303,8 +300,7 @@ def test_succeeded_interrupt_redispatch_does_not_rewind_attempt(tmp_path: Path) 
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -358,8 +354,7 @@ def test_retry_does_not_empty_ack_when_active_node_id_is_ahead(tmp_path: Path) -
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -510,8 +505,7 @@ def test_empty_runid_interrupt_advances_without_handoff(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -551,8 +545,7 @@ def test_empty_runid_interrupt_walks_to_controlled_run(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -590,8 +583,7 @@ def test_real_runid_finding_interrupt_walks_to_controlled_run(tmp_path: Path) ->
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -656,8 +648,7 @@ def test_goto_split_finding_interrupt_walks_to_controlled_run(tmp_path: Path) ->
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
@@ -701,15 +692,15 @@ def test_pump_repairs_starting_attempt_missing_graph_dispatch(tmp_path: Path) ->
                 build_command_record(
                     command_id="cmd-starting-orphan",
                     run_id="run-test",
-                    node_id="source_finding",
+                    node_id="problem_understanding",
                     idempotency_key="seed-starting-orphan",
                 )
             )
             uow.repository.insert_attempt(
                 build_attempt_record(
-                    node_run_id="nr-run-test-source_finding-a1",
+                    node_run_id="nr-run-test-problem_understanding-a1",
                     run_id="run-test",
-                    node_id="source_finding",
+                    node_id="problem_understanding",
                     attempt=1,
                     status="starting",
                     command_id="cmd-starting-orphan",
@@ -719,7 +710,9 @@ def test_pump_repairs_starting_attempt_missing_graph_dispatch(tmp_path: Path) ->
         harness.commands.store.submit(seed_starting, force_flush=True).result(timeout=10)
         harness.worker.run_once()
         harness.worker.run_once()
-        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        finding = harness.commands.store.latest_attempt(
+            "run-test", "problem_understanding"
+        )
         assert finding is not None
         assert finding.status == "dispatching"
         pending = harness.latest_adapter_pending()
@@ -734,8 +727,7 @@ def test_half_advanced_resumes_when_checkpoint_still_at_predecessor(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]

@@ -28,7 +28,12 @@ function meeting(id: string, startedAt: string): MeetingRoundRecord {
   };
 }
 
-function link(id: string, roundIndex: number): ReviewRoundLinkRecord {
+function link(
+  id: string,
+  roundIndex: number,
+  candidateId = `cand-${id}`,
+  candidateOrder?: number,
+): ReviewRoundLinkRecord {
   return {
     schemaVersion: 1,
     recordKind: "hypothesis_first_review_round_link",
@@ -39,6 +44,8 @@ function link(id: string, roundIndex: number): ReviewRoundLinkRecord {
     collectionRequestId: "",
     questionId: "SCI-001",
     roundIndex,
+    candidateId,
+    candidateOrder,
     createdAt: `2026-08-20T0${roundIndex}:00:01Z`,
   };
 }
@@ -55,23 +62,45 @@ describe("buildHypothesisFirstReviewProjection", () => {
     );
 
     expect(projection.rounds.map((round) => round.nodeId)).toEqual([
-      "hf_meeting_1",
-      "hf_meeting_3",
-      "hf_meeting_5",
+      "hf_meeting_1_cand-r1",
+      "hf_meeting_3_cand-r3",
+      "hf_meeting_5_cand-r5",
     ]);
     expect(currentProjectedReview(projection)?.meeting.meetingRoundId).toBe("r5");
-    expect(projection.byNodeId.get("hf_meeting_5")?.meeting.meetingRoundId).toBe("r5");
+    expect(projection.byNodeId.get("hf_meeting_5_cand-r5")?.meeting.meetingRoundId).toBe("r5");
     expect(projection.unresolvedMeetingIds).toEqual([]);
   });
 
-  it("fails closed when two meetings claim the same node", () => {
+  it("keeps two candidates in the same round with stable distinct node ids", () => {
     const projection = buildHypothesisFirstReviewProjection(
       [meeting("r5-a", "2026-08-20T05:00:00Z"), meeting("r5-b", "2026-08-20T05:01:00Z")],
-      [link("r5-a", 5), link("r5-b", 5)],
+      [link("r5-a", 5, "cand-a", 1), link("r5-b", 5, "cand-b", 0)],
     );
 
-    expect(projection.byNodeId.has("hf_meeting_5")).toBe(false);
-    expect(projection.unresolvedMeetingIds).toEqual(["r5-a", "r5-b"]);
+    expect(projection.rounds.map((round) => round.nodeId)).toEqual([
+      "hf_meeting_5_cand-b",
+      "hf_meeting_5_cand-a",
+    ]);
+    expect(projection.rounds.map((round) => round.candidateOrder)).toEqual([0, 1]);
+    expect(projection.byNodeId.get("hf_meeting_5_cand-a")?.meeting.meetingRoundId).toBe("r5-a");
+    expect(projection.byNodeId.get("hf_meeting_5_cand-b")?.meeting.meetingRoundId).toBe("r5-b");
+    expect(projection.unresolvedMeetingIds).toEqual([]);
+  });
+
+  it("fails closed when a candidate is missing or duplicated within a selection round", () => {
+    const missingCandidate = buildHypothesisFirstReviewProjection(
+      [meeting("r5", "2026-08-20T05:00:00Z")],
+      [{ ...link("r5", 5), candidateId: "" }],
+    );
+    expect(missingCandidate.rounds).toEqual([]);
+    expect(missingCandidate.unresolvedMeetingIds).toEqual(["r5"]);
+
+    const duplicateCandidate = buildHypothesisFirstReviewProjection(
+      [meeting("r5-a", "2026-08-20T05:00:00Z"), meeting("r5-b", "2026-08-20T05:01:00Z")],
+      [link("r5-a", 5, "cand-a"), link("r5-b", 5, "cand-a")],
+    );
+    expect(duplicateCandidate.rounds).toEqual([]);
+    expect(duplicateCandidate.unresolvedMeetingIds).toEqual(["r5-a", "r5-b"]);
   });
 
   it("fails closed when one meeting has duplicate lineage links", () => {
@@ -103,7 +132,7 @@ describe("buildHypothesisFirstReviewProjection", () => {
       "current-r1",
       "current-r2",
     ]);
-    expect(projection.byNodeId.has("hf_meeting_9")).toBe(false);
+    expect(projection.byNodeId.has("hf_meeting_9_cand-old-r9")).toBe(false);
     expect(projection.unresolvedMeetingIds).toEqual([]);
   });
 });

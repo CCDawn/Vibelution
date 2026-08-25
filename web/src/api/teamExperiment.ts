@@ -6,6 +6,13 @@ import type {
   ChallengeCupDevControlSnapshot,
   ChallengeCupDevReadinessRunRequest,
   ChallengeCupDevReadinessRunResponse,
+  ChallengeCupRealBatchAuthorization,
+  ChallengeCupRealBatchCancelRequest,
+  ChallengeCupRealBatchPlanId,
+  ChallengeCupRealBatchPollResponse,
+  ChallengeCupRealBatchProjection,
+  ChallengeCupRealBatchStartRequest,
+  ChallengeCupRealBatchStartResponse,
   ChallengeCupTokenUsage,
   ChallengeCatalogReadiness,
 } from "./types/challengeCup";
@@ -414,5 +421,64 @@ export function runChallengeCupDevBatch(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     },
+  );
+}
+
+function challengeCupRealBatchPath(teamId: string, planId: ChallengeCupRealBatchPlanId): string {
+  return `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/real-batches/${encodeURIComponent(planId)}`;
+}
+
+export function fetchChallengeCupRealBatchStatus(
+  teamId: string,
+  planId: ChallengeCupRealBatchPlanId,
+  options?: { signal?: AbortSignal },
+): Promise<ChallengeCupRealBatchProjection> {
+  return fetchJson<ChallengeCupRealBatchProjection>(challengeCupRealBatchPath(teamId, planId), {
+    signal: options?.signal,
+  });
+}
+
+export function authorizeChallengeCupRealBatch(
+  teamId: string,
+  planId: ChallengeCupRealBatchPlanId,
+): Promise<ChallengeCupRealBatchAuthorization> {
+  return writeJson<ChallengeCupRealBatchAuthorization>(
+    `${challengeCupRealBatchPath(teamId, planId)}/authorize`,
+    "POST",
+    {},
+  );
+}
+
+export function startChallengeCupRealBatch(
+  teamId: string,
+  planId: ChallengeCupRealBatchPlanId,
+  request: ChallengeCupRealBatchStartRequest,
+): Promise<ChallengeCupRealBatchStartResponse> {
+  return writeJson<ChallengeCupRealBatchStartResponse>(
+    `${challengeCupRealBatchPath(teamId, planId)}/start`,
+    "POST",
+    request,
+  );
+}
+
+export function pollChallengeCupRealBatch(
+  teamId: string,
+  planId: ChallengeCupRealBatchPlanId,
+): Promise<ChallengeCupRealBatchPollResponse> {
+  return writeJson<ChallengeCupRealBatchPollResponse>(
+    `${challengeCupRealBatchPath(teamId, planId)}/poll`,
+    "POST",
+  );
+}
+
+export function cancelChallengeCupRealBatch(
+  teamId: string,
+  planId: ChallengeCupRealBatchPlanId,
+  request: ChallengeCupRealBatchCancelRequest,
+): Promise<ChallengeCupRealBatchProjection> {
+  return writeJson<ChallengeCupRealBatchProjection>(
+    `${challengeCupRealBatchPath(teamId, planId)}/cancel`,
+    "POST",
+    request,
   );
 }

@@ -20,23 +20,15 @@ from ._validation import (
     require_int,
     require_list,
     require_mapping,
-    require_score,
     require_text,
 )
+from .hypothesis_quality import normalize_hypothesis_scores
 
 # Adding the v2 hypothesis semantics is a breaking contract change: old
 # fragments do not contain the required novelty/boundary facts and therefore
 # must not be replayed as formal Challenge Cup evidence.
 HYPOTHESIS_FRAGMENT_SCHEMA_VERSION = 2
 HYPOTHESIS_FRAGMENT_KIND = "hypothesis_fragment"
-
-_PORTFOLIO_SCORE_KEYS = (
-    "novelty",
-    "competitionFit",
-    "falsifiability",
-    "evidenceSupport",
-    "feasibility",
-)
 
 
 def _string_list(
@@ -51,9 +43,7 @@ def _string_list(
     return result
 
 
-def _aliased_value(
-    payload: Mapping[str, Any], canonical: str, *aliases: str
-) -> Any:
+def _aliased_value(payload: Mapping[str, Any], canonical: str, *aliases: str) -> Any:
     """Return one canonical field while rejecting conflicting aliases."""
 
     keys = (canonical, *aliases)
@@ -69,9 +59,7 @@ def _aliased_value(
     return first_value
 
 
-def _aliased_text(
-    payload: Mapping[str, Any], canonical: str, *aliases: str
-) -> str:
+def _aliased_text(payload: Mapping[str, Any], canonical: str, *aliases: str) -> str:
     value = _aliased_value(payload, canonical, *aliases)
     normalized = str(value or "").strip()
     if not normalized:
@@ -137,15 +125,12 @@ class HypothesisFragment:
             )
         kind = require_text(payload, "kind")
         if kind != HYPOTHESIS_FRAGMENT_KIND:
-            raise ContractValidationError(
-                f"kind must be {HYPOTHESIS_FRAGMENT_KIND}"
-            )
+            raise ContractValidationError(f"kind must be {HYPOTHESIS_FRAGMENT_KIND}")
         raw_scores = require_mapping(payload, "scores")
-        missing_scores = [key for key in _PORTFOLIO_SCORE_KEYS if key not in raw_scores]
-        if missing_scores:
-            raise ContractValidationError(
-                "missing hypothesis fragment scores: " + ", ".join(missing_scores)
-            )
+        scores, _diagnostics = normalize_hypothesis_scores(
+            raw_scores,
+            allow_legacy_auxiliary_scores=False,
+        )
         fragment = cls(
             schemaVersion=schema_version,
             kind=kind,
@@ -170,13 +155,12 @@ class HypothesisFragment:
             boundary_conditions=_aliased_string_list(
                 payload, "boundary_conditions", "boundaryConditions"
             ),
-            scores={
-                key: require_score(raw_scores[key], f"scores.{key}")
-                for key in _PORTFOLIO_SCORE_KEYS
-            },
+            scores=scores,
             contentHash=require_text(payload, "contentHash").lower(),
         )
-        expected_hash = sha256_hex(_content_payload(fragment.to_dict(include_hash=False)))
+        expected_hash = sha256_hex(
+            _content_payload(fragment.to_dict(include_hash=False))
+        )
         if fragment.contentHash != expected_hash:
             raise ContractValidationError(
                 "contentHash does not match the hypothesis fragment content"
@@ -236,6 +220,7 @@ class HypothesisFragment:
             scores=copy.deepcopy(self.scores),
             contentHash=content_hash,
         )
+
 
 def canonical_fragment_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize a raw fragment and return a hash-bound canonical payload."""

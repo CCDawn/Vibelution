@@ -117,19 +117,29 @@ function launcherAppProtocolResponse(input: {
     return new Response("launcher app asset not found", { status: 404 });
   }
   const mime = MIME_TYPES[extname(candidate).toLowerCase()] ?? "application/octet-stream";
+  const headers: Record<string, string> = { "content-type": mime };
+  if (target.endsWith(".html")) {
+    // The launcher shell must always observe the current active release; a
+    // heuristic renderer cache would pin a stale shell until app restart.
+    headers["cache-control"] = "no-store, no-cache, must-revalidate, max-age=0";
+    headers["pragma"] = "no-cache";
+    headers["expires"] = "0";
+  }
   return new Response(new Uint8Array(readFile(candidate)), {
     status: 200,
-    headers: { "content-type": mime }
+    headers
   });
 }
 
 export function registerLauncherAppProtocolHandle(input: {
-  distRoot: string;
+  resolveDistRoot: () => string;
   handle?: (scheme: string, handler: (request: Request) => Response | Promise<Response>) => void;
 }): void {
   const handle = input.handle ?? ((scheme, handler) => protocol.handle(scheme, handler));
   handle(LAUNCHER_APP_PROTOCOL, (request) =>
-    launcherAppProtocolResponse({ distRoot: input.distRoot, requestUrl: request.url })
+    // Resolve per request: the shell stays resident in the tray while
+    // frontend rebuilds switch the active release pointer.
+    launcherAppProtocolResponse({ distRoot: input.resolveDistRoot(), requestUrl: request.url })
   );
 }
 

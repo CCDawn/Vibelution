@@ -12,16 +12,10 @@ from ._validation import (
     require_int,
     require_list,
     require_mapping,
-    require_score,
     require_text,
 )
-
-_SCORE_KEYS = (
-    "novelty",
-    "competitionFit",
-    "falsifiability",
-    "evidenceSupport",
-    "feasibility",
+from .hypothesis_quality import (
+    normalize_hypothesis_scores,
 )
 
 
@@ -30,6 +24,7 @@ class HypothesisCandidate:
     candidateId: str
     claim: str
     scores: dict[str, float]
+    diagnostics: dict[str, float]
     counterEvidenceRefs: tuple[str, ...]
     derivedFromCandidateIds: tuple[str, ...]
     status: str
@@ -38,18 +33,18 @@ class HypothesisCandidate:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> HypothesisCandidate:
         raw_scores = require_mapping(payload, "scores")
-        missing = [key for key in _SCORE_KEYS if key not in raw_scores]
-        if missing:
-            raise ContractValidationError(
-                f"missing hypothesis scores: {', '.join(missing)}"
-            )
-        scores = {
-            key: require_score(raw_scores[key], f"scores.{key}") for key in _SCORE_KEYS
-        }
+        raw_diagnostics = payload.get("diagnostics")
+        if raw_diagnostics is not None and not isinstance(raw_diagnostics, Mapping):
+            raise ContractValidationError("hypothesis diagnostics must be an object")
+        scores, diagnostics = normalize_hypothesis_scores(
+            raw_scores,
+            raw_diagnostics=raw_diagnostics,
+        )
         return cls(
             candidateId=require_text(payload, "candidateId"),
             claim=require_text(payload, "claim"),
             scores=scores,
+            diagnostics=diagnostics,
             counterEvidenceRefs=tuple(
                 str(item) for item in require_list(payload, "counterEvidenceRefs")
             ),
@@ -61,7 +56,7 @@ class HypothesisCandidate:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "candidateId": self.candidateId,
             "claim": self.claim,
             "scores": copy.deepcopy(self.scores),
@@ -70,6 +65,9 @@ class HypothesisCandidate:
             "status": self.status,
             "reviewRef": self.reviewRef,
         }
+        if self.diagnostics:
+            result["diagnostics"] = copy.deepcopy(self.diagnostics)
+        return result
 
 
 @dataclass(frozen=True, slots=True)

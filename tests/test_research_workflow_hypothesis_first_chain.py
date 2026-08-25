@@ -23,17 +23,18 @@ import json
 
 from core.infrastructure import developer_sandbox
 from concurrent.futures import Future, ThreadPoolExecutor
+import threading
 import time
 from pathlib import Path
 
 import pytest
-
 from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
     WorkflowCommandKind,
     scope_hash_for,
 )
+from core.research.workflow.contracts.discussion_scope import parse_discussion_scope
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -50,6 +51,9 @@ from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain as chain,
 )
 from core.web.services.team_workflow.research_runtime import question_launch
+from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+    reset_formal_write_runtime_for_tests,
+)
 from core.web.services.team_workflow.research_runtime.command_service import (
     NodeNotReadyError,
 )
@@ -98,9 +102,31 @@ class _InlineExecutor:
         return future
 
 
+class _DeferredExecutor:
+    """Keep background room rounds running until the test releases them."""
+
+    def __init__(self) -> None:
+        self.submitted: list[dict] = []
+
+    def submit(self, fn, *args, **kwargs):
+        future: Future = Future()
+        self.submitted.append(
+            {"fn": fn, "args": args, "kwargs": kwargs, "future": future}
+        )
+        return future
+
+    def drain(self) -> None:
+        for submitted in self.submitted:
+            future = submitted["future"]
+            if future.done():
+                continue
+            future.set_result(submitted["fn"](*submitted["args"], **submitted["kwargs"]))
+
+
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    reset_formal_write_runtime_for_tests()
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(selections, "PROJECT_ROOT", tmp_path)
@@ -280,16 +306,8 @@ def _patch_approved_question(
     }
     monkeypatch.setattr(
         question_launch,
-        "challenge_question_run_summary",
-        lambda _team_id: {
-            "completedQuestionIds": [_QUESTION_ID],
-            "completedQuestionResults": [dict(detail["record"])],
-        },
-    )
-    monkeypatch.setattr(
-        question_launch,
-        "get_challenge_question_run_detail",
-        lambda _team_id, requested, *, run_id="": detail,
+        "_approved_details",
+        lambda _team_id: {_QUESTION_ID.upper(): detail},
     )
 
 
@@ -405,6 +423,224 @@ def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
         payload["discussionScope"]["candidateId"] for payload in opened_payloads
     } == {"hyp-a", "hyp-b"}
     assert len({payload["meetingRoundId"] for payload in opened_payloads}) == 2
+
+
+def test_selection_fans_out_per_candidate_without_receipt_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A temporarily unreadable Ledger cannot collapse candidate reviews."""
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+
+    team_id = "team-unscoped-fanout"
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            meetings.ResearchMeetingRoundNotFoundError("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_ensure_linked_room",
+        lambda value: ({"teamId": value}, "team-room"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_resolve_hypothesis_participants",
+        lambda *_args: {"participants": ["agent-a"]},
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    monkeypatch.setattr(
+        chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {"candidates": []},
+    )
+    opened_payloads: list[dict[str, object]] = []
+    recorded_links: list[dict[str, object]] = []
+
+    def fake_open(_team_id, payload, **_kwargs):
+        opened_payloads.append(dict(payload))
+        candidate_id = str(payload["candidateId"])
+        return {
+            "status": "created",
+            "meetingRound": {"meetingRoundId": payload["meetingRoundId"]},
+            "roomId": f"room-{candidate_id}",
+            "roundId": f"round-{candidate_id}",
+            "chatRoomRoundIds": [f"round-{candidate_id}"],
+        }
+
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", fake_open)
+    monkeypatch.setattr(
+        chain,
+        "_record_review_round_link",
+        lambda _team_id, **fields: recorded_links.append(dict(fields)) or dict(fields),
+    )
+
+    result = chain.open_review_meeting_for_selection(
+        team_id,
+        {**_selection_payload("agent-a"), "selectionId": "selection-unscoped-1"},
+        background=True,
+    )
+
+    assert result["candidateCount"] == 2
+    assert len(result["reviewMeetings"]) == 2
+    assert [payload["selectedCandidateIds"] for payload in opened_payloads] == [
+        ["hyp-a"],
+        ["hyp-b"],
+    ]
+    assert {payload["candidateId"] for payload in opened_payloads} == {"hyp-a", "hyp-b"}
+    assert all("discussionScope" not in payload for payload in opened_payloads)
+    assert [link["candidate_id"] for link in recorded_links] == ["hyp-a", "hyp-b"]
+
+
+def test_selection_reuses_server_generation_scope_when_receipt_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run-created generation scope retains candidate room identity on retry."""
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+
+    team_id = "team-scoped-fallback"
+    generation_scope = WorkflowDiscussionScopeV1.generation(
+        teamId=team_id,
+        researchProjectId="project-1",
+        workflowRunId="run-1",
+        workflowNodeId=chain.HYPOTHESIS_DESIGN_NODE_ID,
+        questionId=_QUESTION_ID,
+    )
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {
+            "candidates": [
+                {"candidateId": "hyp-a", "meetingRoundId": "generation-1"},
+                {"candidateId": "hyp-b", "meetingRoundId": "generation-1"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "_question_generation_meetings",
+        lambda *_args: [
+            {
+                "meetingRoundId": "generation-1",
+                "discussionScope": generation_scope.to_dict(),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            meetings.ResearchMeetingRoundNotFoundError("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_ensure_linked_room",
+        lambda value: ({"teamId": value}, "team-room"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_resolve_hypothesis_participants",
+        lambda *_args: {"participants": ["agent-a"]},
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    opened_payloads: list[dict[str, object]] = []
+
+    def fake_open(_team_id, payload, **_kwargs):
+        opened_payloads.append(dict(payload))
+        return {
+            "status": "created",
+            "meetingRound": {"meetingRoundId": payload["meetingRoundId"]},
+            "roomId": "room",
+            "roundId": "round",
+            "chatRoomRoundIds": ["round"],
+        }
+
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", fake_open)
+    monkeypatch.setattr(
+        chain,
+        "_record_review_round_link",
+        lambda _team_id, **fields: dict(fields),
+    )
+
+    chain.open_review_meeting_for_selection(
+        team_id,
+        {**_selection_payload("agent-a"), "selectionId": "selection-scoped-1"},
+        background=True,
+    )
+
+    scopes = [payload["discussionScope"] for payload in opened_payloads]
+    assert [scope["candidateId"] for scope in scopes] == ["hyp-a", "hyp-b"]
+    assert {scope["workflowRunId"] for scope in scopes} == {"run-1"}
+    assert {scope["researchProjectId"] for scope in scopes} == {"project-1"}
+
+
+def test_question_run_scopes_candidate_generation_before_receipt_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(chain, "needs_candidate_generation", lambda *_args: True)
+
+    def fake_open(_team_id, _question_id, **kwargs):
+        captured.update(kwargs)
+        return {"status": "opened", "meetingRound": {"meetingRoundId": "generation-1"}}
+
+    monkeypatch.setattr(chain, "open_candidate_generation_meeting", fake_open)
+    run_input = {
+        "teamId": "team-created-run",
+        "questionId": _QUESTION_ID,
+        "projectId": "project-created-run",
+        "researchObjectiveContract": {"hypothesisFirst": True},
+        "modelRoutingPolicy": {"modelPolicySha256": "a" * 64},
+    }
+    created_run = {
+        "teamId": "team-created-run",
+        "runId": "run-created-1",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-created-1",
+    }
+
+    opened = run_creation._auto_open_candidate_generation(
+        run_input,
+        created_run=created_run,
+    )
+
+    assert opened == {"status": "opened", "meetingRoundId": "generation-1"}
+    assert captured["_discussion_scope"] == {
+        "version": 1,
+        "kind": "question_generation",
+        "teamId": "team-created-run",
+        "researchProjectId": "project-created-run",
+        "workflowRunId": "run-created-1",
+        "workflowNodeId": chain.HYPOTHESIS_DESIGN_NODE_ID,
+        "questionId": _QUESTION_ID,
+    }
 
 
 def test_review_meeting_fan_in_waits_for_every_selected_candidate(
@@ -608,7 +844,7 @@ def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
     ]
 
 
-def test_chain_state_projects_explicit_next_candidate_anchor(
+def test_chain_state_projects_first_open_candidate_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from core.web.services import team_service
@@ -626,6 +862,10 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
         "candidateId": "hyp-a",
     }
     scope_b = {**scope_a, "candidateId": "hyp-b"}
+    scope_hashes = {
+        "room-a": parse_discussion_scope(scope_a).scope_hash,
+        "room-b": parse_discussion_scope(scope_b).scope_hash,
+    }
     records = [
         {
             "recordKind": chain.REVIEW_ROUND_LINK_KIND,
@@ -648,6 +888,9 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
             "candidateOrder": 1,
         },
     ]
+    # Ledger insertion order is intentionally opposite to candidateOrder;
+    # chain_state must follow the explicit ordering key, not array position.
+    records.reverse()
     monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
     monkeypatch.setattr(chain, "_records", lambda _team_id: records)
     monkeypatch.setattr(
@@ -658,9 +901,9 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
                 "meetingRoundId": "meeting-a",
                 "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
                 "question": _QUESTION_ID,
-                "status": "closed",
+                "status": "open",
                 "discussionScope": scope_a,
-                "discussionScopeHash": "hash-a",
+                "discussionScopeHash": scope_hashes["room-a"],
                 "linkedChatRoomId": "room-a",
             },
             {
@@ -669,10 +912,22 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
                 "question": _QUESTION_ID,
                 "status": "open",
                 "discussionScope": scope_b,
-                "discussionScopeHash": "hash-b",
+                "discussionScopeHash": scope_hashes["room-b"],
                 "linkedChatRoomId": "room-b",
             },
         ],
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_compact",
+        lambda room_id: {
+            "roomId": room_id,
+            "status": "active",
+            "config": {
+                "discussionScope": scope_a if room_id == "room-a" else scope_b,
+                "scopeHash": scope_hashes[room_id],
+            },
+        },
     )
     monkeypatch.setattr(chain, "_question_hypothesis_rounds", lambda *_args: [])
     monkeypatch.setattr(chain, "_question_template_baselines", lambda *_args: [])
@@ -680,14 +935,17 @@ def test_chain_state_projects_explicit_next_candidate_anchor(
 
     state = chain.chain_state(team_id, _QUESTION_ID)
 
-    assert state["activeDiscussionAnchor"] == {
-        "scope": scope_b,
-        "scopeHash": "hash-b",
-        "meetingRoundId": "meeting-b",
-        "roomId": "room-b",
-        "selectionId": "selection-1",
-        "candidateId": "hyp-b",
-    }
+    anchor = state["activeDiscussionAnchor"]
+    assert anchor["status"] == "ready"
+    assert anchor["scope"] == scope_a
+    assert anchor["scopeHash"] == scope_hashes["room-a"]
+    assert anchor["meetingRoundId"] == "meeting-a"
+    assert anchor["roomId"] == "room-a"
+    assert anchor["questionId"] == _QUESTION_ID
+    assert anchor["selectionId"] == "selection-1"
+    assert anchor["candidateId"] == "hyp-a"
+    assert "returnTo=" in anchor["deepLink"]
+    assert anchor["returnLabel"] == "返回科研流程"
 
 
 def _marker_runner(participant, prompt, context):
@@ -1251,7 +1509,7 @@ def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
         },
         "stopPolicy": {},
         "environmentSnapshotRef": "env-1",
-        "modelRoutingPolicy": {},
+        "modelRoutingPolicy": {"modelPolicySha256": "d" * 64},
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
@@ -1431,8 +1689,19 @@ def _open_first_meeting(team_id: str, agent_ids: list[str]) -> dict:
     )
     assert recorded["status"] == "created"
     review = recorded["reviewMeeting"]
-    assert review["status"] == "opened"
+    assert review["status"] in {"opened", "created", "reused"}, review
     return recorded
+
+
+def _opened_review_meetings(review: dict) -> list[dict]:
+    siblings = list(review.get("reviewMeetings") or [])
+    if siblings:
+        return [dict(item["meetingRound"]) for item in siblings]
+    return [dict(review["meetingRound"])]
+
+
+def _review_meetings(recorded: dict) -> list[dict]:
+    return _opened_review_meetings(recorded["reviewMeeting"])
 
 
 def test_selection_review_prompt_hydrates_canonical_candidate_content(
@@ -1468,10 +1737,112 @@ def test_selection_review_prompt_hydrates_canonical_candidate_content(
 
     assert recorded["reviewMeeting"]["status"] == "opened"
     assert prompts
-    assert all("canonical statement a" in prompt for prompt in prompts)
-    assert all("canonical mechanism a" in prompt for prompt in prompts)
-    assert all("canonical statement b" in prompt for prompt in prompts)
-    assert all("canonical mechanism b" in prompt for prompt in prompts)
+    prompts_for_a = [prompt for prompt in prompts if "canonical statement a" in prompt]
+    prompts_for_b = [prompt for prompt in prompts if "canonical statement b" in prompt]
+    assert prompts_for_a
+    assert prompts_for_b
+    assert all("canonical mechanism a" in prompt for prompt in prompts_for_a)
+    assert all("canonical statement b" not in prompt for prompt in prompts_for_a)
+    assert all("canonical mechanism b" in prompt for prompt in prompts_for_b)
+    assert all("canonical statement a" not in prompt for prompt in prompts_for_b)
+
+
+def test_preformal_fanout_binds_each_candidate_before_sibling_rounds_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A busy first review room must not prevent its sibling from opening."""
+
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    executor = _DeferredExecutor()
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+
+    try:
+        recorded = selections.record_hypothesis_selection(
+            team_id,
+            _selection_payload(agents["coordinator"]),
+            agent_runner=_marker_runner,
+        )
+        meetings = _review_meetings(recorded)
+        links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
+
+        assert len(meetings) == 2
+        assert len(links) == 2
+        assert {link["candidateId"] for link in links} == {"hyp-a", "hyp-b"}
+        assert {link["meetingRoundId"] for link in links} == {
+            meeting["meetingRoundId"] for meeting in meetings
+        }
+        room_ids = {str(meeting["linkedChatRoomId"]) for meeting in meetings}
+        assert len(room_ids) == 2
+        assert all(meeting["chatRoomRoundIds"] for meeting in meetings)
+        for room_id in room_ids:
+            room = chat_room_service.get_chat_room_detail(room_id)
+            assert room is not None
+            assert room["config"]["source"] == "hypothesis_first_candidate_review.v1"
+            assert room["config"]["teamId"] == team_id
+            expected_roles = {
+                str(item["agentId"]): str(item["observedRole"])
+                for item in meetings[0]["participantRoleSnapshot"]
+            }
+            assert {
+                str(participant["agentId"]): participant.get("teamRole")
+                for participant in room["participants"]
+            } == expected_roles
+        assert len(executor.submitted) == 2
+    finally:
+        executor.drain()
+
+
+def test_preformal_fanout_persists_siblings_while_kernel_trace_is_slow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow trace may delay workers but must not hold up sibling room creation."""
+
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    trace_started = threading.Event()
+    release_trace = threading.Event()
+    selection_finished = threading.Event()
+    recorded: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    from core.agent_kernel import service as agent_kernel_service
+
+    def slow_kernel_trace(_event_payload):
+        trace_started.set()
+        assert release_trace.wait(timeout=5), "test must release the background trace"
+        return {"event": {}, "task": {}, "execution": {}, "outcome": {}}
+
+    def record_selection() -> None:
+        try:
+            recorded["value"] = selections.record_hypothesis_selection(
+                team_id,
+                _selection_payload(agents["coordinator"]),
+                agent_runner=_marker_runner,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface selection errors from the worker thread
+            errors.append(exc)
+        finally:
+            selection_finished.set()
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-slow-trace")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+    monkeypatch.setattr(agent_kernel_service, "handle_kernel_event", slow_kernel_trace)
+    selection_thread = threading.Thread(target=record_selection, name="pytest-selection", daemon=True)
+
+    try:
+        selection_thread.start()
+        assert trace_started.wait(timeout=5), "background worker did not start the trace"
+        assert selection_finished.wait(timeout=5), "slow trace blocked candidate fan-out"
+        assert not errors
+
+        review_meetings = _review_meetings(recorded["value"])
+        assert len(review_meetings) == 2
+        assert all(meeting["chatRoomRoundIds"] for meeting in review_meetings)
+    finally:
+        release_trace.set()
+        selection_thread.join(timeout=5)
+        executor.shutdown(wait=True)
 
 
 def _close_first_meeting_with_envelope(
@@ -1510,8 +1881,11 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             recorded = _open_first_meeting(team_id, agent_ids)
             review = recorded["reviewMeeting"]
             assert review["discussion"]["background"] is True
-            meeting = review["meetingRound"]
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            meeting = first_round_meetings[0]
             first_meeting_id = meeting["meetingRoundId"]
+            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
             assert meeting["meetingType"] == "hypothesis_review"
             assert meeting["linkedChatRoomId"] == review["roomId"]
             assert meeting["chatRoomRoundIds"] == [review["roundId"]]
@@ -1528,11 +1902,15 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
 
             # 3. Closing with a searchEnvelope decision triggers stage-1
             #    collection through the facade exactly once.
-            closed = _close_first_meeting_with_envelope(
+            closed_first = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            assert closed["meetingRound"]["status"] == "closed"
-            requests = closed["collection"]["requests"]
+            assert closed_first["meetingRound"]["status"] == "closed"
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+            requests = closed_first["collection"]["requests"]
             assert len(requests) == 1
             request = requests[0]
             assert request["status"] == "pending"
@@ -1546,6 +1924,19 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 "spike train coding",
             ]
 
+            # The logical round fans out to both selected candidates. Fan-in
+            # happens only after the second sibling is confirmed.
+            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                sibling_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed["meetingRound"]["status"] == "closed"
+            assert closed["collection"]["requests"] == []
+            assert len(collection_calls) == 1
+
             # 3b. The closure auto-generates a closed HypothesisRound through
             #     the HF-3 executor: meetingRefs point back to this meeting and
             #     the first round's lineage terminates at the question candidates.
@@ -1558,7 +1949,7 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 item["id"]
                 for item in first_round["meetingRefs"]
                 if item["kind"] == "meeting_round"
-            } == {first_meeting_id}
+            } == {first_meeting_id, sibling_meeting_id}
             assert {
                 item["id"] for item in first_round["lineage"] if item["kind"] == "candidate"
             } == {"hyp-a", "hyp-b"}
@@ -1604,16 +1995,21 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             assert handoff["request"]["status"] == "handed_off"
             assert handoff["request"]["handoffRef"] == "knowledge_package:pkg-1"
             next_meeting = handoff["nextMeeting"]
-            assert next_meeting["status"] == "opened"
-            second_meeting_id = next_meeting["meetingRound"]["meetingRoundId"]
-            assert second_meeting_id != first_meeting_id
+            assert next_meeting["status"] in {"opened", "created", "reused"}
+            second_round_meetings = _opened_review_meetings(next_meeting)
+            assert second_round_meetings
+            assert {item["meetingRoundId"] for item in second_round_meetings}.isdisjoint(
+                {first_meeting_id, sibling_meeting_id}
+            )
             assert next_meeting["roundIndex"] == 2
 
             links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-            assert [link["roundIndex"] for link in links] == [1, 2]
+            assert [link["roundIndex"] for link in links] == [1, 1] + [
+                2
+            ] * len(second_round_meetings)
             assert links[0]["meetingRoundId"] == first_meeting_id
-            assert links[1]["previousMeetingRoundId"] == first_meeting_id
-            assert links[1]["collectionRequestId"] == request["requestId"]
+            assert links[2]["previousMeetingRoundId"] == first_meeting_id
+            assert links[2]["collectionRequestId"] == request["requestId"]
 
             design = _evaluate(runtime, team_id, "hypothesis_design")
             design_codes = _blocker_codes(design)
@@ -1628,13 +2024,17 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             # 6. Second discussion closes without new evidence requests; the
             #    closure auto-generates the next HypothesisRound whose lineage
             #    links back to the first round; a frozen baseline appears.
-            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed_second = chain.close_review_meeting(
-                team_id,
-                second_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
+            closed_second = None
+            for second_round_meeting in second_round_meetings:
+                meeting_id = second_round_meeting["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                closed_second = chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                )
+            assert closed_second is not None
             assert closed_second["collection"]["requests"] == []
             assert len(collection_calls) == 1
             generated_second = closed_second["hypothesisRound"]
@@ -1646,7 +2046,7 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 item["id"]
                 for item in second_round["meetingRefs"]
                 if item["kind"] == "meeting_round"
-            } == {second_meeting_id}
+            } == {item["meetingRoundId"] for item in second_round_meetings}
             assert [
                 item["id"] for item in second_round["lineage"] if item["kind"] == "round"
             ] == [first_round["roundId"]]
@@ -1740,19 +2140,34 @@ def test_unconverged_round_blocks_hypothesis_design(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-            closed = _close_first_meeting_with_envelope(
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            first_meeting_id = first_round_meetings[0]["meetingRoundId"]
+            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
+            closed_first = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            request = closed["collection"]["requests"][0]
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+            closed_sibling = chain.close_review_meeting(
+                team_id,
+                sibling_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed_sibling["hypothesisRound"]["status"] == "created"
+            request = closed_first["collection"]["requests"][0]
             handoff = chain.record_collection_handoff(
                 team_id,
                 request["requestId"],
                 runtime=runtime,
                 agent_runner=_marker_runner,
             )
-            second_meeting_id = handoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
-            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
+            second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            assert second_round_meetings
             # MetaReview does NOT accept: the auto-generated round stays
             # unconverged and hypothesis_design remains blocked.
             rejected_metareview = lambda context, candidates, pairwise, pareto: {
@@ -1761,13 +2176,22 @@ def test_unconverged_round_blocks_hypothesis_design(
                 "riskNotes": "hyp-b 泛化证据待补",
                 "accepted": False,
             }
-            closed_second = chain.close_review_meeting(
-                team_id,
-                second_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-                metareview_runner=rejected_metareview,
-            )
+            closed_second = None
+            for index, second_round_meeting in enumerate(second_round_meetings):
+                meeting_id = second_round_meeting["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                closed_second = chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                    metareview_runner=(
+                        rejected_metareview
+                        if index == len(second_round_meetings) - 1
+                        else None
+                    ),
+                )
+            assert closed_second is not None
             generated_second = closed_second["hypothesisRound"]
             assert generated_second["status"] == "created"
             assert generated_second["round"]["status"] == "closed"
@@ -1887,7 +2311,10 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
             selection_id = recorded["selection"]["selectionId"]
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            first_meeting_id = first_round_meetings[0]["meetingRoundId"]
+            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
 
             # Re-recording the same selection reuses everything (recovery from
             # a crash between selection persistence and meeting opening).
@@ -1903,12 +2330,23 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 == first_meeting_id
             )
 
-            closed = _close_first_meeting_with_envelope(
+            closed_first = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            request = closed["collection"]["requests"][0]
-            first_round_id = closed["hypothesisRound"]["round"]["roundId"]
-            assert closed["hypothesisRound"]["status"] == "created"
+            request = closed_first["collection"]["requests"][0]
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+            closed_sibling = chain.close_review_meeting(
+                team_id,
+                sibling_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            first_round_id = closed_sibling["hypothesisRound"]["round"]["roundId"]
+            assert closed_sibling["hypothesisRound"]["status"] == "created"
 
             # Re-closing with the identical payload replays the closure and
             # must not duplicate the collection request, the facade call, or
@@ -1936,7 +2374,8 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 runtime=runtime,
                 agent_runner=_marker_runner,
             )
-            second_meeting_id = handoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
+            second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            second_meeting_id = second_round_meetings[0]["meetingRoundId"]
 
             # Repeating the handoff is a no-op: no new meeting, no new link.
             rehandoff = chain.record_collection_handoff(
@@ -1952,7 +2391,7 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 == second_meeting_id
             )
             links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-            assert len(links) == 2
+            assert len(links) == 2 + len(second_round_meetings)
 
             # Chain state survives a fresh read (no in-memory state).
             state = chain.chain_state(team_id, _QUESTION_ID)
@@ -1962,7 +2401,7 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
             assert state["collectionRequestCount"] == 1
             assert state["pendingCollectionCount"] == 0
             assert state["collectionReady"] is True
-            assert state["meetingCount"] == 2
+            assert state["meetingCount"] == 2 + len(second_round_meetings)
             assert state["hypothesisRoundCount"] == 1
     finally:
         runtime.close()
@@ -1989,12 +2428,31 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+            sibling_meetings = _review_meetings(recorded)
+            assert len(sibling_meetings) == 2
+            first_meeting_id = sibling_meetings[0]["meetingRoundId"]
+            second_meeting_id = sibling_meetings[1]["meetingRoundId"]
             _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
+            closed_first = chain.close_review_meeting(
                 team_id,
                 first_meeting_id,
                 _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+
+            assert closed_first["meetingRound"]["status"] == "closed"
+            assert len(closed_first["collection"]["requests"]) == 1
+            assert len(collection_calls) == 1
+            assert (
+                closed_first["hypothesisRound"]["status"]
+                == "waiting_for_sibling_reviews"
+            )
+
+            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                second_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
                 runtime=runtime,
             )
 
@@ -2002,7 +2460,6 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
             # generation reports a structured failure (fail-closed via the
             # readiness layer, never a rollback of the closed fact).
             assert closed["meetingRound"]["status"] == "closed"
-            assert len(closed["collection"]["requests"]) == 1
             assert len(collection_calls) == 1
             hypothesis_round = closed["hypothesisRound"]
             assert hypothesis_round["status"] == "failed"
@@ -2370,16 +2827,18 @@ def test_converged_chain_without_evidence_requests_is_collection_ready(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-
-            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
-                team_id,
-                first_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            assert closed["meetingRound"]["status"] == "closed"
+            sibling_meetings = _review_meetings(recorded)
+            assert len(sibling_meetings) == 2
+            for sibling in sibling_meetings:
+                meeting_id = sibling["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                closed = chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                )
+                assert closed["meetingRound"]["status"] == "closed"
 
             state = chain.chain_state(team_id, _QUESTION_ID)
             assert state["hypothesisConverged"] is True

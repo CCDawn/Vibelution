@@ -26,7 +26,7 @@ from core.llm.client import (
 )
 from core.llm.errors import classify_exception
 from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
-from core.llm.semantic_messages import InvocationScope
+from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
@@ -53,6 +53,70 @@ def test_litellm_cost_map_defaults_to_local_without_overriding_operator_env(monk
     _configure_litellm_import_environment()
 
     assert os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] == "False"
+
+
+def test_strict_output_fails_before_provider_when_capability_is_missing():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "chat-model",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    client.capabilities.supports_strict_json_schema = False
+
+    with pytest.raises(LLMError, match="does not support strict JSON Schema") as exc_info:
+        client._build_payload(
+            [{"role": "user", "content": "review"}],
+            output_schema=SemanticOutputSchema(
+                name="research_protocol_review_v1",
+                schema={"type": "object"},
+            ),
+        )
+
+    assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
+
+
+def test_strict_output_reaches_supported_provider_payload():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "chat-model",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    client.capabilities.supports_strict_json_schema = True
+    schema = {
+        "type": "object",
+        "properties": {"reasoning": {"type": "string"}},
+        "required": ["reasoning"],
+        "additionalProperties": False,
+    }
+
+    payload = client._build_payload(
+        [{"role": "user", "content": "review"}],
+        output_schema=SemanticOutputSchema(
+            name="research_protocol_review_v1",
+            schema=schema,
+        ),
+    )
+
+    assert payload["response_format"]["json_schema"] == {
+        "name": "research_protocol_review_v1",
+        "strict": True,
+        "schema": schema,
+    }
+    assert client._last_payload_protocol_summary["structuredOutput"] is True
+    assert client._last_payload_protocol_summary["outputSchemaName"] == (
+        "research_protocol_review_v1"
+    )
+    assert len(client._last_payload_protocol_summary["outputSchemaSha256"]) == 64
 
 
 def test_compression_role_disables_provider_retry_amplification() -> None:
@@ -364,6 +428,106 @@ def test_client_message_metadata_cannot_mint_model_invocation_receipt() -> None:
         )
         is None
     )
+
+
+def _receipt_binding_outcome() -> tuple[TurnOutcome, dict]:
+    outcome = TurnOutcome.final_answer(
+        identity=CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-1",
+            iteration=0,
+            item_id="item-1",
+        ),
+        text="review verdict",
+    )
+    binding = {
+        "questionId": "SCI-001",
+        "questionRunId": "workflow-run-1",
+        "workflowRunId": "workflow-run-1",
+        "workflowId": "workflow-1",
+        "workflowVersionId": "version-1",
+        "formalNodeId": "hypothesis_design",
+        "formalNodeRunId": "node-run-1",
+        "formalNodeAttempt": 1,
+        "sessionId": "session-1",
+        "taskId": "task-1",
+        "turnId": "turn-1",
+        "outcomeKinds": ["review"],
+    }
+    return outcome, binding
+
+
+def test_receipt_attaches_with_redacted_request_summary() -> None:
+    # The persisted request summary carries only bounded shape metadata, so
+    # the route check must resolve the actual model from the client profile;
+    # the redacted summary itself never names the model.
+    outcome, binding = _receipt_binding_outcome()
+    receipt_context = {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-plus",
+        },
+        "questionInvocationBinding": binding,
+    }
+    client = LLMClient(config=make_config(), backend=lambda _payload: {})
+
+    with model_invocation_receipt_context_scope(receipt_context):
+        attached = client._attach_model_invocation_receipt(
+            outcome,
+            metadata=None,
+            invocation_scope=outcome.identity,
+            request_content={
+                "conversationSha256": "b" * 64,
+                "messageCount": 1,
+                "payloadShape": {"messageRoles": {"user": 1}},
+            },
+            response_content={"finalText": "review verdict"},
+            started_at_ms=100,
+            finished_at_ms=120,
+            attempt=1,
+            retry_count=0,
+        )
+
+    receipt = attached.model_invocation_receipt
+    assert isinstance(receipt, dict)
+    assert receipt["receiptId"]
+    assert receipt["model"] == "qwen-plus"
+
+
+def test_receipt_still_fails_closed_when_profile_route_differs() -> None:
+    outcome, binding = _receipt_binding_outcome()
+    receipt_context = {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-max",
+        },
+        "questionInvocationBinding": binding,
+    }
+    client = LLMClient(config=make_config(), backend=lambda _payload: {})
+
+    with model_invocation_receipt_context_scope(receipt_context):
+        attached = client._attach_model_invocation_receipt(
+            outcome,
+            metadata=None,
+            invocation_scope=outcome.identity,
+            request_content={"conversationSha256": "b" * 64, "messageCount": 1},
+            response_content={"finalText": "review verdict"},
+            started_at_ms=100,
+            finished_at_ms=120,
+            attempt=1,
+            retry_count=0,
+        )
+
+    assert attached.model_invocation_receipt is None
 
 
 def test_prompt_cache_payload_summary_fingerprints_messages_and_tool_schema_without_content() -> None:

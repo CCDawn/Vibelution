@@ -51,6 +51,19 @@ from .iteration_route import branch_decision_from_run, routed_successors
 DEFAULT_START_DEADLINE_MS = 60_000
 
 
+def _is_hypothesis_first_prelude(run: Any) -> bool:
+    """Return whether a created run legitimately awaits hypothesis review."""
+
+    try:
+        snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(snapshot, Mapping):
+        return False
+    objective = snapshot.get("researchObjectiveContract")
+    return isinstance(objective, Mapping) and objective.get("hypothesisFirst") is True
+
+
 def _log_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
     debug.warning(
         f"graph repair skipped run={run_id} stage={stage} error={type(exc).__name__}"
@@ -133,9 +146,11 @@ class GraphDispatchWorker:
         only evidence that a run actually started is a durable node attempt;
         command rows and graph-dispatch outbox rows can be stale, partially
         committed, or replayable and therefore do not extend the deadline.
-        Everything else past the deadline is closed atomically with a
-        deterministic ``run_failed`` event and any still-live graph dispatch
-        is cancelled in the same transaction.
+        Hypothesis-first parent runs are a deliberate exception: their
+        prelude awaits candidate review and later submits the formal start
+        through its existing command path. Everything else past the deadline
+        is closed atomically with a deterministic ``run_failed`` event and any
+        still-live graph dispatch is cancelled in the same transaction.
         """
         now_ms = self._now()
         cutoff_ms = now_ms - self._start_deadline_ms
@@ -195,6 +210,8 @@ class GraphDispatchWorker:
                     continue
                 run = uow.repository.get_run(run_id)
                 if run is None or run.status != "created":
+                    continue
+                if _is_hypothesis_first_prelude(run):
                     continue
                 event_id = f"evt-dispatch-never-started-{run_id}"
                 event_payload = {

@@ -4,14 +4,14 @@ The executor turns the bounded review context (closed meeting digest v2 +
 candidate hypotheses + evidence refs) into the content of a closable
 ``HypothesisRound``:
 
-1. **Reflection** — every candidate is scored independently on the seven
+1. **Reflection** — every candidate is scored independently on the five
    fixed review dimensions; owning role ``research_evidence_reviewer``.
 2. **Pairwise debate** — every unordered candidate pair is compared once; the
    left/right presentation order is randomized from a recorded seed to
    mitigate position bias, and the persisted comparison fields record the
    order that was debated; owning role ``research_theme_synthesizer``.
 3. **Pareto classification** — every candidate is classified as front or
-   dominated over the seven dimensions (no Elo-style single total score,
+   dominated over the five dimensions (no Elo-style single total score,
    D-02); owning role ``research_theme_synthesizer``.
 4. **MetaReview** — one recommendation with rationale, risk notes, and an
    acceptance flag; owning role is the meeting Coordinator.
@@ -115,7 +115,7 @@ def _reflection_step(
     runner: ReflectionRunner | None,
     agent_id: str,
 ) -> list[dict[str, Any]]:
-    """Score every candidate independently on the seven fixed dimensions."""
+    """Score every candidate independently on the five fixed dimensions."""
 
     context_id = str(context.get("contextId") or "")
     reviewed: list[dict[str, Any]] = []
@@ -217,7 +217,7 @@ def _fixture_debate_outcome(
     else:
         outcome = "tie"
     justification = (
-        f"七维独立评分对比：{left_id} 在 {len(left_ahead)} 维领先（{('、'.join(left_ahead)) or '无'}），"
+        f"五维独立评分对比：{left_id} 在 {len(left_ahead)} 维领先（{('、'.join(left_ahead)) or '无'}），"
         f"{right_id} 在 {len(right_ahead)} 维领先（{('、'.join(right_ahead)) or '无'}）。"
     )
     return outcome, justification
@@ -332,7 +332,7 @@ def _pareto_step(
         notes = str(produced.get("notes") or "").strip()
     else:
         front, dominated = _fixture_pareto(scores_by_candidate)
-        notes = "七维评分 Pareto 分类：前沿候选不被任何其他候选全维度占优（DEV fixture）。"
+        notes = "五维评分 Pareto 分类：前沿候选不被任何其他候选全维度占优（DEV fixture）。"
     candidate_ids = set(scores_by_candidate)
     overlap = set(front) & set(dominated)
     if overlap:

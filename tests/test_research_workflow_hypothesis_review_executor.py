@@ -23,10 +23,10 @@ import pytest
 from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+    HYPOTHESIS_REVIEW_MEETING_TYPE,
     SCORE_DIMENSIONS,
     ContractValidationError,
     HypothesisRound,
-    HYPOTHESIS_REVIEW_MEETING_TYPE,
 )
 from core.web.services import (
     agent_directory_service,
@@ -439,7 +439,7 @@ def test_pairwise_runner_gap_fails_closed(tmp_path, monkeypatch):
     def silent_pairwise(left, right, context):
         if {left["candidateId"], right["candidateId"]} == {"cand-a", "cand-c"}:
             return None
-        return {"outcome": "left_wins", "justification": "七维评分多数维度占优"}
+        return {"outcome": "left_wins", "justification": "五维评分多数维度占优"}
 
     with pytest.raises(ContractValidationError, match="pairwise runner must return a mapping"):
         _generate(team_id, meeting_round_id, pairwise_runner=silent_pairwise)

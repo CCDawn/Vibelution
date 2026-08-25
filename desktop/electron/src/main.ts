@@ -1,7 +1,7 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { deflateSync } from "node:zlib";
 import {
@@ -19,6 +19,10 @@ import {
   type DesktopLaunchSettings
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
+import {
+  startLauncherActiveReleaseWatcher,
+  type LauncherActiveReleaseWatcherHandle
+} from "./process/launcherActiveReleaseWatcher.js";
 import {
   LauncherLifecycleSupervisor,
   type LauncherDesiredState,
@@ -261,6 +265,7 @@ const launcherControlPlaneReady = new Promise<void>((resolve) => {
   resolveLauncherControlPlaneReady = resolve;
 });
 let launcherStateWatchers: FSWatcher[] = [];
+let launcherActiveReleaseWatcher: LauncherActiveReleaseWatcherHandle | null = null;
 let launcherStateHintTimer: ReturnType<typeof setTimeout> | null = null;
 let launcherStateStatTimer: ReturnType<typeof setInterval> | null = null;
 const launcherStateStatSignatures = new Map<string, string>();
@@ -472,6 +477,12 @@ async function recordElectronStartupSummaryOnce(
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
   const desktopEnv = desktopEnvironment();
   conversationNotificationService = null;
+  const launcherDistRootInput = {
+    resourcesRoot: paths.resourcesRoot,
+    workspaceRoot: paths.workspaceRoot,
+    packaged: app.isPackaged,
+    env: desktopEnv
+  };
   return new ElectronWindowProvider(
     paths,
     resolveLauncherWindowUrl(desktopEnv),
@@ -479,6 +490,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     {
       createLauncherWindow,
       createWorkbenchWindow,
+      launcherContentVersion: () => resolveLauncherDistRoot(launcherDistRootInput),
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
@@ -3983,6 +3995,8 @@ function startLauncherStateFileHints(paths: DesktopPaths): void {
 }
 
 function stopLauncherStateFileHints(): void {
+  launcherActiveReleaseWatcher?.stop();
+  launcherActiveReleaseWatcher = null;
   if (launcherStateHintTimer !== null) {
     clearTimeout(launcherStateHintTimer);
     launcherStateHintTimer = null;
@@ -4185,13 +4199,16 @@ app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
     claimElectronDesktopShellOwner(paths.workspaceRoot);
+    const launcherDistRootInput = {
+      resourcesRoot: paths.resourcesRoot,
+      workspaceRoot: paths.workspaceRoot,
+      packaged: app.isPackaged,
+      env: desktopEnvironment()
+    };
     registerLauncherAppProtocolHandle({
-      distRoot: resolveLauncherDistRoot({
-        resourcesRoot: paths.resourcesRoot,
-        workspaceRoot: paths.workspaceRoot,
-        packaged: app.isPackaged,
-        env: desktopEnvironment()
-      })
+      // Resolve per request: the shell stays resident in the tray while
+      // frontend rebuilds switch the active release pointer.
+      resolveDistRoot: () => resolveLauncherDistRoot(launcherDistRootInput)
     });
     await reapManagedRuntimeOnDesktopStart({
       stopManagedRuntime,
@@ -4217,6 +4234,17 @@ app.whenReady()
     resolveLauncherControlPlaneReady = null;
     updateLauncherWindowTruth();
     startLauncherStateFileHints(paths);
+    if (!app.isPackaged) {
+      // Follow active.json switches while the shell stays resident so an
+      // already-open launcher window reloads onto the fresh release; the
+      // protocol layer alone only helps the next navigation.
+      launcherActiveReleaseWatcher = startLauncherActiveReleaseWatcher({
+        buildsRoot: join(paths.workspaceRoot, "web", ".vibelution-builds"),
+        onChange: () => {
+          windowProvider?.refreshLauncherIfReleaseChanged();
+        }
+      });
+    }
     scheduleLauncherStatusCliRefresh();
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {

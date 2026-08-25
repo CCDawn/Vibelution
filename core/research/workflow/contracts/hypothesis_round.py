@@ -3,7 +3,7 @@
 A ``HypothesisRound`` is the closed-loop artifact that turns two or more
 substantially different hypothesis candidates into a decision.  It carries:
 
-- at least two distinct candidates, each scored independently across seven
+- at least two distinct candidates, each scored independently across five
   fixed review dimensions by a reviewer agent;
 - pairwise comparisons covering every unordered candidate pair;
 - a Pareto analysis that classifies every candidate as front or dominated;
@@ -25,22 +25,16 @@ from typing import Any
 
 from ._validation import (
     ContractValidationError,
-    require_int,
     require_list,
-    require_score,
     require_text,
+)
+from .hypothesis_quality import (
+    HYPOTHESIS_SCORE_DIMENSIONS,
+    normalize_hypothesis_scores,
 )
 from .research_scope import REQUIRED_SCOPE_FIELDS, scope_hash_for
 
-SCORE_DIMENSIONS = (
-    "novelty",
-    "competitionFit",
-    "falsifiability",
-    "evidenceSupport",
-    "feasibility",
-    "replicability",
-    "scopeAlignment",
-)
+SCORE_DIMENSIONS = HYPOTHESIS_SCORE_DIMENSIONS
 
 MIN_CANDIDATES = 2
 ROUND_STATUSES = {"open", "reviewed", "closed"}
@@ -56,7 +50,9 @@ def _scope_identity(payload: Mapping[str, Any]) -> dict[str, str]:
     return identity
 
 
-def _validated_scope_hash(payload: Mapping[str, Any], identity: Mapping[str, str]) -> str:
+def _validated_scope_hash(
+    payload: Mapping[str, Any], identity: Mapping[str, str]
+) -> str:
     supplied = require_text(payload, "scopeHash").lower()
     expected = scope_hash_for(
         **{field: identity[field] for field in REQUIRED_SCOPE_FIELDS},
@@ -64,17 +60,19 @@ def _validated_scope_hash(payload: Mapping[str, Any], identity: Mapping[str, str
         mode=identity["mode"],
     )
     if supplied != expected:
-        raise ContractValidationError("scopeHash does not match the round scope identity")
+        raise ContractValidationError(
+            "scopeHash does not match the round scope identity"
+        )
     return supplied
 
 
-def _candidate_id_set(candidates: tuple["HypothesisRoundCandidate", ...]) -> set[str]:
+def _candidate_id_set(candidates: tuple[HypothesisRoundCandidate, ...]) -> set[str]:
     return {item.candidateId for item in candidates}
 
 
 @dataclass(frozen=True, slots=True)
 class HypothesisRoundCandidate:
-    """One scored candidate in a review round across seven fixed dimensions."""
+    """One scored candidate across five scores plus optional diagnostics."""
 
     candidateId: str
     claim: str
@@ -82,6 +80,7 @@ class HypothesisRoundCandidate:
     differenceFromAlternatives: str
     lineageRefs: tuple[str, ...]
     scores: dict[str, float]
+    diagnostics: dict[str, float]
     reviewedBy: str
     status: str
 
@@ -90,15 +89,13 @@ class HypothesisRoundCandidate:
         raw_scores = payload.get("scores")
         if not isinstance(raw_scores, Mapping):
             raise ContractValidationError("candidate scores must be an object")
-        missing = [key for key in SCORE_DIMENSIONS if key not in raw_scores]
-        if missing:
-            raise ContractValidationError(
-                "missing candidate review dimensions: " + ", ".join(missing)
-            )
-        scores = {
-            key: require_score(raw_scores[key], f"scores.{key}")
-            for key in SCORE_DIMENSIONS
-        }
+        raw_diagnostics = payload.get("diagnostics")
+        if raw_diagnostics is not None and not isinstance(raw_diagnostics, Mapping):
+            raise ContractValidationError("candidate diagnostics must be an object")
+        scores, diagnostics = normalize_hypothesis_scores(
+            raw_scores,
+            raw_diagnostics=raw_diagnostics,
+        )
         return cls(
             candidateId=require_text(payload, "candidateId"),
             claim=require_text(payload, "claim"),
@@ -110,12 +107,13 @@ class HypothesisRoundCandidate:
                 str(item) for item in require_list(payload, "lineageRefs")
             ),
             scores=scores,
+            diagnostics=diagnostics,
             reviewedBy=require_text(payload, "reviewedBy"),
             status=require_text(payload, "status"),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "candidateId": self.candidateId,
             "claim": self.claim,
             "rationale": self.rationale,
@@ -125,8 +123,11 @@ class HypothesisRoundCandidate:
             "reviewedBy": self.reviewedBy,
             "status": self.status,
         }
+        if self.diagnostics:
+            result["diagnostics"] = dict(self.diagnostics)
+        return result
 
-    def is_substantially_different(self, other: "HypothesisRoundCandidate") -> bool:
+    def is_substantially_different(self, other: HypothesisRoundCandidate) -> bool:
         """Two candidates are substantially different when their claims diverge.
 
         A duplicate claim or identical difference statement is not a real
@@ -138,9 +139,7 @@ class HypothesisRoundCandidate:
             return False
         difference_self = " ".join(self.differenceFromAlternatives.lower().split())
         difference_other = " ".join(other.differenceFromAlternatives.lower().split())
-        if difference_self and difference_self == difference_other:
-            return False
-        return True
+        return not (difference_self and difference_self == difference_other)
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,7 +386,10 @@ class HypothesisRound:
                 "Pareto analysis references unknown candidates: "
                 + ", ".join(sorted(unknown))
             )
-        if meta_review.recommendationCandidateId and meta_review.recommendationCandidateId not in candidate_ids:
+        if (
+            meta_review.recommendationCandidateId
+            and meta_review.recommendationCandidateId not in candidate_ids
+        ):
             raise ContractValidationError(
                 "metaReview recommendation references an unknown candidate"
             )
@@ -421,7 +423,9 @@ class HypothesisRound:
             "scopeHash": self.scopeHash,
             "status": self.status,
             "candidates": [item.to_dict() for item in self.candidates],
-            "pairwiseComparisons": [item.to_dict() for item in self.pairwiseComparisons],
+            "pairwiseComparisons": [
+                item.to_dict() for item in self.pairwiseComparisons
+            ],
             "pareto": self.pareto.to_dict(),
             "metaReview": self.metaReview.to_dict(),
             "lineage": [item.to_dict() for item in self.lineage],
@@ -454,9 +458,7 @@ class HypothesisRound:
         missing: pair coverage, Pareto coverage, MetaReview, or meeting refs.
         """
         if self.status not in {"reviewed", "closed"}:
-            raise ContractValidationError(
-                "a complete round must be reviewed or closed"
-            )
+            raise ContractValidationError("a complete round must be reviewed or closed")
         if not self.closedAt or not self.closedBy:
             raise ContractValidationError(
                 "a closed round requires closedAt and closedBy"
@@ -471,7 +473,9 @@ class HypothesisRound:
                     f"missing pairwise comparison between {pair[0]} and {pair[1]}"
                 )
         if not self.pareto.paretoFrontCandidateIds:
-            raise ContractValidationError("a closed round requires a non-empty Pareto front")
+            raise ContractValidationError(
+                "a closed round requires a non-empty Pareto front"
+            )
         candidate_ids = _candidate_id_set(self.candidates)
         classified = set(self.pareto.paretoFrontCandidateIds) | set(
             self.pareto.dominatedCandidateIds
@@ -485,7 +489,9 @@ class HypothesisRound:
         if not self.pareto.analystAgentId:
             raise ContractValidationError("Pareto analysis requires an analystAgentId")
         if not self.metaReview.reviewerAgentId:
-            raise ContractValidationError("a closed round requires a MetaReview reviewer")
+            raise ContractValidationError(
+                "a closed round requires a MetaReview reviewer"
+            )
         if not self.metaReview.recommendationCandidateId:
             raise ContractValidationError(
                 "a closed round requires a MetaReview recommendation"

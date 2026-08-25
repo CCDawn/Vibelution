@@ -29,6 +29,7 @@ import { resolveSessionStreamShouldConnect } from "./chatSessionStreamConnect";
 const routeSource = readFileSync(resolve(import.meta.dirname, "./ChatCodingRouteWorkbench.tsx"), "utf8");
 const sessionStreamSource = readFileSync(resolve(import.meta.dirname, "useSessionDetailStream.ts"), "utf8");
 const groupStreamSource = readFileSync(resolve(import.meta.dirname, "useGroupRoomStream.ts"), "utf8");
+const groupRoomEventStreamSource = readFileSync(resolve(import.meta.dirname, "chatRoomEventStream.ts"), "utf8");
 const cacheDialogSource = readFileSync(resolve(import.meta.dirname, "useChatCacheDetailDialog.ts"), "utf8");
 const cliTerminalHookSource = readFileSync(resolve(import.meta.dirname, "useChatCliAgentTerminal.ts"), "utf8");
 
@@ -285,10 +286,12 @@ describe("chat hand-test substitute: CLI terminal lifecycle", () => {
 });
 
 describe("chat hand-test substitute: stream ownership + apply", () => {
-  it("keeps sole session/group EventSource owners and route wiring", () => {
+  it("keeps sole session/group stream owners and route wiring", () => {
     expect(sessionStreamSource).toContain("new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`)");
     expect(sessionStreamSource).not.toContain("/events?initial=light");
-    expect(groupStreamSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
+    expect(groupStreamSource).toContain("consumeChatRoomEventStream");
+    expect(groupStreamSource).not.toContain("new EventSource(`/api/chat-rooms/");
+    expect(groupRoomEventStreamSource).toContain("fetchWithControl");
     expect(routeSource).toContain("useSessionDetailStream");
     expect(routeSource).toContain("useGroupRoomStream");
     // route itself must not open these two EventSources

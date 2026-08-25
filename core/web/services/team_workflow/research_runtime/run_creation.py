@@ -57,6 +57,9 @@ def _auto_open_candidate_generation(
         objective = run_input.get("researchObjectiveContract")
         if not (isinstance(objective, Mapping) and objective.get("hypothesisFirst") is True):
             return None
+        from core.research.workflow.contracts.discussion_scope import (
+            WorkflowDiscussionScopeV1,
+        )
         from core.web.services.team_workflow.research_runtime import (
             hypothesis_first_chain,
         )
@@ -70,6 +73,13 @@ def _auto_open_candidate_generation(
             return None
         if not hypothesis_first_chain.needs_candidate_generation(team_id, question_id):
             return None
+        discussion_scope = WorkflowDiscussionScopeV1.generation(
+            teamId=team_id,
+            researchProjectId=str(run_input.get("projectId") or "").strip(),
+            workflowRunId=str(created_run.get("runId") or "").strip(),
+            workflowNodeId=hypothesis_first_chain.HYPOTHESIS_DESIGN_NODE_ID,
+            questionId=question_id,
+        )
         opened = hypothesis_first_chain.open_candidate_generation_meeting(
             team_id,
             question_id,
@@ -78,6 +88,7 @@ def _auto_open_candidate_generation(
                 run_input,
                 created_run,
             ),
+            _discussion_scope=discussion_scope.to_dict(),
         )
         return {
             "status": str(opened.get("status") or ""),

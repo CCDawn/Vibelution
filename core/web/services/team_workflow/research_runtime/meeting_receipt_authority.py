@@ -145,6 +145,7 @@ def build_speaker_receipt_context(
     *,
     session_id: str,
     turn_identity: str,
+    expected_model_route: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     """Bind one real meeting speaker turn to an explicit package stage."""
 
@@ -188,6 +189,18 @@ def build_speaker_receipt_context(
         or any(char not in "0123456789abcdef" for char in policy_sha256)
     ):
         raise MeetingReceiptAuthorityError("formal meeting receipt authority is invalid")
+    route = expected_model_route if isinstance(expected_model_route, Mapping) else {}
+    expected_route = {
+        "modelRef": str(route.get("modelRef") or "").strip(),
+        "providerId": str(route.get("providerId") or "").strip(),
+        "modelId": str(route.get("modelId") or "").strip(),
+    }
+    if (
+        not all(expected_route.values())
+        or expected_route["modelRef"].partition("/")[0].casefold()
+        != expected_route["providerId"].casefold()
+    ):
+        raise MeetingReceiptAuthorityError("formal meeting effective model route is invalid")
     meeting_round_id = str(context.get("meetingRoundId") or "").strip()
     chat_room_round_id = str(context.get("roundId") or "").strip()
     participant_id = str(
@@ -226,6 +239,7 @@ def build_speaker_receipt_context(
         "modelPolicySha256": policy_sha256,
         "questionStageBinding": stage_binding.to_dict(),
         "outcomeKinds": [outcome_kind],
+        "expectedModelRoute": expected_route,
         "evidenceLocator": {
             "kind": "turn_journal",
             "executionKind": "chat_room_meeting",

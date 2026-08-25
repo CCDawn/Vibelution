@@ -21,6 +21,71 @@ from core.infrastructure.tool_execution_scope import (
 from core.orchestration.context_engine import AgentContextInterrupted
 
 
+_STRICT_RESEARCH_TASK_KINDS = frozenset(
+    {"hypothesis_design", "protocol_review", "result_evaluation"}
+)
+
+
+def _research_task_structured_output_contract(
+    context: dict[str, Any],
+    *,
+    session_id: str,
+    turn_id: str,
+):
+    """Resolve strict output only from the server-owned formal task record."""
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    if str(metadata.get("kind") or "").strip() != "research_project_agent_task":
+        return None
+    requested_task_kind = str(metadata.get("taskKind") or "").strip()
+    if requested_task_kind not in _STRICT_RESEARCH_TASK_KINDS:
+        return None
+    task_id = str(metadata.get("taskId") or "").strip()
+    team_id = str(metadata.get("teamId") or "").strip()
+    project_id = str(metadata.get("researchProjectId") or "").strip()
+    if not task_id or not team_id or not project_id:
+        raise RuntimeError("strict research task output binding is incomplete")
+    try:
+        from core.web.services.team_workflow.research_project_agent_tasks import (
+            _read_research_project_agent_task_record,
+        )
+
+        task = _read_research_project_agent_task_record(team_id, project_id, task_id)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise RuntimeError("strict research task output record is unavailable") from exc
+    if not isinstance(task, dict):
+        raise RuntimeError("strict research task output record is unavailable")
+    task_kind = str(task.get("taskKind") or "").strip()
+    task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    stored_turn_id = str(task_turn.get("turnId") or "").strip()
+    if (
+        task_kind not in _STRICT_RESEARCH_TASK_KINDS
+        or task_kind != requested_task_kind
+        or str(task.get("taskId") or "").strip() != task_id
+        or str(task.get("researchProjectId") or "").strip() != project_id
+        or str(task.get("sessionId") or "").strip() != str(session_id or "").strip()
+        or (stored_turn_id and stored_turn_id != str(turn_id or "").strip())
+    ):
+        raise RuntimeError("strict research task output binding does not match the turn")
+    from core.llm.semantic_messages import SemanticOutputSchema
+    from core.research.workflow.contracts import (
+        RESEARCH_TASK_OUTPUT_SCHEMA_VERSION,
+        canonical_research_task_output_schema_bundle,
+        parse_research_task_output,
+    )
+
+    schema = canonical_research_task_output_schema_bundle()["schemas"][task_kind]
+    return SemanticOutputSchema(
+        name=f"research_{task_kind}_v{RESEARCH_TASK_OUTPUT_SCHEMA_VERSION}",
+        schema=schema,
+        validator=lambda payload: parse_research_task_output(task_kind, payload),
+    )
+
+
 def _model_invocation_receipt_context(
     context: dict[str, Any],
     *,
@@ -924,6 +989,19 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     if isinstance(agent_prompt_snapshot, dict)
                     else "",
                 )
+                structured_output_setter = getattr(
+                    runtime_agent,
+                    "set_turn_structured_output_contract",
+                    None,
+                )
+                if callable(structured_output_setter):
+                    structured_output_setter(
+                        _research_task_structured_output_contract(
+                            context,
+                            session_id=session_id,
+                            turn_id=turn_id,
+                        )
+                    )
                 agent_create_ms = s._elapsed_ms(stage_started_at)
                 attachments = s._normalize_message_attachments(context.get("attachments") or [])
                 resolved_llm_model_id = str(getattr(resolved_agent_llm, "model_id", "") or "").strip() or s._session_agent_llm_slot_model_id(

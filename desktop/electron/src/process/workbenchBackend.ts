@@ -635,6 +635,12 @@ export async function reclaimStaleWorkbenchBackend(input: {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  /**
+   * Capture an identity only after the loopback health check has proved that
+   * this PID belongs to this project's workbench. This recovers an orphaned
+   * backend whose original launcher parent has already exited.
+   */
+  captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
@@ -679,12 +685,15 @@ export async function reclaimStaleWorkbenchBackend(input: {
     };
   }
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
+  const expectedIdentities: Record<string, PythonProcessIdentity> = {
+    ...(input.expectedIdentities ?? {})
+  };
   const occupant = await classifyWorkbenchPortOccupant(input);
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
   const terminateOne = async (pid: number): Promise<boolean> => {
     if (input.terminateProcessTree) {
-      const expectedIdentity = input.expectedIdentities?.[String(pid)];
+      const expectedIdentity = expectedIdentities[String(pid)];
       // The project classifier is not a substitute for pid/create-time/exe
       // identity. Old state without that identity remains visible rather than
       // risking a PID-reuse kill.
@@ -787,6 +796,26 @@ export async function reclaimStaleWorkbenchBackend(input: {
       };
     }
     if (!gracefulCompleted) {
+      // The persisted state may identify the detached Python parent while
+      // /api/health reports the still-listening child. Capture the child only
+      // after health has matched its workspace, then let the existing
+      // identity-checked, kind-checked tree terminator make the final call.
+      if (!expectedIdentities[String(occupant.pid)] && input.captureProcessIdentity) {
+        const captured = await input.captureProcessIdentity(occupant.pid);
+        if (
+          captured
+          && Math.trunc(Number(captured.pid)) === occupant.pid
+          && Number.isFinite(Number(captured.createTime))
+          && Number(captured.createTime) > 0
+          && String(captured.executable || "").trim()
+        ) {
+          expectedIdentities[String(occupant.pid)] = {
+            pid: occupant.pid,
+            createTime: Number(captured.createTime),
+            executable: String(captured.executable).trim()
+          };
+        }
+      }
       const terminated = await terminateOne(occupant.pid);
       if (!terminated) {
         return {
@@ -869,6 +898,7 @@ export async function resolveBindableWorkbenchPort(input: {
   killPid?: (pid: number) => void | Promise<void>;
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
+  captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   controlToken?: string;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
@@ -1362,6 +1392,16 @@ export async function executeMainLineWorkbench(
   const host = DEFAULT_WORKBENCH_HOST;
   const operation = input.operation;
   const commandId = input.command.commandId;
+  const captureIdentity = input.captureProcessIdentity
+    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
+      capturePythonProcessIdentity(captureInput));
+  const captureCurrentBackendIdentity = async (pid: number): Promise<PythonProcessIdentity | null> => {
+    return await captureIdentity({
+      pythonPath: input.pythonPath,
+      workspaceRoot: input.workspaceRoot,
+      pid
+    });
+  };
 
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
     if (operation === "stop" || operation === "shutdown") {
@@ -1447,6 +1487,7 @@ export async function executeMainLineWorkbench(
         killPid: input.killPid,
         terminateProcessTree,
         expectedIdentities,
+        captureProcessIdentity: captureCurrentBackendIdentity,
         controlToken: input.controlToken,
         gracefulShutdown,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
@@ -1493,6 +1534,7 @@ export async function executeMainLineWorkbench(
         killPid: input.killPid,
         terminateProcessTree,
         expectedIdentities,
+        captureProcessIdentity: captureCurrentBackendIdentity,
         controlToken: input.controlToken,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
@@ -1692,6 +1734,7 @@ export async function executeMainLineWorkbench(
       killPid: input.killPid,
       terminateProcessTree,
       expectedIdentities,
+      captureProcessIdentity: captureCurrentBackendIdentity,
       gracefulShutdown,
       forceRetireOnActiveWorkRefusal: false
     });
@@ -1725,9 +1768,6 @@ export async function executeMainLineWorkbench(
     fileExists
   });
   const spawnPid = Number(spawned.child.pid || 0);
-  const captureIdentity = input.captureProcessIdentity
-    ?? ((captureInput: { pythonPath: string; workspaceRoot: string; pid: number }) =>
-      capturePythonProcessIdentity(captureInput));
   let backendIdentity: PythonProcessIdentity | null = null;
   const persistUnretiredStart = (message: string): void => {
     writeState({

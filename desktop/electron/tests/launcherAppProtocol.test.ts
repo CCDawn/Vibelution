@@ -141,9 +141,57 @@ describe("launcher app protocol file serving", () => {
 
   it("registers the scheme handler through the Electron protocol module", () => {
     const handle = vi.fn();
-    registerLauncherAppProtocolHandle({ distRoot: FAKE_DIST, handle });
+    registerLauncherAppProtocolHandle({ resolveDistRoot: () => FAKE_DIST, handle });
     expect(handle).toHaveBeenCalledTimes(1);
     expect(handle.mock.calls[0][0]).toBe(LAUNCHER_APP_PROTOCOL);
     expect(typeof handle.mock.calls[0][1]).toBe("function");
+  });
+
+  it("re-resolves the dist root per request so an active release switch is served immediately", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-switch-"));
+    const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
+    const distRootInput = {
+      resourcesRoot: "C:/app/resources",
+      workspaceRoot,
+      packaged: false,
+      env: {}
+    };
+    try {
+      mkdirSync(join(releasesRoot, "release-a"), { recursive: true });
+      mkdirSync(join(releasesRoot, "release-b"), { recursive: true });
+      writeFileSync(join(releasesRoot, "release-a", "index.html"), "<!doctype html>release-a", "utf8");
+      writeFileSync(join(releasesRoot, "release-b", "index.html"), "<!doctype html>release-b", "utf8");
+      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release: "release-a" }), "utf8");
+
+      const handle = vi.fn();
+      registerLauncherAppProtocolHandle({
+        resolveDistRoot: () => resolveLauncherDistRoot(distRootInput),
+        handle
+      });
+      const handler = handle.mock.calls[0][1] as (request: Request) => Response;
+
+      const first = handler(new Request(`${LAUNCHER_APP_ORIGIN}/launcher`));
+      expect(first.status).toBe(200);
+
+      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release: "release-b" }), "utf8");
+
+      const second = handler(new Request(`${LAUNCHER_APP_ORIGIN}/launcher`));
+      expect(second.status).toBe(200);
+
+      expect(await first.text()).toContain("release-a");
+      expect(await second.text()).toContain("release-b");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("serves the launcher shell with no-store caching headers", async () => {
+    const shell = handlerFor(`${LAUNCHER_APP_ORIGIN}/launcher`);
+    expect(shell.headers.get("cache-control")).toBe("no-store, no-cache, must-revalidate, max-age=0");
+    expect(shell.headers.get("pragma")).toBe("no-cache");
+    expect(shell.headers.get("expires")).toBe("0");
+
+    const asset = handlerFor(`${LAUNCHER_APP_ORIGIN}/assets/app.js`);
+    expect(asset.headers.get("cache-control")).toBeNull();
   });
 });
