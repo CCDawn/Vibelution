@@ -264,10 +264,25 @@ def test_execute_chat_history_recreates_empty_default_session(reset_project: Pat
                 {
                     "conversation_id": "default",
                     "messages": [{"role": "user", "content": "old"}],
-                }
+                },
+                {
+                    "conversation_id": "second",
+                    "messages": [{"role": "assistant", "content": "also old"}],
+                },
             ],
         },
     )
+
+    preview = reset_service.preview_reset(["chat_history"])
+    preview_paths = {
+        candidate["path"]
+        for candidate in preview["items"][0]["deleteCandidates"]
+    }
+    assert preview_paths == {
+        "workspace/chat/chat_state.json",
+        "workspace/sessions/default/turn_journal.jsonl",
+        "workspace/sessions/second/turn_journal.jsonl",
+    }
 
     result = reset_service.execute_reset(["chat_history"], confirmed=True)
     state = load_chat_state(reset_project)
@@ -276,6 +291,7 @@ def test_execute_chat_history_recreates_empty_default_session(reset_project: Pat
     assert state["active_conversation_id"] == "default"
     assert "messages" not in state["conversations"][0]
     assert load_conversation_events(reset_project, "default") == []
+    assert load_conversation_events(reset_project, "second") == []
 
 
 def test_reset_can_clear_sessions_rooms_teams_agents_and_bus(reset_project: Path):

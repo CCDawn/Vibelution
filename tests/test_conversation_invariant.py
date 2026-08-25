@@ -60,6 +60,7 @@ def test_rewrite_exceptions_are_named_owners():
     joined = " ".join(LEDGER_REWRITE_EXCEPTION_OWNERS)
     assert "truncate_session_ledger_before_message" in joined
     assert "chat_room_service" in joined
+    assert "maintenance_reset" in joined
 
 
 def test_assembled_history_fingerprint_matches_ledger_reconstruction(tmp_path):

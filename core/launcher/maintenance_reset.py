@@ -625,10 +625,10 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             id="chat_history",
             name_zh="聊天历史",
             name_en="Chat history",
-            description_zh="清空 workspace/chat/chat_state.json，并写回一个空默认会话。",
-            description_en="Clear workspace/chat/chat_state.json and recreate one empty default session.",
-            detail_zh="workspace/chat/chat_state.json",
-            detail_en="workspace/chat/chat_state.json",
+            description_zh="清空会话目录与规范对话日志，并写回一个空默认会话。",
+            description_en="Clear the conversation directory and canonical ledgers, then recreate one empty default session.",
+            detail_zh="workspace/chat/chat_state.json、workspace/sessions/*/turn_journal.jsonl",
+            detail_en="workspace/chat/chat_state.json and workspace/sessions/*/turn_journal.jsonl",
             risk="medium",
             default_selected=False,
             category="conversation_state",
@@ -1076,7 +1076,15 @@ def _execute_item(definition: ResetItemDefinition, lang: str) -> dict:
 
 def _collect_chat_history() -> list[ResetCandidate]:
     path = chat_state_path(PROJECT_ROOT)
-    return [_candidate_for_path(path, kind="file", action="reset", missing=not path.exists())]
+    sessions_root = developer_sandbox.route_workspace_path(PROJECT_ROOT, "session", "sessions", intent="state")
+    candidates = [_candidate_for_path(path, kind="file", action="reset", missing=not path.exists())]
+    if sessions_root.is_dir():
+        candidates.extend(
+            _candidate_for_path(journal_path, kind="file", action="reset")
+            for journal_path in sorted(sessions_root.glob("*/turn_journal.jsonl"))
+            if journal_path.is_file()
+        )
+    return candidates
 
 
 def _collect_workspace_sessions() -> list[ResetCandidate]:
@@ -1242,6 +1250,8 @@ def _execute_state_memory_reset(candidate: ResetCandidate) -> ResetActionResult:
 
 
 def _execute_chat_history(candidate: ResetCandidate) -> ResetActionResult:
+    if candidate.path.name == "turn_journal.jsonl":
+        return _execute_delete_candidate(candidate)
     try:
         save_chat_state(PROJECT_ROOT, build_chat_state([]))
     except OSError as exc:
