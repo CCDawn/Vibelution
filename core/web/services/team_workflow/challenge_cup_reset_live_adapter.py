@@ -240,6 +240,7 @@ def _safe_record(
     role_by_id: Mapping[str, str] | None = None,
     source_kind: str = "",
     immutable: bool | None = None,
+    observation_only_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
     source = item if isinstance(item, Mapping) else {"id": item}
     identifier = _text(
@@ -267,6 +268,15 @@ def _safe_record(
     if immutable is not None:
         payload["immutable"] = bool(immutable)
     payload["sourceFamily"] = _text(family, limit=80)
+    normalized_observation_fields = sorted(
+        {
+            _text(field, limit=80)
+            for field in observation_only_fields
+            if _text(field, limit=80)
+        }
+    )
+    if normalized_observation_fields:
+        payload["observationOnlyFields"] = normalized_observation_fields
     return payload
 
 
@@ -714,7 +724,15 @@ class LiveChallengeCupInventoryReader:
                     if agent_id:
                         agent_team.setdefault(agent_id, owner)
 
-        safe_teams = [_safe_record(item, family="teams", owner_team_id=_text(_first(item, "teamId", "team_id", "id"))) for item in raw_teams]
+        safe_teams = [
+            _safe_record(
+                item,
+                family="teams",
+                owner_team_id=_text(_first(item, "teamId", "team_id", "id")),
+                observation_only_fields=("updatedAt",),
+            )
+            for item in raw_teams
+        ]
         scoped_agents = [
             item
             for item in raw_agents
@@ -750,6 +768,7 @@ class LiveChallengeCupInventoryReader:
                 owner_team_id=_member_owned_team(item, agent_team),
                 agent_team_by_id=agent_team,
                 role_by_id=role_by_agent,
+                observation_only_fields=("updatedAt",),
             )
             for item in scoped_rooms
         ]

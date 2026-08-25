@@ -482,13 +482,29 @@ def _adapter_method(adapter: Any, name: str):
 def _record_hash_input(item: Mapping[str, Any]) -> dict[str, Any]:
     """Return the semantic record view used by reset freshness checks.
 
-    ``updatedAt`` is refreshed by inventory readers while producing a bounded
-    observation and is therefore not an entity-version signal.  Creation and
-    completion timestamps remain part of the hash: they describe the record's
-    lifecycle state, just like its status, scope, owner, or content hash.
+    A reader may explicitly declare ``updatedAt`` as an observation-only field
+    in its bounded projection.  Every other record field, including ``status``
+    and an undeclared ``updatedAt``, remains part of the freshness hash.
     """
 
-    return {key: value for key, value in item.items() if key != "updatedAt"}
+    declared = item.get("observationOnlyFields")
+    if not isinstance(declared, Sequence) or isinstance(declared, (str, bytes, bytearray)):
+        return dict(item)
+    if not all(isinstance(field, str) for field in declared):
+        return dict(item)
+
+    projection = dict(item)
+    normalized = sorted(set(declared))
+    # Keep the declaration in the canonical projection.  It is part of the
+    # reader's freshness contract, so changing the declaration itself must
+    # invalidate a previously generated plan.
+    projection["observationOnlyFields"] = normalized
+    # ``updatedAt`` is the only field this service is allowed to treat as an
+    # observation.  Unknown or mixed declarations remain fully semantic and
+    # therefore cannot hide either the timestamp or any other record field.
+    if normalized == ["updatedAt"]:
+        projection.pop("updatedAt", None)
+    return projection
 
 
 def _compact_record(family: str, item: Any) -> dict[str, Any]:

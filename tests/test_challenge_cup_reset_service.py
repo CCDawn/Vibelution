@@ -43,12 +43,12 @@ def _inventory(*, active_work: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "teamId": "research-team",
         "objects": {
-            "teams": [{"teamId": "research-team"}],
+            "teams": [{"teamId": "research-team", "observationOnlyFields": ["updatedAt"]}],
             "agents": agents,
             "catalog": [{"catalogId": "science-125", "immutable": True}],
             "program": [{"programId": "competition-program-v2", "immutable": True}],
             "policy": [{"policyId": "full-catalog-v1", "immutable": True}],
-            "rooms": [{"roomId": "legacy-room", "teamId": "research-team"}],
+            "rooms": [{"roomId": "legacy-room", "teamId": "research-team", "observationOnlyFields": ["updatedAt"]}],
             "projects": [{"projectId": "legacy-project", "teamId": "research-team"}],
             "workflowRuns": [{"runId": "legacy-run", "teamId": "research-team"}],
             "sessions": [
@@ -84,7 +84,8 @@ class _RefreshingReader(_Reader):
 
     def read_inventory(self, team_id: str) -> dict[str, Any]:
         self._tick += 1
-        for rows in self.payload["objects"].values():
+        for family in ("teams", "rooms"):
+            rows = self.payload["objects"].get(family)
             if not isinstance(rows, list):
                 continue
             for row in rows:
@@ -198,6 +199,19 @@ def test_updated_at_observation_drift_keeps_plan_stable_but_semantic_drift_is_st
     assert second["inventoryHash"] == first["inventoryHash"]
 
     payload["objects"]["rooms"][0]["status"] = "archived"
+    with pytest.raises(ResetPlanStaleError):
+        service.confirm(
+            purge_plan_id=first["purgePlanId"],
+            confirmation_phrase=CONFIRMATION_PHRASE,
+        )
+
+
+def test_undeclared_updated_at_drift_is_stale() -> None:
+    payload = _inventory()
+    service = ChallengeCupResetService(inventory_reader=_Reader(payload))
+    first = service.preview().to_dict()
+
+    payload["objects"]["projects"][0]["updatedAt"] = "semantic-version-2"
     with pytest.raises(ResetPlanStaleError):
         service.confirm(
             purge_plan_id=first["purgePlanId"],

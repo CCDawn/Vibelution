@@ -128,6 +128,44 @@ def test_live_adapter_returns_bounded_identity_only_and_preview_can_consume_it()
     assert preview["deleteSet"]["rooms"] == ["legacy-room"]
 
 
+def test_live_adapter_observation_updates_keep_preview_stable() -> None:
+    ports = _ports()
+    tick = 0
+    original_list_teams = ports.list_teams
+    original_list_rooms = ports.list_rooms
+
+    def list_teams() -> Any:
+        nonlocal tick
+        tick += 1
+        payload = original_list_teams()
+        for row in payload["teams"]:
+            row["updatedAt"] = f"team-observation-{tick}"
+        return payload
+
+    def list_rooms() -> Any:
+        payload = original_list_rooms()
+        for row in payload:
+            row["updatedAt"] = f"room-observation-{tick}"
+        return payload
+
+    reader = LiveChallengeCupInventoryReader(
+        ChallengeCupInventoryPorts(
+            **{
+                **ports.__dict__,
+                "list_teams": list_teams,
+                "list_rooms": list_rooms,
+            }
+        )
+    )
+    service = ChallengeCupResetService(inventory_reader=reader)
+
+    first = service.preview().to_dict()
+    second = service.preview().to_dict()
+
+    assert second["purgePlanId"] == first["purgePlanId"]
+    assert second["inventoryHash"] == first["inventoryHash"]
+
+
 def test_active_work_is_derived_from_managed_snapshots() -> None:
     ports = _ports()
     ports = ChallengeCupInventoryPorts(
