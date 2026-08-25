@@ -212,6 +212,8 @@ export type MeetingRoundRecord = HypothesisFirstScope & {
   draftRejectedBy?: string;
   draftRejectedReason?: string;
   updatedAt?: string;
+  /** Server-authored discussion scope; formal candidate meetings carry candidateId here. */
+  discussionScope?: Record<string, unknown>;
 };
 
 export type MeetingRoundListResponse = {
@@ -406,6 +408,12 @@ export type ReviewRoundLinkRecord = {
   collectionRequestId: string;
   questionId: string;
   roundIndex: number;
+  /** Candidate-specific review lineage. Older records may omit it; UI treats
+   * a missing value on a linked review as unresolved rather than guessing. */
+  candidateId?: string;
+  /** Zero-based server-authored position within a parallel candidate review round. */
+  candidateOrder?: number | null;
+  roundBudget?: number;
   createdAt: string;
 };
 

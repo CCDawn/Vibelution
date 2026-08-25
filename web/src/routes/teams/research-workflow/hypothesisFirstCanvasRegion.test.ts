@@ -17,6 +17,7 @@ import {
   HYPOTHESIS_FIRST_STAGE_ID,
   hypothesisFirstSemanticNodeId,
   isHypothesisFirstCanvasNode,
+  summarizeHypothesisReviewMeetings,
   type HypothesisFirstCanvasRegionInput,
 } from "./hypothesisFirstCanvasRegion";
 
@@ -153,6 +154,17 @@ function regionOf(input: Partial<HypothesisFirstCanvasRegionInput>) {
 }
 
 describe("hypothesisFirstCanvasRegion", () => {
+  it("counts fan-out siblings as one logical review round", () => {
+    const summary = summarizeHypothesisReviewMeetings([
+      meeting(1, "closed", { meetingRoundId: "r1-a", digestId: "d1-a" }),
+      meeting(1, "closed", { meetingRoundId: "r1-b", digestId: "d1-b" }),
+      meeting(2, "awaiting_approval", { meetingRoundId: "r2-a" }),
+    ]);
+
+    expect(summary.effectiveRounds).toBe(2);
+    expect(summary.latestRound).toBe(2);
+  });
+
   it("returns null only when the chain has no question identity", () => {
     expect(regionOf({ chainState: null })).toBeNull();
   });

@@ -143,6 +143,7 @@ import chatWorkbenchLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import chatSessionStreamConnectSource from "./chat/chatSessionStreamConnect.ts?raw";
 import sessionDetailStreamSource from "./chat/useSessionDetailStream.ts?raw";
 import groupRoomStreamSource from "./chat/useGroupRoomStream.ts?raw";
+import chatRoomEventStreamSource from "./chat/chatRoomEventStream.ts?raw";
 import chatSessionSelectionSource from "./chat/useChatSessionSelection.ts?raw";
 import chatArchivedAgentRetirementSource from "./chat/useChatArchivedAgentRetirement.ts?raw";
 import chatSessionDetailHelpersSource from "./chat/chatSessionDetailHelpers.ts?raw";
@@ -253,7 +254,7 @@ const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}\n${ch
 const routeAndCenterPackSource = `${routeSource}\n${chatCenterTabStripSource}\n${chatCenterSessionSurfaceSource}\n${chatWorkbenchCenterColumnSource}\n${chatSessionWorkbenchShellSource}`;
 const routeAndPresentationSource = `${routeSource}\n${chatWorkbenchPresentationSource}\n${chatWorkbenchFormatSource}`;
 const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}\n${chatSubmitTelemetrySource}`;
-const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${groupRoomStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
+const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${groupRoomStreamSource}\n${chatRoomEventStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
 const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
 const routeAndHelpersSource = `${routeSource}\n${chatSessionDetailHelpersSource}\n${chatRoutePresentationSource}`;
 const routeAndLifecycleSource = `${routeSource}\n${chatWorkspaceLifecycleSource}\n${chatSessionDetailHelpersSource}`;
@@ -2002,7 +2003,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("purpose: groupManagePurposeDraft || \"discussion\"");
     expect(routeSource).toContain("fetchChatRoomDetail(activeGroupRoomId)");
     expect(chatApiSource).toContain("`/api/chat-rooms/${encodeURIComponent(roomId)}`");
-    expect(routeAndStreamSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
+    expect(routeAndStreamSource).toContain("consumeChatRoomEventStream");
+    expect(routeAndStreamSource).toContain("fetchWithControl(chatRoomEventsUrl(options.roomId)");
+    expect(routeAndStreamSource).not.toContain("new EventSource(`/api/chat-rooms/");
     expect(routeAndStreamSource).toContain("scheduleChatRoomDetail(payload.detail)");
     expect(routeAndStreamSource).toContain("browser.chat_room_stream.closed");
     expect(routeSource).toContain("useGroupRoomStream");
@@ -2431,7 +2434,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionStreamEffectSource).not.toContain("pageVisible,");
     expect(routeAndStreamSource).toContain("forceCloseStreamRef.current = forceCloseStream");
     expect(routeAndStreamSource).toContain("SESSION_STREAM_ROUTE_SWITCH_GRACE_MS");
-    expect(routeAndStreamSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeAndStreamSource).toContain("if (!groupStreamShouldConnect || typeof AbortController === \"undefined\")");
     expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground");
     expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground");
     expect(routeSource).toContain("refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground");

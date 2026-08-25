@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.research.competition.question_result_package import canonical_model_policy
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
     write_problem_understanding_artifact,
@@ -8168,11 +8169,14 @@ def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, 
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
             "questionId": "SCI-096",
-            "requiredModelPolicy": {
-                "providerIds": ["dashscope_main"],
-                "modelIds": ["qwen3.6-plus"],
-                "requireOfficialProvider": True,
-            },
+            "requiredModelPolicy": canonical_model_policy(
+                {
+                    "family": "qwen",
+                    "providerIds": ["dashscope_main"],
+                    "modelIds": ["qwen3.6-plus"],
+                    "requireOfficialProvider": True,
+                }
+            ),
         },
     )
     monkeypatch.setattr(

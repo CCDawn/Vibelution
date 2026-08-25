@@ -1,8 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 
-import { getLauncherBranchInstances } from "../api/launcher";
+import {
+  getLauncherBranchInstances,
+  getLauncherState,
+  hasLauncherStateBridge,
+  onLauncherStateChanged,
+} from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
@@ -14,12 +19,35 @@ import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePr
 export function LauncherShell() {
   const { lang } = useShellI18n({ configEnabled: false });
   const [theme] = useState(() => readStoredWorkbenchTheme());
+  const queryClient = useQueryClient();
+  const stateBridgeAvailable = hasLauncherStateBridge();
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
     queryFn: () => getLauncherBranchInstances(),
     staleTime: 15_000,
   });
   const launcherWindowTitle = currentInstanceWindowTitle("launcher", branchInstancesQuery.data);
+
+  useEffect(() => {
+    if (!stateBridgeAvailable) {
+      return;
+    }
+
+    const invalidateBranchInstances = () => {
+      void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
+    };
+    const unsubscribe = onLauncherStateChanged(() => {
+      invalidateBranchInstances();
+    });
+
+    // Read once after subscribing so a state event emitted during initial mount
+    // still causes the shared branch-instance query to refresh.
+    void Promise.resolve()
+      .then(() => getLauncherState())
+      .then(invalidateBranchInstances, () => undefined);
+
+    return unsubscribe;
+  }, [queryClient, stateBridgeAvailable]);
 
   useEffect(() => {
     applyWorkbenchDocumentLanguage(document, lang);

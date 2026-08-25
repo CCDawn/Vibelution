@@ -12,6 +12,7 @@ from core.llm.semantic_messages import (
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
+    SemanticOutputSchema,
     SemanticToolDefinition,
     TextPart,
     ToolCallPart,
@@ -46,6 +47,37 @@ def identity(item_id: str) -> CanonicalItemIdentity:
         iteration=current.iteration,
         item_id=item_id,
     )
+
+
+def test_chat_encodes_strict_structured_output_schema():
+    schema = {
+        "type": "object",
+        "properties": {"reasoning": {"type": "string"}},
+        "required": ["reasoning"],
+        "additionalProperties": False,
+    }
+    output_schema = SemanticOutputSchema(
+        name="research_protocol_review_v1",
+        schema=schema,
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="user", parts=(TextPart("review"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=64),
+        output_schema=output_schema,
+    )
+
+    payload = ChatCompletionsWireAdapter().encode_request(request, route=route()).body
+
+    assert payload["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "research_protocol_review_v1",
+            "strict": True,
+            "schema": schema,
+        },
+    }
 
 
 def test_chat_encoder_owns_openai_messages_and_tool_result_shape():

@@ -1083,6 +1083,18 @@ def start_chat_room_round(
         if isinstance(_model_invocation_receipt_authority, Mapping)
         else None
     )
+    if receipt_authority is None and _is_scoped_discussion_room(existing_room):
+        # A workflow-scoped meeting room only exists for formal hypothesis
+        # stages; its speaker turns must stay receipt-bound. Failing closed
+        # here keeps every driving path (reopen, direct round API, scheduler)
+        # from landing unverified formal content.
+        raise ChatRoomValidationError(
+            text_for(
+                lang,
+                zh="该群聊绑定正式工作流阶段，必须携带模型调用回执授权才能发起轮次。",
+                en="This room is bound to a formal workflow stage; rounds require model invocation receipt authority.",
+            )
+        )
     if background and not _try_acquire_chat_room_inflight():
         # Reject before any durable round write so the room stays clean.
         raise ChatRoomBusyError(
@@ -1267,21 +1279,26 @@ def start_chat_room_round(
 
     inflight_submitted = False
     try:
-        stage_started_at = _perf_counter()
-        kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
-        if kernel_trace:
-            room, round_payload = _attach_chat_room_round_kernel_trace(
-                normalized_room_id,
-                round_id,
-                kernel_trace,
-                fallback_room=room,
-                fallback_round=round_payload,
-            )
-        submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
+        # A background round must become observable as soon as its durable room
+        # and round records exist. Kernel tracing and WorkRun persistence can
+        # touch other stores, so doing either before ``submit`` makes sibling
+        # candidate reviews wait behind an unrelated slow trace.
+        if not background:
+            stage_started_at = _perf_counter()
+            kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
+            if kernel_trace:
+                room, round_payload = _attach_chat_room_round_kernel_trace(
+                    normalized_room_id,
+                    round_id,
+                    kernel_trace,
+                    fallback_room=room,
+                    fallback_round=round_payload,
+                )
+            submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
 
-        stage_started_at = _perf_counter()
-        _persist_chat_room_work_run(room, round_payload, status="running", summary="")
-        submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
+            stage_started_at = _perf_counter()
+            _persist_chat_room_work_run(room, round_payload, status="running", summary="")
+            submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
         submit_timings["submitElapsedBeforeStartLogMs"] = _elapsed_ms(submit_started_at)
         _record_room_event(
             "round",
@@ -1726,6 +1743,16 @@ def _run_chat_room_round_background(
         lifecycle=True,
     )
     try:
+        kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
+        if kernel_trace:
+            room, round_payload = _attach_chat_room_round_kernel_trace(
+                room_id,
+                round_id,
+                kernel_trace,
+                fallback_room=room,
+                fallback_round=round_payload,
+            )
+        _persist_chat_room_work_run(room, round_payload, status="running", summary="")
         _execute_chat_room_round(
             room_id,
             round_id,
@@ -2403,10 +2430,6 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
         build_speaker_receipt_context,
     )
-
-    receipt_context = build_speaker_receipt_context(
-        participant, context, session_id=session_id, turn_identity=turn_identity
-    )
     stage_started_at = _perf_counter()
     agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     if agent_id and not agent:
@@ -2461,6 +2484,17 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         stage_started_at = _perf_counter()
         resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
         agent_config = resolved_agent_llm.config
+        receipt_context = build_speaker_receipt_context(
+            participant,
+            context,
+            session_id=session_id,
+            turn_identity=turn_identity,
+            expected_model_route={
+                "modelRef": str(getattr(resolved_agent_llm, "model_ref", "") or "").strip(),
+                "providerId": str(getattr(resolved_agent_llm, "provider_id", "") or "").strip(),
+                "modelId": str(getattr(resolved_agent_llm, "model", "") or "").strip(),
+            },
+        )
         timings["agentConfigMs"] = _elapsed_ms(stage_started_at)
         stage_started_at = _perf_counter()
         ledger_events = load_conversation_events(PROJECT_ROOT, session_id) if session_id else []
@@ -2513,23 +2547,70 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
             stage_started_at = _perf_counter()
-            from core.llm.client import model_invocation_receipt_context_scope
+            from core.llm.client import llm_status_context, model_invocation_receipt_context_scope
 
-            with model_invocation_receipt_context_scope(receipt_context):
-                result = run_existing_agent_single_turn(
-                    agent_runtime,
-                    initial_prompt=prompt,
-                    disable_tools=True,
-                    turn_identity=turn_identity,
-                    interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
-                    chat_history=canonical_chat_history,
+            meeting_outcomes: list[Any] = []
+            llm_response_callback_id = ""
+            if receipt_context is not None:
+                # Formal meeting turns bypass the session UI stream, so nothing
+                # journals their canonical TurnOutcome. Without the journal the
+                # receipt readback below always fails closed; capture the
+                # outcomes here and commit them to the speaker Child Session
+                # ledger before registration, mirroring stream_capture.
+                from core.infrastructure.event_bus import EventNames, get_event_bus
+
+                def _capture_meeting_llm_outcome(event: Any) -> None:
+                    data = getattr(event, "data", None)
+                    outcome = data.get("turn_outcome") if isinstance(data, dict) else None
+                    identity = getattr(outcome, "identity", None)
+                    if (
+                        outcome is not None
+                        and str(getattr(identity, "session_id", "") or "").strip() == session_id
+                        and str(getattr(identity, "turn_id", "") or "").strip() == turn_identity
+                    ):
+                        meeting_outcomes.append(outcome)
+
+                llm_response_callback_id = get_event_bus().subscribe(
+                    EventNames.LLM_RESPONSE,
+                    _capture_meeting_llm_outcome,
+                    callback_id=f"chat_room_meeting_{session_id}_{round_id}_{participant_id}",
                 )
+            try:
+                # The status context is the only meeting-side source for the
+                # invocation session/turn identity; without it the LLM scope
+                # degrades to a synthetic namespace whose outcomes can never
+                # match the speaker Child Session journal.
+                with model_invocation_receipt_context_scope(receipt_context), llm_status_context(
+                    session_id=session_id,
+                    turn_id=turn_identity,
+                ):
+                    result = run_existing_agent_single_turn(
+                        agent_runtime,
+                        initial_prompt=prompt,
+                        disable_tools=True,
+                        turn_identity=turn_identity,
+                        interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                        chat_history=canonical_chat_history,
+                    )
+            finally:
+                if llm_response_callback_id:
+                    from core.infrastructure.event_bus import get_event_bus as _get_event_bus
+
+                    _get_event_bus().unsubscribe_by_id(llm_response_callback_id)
             timings["llmElapsedMs"] = _elapsed_ms(stage_started_at)
             if receipt_context is not None:
+                from core.chat.conversation_ledger import append_conversation_turn_outcome
                 from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
                     register_speaker_receipts,
                 )
 
+                for outcome in meeting_outcomes:
+                    append_conversation_turn_outcome(
+                        PROJECT_ROOT,
+                        session_id,
+                        turn_identity,
+                        outcome,
+                    )
                 register_speaker_receipts(
                     project_root=PROJECT_ROOT,
                     team_id=str(context.get("teamId") or "").strip(),
@@ -4603,9 +4684,14 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
 
     if _chat_room_lock_owned_by_current_thread():
         return []
-    reconciled: list[dict[str, Any]] = []
     store = _work_run_store()
     reconciled_at = utc_now_iso()
+
+    # WorkRun reads can touch a separate persistent store.  Take a small room
+    # snapshot first, then resolve the WorkRun state without holding the room
+    # mutex.  Holding this mutex across that I/O blocks detail, stop, and room
+    # recovery requests behind one slow reconciliation read.
+    active_rounds: list[tuple[str, str]] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         for room in list(state.get("rooms") or []):
@@ -4620,57 +4706,98 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
             previous_status = str(round_payload.get("status") or "").strip().lower()
             if previous_status not in RUNNING_ROUND_STATUSES:
                 continue
-            work_run = store.load_snapshot(RUN_KIND, round_id)
-            final_status = _terminal_chat_room_status_from_work_run(work_run)
-            reconciliation_source = "terminal_work_run"
-            if not final_status and not _chat_room_round_has_process_control(round_id):
-                final_status = "stopped"
-                reconciliation_source = "missing_process_controller"
-            if not final_status:
-                continue
-            finished_at = (
-                reconciled_at
-                if reconciliation_source == "missing_process_controller"
-                else str((work_run or {}).get("finishedAt") or (work_run or {}).get("updatedAt") or reconciled_at).strip()
-            )
-            reason = (
-                text_for(
-                    get_web_language(),
-                    zh="后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
-                    en="The backend process restarted, so the chat room round without a current process controller was closed.",
-                )
-                if reconciliation_source == "missing_process_controller"
-                else _chat_room_reconciliation_reason(work_run or {}, final_status=final_status)
-            )
-            message_count = len(list(round_payload.get("messages") or []))
-            speaker_count = len(list(round_payload.get("speakerOrder") or []))
-            round_payload["status"] = final_status
-            round_payload["summary"] = (
-                _stopped_round_summary(reason, message_count=message_count, speaker_count=speaker_count)
-                if final_status == "stopped"
-                else reason
-            )
-            round_payload["updatedAt"] = finished_at
-            round_payload["finishedAt"] = finished_at
-            room["status"] = "ready" if final_status in {"completed", "partial", "stopped"} else "failed"
-            room["activeRoundId"] = ""
-            room["updatedAt"] = finished_at
-            reconciled.append(
+            active_rounds.append((str(room.get("roomId") or "").strip(), round_id))
+
+    candidates: list[dict[str, Any]] = []
+    for room_id, round_id in active_rounds:
+        if not room_id:
+            continue
+        work_run = store.load_snapshot(RUN_KIND, round_id)
+        final_status = _terminal_chat_room_status_from_work_run(work_run)
+        reconciliation_source = "terminal_work_run"
+        if not final_status and not _chat_room_round_has_process_control(round_id):
+            final_status = "stopped"
+            reconciliation_source = "missing_process_controller"
+        if final_status:
+            candidates.append(
                 {
-                    "room": dict(room),
-                    "round": dict(round_payload),
-                    "previousStatus": previous_status,
+                    "roomId": room_id,
+                    "roundId": round_id,
+                    "workRun": dict(work_run) if isinstance(work_run, Mapping) else {},
                     "finalStatus": final_status,
                     "reconciliationSource": reconciliation_source,
-                    "workRunStatus": str((work_run or {}).get("status") or "").strip(),
-                    "runtimeStatus": str((work_run or {}).get("runtimeStatus") or "").strip(),
-                    "messageCount": message_count,
-                    "speakerCount": speaker_count,
-                    "persistWorkRun": not _terminal_chat_room_status_from_work_run(work_run),
                 }
             )
-        if reconciled:
-            _store().save(state)
+
+    reconciled: list[dict[str, Any]] = []
+    if candidates:
+        with _CHAT_ROOM_LOCK:
+            state = _store().load()
+            for candidate in candidates:
+                room = _find_room(state, str(candidate["roomId"]))
+                round_id = str(candidate["roundId"])
+                if not isinstance(room, dict) or str(room.get("activeRoundId") or "").strip() != round_id:
+                    continue
+                round_payload = _find_round(room, round_id)
+                if not isinstance(round_payload, dict):
+                    continue
+                previous_status = str(round_payload.get("status") or "").strip().lower()
+                if previous_status not in RUNNING_ROUND_STATUSES:
+                    continue
+                # A user stop can create a process control record while this
+                # reconciliation is resolving its WorkRun snapshot.  Do not
+                # replace that live, user-owned stop with an orphan recovery.
+                if (
+                    candidate["reconciliationSource"] == "missing_process_controller"
+                    and _chat_room_round_has_process_control(round_id)
+                ):
+                    continue
+                work_run = candidate["workRun"]
+                final_status = str(candidate["finalStatus"])
+                reconciliation_source = str(candidate["reconciliationSource"])
+                finished_at = (
+                    reconciled_at
+                    if reconciliation_source == "missing_process_controller"
+                    else str(work_run.get("finishedAt") or work_run.get("updatedAt") or reconciled_at).strip()
+                )
+                reason = (
+                    text_for(
+                        get_web_language(),
+                        zh="后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
+                        en="The backend process restarted, so the chat room round without a current process controller was closed.",
+                    )
+                    if reconciliation_source == "missing_process_controller"
+                    else _chat_room_reconciliation_reason(work_run, final_status=final_status)
+                )
+                message_count = len(list(round_payload.get("messages") or []))
+                speaker_count = len(list(round_payload.get("speakerOrder") or []))
+                round_payload["status"] = final_status
+                round_payload["summary"] = (
+                    _stopped_round_summary(reason, message_count=message_count, speaker_count=speaker_count)
+                    if final_status == "stopped"
+                    else reason
+                )
+                round_payload["updatedAt"] = finished_at
+                round_payload["finishedAt"] = finished_at
+                room["status"] = "ready" if final_status in {"completed", "partial", "stopped"} else "failed"
+                room["activeRoundId"] = ""
+                room["updatedAt"] = finished_at
+                reconciled.append(
+                    {
+                        "room": dict(room),
+                        "round": dict(round_payload),
+                        "previousStatus": previous_status,
+                        "finalStatus": final_status,
+                        "reconciliationSource": reconciliation_source,
+                        "workRunStatus": str(work_run.get("status") or "").strip(),
+                        "runtimeStatus": str(work_run.get("runtimeStatus") or "").strip(),
+                        "messageCount": message_count,
+                        "speakerCount": speaker_count,
+                        "persistWorkRun": not _terminal_chat_room_status_from_work_run(work_run),
+                    }
+                )
+            if reconciled:
+                _store().save(state)
 
     for item in reconciled:
         if item["persistWorkRun"]:
@@ -4964,6 +5091,7 @@ def _fail_chat_room_round(
         zh=f"群聊后台轮次失败：{type(exc).__name__}: {exc}",
         en=f"Chat room background round failed: {type(exc).__name__}: {exc}",
     )
+    already_terminal = False
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         live_room = _find_room(state, room_id)
@@ -4973,17 +5101,21 @@ def _fail_chat_room_round(
         if target_round is None:
             target_round = round_payload
         if str(target_round.get("status") or "").strip().lower() not in RUNNING_ROUND_STATUSES:
-            _publish_chat_room_detail_snapshot(room_id)
-            return
-        target_round["status"] = "failed"
-        target_round["summary"] = summary
-        target_round["updatedAt"] = failed_at
-        target_round["finishedAt"] = failed_at
-        live_room["status"] = "failed"
-        live_room["activeRoundId"] = ""
-        live_room["updatedAt"] = failed_at
-        if _find_room(state, room_id) is not None:
-            _store().save(state)
+            already_terminal = True
+        else:
+            target_round["status"] = "failed"
+            target_round["summary"] = summary
+            target_round["updatedAt"] = failed_at
+            target_round["finishedAt"] = failed_at
+            live_room["status"] = "failed"
+            live_room["activeRoundId"] = ""
+            live_room["updatedAt"] = failed_at
+            if _find_room(state, room_id) is not None:
+                _store().save(state)
+
+    if already_terminal:
+        _publish_chat_room_detail_snapshot(room_id)
+        return
 
     _persist_chat_room_work_run(live_room, target_round, status="failed", summary=summary)
     _sync_stopped_round_to_sessions_if_needed(live_room, target_round)

@@ -65,8 +65,7 @@ def test_downstream_retry_synthesizes_pending_when_lag_walk_fails(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)

@@ -79,8 +79,7 @@ def test_not_ready_successor_blocked_no_adapter(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
@@ -120,9 +119,9 @@ def test_not_ready_successor_blocked_no_adapter(tmp_path: Path) -> None:
             ).fetchall(),
             force_flush=True,
         ).result(timeout=10)
-        # 只有 source_finding 的 adapter（已 consume），source_extraction 未创建。
-        assert len(adapter_rows) == 1
-        assert adapter_rows[0][0] == "succeeded"
+        # 入口与 source_finding 的 adapter 均已 consume，source_extraction 未创建。
+        assert len(adapter_rows) == 2
+        assert all(row[0] == "succeeded" for row in adapter_rows)
         # 事件记录 node_blocked。
         events = harness.commands.store.list_events("run-test")
         assert any(e.event_type == "node_blocked" for e in events)
@@ -134,8 +133,7 @@ def test_ready_successor_creates_adapter_outbox(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
@@ -173,8 +171,7 @@ def test_no_readiness_wiring_defaults_to_pass(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]

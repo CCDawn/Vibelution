@@ -425,6 +425,26 @@ def _node_order() -> list[str]:
     return [node.nodeId for node in build_challenge_cup_workflow_definition().nodes]
 
 
+def _fork_predecessor_for(node_id: str) -> str | None:
+    """Unique static predecessor used as ``as_node`` when forking a checkpoint.
+
+    A fresh thread's bare ``update_state`` only schedules the graph entry
+    node; resuming a forked child at any other node must attribute the
+    inherited values to that node's unique linear predecessor so LangGraph
+    schedules the requested resume node.  Returns ``None`` for the entry node
+    itself and for conditional-sourced nodes, where static scheduling is not
+    determinable.
+    """
+    if node_id == _node_order()[0]:
+        return None
+    predecessors = [
+        source for source, target in graph_static_edge_pairs() if target == node_id
+    ]
+    if len(predecessors) == 1:
+        return predecessors[0]
+    return None
+
+
 def _make_node_fn(node_id: str) -> Callable[[ChallengeCupGraphState], ChallengeCupGraphState]:
     def run_node(state: ChallengeCupGraphState) -> ChallengeCupGraphState:
         pending = build_pending_action(state, node_id)
@@ -914,9 +934,14 @@ class ChallengeCupGraphCoordinator:
                 )
                 inherited["scope_binding_required"] = True
             _validate_state_scope_binding(inherited)
+            predecessor = _fork_predecessor_for(resume_node_id)
+            if predecessor is not None:
+                # A leftover failure marker would route the linear edge to END.
+                inherited.pop("blocked_outcome", None)
             saved = graph.update_state(
                 child_config,
                 inherited,
+                as_node=predecessor,
             )
             child_state = graph.get_state(saved)
             scheduled = [str(node_id) for node_id in child_state.next or ()]

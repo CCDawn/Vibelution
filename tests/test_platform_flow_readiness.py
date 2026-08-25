@@ -16,13 +16,22 @@ from core.web.services.team_workflow import research_scope as scope_service
 
 
 def _isolate_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    legacy_workspace_root = tmp_path / "legacy-team-workspace" / "teams"
+    formal_workspace_root = tmp_path / "formal-team-workspace" / "teams"
+    assert legacy_workspace_root != formal_workspace_root
     monkeypatch.setattr(research_projects.team_service, "get_team", lambda _team_id: {})
     monkeypatch.setattr(research_projects.team_service, "assert_team_exists", lambda _team_id: None)
     monkeypatch.setattr(
         research_projects,
         "team_workspace_root",
-        lambda team_id: tmp_path / "teams" / str(team_id),
+        lambda team_id: legacy_workspace_root / str(team_id),
     )
+    monkeypatch.setattr(
+        research_projects,
+        "formal_team_workspace_root",
+        lambda team_id: formal_workspace_root / str(team_id),
+    )
+    assert research_projects._store_path("research-team").is_relative_to(formal_workspace_root)
     monkeypatch.setattr(research_projects, "_record_project_event", lambda *args, **kwargs: None)
 
 

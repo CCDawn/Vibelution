@@ -680,7 +680,7 @@ def open_review_meeting_for_selection(
     _formal_candidate_id: str = "",
     _formal_candidate_order: int | None = None,
 ) -> dict[str, Any]:
-    """Open (or reuse) one hypothesis-review meeting for a selection record.
+    """Open (or reuse) one candidate-level review meeting per selection item.
 
     Participants derive from the team's linked chat room; the meeting id is
     deterministic per selection/round so replays reuse instead of duplicating.
@@ -713,12 +713,19 @@ def open_review_meeting_for_selection(
             "selection requires at least one selectedCandidateId"
         )
 
-    # A formal Challenge Cup run reviews each selected hypothesis in its own
-    # room.  The receipt is the server-owned formal-run signal; legacy DEV
-    # selections keep their existing single-meeting contract.  Recursive
-    # calls carry one explicit candidate so the meeting runtime can create the
-    # canonical candidate_review scope and hidden Child Sessions.
-    if receipt_authority is not None and not _formal_candidate_id:
+    # Every selected hypothesis owns a review meeting. Receipt authority
+    # constrains model invocation evidence; it must never decide whether a
+    # multi-candidate selection is fanned out. Otherwise a temporarily
+    # unavailable formal Ledger silently produces one combined meeting with an
+    # empty candidate link, while the UI correctly fails closed because it
+    # cannot assign that meeting to any candidate.
+    #
+    # Recursive calls carry exactly one candidate. When a server-authored
+    # workflow discussion scope is available, each child receives its own
+    # candidate_review scope and child sessions; older DEV paths still keep
+    # the same candidate-level meeting/link contract without inventing a
+    # workflow identity.
+    if not _formal_candidate_id:
         if previous_meeting_round_id:
             previous = meeting_rounds.get_meeting_round(
                 normalized_team_id, str(previous_meeting_round_id).strip()
@@ -732,31 +739,14 @@ def open_review_meeting_for_selection(
             if previous_candidate_id:
                 selected_candidate_ids = [previous_candidate_id]
 
-        from core.research.workflow.contracts.discussion_scope import (
-            WorkflowDiscussionScopeV1,
+        discussion_scope_base = _review_discussion_scope_base(
+            normalized_team_id,
+            question_id,
+            selected_candidate_ids,
+            receipt_authority=receipt_authority,
         )
-        from core.web.services.team_workflow.research_project_agent_sessions import (
-            resolve_research_project_identity,
-        )
-
-        project = resolve_research_project_identity(normalized_team_id)
-        research_project_id = str(project.get("projectId") or "").strip()
-        workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
-        if not research_project_id or not workflow_run_id:
-            raise HypothesisFirstChainError(
-                "formal hypothesis review requires research project and workflow run authority"
-            )
         opened_candidates: list[dict[str, Any]] = []
         for candidate_order, candidate_id in enumerate(selected_candidate_ids):
-            discussion_scope = WorkflowDiscussionScopeV1.review(
-                teamId=normalized_team_id,
-                researchProjectId=research_project_id,
-                workflowRunId=workflow_run_id,
-                workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
-                questionId=question_id,
-                selectionId=selection_id,
-                candidateId=candidate_id,
-            )
             candidate_meeting_id = (
                 f"hf-review-{selection_id}-"
                 f"{_stable_hash({'candidateId': candidate_id})[:10]}-"
@@ -766,11 +756,29 @@ def open_review_meeting_for_selection(
                 **selection_record,
                 "selectedCandidateIds": [candidate_id],
                 "candidateId": candidate_id,
-                "discussionScope": discussion_scope.to_dict(),
-                "workflowRunId": workflow_run_id,
-                "workflowNodeId": HYPOTHESIS_DESIGN_NODE_ID,
-                "researchProjectId": research_project_id,
             }
+            if discussion_scope_base is not None:
+                from core.research.workflow.contracts.discussion_scope import (
+                    WorkflowDiscussionScopeV1,
+                )
+
+                discussion_scope = WorkflowDiscussionScopeV1.review(
+                    teamId=normalized_team_id,
+                    researchProjectId=discussion_scope_base.researchProjectId,
+                    workflowRunId=discussion_scope_base.workflowRunId,
+                    workflowNodeId=discussion_scope_base.workflowNodeId,
+                    questionId=question_id,
+                    selectionId=selection_id,
+                    candidateId=candidate_id,
+                )
+                candidate_selection.update(
+                    {
+                        "discussionScope": discussion_scope.to_dict(),
+                        "workflowRunId": discussion_scope.workflowRunId,
+                        "workflowNodeId": discussion_scope.workflowNodeId,
+                        "researchProjectId": discussion_scope.researchProjectId,
+                    }
+                )
             opened_candidates.append(
                 open_review_meeting_for_selection(
                     normalized_team_id,
@@ -786,16 +794,56 @@ def open_review_meeting_for_selection(
                     _formal_candidate_order=candidate_order,
                 )
             )
+        discussion_drivers: list[dict[str, Any]] = []
+        if background and agent_runner is None:
+            for opened in opened_candidates:
+                meeting = (
+                    opened.get("meetingRound")
+                    if isinstance(opened.get("meetingRound"), Mapping)
+                    else {}
+                )
+                candidate_meeting_id = str(
+                    meeting.get("meetingRoundId") or ""
+                ).strip()
+                if not candidate_meeting_id:
+                    continue
+                try:
+                    discussion_drivers.append(
+                        meeting_runtime.schedule_meeting_discussion(
+                            normalized_team_id,
+                            candidate_meeting_id,
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001 - selection fact remains replayable
+                    discussion_drivers.append(
+                        {
+                            "status": "failed",
+                            "meetingRoundId": candidate_meeting_id,
+                            "errorType": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    )
         primary = opened_candidates[0]
+        if len(opened_candidates) == 1:
+            # Preserve the long-standing single-candidate status contract
+            # (for example ``opened``) while still recording its candidate
+            # identity in the meeting/link.
+            return {
+                **primary,
+                "reviewMeetings": opened_candidates,
+                "candidateCount": 1,
+                "discussionDrivers": discussion_drivers,
+            }
         return {
             **primary,
             "status": (
                 "reused"
                 if all(item.get("status") == "reused" for item in opened_candidates)
-                else "created"
+                else str(primary.get("status") or "opened")
             ),
             "reviewMeetings": opened_candidates,
             "candidateCount": len(opened_candidates),
+            "discussionDrivers": discussion_drivers,
         }
 
     normalized_meeting_round_id = (
@@ -918,6 +966,95 @@ def open_review_meeting_for_selection(
         "roundIndex": normalized_round_index,
         "link": link,
     }
+
+
+def _review_discussion_scope_base(
+    team_id: str,
+    question_id: str,
+    selected_candidate_ids: list[str],
+    *,
+    receipt_authority: Mapping[str, Any] | None,
+):
+    """Resolve a server-owned workflow identity for candidate review rooms.
+
+    The current formal Ledger remains the preferred authority. If it is
+    temporarily unavailable after a run was already created, reuse the scope
+    persisted on the generation meeting that produced this exact selected
+    candidate set. That meeting was server-written during run creation, so
+    this is not a client-controlled fallback. No scope is synthesized when
+    neither source is available: candidate fan-out still proceeds, but the
+    legacy meeting remains deliberately unscoped.
+    """
+
+    from core.research.workflow.contracts.discussion_scope import (
+        QUESTION_GENERATION_SCOPE_KIND,
+        WorkflowDiscussionScopeV1,
+        parse_discussion_scope,
+    )
+
+    if receipt_authority is not None:
+        from core.web.services.team_workflow.research_project_agent_sessions import (
+            resolve_research_project_identity,
+        )
+
+        project = resolve_research_project_identity(team_id)
+        research_project_id = str(project.get("projectId") or "").strip()
+        workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
+        if not research_project_id or not workflow_run_id:
+            raise HypothesisFirstChainError(
+                "formal hypothesis review requires research project and workflow run authority"
+            )
+        return WorkflowDiscussionScopeV1.generation(
+            teamId=team_id,
+            researchProjectId=research_project_id,
+            workflowRunId=workflow_run_id,
+            workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
+            questionId=question_id,
+        )
+
+    selected = set(selected_candidate_ids)
+    try:
+        candidates = list_hypothesis_candidates(team_id, question_id=question_id)[
+            "candidates"
+        ]
+    except Exception:  # noqa: BLE001 - unscoped legacy fallback remains valid
+        return None
+    source_meeting_ids = {
+        str(candidate.get("meetingRoundId") or "").strip()
+        for candidate in candidates
+        if isinstance(candidate, Mapping)
+        and str(candidate.get("candidateId") or "").strip() in selected
+        and str(candidate.get("meetingRoundId") or "").strip()
+    }
+    if len(source_meeting_ids) != 1:
+        return None
+    source_meeting_id = next(iter(source_meeting_ids))
+    source_meeting = next(
+        (
+            meeting
+            for meeting in _question_generation_meetings(team_id, question_id)
+            if str(meeting.get("meetingRoundId") or "").strip() == source_meeting_id
+        ),
+        None,
+    )
+    raw_scope = (
+        source_meeting.get("discussionScope")
+        if isinstance(source_meeting, Mapping)
+        else None
+    )
+    if not isinstance(raw_scope, Mapping):
+        return None
+    try:
+        scope = parse_discussion_scope(raw_scope)
+    except ContractValidationError:
+        return None
+    if (
+        scope.kind != QUESTION_GENERATION_SCOPE_KIND
+        or scope.teamId != team_id
+        or scope.questionId.upper() != question_id.upper()
+    ):
+        return None
+    return scope
 
 
 def _selection_id_from_meeting(meeting_round: Mapping[str, Any]) -> str:
@@ -1208,6 +1345,7 @@ def open_candidate_generation_meeting(
     agent_runner: Any = None,
     background: bool = True,
     _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
+    _discussion_scope: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open (or reuse) the round-0 candidate-generation discussion.
 
@@ -1311,6 +1449,31 @@ def open_candidate_generation_meeting(
                 "roomId": str(existing.get("linkedChatRoomId") or ""),
                 "chatRoomRoundIds": _normalized_str_list(existing.get("chatRoomRoundIds")),
             }
+    if _discussion_scope is None:
+        # A retry can be initiated after the creation request has completed.
+        # Carry forward the latest valid server-written generation scope so a
+        # transient retry does not lose the run/node identity needed later by
+        # candidate-level reviews.
+        from core.research.workflow.contracts.discussion_scope import (
+            QUESTION_GENERATION_SCOPE_KIND,
+            parse_discussion_scope,
+        )
+
+        for previous in reversed(meetings):
+            previous_scope = previous.get("discussionScope")
+            if not isinstance(previous_scope, Mapping):
+                continue
+            try:
+                parsed_scope = parse_discussion_scope(previous_scope)
+            except ContractValidationError:
+                continue
+            if (
+                parsed_scope.kind == QUESTION_GENERATION_SCOPE_KIND
+                and parsed_scope.teamId == normalized_team_id
+                and parsed_scope.questionId.upper() == normalized_question_id
+            ):
+                _discussion_scope = parsed_scope.to_dict()
+                break
     base_id = f"hf-candgen-{scope_hash[:16]}"
     if open_meeting is not None:
         meeting_round_id = str(open_meeting.get("meetingRoundId") or "")
@@ -1327,6 +1490,8 @@ def open_candidate_generation_meeting(
         "meetingRoundId": meeting_round_id,
         **participant_resolution,
     }
+    if isinstance(_discussion_scope, Mapping):
+        payload["discussionScope"] = dict(_discussion_scope)
     opened = meeting_runtime.open_candidate_generation_meeting(
         normalized_team_id,
         payload,
@@ -1965,9 +2130,12 @@ def _review_meeting_fan_in_group(
 
 
 def _build_round_candidates(
-    team_id: str, meeting_round: Mapping[str, Any]
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    *,
+    candidate_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Assemble review inputs for the candidates discussed in one meeting.
+    """Assemble review inputs for explicit candidates or one meeting's refs.
 
     The authoritative source is the approved v2 question artifact (the same
     read path HF-1 selection validation uses): ``statement`` maps to the
@@ -1977,11 +2145,16 @@ def _build_round_candidates(
     """
     from core.web.services.team_workflow.research_runtime import question_launch
 
-    candidate_ids = [
-        ref.split(":", 1)[1].strip()
-        for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
-        if ref.startswith("hypothesis_candidate:") and ref.split(":", 1)[1].strip()
-    ]
+    normalized_candidate_ids = (
+        _normalized_str_list(candidate_ids)
+        if candidate_ids is not None
+        else [
+            ref.split(":", 1)[1].strip()
+            for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
+            if ref.startswith("hypothesis_candidate:")
+            and ref.split(":", 1)[1].strip()
+        ]
+    )
     question_id = str(meeting_round.get("question") or "").strip()
     detail = question_launch._approved_details(team_id).get(question_id.upper())
     if detail is None:
@@ -2009,7 +2182,7 @@ def _build_round_candidates(
             str(item.get("hypothesis_id") or "").strip(): item for item in hypotheses
         }
     candidates: list[dict[str, Any]] = []
-    for candidate_id in candidate_ids:
+    for candidate_id in normalized_candidate_ids:
         artifact = artifact_by_id.get(candidate_id) or {}
         candidate: dict[str, Any] = {
             "candidateId": candidate_id,
@@ -2088,11 +2261,21 @@ def _generate_hypothesis_round(
             raise HypothesisFirstChainError(
                 "fan-in meetings belong to different workflow runs"
             )
-        candidates = [
-            candidate
-            for bound_meeting in bound_meetings
-            for candidate in _build_round_candidates(team_id, bound_meeting)
-        ]
+        selected_candidate_ids = _normalized_str_list(
+            selection.get("selectedCandidateIds")
+        )
+        if not selected_candidate_ids:
+            raise HypothesisFirstChainError("selection has no selected candidates")
+        # Candidate-scoped follow-up meetings may review only the hypothesis
+        # that requested new evidence.  The generated HypothesisRound remains
+        # a selection-level comparison, so its candidate authority must stay
+        # the full ordered selection while meetingRefs preserve exactly which
+        # scoped discussions supplied this round's evidence.
+        candidates = _build_round_candidates(
+            team_id,
+            primary_meeting,
+            candidate_ids=selected_candidate_ids,
+        )
         round_index = int(fan_in.get("roundIndex") or 1)
         round_payload: dict[str, Any] = {"candidates": candidates}
         if len(meeting_round_ids) > 1:
@@ -3026,6 +3209,50 @@ def _question_template_baselines(team_id: str, question_id: str) -> list[dict[st
     ]
 
 
+def _project_chain_discussion_anchor(
+    meeting: Mapping[str, Any],
+    *,
+    selection_id: str = "",
+    candidate_id: str = "",
+) -> dict[str, Any]:
+    """Project one chain meeting through the canonical scoped-room guard.
+
+    The chain ledger owns meeting/candidate lineage, but it does not own room
+    identity.  Resolve only the room explicitly bound to this meeting and let
+    ``active_discussion_anchor`` validate its v1 scope and room config.  This
+    keeps chain state from promoting a sibling candidate's room when a binding
+    is absent or malformed.
+    """
+    from core.web.services import chat_room_service
+    from core.web.services.team_workflow.active_discussion_anchor import (
+        project_active_discussion_anchor,
+    )
+
+    meeting_id = str(meeting.get("meetingRoundId") or "").strip()
+    room_id = str(meeting.get("linkedChatRoomId") or "").strip()
+    room = None
+    if room_id:
+        try:
+            room = chat_room_service.get_chat_room_compact(room_id)
+        except Exception:  # noqa: BLE001 - unreadable room state degrades
+            room = None
+    projection: dict[str, Any] = {
+        "activeMeetingRoundId": meeting_id,
+    }
+    discussion_scope = meeting.get("discussionScope")
+    if isinstance(discussion_scope, Mapping):
+        projection["scope"] = dict(discussion_scope)
+    if selection_id:
+        projection["activeSelectionId"] = selection_id
+    if candidate_id:
+        projection["activeCandidateId"] = candidate_id
+    return project_active_discussion_anchor(
+        projection,
+        [meeting],
+        [room] if isinstance(room, Mapping) else [],
+    )
+
+
 def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
     """Aggregate the hypothesis-first chain state for one scoped question.
 
@@ -3138,24 +3365,11 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         active_link = active_candidate_links[0]
         active_meeting_id = str(active_link.get("meetingRoundId") or "").strip()
         active_meeting = meeting_by_id.get(active_meeting_id) or {}
-        discussion_scope = active_meeting.get("discussionScope")
-        discussion_scope_hash = str(
-            active_meeting.get("discussionScopeHash") or ""
-        ).strip()
-        active_room_id = str(active_meeting.get("linkedChatRoomId") or "").strip()
-        if (
-            isinstance(discussion_scope, Mapping)
-            and discussion_scope_hash
-            and active_room_id
-        ):
-            active_discussion_anchor = {
-                "scope": dict(discussion_scope),
-                "scopeHash": discussion_scope_hash,
-                "meetingRoundId": active_meeting_id,
-                "roomId": active_room_id,
-                "selectionId": str(active_link.get("selectionId") or "").strip(),
-                "candidateId": str(active_link.get("candidateId") or "").strip(),
-            }
+        active_discussion_anchor = _project_chain_discussion_anchor(
+            active_meeting,
+            selection_id=str(active_link.get("selectionId") or "").strip(),
+            candidate_id=str(active_link.get("candidateId") or "").strip(),
+        )
     pending_requests = [
         request for request in requests if str(request.get("status") or "") != "handed_off"
     ]

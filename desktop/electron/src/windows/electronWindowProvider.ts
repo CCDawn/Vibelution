@@ -21,6 +21,7 @@ export type ElectronWindowLike = {
   close(): void;
   destroy(): void;
   loadURL(url: string): Promise<void>;
+  reload?(): void;
   isDestroyed(): boolean;
   isFocused(): boolean;
   isMinimized?(): boolean;
@@ -58,6 +59,7 @@ export type ElectronWindowFactory = (
 export type ElectronWindowProviderOptions = {
   createLauncherWindow?: ElectronWindowFactory;
   createWorkbenchWindow?: ElectronWindowFactory;
+  launcherContentVersion?: () => string;
   listLauncherWindows?: (launcherOrigin: string) => ElectronWindowLike[];
   listWorkbenchWindows?: (workbenchOrigin: string) => ElectronWindowLike[];
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
@@ -139,6 +141,8 @@ export class ElectronWindowProvider {
   private readonly instanceCloseAuthorized = new Map<string, ElectronWindowLike>();
   private readonly instanceCloseInFlight = new Set<string>();
   private launcherOpen: Promise<ManagedWindowState> | null = null;
+  private readonly launcherContentVersion?: () => string;
+  private launcherLoadedVersion: string | null = null;
   private readonly attachedWindows = new Set<ElectronWindowLike>();
   private readonly listLauncherWindows: (launcherOrigin: string) => ElectronWindowLike[];
   private readonly listWorkbenchWindows: (workbenchOrigin: string) => ElectronWindowLike[];
@@ -172,6 +176,7 @@ export class ElectronWindowProvider {
       typeof options.hungCloseDestroyAfterMs === "number" && Number.isFinite(options.hungCloseDestroyAfterMs)
         ? Math.max(0, options.hungCloseDestroyAfterMs)
         : DEFAULT_HUNG_CLOSE_DESTROY_AFTER_MS;
+    this.launcherContentVersion = options.launcherContentVersion;
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
@@ -189,11 +194,32 @@ export class ElectronWindowProvider {
     }
   }
 
+  /**
+   * Reload an already-open launcher window when the active frontend release
+   * changed since it was last presented (e.g. the builder switched
+   * active.json while the shell stayed resident).  Returns true when a
+   * reload was issued.
+   */
+  refreshLauncherIfReleaseChanged(): boolean {
+    const window = this.launcherWindow;
+    if (!window || window.isDestroyed()) {
+      return false;
+    }
+    const version = this.currentLauncherContentVersion();
+    if (!version || this.launcherLoadedVersion === version) {
+      return false;
+    }
+    this.reloadLauncherIfStale(window, version);
+    return true;
+  }
+
   private async presentLauncher(): Promise<ManagedWindowState> {
     const launcherOrigin = launcherAppOriginFor(this.launcherUrl);
     const safeUrl = launcherWindowUrl(this.launcherUrl);
     const existing = this.listLauncherWindows(launcherOrigin).filter((window) => !window.isDestroyed());
+    const contentVersion = this.currentLauncherContentVersion();
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.reloadLauncherIfStale(this.launcherWindow, contentVersion);
       this.discardExtraLauncherWindows(existing, this.launcherWindow);
       presentElectronWindow(this.launcherWindow);
       this.reportLeftoverWorkbenchIfPresent();
@@ -203,6 +229,7 @@ export class ElectronWindowProvider {
     if (adopted) {
       this.launcherWindow = adopted;
       this.attachWindowEvents("launcher", adopted);
+      this.noteLauncherContentVersion(contentVersion);
       this.discardExtraLauncherWindows(existing, adopted);
       presentElectronWindow(adopted);
       this.reportLeftoverWorkbenchIfPresent();
@@ -210,9 +237,44 @@ export class ElectronWindowProvider {
     }
     this.launcherWindow = this.createLauncherWindow(safeUrl, this.paths);
     this.attachWindowEvents("launcher", this.launcherWindow);
+    this.noteLauncherContentVersion(contentVersion);
     presentElectronWindow(this.launcherWindow);
     this.reportLeftoverWorkbenchIfPresent();
     return this.reportAndReturn(this.stateFor("launcher"));
+  }
+
+  private currentLauncherContentVersion(): string {
+    if (!this.launcherContentVersion) {
+      return "";
+    }
+    try {
+      return String(this.launcherContentVersion() ?? "");
+    } catch {
+      return "";
+    }
+  }
+
+  private noteLauncherContentVersion(version: string): void {
+    if (version) {
+      this.launcherLoadedVersion = version;
+    }
+  }
+
+  private reloadLauncherIfStale(window: ElectronWindowLike, version: string): void {
+    if (!version) {
+      return;
+    }
+    const loaded = this.launcherLoadedVersion;
+    this.launcherLoadedVersion = version;
+    if (loaded === null || loaded === version) {
+      return;
+    }
+    try {
+      window.reload?.();
+    } catch {
+      // A destroyed or mid-navigation window keeps its current document; the
+      // next open re-checks the content version.
+    }
   }
 
   private discardExtraLauncherWindows(windows: ElectronWindowLike[], keep: ElectronWindowLike): void {

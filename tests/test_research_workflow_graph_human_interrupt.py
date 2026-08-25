@@ -20,7 +20,7 @@ def test_human_node_interrupts_with_human_task_action(tmp_path: Path) -> None:
     try:
         harness.seed()
         # 走到 knowledge_handoff（第 5 个节点，human）。
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         last_action: str | None = None
         for _ in range(30):
             harness.worker.run_once()
@@ -59,7 +59,7 @@ def test_human_accept_resume_proceeds_to_next_node(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         last_action: str | None = None
         for _ in range(40):
             harness.worker.run_once()
@@ -92,7 +92,7 @@ def test_human_reject_marker_stops_advance(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         last_action: str | None = None
         for _ in range(30):
             harness.worker.run_once()

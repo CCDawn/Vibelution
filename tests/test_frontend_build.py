@@ -138,6 +138,166 @@ def test_publish_switches_only_after_complete_staging_release(monkeypatch: pytes
     assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
 
 
+def test_publish_retries_transient_directory_sharing_violation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+    original_replace = frontend_build.os.replace
+    replacement_calls: list[tuple[Path, Path]] = []
+    sleep_delays: list[float] = []
+    attempts = 0
+
+    def replace_with_transient_sharing_violation(source: Path | str, destination: Path | str) -> None:
+        nonlocal attempts
+        source_path = Path(source)
+        destination_path = Path(destination)
+        replacement_calls.append((source_path, destination_path))
+        if source_path.name.startswith("stage-") and destination_path.name.startswith("release-"):
+            attempts += 1
+            if attempts <= 2:
+                raise PermissionError("sharing violation")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(frontend_build.os, "replace", replace_with_transient_sharing_violation)
+    monkeypatch.setattr(frontend_build.time, "sleep", sleep_delays.append)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    release = frontend_build.frontend_releases_dir(tmp_path) / active["release"]
+    assert attempts == 3
+    assert (release / "assets" / "app.js").read_text(encoding="utf-8") == "new"
+    assert active["release"] == f"release-{result['buildKey']}"
+    assert sleep_delays == [0.05, 0.1]
+    assert max(sleep_delays) <= 0.25
+    assert replacement_calls[-1][1] == frontend_build.active_release_path(tmp_path)
+
+
+def test_publish_permission_timeout_copies_verified_release_before_activating(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+    original_replace = frontend_build.os.replace
+    sleep_delays: list[float] = []
+    monkeypatch.setattr(frontend_build, "FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS", 0.0)
+
+    def replace_with_persistent_sharing_violation(source: Path | str, destination: Path | str) -> None:
+        if Path(source).name.startswith("stage-") and Path(destination).name.startswith("release-"):
+            raise PermissionError("sharing violation")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(frontend_build.os, "replace", replace_with_persistent_sharing_violation)
+    monkeypatch.setattr(frontend_build.time, "sleep", sleep_delays.append)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    copied_release = frontend_build.frontend_releases_dir(tmp_path) / active["release"]
+    assert active["release"] == copied_release.name
+    assert active["release"].startswith(f"release-{result['buildKey']}-")
+    assert (copied_release / "assets" / "app.js").read_text(encoding="utf-8") == "new"
+    assert frontend_build._is_complete_release(copied_release, build_key=result["buildKey"])
+    assert not any(path.name.startswith("stage-") for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
+    assert sleep_delays == []
+
+
+def test_publish_copy_failure_keeps_previous_active_release_and_cleans_partial_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+    monkeypatch.setattr(frontend_build, "FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS", 0.0)
+    original_copytree = frontend_build.shutil.copytree
+
+    def persistent_sharing_violation(source: Path | str, destination: Path | str) -> None:
+        if Path(source).name.startswith("stage-") and Path(destination).name.startswith("release-"):
+            raise PermissionError("sharing violation")
+        os.replace(source, destination)
+
+    def copy_then_fail(source: Path | str, destination: Path | str, *args: object, **kwargs: object) -> Path:
+        original_copytree(source, destination, *args, **kwargs)
+        raise RuntimeError("copy failed")
+
+    monkeypatch.setattr(frontend_build.os, "replace", persistent_sharing_violation)
+    monkeypatch.setattr(frontend_build.shutil, "copytree", copy_then_fail)
+
+    with pytest.raises(RuntimeError, match="copy failed"):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    assert active["release"] == "release-old"
+    assert not any(path.name.startswith("stage-") for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
+    assert not any(path.name.startswith("release-") and path.name != "release-old" for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
+
+
+def test_publish_copy_validation_failure_keeps_previous_active_release_and_cleans_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+    monkeypatch.setattr(frontend_build, "FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS", 0.0)
+    original_complete_release = frontend_build._is_complete_release
+
+    def persistent_sharing_violation(source: Path | str, destination: Path | str) -> None:
+        if Path(source).name.startswith("stage-") and Path(destination).name.startswith("release-"):
+            raise PermissionError("sharing violation")
+        os.replace(source, destination)
+
+    def copied_release_is_incomplete(path: Path, *, build_key: str | None = None) -> bool:
+        if path.name.startswith("release-") and path.name != "release-old":
+            return False
+        return original_complete_release(path, build_key=build_key)
+
+    monkeypatch.setattr(frontend_build.os, "replace", persistent_sharing_violation)
+    monkeypatch.setattr(frontend_build, "_is_complete_release", copied_release_is_incomplete)
+
+    with pytest.raises(RuntimeError, match="Copied frontend release failed validation"):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    assert active["release"] == "release-old"
+    assert not any(path.name.startswith("stage-") for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
+    assert not any(path.name.startswith("release-") and path.name != "release-old" for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
+
+
+def test_publish_non_retryable_os_error_preserves_previous_active_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+    original_replace = frontend_build.os.replace
+    sleep_delays: list[float] = []
+
+    def replace_with_disk_error(source: Path | str, destination: Path | str) -> None:
+        if Path(source).name.startswith("stage-") and Path(destination).name.startswith("release-"):
+            raise OSError("disk error")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(frontend_build.os, "replace", replace_with_disk_error)
+    monkeypatch.setattr(frontend_build.time, "sleep", sleep_delays.append)
+    monkeypatch.setattr(frontend_build.shutil, "copytree", lambda *_args, **_kwargs: pytest.fail("copy fallback was invoked"))
+
+    with pytest.raises(OSError, match="disk error"):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    assert active["release"] == "release-old"
+    assert sleep_delays == []
+
+
 def test_gc_frontend_releases_preserves_active_serving_and_recent_entries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

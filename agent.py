@@ -643,6 +643,11 @@ class SelfEvolvingAgent:
 
         self._runtime_status_enabled_override = None if enabled is None else bool(enabled)
 
+    def set_turn_structured_output_contract(self, contract: Any = None) -> None:
+        """Bind or clear one server-owned strict final-output contract."""
+
+        self._turn_structured_output_contract = contract
+
     def is_runtime_status_inject_enabled_for_turn(self) -> bool:
         override = getattr(self, "_runtime_status_enabled_override", None)
         agent = None
@@ -3072,6 +3077,11 @@ class SelfEvolvingAgent:
                 force_disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
                 stop_error_cls=TurnStopRequested,
                 base_llm=getattr(self, "_base_llm", None),
+                structured_output_contract=getattr(
+                    self,
+                    "_turn_structured_output_contract",
+                    None,
+                ),
             ),
         )
         self._last_llm_error_category = result.last_error_category

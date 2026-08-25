@@ -14,8 +14,7 @@ def test_crash_after_interrupt_redispatch_reuses_same_action_id(tmp_path: Path) 
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
@@ -31,7 +30,11 @@ def test_crash_after_interrupt_redispatch_reuses_same_action_id(tmp_path: Path) 
         assert len(adapter_rows) == 1
         assert json.loads(adapter_rows[0].payload_json)["actionId"] == first_action_id
         # 不产生第二个 adapter 任务（幂等键抑制）。
-        attempts = harness.commands.store.list_attempts("run-test")
+        attempts = [
+            a
+            for a in harness.commands.store.list_attempts("run-test")
+            if a.node_id == "source_finding"
+        ]
         assert len(attempts) == 1
     finally:
         harness.close()
@@ -41,8 +44,7 @@ def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
 
@@ -55,7 +57,11 @@ def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
             outcome="failed",
         )
         harness.worker.run_once()
-        attempts = harness.commands.store.list_attempts("run-test")
+        attempts = [
+            a
+            for a in harness.commands.store.list_attempts("run-test")
+            if a.node_id == "source_finding"
+        ]
         assert attempts[0].status == "failed"
 
         # retry: attempt 2 的 start dispatch 重入节点并产生新 actionId。
@@ -66,7 +72,11 @@ def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
         payload = json.loads(pending.payload_json)
         assert int(payload["attempt"]) == 2
         assert payload["actionId"] != first_action_id
-        attempts = harness.commands.store.list_attempts("run-test")
+        attempts = [
+            a
+            for a in harness.commands.store.list_attempts("run-test")
+            if a.node_id == "source_finding"
+        ]
         assert {attempt.attempt for attempt in attempts} == {1, 2}
         retry = next(attempt for attempt in attempts if attempt.attempt == 2)
         assert retry.status == "dispatching"
@@ -78,8 +88,7 @@ def test_restart_after_worker_crash_resumes_same_thread(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
-        harness.worker.run_once()
+        harness.start_thread_to("source_finding")
         first_pending = harness.latest_adapter_pending()
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
 
