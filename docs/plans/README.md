@@ -7,7 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
-| [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从题目登记到正式研究结果的规范化状态 V2、服务端动作、兼容迁移与真实链路验收 |
+| [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从官方题目冷启动到正式运行、产出登记和 H1–H4 审核的规范化状态 V2、服务端动作与真实链路验收 |
 | [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯按题目/假说隔离群聊与 Child Session、三类 checkpoint 绑定、旧数据清空及 SCI-096 初始化重建 |
 | [2026-08-21-research-workflow-three-pane-current-task-redesign.md](2026-08-21-research-workflow-three-pane-current-task-redesign.md) | user-approved | 科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
 | [2026-08-20-physical-retirement-of-python-lifecycle.md](2026-08-20-physical-retirement-of-python-lifecycle.md) | ACTIVE | Python lifecycle 退役代码物理清理；批次 D 仍未完成 |

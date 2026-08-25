@@ -3,8 +3,9 @@
 > - **Status**：USER-REQUESTED / ACTIVE PLAN
 > - **Plan mode**：TASK_GRAPH
 > - **日期**：2026-08-25
+> - **修订**：2026-08-25 二次审查修正——官方目录题号冷启动与结果登记归位（§5.1 / §5.8）、stateVersion/representationVersion 分离（§4.4）、commit 后缓存失效（Task 2）、formal lineage 保真（§5.7）、command/navigation 双 action 契约（§4.5）、跨 store CAS 保护（§9.1）、可复现延迟预算（Task 2）
 > - **基线快照**：本地 `main@a0dafb02edf0d60840a096d18d32857d305a9c09`；实施任务开始前必须刷新当前 `HEAD`、active claim 与相关并行改动
-> - **计划范围**：题目登记 → 候选生成 → 假说选择 → 候选评审扇出/汇合 → 资料搜集/交接 → 假说收敛 → 正式研究运行 → 结果闭环的规范化状态、动作与前后端契约
+> - **计划范围**：官方目录题目选择/解析 → 候选生成 → 假说选择 → 候选评审扇出/汇合 → 资料搜集/交接 → 假说收敛 → 正式研究运行 → Challenge Program 产出交付/登记 → H1–H4 人工审核 → 结果闭环的规范化状态、动作与前后端契约
 > - **本轮授权边界**：只落盘计划，不修改业务代码、不启动或重启产品运行时、不迁移用户数据、不 push/PR
 > - **权威边界**：本计划低于 `AGENTS.md`、`docs/standards/`、ADR 与 owning module README；状态投影不是第二写入者
 > - **实施 owner**：每个 Task 启动前由独立 worktree + claim 明确；本计划不自动占有业务文件
@@ -19,17 +20,18 @@
 本计划采用以下决策：
 
 1. 新增后端权威的 `HypothesisFirstStateV2`。前端只消费状态和服务端给出的动作，不再用候选数量、会议数量、URL 或面板状态判断业务阶段。
-2. 顶层必须显式提供 `isInitial`、`stateVersion`、`currentPhase`、`allowedActions` 和 `problems`；所有阶段统一提供 `lifecycle / outcome / actionability / attempt / updatedAt`。
-3. `isInitial=true` 的唯一语义是：**最近一次题目运行重置之后，没有任何 generation attempt、selection、review、collection、hypothesis round 或 formal run 流程事实**。题目元数据和模板基线不算流程进展，`candidateCount === 0` 永远不能作为初始态依据。
+2. 顶层必须显式提供 `isInitial`、用于命令 CAS 的 `stateVersion`、用于完整响应/ETag 的 `representationVersion`、`currentPhase`、`allowedActions` 和 `problems`；所有阶段统一提供 `lifecycle / outcome / actionability / attempt / updatedAt`。
+3. `isInitial=true` 的唯一语义是：**最近一次题目运行重置之后，没有任何 generation attempt、selection、review、collection、hypothesis round、formal run、delivery、program output 或 human gate 流程事实**。官方题库元数据和模板基线不算流程进展，`candidateCount === 0` 永远不能作为初始态依据。
 4. 生命周期、业务结果和“现在能否操作”分层表达，禁止再用一个 `status` 字符串同时承担三种含义。
 5. 生成至少区分 `not_started`、`queued`、`running`、`waiting_human`、`completed+succeeded`、`completed+empty`、`failed`、`cancelled`、`superseded`。
 6. 旧 `generation_missing` 不再是正常阶段：初始态映射为 `not_started`，空结果映射为 `completed + empty`，失败映射为 `failed`；只有权威事实预期存在却缺失/损坏时才产生 `problem.code`。
 7. 扇出评审由后端按 `(selectionId, roundIndex, candidateId, attempt)` 投影逐候选状态，并给出 `total/completed/pending/failed/blocked` 聚合；前端现有候选清单改为消费该聚合。
 8. 每个会议拆为 `discussion`、`summarization`、`approval` 三段，避免“会议 open”掩盖讨论已死、纪要未生成或正等待人工确认。
 9. 资料搜集拆为 request、child run、per-source progress、handoff 四段；收敛与正式运行也进入同一快照。
-10. `allowedActions` 由后端生成，携带命令、幂等键、payload、`expectedStateVersion`、可用性、禁用原因和确认要求；前端只负责呈现与发送。
+10. `allowedActions` 由后端生成并区分 `command` 与 `navigation`：命令携带幂等键、payload、`expectedStateVersion`、输入契约和确认要求；导航携带服务端已验证的 deepLink、returnTo/returnLabel 与 anchor 状态。前端只负责呈现、收集声明式输入并发送/导航。
 11. V2 DTO 采用严格声明，嵌套模型 `extra="forbid"`；旧 `ChainStateResponse(extra="allow")` 只在兼容期保留。
 12. 不引入 LangGraph、Temporal、Dify、Flowise 或 n8n 作为第二套引擎。只借鉴它们的状态快照、事件历史、attempt、interrupt、node state 与 crash recovery 设计，复用 Vibelution 已有 JSONL/Ledger、outbox、会议运行时、资料搜集子运行和命令幂等机制。
+13. “题目登记”不是研究冷启动前置条件：有效官方目录题号在没有任何流程事实时直接进入 generation initial；现有 `ChallengeQuestionRegisterDialog` 是最终产出的手工登记/发布入口。正常闭环必须继续投影正式运行后的 delivery、program candidate handoff 与 H1–H4 人工审核，只有正式批准后才进入顶层 `completed`。
 
 ---
 
@@ -45,6 +47,8 @@
 | 选择与开会不是一个可观察事务 | `record_hypothesis_selection()` 先落选择，再 best-effort 开评审；失败只临时返回在 `reviewMeeting` | 刷新后丢失副作用失败事实，用户只看到“评审尚未开启” |
 | 下一步由浏览器决定 | `ResearchProcessWorkspace.tsx` 调用 `resolveHypothesisFirstNextAction` 汇总链状态、会议、链接、请求和正式运行 | 同一事实可能在不同面板被解释成不同阶段 |
 | 正式运行枚举漂移 | Python `WorkflowRunStatus`、`transitions.RunStatus` 与 TypeScript `WorkflowRunStatus` 集合不同 | 新状态可能被前端静默降级或被投影丢失 |
+| 产出登记曾被误放到起点 | `ChallengeQuestionRegisterDialog` 明确登记/发布“已经产出的 schema v2 output”；`open_hypothesis_candidate_generation_meeting` 明确支持无 approved artifact 的官方目录题号冷启动 | 若把 output record 缺失解释成 registration，会形成“先有最终产出才能开始研究”的循环 |
+| run 成功不等于 Challenge Program 闭环 | `delivery_orchestration.py` 在 run 已 succeeded 后执行 program candidate handoff；`NEEDS_CONTEXT` 会让 delivery blocked，但不会改写 run status | 只投影 formal run 会把交付失败误报为 completed，且遗漏 H1–H4 人工审核 |
 
 ### 2.2 已修复但仍需收权的内容
 
@@ -74,12 +78,12 @@
 
 ### 3.1 目标
 
-- 用户从目录登记题目开始，可以依据同一份状态快照持续推进到正式运行结果，任何停顿都能看见“正在做什么、在等谁、还能做什么”。
+- 用户从官方目录选择一道题开始，可以依据同一份状态快照持续推进到 Challenge Program 产出登记与 H1–H4 审核，任何停顿都能看见“正在做什么、在等谁、还能做什么”。
 - 后端拥有阶段判断、扇出聚合、下一动作和问题诊断的唯一权威；前端不再猜业务状态。
 - 初始、空结果、失败、取消、被取代、等待人工和数据损坏均有不同的 wire contract。
 - 每个写动作可幂等重放，可通过 `expectedStateVersion` 拒绝 stale 操作。
 - 旧数据无需大爆炸重写即可投影为 V2；无法无歧义恢复的记录显式降级，不伪造成功。
-- 同一状态能同时驱动画布、右栏 current task、团队壳徽标、命令面板和通知。
+- 同一状态能同时驱动画布、右栏 current task、团队壳徽标、命令面板、讨论室导航和通知。
 
 ### 3.2 非目标
 
@@ -94,13 +98,13 @@
 
 以下条件必须同时成立：
 
-1. 对同一题目、同一 `stateVersion`，后端、画布、右栏、命令面板和徽标展示同一 `currentPhase` 与同一主动作。
+1. 对同一题目、同一 `representationVersion`，后端、画布、右栏、命令面板和徽标展示同一 `currentPhase`、主动作与可见进度；同一 `stateVersion` 只保证命令前置条件和 action set 相同。
 2. 在无候选时，系统能通过服务端事实稳定区分初始、生成中、完成为空、失败和损坏。
 3. 选择 2–16 个候选后，快照包含完整候选集合；全部候选达到规定的人类确认终态之前，fan-in 不会提前发生。
 4. 任何副作用在进程重启后仍有 durable attempt/problem 记录，不依赖调用当次的临时 response。
 5. stale 动作返回结构化 409 和最新版本，重复幂等请求不产生第二批会议、子运行或正式运行。
 6. 旧记录有明确的 legacy 投影规则；歧义数据进入 degraded/problem，而不是猜一个候选或阶段。
-7. 使用 operator 已配置的 Flash 模型完成一轮真实挑战杯链路验收；业务代码不得硬编码模型名。
+7. 使用 operator 已配置的 Flash 模型完成一轮真实挑战杯链路验收，直至 program candidate 已登记且 H1–H4 审核有明确终态；业务代码不得硬编码模型名。
 
 ---
 
@@ -133,7 +137,7 @@
 
 `currentPhase` 的固定集合：
 
-`registration | generation | selection | review | collection | convergence | formal_runtime | completed`
+`generation | selection | review | collection | convergence | formal_runtime | program_delivery | completed`
 
 阶段不是只增不减。一次假说迭代可能从 `review` 进入 `collection`，资料交接后再回到下一轮 `review`。历史不能靠覆盖丢失，必须由 `roundIndex`、`attempt` 和 lineage 保留。
 
@@ -153,24 +157,28 @@
 - review meeting/link/digest/approval；
 - collection request/child run/handoff；
 - hypothesis round/meta review；
-- formal research run。
+- formal research run；
+- delivery artifact、program candidate handoff、Challenge Program output record 或 H1–H4 human gate。
 
-题目登记信息、题目正文、Agent 绑定、模板 baseline、纯 UI 选择和 query cache 不改变 `isInitial`。
+官方题库元数据、题目正文、Agent 绑定、模板 baseline、纯 UI 选择和 query cache 不改变 `isInitial`。Challenge Program 产出登记不是题目元数据，属于流程结果事实，会使 `isInitial=false`。
 
 ### 4.4 `stateVersion`
 
-当前事实分散在多个 append-only store，不能伪造一个不存在的全局自增序号。V2 将 `stateVersion` 定义为**不透明的相等性令牌**：
+当前事实分散在多个 append-only store，不能伪造一个不存在的全局自增序号。V2 使用两个职责不同、都只能做相等性比较的不透明令牌：
 
-`hf2:<reset-id-or-origin>:<canonical-source-cursor-hash>`
+`stateVersion = hf2-action:<reset-id-or-origin>:<action-relevant-cursor-hash>`
 
-- canonical projector 按固定顺序规范化各来源的 durable cursor/record identity 后计算；
-- 任何会改变 V2 可见状态或动作的事实都必须改变令牌；授权/配置若会改变 action，也必须贡献一个不含密钥的版本游标；
-- 客户端只比较相等/不相等，不按字符串或数字排序；
-- mutating command 发送 `expectedStateVersion`；
-- 不匹配时返回 HTTP 409 `state_version_conflict`，响应带 `actualStateVersion` 和最新快照读取地址；
-- ETag 可直接使用同一令牌，但 ETag 不能替代 response body 中的 `stateVersion`。`computedAt` 必须由最新 source timestamp/reset boundary 确定，确保相同令牌的响应表示稳定；否则只能发送 weak ETag。
+`representationVersion = hf2-repr:<reset-id-or-origin>:<wire-representation-hash>`
 
-这使投影保持只读，又能可靠阻止 stale action。未来如果所有事实统一进入同一全局 ledger，可以在不改变客户端语义的情况下把令牌内部实现改为 ledger sequence。
+- canonical projector 按固定顺序规范化各来源的 durable cursor/record identity 与可见 observation 后计算；客户端只比较相等/不相等，不按字符串或数字排序；
+- `stateVersion` 只覆盖会改变 lifecycle/outcome/actionability、allowedActions、命令前置条件或阻断性 problem 的事实；授权/配置若会改变 action，也必须贡献一个不含密钥的版本游标；
+- mutating command 只发送 `expectedStateVersion`；不匹配时返回 HTTP 409 `state_version_conflict`，响应带 `actualStateVersion` 和最新快照读取地址；
+- `representationVersion` 对规范化默认 DTO（排除 `representationVersion` 自身和诊断 `sourceCursor`）计算，覆盖任何可见字段的变化，包括 `stateVersion`、逐源进度、heartbeat、计数、`updatedAt` 和非阻断性 problem；HTTP ETag/If-None-Match 必须使用 `representationVersion`，不得使用 `stateVersion`；
+- `computedAt` 取最新 contributing source/observation 的稳定时间，不使用每次 GET 的墙钟时间。相同 `representationVersion` 必须得到逐字段相同的默认响应；带 `sourceCursor` 的诊断响应必须 `Cache-Control: no-store` 且不参与 If-None-Match/304，不能把默认响应的 ETag 用于可变化的诊断响应；
+- 会议消息正文等不进入 V2 DTO 的高频内容既不改变 `stateVersion`，也不改变 `representationVersion`；逐源进度等进入 DTO 的遥测只改变 `representationVersion`。这样既避免按钮因无关遥测持续 409，也不会让 304 吞掉新进度；
+- source read failure 若无法生成可信 observation，优先返回结构化 503；只有存在标明 `stale=true` 的最后可信快照时才可返回 degraded representation，并为该 observation 生成新的 `representationVersion`。
+
+这使投影保持只读，同时把“命令是否仍可执行”与“响应是否发生任何可见变化”分开。未来如果所有事实统一进入同一全局 ledger，可以在不改变客户端语义的情况下把两个令牌的内部实现改为 ledger sequence/representation sequence。
 
 ### 4.5 V2 契约骨架
 
@@ -205,13 +213,13 @@ type WorkflowActionability =
   | "terminal";
 
 type HypothesisFirstPhase =
-  | "registration"
   | "generation"
   | "selection"
   | "review"
   | "collection"
   | "convergence"
   | "formal_runtime"
+  | "program_delivery"
   | "completed";
 
 type WorkflowProblem = {
@@ -246,7 +254,6 @@ type PhaseState = {
 };
 
 type ActionCommand =
-  | "register_question"
   | "open_generation"
   | "retry_generation"
   | "record_selection"
@@ -260,46 +267,109 @@ type ActionCommand =
   | "handoff_collection"
   | "human_adjudication"
   | "create_formal_run"
-  | "reconcile_formal_run";
+  | "reconcile_formal_run"
+  | "retry_program_handoff"
+  | "record_program_review"
+  | "create_formal_revision";
 
 type ActionPayloadByCommand = {
-  register_question: { draftId: string | null };
   open_generation: { questionId: string };
   retry_generation: { questionId: string; previousAttemptId: string };
-  record_selection: { candidateIds: string[] };
+  record_selection: { questionId: string; generationAttemptId: string };
   retry_review_dispatch: { selectionId: string; candidateIds: string[] };
   resume_discussion: { meetingRoundId: string };
   stop_discussion: { meetingRoundId: string };
   regenerate_summary: { meetingRoundId: string };
-  approve_summary: { meetingRoundId: string; decision: "accepted" | "rejected" | "revised" };
+  approve_summary: { meetingRoundId: string };
   retry_collection: { requestId: string; childRunId: string | null };
   continue_collection: { requestId: string; childRunId: string };
   handoff_collection: { requestId: string; childRunId: string };
   human_adjudication: { hypothesisRoundId: string };
   create_formal_run: { questionId: string; hypothesisRoundId: string };
   reconcile_formal_run: { runId: string };
+  retry_program_handoff: { runId: string; deliveryArtifactRef: string | null };
+  record_program_review: { questionId: string; outputRunId: string };
+  create_formal_revision: { runId: string; outputRecordId: string };
 };
 
-type ActionBase = {
+type ProgramHumanGateKey =
+  | "H1_problem_understanding"
+  | "H2_hypothesis_selection"
+  | "H3_research_plan"
+  | "H4_external_output";
+
+type ProgramHumanGateDecision =
+  | "pending"
+  | "approved"
+  | "revision_requested"
+  | "rejected";
+
+type ActionInputByCommand = {
+  record_selection: { candidateIds: string[] };
+  approve_summary: { decision: "accepted" | "rejected" | "revised" };
+  human_adjudication: { decision: string; rationale: string };
+  record_program_review: {
+    reviewer: string;
+    rationale: string;
+    decisions: Record<
+      ProgramHumanGateKey,
+      Exclude<ProgramHumanGateDecision, "pending">
+    >;
+  };
+};
+
+type ActionCommon = {
   actionId: string;
   label: string;
   enabled: boolean;
   disabledReason: string | null;
-  idempotencyKey: string;
-  expectedStateVersion: string;
   targetPhase: HypothesisFirstPhase;
   targetNodeId: string | null;
-  inputSchemaRef: string | null;
-  requiresConfirmation: boolean;
-  confirmationText: string | null;
 };
 
-type AllowedAction = {
-  [C in ActionCommand]: ActionBase & {
+type CommandAction = {
+  [C in ActionCommand]: ActionCommon & {
+    kind: "command";
     command: C;
     payload: ActionPayloadByCommand[C];
+    /** User-editable fields are submitted separately as `input` and validated by this schema. */
+    inputSchemaRef: string | null;
+    idempotencyKey: string;
+    expectedStateVersion: string;
+    requiresConfirmation: boolean;
+    confirmationText: string | null;
   };
 }[ActionCommand];
+
+/** Reuse and tighten ResearchWorkflowActiveDiscussionAnchor; all routes are internal. */
+type WorkflowNavigationAnchor = {
+  status: "ready" | "degraded";
+  degradedReason: string | null;
+  roomId: string | null;
+  meetingRoundId: string | null;
+  questionId: string;
+  selectionId: string | null;
+  candidateId: string | null;
+  deepLink: string | null;
+  returnTo: string;
+  returnLabel: string;
+};
+
+type NavigationAction = ActionCommon & {
+  kind: "navigation";
+  navigation: WorkflowNavigationAnchor;
+};
+
+type AllowedAction = CommandAction | NavigationAction;
+
+type CommandRequest<C extends ActionCommand> = {
+  actionId: string;
+  idempotencyKey: string;
+  expectedStateVersion: string;
+  payload: ActionPayloadByCommand[C];
+} & (C extends keyof ActionInputByCommand
+  ? { input: ActionInputByCommand[C] }
+  : { input?: never });
 
 type ReviewCandidateState = PhaseState & {
   candidateId: string;
@@ -307,6 +377,7 @@ type ReviewCandidateState = PhaseState & {
   selectionId: string;
   roundIndex: number;
   meetingRoundId: string | null;
+  discussionAnchor: WorkflowNavigationAnchor | null;
   discussion: PhaseState;
   summarization: PhaseState;
   approval: PhaseState;
@@ -341,8 +412,42 @@ type FormalRunViewStatus =
   | "succeeded"
   | "failed"
   | "cancelled"
-  | "superseded"
   | "archived";
+
+type FormalRunLineageDisposition =
+  | "current"
+  | "branched_parent"
+  | "historical"
+  | "conflicted";
+
+type ProgramDeliveryStatus =
+  | "not_started"
+  | "queued"
+  | "running"
+  | "blocked"
+  | "succeeded"
+  | "failed";
+
+type ProgramCandidateHandoffStatus =
+  | "not_started"
+  | "needs_context"
+  | "registered"
+  | "idempotent"
+  | "failed";
+
+type ProgramHumanReviewStatus =
+  | "not_started"
+  | "waiting_human"
+  | "revision_requested"
+  | "rejected"
+  | "approved";
+
+type ProgramHumanGateState = {
+  decisions: Record<ProgramHumanGateKey, ProgramHumanGateDecision>;
+  reviewer: string | null;
+  rationale: string | null;
+  decidedAt: string | null;
+};
 
 type HypothesisFirstStateV2 = {
   schemaVersion: 2;
@@ -350,7 +455,13 @@ type HypothesisFirstStateV2 = {
   teamId: string;
   questionId: string;
   stateVersion: string;
+  representationVersion: string;
   computedAt: string;
+  scope: {
+    questionInOfficialCatalog: true;
+    catalogId: string;
+    catalogSha256: string;
+  };
   resetBoundary: {
     resetId: string;
     resetAt: string | null;
@@ -359,7 +470,6 @@ type HypothesisFirstStateV2 = {
   isInitial: boolean;
   currentPhase: HypothesisFirstPhase;
   overall: PhaseState;
-  registration: PhaseState & { questionExists: boolean };
   generation: PhaseState & {
     generationMeetingId: string | null;
     candidateCount: number;
@@ -400,15 +510,32 @@ type HypothesisFirstStateV2 = {
     runId: string | null;
     runVersion: number | null;
     runStatus: FormalRunViewStatus | null;
+    completionKind: string | null;
+    lineageDisposition: FormalRunLineageDisposition | null;
+    isCurrentRevision: boolean;
+    parentRunId: string | null;
+    childRunIds: string[];
     currentNodeIds: string[];
+  };
+  programDelivery: PhaseState & {
+    deliveryStatus: ProgramDeliveryStatus;
+    deliveryArtifactRef: string | null;
+    handoffStatus: ProgramCandidateHandoffStatus;
+    outputRecordId: string | null;
+    outputRunId: string | null;
+    humanReviewStatus: ProgramHumanReviewStatus;
+    humanGates: ProgramHumanGateState;
+    approvedGateCount: number;
+    requiredGateCount: 4;
   };
   allowedActions: AllowedAction[];
   problems: WorkflowProblem[];
-  sourceCursor: Record<string, string>;
+  /** 诊断模式才返回；默认响应省略。内部 store 游标不属于稳定对外契约。 */
+  sourceCursor?: Record<string, string>;
 };
 ```
 
-`inputSchemaRef` 仅用于需要用户补充表单值的 action（例如空目录登记题目）；它引用前后端共同注册的版本化表单契约。前端可以收集输入，但不能自行决定命令是否可用，也不能绕过服务端对 payload 和 `expectedStateVersion` 的重新校验。
+`inputSchemaRef` 仅用于需要用户补充表单值的 command（例如 H1–H4 审核）；它引用前后端共同注册的版本化表单契约。服务端下发的 `payload` 只放不可由用户改写的 scope/lineage 字段，前端把表单值放入 `CommandRequest.input`；服务端必须按 schema 校验 input，并重新校验 payload、action、命令自身不变量和 `expectedStateVersion`。navigation 不携带幂等键或 CAS 令牌，只能使用服务端生成且通过内部路由校验的 anchor。
 
 `CollectionRequestState` 的正式 DTO 必须显式包含：
 
@@ -426,8 +553,14 @@ type HypothesisFirstStateV2 = {
   "contract": "hypothesis-first-state/v2",
   "teamId": "research-team",
   "questionId": "SCI-125",
-  "stateVersion": "hf2:origin:8d7d4a2f",
+  "stateVersion": "hf2-action:origin:8d7d4a2f",
+  "representationVersion": "hf2-repr:origin:16bf399e",
   "computedAt": "2026-08-25T04:00:00Z",
+  "scope": {
+    "questionInOfficialCatalog": true,
+    "catalogId": "science-125-questions-2021",
+    "catalogSha256": "catalog-sha256"
+  },
   "resetBoundary": {
     "resetId": "origin",
     "resetAt": null,
@@ -449,12 +582,13 @@ type HypothesisFirstStateV2 = {
   "allowedActions": [
     {
       "actionId": "generate-candidates",
+      "kind": "command",
       "command": "open_generation",
       "label": "生成候选假说",
       "enabled": true,
       "disabledReason": null,
       "idempotencyKey": "hf:SCI-125:generation:attempt:1",
-      "expectedStateVersion": "hf2:origin:8d7d4a2f",
+      "expectedStateVersion": "hf2-action:origin:8d7d4a2f",
       "payload": {
         "questionId": "SCI-125"
       },
@@ -469,24 +603,27 @@ type HypothesisFirstStateV2 = {
 }
 ```
 
-生产响应必须包含 4.5 定义的全部字段；此处为阅读方便省略了不活跃阶段。
+生产默认响应必须包含 4.5 定义的全部非诊断字段；此处为阅读方便省略了 `overall`、不活跃阶段和 `programDelivery`。`sourceCursor` 是唯一允许省略且只在显式诊断模式出现的字段。
 
-`overall` 不拥有独立状态机：它镜像 `currentPhase` 对应阶段的 lifecycle/outcome/actionability，`updatedAt` 取所有可见阶段与 problem 的最新时间。`sourceCursor` 只暴露不透明 cursor/record identity，不返回磁盘路径、内容摘要、Prompt 或凭据。
+`overall` 不拥有独立状态机：它镜像 `currentPhase` 对应阶段的 lifecycle/outcome/actionability，`updatedAt` 取所有可见阶段与 problem 的最新时间。`sourceCursor` 是 projector 计算两个版本令牌的诊断输入，不进入默认 wire 契约（避免内部 store 重构破坏对外契约）；仅在显式诊断参数下返回，且只含不透明 cursor/record identity，不返回磁盘路径、内容摘要、Prompt 或凭据。
 
 ---
 
 ## 5. 阶段状态与推导规则
 
-### 5.1 登记
+### 5.1 官方目录作用域与冷启动
 
-| 条件 | lifecycle / outcome | currentPhase | 主动作 |
-| --- | --- | --- | --- |
-| 题目不存在 | `not_started / none` | `registration` | `register_question` |
-| 登记处理中 | `running / none` | `registration` | 无，等待系统 |
-| 题目存在 | `completed / succeeded` | 按后续事实决定 | 无 |
-| 登记失败 | `failed / none` | `registration` | `retry_registration` |
+V2 的 per-question scope 以官方目录为边界，而不是以 Challenge Program 是否已有产出记录为边界：
 
-空目录 CTA 和详情面板必须消费同一个 `register_question` action；不能再由某个挂载点是否传 `onRegisterQuestion` 决定能力是否存在。
+| 条件 | endpoint 行为 | currentPhase / 主动作 |
+| --- | --- | --- |
+| `teamId`/`questionId` 格式非法 | 422 validation problem，不返回正常空快照 | 无 |
+| team 不存在 | 404 `team_not_found` | 无 |
+| 题号格式合法但不在官方目录 | 404 `catalog_question_unknown` | 无，不提供产出登记 |
+| 官方目录题号存在、无任何流程事实和产出记录 | 正常 V2 快照，`isInitial=true` | `generation` / `open_generation` |
+| 官方目录题号存在、已有手工导入或自动 handoff 的产出记录 | 正常 V2 快照，`isInitial=false` | 由 `program_delivery`/human gate 决定 |
+
+125 题结果目录为空时，catalog-level 空态 CTA 应是“从官方题库选择一道题开始研究”，随后打开该题的 generation initial；现有 `ChallengeQuestionRegisterDialog` 继续作为“手工导入/发布已有 schema v2 产出”的管理与修复入口，不进入正常冷启动 critical path，也不能由 per-question GET 自动授权。
 
 ### 5.2 候选生成
 
@@ -589,11 +726,25 @@ fan-in 只在以下条件全部满足时写 hypothesis round：
 
 正式运行 wire status 统一为：
 
-`queued | running | waiting_human | blocked | reconciliation_required | succeeded | failed | cancelled | superseded | archived`
+`queued | running | waiting_human | blocked | reconciliation_required | succeeded | failed | cancelled | archived`
 
-内部 durable `RunStatus.CREATED` 显式映射为 wire `queued`；`reconciliation_required`、`superseded` 和 `archived` 不得被 TypeScript 丢失。Task 7 要把 Python projection enum、transition enum 和 TypeScript union 的映射集中测试，不要求把持久层与展示层强行合成同一个 enum。
+内部 durable `RunStatus.CREATED` 显式映射为 wire `queued`；`reconciliation_required` 和 `archived` 直接映射，不得被 TypeScript 丢失。formal run 不再派生 wire `superseded`：当前 fork 权威会把父运行保留为 `succeeded + completionKind=branched_revision + childRunIds`，projector 必须原样保留生命周期，并用 `lineageDisposition=branched_parent`、`isCurrentRevision=false` 和 child refs 表达“已有后续修订”。
 
-run 成功并产生正式结果包后，顶层 `currentPhase=completed`、`overall=completed+succeeded`；run 失败或需 reconciliation 时仍停留在 `formal_runtime` 并给出后端动作。
+current formal run 的选择规则必须确定且 fail closed：先绑定最新 accepted hypothesis round，再沿显式 `parentRunId/childRunIds/supersedesRunId` 选择唯一有效 lineage leaf；如果出现多个互斥 leaf 或引用断裂，保留最后可信 run 并产生 `formal_run_lineage_conflict`，不得按时间任取一个。run 失败或需 reconciliation 时停留在 `formal_runtime` 并给出后端动作；run `succeeded` 只代表研究执行完成，不代表 Challenge Program 已闭环。
+
+### 5.8 Challenge Program 交付、产出登记与 H1–H4 审核
+
+formal run `succeeded` 后进入 `program_delivery`，复用现有 delivery orchestration 与 `programCandidateHandoff`，不把交付结果反写成 run lifecycle：
+
+- 正式结果包缺失/不可读：`programDelivery.actionability=blocked`，problem=`formal_result_package_missing`，提供 `reconcile_formal_run`；
+- delivery artifact 正在构建：`queued/running`，等待系统；
+- handoff 返回 `NEEDS_CONTEXT`：run 仍是 `succeeded`，但 `programDelivery=blocked`，problem=`program_candidate_handoff_needs_context`，提供 `retry_program_handoff`；
+- handoff 已 `registered/idempotent`，Challenge Program output record 等待 H1–H4：`waiting_human`，提供 `record_program_review` command 和可返回的审核 navigation；
+- human gate 为 `revision_requested`：`completed+rejected` 且 actionability=`available`，提供基于当前 run/output lineage 的 `create_formal_revision`；父 run 仍保留 succeeded/branched_revision 历史；
+- human gate 为 `rejected`：`completed+rejected`，保留证据与是否允许新 revision 的后端裁决；
+- 四个 gate 全部 approved：`programDelivery=completed+succeeded`，此时顶层才进入 `currentPhase=completed`、`overall=completed+succeeded`。
+
+现有手工产出登记对话框只作为 program delivery 的导入/修复路径。它产生的 output record 与自动 handoff 记录必须进入同一 projector，不能再形成另一套“目录里有无题目”的起点判断。
 
 ---
 
@@ -601,23 +752,26 @@ run 成功并产生正式结果包后，顶层 `currentPhase=completed`、`overa
 
 canonical projector 按以下顺序选择用户当前应该处理的阶段：
 
-1. scope 不存在或登记未完成：`registration`；
-2. 已有 formal run 且未终结：`formal_runtime`；
-3. formal run 已成功且结果包可读：`completed`；
-4. 已收敛但尚无 formal run：`formal_runtime`；
-5. 当前 collection 有未完成 child/handoff：`collection`；
-6. 当前 selection 有未完成 review candidate，或服务端已允许开启下一轮 review：`review`；
-7. 当前 round 正在等待 MetaReview/fan-in 判定，或预算耗尽等待裁决：`convergence`；
-8. 已有 candidates 但没有 current selection：`selection`；
-9. 否则：`generation`。
+1. scope 格式、team 与官方目录题号先按 §5.1 校验；非法/不存在直接返回 422/404，不构造正常空快照；
+2. current formal run 为 queued/running/waiting_human/blocked/reconciliation/failed 且仍需处理：`formal_runtime`；
+3. current formal run 已 succeeded，但结果包、delivery、program handoff 或 H1–H4 尚未成功终结：`program_delivery`；
+4. program delivery 与 H1–H4 全部 approved：`completed`；
+5. 已收敛但尚无 current formal run：`formal_runtime`；
+6. 当前 collection 有未完成 child/handoff：`collection`；
+7. 当前 selection 有未完成 review candidate，或服务端已允许开启下一轮 review：`review`；
+8. 当前 round 正在等待 MetaReview/fan-in 判定，或预算耗尽等待裁决：`convergence`；
+9. 已有 candidates 但没有 current selection：`selection`；
+10. 否则：`generation`。
 
-完整性 problem 不凭空创造“第九阶段”。它改变对应阶段的 actionability 和 allowedActions；只有 scope 无法解析时返回 409/422，而不是构造一个看似正常的空快照。
+完整性 problem 不凭空创造额外阶段；它改变拥有该事实的阶段 actionability 和 allowedActions。尤其是 terminal formal run + missing result/delivery 必须停留在 `program_delivery` blocked，不得跌回 collection/review/generation。
+
+scope 边界判据（与 §8.1 一致，进 Task 1 fixture）：格式非法 → 422；well-formed team 不存在 → 404；well-formed 题号不在官方目录 → 404 `catalog_question_unknown`；官方目录题号存在但没有产出记录 → 正常 generation initial。判据必须可测，不允许各实现自行解释。
 
 流程关系：
 
 ```mermaid
 flowchart LR
-  A["题目登记"] --> B["候选生成 attempt"]
+  A["选择官方目录题目"] --> B["候选生成 attempt"]
   B --> C{"生成结果"}
   C -->|"候选 > 0"| D["人工选择"]
   C -->|"empty / failed"| B
@@ -633,7 +787,11 @@ flowchart LR
   J --> I
   I --> K["创建正式研究运行"]
   K --> L["正式节点执行"]
-  L --> M["结果包闭环"]
+  L --> M["正式结果包 / delivery"]
+  M --> N["Program candidate handoff / 产出登记"]
+  N --> O{"H1–H4 审核"}
+  O -->|"全部批准"| P["Challenge Program 闭环"]
+  O -->|"需修订"| K
 ```
 
 ---
@@ -646,19 +804,22 @@ flowchart LR
 | --- | --- | --- |
 | 1 | hypothesis-first JSONL records、question reset audit、meeting records、review links、collection request、hypothesis round | 继续作为业务事实源；V2 只读投影 |
 | 2 | research runtime command idempotency、runVersion、outbox lease、human task | 改造后复用其 expected version、幂等与恢复模式 |
-| 3 | `source_collection_projection.py` 和 formal `projection_builder.py` 的 command offer | 抽取一致的 action offer 语义，不复制两套字段 |
-| 4 | SSE query invalidation、可见页轮询策略 | 扩展 state-changed 信号和 window-focus refetch |
-| 5 | 前端 `hypothesisFirstMeetingProjection` / `hypothesisFirstNextAction` | 只作为兼容期 adapter 与回归 oracle；最终不再拥有业务判断 |
+| 3 | `hypothesis_selection.py` 的 scope lock 与命令内重读模式 | 改造为 team/question coordinator lock + command-specific invariant；不把 stateVersion 当全局事务 |
+| 4 | `WorkflowLedgerUnitOfWork.after_commit` | 复用 commit 后 callback 顺序：先后端 cache eviction，再 publish SSE |
+| 5 | `source_collection_projection.py` 和 formal `projection_builder.py` 的 command offer | 抽取一致的 command/navigation offer 语义，不复制两套字段 |
+| 6 | SSE query invalidation、可见页轮询策略 | 扩展 state-changed 信号和 window-focus refetch；只负责客户端刷新 |
+| 7 | 前端 `hypothesisFirstMeetingProjection` / `hypothesisFirstNextAction` | 只作为兼容期 adapter 与回归 oracle；最终不再拥有业务判断 |
 
 ### 7.2 建议 owning surface
 
-- 新增 `core/web/services/team_workflow/research_runtime/hypothesis_first_state_v2.py`：只读 canonical projector、stateVersion、phase selection、aggregate 与 problem。
+- 新增 `core/web/services/team_workflow/research_runtime/hypothesis_first_state_v2.py`：只读 canonical projector、双版本令牌、phase selection、aggregate 与 problem。
 - 新增或拆分 `core/web/routes/team_workflows/hypothesis_first_state_models.py`：严格 Pydantic V2 DTO；避免继续扩大 legacy model 文件。
 - `hypothesis_first_chain.py`：保留业务命令与现有事实读取入口；只在需要暴露规范化 source reader 时做窄改。
 - `hypothesis_selection.py`：selection 与 review dispatch attempt 的写入 owner。
 - meeting runtime / rounds：discussion、summarization、approval 的事实 owner，不允许 projector 回写会议状态。
 - source collection owner：request、child run、source progress、handoff 的事实 owner。
 - research runtime store/projection：formal run 状态 owner。
+- `delivery_orchestration.py`、`program_candidate_handoff.py` 与 challenge question run store：delivery、program handoff、output record、H1–H4 gate 的既有事实 owner；projector 只读消费，不另造登记数据库。
 - route 只调用 projector 并序列化，不实现状态判断。
 
 ### 7.3 新增 durable 事实
@@ -691,8 +852,8 @@ flowchart LR
 
 - response model 全字段严格声明，核心嵌套模型 `extra="forbid"`；
 - 固定 `schemaVersion=2` 和 `contract="hypothesis-first-state/v2"`；
-- 支持 ETag/If-None-Match；
-- scope 不存在时仍可返回 registration 状态；非法 scope 返回 422；
+- 默认响应支持 ETag/If-None-Match，ETag 只使用 `representationVersion`；带 `sourceCursor` 的显式诊断响应使用 `Cache-Control: no-store`，不返回 304；
+- scope 格式非法返回 422；team 或官方目录题号不存在返回带稳定 problem code 的 404；官方目录题号存在但没有流程/产出事实时返回正常 generation initial；
 - 来源读取失败时不能返回伪初始态，返回结构化错误或带 fatal problem 的 degraded 快照。
 
 ### 8.2 command contract
@@ -703,15 +864,17 @@ flowchart LR
 {
   "actionId": "approve-review-candidate",
   "idempotencyKey": "hf:sel-1:r2:candidate-7:approve:v1",
-  "expectedStateVersion": "hf2:reset-1:812f...",
+  "expectedStateVersion": "hf2-action:reset-1:812f...",
   "payload": {
-    "meetingRoundId": "meeting-7",
+    "meetingRoundId": "meeting-7"
+  },
+  "input": {
     "decision": "accepted"
   }
 }
 ```
 
-服务端必须重新验证 action 是否仍 enabled，不能信任客户端带回的 label、disabledReason 或 targetNodeId。
+服务端不能信任客户端带回的 label、disabledReason、targetNodeId、scope identity 或 lineage。统一 envelope 的强制执行顺序是：锁外只验证 actionId/payload/input 的结构与 schema → 进入 team/question orchestration lock → 在锁内根据最新快照重新授权 action，并重读 reset、current selection/attempt/meeting/run 与命令专属前置条件 → 比较 `expectedStateVersion` → 以同一临界区写 durable fact/outbox。任何一步变化都返回 409/精确 problem，不得为通过版本比较而跳过 action 授权或命令自身不变量。
 
 ### 8.3 前端双读
 
@@ -719,8 +882,8 @@ flowchart LR
 
 1. 后端先上线 V2，V1 不变；
 2. 前端并行读取/影子比较 V2 与旧 resolver，记录不含内容数据的阶段差异；
-3. V2 成为画布、右栏、命令面板和徽标主来源；
-4. 404/501 可回退 V1；500、invalid DTO、fatal problem **不得**静默回退为旧推断；
+3. V2 成为画布、右栏、命令面板、徽标和讨论导航主来源；
+4. 只有 route-level `endpoint_not_found/contract_not_supported`（404/501）可回退 V1；domain-level `team_not_found/catalog_question_unknown`、500、invalid DTO、fatal problem **不得**静默回退为旧推断；
 5. 稳定窗口结束后删除旧 `resolveHypothesisFirstNextAction` 业务分支和跨请求拼装；
 6. 确认无消费者后再归档 V1 endpoint。
 
@@ -733,6 +896,8 @@ flowchart LR
 ### 9.1 stale handling
 
 - 所有按钮都使用快照下发的 `expectedStateVersion`；
+- `stateVersion` 是跨表面统一的 coarse CAS，不是多个 JSONL/store 之间凭空出现的全局 ACID 事务；每个 command 仍必须在 owning lock/transaction 内重读并验证 `resetId + command-specific lineage identity + terminal/lease/idempotency`；
+- team/question orchestration command 使用同一 scope coordinator lock 包住“二次读取 → 比较 → 写本命令事实/outbox”；不能安全纳入同一锁的异步 late completion 通过精确 attempt/selection/run identity fail closed，不得只比较之前读取的版本字符串；
 - 409 后自动刷新一次，并把用户留在同一逻辑阶段；
 - 若动作仍存在，可提示“状态已更新，请再次确认”；不得自动执行需要人工确认的动作；
 - 切换 questionId 时旧 query、旧 action 和旧 mutation 结果全部按 scope fencing 丢弃。
@@ -769,6 +934,9 @@ flowchart LR
 | child run completed、无 runId/handoff | collection blocked，精确 problem |
 | 已收敛、无 formal run | formal runtime not_started，提供 create action |
 | 未知 formal run status | 保留原值到诊断字段，wire status 为空并产生 `formal_run_status_unknown` |
+| parent run 为 succeeded + branched_revision + childRunIds | 保留 parent succeeded；lineageDisposition=branched_parent；唯一有效 child leaf 为 current revision |
+| formal run succeeded、无 result/delivery artifact | program delivery blocked，`formal_result_package_missing`，不得退回上游阶段 |
+| 已有 Challenge Program output record、无 hypothesis-first 前置事实 | `isInitial=false`；直接投影 program delivery/H1–H4，不伪造 generation 历史 |
 
 新写入从发布日开始生成显式 attempt/dispatch facts。只有影子比较证明 legacy adapter 无法稳定解释某类高价值记录时，才另立可回滚、带 preview/receipt 的迁移任务。
 
@@ -790,6 +958,9 @@ flowchart LR
 | `collection_child_missing` | request 存在但 child run 缺失 | start/retry |
 | `collection_handoff_missing` | child 完成但 handoff 缺失 | create handoff |
 | `formal_run_status_unknown` | 持久状态不在映射表 | reconciliation |
+| `formal_run_lineage_conflict` | formal run 存在多个互斥 current leaf 或 lineage 断裂 | fail closed / reconciliation |
+| `formal_result_package_missing` | run succeeded 但正式结果包/delivery authority 不可读 | reconcile formal run |
+| `program_candidate_handoff_needs_context` | delivery 无法把结果包登记为 program candidate | 补齐上下文后 retry handoff |
 | `state_source_unavailable` | projector 读取某事实源失败 | 禁止伪初始，重试读取 |
 | `state_version_conflict` | 客户端动作基于旧快照 | 刷新后重新确认 |
 
@@ -799,11 +970,13 @@ message 用于人读，业务分支只能依赖 code/category/recoverable。
 
 ## 12. 可观测性、刷新与用户提示
 
-- SSE 增加 `hypothesis_first_state_changed`，最小 payload 为 teamId、questionId、stateVersion、currentPhase、awaitingHumanCount；
+- durable fact 成功 commit 后，writer/UoW 先失效本进程的 team/question projector cache，再发布 `hypothesis_first_state_changed`；不得让后端缓存依赖下游浏览器 SSE 才失效；
+- 多进程正确性不依赖进程内 eviction：cache entry 必须绑定可快速校验的 durable source-cursor signature；任一进程读到 cursor 不匹配即重算。若后续引入共享 invalidation bus，只作为降低重算延迟的优化；
+- SSE 最小 payload 为 teamId、questionId、stateVersion、representationVersion、currentPhase、awaitingHumanCount；
 - 前端收到事件后失效 V2 query，不在 SSE reducer 内重建业务状态；
 - polling 只在 queued/running/waiting_human 或 recoverable pending 时启用；
 - 页面从后台回到前台、窗口 focus、网络恢复时强制校验 ETag；
-- 团队壳徽标由 V2 聚合 `awaitingHumanCount`，覆盖候选纪要确认、搜集交接、人工裁决；
+- 团队壳徽标由 V2 聚合 `awaitingHumanCount`，覆盖候选纪要确认、搜集交接、人工裁决与 H1–H4 审核；
 - 每个 phase 展示 updatedAt、attempt number、等待对象和 problem；
 - 日志只记录 identity、版本、阶段、problem code、延迟和计数，不记录完整 Prompt、候选正文或资料内容。
 
@@ -835,10 +1008,10 @@ message 用于人读，业务分支只能依赖 code/category/recoverable。
 
 ```mermaid
 flowchart TD
-  T1["Task 1 冻结 V2 契约与不变量"] --> T2["Task 2 canonical projector 与 stateVersion"]
+  T1["Task 1 冻结 V2 契约与不变量"] --> T2["Task 2 canonical projector 与双版本/缓存"]
   T2 --> T3["Task 3 generation attempt 与显式初始/空/失败"]
   T2 --> T4["Task 4 selection 副作用与 review fan-out/fan-in"]
-  T2 --> T5["Task 5 collection/convergence/formal runtime"]
+  T2 --> T5["Task 5 collection/convergence/formal/program delivery"]
   T3 --> T6["Task 6 V2 API 与前端双读"]
   T4 --> T6
   T5 --> T6
@@ -859,21 +1032,32 @@ flowchart TD
   - lifecycle/outcome 非法组合被拒绝；
   - review aggregate 与 candidate items 不一致被拒绝；
   - DTO 多余字段被拒绝；
-  - Python/TypeScript fixture 逐字段一致。
-- **退出条件**：schema、枚举、problem code、stateVersion 语义、action envelope 被测试冻结；没有业务行为改动。
+  - Python/TypeScript fixture 逐字段一致；
+  - scope 边界（格式非法、team 不存在、官方目录题号不存在、有效题号无流程事实）有 fixture；
+  - `stateVersion`/`representationVersion` 的贡献事实与 ETag 语义有 fixture；诊断响应不复用默认响应 ETag/304；
+  - formal parent succeeded+branched_revision 保真，lineage disposition 不覆盖 lifecycle；
+  - command/navigation 两类 action、navigation return route 与 program delivery/H1–H4 DTO 逐字段冻结。
+- **退出条件**：schema、枚举、problem code、双版本语义、command/navigation envelope 被测试冻结；没有业务行为改动。
 
-### Task 2：canonical projector 与版本游标
+### Task 2：canonical projector、双版本游标与增量缓存
 
 - **Owner**：hypothesis-first read model
 - **方法**：BDD_TDD
-- **Scope**：新 projector、source readers、stateVersion、currentPhase、problem 聚合
+- **Scope**：新 projector、source readers、stateVersion、representationVersion/ETag、currentPhase、problem 聚合、增量读取/失效缓存
 - **约束**：只读；不得写补偿记录；不得吞掉 source read error
+- **缓存正确性**：projector 基于 durable cursor 增量读取或使用 cursor-bound cache；fact commit 后先本地失效、再发 SSE。多进程/漏事件时由请求侧 cursor signature 校验兜底，禁止以浏览器 SSE 作为后端缓存正确性来源；禁止每次 GET 全量重放所有 JSONL。
+- **可复现性能 fixture**：固定一个 active team/question：16 candidates、16 个候选会议、每会议 3 个 discussion rounds、8 个 collection requests × 12 sources × 每源 20 条 progress、2 个 formal lineage runs、10,000 条同团队无关历史事实。仓库保存只含合成数据的 fixture generator 与 seed。
+- **测量协议**：Python 3.12、Windows、本地 SSD；报告 CPU/内存/commit SHA。每次先跑全量 replay baseline；cold-cache 50 次（每次显式清空 projector 进程缓存）、warm-cache 预热 50 次后测 500 次，并分别测 concurrency=1/8。以 `perf_counter_ns` 记录 endpoint service time，不含浏览器渲染与网络；原始样本/汇总写测试 artifact，不进入产品数据。
+- **发布预算**：warm concurrency=1/8 均满足 p95 < 500ms、p99 < 1.5s；cold p95 < 1.5s；增量读取量不得随无关 10,000 条历史事实线性增长。环境噪声导致不可比较时只能标记 inconclusive，不能伪装通过。
 - **测试**：
-  - 同一 facts → 同一 stateVersion；
-  - 任一可见 fact 变化 → version 变化；
+  - 同一 facts/observation → 两个 version 与默认响应逐字段相同；
+  - 只改变 wire-visible telemetry → stateVersion 不变、representationVersion/ETag 改变；
+  - action-relevant fact 变化 → 两个 version 都改变；
   - reset 前事实不污染 reset 后 initial；
   - 多来源读取顺序变化不改变快照；
-  - source unavailable 不返回假 initial。
+  - source unavailable 不返回假 initial；
+  - commit → cache invalidation → SSE 的顺序可断言，漏 SSE/另一进程仍由 cursor mismatch 得到新快照；
+  - 增量读取/缓存命中结果与全量投影逐字段一致。
 - **退出条件**：纯函数 fixture 可以覆盖全阶段，投影没有副作用。
 
 ### Task 3：generation attempt 与显式 initial/empty/failed
@@ -887,7 +1071,8 @@ flowchart TD
   - closed + 0 candidates 为 completed_empty；
   - provider/meeting failure 为 failed；
   - retry 生成 attempt N+1，重放不重复开会；
-  - stale expectedStateVersion 返回 409。
+  - stale expectedStateVersion 返回 409；
+  - 在 scope lock 内二次校验 reset/attempt/idempotency；版本读取后、写入前插入并发 selection/reset 时 fail closed。
 - **退出条件**：`generation_missing` 不再承担正常状态。
 
 ### Task 4：selection 副作用与 review fan-out/fan-in 权威状态
@@ -904,32 +1089,35 @@ flowchart TD
   - late completion 不推进已 superseded selection。
 - **退出条件**：候选清单、计数和主动作均来自 V2 后端。
 
-### Task 5：collection、convergence、formal runtime 纳入 V2
+### Task 5：collection、convergence、formal runtime 与 program delivery 纳入 V2
 
 - **Owner**：各事实 owner + V2 projector 单一集成 owner
 - **方法**：BDD_TDD
-- **Scope**：request/child/source/handoff 状态、收敛依据、formal run mapping/action
+- **Scope**：request/child/source/handoff 状态、收敛依据、formal run mapping/lineage、delivery artifact、program candidate handoff、Challenge Program output record 与 H1–H4 action
 - **测试**：
   - request 无 child、child partial、child failed、完成无 handoff；
   - handoff 后返回下一 review；
   - accepted/no-request/pending=0 才收敛；
   - budget exhausted 给 human adjudication；
   - converged/no-run 给 create_formal_run；
-  - formal status mapping 覆盖未知值。
-- **退出条件**：假说链到正式运行的断点能由同一快照解释。
+  - formal status mapping 覆盖 unknown；fork parent 保持 succeeded+branched_revision，唯一 child leaf 为 current；
+  - run succeeded + missing result/handoff NEEDS_CONTEXT 停留 program_delivery blocked；
+  - program candidate registered 后逐项投影四个权威 gate key、reviewer/rationale/decidedAt；revision_requested 进入 revision action；四 gate approved 后才顶层 completed。
+- **退出条件**：假说链、正式运行、产出登记与人工审核的断点都能由同一快照解释。
 
 ### Task 6：V2 API 与前端双读迁移
 
 - **Owner**：route/client/workspace integration
 - **方法**：BDD_TDD
-- **Scope**：V2 route、client、query、state-driven current task/action rendering、V1 fallback
+- **Scope**：V2 route、client、query、state-driven current task、command/navigation rendering、V1 fallback
 - **UI 约束**：任何新增/修改的用户可见 VUI 元素先更新 `web/src/components/vui/designs/` 和 `designs/INDEX.md`；复用现有 candidate checklist、VStateRow、VStatusChip 和 command offer 组件
 - **测试**：
-  - V2 404/501 才回退 V1；
+  - 只有 route-level unsupported 404/501 回退 V1；domain 404 不回退；
   - V2 500/invalid/fatal 不静默回退；
-  - 同一 stateVersion 各面板主动作一致；
+  - 同一 representationVersion 各面板主动作、进度和徽标一致；
+  - 125 题结果目录为空时显示“从官方题库选择一道题开始”，不得把 `ChallengeQuestionRegisterDialog` 当冷启动前置；手工产出导入仍可从 program delivery 管理/修复入口到达；
   - scope switch 丢弃旧 action；
-  - returnTo/returnLabel 保留；
+  - 每个 active review candidate 的 navigation 含 ready/degraded、deepLink、returnTo/returnLabel，且前端不跨请求重建 anchor；
   - `npx tsc -b --pretty false` 与相关 VUI contract。
 - **退出条件**：V2 成为主读，旧 resolver 只在明确 legacy path 运行。
 
@@ -937,11 +1125,13 @@ flowchart TD
 
 - **Owner**：workflow contract cleanup
 - **方法**：BDD_TDD
-- **Scope**：删除 candidate/meeting-count 阶段猜测；集中 formal persisted→wire mapping；收紧 legacy DTO
+- **Scope**：删除 candidate/meeting-count/“目录有无产出”阶段猜测；集中 formal persisted→wire+lineage mapping；收紧 legacy DTO
 - **测试**：
   - 源码 contract 禁止 `candidateCount === 0` 决定 initial；
   - 前端不能从 URL/selectedNodeId 决定业务 phase；
   - Python 与 TypeScript formal status fixture 一致；
+  - formal wire 不派生 superseded 覆盖 succeeded parent；
+  - valid official question 无 output record 仍是 generation initial；
   - unknown status fail closed。
 - **退出条件**：只有后端 projector 拥有 currentPhase 和 allowedActions 规则。
 
@@ -951,16 +1141,18 @@ flowchart TD
 - **方法**：targeted verification + browser/runtime acceptance
 - **Scope**：SSE/focus refresh、徽标、真实挑战杯闭环、文档归档
 - **场景**：
-  1. 登记一题；
+  1. 从官方目录选择一题；目录中尚无产出记录也必须直接得到 generation initial；
   2. 使用 operator 配置的 Flash 模型生成候选；
   3. 选择至少 2 个候选；
   4. 逐候选完成讨论、纪要确认；
   5. 至少走一次资料搜集与 handoff；
   6. 收敛；
   7. 创建正式运行；
-  8. 完成正式节点并看到结果包。
-- **故障注入**：生成空结果、一个候选会议启动失败、讨论重启中断、child run 失败、stale action、窗口后台后恢复。
-- **证据**：每一步保存 stateVersion/currentPhase/allowedAction/problem 的脱敏 trace；浏览器截图证明用户能定位下一步。
+  8. 完成正式节点并看到结果包；
+  9. delivery 将结果包登记为 Challenge Program candidate；
+  10. 完成 H1–H4 审核，逐项看到 `H1_problem_understanding`、`H2_hypothesis_selection`、`H3_research_plan`、`H4_external_output` 的决定，并在 125 题总览看到正式批准状态。
+- **故障注入**：生成空结果、一个候选会议启动失败、讨论重启中断、child run 失败、stale action、窗口后台后恢复、run succeeded 但 result package 缺失、program handoff NEEDS_CONTEXT、H1–H4 revision_requested。
+- **证据**：每一步保存 stateVersion/representationVersion/currentPhase/allowedAction/problem 的脱敏 trace；浏览器截图证明用户能定位下一步、导航后能返回、最终产出进入 Challenge Program 台账。
 - **退出条件**：正常链闭环；故障链能恢复或明确 fatal，不出现“刷新永远无效”的假恢复；计划迁 archive。
 
 ---
@@ -969,7 +1161,8 @@ flowchart TD
 
 | 场景 | 预期状态 | 预期动作/行为 |
 | --- | --- | --- |
-| 新登记题目，无流程事实 | isInitial=true；generation not_started | 生成候选 |
+| 官方目录题号存在、无流程/产出事实 | isInitial=true；generation not_started | 生成候选，不要求先登记产出 |
+| 题号格式合法但不在官方目录 | 404 catalog_question_unknown | 不提供 register/import action |
 | 生成已排队 | queued | 显示排队，不重复开会 |
 | 生成正常但无候选 | completed+empty | 解释空结果，可新建 attempt |
 | 生成失败 | failed + problem | 重试，保留错误与 attempt |
@@ -980,6 +1173,13 @@ flowchart TD
 | 资料搜集逐源 2/3 完成 | collection running/partial progress | 展示逐源，不伪装完成 |
 | child 完成无 handoff | handoff waiting/failed | 交接/重试 |
 | 收敛完成无正式 run | formal_runtime not_started | 创建正式研究运行 |
+| formal parent 已 fork child | parent succeeded+branched_revision；child current | lineage 关系单列，不把 parent 改成 superseded |
+| formal run succeeded、结果包/交付缺失 | program_delivery blocked | reconcile formal run，不回退上游阶段 |
+| program handoff NEEDS_CONTEXT | run 保持 succeeded；program_delivery blocked | 补齐上下文后 retry handoff |
+| program candidate 已登记、H1–H4 待审核 | program_delivery waiting_human | 审核 action/导航可达且可返回 |
+| H1–H4 revision_requested | program_delivery completed+rejected/available | 创建 formal revision，保留父历史 |
+| H1–H4 全部 approved | currentPhase=completed | 125 题台账显示正式批准 |
+| 仅逐源进度变化 | stateVersion 不变；representationVersion/ETag 改变 | 不产生 409，focus/ETag 能看到新进度 |
 | stale button | 409 state_version_conflict | 刷新并重新确认 |
 | reset 后旧任务晚到 | isInitial 由新 reset boundary 计算 | 晚到结果不推进新链 |
 | 未知/损坏事实 | phase 保留最后可信状态 + fatal problem | 禁止误显示生成按钮 |
@@ -991,9 +1191,10 @@ flowchart TD
 ### 16.1 主要风险
 
 - 多 store 读取时发生跨时刻快照：Task 2 必须用现有读锁/一致性 cursor，或把不一致显式标为 stale/problem。
-- action 下发后状态迅速变化：依靠 expectedStateVersion + command 内二次授权，不依赖按钮 disabled。
+- action 下发后状态迅速变化：依靠 expectedStateVersion + scope lock 内命令专属二次授权，不依赖按钮 disabled；无法进入同一锁的 late completion 以精确 lineage identity fail closed。
 - 旧数据缺 candidate identity：禁止猜测；这会暴露历史问题，但比错误 fan-in 安全。
-- V1/V2 双读增加请求量：优先 ETag、SSE invalidation 和共享 query，影子比较仅在受控窗口启用。
+- V1/V2 双读增加请求量：优先 representationVersion ETag、commit 后 SSE invalidation 和共享 query，影子比较仅在受控窗口启用。
+- projector 读取量随团队历史线性增长：Task 2 必须实现增量读取或失效缓存并满足延迟预算，否则 V2 快照本身会成为新的稳定性风险。
 - 并行任务可能改动 reset、meeting receipt、workspace 热文件：每个 Task 开始前重新 preflight，不以本计划基线覆盖新事实。
 
 ### 16.2 回滚
