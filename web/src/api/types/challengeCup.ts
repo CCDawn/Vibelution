@@ -317,6 +317,87 @@ export type ChallengeCupDevBatchRunResponse = {
   persisted: boolean;
 };
 
+export type ChallengeCupRealBatchPlanId = "real-1" | "real-5" | "real-12" | "real-125";
+
+export type ChallengeCupRealBatchStatus = "pending" | "running" | "succeeded" | "failed" | "blocked";
+
+export type ChallengeCupRealBatchStatusSummary = {
+  pending: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  blocked: number;
+};
+
+export type ChallengeCupRealBatchRunRef = {
+  runId: string;
+  attempt: number;
+};
+
+/** Server-owned projection of one persisted real catalog gate. */
+export type ChallengeCupRealBatchProjection = {
+  schemaVersion: number;
+  planId: string;
+  gateId: string;
+  exists: boolean;
+  questionCount: number;
+  statusSummary: ChallengeCupRealBatchStatusSummary;
+  pendingCount: number;
+  succeededCount: number;
+  failedCount: number;
+  blockedCount: number;
+  totalAttempts: number;
+  completedQuestionIds: string[];
+  pendingQuestionIds: string[];
+  runRefs: Record<string, ChallengeCupRealBatchRunRef>;
+  awaitingApprovalQuestionIds: string[];
+  consecutiveFailures: number;
+  failureBudget: number;
+  circuitBreakerOpen: boolean;
+  cancelled: boolean;
+  gateComplete: boolean;
+  lastUpdatedAt: string;
+  canResume: boolean;
+};
+
+export type ChallengeCupRealBatchOutcome = {
+  questionId: string;
+  outcome: string;
+};
+
+export type ChallengeCupRealBatchAuthorization = {
+  authorizationId: string;
+  teamId: string;
+  planId: string;
+  batchScope: Record<string, unknown>;
+  scopeHash: string;
+  approvedBy: string;
+  approvedAtMs: number;
+  readinessReportSha256: string;
+  recordHash: string;
+  createdAtMs: number;
+};
+
+export type ChallengeCupRealBatchStartResponse = ChallengeCupRealBatchProjection & {
+  launched: ChallengeCupRealBatchOutcome[];
+};
+
+export type ChallengeCupRealBatchPollResponse = ChallengeCupRealBatchProjection & {
+  harvested: ChallengeCupRealBatchOutcome[];
+  launched: ChallengeCupRealBatchOutcome[];
+};
+
+export type ChallengeCupRealBatchStartRequest = {
+  confirmed: boolean;
+  concurrency?: number | null;
+  maxItems?: number | null;
+  failureBudget?: number | null;
+};
+
+export type ChallengeCupRealBatchCancelRequest = {
+  confirmed: boolean;
+};
+
 export type ChallengeCupCatalogOverviewStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type ChallengeCupCatalogOverviewAction = "continue" | "retry" | "view";
