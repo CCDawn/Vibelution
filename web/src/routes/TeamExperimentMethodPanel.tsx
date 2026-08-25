@@ -77,7 +77,7 @@ const METHOD_FIELD_DEFINITIONS: Record<string, MethodFieldDefinition> = {
   baseline: { labelZh: "公平基线", labelEn: "Fair baseline", kind: "textarea", wide: true },
   seeds: { labelZh: "随机种子", labelEn: "Seeds", kind: "integer_list", placeholderZh: "17, 42, 101", placeholderEn: "17, 42, 101" },
   budget: { labelZh: "实验预算", labelEn: "Budget", kind: "textarea", placeholderZh: "训练轮次、调参预算、停止条件", placeholderEn: "Epochs, tuning budget, and stop rule", wide: true },
-  smokePlan: { labelZh: "Smoke 计划", labelEn: "Smoke plan", kind: "textarea", wide: true },
+  smokePlan: { labelZh: "试跑计划", labelEn: "Trial run plan", kind: "textarea", wide: true },
   sources: { labelZh: "数据来源", labelEn: "Sources", kind: "list", placeholderZh: "每行一个来源", placeholderEn: "One source per line", wide: true },
   dataSchema: { labelZh: "数据结构", labelEn: "Data schema", kind: "textarea", wide: true },
   transform: { labelZh: "清洗与转换", labelEn: "Transform", kind: "textarea", wide: true },

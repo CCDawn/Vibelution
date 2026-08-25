@@ -83,12 +83,12 @@ export function projectNodeOps(options: {
       tone: protocolOk ? "done" : "blocked",
     });
     facts.push({
-      label: "Smoke",
+      label: "试跑",
       value: smokeOk ? "已放行" : "未放行",
       tone: smokeOk ? "done" : "blocked",
     });
     if (!protocolOk || !smokeOk) {
-      blockedReason = "需要 Frozen Protocol + smoke 人工放行（不能仅因有实验计划解锁）";
+      blockedReason = "需要冻结协议和试跑人工放行（不能仅因有实验计划解锁）";
     }
   }
 

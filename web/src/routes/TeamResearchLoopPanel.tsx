@@ -62,8 +62,8 @@ export function buildBoundedSmokeEvidenceDraft(
   const baselineMetricValue = nestedMetric(metrics, "baseline", "reconstruction_mse");
   const variantMetricValue = nestedMetric(metrics, "variant", "reconstruction_mse");
   const summary = lang === "zh"
-    ? `受控代理 Smoke ${smokeRun.smokeRunId} 已完成，结果仅用于流程与工程可执行性复核；不得据此声称睡眠机制或神经真实性。`
-    : `Bounded proxy Smoke ${smokeRun.smokeRunId} completed. Review it only as workflow and engineering evidence; it does not establish sleep mechanisms or neural realism.`;
+    ? `受控代理试跑 ${smokeRun.smokeRunId} 已完成，结果仅用于流程与工程可执行性复核；不得据此声称睡眠机制或神经真实性。`
+    : `Bounded proxy trial run ${smokeRun.smokeRunId} completed. Review it only as workflow and engineering evidence; it does not establish sleep mechanisms or neural realism.`;
   return {
     evidenceType: "metric_report",
     status: smokeRun.status === "failed" ? "failed" : "needs_review",

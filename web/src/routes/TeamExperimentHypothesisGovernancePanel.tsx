@@ -347,8 +347,8 @@ export function TeamExperimentHypothesisGovernancePanel(
               {candidate.approvedForExperiment && !selectedByActivePlan ? (
                 <span className={styles.approvalNote}>
                   {lang === "zh"
-                    ? "新修订不会自动冻结，也不会运行 Smoke。"
-                    : "The new revision will not auto-freeze or run Smoke."}
+                    ? "新修订不会自动冻结，也不会运行试跑。"
+                    : "The new revision will not auto-freeze or start a trial run."}
                 </span>
               ) : null}
             </article>

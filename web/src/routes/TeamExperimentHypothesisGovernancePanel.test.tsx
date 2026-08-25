@@ -342,6 +342,6 @@ describe("TeamExperimentHypothesisGovernancePanel", () => {
     );
 
     expect(markup).toContain("实验进展 1/5");
-    expect(markup).toContain("止步于冒烟试跑");
+    expect(markup).toContain("止步于试跑");
   });
 });

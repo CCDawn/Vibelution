@@ -59,8 +59,8 @@ export const RESEARCH_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStage
       roleKeys: ["experiment_planner", "challenge_cup_experiment_planner"],
       zh: "实验规划",
       en: "Experiment planner",
-      zhFocus: "计划、baseline 与 smoke gate",
-      enFocus: "Plan, baseline, smoke gate",
+      zhFocus: "计划、baseline 与试跑放行",
+      enFocus: "Plan, baseline, trial-run gate",
     },
     {
       key: "experiment_ledger",

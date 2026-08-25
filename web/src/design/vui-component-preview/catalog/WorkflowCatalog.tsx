@@ -238,7 +238,7 @@ const serpentineStatusGraph: WorkflowLayoutInput = {
     { nodeId: "se_hypothesis", stageId: "s_experiment", label: "假设起草", actorKind: "agent", visualKind: "agent_task", status: "succeeded", primaryRoleKey: "experiment_planner", primaryAgentId: "agent-lin" },
     { nodeId: "se_protocol", stageId: "s_experiment", label: "协议冻结", actorKind: "agent", visualKind: "agent_task", status: "running", isRuntimeCurrent: true, primaryRoleKey: "experiment_planner", primaryAgentId: "agent-shen" },
     { nodeId: "se_review", stageId: "s_experiment", label: "人工评审", actorKind: "human", visualKind: "human_gate", status: "waiting_human", primaryRoleKey: "research_owner" },
-    { nodeId: "se_smoke", stageId: "s_experiment", label: "Smoke 门禁", actorKind: "system", visualKind: "system_task", status: "pending", primaryRoleKey: "formal_runner" },
+    { nodeId: "se_smoke", stageId: "s_experiment", label: "试跑放行", actorKind: "system", visualKind: "system_task", status: "pending", primaryRoleKey: "formal_runner" },
     { nodeId: "si_run", stageId: "s_iteration", label: "批次执行", actorKind: "agent", visualKind: "agent_task", status: "failed", primaryRoleKey: "formal_runner", primaryAgentId: "agent-zhou" },
     { nodeId: "si_eval", stageId: "s_iteration", label: "结果评估", actorKind: "agent", visualKind: "agent_task", status: "blocked", primaryRoleKey: "experiment_ledger" },
     { nodeId: "si_decision", stageId: "s_iteration", label: "迭代决策", actorKind: "agent", visualKind: "decision", status: "pending", primaryRoleKey: "iteration_planner" },

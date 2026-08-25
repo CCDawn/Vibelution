@@ -1952,7 +1952,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("research-stage-workbench-body");
     expect(routeSource).toContain("experimentPlanningStatusQuery={experimentPlanningStatusQuery}");
     expect(routeAndPureSource).toContain("researchDiagnosticStatusLabel");
-    expect(experimentLoopModelSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
+    expect(experimentLoopModelSource).toContain('smoke_needs_review: { zh: "试跑待复核", en: "trial run needs review" }');
     expect(experimentLoopModelSource).toContain('full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" }');
     expect(teamResearchStageLauncherPanelSource).toContain("团队记忆");
     expect(teamResearchStageLauncherPanelSource).toContain("已用记忆");
@@ -2325,7 +2325,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("reproductionCommand");
     expect(teamExperimentLoopMutationsSource).toContain("runTeamExperimentSmoke");
     expect(teamExperimentApiSource).toContain("smoke-run");
-    expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控 Smoke");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控试跑");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForBoundedSmokeRun");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("runExperimentSmokeFromWorkspace");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("VMetricChip");
@@ -2345,7 +2345,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");
     expect(routeAndPureSource).toContain("gateDecision");
-    expect(teamExperimentPlanningLedgerPanelSource).toContain("登记 smoke 结果");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("登记试跑结果");
     expect(routeAndPureSource).toContain("needs_review");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("full-run 已解锁");
     expect(routeAndPureSource).toContain("readyForSmoke");
@@ -2940,7 +2940,7 @@ describe("TeamsRoute layout contract", () => {
 
   it("keeps the bounded Smoke gate visible while prerequisites are still locked", () => {
     const smokeCardIndex = teamExperimentPlanningLedgerPanelSource.indexOf(
-      'lang === "zh" ? "受控试跑" : "Bounded smoke"',
+      'lang === "zh" ? "受控试跑" : "Bounded trial run"',
     );
     const executeStepIndex = teamExperimentPlanningLedgerPanelSource.indexOf(
       'currentStep === "execute"',
@@ -2951,7 +2951,7 @@ describe("TeamsRoute layout contract", () => {
     expect(smokeCardIndex).toBeGreaterThan(executeStepIndex);
     expect(teamExperimentPlanningLedgerPanelSource).toContain("smokeGateDetail");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("先完成假设审查并冻结设计");
-    expect(teamExperimentPlanningLedgerPanelSource).toContain("自包含执行器会在 Smoke 中同时计算 baseline 与 variant");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("自包含执行器会在试跑中同时计算对照与实验两组结果");
     expect(teamExperimentHypothesisGovernancePanelSource).toContain("仍缺：");
   });
 
