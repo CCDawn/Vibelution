@@ -29,7 +29,7 @@ const styles: Record<string, string> = {
     "grid min-w-0 gap-1.5 [&>div]:flex [&>div]:min-w-0 [&>div]:flex-wrap [&>div]:items-center [&>div]:gap-2 [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-inset)] [&>div]:p-2 [&_code]:wrap-anywhere [&_code]:[font-size:var(--vui-font-2xs)] [&_code]:text-[var(--fg-secondary)]",
   actions: "flex flex-wrap items-center gap-2",
   actionFooter:
-    "sticky bottom-0 z-10 min-w-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] py-2 backdrop-blur-md",
+    "min-w-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] py-2",
   hint: "m-0 min-w-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
 };
 

@@ -65,7 +65,11 @@ export function formatHypothesisSummary(
   if (!ids.length) return "假说待生成";
   const count = ids.length;
   if (chain?.hypothesisConverged) return `${count} 条假说已收敛`;
-  const round = Number(chain?.meetingCount ?? 0);
+  // One logical review round fans out into one meeting per selected candidate.
+  // meetingCount is a physical-room count, so normalize it by the fan-out
+  // width before presenting a human-facing round number.
+  const meetingCount = Number(chain?.meetingCount ?? 0);
+  const round = meetingCount > 0 ? Math.ceil(meetingCount / count) : 0;
   if (round > 0) return `${count} 条假说评审中 · 第 ${round} 轮`;
   return `${count} 条假说待评审`;
 }

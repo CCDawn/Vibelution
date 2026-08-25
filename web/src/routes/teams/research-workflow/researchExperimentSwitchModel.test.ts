@@ -240,11 +240,23 @@ describe("researchExperimentSwitchModel", () => {
         questionId: "SCI-004",
         runId: "run-4",
         selectedCandidateIds: ["hyp-a", "hyp-b"],
-        chain: { meetingCount: 1 },
+        chain: { meetingCount: 2 },
       },
     });
 
     expect(reviewing[0].label).toBe("SCI-004 · 2 条假说评审中 · 第 1 轮");
+
+    const secondRound = buildExperimentSwitchOptions({
+      questions: [question({ questionId: "SCI-004", checkpoint: null })],
+      current: {
+        questionId: "SCI-004",
+        runId: "run-4",
+        selectedCandidateIds: ["hyp-a", "hyp-b"],
+        chain: { meetingCount: 3 },
+      },
+    });
+
+    expect(secondRound[0].label).toBe("SCI-004 · 2 条假说评审中 · 第 2 轮");
   });
 
   it("keeps the current run visible even if launch-options omitted it", () => {

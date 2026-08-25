@@ -1785,17 +1785,25 @@ def build_meeting_digest_draft(
         if isinstance(item, Mapping)
         and str(item.get("derivedFrom") or "") == meeting_rounds.UNSTRUCTURED_DERIVED_FROM
     ]
+    meeting_type = str(meeting_round.get("meetingType") or "").strip()
+    is_candidate_generation = meeting_type == CANDIDATE_GENERATION_MEETING_TYPE
+    meeting_label = "候选生成会议" if is_candidate_generation else "假说评审会议"
+    discussion_focus = (
+        f"{len(markers['proposedCandidates'])} 个候选"
+        if is_candidate_generation
+        else f"{len(discussion_item_refs)} 个入选候选"
+    )
     if unstructured_agreements and not markers.get("disagreements"):
         summary = (
-            f"假说评审会议 {str(meeting_round.get('meetingRoundId') or '')}："
-            f"{len(participants)} 位参与者围绕 {len(discussion_item_refs)} 个入选候选完成 "
+            f"{meeting_label} {str(meeting_round.get('meetingRoundId') or '')}："
+            f"{len(participants)} 位参与者围绕 {discussion_focus}完成 "
             f"{rounds_run} 轮讨论，从 {len(unstructured_agreements)} 条自由格式发言生成摘要条目，"
             "未提取到标记化共识或分歧。"
         )
     else:
         summary = (
-            f"假说评审会议 {str(meeting_round.get('meetingRoundId') or '')}："
-            f"{len(participants)} 位参与者围绕 {len(discussion_item_refs)} 个入选候选完成 "
+            f"{meeting_label} {str(meeting_round.get('meetingRoundId') or '')}："
+            f"{len(participants)} 位参与者围绕 {discussion_focus}完成 "
             f"{rounds_run} 轮讨论，形成 {len(markers['agreements'])} 条共识、"
             f"{len(markers['disagreements'])} 条分歧、{len(markers['actionItems'])} 条行动项、"
             f"{len(markers['risks'])} 条未解决风险。"
@@ -1872,6 +1880,7 @@ def validate_evidence_request_draft(
     from core.web.services.team_workflow.source_collection import facade
 
     errors: list[dict[str, str]] = []
+    warnings: list[dict[str, str]] = []
     if not isinstance(raw, Mapping):
         return None, [
             {
@@ -1913,9 +1922,39 @@ def validate_evidence_request_draft(
                 }
             )
             break
+    search_envelope = raw.get("searchEnvelope")
+    if isinstance(search_envelope, Mapping):
+        search_envelope = dict(search_envelope)
+        source_types = _normalized_str_list(search_envelope.get("sourceTypes"))
+        supported_source_types: list[str] = []
+        dropped_source_types: list[str] = []
+        for item in source_types:
+            normalized = item.lower()
+            if normalized in facade.SEARCH_ENVELOPE_SOURCE_TYPES:
+                if normalized not in supported_source_types:
+                    supported_source_types.append(normalized)
+            elif item not in dropped_source_types:
+                dropped_source_types.append(item)
+        search_envelope["sourceTypes"] = supported_source_types
+        if source_types and not supported_source_types:
+            errors.append(
+                {
+                    "code": "search_source_types_invalid",
+                    "message": "sourceTypes 未包含支持的来源类型："
+                    + "、".join(dropped_source_types),
+                }
+            )
+        elif dropped_source_types:
+            warnings.append(
+                {
+                    "code": "search_source_types_dropped",
+                    "message": "已忽略不支持的 sourceTypes："
+                    + "、".join(dropped_source_types),
+                }
+            )
     try:
         envelope = facade._normalize_search_envelope(
-            raw.get("searchEnvelope"), require_keywords=True
+            search_envelope, require_keywords=True
         )
     except Exception as exc:
         errors.append(
@@ -1938,7 +1977,7 @@ def validate_evidence_request_draft(
         requirements = {}
         writeback_policy = {}
     if errors or envelope is None:
-        return None, errors
+        return None, [*errors, *warnings]
     return {
         "rationale": rationale,
         "candidateRefs": candidate_refs,
@@ -1950,7 +1989,7 @@ def validate_evidence_request_draft(
         },
         "requirements": requirements,
         "writebackPolicy": writeback_policy,
-    }, []
+    }, warnings
 
 
 def _collect_evidence_requests(
@@ -1973,9 +2012,15 @@ def _collect_evidence_requests(
         validation_errors.extend(errors)
         if normalized is not None:
             collected.append(normalized)
-        elif isinstance(raw, Mapping):
-            collected.append(dict(raw))
-    return collected, validation_errors
+    deduplicated_errors: list[dict[str, str]] = []
+    seen_errors: set[tuple[str, str]] = set()
+    for item in validation_errors:
+        key = (str(item.get("code") or ""), str(item.get("message") or ""))
+        if key in seen_errors:
+            continue
+        seen_errors.add(key)
+        deduplicated_errors.append(item)
+    return collected, deduplicated_errors
 
 
 def prepare_meeting_summary_draft(
