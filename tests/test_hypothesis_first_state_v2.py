@@ -22,6 +22,7 @@ from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 
     finalize_state_versions,
     project_state_from_records,
 )
+from tests.helpers.managed_processes import managed_processes
 
 
 def _phase(
@@ -1363,23 +1364,24 @@ result.write_text(str(response["result"]["status"]), encoding="utf-8")
 """
 
     result_paths = [tmp_path / f"result-{index}.txt" for index in range(2)]
-    workers = [
-        subprocess.Popen(
-            [sys.executable, "-c", worker_script, str(result_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+    with managed_processes() as workers:
+        workers.extend(
+            subprocess.Popen(
+                [sys.executable, "-c", worker_script, str(result_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            for result_path in result_paths
         )
-        for result_path in result_paths
-    ]
-    ready_paths = [path.with_suffix(".ready") for path in result_paths]
-    deadline = time.monotonic() + 10
-    while not all(path.exists() for path in ready_paths):
-        assert time.monotonic() < deadline, "workers did not reach the start barrier"
-        time.sleep(0.01)
-    start.write_text("start", encoding="utf-8")
-    for worker in workers:
-        _, stderr = worker.communicate(timeout=30)
-        assert worker.returncode == 0, stderr.decode("utf-8", "replace")
+        ready_paths = [path.with_suffix(".ready") for path in result_paths]
+        deadline = time.monotonic() + 10
+        while not all(path.exists() for path in ready_paths):
+            assert time.monotonic() < deadline, "workers did not reach the start barrier"
+            time.sleep(0.01)
+        start.write_text("start", encoding="utf-8")
+        for worker in workers:
+            _, stderr = worker.communicate(timeout=30)
+            assert worker.returncode == 0, stderr.decode("utf-8", "replace")
 
     outcomes = [path.read_text(encoding="utf-8") for path in result_paths]
     assert outcomes.count("created") == 1

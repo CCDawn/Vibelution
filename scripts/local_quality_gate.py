@@ -88,7 +88,7 @@ FAILURE_SUMMARY_REDACTIONS = (
 )
 GATE_SELF_TEST_COMMAND = (
     ".\\.venv\\Scripts\\python.exe -m pytest "
-    "tests/test_local_quality_gate.py tests/test_ci_workflow_contract.py "
+    "tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
     "tests/test_environment_doctor.py tests/test_select_tests.py -q"
 )
 GATE_DEFINITION_FILES = frozenset(
@@ -97,8 +97,10 @@ GATE_DEFINITION_FILES = frozenset(
         ".github/workflows/ci.yml",
         "scripts/doctor.ps1",
         "scripts/local_quality_gate.py",
+        "scripts/task_closeout.py",
         "tests/select_tests.py",
         "tests/test_matrix.yaml",
+        "tests/test_task_closeout.py",
     }
 )
 SUPPORTED_RECORDED_COMMAND_KINDS = frozenset(

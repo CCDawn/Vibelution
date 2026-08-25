@@ -21,6 +21,7 @@ from core.chat.turn_journal import (
     rewrite_turn_events,
     turn_journal_path,
 )
+from tests.helpers.managed_processes import managed_processes
 
 
 @pytest.fixture(autouse=True)
@@ -156,34 +157,36 @@ def test_concurrent_process_appends_keep_sequences_unique_and_contiguous(tmp_pat
             "    )",
         ]
     )
-    processes = []
-    for worker_id in range(process_count):
-        env = os.environ.copy()
-        env.update(
-            {
-                "TURN_JOURNAL_PROJECT_ROOT": str(tmp_path),
-                "TURN_JOURNAL_START_FILE": str(start_file),
-                "TURN_JOURNAL_WORKER_ID": str(worker_id),
-            }
-        )
-        processes.append(
-            subprocess.Popen(
-                [sys.executable, "-c", worker],
-                cwd=Path(__file__).resolve().parents[1],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+    with managed_processes() as processes:
+        for worker_id in range(process_count):
+            env = os.environ.copy()
+            env.update(
+                {
+                    "TURN_JOURNAL_PROJECT_ROOT": str(tmp_path),
+                    "TURN_JOURNAL_START_FILE": str(start_file),
+                    "TURN_JOURNAL_WORKER_ID": str(worker_id),
+                }
             )
-        )
+            processes.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", worker],
+                    cwd=Path(__file__).resolve().parents[1],
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
 
-    start_file.touch()
-    failures = []
-    for process in processes:
-        stdout, stderr = process.communicate(timeout=30)
-        if process.returncode:
-            failures.append({"returncode": process.returncode, "stdout": stdout, "stderr": stderr})
-    assert failures == []
+        start_file.touch()
+        failures = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=30)
+            if process.returncode:
+                failures.append(
+                    {"returncode": process.returncode, "stdout": stdout, "stderr": stderr}
+                )
+        assert failures == []
 
     events = load_turn_events(tmp_path, "session-concurrent")
     expected_count = process_count * events_per_process

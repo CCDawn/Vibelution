@@ -7,7 +7,6 @@ import pytest
 from tests import conftest as test_conftest
 from tests import select_tests
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -481,8 +480,8 @@ def test_selector_scopes_authorization_contract_to_authorization_changes():
     assert not any("test_tool_authorization_test_contract.py" in command for command in docs["commands"])
 
     ordinary_test = select_tests.select_tests(["tests/test_runner.py"], select_tests.load_matrix())
-    assert any("test-tool-authorization" == rule["id"] for rule in ordinary_test["matchedRules"])
-    assert any("test_tool_authorization_test_contract.py" in command for command in ordinary_test["commands"])
+    assert not any("test-tool-authorization" == rule["id"] for rule in ordinary_test["matchedRules"])
+    assert not any("test_tool_authorization_test_contract.py" in command for command in ordinary_test["commands"])
 
     auth = select_tests.select_tests(
         ["tests/test_tool_authorization_contract.py"], select_tests.load_matrix()

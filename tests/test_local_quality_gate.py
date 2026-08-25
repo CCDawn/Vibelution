@@ -24,6 +24,12 @@ def test_pre_commit_is_thin_adapter() -> None:
     assert "ruff" not in hook
 
 
+def test_managed_closeout_is_part_of_the_gate_definition() -> None:
+    assert "scripts/task_closeout.py" in gate.GATE_DEFINITION_FILES
+    assert "tests/test_task_closeout.py" in gate.GATE_DEFINITION_FILES
+    assert "tests/test_task_closeout.py" in gate.GATE_SELF_TEST_COMMAND
+
+
 def test_commit_gate_blocks_direct_writes_on_main(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
     (git_repo / "direct-main-change.txt").write_text("blocked\n", encoding="utf-8")
@@ -459,6 +465,7 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
         "-m",
         "pytest",
         "tests/test_local_quality_gate.py",
+        "tests/test_task_closeout.py",
         "tests/test_ci_workflow_contract.py",
         "tests/test_environment_doctor.py",
         "tests/test_select_tests.py",
