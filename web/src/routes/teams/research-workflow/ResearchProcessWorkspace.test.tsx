@@ -86,7 +86,8 @@ vi.mock("./useResearchWorkflowRun", () => ({
 vi.mock("./useResearchWorkflowCatalog", () => ({
   useResearchWorkflowCatalog: () => harness.catalog,
 }));
-vi.mock("./useHypothesisFirstChain", () => ({
+vi.mock("./useHypothesisFirstChain", async () => ({
+  ...(await vi.importActual<typeof import("./useHypothesisFirstChain")>("./useHypothesisFirstChain")),
   useHypothesisFirstChain: () => harness.chain,
   useHypothesisFirstChainInvalidation: () => undefined,
 }));

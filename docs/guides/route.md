@@ -9,7 +9,7 @@
 
 | 任务类型 | READ（按序） | EDIT（优先） | TEST（最小） | 禁止 |
 | --- | --- | --- | --- | --- |
-| **任意开发（默认）** | `AGENTS.md`§3.0；本机 `briefbound-router/SKILL.md`；本 `route.md`；`ownership.md` | — | 按 Router 分级选最小验证 | 不读 Router 就广扫/写入；跳过路由叠 process 框架；不评估本地复用/改造、不对照仓外成熟方案就开写 |
+| **任意开发（默认）** | `AGENTS.md`§3.0；本机 `briefbound-router/SKILL.md`；本 `route.md`；`ownership.md` | — | 按 Router 分级选最小验证 | 不读 Router 就广扫/写入；不评估本地复用；或在复杂/开放复用决策中跳过必要仓外对照 |
 | **任意非平凡** | `AGENTS.md`；`briefbound-router`；本 `route.md`；`ownership.md` | — | `tests/select_tests.py --from-git main --commands-only` | 先广扫全仓 |
 | **Bug/回归/卡住** | [`agent-log-routing.md`](agent-log-routing.md)；`scripts/agent_log_context.py` | 根因位点；必要时补日志 | 复现相关 pytest/vitest | 无日志瞎猜；未跑 agent_log_context 就 grep |
 | **用户可见 UI** | `AGENTS.md`§2 前端；`development-standard`§9.1；`docs/guides/button-selection.md`；`web/src/components/vui/designs/INDEX.md` | `web/src/routes/<domain>/`；`components/vui`；**不**改 renderer 除非扩展交互 | `vuiShadcnRouteContract` + 触及 `*.layout.test` / route contract | `@heroui`；route→`renderers/shadcn`；未登记新 `V*`；通用裸 `<button>` |
