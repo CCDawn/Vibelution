@@ -602,7 +602,9 @@ def test_selector_uses_default_when_no_rule_matches():
     assert result["validationLayers"] == ["hygiene", "focused"]
 
 
-def test_selector_uses_static_python_imports_for_unmapped_product_sources(tmp_path: Path):
+def test_selector_uses_static_python_imports_for_unmapped_product_sources(
+    tmp_path: Path,
+):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "core" / "direct.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -628,6 +630,93 @@ def test_selector_uses_static_python_imports_for_unmapped_product_sources(tmp_pa
     ]
     assert result["coverageGaps"] == []
     assert result["validationLayers"] == ["focused"]
+
+
+def test_selector_stops_at_nearest_tested_python_import_frontier(
+    tmp_path: Path,
+):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "leaf.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "internal.py").write_text(
+        "from core import leaf\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "core" / "service.py").write_text(
+        "from core import internal\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "core" / "outer.py").write_text(
+        "from core import service\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_service.py").write_text(
+        "from core import service\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_outer.py").write_text(
+        "from core import outer\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["core/leaf.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    fallback = result["matchedRules"][0]
+    assert fallback["id"] == "python-import-fallback"
+    assert fallback["matchedFiles"] == ["core/leaf.py"]
+    assert fallback["selectedTests"] == ["tests/test_service.py"]
+    assert result["coverageGaps"] == []
+
+
+def test_selector_follows_relative_imports_to_the_nearest_tested_frontier(
+    tmp_path: Path,
+):
+    package = tmp_path / "core" / "package"
+    package.mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (package / "__init__.py").write_text("\n", encoding="utf-8")
+    (package / "leaf.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (package / "internal.py").write_text("from . import leaf\n", encoding="utf-8")
+    (package / "service.py").write_text("from . import internal\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_service.py").write_text(
+        "from core.package import service\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["core/package/leaf.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"][0]["selectedTests"] == ["tests/test_service.py"]
+    assert result["coverageGaps"] == []
+
+
+def test_selector_selects_real_pet_storage_nearest_tested_frontier():
+    result = select_tests.select_tests(
+        ["core/pet_system/utils/storage.py"],
+        select_tests.load_matrix(),
+    )
+
+    fallback = next(
+        rule
+        for rule in result["matchedRules"]
+        if rule["id"] == "python-import-fallback"
+    )
+    assert fallback["selectedTests"] == [
+        "tests/test_config_sync.py",
+        "tests/test_pet_system_tokens.py",
+        "tests/test_pet_web_actions.py",
+        "tests/test_tool_executor.py",
+    ]
+    assert result["coverageGaps"] == []
 
 
 def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):

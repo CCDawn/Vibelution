@@ -25,3 +25,4 @@
 - `2026-08-16-compat-ssot-closeout-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md)（Implemented；长期规则见 [development-standard §25](../standards/development-standard.md)）
 - `2026-08-20-launcher-lifecycle-ts-migration.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-20-launcher-lifecycle-ts-migration.md)（Closed；长期规则见 [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)）
 - `2026-08-26-test-regression-baseline-recovery.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-26-test-regression-baseline-recovery.md)（Implemented；Pet 测试隔离与完整回归命令修正）
+- `2026-08-26-test-selector-import-closure.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-26-test-selector-import-closure.md)（Implemented；未映射 Python 改动的最近测试 import 前沿选择）

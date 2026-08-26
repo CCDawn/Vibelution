@@ -258,16 +258,132 @@ def _module_name_for_python_path(path: str) -> str | None:
     return module_name
 
 
+def _python_product_modules(project_root: Path) -> dict[str, tuple[Path, bool]]:
+    """Return importable product modules and whether each one is a package."""
+    modules: dict[str, tuple[Path, bool]] = {}
+    source_paths = [project_root / "agent.py"]
+    for root_name in PYTHON_PRODUCT_ROOTS:
+        root = project_root / root_name
+        if root.is_dir():
+            source_paths.extend(root.rglob("*.py"))
+    for source_path in sorted(source_paths):
+        if not source_path.is_file():
+            continue
+        relative_path = source_path.relative_to(project_root).as_posix()
+        module_name = _module_name_for_python_path(relative_path)
+        if module_name:
+            modules[module_name] = (source_path, source_path.name == "__init__.py")
+    return modules
+
+
+def _import_from_base(
+    module_name: str,
+    is_package: bool,
+    node: ast.ImportFrom,
+) -> str:
+    """Resolve an ``ImportFrom`` base to an absolute module spelling when possible."""
+    if node.level == 0:
+        return node.module or ""
+    package = module_name if is_package else module_name.rpartition(".")[0]
+    if not package:
+        return ""
+    package_parts = package.split(".")
+    levels_to_climb = node.level - 1
+    if levels_to_climb >= len(package_parts):
+        return ""
+    base = ".".join(package_parts[: len(package_parts) - levels_to_climb])
+    return ".".join(part for part in (base, node.module or "") if part)
+
+
+def _static_product_imports(
+    source_path: Path,
+    *,
+    module_name: str,
+    is_package: bool,
+    known_modules: set[str],
+) -> set[str]:
+    """Return static imports from one product module without loading it."""
+    try:
+        tree = ast.parse(
+            source_path.read_text(encoding="utf-8"),
+            filename=str(source_path),
+        )
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return set()
+
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(
+                alias.name for alias in node.names if alias.name in known_modules
+            )
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        base = _import_from_base(module_name, is_package, node)
+        if base in known_modules:
+            imported_modules.add(base)
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            candidate = f"{base}.{alias.name}" if base else ""
+            if candidate in known_modules:
+                imported_modules.add(candidate)
+    return imported_modules
+
+
+def _python_product_reverse_import_index(
+    project_root: Path,
+    product_modules: dict[str, tuple[Path, bool]] | None = None,
+) -> dict[str, set[str]]:
+    """Build a product-module reverse index for dependency-aware selection."""
+    modules = product_modules or _python_product_modules(project_root)
+    known_modules = set(modules)
+    reverse_index = {module_name: set() for module_name in known_modules}
+    for importer, (source_path, is_package) in modules.items():
+        for imported in _static_product_imports(
+            source_path,
+            module_name=importer,
+            is_package=is_package,
+            known_modules=known_modules,
+        ):
+            reverse_index.setdefault(imported, set()).add(importer)
+    return reverse_index
+
+
+def _nearest_tested_python_frontier(
+    changed_module: str,
+    reverse_import_index: dict[str, set[str]],
+    test_import_index: dict[str, set[str]],
+) -> set[str]:
+    """Return tests at the first directly tested module on each reverse-import path."""
+    selected_tests: set[str] = set()
+    visited = {changed_module}
+    pending = [changed_module]
+    while pending:
+        module_name = pending.pop()
+        direct_tests = test_import_index.get(module_name, set())
+        if direct_tests:
+            selected_tests.update(direct_tests)
+            continue
+        for importer in reverse_import_index.get(module_name, set()):
+            if importer in visited:
+                continue
+            visited.add(importer)
+            pending.append(importer)
+    return selected_tests
+
+
 def _python_test_import_index(
     project_root: Path,
     source_modules: set[str],
 ) -> tuple[dict[str, set[str]], set[str]]:
     """Build a conservative source-module to test-file index without importing code.
 
-    Only tests containing an import spelling relevant to a changed module are
-    parsed.  `from package import child` is indexed as `package.child` only
-    when that exact child is among the changed source modules, which avoids
-    guesses based on arbitrary imported symbols.
+    Only tests containing an import spelling relevant to an indexed product
+    module are parsed.  `from package import child` is indexed as
+    `package.child` only when that exact child is a known product module.
+    This avoids guesses based on arbitrary imported symbols.
     """
     index: dict[str, set[str]] = {}
     serial_tests: set[str] = set()
@@ -384,11 +500,25 @@ def _python_fallback_selection(
         for source_path in uncovered_sources
         if (module_name := _module_name_for_python_path(source_path))
     }
-    import_index, serial_tests = _python_test_import_index(project_root, source_modules)
+    product_modules = _python_product_modules(project_root)
+    reverse_import_index = _python_product_reverse_import_index(
+        project_root,
+        product_modules,
+    )
+    import_index, serial_tests = _python_test_import_index(
+        project_root,
+        set(product_modules) | source_modules,
+    )
     source_tests: dict[str, list[str]] = {}
     for source_path in uncovered_sources:
         module_name = _module_name_for_python_path(source_path)
-        selected_tests = sorted(import_index.get(module_name or "", set()))
+        selected_tests = sorted(
+            _nearest_tested_python_frontier(
+                module_name or "",
+                reverse_import_index,
+                import_index,
+            )
+        )
         if selected_tests:
             source_tests[source_path] = selected_tests
             continue
@@ -412,7 +542,9 @@ def _python_fallback_selection(
         fallback_rules.append(
             {
                 "id": "python-import-fallback",
-                "description": "Tests that statically import uncovered Python product modules.",
+                "description": (
+                    "Tests at the nearest statically provable Python import frontier."
+                ),
                 "matchedFiles": sorted(source_tests),
                 "selectedTests": selected_tests,
             }
@@ -428,8 +560,9 @@ def _python_fallback_selection(
 
     if coverage_gaps:
         notes.append(
-            "No static test import was found for the listed Python product files; "
-            "add a focused matrix rule or a direct test import before treating them as covered."
+            "No static test import was found along the listed Python product files' "
+            "reverse import paths; add a focused matrix rule or a direct test import "
+            "before treating them as covered."
         )
     return {
         "matchedRules": fallback_rules,

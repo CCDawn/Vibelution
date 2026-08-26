@@ -191,7 +191,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 `tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，会把包含至少两个显式测试文件且尚未配置 xdist 的 pytest 命令改写为最多 4-worker 的 `loadfile` 并行执行，单文件、非 pytest 命令和已有 xdist 参数保持不变。
 
-选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。选择器输出的 Vitest 命令从仓库根执行并固定追加 `--root web`，TypeScript 则固定为 `node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false`，因此不会误扫 `.worktrees` 或 `.runtime`。
+选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。未映射的 Python 产品文件会用标准库 AST 沿产品 import 的反向路径寻找最近的“测试直接 import”边界；每条路径到达该边界即停止，因此不会膨胀为完整反向闭包。动态 import 或没有静态链路时仍输出 coverage gap，不把 smoke 当覆盖。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。选择器输出的 Vitest 命令从仓库根执行并固定追加 `--root web`，TypeScript 则固定为 `node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false`，因此不会误扫 `.worktrees` 或 `.runtime`。
 
 ```bash
 # 手动输入变更文件并查看结构化结果
