@@ -448,28 +448,39 @@ def _resolve_role_agent(
     team = s.team_service.get_team(team_id)
     expected_team_role = _text(contract.get("teamRole"), limit=80)
     expected_role_key = _text(contract.get("roleKey"), limit=80)
-    member = next(
-        (
-            item
-            for item in list(team.get("members") or [])
-            if isinstance(item, dict)
-            and _text(item.get("role"), limit=80) == expected_team_role
-            and _text(item.get("agentId"))
-        ),
-        None,
+    normalized_requested_agent_id = _text(requested_agent_id)
+    accepted_member_roles = {expected_team_role, expected_role_key} - {""}
+    eligible_members = [
+        item
+        for item in list(team.get("members") or [])
+        if isinstance(item, dict)
+        and _text(item.get("role"), limit=80) in accepted_member_roles
+        and _text(item.get("agentId"))
+    ]
+    member = (
+        next(
+            (
+                item
+                for item in eligible_members
+                if _text(item.get("agentId")) == normalized_requested_agent_id
+            ),
+            None,
+        )
+        if normalized_requested_agent_id
+        else next(iter(eligible_members), None)
     )
+    if member is None and normalized_requested_agent_id and eligible_members:
+        raise ResearchProjectAgentTaskError(
+            f"Explicit Agent {normalized_requested_agent_id} does not match "
+            f"the Agent bound to research team role {expected_team_role}.",
+            code="explicit_agent_mismatch",
+        )
     if member is None:
         raise ResearchProjectAgentTaskError(
             f"Research team role {expected_team_role} is not bound to an Agent.",
             code="agent_role_unbound",
         )
     agent_id = _text(member.get("agentId"))
-    normalized_requested_agent_id = _text(requested_agent_id)
-    if normalized_requested_agent_id and normalized_requested_agent_id != agent_id:
-        raise ResearchProjectAgentTaskError(
-            f"Explicit Agent {normalized_requested_agent_id} does not match the Agent bound to research team role {expected_team_role}.",
-            code="explicit_agent_mismatch",
-        )
     agent = s.agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise ResearchProjectAgentTaskError(

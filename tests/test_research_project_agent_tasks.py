@@ -955,6 +955,49 @@ def test_task_start_rejects_missing_fixed_role_binding(tmp_path, monkeypatch):
     assert exc_info.value.code == "agent_role_unbound"
 
 
+def test_explicit_agent_resolution_accepts_canonical_product_role_member(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="挑战杯搜索",
+        role_key="challenge_cup_search",
+    )
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {
+                "agentId": agent["agentId"],
+                "agentName": "挑战杯搜索",
+                "role": "challenge_cup_search",
+            }
+        ],
+    )
+
+    member, resolved = research_project_agent_tasks._resolve_role_agent(
+        team["teamId"],
+        research_project_agent_tasks.TASK_KIND_CONTRACTS["problem_understanding"],
+        requested_agent_id=agent["agentId"],
+    )
+
+    assert member["role"] == "challenge_cup_search"
+    assert resolved["agentId"] == agent["agentId"]
+
+    unrelated = agent_directory_service.create_agent_instance(
+        display_name="无关角色",
+        role_key="challenge_cup_evaluator",
+    )
+    with pytest.raises(ResearchProjectAgentTaskError) as exc_info:
+        research_project_agent_tasks._resolve_role_agent(
+            team["teamId"],
+            research_project_agent_tasks.TASK_KIND_CONTRACTS[
+                "problem_understanding"
+            ],
+            requested_agent_id=unrelated["agentId"],
+        )
+    assert exc_info.value.code == "explicit_agent_mismatch"
+
+
 def test_agent_task_routes_expose_typed_start_and_status_payloads(
     tmp_path, monkeypatch
 ):
