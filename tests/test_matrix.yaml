@@ -312,6 +312,10 @@ rules:
       - "focused"
       - "local-parallel"
       - "remote-distributed"
+    excludePaths:
+      - "core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py"
+      - "core/web/services/team_workflow/research_runtime/hypothesis_first_state_v2.py"
+      - "core/web/routes/team_workflows/hypothesis_first_state_models.py"
     paths:
       - "core/web/services/team_service.py"
       - "core/web/services/team_knowledge_service.py"
@@ -338,6 +342,22 @@ rules:
       - "Behavioral cases are split into five domain packs for xdist loadfile; the aggregate test_team_workflow_orchestration_service.py is skipped when those packs are collected."
       - "Single-domain debug: pytest tests/test_team_workflow_source_collection_cases.py -q (or cases_*.py under _support/)."
       - "Team workflow Python tests are not serial-marked; use local-parallel / remote-distributed for speed."
+
+  - id: challenge-hypothesis-first-runtime
+    description: "Hypothesis-first chain/state runtime and its direct Challenge boundary tests."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py"
+      - "core/web/services/team_workflow/research_runtime/hypothesis_first_state_v2.py"
+      - "core/web/routes/team_workflows/hypothesis_first_state_models.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_research_workflow_hypothesis_first_chain.py tests/test_hypothesis_first_state_v2.py tests/test_challenge_review_budget_consistency.py tests/test_collection_orphan_recovery.py tests/test_challenge_chain_observability.py tests/test_challenge_worker_observability.py -n 8 --dist load -m \"not serial\" -q"
+    notes:
+      - "These hot files are excluded from the broad teams-knowledge subtree; command_service and the maintenance fence stay with teams-knowledge because their direct test frontiers are wider."
+      - "Small hypothesis-first runtime edits validate through these six direct boundary test files instead of the full Teams pack."
+      - "Use dist load, not loadfile: one chain file holds most of the wall clock and needs test-level distribution."
 
   - id: teams-knowledge-ui
     description: "Teams and Challenge Cup route UI focused validation."
