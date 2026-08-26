@@ -215,7 +215,19 @@ function firstEnabledCommand(
   phase: HypothesisFirstPhase,
   reviewCandidate: ReviewCandidateState | null,
 ): CommandAction | null {
-  return commandActionsForPhase(actions, phase, reviewCandidate).find((action) => action.enabled) ?? null;
+  const commands = commandActionsForPhase(actions, phase, reviewCandidate);
+  if (phase === "review" && reviewCandidate) {
+    const summaryFailed = reviewCandidate.problems.some((problem) => problem.code === "summary_draft_failed");
+    if (summaryFailed) {
+      const regenerateSummary = commands.find((action) => (
+        action.enabled
+        && action.command === "regenerate_summary"
+        && String((action.payload as Record<string, unknown>).meetingRoundId || "") === reviewCandidate.meetingRoundId
+      ));
+      if (regenerateSummary) return regenerateSummary;
+    }
+  }
+  return commands.find((action) => action.enabled) ?? null;
 }
 
 function firstReadyNavigation(
@@ -277,7 +289,10 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
   }
 }
 
-function stageFor(state: HypothesisFirstStateV2): HypothesisFirstStage {
+function stageFor(
+  state: HypothesisFirstStateV2,
+  reviewCandidate: ReviewCandidateState | null = null,
+): HypothesisFirstStage {
   switch (state.currentPhase) {
     case "generation":
       if (state.generation.lifecycle === "waiting_human") return "generation_awaiting_approval";
@@ -292,11 +307,11 @@ function stageFor(state: HypothesisFirstStateV2): HypothesisFirstStage {
       return "selection_required";
     case "selection": return "selection_required";
     case "review": {
-      const candidate = activeReviewCandidate(state);
+      const candidate = reviewCandidate ?? activeReviewCandidate(state);
       if (!candidate || candidate.actionability === "blocked") return "blocked";
       if (candidate.approval.lifecycle === "waiting_human") return "review_awaiting_approval";
+      if (candidate.lifecycle === "failed") return "blocked";
       if (candidate.summarization.lifecycle === "running") return "review_summarizing";
-      if (candidate.lifecycle === "failed") return "review_summarizing";
       return "review_running";
     }
     case "collection":
@@ -381,7 +396,7 @@ export function resolveHypothesisFirstNextActionFromV2(
     : phaseState(state);
   const mappedCommand = legacyCommand(command, state.currentPhase);
   return {
-    stage: stageFor(state),
+    stage: stageFor(state, reviewCandidate),
     targetNodeId: phaseTarget(state, reviewCandidate),
     navigationLabel: navigation?.label || command?.label || canonicalActions[0]?.label || "前往当前任务",
     command: mappedCommand,
