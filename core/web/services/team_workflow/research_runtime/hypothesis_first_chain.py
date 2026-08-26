@@ -1804,6 +1804,11 @@ def _execute_v2_command_impl(
                 normalized_team_id,
                 str(payload.get("meetingRoundId") or ""),
             )
+        elif command == "reopen_review":
+            result = reopen_failed_review_meeting(
+                normalized_team_id,
+                str(payload.get("meetingRoundId") or ""),
+            )
         elif command == "stop_discussion":
             result = meeting_rounds.supersede_empty_discussion_meeting(
                 normalized_team_id,
@@ -5144,6 +5149,8 @@ def _project_chain_discussion_anchor(
     *,
     selection_id: str = "",
     candidate_id: str = "",
+    team_id: str = "",
+    question_id: str = "",
 ) -> dict[str, Any]:
     """Project one chain meeting through the canonical scoped-room guard.
 
@@ -5172,6 +5179,28 @@ def _project_chain_discussion_anchor(
     discussion_scope = meeting.get("discussionScope")
     if isinstance(discussion_scope, Mapping):
         projection["scope"] = dict(discussion_scope)
+    else:
+        # Selection fan-out can precede formal run creation.  The chain link,
+        # meeting binding, and explicitly linked room together provide an
+        # exact preformal identity; do not infer one from the question/team
+        # alone and do not manufacture a formal workflowRunId.
+        from core.research.workflow.contracts.discussion_scope import (
+            PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
+            PREFORMAL_DISCUSSION_SCOPE_VERSION,
+        )
+
+        projection["preformalBinding"] = {
+            "version": PREFORMAL_DISCUSSION_SCOPE_VERSION,
+            "kind": PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
+            "teamId": str(team_id or meeting.get("teamId") or "").strip(),
+            "questionId": str(
+                question_id or meeting.get("questionId") or meeting.get("question") or ""
+            ).strip().upper(),
+            "selectionId": selection_id,
+            "candidateId": candidate_id,
+            "meetingRoundId": meeting_id,
+            "roomId": room_id,
+        }
     if selection_id:
         projection["activeSelectionId"] = selection_id
     if candidate_id:
@@ -5299,6 +5328,8 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
             active_meeting,
             selection_id=str(active_link.get("selectionId") or "").strip(),
             candidate_id=str(active_link.get("candidateId") or "").strip(),
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
         )
     pending_requests = [
         request for request in requests if str(request.get("status") or "") != "handed_off"

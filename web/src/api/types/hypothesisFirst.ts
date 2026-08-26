@@ -520,6 +520,7 @@ export type ActionCommand =
   | "retry_generation"
   | "record_selection"
   | "retry_review_dispatch"
+  | "reopen_review"
   | "resume_discussion"
   | "stop_discussion"
   | "regenerate_summary"
@@ -540,6 +541,7 @@ export type ActionPayloadByCommand = {
   retry_generation: { questionId: string; previousAttemptId: string };
   record_selection: { questionId: string; generationAttemptId: string };
   retry_review_dispatch: { selectionId: string; candidateIds: string[] };
+  reopen_review: { meetingRoundId: string };
   resume_discussion: { meetingRoundId: string };
   stop_discussion: { meetingRoundId: string };
   regenerate_summary: { meetingRoundId: string };

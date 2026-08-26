@@ -271,6 +271,7 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
     case "create_formal_revision": return "create_formal_revision";
     case "reconcile_formal_run": return "reconcile_formal_run";
     case "retry_review_dispatch": return "retry_review_dispatch";
+    case "reopen_review": return "reopen_review";
     case "resume_discussion": return "resume_discussion";
     case "stop_discussion": return "stop_discussion";
   }
@@ -386,10 +387,10 @@ export function resolveHypothesisFirstNextActionFromV2(
     command: mappedCommand,
     commandLabel: command?.label,
     commandDetail: command?.confirmationText || defaultStatus(state, current),
-    disabledReason: current.actionability === "blocked"
-      ? current.problems[0]?.message || command?.disabledReason || "当前状态需要修复后才能继续"
-      : command && !command.enabled
-        ? command.disabledReason || undefined
+    disabledReason: command
+      ? undefined
+      : current.actionability === "blocked"
+        ? current.problems[0]?.message || "当前状态需要修复后才能继续"
         : undefined,
     recovery: null,
     statusMessage: defaultStatus(state, current),

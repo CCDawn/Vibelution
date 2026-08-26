@@ -39,7 +39,9 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.contracts.discussion_scope import (
     CANDIDATE_REVIEW_SCOPE_KIND,
+    PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
     QUESTION_GENERATION_SCOPE_KIND,
+    PreformalCandidateReviewScopeV1,
     WorkflowDiscussionScopeV1,
     parse_discussion_scope,
     session_scope_key,
@@ -133,6 +135,7 @@ _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
 _SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
 _PREFORMAL_CANDIDATE_ROOM_SOURCE = "hypothesis_first_candidate_review.v1"
+_PREFORMAL_DISCUSSION_SCOPE_AUTHORITY = "preformal_candidate_review_scope.v1"
 
 
 @contextmanager
@@ -397,20 +400,17 @@ def _resolve_scoped_meeting_room(
     participant_resolution: Mapping[str, Any],
     meeting_type: str,
     selected_candidate_ids: Sequence[str] = (),
-) -> tuple[str, WorkflowDiscussionScopeV1 | None]:
+) -> tuple[str, WorkflowDiscussionScopeV1 | PreformalCandidateReviewScopeV1 | None]:
     """Bind role-resolved Agents to hidden Child Sessions and one room."""
 
     if scope is None:
-        return (
-            _resolve_preformal_candidate_review_room(
-                team_id,
-                request,
-                base_room_id=base_room_id,
-                participant_resolution=participant_resolution,
-                meeting_type=meeting_type,
-                selected_candidate_ids=selected_candidate_ids,
-            ),
-            None,
+        return _resolve_preformal_candidate_review_room(
+            team_id,
+            request,
+            base_room_id=base_room_id,
+            participant_resolution=participant_resolution,
+            meeting_type=meeting_type,
+            selected_candidate_ids=selected_candidate_ids,
         )
 
     from core.web.services import chat_room_service
@@ -506,7 +506,7 @@ def _resolve_preformal_candidate_review_room(
     participant_resolution: Mapping[str, Any],
     meeting_type: str,
     selected_candidate_ids: Sequence[str],
-) -> str:
+) -> tuple[str, PreformalCandidateReviewScopeV1 | None]:
     """Allocate one deterministic room for an unscoped candidate review.
 
     Candidate selection normally precedes creation of the formal research
@@ -523,7 +523,7 @@ def _resolve_preformal_candidate_review_room(
         str(meeting_type or "").strip().lower() != "hypothesis_review"
         or len(selected) != 1
     ):
-        return base_room_id
+        return base_room_id, None
 
     from core.web.services import chat_room_service
 
@@ -552,6 +552,14 @@ def _resolve_preformal_candidate_review_room(
         "questionId": question_id,
         "candidateId": candidate_id,
     }
+    discussion_scope = PreformalCandidateReviewScopeV1.review(
+        teamId=str(team_id or "").strip(),
+        questionId=question_id,
+        selectionId=selection_id,
+        candidateId=candidate_id,
+        meetingRoundId=meeting_round_id,
+        roomId=room_id,
+    )
     existing = chat_room_service.get_chat_room_detail(room_id)
     if isinstance(existing, Mapping):
         config = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
@@ -559,7 +567,21 @@ def _resolve_preformal_candidate_review_room(
             raise ResearchMeetingRuntimeError(
                 "preformal candidate review room is already bound to different content"
             )
-        return room_id
+        stored_scope = config.get("discussionScope")
+        if stored_scope is not None:
+            try:
+                stored = PreformalCandidateReviewScopeV1.from_mapping(stored_scope)
+            except (ContractValidationError, TypeError, ValueError) as exc:
+                raise ResearchMeetingRuntimeError(
+                    "preformal candidate review room has an invalid discussion scope"
+                ) from exc
+            if stored.to_dict() != discussion_scope.to_dict() or str(
+                config.get("discussionScopeHash") or config.get("scopeHash") or ""
+            ).lower() != discussion_scope.scope_hash:
+                raise ResearchMeetingRuntimeError(
+                    "preformal candidate review room is already bound to different content"
+                )
+        return room_id, discussion_scope
 
     participant_agent_ids = _normalized_str_list(participant_resolution.get("participants"))
     if not participant_agent_ids:
@@ -578,12 +600,18 @@ def _resolve_preformal_candidate_review_room(
         participant_contexts_by_agent_id=participant_contexts,
         mode="round_robin",
         purpose="meeting",
-        config=expected_config,
+        config={
+            **expected_config,
+            "scopeAuthority": _PREFORMAL_DISCUSSION_SCOPE_AUTHORITY,
+            "discussionScope": discussion_scope.to_dict(),
+            "discussionScopeHash": discussion_scope.scope_hash,
+            "scopeHash": discussion_scope.scope_hash,
+        },
     )
     created_room_id = str(created.get("roomId") or "").strip()
     if created_room_id != room_id:
         raise ResearchMeetingRuntimeError("preformal candidate room resolver returned no roomId")
-    return room_id
+    return room_id, discussion_scope
 
 
 def _derived_room_participant_contexts(
@@ -628,9 +656,9 @@ def _derived_room_participant_contexts(
 def _persist_discussion_scope_projection(
     team_id: str,
     meeting_round: Mapping[str, Any],
-    scope: WorkflowDiscussionScopeV1 | None,
+    scope: WorkflowDiscussionScopeV1 | PreformalCandidateReviewScopeV1 | None,
 ) -> dict[str, Any]:
-    """Persist the v1 scope beside the legacy MeetingRound contract.
+    """Persist a formal or preformal scope beside the legacy MeetingRound contract.
 
     ``MeetingRound`` predates the v1 discussion identity and intentionally
     ignores unknown projection fields.  Append the validated projection using
@@ -644,7 +672,10 @@ def _persist_discussion_scope_projection(
     existing_scope = record.get("discussionScope")
     if existing_scope is not None:
         try:
-            existing = parse_discussion_scope(existing_scope)
+            if isinstance(scope, PreformalCandidateReviewScopeV1):
+                existing = PreformalCandidateReviewScopeV1.from_mapping(existing_scope)
+            else:
+                existing = parse_discussion_scope(existing_scope)
         except ContractValidationError as exc:
             raise ResearchMeetingRuntimeError(
                 "existing meeting has an invalid discussion scope"
@@ -654,6 +685,14 @@ def _persist_discussion_scope_projection(
                 "existing meeting is bound to a different discussion scope"
             )
         return record
+    if isinstance(scope, PreformalCandidateReviewScopeV1):
+        return meeting_rounds.persist_preformal_meeting_discussion_scope(
+            str(team_id or "").strip(),
+            str(record.get("meetingRoundId") or "").strip(),
+            discussion_scope=scope.to_dict(),
+            discussion_scope_hash=scope.scope_hash,
+            scope_authority=_PREFORMAL_DISCUSSION_SCOPE_AUTHORITY,
+        )
     record.update(
         {
             "discussionScope": scope.to_dict(),
@@ -991,6 +1030,13 @@ def _round_config(
     discussion_scope_hash = str(
         meeting_round.get("discussionScopeHash") or ""
     ).strip().lower()
+    scope_authority = (
+        _PREFORMAL_DISCUSSION_SCOPE_AUTHORITY
+        if isinstance(discussion_scope, Mapping)
+        and str(discussion_scope.get("kind") or "").strip()
+        == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
+        else _SCOPED_DISCUSSION_SCOPE_AUTHORITY
+    )
     return {
         "source": MEETING_SOURCE,
         "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
@@ -1005,7 +1051,7 @@ def _round_config(
         or str(meeting_round.get("scopeHash") or ""),
         **(
             {
-                "scopeAuthority": _SCOPED_DISCUSSION_SCOPE_AUTHORITY,
+                "scopeAuthority": scope_authority,
                 "discussionScope": dict(discussion_scope),
                 "discussionScopeHash": discussion_scope_hash,
             }

@@ -1204,7 +1204,7 @@ def test_stalled_review_exposes_precise_discussion_recovery_actions() -> None:
     assert {"resume_discussion", "stop_discussion", "regenerate_summary"} <= commands
 
 
-def test_stopped_linked_chat_round_projects_review_as_blocked_without_fake_recovery() -> None:
+def test_stopped_linked_chat_round_projects_guarded_review_reopen() -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id="team-1",
@@ -1283,8 +1283,62 @@ def test_stopped_linked_chat_round_projects_review_as_blocked_without_fake_recov
         for action in state.allowedActions
         if action.kind == "command"
     }
+    assert "reopen_review" in commands
     assert "resume_discussion" not in commands
     assert "retry_review_dispatch" not in commands
+
+
+def test_v2_reopen_review_command_uses_guarded_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:orphaned-review",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "reopen-review:review-1",
+                "command": "reopen_review",
+                "payload": {"meetingRoundId": "review-1"},
+                "enabled": True,
+                "idempotencyKey": "hf2:reopen-review:review-1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[tuple[str, str]] = []
+
+    def reopen(team_id: str, meeting_round_id: str, **_kwargs):
+        calls.append((team_id, meeting_round_id))
+        return {"status": "reopened", "meetingRoundId": "review-2"}
+
+    monkeypatch.setattr(hypothesis_first_chain, "reopen_failed_review_meeting", reopen)
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "reopen-review:review-1",
+            "idempotencyKey": "hf2:reopen-review:review-1",
+            "expectedStateVersion": "hf2-action:orphaned-review",
+            "command": "reopen_review",
+            "payload": {"meetingRoundId": "review-1"},
+        },
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["status"] == "reopened"
+    assert calls == [("team-1", "review-1")]
 
 
 @pytest.mark.parametrize("current_round_status", ["running", "closed"])

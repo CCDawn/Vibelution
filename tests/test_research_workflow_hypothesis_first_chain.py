@@ -1776,10 +1776,24 @@ def test_preformal_fanout_binds_each_candidate_before_sibling_rounds_finish(
         assert len(room_ids) == 2
         assert all(meeting["chatRoomRoundIds"] for meeting in meetings)
         for room_id in room_ids:
+            meeting_for_room = next(
+                item for item in meetings if item["linkedChatRoomId"] == room_id
+            )
             room = chat_room_service.get_chat_room_detail(room_id)
             assert room is not None
             assert room["config"]["source"] == "hypothesis_first_candidate_review.v1"
             assert room["config"]["teamId"] == team_id
+            assert room["config"]["scopeAuthority"] == "preformal_candidate_review_scope.v1"
+            assert room["config"]["discussionScope"]["kind"] == "preformal_candidate_review"
+            assert room["config"]["discussionScopeHash"] == room["config"]["scopeHash"]
+            opening_round = next(
+                item
+                for item in room["rounds"]
+                if item.get("roundId") in set(meeting_for_room["chatRoomRoundIds"])
+            )
+            assert opening_round["config"]["scopeAuthority"] == (
+                "preformal_candidate_review_scope.v1"
+            )
             expected_roles = {
                 str(item["agentId"]): str(item["observedRole"])
                 for item in meetings[0]["participantRoleSnapshot"]
@@ -1788,6 +1802,15 @@ def test_preformal_fanout_binds_each_candidate_before_sibling_rounds_finish(
                 str(participant["agentId"]): participant.get("teamRole")
                 for participant in room["participants"]
             } == expected_roles
+        assert all(
+            meeting["discussionScope"]["kind"] == "preformal_candidate_review"
+            for meeting in meetings
+        )
+        assert all(
+            meeting["discussionScopeHash"]
+            == chat_room_service.get_chat_room_detail(meeting["linkedChatRoomId"])["config"]["scopeHash"]
+            for meeting in meetings
+        )
         assert len(executor.submitted) == 2
     finally:
         executor.drain()

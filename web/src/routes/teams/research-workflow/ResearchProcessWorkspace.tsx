@@ -29,7 +29,10 @@ import {
   definitionToCanvasGraph,
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
-import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
+import {
+  RESEARCH_PROCESS_INSPECTOR_CLOSED,
+  shouldShowResearchProcessInspector,
+} from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import {
@@ -468,6 +471,11 @@ export function ResearchProcessWorkspace({
     semanticCurrentTaskNodeId,
   ]);
   const archiveOpen = location.panel === "question";
+  const inspectorOpenChange = useCallback((open: boolean) => {
+    location.replaceParams({
+      inspector: open ? null : RESEARCH_PROCESS_INSPECTOR_CLOSED,
+    });
+  }, [location.replaceParams]);
   const scopedReviewMeetings = useMemo(() => hypothesisFirstChain.meetings
     .filter((meeting) => (
       meeting.meetingType === "hypothesis_review"
@@ -727,7 +735,11 @@ export function ResearchProcessWorkspace({
         responsive={{
           enabled: true,
           rail: { label: "研究阶段" },
-          inspector: { label: "当前任务" },
+          inspector: {
+            label: "当前任务",
+            open: location.inspectorOpen,
+            onOpenChange: inspectorOpenChange,
+          },
         }}
         rail={archiveOpen ? null : (
           <div className={styles.stageNavigator}>

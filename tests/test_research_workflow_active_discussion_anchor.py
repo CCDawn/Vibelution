@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from core.research.workflow.contracts.discussion_scope import WorkflowDiscussionScopeV1
+import pytest
+
+from core.research.workflow.contracts.discussion_scope import (
+    PreformalCandidateReviewScopeV1,
+    WorkflowDiscussionScopeV1,
+)
 from core.web.services.team_workflow.active_discussion_anchor import (
     AMBIGUOUS_ACTIVE_CANDIDATE,
     MEETING_MISSING,
@@ -8,6 +13,51 @@ from core.web.services.team_workflow.active_discussion_anchor import (
     ROOM_SCOPE_MISMATCH,
     project_active_discussion_anchor,
 )
+
+
+def _preformal_scope(
+    *,
+    question_id: str = "SCI-003",
+    selection_id: str = "selection-1",
+    candidate_id: str = "h1",
+    meeting_id: str = "meeting-h1",
+    room_id: str = "room-h1",
+) -> PreformalCandidateReviewScopeV1:
+    return PreformalCandidateReviewScopeV1.review(
+        teamId="research-team",
+        questionId=question_id,
+        selectionId=selection_id,
+        candidateId=candidate_id,
+        meetingRoundId=meeting_id,
+        roomId=room_id,
+    )
+
+
+def _preformal_legacy_meeting(scope: PreformalCandidateReviewScopeV1) -> dict:
+    return {
+        "meetingRoundId": scope.meetingRoundId,
+        "meetingType": "hypothesis_review",
+        "question": scope.questionId,
+        "status": "open",
+        "linkedChatRoomId": scope.roomId,
+        "inputArtifactRefs": [f"hypothesis_selection:{scope.selectionId}"],
+        "discussionItemRefs": [f"hypothesis_candidate:{scope.candidateId}"],
+    }
+
+
+def _preformal_legacy_room(scope: PreformalCandidateReviewScopeV1) -> dict:
+    return {
+        "roomId": scope.roomId,
+        "status": "ready",
+        "config": {
+            "source": "hypothesis_first_candidate_review.v1",
+            "teamId": scope.teamId,
+            "meetingRoundId": scope.meetingRoundId,
+            "selectionId": scope.selectionId,
+            "questionId": scope.questionId,
+            "candidateId": scope.candidateId,
+        },
+    }
 
 
 def _scope(candidate_id: str = "") -> WorkflowDiscussionScopeV1:
@@ -138,3 +188,96 @@ def test_room_scope_mismatch_and_closed_room_are_fail_closed() -> None:
         [_room(scope, "room-h1", status="closed")],
     )
     assert closed["degradedReason"] == ROOM_CLOSED
+
+
+def test_preformal_chain_binding_projects_legacy_meeting_and_room() -> None:
+    scope = _preformal_scope()
+    room = _preformal_legacy_room(scope)
+    room["config"]["scopeHash"] = "legacy-room-hash-that-is-not-a-v1-scope-hash"
+    anchor = project_active_discussion_anchor(
+        {"preformalBinding": scope.to_dict()},
+        [_preformal_legacy_meeting(scope)],
+        [room],
+    )
+
+    assert anchor["status"] == "ready"
+    assert anchor["scope"] == scope.to_dict()
+    assert anchor["scopeHash"] == scope.scope_hash
+    assert anchor["roomId"] == scope.roomId
+    assert anchor["meetingRoundId"] == scope.meetingRoundId
+    assert "runId=" not in anchor["returnTo"]
+    assert "questionId=SCI-003" in anchor["returnTo"]
+
+
+def test_explicit_preformal_scope_missing_field_is_not_repaired_from_outer_data() -> None:
+    scope = _preformal_scope()
+    damaged_scope = dict(scope.to_dict())
+    damaged_scope.pop("candidateId")
+    anchor = project_active_discussion_anchor(
+        {
+            "preformalBinding": damaged_scope,
+            "candidateId": scope.candidateId,
+            "meetingRoundId": scope.meetingRoundId,
+            "roomId": scope.roomId,
+        },
+        [_preformal_legacy_meeting(scope)],
+        [_preformal_legacy_room(scope)],
+    )
+
+    assert anchor["status"] == "degraded"
+    assert anchor["deepLink"] == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("selectionId", "selection-other"),
+        ("candidateId", "h2"),
+        ("meetingRoundId", "meeting-other"),
+        ("roomId", "room-other"),
+    ],
+)
+def test_preformal_binding_mismatch_never_promotes_sibling(
+    field: str, value: str
+) -> None:
+    scope = _preformal_scope()
+    binding = dict(scope.to_dict())
+    binding[field] = value
+    anchor = project_active_discussion_anchor(
+        {"preformalBinding": binding},
+        [_preformal_legacy_meeting(scope)],
+        [_preformal_legacy_room(scope)],
+    )
+
+    assert anchor["status"] == "degraded"
+    assert anchor["deepLink"] == ""
+
+
+def test_preformal_room_scope_hash_and_full_scope_are_cross_checked() -> None:
+    scope = _preformal_scope()
+    room = _preformal_legacy_room(scope)
+    room["config"].update(
+        {
+            "scopeAuthority": "preformal_candidate_review_scope.v1",
+            "discussionScope": scope.to_dict(),
+            "discussionScopeHash": scope.scope_hash,
+            "scopeHash": scope.scope_hash,
+        }
+    )
+    meeting = _preformal_legacy_meeting(scope)
+    meeting.update(
+        {
+            "discussionScope": scope.to_dict(),
+            "discussionScopeHash": scope.scope_hash,
+        }
+    )
+    anchor = project_active_discussion_anchor(
+        {"preformalBinding": scope.to_dict()}, [meeting], [room]
+    )
+    assert anchor["status"] == "ready"
+
+    room["config"]["scopeHash"] = "0" * 64
+    mismatched = project_active_discussion_anchor(
+        {"preformalBinding": scope.to_dict()}, [meeting], [room]
+    )
+    assert mismatched["status"] == "degraded"

@@ -979,12 +979,26 @@ def _meeting_recovery_actions(
         )
     ]
     status = str(meeting.get("status") or "").strip().lower()
-    if status in {"open", "summarizing"} and _linked_chat_room_round_problem(
+    linked_round_problem = _linked_chat_room_round_problem(
         meeting,
         chat_room_round_snapshots,
-    ):
+    )
+    if status in {"open", "summarizing"} and linked_round_problem:
         # The linked WorkRun is terminal, so there is no live executor to
-        # resume or stop.  Keep only the room navigation for inspection.
+        # resume or stop.  Review meetings can safely supersede a zero-speech
+        # failed attempt and open the next budgeted round; the owning service
+        # rechecks terminality and completed messages under its lock.
+        if str(meeting.get("meetingType") or "").strip().lower() == "hypothesis_review":
+            actions.append(
+                _command_action(
+                    "reopen_review",
+                    action_id=f"reopen-review:{meeting_id}",
+                    label="重新发起评审讨论",
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                    payload={"meetingRoundId": meeting_id},
+                )
+            )
         return actions, anchor
     stalled = _meeting_is_stalled(meeting)
     if status == "awaiting_approval":
