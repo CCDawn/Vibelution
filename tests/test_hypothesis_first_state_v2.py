@@ -603,7 +603,85 @@ def test_conflicting_current_formal_revisions_block_downstream_delivery_actions(
     assert state.formalRuntime.lineageDisposition == "conflicted"
     assert state.formalRuntime.actionability == "blocked"
     assert any(problem.code == "formal_run_lineage_conflict" for problem in state.problems)
-    assert state.allowedActions == []
+    archive_actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "archive_run"
+    ]
+    assert {action.payload.runId for action in archive_actions} == {"run-a", "run-b"}
+    assert all(action.requiresConfirmation for action in archive_actions)
+
+
+@pytest.mark.parametrize("run_status", ["failed", "cancelled"])
+def test_terminal_formal_run_offers_archive_instead_of_reconcile(
+    run_status: str,
+) -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {"accepted": True},
+            }],
+            formal_runs=[{
+                "runId": "run-terminal",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": run_status,
+                "runVersion": 3,
+            }],
+        )
+    )
+
+    commands = [
+        action.command for action in state.allowedActions if action.kind == "command"
+    ]
+    assert commands == ["archive_run"]
+
+
+def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {"accepted": True},
+            }],
+            formal_runs=[{
+                "runId": "run-archived",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": "archived",
+                "runVersion": 4,
+            }],
+        )
+    )
+
+    assert state.formalRuntime.runId is None
+    assert any(
+        action.kind == "command" and action.command == "create_formal_run"
+        for action in state.allowedActions
+    )
 
 
 def test_converged_chain_does_not_offer_duplicate_formal_run() -> None:
@@ -949,6 +1027,39 @@ def test_program_output_validation_failure_blocks_human_review() -> None:
         action.kind == "command" and action.command == "record_program_review"
         for action in state.allowedActions
     )
+    assert any(
+        action.kind == "command" and action.command == "archive_run"
+        for action in state.allowedActions
+    )
+
+
+def test_succeeded_run_with_missing_delivery_event_retries_program_handoff() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            formal_runs=[{
+                "runId": "run-delivery-gap",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": "succeeded",
+                "runVersion": 5,
+            }],
+            formal_snapshots={"run-delivery-gap": {}},
+        )
+    )
+
+    commands = [
+        action.command for action in state.allowedActions if action.kind == "command"
+    ]
+    assert commands == ["retry_program_handoff"]
 
 
 def test_revision_requested_keeps_create_revision_action_in_program_phase() -> None:
@@ -1339,6 +1450,62 @@ def test_v2_reopen_review_command_uses_guarded_recovery(
 
     assert result["result"]["status"] == "reopened"
     assert calls == [("team-1", "review-1")]
+
+
+def test_v2_archive_run_command_uses_formal_command_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:terminal-run",
+        "allowedActions": [{
+            "kind": "command",
+            "actionId": "archive-formal-run:run-terminal",
+            "command": "archive_run",
+            "payload": {"runId": "run-terminal"},
+            "enabled": True,
+            "idempotencyKey": "hf2:archive-formal-run:run-terminal",
+        }],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[tuple[str, str, str, str]] = []
+
+    def submit(team_id: str, *, run_id: str, command: str, idempotency_key: str, **_kwargs):
+        calls.append((team_id, run_id, command, idempotency_key))
+        return {"status": "accepted"}
+
+    monkeypatch.setattr(hypothesis_first_chain, "_submit_formal_v2_command", submit)
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "archive-formal-run:run-terminal",
+            "idempotencyKey": "hf2:archive-formal-run:run-terminal",
+            "expectedStateVersion": "hf2-action:terminal-run",
+            "command": "archive_run",
+            "payload": {"runId": "run-terminal"},
+        },
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["status"] == "accepted"
+    assert calls == [(
+        "team-1",
+        "run-terminal",
+        "archive_run",
+        "hf2:archive-formal-run:run-terminal",
+    )]
 
 
 @pytest.mark.parametrize("current_round_status", ["running", "closed"])
