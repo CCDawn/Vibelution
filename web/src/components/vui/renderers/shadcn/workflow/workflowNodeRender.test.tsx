@@ -114,12 +114,29 @@ describe("WorkflowAgentTaskNode render (P1-4)", () => {
     expect(markup).toContain('data-layout-mode="serpentine"');
     expect(markup).toContain("Agent 任务");
     expect(markup).toContain("实验规划 · Agent 已绑定");
+    expect(markup).toContain("就绪");
     expect(markup).toContain("size-11");
     expect(markup).toContain("data-status-badge");
     expect(markup).not.toContain("冻结变量、数据切分、预算和停止条件。");
     expect(markup).not.toContain(">agent-technical-id<");
     expect(markup).not.toContain("text-[8px]");
     expect(markup).not.toContain("text-[8.5px]");
+  });
+
+  it.each([
+    ["pending", "待运行"],
+    ["running", "运行中"],
+    ["waiting_human", "等待人工"],
+    ["succeeded", "已完成"],
+    ["failed", "失败"],
+  ])("renders a visible %s badge in serpentine mode", (status, label) => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "评审任务",
+      status,
+      layoutMode: "serpentine",
+    });
+    expect(markup).toContain(`data-status-badge="${status}"`);
+    expect(markup).toContain(label);
   });
 });
 

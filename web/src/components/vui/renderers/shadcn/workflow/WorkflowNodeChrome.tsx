@@ -220,10 +220,6 @@ function moduleSubtitle(
   return `${role} · 未绑定`;
 }
 
-function statusMarkFill(accentBarClass: string): string {
-  return accentBarClass.includes("transparent") ? "bg-[var(--fg-tertiary)]" : accentBarClass;
-}
-
 export function WorkflowNodeChrome({
   label,
   visualKind,
@@ -298,6 +294,7 @@ export function WorkflowNodeChrome({
       role="button"
       tabIndex={0}
       aria-label={aria}
+      aria-current={isRuntimeCurrent ? "step" : undefined}
       title={title}
     >
       {showTargetHandle ? (
@@ -342,21 +339,6 @@ export function WorkflowNodeChrome({
             )}
           >
             <KindGlyph kind={visualKind} className="h-[22px] w-[22px] shrink-0" />
-            {status !== "pending" ? (
-              <span
-                className={cn(
-                  "absolute -right-1.5 -bottom-1.5 grid size-[18px] place-items-center rounded-full border-2 border-[var(--vui-surface-panel)] text-[var(--accent-cool-contrast)]",
-                  statusMarkFill(visual.accentBarClass),
-                )}
-                data-status-badge={status}
-              >
-                {status === "running" ? (
-                  <Loader2 className="h-2.5 w-2.5 animate-spin motion-reduce:animate-none" aria-hidden />
-                ) : (
-                  <StatusIcon icon={visual.icon} className="h-2.5 w-2.5 shrink-0" />
-                )}
-              </span>
-            ) : null}
           </span>
           <span className="grid min-w-0 flex-1 gap-0.5 text-left">
             <span className="truncate text-[15px] font-bold leading-[1.2] tracking-[-0.02em] text-[var(--fg-primary)]">
@@ -367,6 +349,20 @@ export function WorkflowNodeChrome({
                 ? (subtitle?.trim() || moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status))
                 : moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)}
             </span>
+          </span>
+          <span
+            className={cn(
+              "inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-semibold leading-none",
+              visual.badgeClass,
+            )}
+            data-status-badge={status}
+          >
+            {status === "running" ? (
+              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden />
+            ) : (
+              <StatusIcon icon={visual.icon} className="h-3 w-3 shrink-0" />
+            )}
+            <span>{visual.statusLabel}</span>
           </span>
         </div>
       ) : (

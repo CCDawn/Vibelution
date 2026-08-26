@@ -91,6 +91,14 @@ import {
 } from "./workflowSelectionFocus";
 import type { OrthogonalObstacle } from "./workflowOrthogonalRoute";
 
+export function workflowCanvasMinZoom(
+  layoutMode: WorkflowCanvasLayoutMode,
+  nodeCount: number,
+): number {
+  if (layoutMode === "serpentine" && nodeCount > 0 && nodeCount <= 5) return 0.5;
+  return layoutMode === "serpentine" ? 0.28 : 0.35;
+}
+
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
   selectedNodeId?: string | null;
@@ -931,7 +939,7 @@ function WorkflowCanvasInner({
           edges={edges}
           nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
-          minZoom={layoutMode === "serpentine" ? 0.28 : 0.35}
+          minZoom={workflowCanvasMinZoom(layoutMode, graph.nodes.length)}
           maxZoom={1.6}
           nodesDraggable={manualLayoutEnabled && !manualLayoutLocked}
           nodesConnectable={reconnectSession !== null}

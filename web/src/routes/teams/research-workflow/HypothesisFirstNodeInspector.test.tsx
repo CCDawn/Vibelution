@@ -498,7 +498,7 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("候选 cand-b");
     expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).not.toContain("cand-old");
     const candidateButtons = Array.from(container.querySelectorAll("button"))
-      .filter((button) => button.textContent === "进入对应会议");
+      .filter((button) => button.textContent === "查看该候选评审");
     act(() => {
       candidateButtons[0]?.click();
     });
@@ -716,6 +716,37 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("第 1 轮");
     expect(container.textContent).toContain("第 3 轮");
     expect(container.textContent).not.toContain("第 2 轮");
+  });
+
+  it("groups parallel candidate meetings into one review round", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        selectedCandidateIds: ["cand-a", "cand-b"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r1-a", meetingType: "hypothesis_review", status: "closed", roundIndex: 1, digestId: "d1-a" }),
+        scopeMeeting({ meetingRoundId: "r1-b", meetingType: "hypothesis_review", status: "open", roundIndex: 1 }),
+      ] as HypothesisFirstChainData["meetings"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("1 轮有效评审");
+    expect(container.textContent?.match(/第 1 轮/g)).toHaveLength(1);
+    expect(container.textContent).toContain("本轮 2 个候选评审，已归档 1/2");
   });
 
   it("shows 资料搜集中 without a start-collection command", () => {

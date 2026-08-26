@@ -299,14 +299,20 @@ function stageFor(state: HypothesisFirstStateV2): HypothesisFirstStage {
 }
 
 function defaultStatus(state: HypothesisFirstStateV2): string {
+  const current = phaseState(state);
   const problem = state.problems.find((item) => item.severity === "fatal")
-    ?? state.problems.find((item) => item.severity === "error")
-    ?? state.problems[0];
+    ?? (
+      current.actionability === "blocked" || current.lifecycle === "failed"
+        ? current.problems[0]
+          ?? state.problems.find((item) => item.severity === "error")
+          ?? state.problems[0]
+        : undefined
+    );
   if (problem) return problem.message;
   switch (state.currentPhase) {
     case "generation": return state.isInitial ? "可以开始生成候选假说" : "候选生成状态已更新";
     case "selection": return "请选择进入评审的候选假说";
-    case "review": return `候选评审 ${state.review.aggregate.completed}/${state.review.aggregate.total}`;
+    case "review": return `本轮候选评审：已完成 ${state.review.aggregate.completed}/${state.review.aggregate.total}`;
     case "collection": return `资料搜集 ${state.collection.aggregate.completed}/${state.collection.aggregate.total}`;
     case "convergence": return state.convergence.accepted
       ? "假说已经收敛"

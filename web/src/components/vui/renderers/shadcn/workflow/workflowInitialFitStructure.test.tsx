@@ -43,7 +43,7 @@ vi.mock("@xyflow/react", () => ({
 
 import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
-import { ShadcnWorkflowCanvas } from "./ShadcnWorkflowCanvas";
+import { ShadcnWorkflowCanvas, workflowCanvasMinZoom } from "./ShadcnWorkflowCanvas";
 import { WorkflowOrthogonalConnectionLine } from "./WorkflowOrthogonalConnectionLine";
 import { WORKFLOW_MANUAL_LAYOUT_GRID } from "./workflowManualLayout";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
@@ -62,6 +62,15 @@ vi.mock("./useWorkflowAutoLayout", () => ({
     reportMeasuredSize: vi.fn(),
   })),
 }));
+
+describe("workflowCanvasMinZoom", () => {
+  it("keeps short serpentine workflows readable without constraining full graphs", () => {
+    expect(workflowCanvasMinZoom("serpentine", 3)).toBe(0.5);
+    expect(workflowCanvasMinZoom("serpentine", 5)).toBe(0.5);
+    expect(workflowCanvasMinZoom("serpentine", 6)).toBe(0.28);
+    expect(workflowCanvasMinZoom("stage-columns", 3)).toBe(0.35);
+  });
+});
 
 vi.mock("./useWorkflowInitialFit", () => ({
   useWorkflowInitialFit: vi.fn(() => ({ pendingInitialFit: false })),

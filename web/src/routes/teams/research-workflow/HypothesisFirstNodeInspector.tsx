@@ -447,7 +447,7 @@ function ReviewCandidateChecklist({
                   density="compact"
                   onPress={() => onNavigateToNode(round.nodeId)}
                 >
-                  {isZh ? "进入对应会议" : "Open meeting"}
+                  {isZh ? "查看该候选评审" : "View candidate review"}
                 </VButton>
               ) : null}
             </li>
@@ -768,40 +768,47 @@ function ReviewHistory({
       </VEmptyState>
     );
   }
+  const rounds = groupReviewHistoryMeetings(meetings);
   return (
     <section className={styles.history} aria-label={isZh ? "假说评审历史" : "Hypothesis review history"}>
       <div className={styles.historySummary}>
-        <strong>{isZh ? `${meetings.length} 轮有效评审` : `${meetings.length} effective reviews`}</strong>
+        <strong>{isZh ? `${rounds.length} 轮有效评审` : `${rounds.length} effective reviews`}</strong>
         <VStatusChip tone="neutral">
           {isZh ? `${retryCount} 次失败重试` : `${retryCount} failed retries`}
         </VStatusChip>
       </div>
       <ol className={styles.historyList}>
-        {meetings.map((meeting, index) => {
-          const round = meeting.roundIndex ?? index + 1;
-          const previousRound = index > 0 ? (meetings[index - 1]?.roundIndex ?? index) : 0;
+        {rounds.map((item, index) => {
+          const previousRound = index > 0 ? rounds[index - 1].round : 0;
           const retries = allMeetings.filter((candidate) => {
             const candidateRound = candidate.roundIndex ?? 0;
             return isHypothesisReviewRetryAttempt(candidate)
               && candidateRound > previousRound
-              && candidateRound < round;
+              && candidateRound < item.round;
           }).length;
-          const label = meeting.status === "closed"
+          const archived = item.meetings.filter(meetingHasDigestForHistory).length;
+          const allClosed = item.meetings.every((meeting) => meeting.status === "closed");
+          const hasOpen = item.meetings.some((meeting) => meeting.status === "open");
+          const label = allClosed
             ? (isZh ? "已闭环" : "Closed")
-            : meeting.status === "open"
+            : hasOpen
               ? (isZh ? "进行中" : "Active")
               : (isZh ? "待确认" : "Awaiting review");
+          const tone = allClosed ? "success" : hasOpen ? "accent" : "warning";
+          const progressCopy = item.meetings.length > 1
+            ? (isZh
+              ? `本轮 ${item.meetings.length} 个候选评审，已归档 ${archived}/${item.meetings.length}。`
+              : `${archived}/${item.meetings.length} candidate reviews archived in this round.`)
+            : meetingHasDigestForHistory(item.meetings[0])
+              ? (isZh ? "评审结论与纪要已归档。" : "Review conclusion and digest archived.")
+              : (isZh ? "评审仍在进行或等待纪要。" : "Review is active or awaiting its digest.");
           return (
-            <li className={styles.historyItem} key={meeting.meetingRoundId}>
+            <li className={styles.historyItem} key={item.key}>
               <div className={styles.historyTopline}>
-                <strong>{isZh ? `第 ${round} 轮` : `Round ${round}`}</strong>
-                <VStatusChip tone={meeting.status === "closed" ? "success" : "accent"}>{label}</VStatusChip>
+                <strong>{isZh ? `第 ${item.round} 轮` : `Round ${item.round}`}</strong>
+                <VStatusChip tone={tone}>{label}</VStatusChip>
               </div>
-              <p className={styles.historyCopy}>
-                {meetingHasDigestForHistory(meeting)
-                  ? (isZh ? "评审结论与纪要已归档。" : "Review conclusion and digest archived.")
-                  : (isZh ? "评审仍在进行或等待纪要。" : "Review is active or awaiting its digest.")}
-              </p>
+              <p className={styles.historyCopy}>{progressCopy}</p>
               {retries > 0 ? (
                 <span className={styles.historyRetry}>
                   {isZh ? `包含 ${retries} 次失败重试` : `Includes ${retries} failed retries`}
@@ -813,6 +820,26 @@ function ReviewHistory({
       </ol>
     </section>
   );
+}
+
+function groupReviewHistoryMeetings(meetings: readonly MeetingRoundRecord[]): Array<{
+  key: string;
+  round: number;
+  meetings: MeetingRoundRecord[];
+}> {
+  const grouped = new Map<string, { key: string; round: number; meetings: MeetingRoundRecord[] }>();
+  meetings.forEach((meeting, index) => {
+    const hasRoundIndex = typeof meeting.roundIndex === "number";
+    const round = hasRoundIndex ? Number(meeting.roundIndex) : index + 1;
+    const key = hasRoundIndex ? `round:${round}` : `legacy:${meeting.meetingRoundId}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.meetings.push(meeting);
+    } else {
+      grouped.set(key, { key, round, meetings: [meeting] });
+    }
+  });
+  return [...grouped.values()].sort((left, right) => left.round - right.round);
 }
 
 function meetingHasDigestForHistory(meeting: MeetingRoundRecord): boolean {

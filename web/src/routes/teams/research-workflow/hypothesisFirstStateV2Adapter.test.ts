@@ -173,6 +173,43 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.command).toBe("record_selection");
   });
 
+  it("keeps healthy review progress ahead of a stale dispatch problem", () => {
+    const candidate = {
+      ...reviewCandidate("cand-1", "running"),
+      actionability: "executing" as const,
+      discussion: { ...idle, lifecycle: "running" as const, actionability: "executing" as const },
+      summarization: { ...idle },
+      approval: { ...idle },
+    };
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      review: {
+        ...stateV2().review,
+        lifecycle: "running",
+        actionability: "executing",
+        activeRoundIndex: 1,
+        aggregate: { total: 2, completed: 0, pending: 2, failed: 0, blocked: 0 },
+        candidates: [candidate],
+      },
+      problems: [{
+        code: "review_dispatch_missing",
+        category: "integrity",
+        severity: "error",
+        message: "已记录选择，但候选评审会议尚未建立",
+        recoverable: true,
+        sourceKind: "review_dispatch",
+        sourceId: "selection-1",
+        detectedAt: "2026-08-25T00:00:00Z",
+      }],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+    expect(action.stage).toBe("review_running");
+    expect(action.statusMessage).toBe("本轮候选评审：已完成 0/2");
+    expect(action.disabledReason).toBeUndefined();
+  });
+
   it("selects the exact pending candidate from a two-candidate review", () => {
     const completedNavigation: NavigationAction = {
       kind: "navigation",
