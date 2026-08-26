@@ -174,6 +174,16 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
   });
 
   it("keeps healthy review progress ahead of a stale dispatch problem", () => {
+    const dispatchProblem = {
+      code: "review_dispatch_missing",
+      category: "integrity" as const,
+      severity: "error" as const,
+      message: "已记录选择，但候选评审会议尚未建立",
+      recoverable: true,
+      sourceKind: "review_dispatch",
+      sourceId: "selection-1",
+      detectedAt: "2026-08-25T00:00:00Z",
+    };
     const candidate = {
       ...reviewCandidate("cand-1", "running"),
       actionability: "executing" as const,
@@ -187,21 +197,13 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
       review: {
         ...stateV2().review,
         lifecycle: "running",
-        actionability: "executing",
+        actionability: "blocked",
+        problems: [dispatchProblem],
         activeRoundIndex: 1,
         aggregate: { total: 2, completed: 0, pending: 2, failed: 0, blocked: 0 },
         candidates: [candidate],
       },
-      problems: [{
-        code: "review_dispatch_missing",
-        category: "integrity",
-        severity: "error",
-        message: "已记录选择，但候选评审会议尚未建立",
-        recoverable: true,
-        sourceKind: "review_dispatch",
-        sourceId: "selection-1",
-        detectedAt: "2026-08-25T00:00:00Z",
-      }],
+      problems: [dispatchProblem],
     });
 
     const action = resolveHypothesisFirstNextActionFromV2(state);

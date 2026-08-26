@@ -4,6 +4,7 @@ import type {
   HypothesisFirstPhase,
   HypothesisFirstStateV2,
   NavigationAction,
+  PhaseState,
   ReviewCandidateState,
 } from "../../../api/types/hypothesisFirst";
 import {
@@ -298,8 +299,10 @@ function stageFor(state: HypothesisFirstStateV2): HypothesisFirstStage {
   }
 }
 
-function defaultStatus(state: HypothesisFirstStateV2): string {
-  const current = phaseState(state);
+function defaultStatus(
+  state: HypothesisFirstStateV2,
+  current: PhaseState = phaseState(state),
+): string {
   const problem = state.problems.find((item) => item.severity === "fatal")
     ?? (
       current.actionability === "blocked" || current.lifecycle === "failed"
@@ -347,7 +350,9 @@ export function resolveHypothesisFirstNextActionFromV2(
   const request = state.collection.requests.find((item) => item.lifecycle !== "completed")
     ?? state.collection.requests[0]
     ?? null;
-  const current = phaseState(state);
+  const current = state.currentPhase === "review" && reviewCandidate
+    ? reviewCandidate
+    : phaseState(state);
   const mappedCommand = legacyCommand(command, state.currentPhase);
   return {
     stage: stageFor(state),
@@ -355,14 +360,14 @@ export function resolveHypothesisFirstNextActionFromV2(
     navigationLabel: navigation?.label || command?.label || "前往当前任务",
     command: mappedCommand,
     commandLabel: command?.label,
-    commandDetail: command?.confirmationText || defaultStatus(state),
+    commandDetail: command?.confirmationText || defaultStatus(state, current),
     disabledReason: current.actionability === "blocked"
       ? current.problems[0]?.message || command?.disabledReason || "当前状态需要修复后才能继续"
       : command && !command.enabled
         ? command.disabledReason || undefined
         : undefined,
     recovery: null,
-    statusMessage: defaultStatus(state),
+    statusMessage: defaultStatus(state, current),
     meetingRoundId: reviewCandidate?.meetingRoundId
       || state.generation.generationMeetingId
       || navigation?.navigation.meetingRoundId
