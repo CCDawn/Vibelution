@@ -71,12 +71,24 @@ def test_proactive_self_review_and_local_main_merge_is_required() -> None:
 
     assert "主动自审当前任务 diff" in agents
     assert "不得把「等用户再说审查/合入」当作完成态" in agents
-    assert "不得以未主动审查合入结束" in agents
+    assert "未主动自审并合入本地 `main`" in agents
     assert "waiting for the user to request review or merge is not done" in standard
     assert "without waiting for the user to request review" in collaboration
     assert "不得等用户再下令审查/合入" in loop
     assert "合入门已通过却未主动合入" in loop
     assert "不得等用户再下令" in playbook
+
+
+def test_validation_and_managed_closeout_are_single_pass_by_default() -> None:
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    loop = (PROJECT_ROOT / "docs" / "guides" / "loop.md").read_text(encoding="utf-8")
+    testing = (PROJECT_ROOT / "tests" / "README.md").read_text(encoding="utf-8")
+
+    assert "同一 HEAD" in agents
+    assert "不得重复执行" in agents
+    assert "scripts/task_closeout.py" in loop
+    assert "--manifest" in loop
+    assert "不要先手动跑一遍 `closeout`" in testing
 
 
 def test_windows_no_console_red_line_is_normative():

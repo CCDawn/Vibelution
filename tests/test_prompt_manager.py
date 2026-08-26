@@ -1137,6 +1137,8 @@ class TestLoadFunctions:
         assert "code_symbol_tool" in content or "结构化工具" in content
         assert "cli_tool" in content
         assert "record_learning 只在形成可复用经验或踩坑规律时写入" in content
+        assert "同一 HEAD" in content
+        assert "不重复执行" in content
 
     def test_runtime_log_index_section_compute_uses_runtime_scene_summaries(self, tmp_path, monkeypatch):
         from core.web.services import runtime_scene_service

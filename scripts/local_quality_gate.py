@@ -89,11 +89,17 @@ FAILURE_SUMMARY_REDACTIONS = (
         "[REDACTED]",
     ),
 )
-GATE_SELF_TEST_COMMAND = (
-    ".\\.venv\\Scripts\\python.exe -m pytest "
-    "tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
-    "tests/test_environment_doctor.py tests/test_select_tests.py "
-    "tests/test_reuse_research_contract.py tests/test_github_project_library_service.py -q"
+GATE_SELF_TEST_COMMANDS = (
+    (
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
+        "tests/test_select_tests.py tests/test_reuse_research_contract.py "
+        "tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q"
+    ),
+    (
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_environment_doctor.py -m serial -q"
+    ),
 )
 GATE_DEFINITION_FILES = frozenset(
     {
@@ -666,11 +672,12 @@ def expected_closeout_commands(
     if not isinstance(raw_commands, list):
         raise UnsupportedValidationCommand("selector commands must be a list")
     selected_commands = list(raw_commands)
-    if (
-        GATE_DEFINITION_FILES.intersection(files)
-        and GATE_SELF_TEST_COMMAND not in selected_commands
-    ):
-        selected_commands.append(GATE_SELF_TEST_COMMAND)
+    if GATE_DEFINITION_FILES.intersection(files):
+        selected_commands.extend(
+            command
+            for command in GATE_SELF_TEST_COMMANDS
+            if command not in selected_commands
+        )
 
     specs: list[CommandSpec] = []
     python_files = changed_python_files(root, validated_main_sha, head_sha)
@@ -988,6 +995,10 @@ def run_commit_gate(root: Path) -> GateResult:
                 "-q",
                 "-k",
                 "commit_mode or pre_commit",
+                "-n",
+                "4",
+                "--dist",
+                "load",
             ],
             root,
             env=git_hook_isolated_environment(),
