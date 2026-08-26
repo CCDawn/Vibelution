@@ -231,7 +231,19 @@ export function ResearchProcessInspectorPane(props: {
     return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} />;
   }
   if (scope.panel === "team") {
-    return <ResearchTeamPanel teamId={scope.teamId} teamName={scope.teamName} linkedChatRoomId={scope.linkedChatRoomId} run={state.run} projection={state.projection} effectiveBindings={state.effectiveBindings} meetingRoundId={nextAction?.meetingRoundId || ""} />;
+    return (
+      <ResearchTeamPanel
+        teamId={scope.teamId}
+        teamName={scope.teamName}
+        linkedChatRoomId={scope.linkedChatRoomId}
+        run={state.run}
+        projection={state.projection}
+        effectiveBindings={state.effectiveBindings}
+        meetingRoundId={nextAction?.meetingRoundId || ""}
+        questionId={scope.questionId || state.run?.questionId || ""}
+        discussionModel={discussionModel}
+      />
+    );
   }
   // Hypothesis-first region cards: summary + deep link, in definition and run views alike.
   if (scope.selectedNodeId && isHypothesisFirstCanvasNode(scope.selectedNodeId)) {

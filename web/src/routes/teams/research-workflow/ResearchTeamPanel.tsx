@@ -8,6 +8,7 @@ import { useShellI18n } from "../../../i18n/useShellI18n";
 import { ResearchProjectSwitcher } from "../research-projects/ResearchProjectSwitcher";
 import { teamChatRoomRoute } from "../researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "../researchWorkspaceModel";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import styles from "./ResearchTeamPanel.styles";
 
 function noopProjectActivated() {
@@ -23,6 +24,8 @@ export function ResearchTeamPanel(props: {
   projection: WorkflowCanvasProjection | null;
   effectiveBindings: EffectiveAgentBinding[] | null;
   meetingRoundId?: string;
+  questionId?: string;
+  discussionModel?: ScopedDiscussionModel;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
@@ -43,28 +46,45 @@ export function ResearchTeamPanel(props: {
   const coordinatorAgentId = props.effectiveBindings?.find(
     (binding) => binding.roleKey === "research_coordinator",
   )?.agentId;
+  const scopedQuestionId = String(props.questionId || "").trim();
+  const scopedDiscussionReady = Boolean(
+    scopedQuestionId
+    && props.discussionModel?.status === "ready"
+    && props.discussionModel.questionId === scopedQuestionId
+    && props.discussionModel.deepLink,
+  );
   const returnTo = teamWorkspaceRoute(props.teamId, {
     runId: props.run?.runId,
     panel: "team",
   });
-  const roomRoute = teamChatRoomRoute(
-    props.linkedChatRoomId,
-    returnTo,
-    isZh ? "返回科研流程" : "Back to research workflow",
-    props.meetingRoundId,
-  );
+  const roomRoute = scopedQuestionId
+    ? (scopedDiscussionReady ? props.discussionModel?.deepLink || "" : "")
+    : teamChatRoomRoute(
+        props.linkedChatRoomId,
+        returnTo,
+        isZh ? "返回科研流程" : "Back to research workflow",
+        props.meetingRoundId,
+      );
 
   return (
     <VSurface tone="panel" className={styles.root}>
       <VPanelHeader title={isZh ? "团队治理" : "Team governance"} headingLevel={3} />
-      <ResearchProjectSwitcher
-        teamId={props.teamId}
-        lang={lang}
-        currentTopic=""
-        currentExperimentMethod=""
-        onProjectActivated={noopProjectActivated}
-      />
+      {!scopedQuestionId ? (
+        <ResearchProjectSwitcher
+          teamId={props.teamId}
+          lang={lang}
+          currentTopic=""
+          currentExperimentMethod=""
+          onProjectActivated={noopProjectActivated}
+        />
+      ) : null}
       <dl className={styles.details}>
+        {scopedQuestionId ? (
+          <>
+            <dt className={styles.label}>{isZh ? "当前题目" : "Current question"}</dt>
+            <dd className={styles.valueBreak}>{scopedQuestionId}</dd>
+          </>
+        ) : null}
         <dt className={styles.label}>{isZh ? "团队" : "Team"}</dt>
         <dd className={styles.valueBreak}>{props.teamName || props.teamId}</dd>
         <dt className={styles.label}>{isZh ? "协调 Agent" : "Coordinator agent"}</dt>
@@ -90,10 +110,16 @@ export function ResearchTeamPanel(props: {
         </section>
       ) : null}
       {roomRoute ? (
-        <VRouteLinkButton to={roomRoute} variant="secondary">{isZh ? "打开团队讨论" : "Open team chat"}</VRouteLinkButton>
+        <VRouteLinkButton to={roomRoute} variant="secondary">
+          {scopedQuestionId
+            ? (isZh ? "打开本题讨论" : "Open question discussion")
+            : (isZh ? "打开团队讨论" : "Open team chat")}
+        </VRouteLinkButton>
       ) : (
         <div className={styles.roomMissing} role="status">
-          {isZh ? "团队尚未关联讨论会话" : "No chat room is linked to this team yet"}
+          {scopedQuestionId
+            ? (isZh ? "当前题目尚未关联精确讨论会话" : "No exact discussion is linked to this question yet")
+            : (isZh ? "团队尚未关联讨论会话" : "No chat room is linked to this team yet")}
         </div>
       )}
     </VSurface>
