@@ -7,7 +7,7 @@
  * SSE progress into these queries so cross-panel chain actions (selection,
  * meeting closure, handoff) refresh the canvas region.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -48,6 +48,30 @@ export const hypothesisFirstChainCollectionRequestsKey = (teamId: string, questi
 export const hypothesisFirstChainReviewRoundLinksKey = (teamId: string, questionId: string) =>
   ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId] as const;
 
+/**
+ * Which authority the returned chain data came from. Everything except
+ * `v2_canonical` fails closed for legacy mutation gates because those gates
+ * compare against `"v2_canonical"` only (plan §8.3: UI must know its source).
+ */
+export type HypothesisFirstStateSource =
+  | "v2_canonical"
+  | "v1_legacy"
+  /** V2 read failed (500 / invalid DTO / fatal). Never V1-inferred. */
+  | "v2_error"
+  /** No authoritative read result yet; consumers must not guess a phase. */
+  | "pending";
+
+/** Explicit discrimination of the V2 canonical snapshot read itself. */
+export type HypothesisFirstV2ReadState =
+  /** Snapshot received and parsed. */
+  | "ok"
+  /** Route-level 404/501 — the only fallback that may run the V1 resolver. */
+  | "route_unavailable"
+  /** Server up, route present, but 500/malformed/fatal: fail closed. */
+  | "v2_error"
+  /** First-frame loading or not started. */
+  | "pending";
+
 export type HypothesisFirstChainData = {
   /** Stable identity of the requested read scope. */
   questionScopeKey: string;
@@ -57,7 +81,9 @@ export type HypothesisFirstChainData = {
   /** Canonical server snapshot when the V2 endpoint is available. */
   stateV2: HypothesisFirstStateV2 | null;
   /** Explicitly tells consumers whether the read is canonical or compatibility data. */
-  stateSource: "v2_canonical" | "v1_legacy";
+  stateSource: HypothesisFirstStateSource;
+  /** Four-state discrimination of the canonical V2 read; drives fail-closed UI. */
+  v2ReadState: HypothesisFirstV2ReadState;
   chainState: HypothesisFirstChainState | null;
   /** Latest selection for the question (server already filters by questionId). */
   selection: HypothesisSelectionRecord | null;
@@ -288,14 +314,31 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     : null;
 
   const canonicalState = stateV2Query.data ?? null;
-  const stateSource: "v2_canonical" | "v1_legacy" = canonicalState
+  // Four-state V2 read discrimination. The route-level judgement itself stays
+  // owned by api/hypothesisFirst (isHypothesisFirstStateV2EndpointUnavailable);
+  // only that case may fall back to the compatibility V1 read (plan §8.3).
+  const v2ReadState: HypothesisFirstV2ReadState = !enabled || stateV2Query.isPending
+    ? "pending"
+    : canonicalState
+      ? "ok"
+      : v2EndpointUnavailable
+        ? "route_unavailable"
+        : "v2_error";
+  const stateSource: HypothesisFirstStateSource = v2ReadState === "ok"
     ? "v2_canonical"
-    : legacyChainStateQuery.data
+    : v2ReadState === "route_unavailable"
       ? "v1_legacy"
-      : "v2_canonical";
-  const chainState = canonicalState
+      : v2ReadState === "v2_error"
+        ? "v2_error"
+        // Nothing authoritative has been read yet; never claim a source.
+        : "pending";
+  const chainState = v2ReadState === "ok" && canonicalState
     ? legacyChainStateFromV2(canonicalState)
-    : (legacyChainStateQuery.data ?? null);
+    : v2ReadState === "route_unavailable"
+      ? (legacyChainStateQuery.data ?? null)
+      // v2_error and pending must not expose compatibility phase data, even
+      // when a stale V1 payload lingers in the query cache.
+      : null;
   const firstError = [
     stateV2Query.error && !v2EndpointUnavailable ? stateV2Query.error : null,
     legacyChainStateQuery.error,
@@ -339,28 +382,31 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
 
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,
-  // inspectors, and next-action navigation all share one numbering.
-  const scopedLinks = (links.data?.links ?? EMPTY_LINKS).filter((link) => (
+  // inspectors, and next-action navigation all share one numbering. These are
+  // memoized because downstream canvas/inspector composition is reference-
+  // sensitive; rebuilding per render would invalidate that memoization.
+  const scopedLinks = useMemo(() => (links.data?.links ?? EMPTY_LINKS).filter((link) => (
     recordMatchesQuestion(link.questionId, requestedQuestionId)
-  ));
-  const linkByMeetingId = new Map(
-    scopedLinks.map((link) => [String(link.meetingRoundId || ""), link]),
+  )), [links.data?.links, requestedQuestionId]);
+  const linkByMeetingId = useMemo(
+    () => new Map(scopedLinks.map((link) => [String(link.meetingRoundId || ""), link])),
+    [scopedLinks],
   );
-  const decoratedMeetings = (meetings.data?.meetings ?? EMPTY_MEETINGS)
+  const decoratedMeetings = useMemo(() => (meetings.data?.meetings ?? EMPTY_MEETINGS)
     .filter((meeting) => recordMatchesQuestion(meeting.question, requestedQuestionId))
     .map((meeting) => {
-    const link = linkByMeetingId.get(String(meeting.meetingRoundId || ""));
-    if (!link) return meeting;
-    return {
-      ...meeting,
-      roundIndex: meeting.roundIndex ?? (Number(link.roundIndex || 0) || undefined),
-      previousMeetingRoundId: meeting.previousMeetingRoundId
-        || (String(link.previousMeetingRoundId || "") || undefined),
-    };
-  });
-  const scopedRequests = (requests.data?.requests ?? EMPTY_REQUESTS).filter((request) => (
+      const link = linkByMeetingId.get(String(meeting.meetingRoundId || ""));
+      if (!link) return meeting;
+      return {
+        ...meeting,
+        roundIndex: meeting.roundIndex ?? (Number(link.roundIndex || 0) || undefined),
+        previousMeetingRoundId: meeting.previousMeetingRoundId
+          || (String(link.previousMeetingRoundId || "") || undefined),
+      };
+    }), [meetings.data?.meetings, requestedQuestionId, linkByMeetingId]);
+  const scopedRequests = useMemo(() => (requests.data?.requests ?? EMPTY_REQUESTS).filter((request) => (
     recordMatchesQuestion(request.questionId, requestedQuestionId)
-  ));
+  )), [requests.data?.requests, requestedQuestionId]);
   const resolvedChainQuestionId = normalizedQuestion(chainState?.questionId);
   const scopeMismatch = Boolean(
     enabled
@@ -373,6 +419,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     scopeMismatch,
     stateV2: scopeMismatch ? null : canonicalState,
     stateSource,
+    v2ReadState,
     chainState: scopeMismatch ? null : chainState,
     selection,
     meetings: decoratedMeetings,
