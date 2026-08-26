@@ -740,6 +740,79 @@ def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
+def test_selector_parallelizes_multiple_unmapped_changed_python_tests(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    for name in ("test_alpha.py", "test_beta.py", "test_gamma.py"):
+        (tmp_path / "tests" / name).write_text(
+            "def test_value():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+    result = select_tests.select_tests(
+        ["tests/test_alpha.py", "tests/test_beta.py", "tests/test_gamma.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_alpha.py "
+        "tests/test_beta.py tests/test_gamma.py -q -n 3 --dist loadfile -m \"not serial\""
+    ]
+    assert result["validationLayers"] == ["focused", "local-parallel"]
+
+
+def test_selector_separates_serial_changed_python_tests(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    for name in ("test_alpha.py", "test_beta.py"):
+        (tmp_path / "tests" / name).write_text(
+            "def test_value():\n    assert True\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "tests" / "test_serial.py").write_text(
+        "import pytest\npytestmark = pytest.mark.serial\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["tests/test_alpha.py", "tests/test_beta.py", "tests/test_serial.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_alpha.py "
+        "tests/test_beta.py -q -n 2 --dist loadfile -m \"not serial\"",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q",
+    ]
+    assert result["validationLayers"] == ["focused", "local-parallel", "local-serial"]
+
+
+def test_selector_ignores_serial_marker_text_below_module_scope(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_alpha.py").write_text(
+        "def test_fixture_text():\n    value = 'pytestmark = pytest.mark.serial'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_beta.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["tests/test_alpha.py", "tests/test_beta.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_alpha.py "
+        "tests/test_beta.py -q -n 2 --dist loadfile -m \"not serial\""
+    ]
+
+
 def test_selector_separates_serial_static_import_tests(tmp_path: Path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()

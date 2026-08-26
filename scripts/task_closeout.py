@@ -125,7 +125,12 @@ def validate_development_claim(
         raise ManagedCloseoutError("invalid_claim_owner")
 
 
-def acquire_integration_claim(context: CloseoutContext, *, agent_id: str) -> str:
+def acquire_integration_claim(
+    context: CloseoutContext,
+    *,
+    agent_id: str,
+    reserve_validation: bool = False,
+) -> str:
     try:
         payload = _coordination_call(
             context,
@@ -141,9 +146,13 @@ def acquire_integration_claim(context: CloseoutContext, *, agent_id: str) -> str
             "--status",
             "active",
             "--ttl-minutes",
-            "30",
+            "15" if reserve_validation else "5",
             "--note",
-            "Managed closeout lease: validation, ff-only merge, and immediate cleanup",
+            (
+                "Managed closeout starvation fallback: validation and ff-only merge"
+                if reserve_validation
+                else "Managed closeout lease: final manifest verification and ff-only merge"
+            ),
         )
     except ManagedCloseoutError as error:
         if error.code == "coordination_conflict":
@@ -307,6 +316,8 @@ def run_managed_closeout(
     claim_id: str,
     agent_id: str,
     base: str = "main",
+    manifest_path: Path | str | None = None,
+    reserve_integration: bool = False,
 ) -> ManagedCloseoutResult:
     try:
         context = resolve_context(task_worktree, base=base)
@@ -318,75 +329,134 @@ def run_managed_closeout(
             errors=[_bounded_error(error)],
         )
 
+    integration_claim_id = ""
+    if reserve_integration:
+        try:
+            integration_claim_id = acquire_integration_claim(
+                context,
+                agent_id=agent_id,
+                reserve_validation=True,
+            )
+        except ManagedCloseoutError as error:
+            return ManagedCloseoutResult(
+                status=(
+                    "integration_claim_conflict"
+                    if error.code == "integration_claim_conflict"
+                    else "failed"
+                ),
+                exit_code=1,
+                errors=[_bounded_error(error)],
+            )
+
+    resolved_manifest = Path(manifest_path) if manifest_path is not None else None
+    manifest_path_text = str(resolved_manifest or "")
+    validation_result: ManagedCloseoutResult | None = None
     try:
-        integration_claim_id = acquire_integration_claim(context, agent_id=agent_id)
-    except ManagedCloseoutError as error:
-        return ManagedCloseoutResult(
-            status=(
-                "integration_claim_conflict"
-                if error.code == "integration_claim_conflict"
-                else "failed"
-            ),
+        if resolved_manifest is None:
+            closeout = gate.run_closeout(context.task_root, base, claim_id)
+            resolved_manifest = closeout.manifest_path
+            manifest_path_text = str(resolved_manifest or "")
+            if closeout.outcome != "passed" or resolved_manifest is None:
+                validation_result = ManagedCloseoutResult(
+                    status="validation_failed",
+                    exit_code=1,
+                    manifest_path=manifest_path_text,
+                    errors=[str(closeout.outcome)],
+                )
+
+        if validation_result is None:
+            verified = gate.verify_manifest(resolved_manifest, context.task_root, base)
+            if verified.outcome != "passed":
+                validation_result = ManagedCloseoutResult(
+                    status="validation_failed",
+                    exit_code=1,
+                    manifest_path=manifest_path_text,
+                    errors=[str(verified.outcome)],
+                )
+    except (OSError, RuntimeError, ValueError) as error:
+        validation_result = ManagedCloseoutResult(
+            status="failed",
             exit_code=1,
+            manifest_path=manifest_path_text,
             errors=[_bounded_error(error)],
         )
 
-    integration_released = False
-    manifest_path = ""
-    merge_sha = ""
-    result = ManagedCloseoutResult(status="failed", exit_code=1)
-    try:
-        closeout = gate.run_closeout(context.task_root, base, claim_id)
-        manifest_path = str(closeout.manifest_path or "")
-        if closeout.outcome != "passed" or closeout.manifest_path is None:
-            result = ManagedCloseoutResult(
-                status="validation_failed",
-                exit_code=1,
-                manifest_path=manifest_path,
-                errors=[str(closeout.outcome)],
-            )
-        else:
-            verified = gate.verify_manifest(closeout.manifest_path, context.task_root, base)
-            if verified.outcome != "passed":
-                result = ManagedCloseoutResult(
-                    status="validation_failed",
-                    exit_code=1,
-                    manifest_path=manifest_path,
-                    errors=[str(verified.outcome)],
-                )
-            else:
-                merge_sha = merge_ff_only(context)
-                release_claim(
-                    context,
-                    claim_id,
-                    status="completed",
-                    reason=f"merged to {base} at {merge_sha}",
-                )
+    if validation_result is not None:
+        if integration_claim_id:
+            try:
                 release_claim(
                     context,
                     integration_claim_id,
-                    status="completed",
-                    reason=f"ff-only merge completed at {merge_sha}",
+                    status="released",
+                    reason="reserved validation did not pass",
                 )
-                integration_released = True
-                cleanup_errors: list[str] = []
-                try:
-                    cleanup_task_resources(context, agent_id=agent_id)
-                except (OSError, RuntimeError, ValueError) as error:
-                    cleanup_errors.append(_bounded_error(error))
-                try:
-                    complete_agent(context, agent_id=agent_id, merge_sha=merge_sha)
-                    prune_coordination(context)
-                except (OSError, RuntimeError, ValueError) as error:
-                    cleanup_errors.append(_bounded_error(error))
-                result = ManagedCloseoutResult(
-                    status="merged_cleanup_pending" if cleanup_errors else "merged_clean",
-                    exit_code=2 if cleanup_errors else 0,
-                    merged=True,
-                    merge_sha=merge_sha,
-                    manifest_path=manifest_path,
-                    errors=cleanup_errors,
+            except (OSError, RuntimeError, ValueError) as error:
+                validation_result.errors.append(
+                    f"integration_release_pending: {_bounded_error(error)}"
                 )
+                validation_result.status = "failed"
+        return validation_result
+
+    if not integration_claim_id:
+        try:
+            integration_claim_id = acquire_integration_claim(context, agent_id=agent_id)
+        except ManagedCloseoutError as error:
+            return ManagedCloseoutResult(
+                status=(
+                    "integration_claim_conflict"
+                    if error.code == "integration_claim_conflict"
+                    else "failed"
+                ),
+                exit_code=1,
+                manifest_path=manifest_path_text,
+                errors=[_bounded_error(error)],
+            )
+
+    integration_released = False
+    merge_sha = ""
+    result = ManagedCloseoutResult(status="failed", exit_code=1)
+    try:
+        verified = gate.verify_manifest(resolved_manifest, context.task_root, base)
+        if verified.outcome != "passed":
+            result = ManagedCloseoutResult(
+                status="validation_failed",
+                exit_code=1,
+                manifest_path=manifest_path_text,
+                errors=[str(verified.outcome)],
+            )
+        else:
+            merge_sha = merge_ff_only(context)
+            release_claim(
+                context,
+                claim_id,
+                status="completed",
+                reason=f"merged to {base} at {merge_sha}",
+            )
+            release_claim(
+                context,
+                integration_claim_id,
+                status="completed",
+                reason=f"ff-only merge completed at {merge_sha}",
+            )
+            integration_released = True
+            cleanup_errors: list[str] = []
+            try:
+                cleanup_task_resources(context, agent_id=agent_id)
+            except (OSError, RuntimeError, ValueError) as error:
+                cleanup_errors.append(_bounded_error(error))
+            try:
+                complete_agent(context, agent_id=agent_id, merge_sha=merge_sha)
+                prune_coordination(context)
+            except (OSError, RuntimeError, ValueError) as error:
+                cleanup_errors.append(_bounded_error(error))
+            result = ManagedCloseoutResult(
+                status="merged_cleanup_pending" if cleanup_errors else "merged_clean",
+                exit_code=2 if cleanup_errors else 0,
+                merged=True,
+                merge_sha=merge_sha,
+                manifest_path=manifest_path_text,
+                errors=cleanup_errors,
+            )
     except (OSError, RuntimeError, ValueError) as error:
         if merge_sha:
             status: CloseoutStatus = "merged_cleanup_pending"
@@ -399,7 +469,7 @@ def run_managed_closeout(
             exit_code=exit_code,
             merged=bool(merge_sha),
             merge_sha=merge_sha,
-            manifest_path=manifest_path,
+            manifest_path=manifest_path_text,
             errors=[_bounded_error(error)],
         )
     finally:
@@ -426,6 +496,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--claim-id", required=True)
     parser.add_argument("--agent-id", required=True)
     parser.add_argument("--base", default="main")
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="Reuse an already passed manifest for this exact task HEAD and main SHA.",
+    )
+    parser.add_argument(
+        "--reserve-integration",
+        action="store_true",
+        help="After stale_main, reserve integration/main during the one validation retry.",
+    )
     return parser
 
 
@@ -436,6 +516,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         claim_id=args.claim_id,
         agent_id=args.agent_id,
         base=args.base,
+        manifest_path=args.manifest,
+        reserve_integration=args.reserve_integration,
     )
     print(json.dumps(asdict(result), ensure_ascii=True))
     return result.exit_code

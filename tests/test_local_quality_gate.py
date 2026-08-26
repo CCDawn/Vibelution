@@ -28,13 +28,19 @@ def test_pre_commit_is_thin_adapter() -> None:
 def test_managed_closeout_is_part_of_the_gate_definition() -> None:
     assert "scripts/task_closeout.py" in gate.GATE_DEFINITION_FILES
     assert "tests/test_task_closeout.py" in gate.GATE_DEFINITION_FILES
-    assert "tests/test_task_closeout.py" in gate.GATE_SELF_TEST_COMMAND
+    assert any(
+        "tests/test_task_closeout.py" in command
+        for command in gate.GATE_SELF_TEST_COMMANDS
+    )
 
 
 def test_gate_definition_includes_reuse_research_contract() -> None:
     assert "scripts/reuse_research_contract.py" in gate.GATE_DEFINITION_FILES
     assert "scripts/reuse_research_evidence.py" in gate.GATE_DEFINITION_FILES
-    assert "tests/test_reuse_research_contract.py" in gate.GATE_SELF_TEST_COMMAND
+    assert any(
+        "tests/test_reuse_research_contract.py" in command
+        for command in gate.GATE_SELF_TEST_COMMANDS
+    )
 
 
 def test_commit_gate_blocks_direct_writes_on_main(git_repo: Path) -> None:
@@ -244,8 +250,11 @@ def create_recorded_contract_manifest(
     )
     selection = gate.selected_validation(files)
     raw_commands = list(selection["commands"])
-    if gate.GATE_SELF_TEST_COMMAND not in raw_commands:
-        raw_commands.append(gate.GATE_SELF_TEST_COMMAND)
+    raw_commands.extend(
+        command
+        for command in gate.GATE_SELF_TEST_COMMANDS
+        if command not in raw_commands
+    )
     commands = [
         gate.ProcessResult(
             kind="changed-python-ruff",
@@ -388,6 +397,36 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
 
     assert result.outcome == "passed"
     assert result.commands == []
+
+
+def test_commit_gate_self_test_uses_bounded_test_level_parallelism(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hook = git_repo / ".githooks" / "pre-commit"
+    hook.parent.mkdir()
+    hook.write_text("gate definition\n", encoding="utf-8")
+    git(git_repo, "add", ".githooks/pre-commit")
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_measured(kind: str, argv, cwd, **_kwargs):
+        calls.append((kind, list(argv)))
+        return gate.ProcessResult(
+            kind=kind,
+            argv=list(argv),
+            cwd=str(cwd),
+            exit_code=0,
+            duration_ms=1,
+            status="passed",
+        )
+
+    monkeypatch.setattr(gate, "measured", fake_measured)
+
+    result = gate.run_commit_gate(git_repo)
+
+    assert result.outcome == "passed"
+    self_test = next(argv for kind, argv in calls if kind == "gate-self-test")
+    assert self_test[-4:] == ["-n", "4", "--dist", "load"]
 
 
 @pytest.mark.parametrize(
@@ -555,23 +594,28 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
     matrix = select_tests.load_matrix()
     rule = next(rule for rule in matrix["rules"] if rule["id"] == "local-quality-gate")
 
-    assert rule["commands"] == [gate.GATE_SELF_TEST_COMMAND]
-    spec = gate.parse_allowed_command(rule["commands"][0], git_repo)
-    assert spec.kind == "pytest"
-    assert spec.argv == [
+    assert rule["commands"] == list(gate.GATE_SELF_TEST_COMMANDS)
+    specs = [gate.parse_allowed_command(command, git_repo) for command in rule["commands"]]
+    assert all(spec.kind == "pytest" for spec in specs)
+    assert all(spec.cwd == git_repo for spec in specs)
+    assert specs[0].argv[-7:] == [
+        "-n",
+        "4",
+        "--dist",
+        "load",
+        "-m",
+        "not serial",
+        "-q",
+    ]
+    assert specs[1].argv == [
         str(gate.PROJECT_PYTHON_NAME),
         "-m",
         "pytest",
-        "tests/test_local_quality_gate.py",
-        "tests/test_task_closeout.py",
-        "tests/test_ci_workflow_contract.py",
         "tests/test_environment_doctor.py",
-        "tests/test_select_tests.py",
-        "tests/test_reuse_research_contract.py",
-        "tests/test_github_project_library_service.py",
+        "-m",
+        "serial",
         "-q",
     ]
-    assert spec.cwd == git_repo
 
 
 def test_selected_validation_loads_from_isolated_script_execution(
@@ -1629,6 +1673,7 @@ def test_closeout_appends_gate_self_tests_when_gate_definition_changes(
     assert [command.kind for command in result.commands] == [
         "changed-python-ruff",
         "diff-check",
+        "pytest",
         "pytest",
     ]
 
