@@ -70,8 +70,12 @@ vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
 }));
 
 import {
+  discussionMemberCompletion,
   HypothesisFirstNodeInspector,
   inspectorNodeOwnsCurrentStep,
+  resolveHypothesisFirstNextReviewRoundIndex,
+  resolveHypothesisFirstReviewRoundBudget,
+  reviewRoundActionCopy,
 } from "./HypothesisFirstNodeInspector";
 import {
   useHypothesisFirstChain,
@@ -1383,5 +1387,418 @@ describe("HypothesisFirstNodeInspector", () => {
     );
     expect(container.querySelector('[data-testid="challenge-cup-workflow-completed"]')).toBeTruthy();
     expect(container.textContent).toContain("H1–H4 四项审核全部通过");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Review round budget contract
+  // ---------------------------------------------------------------------------
+
+  describe("review round budget contract", () => {
+    it("resolves the current budget as V2 roundBudget ?? V1 chainState.roundBudget ?? default 3", () => {
+      expect(resolveHypothesisFirstReviewRoundBudget({
+        stateV2: { convergence: { roundBudget: 4, roundIndex: 2 } },
+        chainState: { roundBudget: 9 },
+      })).toBe(4);
+      expect(resolveHypothesisFirstReviewRoundBudget({
+        stateV2: null,
+        chainState: { roundBudget: 5 },
+      })).toBe(5);
+      expect(resolveHypothesisFirstReviewRoundBudget({})).toBe(3);
+      // 非法值（0/负数/NaN）不劫持契约，回退后端默认。
+      expect(resolveHypothesisFirstReviewRoundBudget({
+        stateV2: { convergence: { roundBudget: Number.NaN } },
+      })).toBe(3);
+      expect(resolveHypothesisFirstReviewRoundBudget({
+        stateV2: null,
+        chainState: { roundBudget: -1 },
+      })).toBe(3);
+    });
+
+    it("derives the next review round index from the freshest snapshot", () => {
+      expect(resolveHypothesisFirstNextReviewRoundIndex({
+        stateV2: { convergence: { roundIndex: 2 } },
+        chainState: { hypothesisRoundCount: 7 },
+      })).toBe(3);
+      expect(resolveHypothesisFirstNextReviewRoundIndex({
+        stateV2: null,
+        chainState: { hypothesisRoundCount: 2 },
+      })).toBe(3);
+      expect(resolveHypothesisFirstNextReviewRoundIndex({})).toBeNull();
+    });
+
+    it("labels the budget raise below the cap and degrades to plain open at the cap", () => {
+      const raise = reviewRoundActionCopy(2, 3, "zh");
+      expect(raise.label).toBe("提升预算并发起新一轮评审");
+      expect(raise.detail).toContain("当前预算 2/5");
+      expect(raise.detail).toContain("第 3 轮");
+
+      const capped = reviewRoundActionCopy(5, 6, "zh");
+      expect(capped.label).toBe("发起新一轮评审");
+      expect(capped.detail).toContain("已达上限");
+      expect(capped.label).not.toContain("提升预算");
+
+      const english = reviewRoundActionCopy(1, 2, "en");
+      expect(english.label).toBe("Raise budget and open a new review round");
+      expect(reviewRoundActionCopy(5, null, "en").label).toBe("Open a new review round");
+    });
+  });
+
+  it("shows the snapshot-derived budget copy on the next-review-round fallback action", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        schemaVersion: 1,
+        teamId: "team-1",
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        meetingCount: 2,
+        firstMeetingId: "hf-review-1",
+        firstMeetingClosed: true,
+        openMeetingIds: [],
+        collectionRequests: [],
+        collectionRequestCount: 0,
+        pendingCollectionCount: 0,
+        collectionReady: false,
+        hypothesisRoundCount: 2,
+        latestHypothesisRoundId: "hr-2",
+        hypothesisConverged: false,
+        convergenceDetail: "",
+        roundBudget: 2,
+        budgetExhausted: true,
+        templateBaselineExists: false,
+        templateBaselineIds: [],
+      },
+      meetings: [scopeMeeting({
+        meetingRoundId: "r2",
+        meetingType: "hypothesis_review",
+        status: "closed",
+        roundIndex: 2,
+        digestId: "d2",
+      })],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    // 该 legacy 收敛快照把下一动作落到 human_adjudication 命令但没有已签名
+    // 动作可渲染，兜底出现开新轮按钮；文案必须反映当前快照预算而非写死 5。
+    const wrapper = container.querySelector('[data-testid="next-review-round-action"]');
+    if (wrapper) {
+      expect(wrapper.querySelector('[data-testid="next-review-round-budget"]')?.textContent)
+        .toContain("当前预算 2/5，将开启第 3 轮评审。");
+      expect(Array.from(wrapper.querySelectorAll("button")).some((button) =>
+        button.textContent === "提升预算并发起新一轮评审")).toBe(true);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-source collection progress
+  // ---------------------------------------------------------------------------
+
+  function v2CollectionPhase() {
+    return {
+      lifecycle: "running" as const,
+      outcome: "none" as const,
+      actionability: "executing" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    };
+  }
+
+  function collectionSourceFixture(lifecycle: string, overrides: Record<string, unknown> = {}) {
+    return {
+      lifecycle,
+      outcome: lifecycle === "completed" ? "succeeded" : "none",
+      actionability: lifecycle === "running" ? "executing" : "idle",
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+      sourceId: `source-${lifecycle}`,
+      label: "",
+      itemCount: 0,
+      error: null,
+      ...overrides,
+    };
+  }
+
+  it("renders per-source collection progress from the canonical V2 snapshot", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "collection",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: {
+          ...v2CollectionPhase(),
+          aggregate: { total: 3, completed: 1, pending: 2, failed: 0, blocked: 0 },
+          requests: [{
+            ...v2CollectionPhase(),
+            requestId: "req-v2-1",
+            queryCount: 3,
+            childRun: { ...v2CollectionPhase(), runId: "run-collect-v2" },
+            sources: [
+              collectionSourceFixture("completed", { label: "官方网站", itemCount: 12 }),
+              collectionSourceFixture("running", { label: "行业报告库", itemCount: 3 }),
+              collectionSourceFixture("failed", {
+                label: "社交媒体",
+                itemCount: 0,
+                error: {
+                  code: "source_failed", category: "execution", severity: "error",
+                  message: "社交媒体登录失效", recoverable: true, sourceKind: "collection_source",
+                  sourceId: "social", detectedAt: "2026-08-26T00:00:00Z",
+                },
+              }),
+            ],
+            handoff: { ...v2CollectionPhase(), handoffId: null, targetRoundIndex: null },
+          }],
+        },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_collection"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const progress = container.querySelector('[data-testid="collection-source-progress"]');
+    expect(progress).toBeTruthy();
+    expect(progress?.textContent).toContain("已完成 1/3 源 · 已获 15 条资料");
+    expect(progress?.textContent).toContain("官方网站");
+    expect(progress?.textContent).toContain("12 条");
+    expect(progress?.textContent).toContain("搜集中");
+    expect(progress?.textContent).toContain("行业报告库");
+    expect(progress?.textContent).toContain("社交媒体登录失效");
+  });
+
+  it("degrades silently when the active collection request has no per-source data yet", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "collection",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: {
+          ...v2CollectionPhase(),
+          aggregate: { total: 1, completed: 0, pending: 1, failed: 0, blocked: 0 },
+          requests: [{
+            ...v2CollectionPhase(),
+            requestId: "req-v2-empty",
+            queryCount: 1,
+            childRun: { ...v2CollectionPhase(), runId: "run-collect-empty" },
+            sources: [],
+            handoff: { ...v2CollectionPhase(), handoffId: null, targetRoundIndex: null },
+          }],
+        },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_collection"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-testid="collection-source-progress"]')).toBeNull();
+    // 单行状态反馈仍在，卡片不为空数据制造额外噪音。
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("资料搜集");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Candidate review queue position awareness
+  // ---------------------------------------------------------------------------
+
+  function v2ReviewCandidateFixture(candidateId: string, phases: {
+    discussion?: string;
+    summarization?: string;
+    approvalLifecycle?: string;
+    lifecycle?: string;
+  } = {}) {
+    const base = {
+      lifecycle: "waiting_human" as const,
+      outcome: "none" as const,
+      actionability: "waiting_user" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    };
+    const discussionLifecycle = phases.discussion ?? "queued";
+    const summarizationLifecycle = phases.summarization ?? "not_started";
+    return {
+      ...base,
+      candidateId,
+      candidateOrder: 0,
+      selectionId: "selection-v2",
+      roundIndex: 5,
+      meetingRoundId: `meeting-${candidateId}`,
+      discussionAnchor: null,
+      discussion: { ...base, lifecycle: discussionLifecycle },
+      summarization: { ...base, lifecycle: summarizationLifecycle },
+      approval: { ...base, lifecycle: phases.approvalLifecycle ?? "not_started" },
+      ...(phases.lifecycle ? { lifecycle: phases.lifecycle } : {}),
+    };
+  }
+
+  it("aggregates discussing vs queued positions for the active review round", () => {
+    const phase = v2CollectionPhase();
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "review",
+        generation: { generationMeetingId: null },
+        review: {
+          ...phase,
+          activeRoundIndex: 5,
+          aggregate: { total: 4, completed: 1, pending: 3, failed: 0, blocked: 0 },
+          candidates: [
+            { ...v2ReviewCandidateFixture("cand-a"), lifecycle: "completed", outcome: "succeeded", actionability: "terminal" },
+            v2ReviewCandidateFixture("cand-b", { discussion: "running" }),
+            v2ReviewCandidateFixture("cand-c", { discussion: "completed", summarization: "running" }),
+            v2ReviewCandidateFixture("cand-d"),
+          ],
+        },
+        collection: { requests: [] },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const checklist = container.querySelector('[data-testid="candidate-confirmation-checklist"]');
+    expect(checklist?.textContent).toContain("共 4 · 已确认 1 · 待确认 3");
+    // cand-b 正在讨论；cand-c 在纪要在途（既非讨论也非排队）；cand-d 排队等待。
+    expect(checklist?.textContent).toContain("正在讨论 1 个 · 排队等待 1 个");
+  });
+
+  it("hides the queue position summary when rows come from the legacy projection", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        selectionId: "sel-1",
+        candidateCount: 2,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        selectionId: "sel-1",
+        selectedCandidateIds: ["cand-a", "cand-b"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r4-old", meetingType: "hypothesis_review", roundIndex: 4, status: "closed" }),
+        scopeMeeting({ meetingRoundId: "r5-a", meetingType: "hypothesis_review", roundIndex: 5, status: "closed" }),
+        scopeMeeting({ meetingRoundId: "r5-b", meetingType: "hypothesis_review", roundIndex: 5, status: "awaiting_approval" }),
+      ],
+      reviewRoundLinks: [
+        { ...scopeReviewLink("r4-old", 4), candidateId: "cand-old" },
+        { ...scopeReviewLink("r5-a", 5), candidateId: "cand-a" },
+        { ...scopeReviewLink("r5-b", 5), candidateId: "cand-b" },
+      ],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const checklist = container.querySelector('[data-testid="candidate-confirmation-checklist"]');
+    expect(checklist?.textContent).toContain("共 2 · 已确认 1 · 待确认 1");
+    expect(checklist?.textContent).not.toContain("排队等待");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Discussion member completion (x/y members have spoken)
+  // ---------------------------------------------------------------------------
+
+  it("computes distinct member completion from scoped room messages", () => {
+    const detail = {
+      participants: [
+        { participantId: "p1" },
+        { participantId: "p2" },
+        { participantId: "p3" },
+      ],
+      rounds: [{
+        messages: [
+          { participantId: "p1", status: "completed", content: "我认为假说 A 更优。" },
+          { participantId: "p2", status: "completed", content: "同意，但需要补充证据。" },
+          { participantId: "p2", status: "completed", content: "补充：风险在于样本量。" },
+          { participantId: "p3", status: "running", content: "还在思考…" },
+          { participantId: "outsider", status: "completed", content: "非成员发言不计入。" },
+        ],
+      }],
+    };
+    expect(discussionMemberCompletion(detail)).toEqual({ spoken: 2, total: 3 });
+    expect(discussionMemberCompletion({ participants: [], rounds: [] })).toBeNull();
+    expect(discussionMemberCompletion(undefined)).toBeNull();
+  });
+
+  it("surfaces member completion while a scoped discussion is open", async () => {
+    mockedFetchChatRoomDetail.mockResolvedValueOnce({
+      participants: [{ participantId: "p1" }, { participantId: "p2" }, { participantId: "p3" }],
+      rounds: [{
+        messages: [
+          { participantId: "p1", status: "completed", content: "观点一" },
+          { participantId: "p2", status: "completed", content: "观点二" },
+        ],
+      }],
+    } as never);
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ status: "open" })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        discussionModel={{
+          status: "ready",
+          degradedReason: "",
+          scope: {
+            version: 1,
+            kind: "question_generation",
+            teamId: "team-1",
+            researchProjectId: "project-1",
+            workflowRunId: "run-1",
+            workflowNodeId: "hf_generation",
+            questionId: "Q-01",
+          },
+          scopeHash: "scope-hash",
+          roomId: "scoped-room-1",
+          meetingRoundId: "hf-gen-1",
+          questionId: "Q-01",
+          selectionId: "",
+          candidateId: "",
+          query: { kind: "room", room: "scoped-room-1" },
+          search: "?room=scoped-room-1",
+          deepLink: "/chat?room=scoped-room-1",
+          selectedRoundId: "",
+        }}
+        onOpenQuestion={() => {}}
+      />,
+    );
+    // 房间详情查询是异步的：轮询等待直到成员完成度随查询成功渲染。
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="discussion-member-completion"]')).toBeTruthy();
+      });
+    });
+    const completion = container.querySelector('[data-testid="discussion-member-completion"]');
+    expect(completion?.textContent).toContain("2/3 位成员已发言");
   });
 });

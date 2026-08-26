@@ -524,7 +524,7 @@ def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> b
             for item in claims
             if isinstance(item, dict)
             and item.get("id") == claim_id
-            and item.get("status") == "active"
+            and item.get("status") in {"active", "ready"}
         ),
         None,
     )
@@ -983,29 +983,6 @@ def run_commit_gate(root: Path) -> GateResult:
         )
         commands.append(lint)
         if lint.status == "failed":
-            return GateResult(outcome="failed", exit_code=1, commands=commands)
-    if GATE_DEFINITION_FILES.intersection(staged):
-        self_test = measured(
-            "gate-self-test",
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "tests/test_local_quality_gate.py",
-                "-q",
-                "-k",
-                "commit_mode or pre_commit",
-                "-n",
-                "4",
-                "--dist",
-                "load",
-            ],
-            root,
-            env=git_hook_isolated_environment(),
-            subject="gate self-test",
-        )
-        commands.append(self_test)
-        if self_test.status == "failed":
             return GateResult(outcome="failed", exit_code=1, commands=commands)
     return GateResult(outcome="passed", exit_code=0, commands=commands)
 

@@ -25,6 +25,10 @@ import {
 import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import {
+  HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET,
+  hypothesisFirstChainCollectionRequestsKey,
+  hypothesisFirstChainReviewRoundLinksKey,
+  resolveHypothesisFirstRoundBudget,
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
   shouldPollQuestionScopedChain,
@@ -351,6 +355,65 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.reviewRoundLinks).toBe(before.reviewRoundLinks);
   });
 
+  it("mirrors a raised V2 convergence budget into the compatibility projection", async () => {
+    mockAllResolved();
+    const raised = { ...stateV2Payload().convergence, roundBudget: 5 };
+    mocked.stateV2.mockResolvedValue({ ...stateV2Payload(), convergence: raised });
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    // After a budget raise the next canonical read carries the larger value;
+    // the display resolver reads it through stateV2 first.
+    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.chainState?.roundBudget).toBe(5);
+    expect(latest!.stateV2?.convergence.roundBudget).toBe(5);
+  });
+
+  it("configures every mounted chain query to refresh on focus and reconnect", async () => {
+    mockAllResolved();
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={() => undefined} />);
+    await flushQueries();
+
+    // Per-query override of the global refetchOnWindowFocus:false default:
+    // returning to the tab must not wait for the next gated poll tick.
+    const alwaysFreshKeys = [
+      queryKeys.hypothesisFirstChainStateV2("team-1", "Q-01"),
+      queryKeys.hypothesisFirstSelections("team-1", "Q-01"),
+      queryKeys.teamMeetingRounds("team-1"),
+      hypothesisFirstChainCollectionRequestsKey("team-1", "Q-01"),
+      hypothesisFirstChainReviewRoundLinksKey("team-1", "Q-01"),
+    ];
+    expect(alwaysFreshKeys).toHaveLength(5);
+    for (const queryKey of alwaysFreshKeys) {
+      const query = queryClient.getQueryCache().find({ queryKey });
+      expect(query?.options.refetchOnWindowFocus, String(queryKey)).toBe("always");
+      expect(query?.options.refetchOnReconnect, String(queryKey)).toBe("always");
+      // The existing bounded poll gating stays intact.
+      if (!String(queryKey).includes("selections")
+        && !String(queryKey).includes("review-round-links")) {
+        expect(query?.options.refetchInterval, String(queryKey)).toBeTypeOf("function");
+      }
+    }
+  });
+
+  it("keeps the legacy fallback read fresh on focus too", async () => {
+    mockAllResolved();
+    mocked.stateV2.mockRejectedValue(Object.assign(new Error("route missing"), {
+      status: 404,
+      code: "endpoint_not_found",
+    }));
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={() => undefined} />);
+    await flushQueries();
+
+    const legacy = queryClient.getQueryCache().find({
+      queryKey: queryKeys.hypothesisFirstChainState("team-1", "Q-01"),
+    });
+    expect(legacy).not.toBeNull();
+    expect(legacy?.options.refetchOnWindowFocus).toBe("always");
+    expect(legacy?.options.refetchOnReconnect).toBe("always");
+  });
+
   it("fails closed when a question-keyed chain payload belongs to another question", async () => {
     mockAllResolved();
     mocked.stateV2.mockResolvedValue({ ...stateV2Payload(), questionId: "Q-02" });
@@ -515,6 +578,32 @@ describe("useHypothesisFirstChain", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("hypothesis-first round budget display contract", () => {
+  function v2WithRoundBudget(roundBudget: number): Pick<HypothesisFirstStateV2, "convergence"> {
+    return { convergence: { ...stateV2Payload().convergence, roundBudget } };
+  }
+
+  it("prefers the canonical V2 convergence budget over the V1 projection", () => {
+    expect(resolveHypothesisFirstRoundBudget({
+      stateV2: v2WithRoundBudget(4),
+      chainState: { roundBudget: 3 },
+    })).toBe(4);
+  });
+
+  it("falls back to the V1 chain-state budget when no V2 snapshot exists", () => {
+    expect(resolveHypothesisFirstRoundBudget({
+      stateV2: null,
+      chainState: { roundBudget: 2 },
+    })).toBe(2);
+  });
+
+  it("defaults to the backend DEFAULT_ROUND_BUDGET when neither source has a value", () => {
+    expect(HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET).toBe(3);
+    expect(resolveHypothesisFirstRoundBudget({ stateV2: null, chainState: null })).toBe(3);
+    expect(resolveHypothesisFirstRoundBudget({})).toBe(3);
   });
 });
 

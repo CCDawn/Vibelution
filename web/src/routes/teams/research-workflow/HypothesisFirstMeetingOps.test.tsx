@@ -461,6 +461,57 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect(mockedReopenReview).not.toHaveBeenCalled();
   });
 
+  it("executes the canonical summary retry for the selected failed candidate", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: {
+        ...meetingRound("summarizing"),
+        meetingType: "hypothesis_review",
+        summaryError: "Service temporarily unavailable",
+      },
+    });
+    const canonicalAction = {
+      kind: "command" as const,
+      actionId: "regenerate-summary:meeting-1",
+      label: "重试生成纪要",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "review" as const,
+      targetNodeId: "hf_review",
+      command: "regenerate_summary" as const,
+      payload: { meetingRoundId: "meeting-1" },
+      inputSchemaRef: null,
+      idempotencyKey: "hf2:regenerate-summary:meeting-1",
+      expectedStateVersion: "hf2-action:origin:current",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+
+    render({
+      ...AUTO_ACTION,
+      stage: "blocked",
+      stateSource: "v2_canonical",
+      command: "retry_draft_summary",
+      commandLabel: "重试生成纪要",
+      meetingRoundId: "meeting-1",
+      canonicalAction,
+      canonicalActions: [canonicalAction],
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重试生成纪要"));
+      const retry = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("重试生成纪要"));
+      expect((retry as HTMLButtonElement).disabled).toBe(false);
+      retry?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", canonicalAction);
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+  });
+
   it("restarts a candidate discussion when every speaker failed", async () => {
     mockedFetchMeetingRound.mockResolvedValue({
       schemaVersion: 1,
