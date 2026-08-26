@@ -1234,6 +1234,15 @@ describe("HypothesisFirstNodeInspector", () => {
       requiresConfirmation: true,
       confirmationText: "停止后需要重新确认正式运行状态。",
     };
+    const archive = {
+      ...reconcile,
+      actionId: "formal:archive",
+      label: "归档正式运行",
+      command: "archive_run" as const,
+      payload: { runId: "formal-run-1" },
+      requiresConfirmation: true,
+      confirmationText: "归档后可重新创建正式运行。",
+    };
     mockedChain.mockReturnValue(chainData({
       stateV2: {
         currentPhase: "formal_runtime",
@@ -1253,7 +1262,7 @@ describe("HypothesisFirstNodeInspector", () => {
           childRunIds: [],
           currentNodeIds: ["protocol_design"],
         },
-        allowedActions: [reconcile, stop],
+        allowedActions: [reconcile, stop, archive],
         problems: [],
       } as HypothesisFirstStateV2,
     }));
@@ -1273,22 +1282,23 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(actionList).toBeTruthy();
     expect(actionList?.textContent).toContain("核对正式运行状态");
     expect(actionList?.textContent).toContain("停止正式运行");
+    expect(actionList?.textContent).toContain("归档正式运行");
     expect(container.textContent).toContain("状态待确认");
 
-    const stopButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("停止正式运行"));
+    const archiveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("归档正式运行"));
     await act(async () => {
-      stopButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      archiveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(mockedExecuteCommand).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("停止后需要重新确认正式运行状态。");
+    expect(document.body.textContent).toContain("归档后可重新创建正式运行。");
 
     const confirmButton = Array.from(document.body.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("确认执行"));
     await act(async () => {
       confirmButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", stop);
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", archive);
   });
 
   it("renders every formal delivery problem instead of only the first message", () => {

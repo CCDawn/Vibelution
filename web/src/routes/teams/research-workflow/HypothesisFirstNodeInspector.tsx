@@ -1158,7 +1158,7 @@ function CanonicalCommandButton(props: {
           }}
           title={props.action.label}
           description={props.action.confirmationText || canonicalCommandConfirmationText(props.action.command, props.lang)}
-          tone={props.action.command === "stop_discussion" ? "danger" : "neutral"}
+          tone={["stop_discussion", "archive_run"].includes(props.action.command) ? "danger" : "neutral"}
           confirmLabel={props.lang === "zh" ? "确认执行" : "Confirm action"}
           cancelLabel={props.lang === "zh" ? "取消" : "Cancel"}
           confirmPending={mutation.isPending}
@@ -1177,6 +1177,7 @@ function canonicalCommandConfirmationText(command: CommandAction["command"], lan
   if (lang === "en") {
     switch (command) {
       case "stop_discussion": return "This closes the current discussion. You may need to review the resulting state before continuing.";
+      case "archive_run": return "This archives the terminal formal run so a replacement run can be created.";
       case "reconcile_formal_run": return "This will reconcile the formal run against the durable workflow state.";
       case "create_formal_revision": return "This will create a new formal revision from the current delivery result.";
       default: return "Review the current workflow state before executing this action.";
@@ -1184,6 +1185,7 @@ function canonicalCommandConfirmationText(command: CommandAction["command"], lan
   }
   switch (command) {
     case "stop_discussion": return "这会关闭当前讨论，继续流程前可能需要重新确认结果。";
+    case "archive_run": return "这会归档当前终态正式运行，随后可重新创建正式运行。";
     case "reconcile_formal_run": return "这会根据持久化工作流状态核对正式运行。";
     case "create_formal_revision": return "这会基于当前交付结果创建新的正式修订。";
     default: return "请先确认当前工作流状态，再执行此操作。";
