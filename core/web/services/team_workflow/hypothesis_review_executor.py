@@ -5,7 +5,8 @@ candidate hypotheses + evidence refs) into the content of a closable
 ``HypothesisRound``:
 
 1. **Reflection** — every candidate is scored independently on the five
-   fixed review dimensions; owning role ``research_evidence_reviewer``.
+   decision dimensions; the two auxiliary diagnostics remain separate; owning
+   role ``research_evidence_reviewer``.
 2. **Pairwise debate** — every unordered candidate pair is compared once; the
    left/right presentation order is randomized from a recorded seed to
    mitigate position bias, and the persisted comparison fields record the
@@ -16,11 +17,12 @@ candidate hypotheses + evidence refs) into the content of a closable
 4. **MetaReview** — one recommendation with rationale, risk notes, and an
    acceptance flag; owning role is the meeting Coordinator.
 
-DEV fixtures are deterministic (seeded from the review context id); inject
-``reflection_runner`` / ``pairwise_runner`` / ``pareto_runner`` /
-``metareview_runner`` to delegate a step to a real role later.  Every step
-fails closed: a missing dimension, an invalid or missing comparison, an
-unclassified candidate, or a missing recommendation raises
+DEV fixtures are deterministic (seeded from the review context id).  The
+explicit ``DEV`` / ``FORMAL`` execution fence keeps those fixtures out of
+formal review: FORMAL requires all four real runners and currently remains
+blocked until the provider-bound model invocation receipt wiring is available.
+Every step fails closed: a missing dimension, an invalid or missing
+comparison, an unclassified candidate, or a missing recommendation raises
 ``ContractValidationError`` before anything is persisted.
 """
 
@@ -31,12 +33,16 @@ import json
 import random
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from enum import Enum
 from typing import Any
 
 from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
     SCORE_DIMENSIONS,
     ContractValidationError,
+)
+from core.research.workflow.contracts.hypothesis_quality import (
+    normalize_hypothesis_scores,
 )
 
 REFLECTION_ROLE = "research_evidence_reviewer"
@@ -45,6 +51,59 @@ PARETO_ROLE = "research_theme_synthesizer"
 METAREVIEW_ROLE = "coordinator"
 
 SCHEMA_VERSION = 1
+
+
+class HypothesisReviewExecutionMode(str, Enum):
+    """Execution fence for deterministic development vs formal review output."""
+
+    DEV = "dev"
+    FORMAL = "formal"
+
+
+def normalize_execution_mode(value: Any) -> HypothesisReviewExecutionMode:
+    """Normalize the explicit review mode and reject unknown values."""
+
+    raw = value.value if isinstance(value, HypothesisReviewExecutionMode) else str(value or "")
+    normalized = raw.strip().lower() or HypothesisReviewExecutionMode.DEV.value
+    try:
+        return HypothesisReviewExecutionMode(normalized)
+    except ValueError as exc:
+        raise ContractValidationError(
+            "hypothesis review execution mode must be one of: dev, formal; "
+            f"got {normalized or '<empty>'}"
+        ) from exc
+
+
+def _require_formal_prerequisites(
+    *,
+    reflection_runner: ReflectionRunner | None,
+    pairwise_runner: PairwiseRunner | None,
+    pareto_runner: ParetoRunner | None,
+    metareview_runner: MetaReviewRunner | None,
+) -> None:
+    """Keep FORMAL out of the DEV fixture path until provider wiring is complete."""
+
+    runners = {
+        "reflection": reflection_runner,
+        "pairwise": pairwise_runner,
+        "pareto": pareto_runner,
+        "metareview": metareview_runner,
+    }
+    missing = [name for name, runner in runners.items() if not callable(runner)]
+    if missing:
+        raise ContractValidationError(
+            "FORMAL hypothesis review requires all four real runners; missing: "
+            + ", ".join(missing)
+        )
+    # The current review runner adapter calls invoke_llm(), whose compatibility
+    # response deliberately does not expose TurnOutcome.model_invocation_receipt.
+    # Do not accept a runner-provided receipt-shaped field as a second authority.
+    # A later chain slice must bind invoke_llm_outcome() to the existing provider
+    # receipt registry before this fence can be opened.
+    raise ContractValidationError(
+        "FORMAL hypothesis review requires provider-bound model invocation receipt "
+        "authority; receipt wiring is not available at the executor boundary"
+    )
 
 ReflectionRunner = Callable[[dict[str, Any], dict[str, Any]], Mapping[str, Any] | None]
 PairwiseRunner = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], Mapping[str, Any] | None]
@@ -159,17 +218,31 @@ def _reflection_step(
             raise ContractValidationError(
                 f"reflection candidate {candidate_id} requires differenceFromAlternatives"
             )
-        scores = merged.get("scores")
-        if not isinstance(scores, Mapping):
+        raw_scores = merged.get("scores")
+        if not isinstance(raw_scores, Mapping):
             raise ContractValidationError(
                 f"reflection result for {candidate_id} is missing scores"
             )
-        missing = [dimension for dimension in SCORE_DIMENSIONS if dimension not in scores]
+        raw_diagnostics = merged.get("diagnostics")
+        if raw_diagnostics is not None and not isinstance(raw_diagnostics, Mapping):
+            raise ContractValidationError(
+                f"reflection diagnostics for {candidate_id} must be an object"
+            )
+        missing = [dimension for dimension in SCORE_DIMENSIONS if dimension not in raw_scores]
         if missing:
             raise ContractValidationError(
                 f"reflection result for {candidate_id} is missing review dimensions: "
                 + ", ".join(missing)
             )
+        try:
+            scores, diagnostics = normalize_hypothesis_scores(
+                raw_scores,
+                raw_diagnostics=raw_diagnostics,
+            )
+        except ContractValidationError as exc:
+            raise ContractValidationError(
+                f"reflection result for {candidate_id} has invalid scores: {exc}"
+            ) from exc
         reviewed_item = {
             "candidateId": candidate_id,
             "claim": str(merged.get("claim") or "").strip(),
@@ -180,10 +253,12 @@ def _reflection_step(
             "lineageRefs": [
                 str(item) for item in list(merged.get("lineageRefs") or [])
             ],
-            "scores": {dimension: scores[dimension] for dimension in SCORE_DIMENSIONS},
+            "scores": scores,
             "reviewedBy": str(merged.get("reviewedBy") or "").strip() or agent_id,
             "status": str(merged.get("status") or "").strip() or "reviewed",
         }
+        if diagnostics:
+            reviewed_item["diagnostics"] = diagnostics
         if has_explicit_dimension_reviews:
             reviewed_item["dimensionReviews"] = deepcopy(list(explicit_dimension_reviews))
         reviewed.append(reviewed_item)
@@ -287,7 +362,7 @@ def _pairwise_step(
 
 
 def _fixture_pareto(scores_by_candidate: Mapping[str, Mapping[str, float]]) -> tuple[list[str], list[str]]:
-    """Dominance over the seven dimensions; the front is the non-dominated set."""
+    """Dominance over the five decision dimensions; the front is non-dominated."""
 
     ids = list(scores_by_candidate)
 
@@ -439,6 +514,7 @@ def execute_hypothesis_review(
     context: Mapping[str, Any],
     *,
     round_id: str = "",
+    execution_mode: str | HypothesisReviewExecutionMode | None = None,
     reflection_runner: ReflectionRunner | None = None,
     pairwise_runner: PairwiseRunner | None = None,
     pareto_runner: ParetoRunner | None = None,
@@ -448,6 +524,11 @@ def execute_hypothesis_review(
 ) -> dict[str, Any]:
     """Run the four separated review steps over one bounded review context.
 
+    ``execution_mode`` defaults to ``DEV`` for existing fixture callers.  A
+    ``FORMAL`` request is fenced before any review step: all four real runners
+    must be present, and provider-bound receipt wiring must be available before
+    this executor can be opened for persistence.
+
     Returns the candidate scores, pairwise comparisons, Pareto analysis, and
     MetaReview ready for ``HypothesisRound`` persistence, plus the role
     attribution and the recorded pairwise position seed.  Raises
@@ -456,6 +537,14 @@ def execute_hypothesis_review(
 
     if not isinstance(context, Mapping):
         raise ContractValidationError("hypothesis review requires a review context mapping")
+    mode = normalize_execution_mode(execution_mode)
+    if mode is HypothesisReviewExecutionMode.FORMAL:
+        _require_formal_prerequisites(
+            reflection_runner=reflection_runner,
+            pairwise_runner=pairwise_runner,
+            pareto_runner=pareto_runner,
+            metareview_runner=metareview_runner,
+        )
     candidates = _context_candidates(context)
     assignments = dict(reviewer_assignments) if isinstance(reviewer_assignments, Mapping) else {}
     reflection_agent = str(assignments.get("reflection") or "").strip() or REFLECTION_ROLE
@@ -496,6 +585,7 @@ def execute_hypothesis_review(
     )
     return {
         "schemaVersion": SCHEMA_VERSION,
+        "executionMode": mode.value,
         "reviewContextId": str(context.get("contextId") or ""),
         "positionSeed": seed,
         "candidates": reviewed_candidates,

@@ -2,7 +2,8 @@
 
 Covers the batch contract: a closed ``hypothesis_review`` meeting (digest v2
 with ``sourceMessageRefs`` + decision records) feeds the four-step separated
-review — Reflection (per-candidate seven-dimension independent scoring, role
+review — Reflection (per-candidate 5+2 scoring: five decision dimensions plus
+two auxiliary diagnostics, role
 ``research_evidence_reviewer``) -> Pairwise debate (every unordered pair with
 randomized, recorded left/right order, role ``research_theme_synthesizer``)
 -> Pareto classification (role ``research_theme_synthesizer``) -> MetaReview
@@ -219,8 +220,8 @@ def test_generate_from_closed_meeting_completes_full_review_loop(tmp_path, monke
     parsed = HypothesisRound.from_dict(round_record)
     parsed.validate_complete()
 
-    # Reflection: every candidate scored independently on all seven dimensions
-    # by the evidence reviewer role.
+    # Reflection: every candidate carries the five decision scores; auxiliary
+    # diagnostics, when present, stay separate from the Pareto input.
     assert [item["candidateId"] for item in round_record["candidates"]] == list(_SELECTED_IDS)
     for candidate in round_record["candidates"]:
         assert set(candidate["scores"]) == set(SCORE_DIMENSIONS)
@@ -658,3 +659,97 @@ def test_previous_round_ref_must_resolve_to_a_closed_round(tmp_path, monkeypatch
     # The default path still resolves the latest closed round as the anchor.
     second = _generate(team_id, meeting_2_id)
     assert {"kind": "round", "id": first["round"]["roundId"]} in second["round"]["lineage"]
+
+
+def _direct_review_context() -> dict:
+    return {
+        "contextId": "ctx-hf-formal-fence",
+        "candidates": _candidate_inputs("cand-a", "cand-b"),
+    }
+
+
+def _complete_review_runners():
+    scores = {dimension: 0.7 for dimension in SCORE_DIMENSIONS}
+
+    def reflection(candidate, context):
+        return {
+            "scores": dict(scores),
+            "claim": candidate["claim"],
+            "differenceFromAlternatives": candidate["differenceFromAlternatives"],
+            "rationale": "独立评分依据",
+        }
+
+    def pairwise(left, right, context):
+        return {"outcome": "left_wins", "justification": "左侧候选领先"}
+
+    def pareto(scores_by_candidate, context):
+        ids = list(scores_by_candidate)
+        return {
+            "paretoFrontCandidateIds": ids[:1],
+            "dominatedCandidateIds": ids[1:],
+            "notes": "按五个决策维度分类",
+        }
+
+    def metareview(context, candidates, pairwise, pareto):
+        return {
+            "recommendationCandidateId": "cand-a",
+            "rationale": "位于 Pareto 前沿",
+            "riskNotes": "",
+            "accepted": True,
+        }
+
+    return {
+        "reflection_runner": reflection,
+        "pairwise_runner": pairwise,
+        "pareto_runner": pareto,
+        "metareview_runner": metareview,
+    }
+
+
+def test_review_execution_mode_rejects_unknown_values():
+    with pytest.raises(ContractValidationError, match="execution mode"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            execution_mode="canary",
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_formal_review_requires_all_real_runners_before_any_step():
+    with pytest.raises(ContractValidationError, match="FORMAL.*runner"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            execution_mode="formal",
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_formal_review_stays_blocked_without_provider_bound_receipts():
+    runners = _complete_review_runners()
+
+    with pytest.raises(ContractValidationError, match="FORMAL.*receipt"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            execution_mode="formal",
+            **runners,
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_review_runner_scores_are_bounded_before_review_artifact_is_built():
+    runners = _complete_review_runners()
+
+    def out_of_range_reflection(candidate, context):
+        result = runners["reflection_runner"](candidate, context)
+        result["scores"]["novelty"] = 1.1
+        return result
+
+    with pytest.raises(ContractValidationError, match="between 0 and 1"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            reflection_runner=out_of_range_reflection,
+            pairwise_runner=runners["pairwise_runner"],
+            pareto_runner=runners["pareto_runner"],
+            metareview_runner=runners["metareview_runner"],
+            reviewer_assignments={"metareview": "coordinator"},
+        )
