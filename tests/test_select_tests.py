@@ -13,6 +13,11 @@ FRONTEND_TYPECHECK_COMMAND = (
 )
 
 
+def test_complete_regression_commands_override_project_fail_fast() -> None:
+    assert "--maxfail=0" in select_tests.LOCAL_PARALLEL_COMMAND
+    assert "--maxfail=0" in select_tests.LOCAL_SERIAL_COMMAND
+
+
 def test_matrix_loads_with_builtin_subset_parser():
     matrix = select_tests._parse_yaml_subset(select_tests.DEFAULT_MATRIX.read_text(encoding="utf-8"))
 

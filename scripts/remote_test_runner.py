@@ -306,6 +306,7 @@ def build_parallel_pytest_command(
         "loadfile",
         "-m",
         "not serial",
+        "--maxfail=0",
     ]
 
 
@@ -332,6 +333,7 @@ def build_parallel_pytest_shell_command_from_manifest(
         "loadfile",
         "-m",
         shlex.quote("not serial"),
+        "--maxfail=0",
     ]
     return " ".join(parts)
 

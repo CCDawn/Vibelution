@@ -129,6 +129,7 @@ def test_build_parallel_pytest_command_uses_xdist_marker_and_workers():
     assert command[command.index("-n") + 1] == "16"
     assert command[command.index("--dist") + 1] == "loadfile"
     assert command[command.index("-m", 3) + 1] == "not serial"
+    assert "--maxfail=0" in command
 
 
 def test_build_parallel_pytest_shell_command_reads_targets_from_manifest():
@@ -140,6 +141,7 @@ def test_build_parallel_pytest_shell_command_reads_targets_from_manifest():
     assert "python -m pytest $(cat .remote-test/remote-targets.txt)" in command
     assert "-n 16" in command
     assert "-m 'not serial'" in command
+    assert "--maxfail=0" in command
 
 
 def test_distributed_correctness_summary_names_excluded_gates():

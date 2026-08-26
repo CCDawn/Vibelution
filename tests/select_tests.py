@@ -23,9 +23,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MATRIX = Path(__file__).with_name("test_matrix.yaml")
 MAX_SELECTED_PYTEST_WORKERS = 4
 LOCAL_PARALLEL_COMMAND = (
-    '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q'
+    '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q --maxfail=0'
 )
-LOCAL_SERIAL_COMMAND = '.\\.venv\\Scripts\\python.exe -m pytest tests/ -m serial -q'
+LOCAL_SERIAL_COMMAND = '.\\.venv\\Scripts\\python.exe -m pytest tests/ -m serial -q --maxfail=0'
 REMOTE_DISTRIBUTED_COMMAND = (
     ".\\.venv\\Scripts\\python.exe scripts/remote_test_runner.py --backend docker --distributed"
 )
