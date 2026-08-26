@@ -53,13 +53,65 @@ def test_integration_claim_conflict_preserves_prevalidated_manifest(
         tmp_path / "task",
         claim_id="claim-dev",
         agent_id="agent-test",
+        integration_wait_seconds=0,
     )
 
     assert result.status == "integration_claim_conflict"
     assert result.exit_code == 1
     assert result.merged is False
     assert result.manifest_path == str(manifest)
+    assert result.retryable is True
+    assert result.next_action == "retry_with_manifest"
     assert events == ["closeout", "verify", "acquire"]
+
+
+def test_integration_claim_wait_reuses_manifest_without_rerunning_closeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    attempts = 0
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: events.append("closeout")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(
+        gate,
+        "verify_manifest",
+        lambda *_args, **_kwargs: events.append("verify")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+
+    def acquire(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        events.append(f"acquire:{attempts}")
+        if attempts < 3:
+            raise closeout.ManagedCloseoutError("integration_claim_conflict")
+        return "claim-int"
+
+    monkeypatch.setattr(closeout, "acquire_integration_claim", acquire)
+    monkeypatch.setattr(closeout.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(closeout, "merge_ff_only", lambda *_args, **_kwargs: "head-sha")
+    monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=1,
+    )
+
+    assert result.status == "merged_clean"
+    assert events.count("closeout") == 1
+    assert attempts == 3
 
 
 def test_reserved_integration_claim_uses_bounded_validation_lease(
@@ -262,6 +314,12 @@ def test_reserved_retry_acquires_before_validation_and_releases_on_failure(
 ) -> None:
     events: list[str] = []
     monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        closeout,
+        "validate_stale_retry_token",
+        lambda *_args, **_kwargs: tmp_path / "retry-token.json",
+    )
+    monkeypatch.setattr(closeout, "consume_stale_retry_token", lambda *_args, **_kwargs: None)
 
     def acquire(*_args, **kwargs):
         assert kwargs["reserve_validation"] is True
@@ -291,6 +349,7 @@ def test_reserved_retry_acquires_before_validation_and_releases_on_failure(
         claim_id="claim-dev",
         agent_id="agent-test",
         reserve_integration=True,
+        stale_retry_token=tmp_path / "retry-token.json",
     )
 
     assert result.status == "validation_failed"
@@ -462,6 +521,8 @@ def test_cleanup_failure_preserves_merged_result(
     assert result.merge_sha == "head-sha"
     assert result.errors == ["worktree busy"]
     assert completed == ["complete"]
+    assert result.retryable is True
+    assert result.next_action == "run_cleanup_only_from_main"
 
 
 def test_existing_manifest_skips_expensive_closeout_but_is_verified_inside_lease(
@@ -507,3 +568,128 @@ def test_existing_manifest_skips_expensive_closeout_but_is_verified_inside_lease
     assert result.status == "merged_clean"
     assert result.manifest_path == str(manifest)
     assert events == ["verify", "acquire", "verify", "merge"]
+
+
+def test_stale_retry_token_is_bound_and_consumed_once(
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    ctx.main_root.mkdir()
+    ctx.task_root.mkdir()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+
+    token = closeout.issue_stale_retry_token(manifest, ctx, agent_id="agent-test")
+
+    assert closeout.validate_stale_retry_token(token, ctx, agent_id="agent-test") == token
+    closeout.consume_stale_retry_token(token)
+    with pytest.raises(closeout.ManagedCloseoutError) as caught:
+        closeout.validate_stale_retry_token(token, ctx, agent_id="agent-test")
+    assert caught.value.code == "invalid_stale_retry_token"
+
+
+def test_cleanup_moves_own_cwd_and_retries_transient_worktree_remove(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_root = tmp_path / "main"
+    task_root = main_root / ".worktrees" / "test-task"
+    ctx = closeout.CloseoutContext(
+        main_root=main_root,
+        task_root=task_root,
+        branch="codex/test-task",
+    )
+    ctx.main_root.mkdir()
+    ctx.task_root.mkdir(parents=True)
+    events: list[str] = []
+    remove_attempts = 0
+    monkeypatch.setattr(closeout, "ensure_cleanup_unowned", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gate, "git_lines", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(gate, "rev_parse", lambda root, *_args: "head-sha")
+    monkeypatch.setattr(gate, "is_ancestor", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(closeout, "_branch_exists", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(closeout, "_remove_link_or_junction", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "invocation_cwd_is_inside_task", lambda *_args: True)
+    monkeypatch.setattr(closeout.os, "chdir", lambda path: events.append(f"chdir:{path}"))
+    monkeypatch.setattr(closeout.time, "sleep", lambda _seconds: None)
+
+    def process(argv, _cwd):
+        nonlocal remove_attempts
+        if argv[:3] == ["git", "worktree", "remove"]:
+            remove_attempts += 1
+            if remove_attempts == 1:
+                return closeout.subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    stdout="",
+                    stderr="Access is denied",
+                )
+        events.append(" ".join(argv))
+        return closeout.subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate, "run_process", process)
+
+    closeout.cleanup_task_resources(ctx, agent_id="agent-test")
+
+    assert events[0] == f"chdir:{ctx.main_root}"
+    assert remove_attempts == 2
+
+
+def test_cleanup_only_never_validates_or_merges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        closeout,
+        "resolve_cleanup_context",
+        lambda *_args, **_kwargs: context(tmp_path),
+    )
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: pytest.fail("cleanup-only must not validate"),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: pytest.fail("cleanup-only must not merge"),
+    )
+
+    result = closeout.run_cleanup_only(
+        tmp_path / "task",
+        branch="codex/test-task",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0
+
+
+def test_cli_refuses_managed_closeout_from_task_worktree_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(closeout, "invocation_cwd_is_inside_task", lambda *_args: True)
+    monkeypatch.setattr(
+        closeout,
+        "run_managed_closeout",
+        lambda *_args, **_kwargs: pytest.fail("must fail before managed closeout"),
+    )
+
+    exit_code = closeout.main(
+        [
+            "--task-worktree",
+            str(tmp_path / "task"),
+            "--claim-id",
+            "claim-test",
+            "--agent-id",
+            "agent-test",
+        ]
+    )
+    payload = closeout.json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["next_action"] == "rerun_from_main"
