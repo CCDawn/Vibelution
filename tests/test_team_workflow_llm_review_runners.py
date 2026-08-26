@@ -31,6 +31,7 @@ from core.web.services.team_workflow.hypothesis_review_executor import (
 )
 from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
 
+_RESOLVE_REVIEW_LLM_UNDER_TEST = llm_review_runners.resolve_review_llm
 _FAKE_LLM = {"client": object(), "profileId": "primary", "modelId": "fake-review-model"}
 _FORMAL_FAKE_LLM = {
     **_FAKE_LLM,
@@ -67,6 +68,60 @@ def _install_fake_llm(monkeypatch, payloads: list[str]):
 
 def test_resolve_review_llm_is_pinned_to_none_in_tests():
     assert llm_review_runners.resolve_review_llm() is None
+
+
+def test_review_llm_uses_challenge_cup_team_model_instead_of_operator_primary(
+    monkeypatch,
+):
+    runtime_config = object()
+    captured: dict[str, object] = {}
+
+    class _Provider:
+        provider_id = "team-provider"
+        api_key = "configured"
+        api_key_env = ""
+        requires_api_key = True
+
+    class _Profile:
+        model = "team-model"
+
+    class _Client:
+        provider = _Provider()
+        profile = _Profile()
+
+    def fake_config_for_agent_llm_model(config, **kwargs):
+        captured["baseConfig"] = config
+        captured.update(kwargs)
+        return runtime_config
+
+    def fake_get_llm_client(*, profile_id, config):
+        captured["clientProfileId"] = profile_id
+        captured["clientConfig"] = config
+        return _Client()
+
+    base_config = object()
+    monkeypatch.setattr(llm_review_runners, "get_config", lambda: base_config)
+    monkeypatch.setattr(
+        llm_review_runners,
+        "config_for_agent_llm_model",
+        fake_config_for_agent_llm_model,
+    )
+    monkeypatch.setattr(llm_review_runners, "get_llm_client", fake_get_llm_client)
+
+    resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert captured == {
+        "baseConfig": base_config,
+        "model_id": llm_review_runners.CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
+        "runtime_profile_id": "primary",
+        "slot": "dialogue",
+        "clientProfileId": "primary",
+        "clientConfig": runtime_config,
+    }
+    assert resolved is not None
+    assert resolved["providerId"] == "team-provider"
+    assert resolved["modelId"] == "team-model"
+    assert resolved["modelRef"] == "team-provider/team-model"
 
 
 def test_builders_return_none_without_a_model():

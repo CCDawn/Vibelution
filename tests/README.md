@@ -189,7 +189,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 ### 3.5 使用影响面测试选择器
 
-`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，会把包含至少两个显式测试文件且尚未配置 xdist 的 pytest 命令改写为最多 4-worker 的 `loadfile` 并行执行，单文件、非 pytest 命令和已有 xdist 参数保持不变。
+`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，以及多个未被矩阵认领且未标记 `serial` 的 changed test files，会输出最多 4-worker 的 `loadfile` 并行命令；显式 `serial` 文件拆到独立串行命令。单文件、非 pytest 命令和已有 xdist 参数保持不变。
 
 选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。未映射的 Python 产品文件会用标准库 AST 沿产品 import 的反向路径寻找最近的“测试直接 import”边界；每条路径到达该边界即停止，因此不会膨胀为完整反向闭包。动态 import 或没有静态链路时仍输出 coverage gap，不把 smoke 当覆盖。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。选择器输出的 Vitest 命令从仓库根执行并固定追加 `--root web`，TypeScript 则固定为 `node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false`，因此不会误扫 `.worktrees` 或 `.runtime`。
 
@@ -219,6 +219,10 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 - `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
 - `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，在精确 HEAD 上独立执行一次完整 selector 计划，绑定 claim、本地 `main` SHA、HEAD SHA、命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。实现文件有变更时，它会先加载 `scripts/reuse_research_evidence.py record` 生成的任务证据，将 registry 自动解析的候选 URL、路径、固定 HEAD SHA、许可证和裁决快照写入 manifest；closeout 当前不复用或缓存早期迭代结果。
 - `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、复用研究快照与固定候选 commit、allowlisted command 结果和 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
+
+日常收口首选单一入口 `scripts/task_closeout.py --task-worktree <path> --claim-id <id> --agent-id <id>`：它先在不持有全局 integration claim 的情况下执行一次完整 selector 计划，通过后才短时获取 `integration/main`，在锁内再次复核 manifest 并 fast-forward merge。不要先手动跑一遍 `closeout`，再无参调用 managed closeout；如果已经手动生成 manifest，必须追加 `--manifest <path>`，此时只复核精确绑定当前 HEAD/main/claim 的证据，不重复测试。若锁外验证已因 `main` 前进返回 `stale_main`，先同步最新 `main`，再用一次 `--reserve-integration` 重试；该防饿死路径会在验证期间持有 15 分钟租约，不能作为首轮默认。
+
+同一 HEAD、同一命令且相关源码、测试、配置和依赖未变化时，开发期复用已有通过结果。HEAD、命令、输入或本地 `main` 基线变化后必须重新验证；普通 pytest 输出和 Agent 文本报告不能替代 manifest。
 
 首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。CI/`workflow_dispatch` 按需使用，不是默认日常本地闭环；remote push 也不是默认本地闭环的一部分。
 

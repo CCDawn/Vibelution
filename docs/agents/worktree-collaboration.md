@@ -64,9 +64,11 @@ Inside its own worktree, an Agent should:
 - check `git status --short --branch` before staging;
 - stage only files that belong to the current task;
 - run the narrowest useful validation;
+- reuse a passed result when HEAD, command, and all relevant inputs are unchanged; do not rerun the final selector plan before managed closeout;
 - commit locally;
 - self-review the current-task diff and merge readiness without waiting for the user to request review;
 - merge its own task branch into local `main` when the local merge gates pass, then immediately close its claim and clean only its task-owned resources without waiting for post-merge validation; waiting for the user to request merge is not done;
+- prefer `scripts/task_closeout.py` as the single final entry. If a valid manifest already exists, pass `--manifest`; never run manual closeout and then invoke managed closeout without that manifest.
 - hand off to the main integration session only for large conflicts, cross-lane conflicts, hot-file/active-claim conflicts, release-sensitive work, unclear semantic conflicts, or explicit user-designated integration;
 - never push to GitHub unless the user explicitly authorizes remote sync or publication;
 - report the worktree path, branch, local commit SHA, changed files, pre-merge validation result, Launcher refresh need, project-memory update proposal, whether it self-merged, and the resulting cleanup or exact `cleanup pending` residue.
@@ -80,6 +82,7 @@ The session currently closing work into `main` should:
 - refuse to merge any claim that is not in `ready_for_merge` unless it is doing an explicit mainline repair or user-designated integration pass;
 - abort and restore `main` immediately if a blocked branch is accidentally merged and produces conflicts;
 - merge one task branch at a time;
+- hold the global `integration/main` claim only for final manifest verification and the fast-forward merge, never while expensive validation commands run;
 - confirm each fast-forward merge succeeded and the target contains the merged task tip, then immediately clean that task's local resources;
 - handle semantic conflicts instead of letting Agents resolve them blindly;
 - keep successful merges on local `main`; do not push `main` after merge-result inspection unless the user explicitly asks to sync GitHub or publish;

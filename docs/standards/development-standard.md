@@ -543,6 +543,8 @@ Choose the lowest test layer that proves behavior:
 
 Use existing test guidance in `tests/README.md`.
 
+Passed validation is reusable only while task HEAD, command, and every relevant source/test/config/dependency input remain unchanged. During implementation, run the narrowest feedback test needed for the current change; do not repeatedly execute the full selector plan. The final selector plan runs once through managed closeout. A failed test may be rerun after its affected inputs change; a changed HEAD or local `main` baseline invalidates the corresponding closeout evidence.
+
 Common commands:
 
 ```powershell
@@ -659,7 +661,7 @@ After implementation and validation in a task worktree, the owning Agent should 
 
 - the claim belongs to the current Agent/session and covers the changed files;
 - the task branch is committed and contains only current-task changes;
-- `local_quality_gate.py closeout` passed in the task worktree, and `verify-manifest` still confirms branch/worktree/HEAD/changed files, an active covering claim, clean state, checks/commands, and that the recorded local `main` SHA is still current and an ancestor of task HEAD;
+- managed closeout produced one passed `local_quality_gate.py closeout` manifest, or reused an explicitly supplied `--manifest`; `verify-manifest` still confirms branch/worktree/HEAD/changed files, an active covering claim, clean state, checks/commands, and that the recorded local `main` SHA is still current and an ancestor of task HEAD;
 - selector-selected validation and merge preflight passed;
 - root local `main` is clean and has not moved since the manifest was created;
 - the task branch can enter local `main` with `git merge --ff-only <task-branch>`;
@@ -667,7 +669,7 @@ After implementation and validation in a task worktree, the owning Agent should 
 - the user did not ask to stop before merge, keep work isolated, or hand off only;
 - any post-merge remote sync uses the remote sync gate in section 14.
 
-When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`. All review, testing, quality gates, mergeability checks, and acceptance evidence must already be complete before this command. A successful fast-forward merge immediately triggers bounded task cleanup: remove only provably task-owned temporary content and background processes/listeners, close only that task's claim, and remove only that task's junction (when present), clean worktree, and merged local branch. Do not run or wait for post-merge validation before cleanup. The gate supplies pre-merge evidence but does not execute merge, release, or cleanup.
+When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`. Prefer `scripts/task_closeout.py` as the single final entry: it runs expensive validation before acquiring `integration/main`, then holds that global claim only for a second manifest verification and the fast-forward merge. If manual closeout already produced a manifest, pass it with `--manifest` so managed closeout does not rerun the selector plan. If that lock-free attempt returns `stale_main`, sync the latest local `main` and use `--reserve-integration` for one starvation-prevention retry; this bounded fallback holds a 15-minute integration lease during validation and must not become the first-attempt default. A successful fast-forward merge immediately triggers bounded task cleanup: remove only provably task-owned temporary content and background processes/listeners, close only that task's claim, and remove only that task's junction (when present), clean worktree, and merged local branch. Do not run or wait for post-merge validation before cleanup.
 
 Direct development on `main` is a policy violation even when the change is small or reversible. If `main` becomes dirty outside an active merge, stop and identify the owner; do not continue editing, commit directly, or bypass the pre-commit guard. Move the change into a task worktree, then return to `main` only for the serialized fast-forward merge.
 
@@ -749,7 +751,7 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. Waiting for the user to request review or merge is not done. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete all review, validation, staged-path light gates, claim-bound `closeout`, and acceptance evidence; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. Waiting for the user to request review or merge is not done. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete review, narrow feedback validation, staged-path light gates and acceptance evidence; call managed closeout once so it creates or explicitly reuses the claim-bound manifest outside the global integration claim; acquire `integration/main` only for final re-verification and `git merge --ff-only`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
