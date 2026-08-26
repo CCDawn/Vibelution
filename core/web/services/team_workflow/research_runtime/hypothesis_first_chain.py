@@ -47,6 +47,7 @@ COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"
 GENERATION_ATTEMPT_KIND = "generation_attempt"
+REVIEW_DISPATCH_ATTEMPT_KIND = "review_dispatch_attempt"
 HUMAN_ADJUDICATION_KIND = "human_adjudication"
 QUESTION_RESET_AUDIT_KIND = "question_reset_audit"
 SELECTION_COMMAND_OUTCOME_KIND = "selection_command_outcome"
@@ -1868,6 +1869,163 @@ def _review_round_links(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(latest.values(), key=lambda item: int(item.get("roundIndex") or 0))
 
 
+def _review_dispatch_attempts(
+    records: list[dict[str, Any]],
+    *,
+    selection_id: str = "",
+    round_index: int | None = None,
+) -> list[dict[str, Any]]:
+    """Latest durable per-candidate review-dispatch attempt state, per attempt id."""
+    normalized_selection_id = str(selection_id or "").strip()
+    latest: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if str(record.get("recordKind") or "") != REVIEW_DISPATCH_ATTEMPT_KIND:
+            continue
+        if (
+            normalized_selection_id
+            and str(record.get("selectionId") or "").strip() != normalized_selection_id
+        ):
+            continue
+        if (
+            round_index is not None
+            and int(record.get("roundIndex") or 0) != int(round_index)
+        ):
+            continue
+        attempt_id = str(record.get("attemptId") or "").strip()
+        if attempt_id:
+            latest[attempt_id] = record
+    return sorted(
+        latest.values(),
+        key=lambda item: (
+            int(item.get("attemptNumber") or 0),
+            str(item.get("updatedAt") or item.get("createdAt") or ""),
+        ),
+    )
+
+
+def _latest_review_dispatch_attempt(
+    records: list[dict[str, Any]],
+    *,
+    selection_id: str,
+    candidate_id: str,
+    round_index: int,
+) -> dict[str, Any] | None:
+    """Newest attempt for one (selection, candidate, round) dispatch identity."""
+    matched = [
+        item
+        for item in _review_dispatch_attempts(
+            records, selection_id=selection_id, round_index=round_index
+        )
+        if str(item.get("candidateId") or "").strip() == str(candidate_id or "").strip()
+    ]
+    return matched[-1] if matched else None
+
+
+def _append_review_dispatch_attempt_state(
+    team_id: str,
+    *,
+    question_id: str,
+    selection_id: str,
+    selection_version: str,
+    candidate_id: str,
+    round_index: int,
+    lifecycle: str,
+    outcome: str = "none",
+    meeting_round_id: str = "",
+    error: str = "",
+    error_type: str = "",
+) -> dict[str, Any]:
+    """Append one durable per-candidate review-dispatch attempt transition.
+
+    ``lifecycle="queued"`` opens (or reuses) the current attempt before any
+    meeting side effect: an existing non-failed attempt is reused so selection
+    replays never stack duplicate attempts, while a latest failed attempt bumps
+    the attempt number so retries supersede it in projection instead of
+    rewriting history. Terminal transitions update the same attempt id.
+    """
+    now = _utc_now()
+    with _LOCK:
+        records = _read_jsonl(_storage_path(team_id))
+        current = _latest_review_dispatch_attempt(
+            records,
+            selection_id=selection_id,
+            candidate_id=candidate_id,
+            round_index=round_index,
+        )
+        if lifecycle == "queued":
+            if current is not None and str(current.get("lifecycle") or "") != "failed":
+                return current
+            attempt_number = int(current.get("attemptNumber") or 0) + 1 if current else 1
+        else:
+            if current is None:
+                return {}
+            attempt_number = int(current.get("attemptNumber") or 1)
+        attempt_id = (
+            "hf-rda-"
+            + _stable_hash(
+                {
+                    "selectionId": selection_id,
+                    "candidateId": candidate_id,
+                    "roundIndex": round_index,
+                    "attemptNumber": attempt_number,
+                }
+            )[:16]
+        )
+        previous = next(
+            (
+                item
+                for item in reversed(records)
+                if item.get("recordKind") == REVIEW_DISPATCH_ATTEMPT_KIND
+                and str(item.get("attemptId") or "") == attempt_id
+            ),
+            {},
+        )
+        record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "recordKind": REVIEW_DISPATCH_ATTEMPT_KIND,
+            "attemptId": attempt_id,
+            "attemptNumber": attempt_number,
+            "idempotencyKey": (
+                f"hf2:review-dispatch:{team_id}:{selection_id}:"
+                f"{candidate_id}:r{round_index}:{attempt_number}"
+            ),
+            "questionId": question_id,
+            "selectionId": selection_id,
+            "selectionVersion": str(selection_version or "").strip(),
+            "candidateId": candidate_id,
+            "roundIndex": int(round_index),
+            "lifecycle": lifecycle,
+            "outcome": outcome,
+            "meetingRoundId": str(meeting_round_id or "")
+            or str(previous.get("meetingRoundId") or ""),
+            "error": str(error or ""),
+            "errorType": str(error_type or ""),
+            "createdAt": str(previous.get("createdAt") or "") or now,
+            "updatedAt": now,
+        }
+        _append_jsonl(_storage_path(team_id), record)
+    return record
+
+
+def list_review_dispatch_attempts(
+    team_id: str, *, selection_id: str = "", round_index: int | None = None
+) -> dict[str, Any]:
+    """List durable review-dispatch attempts, latest state per attempt."""
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    attempts = _review_dispatch_attempts(
+        _records(normalized_team_id), selection_id=selection_id, round_index=round_index
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "selectionId": str(selection_id or "").strip(),
+        "attemptCount": len(attempts),
+        "attempts": attempts,
+    }
+
+
 def _generation_attempts(
     records: list[dict[str, Any]], question_id: str = ""
 ) -> list[dict[str, Any]]:
@@ -2252,6 +2410,20 @@ def open_review_meeting_for_selection(
             selected_candidate_ids,
             receipt_authority=receipt_authority,
         )
+        # Fan-out intents are queued on disk before any meeting side effect
+        # (same contract as generation attempts): a crash mid-fan-out still
+        # explains, per candidate, that dispatch was attempted. Replays reuse
+        # the existing attempt instead of stacking duplicates.
+        for candidate_id in selected_candidate_ids:
+            _append_review_dispatch_attempt_state(
+                normalized_team_id,
+                question_id=question_id,
+                selection_id=selection_id,
+                selection_version=selection_version,
+                candidate_id=candidate_id,
+                round_index=normalized_round_index,
+                lifecycle="queued",
+            )
         opened_candidates: list[dict[str, Any]] = []
         for candidate_order, candidate_id in enumerate(selected_candidate_ids):
             candidate_meeting_id = (
@@ -2286,8 +2458,8 @@ def open_review_meeting_for_selection(
                         "researchProjectId": discussion_scope.researchProjectId,
                     }
                 )
-            opened_candidates.append(
-                open_review_meeting_for_selection(
+            try:
+                opened_candidate = open_review_meeting_for_selection(
                     normalized_team_id,
                     candidate_selection,
                     agent_runner=agent_runner,
@@ -2302,7 +2474,31 @@ def open_review_meeting_for_selection(
                     _formal_candidate_id=candidate_id,
                     _formal_candidate_order=candidate_order,
                 )
+            except Exception as exc:  # noqa: BLE001 - attempt fact stays durable
+                _append_review_dispatch_attempt_state(
+                    normalized_team_id,
+                    question_id=question_id,
+                    selection_id=selection_id,
+                    selection_version=selection_version,
+                    candidate_id=candidate_id,
+                    round_index=normalized_round_index,
+                    lifecycle="failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                raise
+            _append_review_dispatch_attempt_state(
+                normalized_team_id,
+                question_id=question_id,
+                selection_id=selection_id,
+                selection_version=selection_version,
+                candidate_id=candidate_id,
+                round_index=normalized_round_index,
+                lifecycle="completed",
+                outcome="succeeded",
+                meeting_round_id=candidate_meeting_id,
             )
+            opened_candidates.append(opened_candidate)
         discussion_drivers: list[dict[str, Any]] = []
         if background and agent_runner is None:
             for opened in opened_candidates:

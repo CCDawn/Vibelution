@@ -300,8 +300,10 @@ def _auto_open_review_meeting(
 
     The selection is already persisted (append-only fact), so a meeting
     failure is reported structurally instead of rolling the selection back.
-    Replays reuse the already-opened meeting through the chain's deterministic
-    meeting id, which also self-heals a previously failed auto-open.
+    The chain additionally records a durable ``review_dispatch_attempt`` per
+    candidate (queued before any side effect, terminal after), so a failed
+    fan-out stays explainable after refresh; replays self-heal through the
+    chain's deterministic meeting id.
     """
     try:
         from core.web.services.team_workflow.research_runtime import (

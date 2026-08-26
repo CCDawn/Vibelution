@@ -25,6 +25,7 @@ from . import hypothesis_first_chain
 _QUESTION_ID_PATTERN = re.compile(r"^SCI-\d{3}$")
 _CANDIDATE_KIND = "hypothesis_candidate"
 _REVIEW_LINK_KIND = "review_round_link"
+_REVIEW_DISPATCH_ATTEMPT_KIND = "review_dispatch_attempt"
 _COLLECTION_REQUEST_KIND = "collection_request"
 _HUMAN_ADJUDICATION_KIND = "human_adjudication"
 _RESET_AUDIT_KIND = "question_reset_audit"
@@ -555,6 +556,22 @@ def _meeting_phase(meeting: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
     return _phase("not_started", "none", "blocked", updated_at=updated_at, problems=[problem]), status
 
 
+def _dispatch_attempt_view(attempt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Shape one durable review-dispatch attempt as the wire ``WorkflowAttempt``."""
+    if not str(attempt.get("attemptId") or "").strip():
+        return None
+    return {
+        "attemptId": str(attempt.get("attemptId") or ""),
+        "number": int(attempt.get("attemptNumber") or 1),
+        "lifecycle": str(attempt.get("lifecycle") or "queued"),
+        "queuedAt": str(attempt.get("createdAt") or "").strip() or None,
+        "startedAt": None,
+        "heartbeatAt": None,
+        "finishedAt": str(attempt.get("updatedAt") or "").strip() or None,
+        "supersedesAttemptId": None,
+    }
+
+
 def _review_candidate(
     *,
     question_id: str,
@@ -565,8 +582,92 @@ def _review_candidate(
     link: Mapping[str, Any] | None,
     meeting: Mapping[str, Any] | None,
     return_to: str,
+    dispatch_attempt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not link or not meeting:
+        attempt_lifecycle = str((dispatch_attempt or {}).get("lifecycle") or "").strip()
+        if attempt_lifecycle in {"queued", "running"}:
+            # Dispatch intent is durable but the meeting side effect has not
+            # landed yet (in flight, or interrupted mid-fan-out).
+            in_flight = _phase(
+                "queued",
+                "none",
+                "waiting_system",
+                updated_at=_timestamp(dispatch_attempt or {}),
+                attempt=_dispatch_attempt_view(dispatch_attempt or {}),
+            )
+            return {
+                **in_flight,
+                "candidateId": candidate_id,
+                "candidateOrder": candidate_order,
+                "selectionId": selection_id,
+                "roundIndex": round_index,
+                "meetingRoundId": None,
+                "discussionAnchor": None,
+                "discussion": in_flight,
+                "summarization": _phase(),
+                "approval": _phase(),
+            }
+        if attempt_lifecycle == "failed":
+            error = str((dispatch_attempt or {}).get("error") or "").strip()
+            problem = _problem(
+                "review_dispatch_failed",
+                error or "候选评审会议分发失败",
+                category="execution",
+                source_kind="review_dispatch_attempt",
+                source_id=str((dispatch_attempt or {}).get("attemptId") or "") or None,
+                detected_at=_timestamp(dispatch_attempt or {}) or _EPOCH,
+            )
+            failed = _phase(
+                "failed",
+                "none",
+                "available",
+                updated_at=_timestamp(dispatch_attempt or {}),
+                problems=[problem],
+                attempt=_dispatch_attempt_view(dispatch_attempt or {}),
+            )
+            return {
+                **failed,
+                "candidateId": candidate_id,
+                "candidateOrder": candidate_order,
+                "selectionId": selection_id,
+                "roundIndex": round_index,
+                "meetingRoundId": None,
+                "discussionAnchor": None,
+                "discussion": failed,
+                "summarization": _phase(),
+                "approval": _phase(),
+            }
+        if attempt_lifecycle == "completed":
+            # The attempt claims success but its link/meeting is unreadable:
+            # an integrity defect, never a fresh dispatch.
+            problem = _problem(
+                "review_dispatch_state_missing",
+                "评审分发已记录完成，但会议关联缺失",
+                source_kind="review_dispatch_attempt",
+                source_id=str((dispatch_attempt or {}).get("attemptId") or "") or None,
+                detected_at=_timestamp(dispatch_attempt or {}) or _EPOCH,
+            )
+            blocked = _phase(
+                "not_started",
+                "none",
+                "blocked",
+                updated_at=_timestamp(dispatch_attempt or {}),
+                problems=[problem],
+                attempt=_dispatch_attempt_view(dispatch_attempt or {}),
+            )
+            return {
+                **blocked,
+                "candidateId": candidate_id,
+                "candidateOrder": candidate_order,
+                "selectionId": selection_id,
+                "roundIndex": round_index,
+                "meetingRoundId": None,
+                "discussionAnchor": None,
+                "discussion": blocked,
+                "summarization": _phase(),
+                "approval": _phase(),
+            }
         problem = _problem(
             "review_dispatch_missing",
             "已记录选择，但候选评审会议尚未建立",
@@ -1691,6 +1792,34 @@ def project_state_from_records(
     link_by_candidate = {
         str(item.get("candidateId") or ""): item for item in active_links
     }
+    # Newest durable dispatch attempt per candidate of the active round; the
+    # projector only reads these facts, it never back-fills them.
+    dispatch_attempt_by_candidate: dict[str, dict[str, Any]] = {}
+    if selection_id:
+        for record in _latest(
+            [
+                item
+                for item in chain
+                if str(item.get("recordKind") or "") == _REVIEW_DISPATCH_ATTEMPT_KIND
+            ],
+            "attemptId",
+        ):
+            if str(record.get("selectionId") or "") != selection_id:
+                continue
+            if int(record.get("roundIndex") or 0) != active_round:
+                continue
+            candidate = str(record.get("candidateId") or "").strip()
+            if not candidate:
+                continue
+            existing = dispatch_attempt_by_candidate.get(candidate)
+            if existing is None or (
+                int(record.get("attemptNumber") or 0),
+                str(record.get("updatedAt") or ""),
+            ) >= (
+                int(existing.get("attemptNumber") or 0),
+                str(existing.get("updatedAt") or ""),
+            ):
+                dispatch_attempt_by_candidate[candidate] = record
     review_candidates = []
     for order, candidate_id in enumerate(selected_candidate_ids):
         link = link_by_candidate.get(candidate_id)
@@ -1705,6 +1834,7 @@ def project_state_from_records(
                 link=link,
                 meeting=meeting,
                 return_to=return_to,
+                dispatch_attempt=dispatch_attempt_by_candidate.get(candidate_id),
             )
         )
     review_aggregate = _aggregate(review_candidates)
@@ -1733,7 +1863,16 @@ def project_state_from_records(
         ]
         review_phase = _phase("running", "none", "blocked", problems=problems)
     elif review_aggregate["failed"]:
-        review_phase = _phase("failed", "none", "available")
+        review_phase = _phase(
+            "failed",
+            "none",
+            "available",
+            problems=[
+                problem
+                for item in review_candidates
+                for problem in list(item.get("problems") or [])
+            ],
+        )
     elif review_aggregate["completed"] == review_aggregate["total"]:
         review_phase = _phase("completed", "succeeded", "terminal", updated_at=computed_at)
     elif any(item.get("lifecycle") == "waiting_human" for item in review_candidates):
@@ -1912,7 +2051,7 @@ def project_state_from_records(
         )
     if review_candidates:
         if (
-            review_aggregate["blocked"]
+            (review_aggregate["blocked"] or review_aggregate["failed"])
             and selection_id
             and not selection_integrity_problems
         ):
