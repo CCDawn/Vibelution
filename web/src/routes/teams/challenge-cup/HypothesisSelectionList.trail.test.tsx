@@ -317,9 +317,7 @@ describe("candidate evidence trail expansion", () => {
       ],
       defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
     } as never));
-    mockedStateV2.mockResolvedValue(stateV2Payload({
-      selection: { selectedCandidateIds: ["candidate-a", "candidate-b"] },
-    }));
+    mockedStateV2.mockResolvedValue(stateV2Payload());
 
     act(() => {
       root.render(
@@ -416,9 +414,7 @@ describe("candidate evidence trail expansion", () => {
       ],
       defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
     } as never);
-    mockedStateV2.mockResolvedValue(stateV2Payload({
-      selection: { selectedCandidateIds: ["candidate-a", "candidate-b"] },
-    }));
+    mockedStateV2.mockResolvedValue(stateV2Payload());
     mockedTrail.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", questionId: "SCI-001", trails: [] } as never);
 
     act(() => {

@@ -94,14 +94,26 @@ export function HypothesisSelectionList({
     : undefined;
   const mutationCanonicalAction = canonicalSelection
     ?? (useLegacyFallback ? canonicalAction : undefined);
-  const serverBaseline = useMemo(
-    () => useLegacyFallback
-      ? context?.latestSelection?.selectedCandidateIds
+  const serverBaseline = useMemo(() => {
+    if (useLegacyFallback) {
+      return context?.latestSelection?.selectedCandidateIds
         ?? context?.defaultSelectedCandidateIds
-        ?? []
-      : selectionProjection.selectedCandidateIds,
-    [context, selectionProjection.selectedCandidateIds, useLegacyFallback],
-  );
+        ?? [];
+    }
+    if (selectionProjection.status === "editable") {
+      // V2 owns whether mutation is allowed; the selection-context default is
+      // only the initial local draft. It must not be written back into V2 or
+      // mistaken for an already committed selection.
+      return context?.defaultSelectedCandidateIds ?? [];
+    }
+    if (selectionProjection.selectedCandidateIds.length > 0) {
+      return selectionProjection.selectedCandidateIds;
+    }
+    // Loading, degraded, and ambiguous states remain mutation-locked. Only a
+    // persisted latestSelection may be shown here; default selections are
+    // draft suggestions and must not be presented as already committed.
+    return context?.latestSelection?.selectedCandidateIds ?? [];
+  }, [context, selectionProjection.selectedCandidateIds, selectionProjection.status, useLegacyFallback]);
   const [selectedIds, setSelectedIds] = useState<string[]>(serverBaseline);
   const previousServerBaseline = useRef<string[]>(serverBaseline);
   useEffect(() => {
