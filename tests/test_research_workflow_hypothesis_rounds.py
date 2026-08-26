@@ -8,6 +8,11 @@ refs — with fail-closed rejection when any item is missing.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+from pathlib import Path
+
 import pytest
 
 from core.research.workflow.contracts import (
@@ -20,6 +25,8 @@ from core.web.services import team_service
 from core.web.services.team_workflow import (
     hypothesis_rounds as hypothesis_rounds_service,
 )
+
+_QUARANTINE_LOGGER = "core.web.services.team_workflow.jsonl_quarantine"
 
 
 def _team(tmp_path, monkeypatch):
@@ -294,3 +301,87 @@ def test_list_returns_latest_round_records(tmp_path, monkeypatch) -> None:
     assert listed["roundCount"] == 1
     assert listed["rounds"][0]["roundId"] == "hround-list-1"
     assert created["round"]["roundId"] == "hround-list-1"
+    assert listed["corruptQuarantinedLineCount"] == 0
+
+
+def test_corrupt_round_lines_are_quarantined_instead_of_raising(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    created = hypothesis_rounds_service.create_hypothesis_round(
+        team_id, _round_payload(roundId="hround-quarantine")
+    )
+    round_id = created["round"]["roundId"]
+    storage_path = Path(
+        hypothesis_rounds_service.list_hypothesis_rounds(team_id)["storagePath"]
+    )
+    corrupt_texts = ["{torn-round-line", json.dumps(["wrong", "shape"])]
+    with open(storage_path, "a", encoding="utf-8") as handle:
+        handle.write("".join(text + "\n" for text in corrupt_texts))
+    original_bytes = storage_path.read_bytes()
+
+    with caplog.at_level(logging.WARNING, logger=_QUARANTINE_LOGGER):
+        listed = hypothesis_rounds_service.list_hypothesis_rounds(team_id)
+        fetched = hypothesis_rounds_service.get_hypothesis_round(team_id, round_id)
+
+    assert [item["roundId"] for item in listed["rounds"]] == [round_id]
+    assert listed["roundCount"] == 1
+    assert listed["corruptQuarantinedLineCount"] == 2
+    assert fetched["corruptQuarantinedLineCount"] == 2
+    assert fetched["round"]["status"] == "open"
+
+    # The ledger stays byte-identical; only the sidecar gains evidence.
+    assert storage_path.read_bytes() == original_bytes
+    sidecar = storage_path.with_name(storage_path.name + ".corrupt.jsonl")
+    rows = [
+        json.loads(line)
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [row["lineHash"] for row in rows] == [
+        hashlib.sha256(text.encode("utf-8")).hexdigest() for text in corrupt_texts
+    ]
+    assert [row["lineNumber"] for row in rows] == [2, 3]
+
+    count_warnings = [
+        record
+        for record in caplog.records
+        if record.name == _QUARANTINE_LOGGER and len(record.args) >= 2
+    ]
+    assert any(
+        str(storage_path) in record.getMessage() and record.args[1] == 2
+        for record in count_warnings
+    )
+    logged_text = "".join(record.getMessage() for record in caplog.records)
+    assert all(text not in logged_text for text in corrupt_texts)
+
+
+def test_round_reads_are_idempotent_and_clean_ledgers_stay_sidecar_free(
+    tmp_path, monkeypatch
+) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    created = hypothesis_rounds_service.create_hypothesis_round(
+        team_id, _round_payload(roundId="hround-clean")
+    )
+    round_id = created["round"]["roundId"]
+
+    clean_listed = hypothesis_rounds_service.list_hypothesis_rounds(team_id)
+    clean_fetched = hypothesis_rounds_service.get_hypothesis_round(team_id, round_id)
+    assert clean_listed["corruptQuarantinedLineCount"] == 0
+    assert clean_fetched["corruptQuarantinedLineCount"] == 0
+    storage_path = Path(clean_listed["storagePath"])
+    sidecar = storage_path.with_name(storage_path.name + ".corrupt.jsonl")
+    assert not sidecar.exists()
+
+    with open(storage_path, "a", encoding="utf-8") as handle:
+        handle.write("{torn-round-line\n")
+    first = hypothesis_rounds_service.list_hypothesis_rounds(team_id)
+    assert first["corruptQuarantinedLineCount"] == 1
+    sidecar_after_first = sidecar.read_bytes()
+
+    repeated_list = hypothesis_rounds_service.list_hypothesis_rounds(team_id)
+    repeated_fetch = hypothesis_rounds_service.get_hypothesis_round(team_id, round_id)
+
+    assert repeated_list["corruptQuarantinedLineCount"] == 1
+    assert repeated_fetch["corruptQuarantinedLineCount"] == 1
+    assert sidecar.read_bytes() == sidecar_after_first

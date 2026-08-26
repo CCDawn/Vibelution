@@ -31,6 +31,9 @@ from core.research.workflow.contracts import (
     HypothesisSelectionRecord,
     scope_hash_for,
 )
+from core.web.services.team_workflow.jsonl_quarantine import (
+    read_jsonl_with_quarantine,
+)
 
 SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
@@ -79,25 +82,19 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _read_store(path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Read the ledger, quarantining corrupt lines instead of failing closed.
+
+    One torn write must not permanently brick every scoped read with a 422,
+    so bad lines are isolated to an append-only sidecar and reported through
+    ``corruptQuarantinedLineCount`` while the original file stays untouched
+    for concurrent appenders.
+    """
+    return read_jsonl_with_quarantine(path)
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ResearchHypothesisSelectionError(
-                f"Invalid hypothesis selection JSONL at line {line_number}."
-            ) from exc
-        if not isinstance(payload, dict):
-            raise ResearchHypothesisSelectionError(
-                f"Invalid hypothesis selection record at line {line_number}."
-            )
-        records.append(payload)
-    return records
+    return _read_store(path)[0]
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
@@ -542,7 +539,7 @@ def list_hypothesis_selections(team_id: str, *, question_id: str = "") -> dict[s
     normalized_team_id = assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
     with _LOCK:
-        records = _read_jsonl(_storage_path(normalized_team_id))
+        records, corrupt_count = _read_store(_storage_path(normalized_team_id))
     selections = [
         record
         for record in records
@@ -554,6 +551,7 @@ def list_hypothesis_selections(team_id: str, *, question_id: str = "") -> dict[s
         "teamId": normalized_team_id,
         "selectionCount": len(selections),
         "selections": selections,
+        "corruptQuarantinedLineCount": corrupt_count,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
 
@@ -565,7 +563,7 @@ def get_hypothesis_selection(team_id: str, selection_id: str) -> dict[str, Any]:
     normalized_team_id = assert_team_exists(team_id)
     normalized_selection_id = str(selection_id or "").strip()
     with _LOCK:
-        records = _read_jsonl(_storage_path(normalized_team_id))
+        records, corrupt_count = _read_store(_storage_path(normalized_team_id))
         record = _latest_by_id(records, "selectionId", normalized_selection_id)
     if record is None:
         raise ResearchHypothesisSelectionNotFoundError("Hypothesis selection not found.")
@@ -573,6 +571,7 @@ def get_hypothesis_selection(team_id: str, selection_id: str) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "selection": record,
+        "corruptQuarantinedLineCount": corrupt_count,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
 
@@ -598,7 +597,7 @@ def get_latest_hypothesis_selection(
         raise ResearchHypothesisSelectionError("Question id is required.")
     resolved_scope = _resolve_read_scope(scope)
     with _LOCK:
-        records = _read_jsonl(_storage_path(normalized_team_id))
+        records, corrupt_count = _read_store(_storage_path(normalized_team_id))
     matched = [
         record
         for record in records
@@ -618,5 +617,6 @@ def get_latest_hypothesis_selection(
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "selection": matched[-1],
+        "corruptQuarantinedLineCount": corrupt_count,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
