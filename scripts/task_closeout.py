@@ -141,9 +141,9 @@ def acquire_integration_claim(context: CloseoutContext, *, agent_id: str) -> str
             "--status",
             "active",
             "--ttl-minutes",
-            "30",
+            "5",
             "--note",
-            "Managed closeout lease: validation, ff-only merge, and immediate cleanup",
+            "Managed closeout lease: final manifest verification and ff-only merge",
         )
     except ManagedCloseoutError as error:
         if error.code == "coordination_conflict":
@@ -307,6 +307,7 @@ def run_managed_closeout(
     claim_id: str,
     agent_id: str,
     base: str = "main",
+    manifest_path: Path | str | None = None,
 ) -> ManagedCloseoutResult:
     try:
         context = resolve_context(task_worktree, base=base)
@@ -315,6 +316,37 @@ def run_managed_closeout(
         return ManagedCloseoutResult(
             status="failed",
             exit_code=1,
+            errors=[_bounded_error(error)],
+        )
+
+    resolved_manifest = Path(manifest_path) if manifest_path is not None else None
+    manifest_path_text = str(resolved_manifest or "")
+    try:
+        if resolved_manifest is None:
+            closeout = gate.run_closeout(context.task_root, base, claim_id)
+            resolved_manifest = closeout.manifest_path
+            manifest_path_text = str(resolved_manifest or "")
+            if closeout.outcome != "passed" or resolved_manifest is None:
+                return ManagedCloseoutResult(
+                    status="validation_failed",
+                    exit_code=1,
+                    manifest_path=manifest_path_text,
+                    errors=[str(closeout.outcome)],
+                )
+
+        verified = gate.verify_manifest(resolved_manifest, context.task_root, base)
+        if verified.outcome != "passed":
+            return ManagedCloseoutResult(
+                status="validation_failed",
+                exit_code=1,
+                manifest_path=manifest_path_text,
+                errors=[str(verified.outcome)],
+            )
+    except (OSError, RuntimeError, ValueError) as error:
+        return ManagedCloseoutResult(
+            status="failed",
+            exit_code=1,
+            manifest_path=manifest_path_text,
             errors=[_bounded_error(error)],
         )
 
@@ -328,65 +360,55 @@ def run_managed_closeout(
                 else "failed"
             ),
             exit_code=1,
+            manifest_path=manifest_path_text,
             errors=[_bounded_error(error)],
         )
 
     integration_released = False
-    manifest_path = ""
     merge_sha = ""
     result = ManagedCloseoutResult(status="failed", exit_code=1)
     try:
-        closeout = gate.run_closeout(context.task_root, base, claim_id)
-        manifest_path = str(closeout.manifest_path or "")
-        if closeout.outcome != "passed" or closeout.manifest_path is None:
+        verified = gate.verify_manifest(resolved_manifest, context.task_root, base)
+        if verified.outcome != "passed":
             result = ManagedCloseoutResult(
                 status="validation_failed",
                 exit_code=1,
-                manifest_path=manifest_path,
-                errors=[str(closeout.outcome)],
+                manifest_path=manifest_path_text,
+                errors=[str(verified.outcome)],
             )
         else:
-            verified = gate.verify_manifest(closeout.manifest_path, context.task_root, base)
-            if verified.outcome != "passed":
-                result = ManagedCloseoutResult(
-                    status="validation_failed",
-                    exit_code=1,
-                    manifest_path=manifest_path,
-                    errors=[str(verified.outcome)],
-                )
-            else:
-                merge_sha = merge_ff_only(context)
-                release_claim(
-                    context,
-                    claim_id,
-                    status="completed",
-                    reason=f"merged to {base} at {merge_sha}",
-                )
-                release_claim(
-                    context,
-                    integration_claim_id,
-                    status="completed",
-                    reason=f"ff-only merge completed at {merge_sha}",
-                )
-                integration_released = True
-                cleanup_errors: list[str] = []
-                try:
-                    cleanup_task_resources(context, agent_id=agent_id)
-                except (OSError, RuntimeError, ValueError) as error:
-                    cleanup_errors.append(_bounded_error(error))
-                try:
-                    complete_agent(context, agent_id=agent_id, merge_sha=merge_sha)
-                    prune_coordination(context)
-                except (OSError, RuntimeError, ValueError) as error:
-                    cleanup_errors.append(_bounded_error(error))
-                result = ManagedCloseoutResult(
-                    status="merged_cleanup_pending" if cleanup_errors else "merged_clean",
-                    exit_code=2 if cleanup_errors else 0,
-                    merged=True,
-                    merge_sha=merge_sha,
-                    manifest_path=manifest_path,
-                    errors=cleanup_errors,
-                )
+            merge_sha = merge_ff_only(context)
+            release_claim(
+                context,
+                claim_id,
+                status="completed",
+                reason=f"merged to {base} at {merge_sha}",
+            )
+            release_claim(
+                context,
+                integration_claim_id,
+                status="completed",
+                reason=f"ff-only merge completed at {merge_sha}",
+            )
+            integration_released = True
+            cleanup_errors: list[str] = []
+            try:
+                cleanup_task_resources(context, agent_id=agent_id)
+            except (OSError, RuntimeError, ValueError) as error:
+                cleanup_errors.append(_bounded_error(error))
+            try:
+                complete_agent(context, agent_id=agent_id, merge_sha=merge_sha)
+                prune_coordination(context)
+            except (OSError, RuntimeError, ValueError) as error:
+                cleanup_errors.append(_bounded_error(error))
+            result = ManagedCloseoutResult(
+                status="merged_cleanup_pending" if cleanup_errors else "merged_clean",
+                exit_code=2 if cleanup_errors else 0,
+                merged=True,
+                merge_sha=merge_sha,
+                manifest_path=manifest_path_text,
+                errors=cleanup_errors,
+            )
     except (OSError, RuntimeError, ValueError) as error:
         if merge_sha:
             status: CloseoutStatus = "merged_cleanup_pending"
@@ -399,7 +421,7 @@ def run_managed_closeout(
             exit_code=exit_code,
             merged=bool(merge_sha),
             merge_sha=merge_sha,
-            manifest_path=manifest_path,
+            manifest_path=manifest_path_text,
             errors=[_bounded_error(error)],
         )
     finally:
@@ -426,6 +448,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--claim-id", required=True)
     parser.add_argument("--agent-id", required=True)
     parser.add_argument("--base", default="main")
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="Reuse an already passed manifest for this exact task HEAD and main SHA.",
+    )
     return parser
 
 
@@ -436,6 +463,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         claim_id=args.claim_id,
         agent_id=args.agent_id,
         base=args.base,
+        manifest_path=args.manifest,
     )
     print(json.dumps(asdict(result), ensure_ascii=True))
     return result.exit_code

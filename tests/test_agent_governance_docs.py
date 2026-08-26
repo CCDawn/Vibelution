@@ -79,6 +79,18 @@ def test_proactive_self_review_and_local_main_merge_is_required() -> None:
     assert "不得等用户再下令" in playbook
 
 
+def test_validation_and_managed_closeout_are_single_pass_by_default() -> None:
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    loop = (PROJECT_ROOT / "docs" / "guides" / "loop.md").read_text(encoding="utf-8")
+    testing = (PROJECT_ROOT / "tests" / "README.md").read_text(encoding="utf-8")
+
+    assert "同一 HEAD" in agents
+    assert "不得重复执行" in agents
+    assert "scripts/task_closeout.py" in loop
+    assert "--manifest" in loop
+    assert "不要先手动跑一遍 `closeout`" in testing
+
+
 def test_windows_no_console_red_line_is_normative():
     """Visible console popups are permanently forbidden for product runtime."""
 

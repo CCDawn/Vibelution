@@ -23,20 +23,30 @@ def context(tmp_path: Path) -> closeout.CloseoutContext:
     )
 
 
-def test_integration_claim_conflict_skips_quality_gate(
+def test_integration_claim_conflict_preserves_prevalidated_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    events: list[str] = []
+    manifest = tmp_path / "manifest.json"
     monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
 
     def conflict(*_args, **_kwargs):
+        events.append("acquire")
         raise closeout.ManagedCloseoutError("integration_claim_conflict")
 
     monkeypatch.setattr(closeout, "acquire_integration_claim", conflict)
     monkeypatch.setattr(
         gate,
         "run_closeout",
-        lambda *_args, **_kwargs: pytest.fail("quality gate must not run without the lease"),
+        lambda *_args, **_kwargs: events.append("closeout")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(
+        gate,
+        "verify_manifest",
+        lambda *_args, **_kwargs: events.append("verify")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
     )
 
     result = closeout.run_managed_closeout(
@@ -48,6 +58,8 @@ def test_integration_claim_conflict_skips_quality_gate(
     assert result.status == "integration_claim_conflict"
     assert result.exit_code == 1
     assert result.merged is False
+    assert result.manifest_path == str(manifest)
+    assert events == ["closeout", "verify", "acquire"]
 
 
 @pytest.mark.parametrize("failure", ["unsafe_worktree_path", "dirty_main", "dirty_worktree"])
@@ -183,13 +195,17 @@ def test_resolve_context_rejects_worktree_outside_managed_parent(
     assert caught.value.code == "unsafe_worktree_path"
 
 
-def test_failed_quality_gate_releases_only_integration_claim(
+def test_failed_quality_gate_never_acquires_integration_claim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
     monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
-    monkeypatch.setattr(closeout, "acquire_integration_claim", lambda *_args, **_kwargs: "claim-int")
+    monkeypatch.setattr(
+        closeout,
+        "acquire_integration_claim",
+        lambda *_args, **_kwargs: pytest.fail("failed validation must not acquire integration claim"),
+    )
     monkeypatch.setattr(
         gate,
         "run_closeout",
@@ -214,7 +230,7 @@ def test_failed_quality_gate_releases_only_integration_claim(
 
     assert result.status == "validation_failed"
     assert result.merged is False
-    assert events == ["claim-int:released"]
+    assert events == []
 
 
 def test_integration_release_failure_is_reported(
@@ -223,11 +239,26 @@ def test_integration_release_failure_is_reported(
 ) -> None:
     monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
     monkeypatch.setattr(closeout, "acquire_integration_claim", lambda *_args, **_kwargs: "claim-int")
+    manifest = tmp_path / "manifest.json"
     monkeypatch.setattr(
         gate,
         "run_closeout",
-        lambda *_args, **_kwargs: gate.GateResult(outcome="failed", exit_code=1),
+        lambda *_args, **_kwargs: gate.GateResult(
+            outcome="passed", exit_code=0, manifest_path=manifest
+        ),
     )
+    verify_calls = 0
+
+    def verify(*_args, **_kwargs):
+        nonlocal verify_calls
+        verify_calls += 1
+        return gate.GateResult(
+            outcome="passed" if verify_calls == 1 else "stale_main",
+            exit_code=0 if verify_calls == 1 else 1,
+            manifest_path=manifest,
+        )
+
+    monkeypatch.setattr(gate, "verify_manifest", verify)
     monkeypatch.setattr(
         closeout,
         "release_claim",
@@ -241,7 +272,7 @@ def test_integration_release_failure_is_reported(
     )
 
     assert result.status == "failed"
-    assert result.errors == ["failed", "integration_release_pending: registry locked"]
+    assert result.errors == ["stale_main", "integration_release_pending: registry locked"]
 
 
 def test_successful_closeout_merges_then_releases_and_cleans(
@@ -305,8 +336,9 @@ def test_successful_closeout_merges_then_releases_and_cleans(
     assert result.merged is True
     assert result.merge_sha == "head-sha"
     assert events == [
-        "acquire",
         "closeout",
+        "verify",
+        "acquire",
         "verify",
         "merge",
         "release:claim-dev:completed",
@@ -365,3 +397,48 @@ def test_cleanup_failure_preserves_merged_result(
     assert result.merge_sha == "head-sha"
     assert result.errors == ["worktree busy"]
     assert completed == ["complete"]
+
+
+def test_existing_manifest_skips_expensive_closeout_but_is_verified_inside_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: pytest.fail("provided manifest must skip expensive closeout"),
+    )
+    monkeypatch.setattr(
+        gate,
+        "verify_manifest",
+        lambda *_args, **_kwargs: events.append("verify")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "acquire_integration_claim",
+        lambda *_args, **_kwargs: events.append("acquire") or "claim-int",
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: events.append("merge") or "head-sha",
+    )
+    monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        manifest_path=manifest,
+    )
+
+    assert result.status == "merged_clean"
+    assert result.manifest_path == str(manifest)
+    assert events == ["verify", "acquire", "verify", "merge"]
