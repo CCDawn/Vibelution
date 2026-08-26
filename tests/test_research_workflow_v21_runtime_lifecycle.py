@@ -11,6 +11,13 @@ from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.services.team_workflow.research_runtime import (
+    problem_understanding_artifact_writer,
+    workflow_artifact_store,
+)
+from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+    canonical_sha256,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     ResearchWorkflowRuntimeService,
@@ -76,6 +83,90 @@ def _service(tmp_path: Path) -> ResearchWorkflowRuntimeService:
     )
 
 
+def _advance_to_source_finding(
+    service: ResearchWorkflowRuntimeService,
+    run: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    """Complete the canonical problem_understanding entry node.
+
+    The v2.1 production graph enters through ``problem_understanding``;
+    ``source_finding`` only becomes ready after that node completes.  Drive the
+    real start/complete path with a written canonical artifact instead of
+    manufacturing a downstream NodeRun.
+    """
+
+    source_collection_run_id = "source-run-lifecycle"
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    service._store.update_run(
+        run["runId"],
+        {"sourceCollectionRunId": source_collection_run_id},
+    )
+    service.apply_node_command(
+        run["runId"],
+        "problem_understanding",
+        "start_execution",
+        payload={
+            "idempotencyKey": "start-lifecycle-problem-understanding",
+            "leaseOwner": "lifecycle-fixture",
+            "leaseSeconds": 60,
+            "deadlineSeconds": 900,
+        },
+    )
+    started = service.get_run(run["runId"])
+    problem_node_run = next(
+        item
+        for item in started["nodeRuns"]
+        if item["nodeId"] == "problem_understanding"
+    )
+    problem_payload = {
+        "scope": "lifecycle fixture problem scope",
+        "subquestions": ["Which lifecycle guarantees must hold?"],
+        "assumptions": ["fixture inputs are bounded"],
+        "known_unknowns": ["runtime evidence is out of scope here"],
+        "human_gate": {
+            "required": True,
+            "decision": "approved",
+            "reviewer": "test-reviewer",
+            "decided_at": "2026-08-26T00:00:00Z",
+            "rationale": "Fixture precondition accepted.",
+        },
+    }
+    problem_understanding_artifact_writer.write_problem_understanding_artifact(
+        team_id=run["teamId"],
+        workflow_run_id=run["runId"],
+        source_collection_run_id=source_collection_run_id,
+        node_run_id=problem_node_run["nodeRunId"],
+        problem_understanding=problem_payload,
+    )
+    content_hash = canonical_sha256(problem_payload)
+    manifest = {
+        "artifactId": f"problem_understanding:{content_hash[:16]}",
+        "contentHash": content_hash,
+        "schemaVersion": "1.0.0",
+        "producerNodeRunId": problem_node_run["nodeRunId"],
+        "producerAttempt": problem_node_run["attempt"],
+        "inputSnapshotHash": problem_node_run["inputSnapshotHash"],
+        "configHash": "3" * 64,
+        "environmentSnapshotHash": "4" * 64,
+        "toolVersionHash": "5" * 64,
+        "sourceArtifactIds": [],
+        "cacheDisposition": "produced",
+        "createdAt": "2026-08-26T00:00:00Z",
+    }
+    return service.apply_node_command(
+        run["runId"],
+        "problem_understanding",
+        "complete_execution",
+        payload={
+            "idempotencyKey": "complete-lifecycle-problem-understanding",
+            "leaseOwner": "lifecycle-fixture",
+            "artifactManifests": [manifest],
+        },
+    )
+
+
 def test_create_run_freezes_input_and_only_prepares_first_node(tmp_path: Path) -> None:
     service = _service(tmp_path)
 
@@ -91,7 +182,7 @@ def test_create_run_freezes_input_and_only_prepares_first_node(tmp_path: Path) -
     assert run["questionId"] == "question-energy-anomaly-gate-v1"
     assert run["inputSnapshot"]["snapshotHash"]
     assert run["inputSnapshot"]["workflowVersionId"] == run["workflowVersionId"]
-    assert run["runtimeCurrentNodeIds"] == ["source_finding"]
+    assert run["runtimeCurrentNodeIds"] == ["problem_understanding"]
     assert run["completedNodeIds"] == []
     assert run["humanTasks"] == []
     assert run["handoffs"] == []
@@ -101,7 +192,7 @@ def test_create_run_freezes_input_and_only_prepares_first_node(tmp_path: Path) -
         key: run["nodeRuns"][0][key]
         for key in ("nodeId", "attempt", "status", "actorType")
     } == {
-        "nodeId": "source_finding",
+        "nodeId": "problem_understanding",
         "attempt": 1,
         "status": "ready",
         "actorType": "agent",
@@ -133,14 +224,14 @@ def test_canvas_projection_uses_real_node_runs_not_legacy_attempt_counters(
 
     canvas = service.get_canvas_projection(run["runId"])
 
-    assert canvas["run"]["runtimeCurrentNodeIds"] == ["source_finding"]
-    assert canvas["run"]["nodeRuns"]["source_finding"]["status"] == "ready"
+    assert canvas["run"]["runtimeCurrentNodeIds"] == ["problem_understanding"]
+    assert canvas["run"]["nodeRuns"]["problem_understanding"]["status"] == "ready"
     assert (
-        canvas["run"]["nodeRuns"]["source_finding"]["primaryAgentId"]
+        canvas["run"]["nodeRuns"]["problem_understanding"]["primaryAgentId"]
         == "agent-source-finder"
     )
     assert (
-        canvas["run"]["nodeRuns"]["source_finding"]["nodeRunId"]
+        canvas["run"]["nodeRuns"]["problem_understanding"]["nodeRunId"]
         == run["nodeRuns"][0]["nodeRunId"]
     )
 
@@ -225,6 +316,7 @@ def test_http_create_rejects_client_authored_frozen_contract(tmp_path: Path) -> 
 
 def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _service(tmp_path)
     run = service.create_run(
@@ -233,6 +325,7 @@ def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(
         binding_layers=SOURCE_BINDING,
         idempotency_key="lease-run",
     )
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
 
     started = service.apply_node_command(
         run["runId"],
@@ -257,14 +350,29 @@ def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(
         },
     )
 
-    assert len(started["taskLeases"]) == 1
-    assert len(repeated["taskLeases"]) == 1
-    assert started["nodeRuns"][0]["status"] == "running"
+    def source_leases(record: dict) -> list[dict]:
+        return [
+            item
+            for item in record["taskLeases"]
+            if item["idempotencyKey"] == "start-source-1"
+        ]
+
+    assert len(source_leases(started)) == 1
+    assert len(source_leases(repeated)) == 1
+    assert next(
+        item for item in started["nodeRuns"] if item["nodeId"] == "source_finding"
+    )["status"] == "running"
     assert started["status"] == "running"
-    assert repeated["taskLeases"][0]["idempotencyKey"] == "start-source-1"
+    assert source_leases(repeated)[0]["idempotencyKey"] == "start-source-1"
 
     detail = service.get_node_detail(run["runId"], "source_finding")
-    assert detail["executionEnvelope"]["nodeRunId"] == started["nodeRuns"][0]["nodeRunId"]
+    assert detail["executionEnvelope"]["nodeRunId"] == (
+        next(
+            item
+            for item in started["nodeRuns"]
+            if item["nodeId"] == "source_finding"
+        )["nodeRunId"]
+    )
     assert detail["taskLease"]["leaseOwner"] == "worker-1"
     assert detail["qualityGateEvaluation"] is None
     assert detail["artifactManifests"] == []
@@ -286,6 +394,7 @@ def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(
 
 def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_node(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _service(tmp_path)
     run = service.create_run(
@@ -294,6 +403,7 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
         binding_layers=SOURCE_BINDING,
         idempotency_key="complete-run",
     )
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
     started = service.apply_node_command(
         run["runId"],
         "source_finding",
@@ -305,7 +415,9 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
             "deadlineSeconds": 900,
         },
     )
-    node_run = started["nodeRuns"][0]
+    node_run = next(
+        item for item in started["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
     manifest = {
         "artifactId": "source_candidate_batch:fixture:1",
         "contentHash": "a" * 64,
@@ -363,24 +475,57 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
     assert by_node["source_finding"]["status"] == "succeeded"
     assert by_node["source_extraction"]["status"] == "ready"
     assert completed["runtimeCurrentNodeIds"] == ["source_extraction"]
-    assert len(completed["artifactManifests"]) == 1
-    assert len(completed["commandReceipts"]) == 1
-    assert len(completed["outbox"]) == 1
-    assert len(completed["handoffs"]) == 1
-    assert completed["qualityGateEvaluations"][0]["status"] == "passed"
-    assert completed["handoffs"][0]["outputArtifactRefs"][0]["contentHash"] == "a" * 64
+    # The entry problem_understanding manifest precedes the source batch; each
+    # is produced exactly once across start/completion replays.
+    assert [
+        item["artifactId"].split(":", 1)[0]
+        for item in completed["artifactManifests"]
+    ] == ["problem_understanding", "source_candidate_batch"]
+    assert [item["nodeId"] for item in completed["commandReceipts"]] == [
+        "problem_understanding",
+        "source_finding",
+    ]
+    assert len(
+        [
+            item
+            for item in completed["outbox"]
+            if item["nodeRunId"] == node_run["nodeRunId"]
+        ]
+    ) == 1
+    assert [item["edgeId"] for item in completed["handoffs"]] == [
+        "e_problem_find",
+        "e_find_extract",
+    ]
+    assert (
+        next(
+            item
+            for item in completed["qualityGateEvaluations"]
+            if item["nodeId"] == "source_finding"
+        )["status"]
+        == "passed"
+    )
+    source_handoff = next(
+        item
+        for item in completed["handoffs"]
+        if item["edgeId"] == "e_find_extract"
+    )
+    assert source_handoff["outputArtifactRefs"][0]["contentHash"] == "a" * 64
     assert repeated["commandReceipts"] == completed["commandReceipts"]
     assert repeated["handoffs"] == completed["handoffs"]
     assert "hash:" not in str(completed)
 
 
-def test_node_completion_rejects_placeholder_artifact(tmp_path: Path) -> None:
+def test_node_completion_rejects_placeholder_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = _service(tmp_path)
     run = service.create_run(
         CHALLENGE_CUP_WORKFLOW_ID,
         run_input=run_input_request(),
         binding_layers=SOURCE_BINDING,
     )
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
     started = service.apply_node_command(
         run["runId"],
         "source_finding",
@@ -392,7 +537,9 @@ def test_node_completion_rejects_placeholder_artifact(tmp_path: Path) -> None:
             "deadlineSeconds": 900,
         },
     )
-    node_run = started["nodeRuns"][0]
+    node_run = next(
+        item for item in started["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
 
     with pytest.raises(ResearchWorkflowError) as exc:
         service.apply_node_command(
@@ -423,7 +570,10 @@ def test_node_completion_rejects_placeholder_artifact(tmp_path: Path) -> None:
     assert exc.value.code == "invalid_artifact"
 
 
-def test_expired_lease_is_diagnosed_and_retry_creates_new_attempt(tmp_path: Path) -> None:
+def test_expired_lease_is_diagnosed_and_retry_creates_new_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = _service(tmp_path)
     run = service.create_run(
         CHALLENGE_CUP_WORKFLOW_ID,
@@ -431,6 +581,7 @@ def test_expired_lease_is_diagnosed_and_retry_creates_new_attempt(tmp_path: Path
         binding_layers=SOURCE_BINDING,
         idempotency_key="stuck-run",
     )
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
     service.apply_node_command(
         run["runId"],
         "source_finding",
@@ -462,11 +613,23 @@ def test_expired_lease_is_diagnosed_and_retry_creates_new_attempt(tmp_path: Path
         payload={"idempotencyKey": "retry-stuck-source"},
     )
 
+    source_stuck_run = next(
+        item for item in stuck["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
     assert stuck["status"] == "blocked"
     assert stuck["blockedReason"] == "lease_expired"
-    assert stuck["taskLeases"][0]["status"] == "stuck"
-    assert stuck["nodeRuns"][0]["status"] == "blocked"
-    assert [item["attempt"] for item in retried["nodeRuns"]] == [1, 2]
-    assert retried["nodeRuns"][-1]["status"] == "ready"
-    assert retried["nodeRuns"][-1]["supersedesNodeRunId"] == retried["nodeRuns"][0]["nodeRunId"]
+    assert next(
+        item
+        for item in stuck["taskLeases"]
+        if item["idempotencyKey"] == "start-stuck-source"
+    )["status"] == "stuck"
+    assert source_stuck_run["status"] == "blocked"
+    source_runs = [
+        item
+        for item in retried["nodeRuns"]
+        if item["nodeId"] == "source_finding"
+    ]
+    assert [item["attempt"] for item in source_runs] == [1, 2]
+    assert source_runs[-1]["status"] == "ready"
+    assert source_runs[-1]["supersedesNodeRunId"] == source_runs[0]["nodeRunId"]
     assert repeated["nodeRuns"] == retried["nodeRuns"]

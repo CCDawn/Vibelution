@@ -481,6 +481,7 @@ def test_selector_executes_pure_local_parallel_pytest_rules_with_xdist():
 
 
 def test_selector_keeps_mixed_serial_parallel_rules_serial():
+    """The serial rule's own batches stay serial; sibling not-serial batches scale."""
     result = select_tests.select_tests(
         ["config/model_catalog.py"],
         select_tests.load_matrix(),
@@ -489,8 +490,34 @@ def test_selector_keeps_mixed_serial_parallel_rules_serial():
     pytest_commands = [
         command for command in result["commands"] if " -m pytest " in command
     ]
-    assert pytest_commands
-    assert all(" -n " not in command for command in pytest_commands)
+    assert len(pytest_commands) == 3
+    assert all(
+        " -n " not in command
+        for command in pytest_commands
+        if "tests/test_config_panel.py" in command
+        or "tests/test_llm_protocol_cache_alignment.py" in command
+    )
+    # The llm-provider-config-v2 focus rule carries no local-serial layer, so its
+    # eight-file batch gets bounded xdist like every other multi-file batch.
+    assert any(
+        "-q -n 6 --dist loadfile" in command and '-m "not serial"' in command
+        for command in pytest_commands
+    )
+
+
+def test_selector_never_touches_serial_layer_batches_even_with_many_files():
+    result = select_tests.select_tests(
+        ["core/web/routes/runtime.py"],
+        select_tests.load_matrix(),
+    )
+
+    pytest_commands = [
+        command for command in result["commands"] if " -m pytest " in command
+    ]
+    four_file_command = next(
+        command for command in pytest_commands if "tests/test_launcher_service.py" in command
+    )
+    assert " -n " not in four_file_command
 
 
 def test_selector_does_not_duplicate_existing_xdist_arguments():
@@ -526,6 +553,30 @@ def test_selector_bounds_workers_by_test_files_and_keeps_single_file_serial():
     )
     assert "-n 2 --dist loadfile" in two_file_command
     assert " -n " not in single_file_command
+
+
+def test_selector_bounds_auto_appended_workers_at_six(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    names = [f"test_pack_{index:02d}.py" for index in range(1, 10)]
+    for name in names:
+        (tmp_path / "tests" / name).write_text(
+            "def test_value():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+    result = select_tests.select_tests(
+        [f"tests/{name}" for name in names],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        + " ".join(f"tests/{name}" for name in names)
+        + ' -q -n 6 --dist loadfile -m "not serial"'
+    ]
+    assert result["validationLayers"] == ["focused", "local-parallel"]
 
 
 def test_selector_keeps_frontend_validation_separate_from_remote_distributed():
@@ -715,6 +766,59 @@ def test_selector_selects_real_pet_storage_nearest_tested_frontier():
         "tests/test_pet_system_tokens.py",
         "tests/test_pet_web_actions.py",
         "tests/test_tool_executor.py",
+    ]
+    assert result["coverageGaps"] == []
+
+
+def test_selector_caps_and_ranks_import_fallback_tests_by_direct_boundary(
+    tmp_path: Path,
+):
+    """Over-cap fallback selections keep the tests closest to the change."""
+    core = tmp_path / "core"
+    tests_root = tmp_path / "tests"
+    core.mkdir()
+    tests_root.mkdir()
+    (core / "zone_leaf.py").write_text("VALUE = 1\n", encoding="utf-8")
+    for index in range(1, 6):
+        (tests_root / f"test_zone_{index:02d}.py").write_text(
+            "import core.zone_leaf\n",
+            encoding="utf-8",
+        )
+    (core / "alpha_chain.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (core / "alpha_mid.py").write_text(
+        "from core import alpha_chain\n",
+        encoding="utf-8",
+    )
+    (core / "alpha_top.py").write_text(
+        "from core import alpha_mid\n",
+        encoding="utf-8",
+    )
+    for index in range(1, 21):
+        (tests_root / f"test_alpha_{index:02d}.py").write_text(
+            "from core import alpha_top\n",
+            encoding="utf-8",
+        )
+
+    result = select_tests.select_tests(
+        ["core/zone_leaf.py", "core/alpha_chain.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert len(result["matchedRules"]) == 1
+    fallback = result["matchedRules"][0]
+    kept = [f"tests/test_alpha_{index:02d}.py" for index in range(1, 8)]
+    kept += [f"tests/test_zone_{index:02d}.py" for index in range(1, 6)]
+    dropped = [f"tests/test_alpha_{index:02d}.py" for index in range(8, 21)]
+    assert fallback["selectedTests"] == kept
+    assert fallback["truncatedFrom"] == 25
+    assert fallback["droppedTests"] == dropped
+    assert any("exceeding the 12-file cap" in note for note in result["notes"])
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        + " ".join(kept)
+        + ' -q -n 6 --dist loadfile -m "not serial"'
     ]
     assert result["coverageGaps"] == []
 
@@ -945,3 +1049,41 @@ def test_cli_json_output(capsys: pytest.CaptureFixture[str]):
     assert "git diff --check" in payload["commands"]
     assert "local-parallel" in payload["validationLayers"]
     assert payload["executionPlan"]["remoteDistributed"]["isCompleteGate"] is False
+
+
+def test_cli_import_fallback_cap_hint_is_explicit_on_commands_only(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    payload = {
+        "changedFiles": ["core/example.py"],
+        "matchedRules": [
+            {
+                "id": "python-import-fallback",
+                "description": "Tests at the nearest statically provable Python import frontier.",
+                "matchedFiles": ["core/example.py"],
+                "selectedTests": [f"tests/test_kept_{index:02d}.py" for index in range(12)],
+                "truncatedFrom": 25,
+                "droppedTests": [f"tests/test_far_{index:02d}.py" for index in range(13)],
+            }
+        ],
+        "commands": [],
+        "notes": ["Python import fallback matched 25 test files."],
+        "coverageGaps": [],
+        "validationLayers": ["focused", "local-parallel"],
+        "executionPlan": {},
+    }
+    monkeypatch.setattr(select_tests, "select_tests", lambda *_args, **_kwargs: payload)
+
+    exit_code = select_tests.main(
+        ["--changed-file", "core/example.py", "--commands-only"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    hint = next(
+        line for line in captured.err.splitlines() if "Import fallback cap" in line
+    )
+    assert "python-import-fallback" in hint
+    assert "exceeding the 12-file cap" in hint
+    assert "Add focused matrix entries" in hint

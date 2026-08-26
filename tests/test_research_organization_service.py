@@ -3,6 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from core.agent_kernel import service as agent_kernel_service
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
@@ -38,6 +39,10 @@ def org_workspace(tmp_path, monkeypatch):
     workspace = FakeWorkspace(tmp_path)
     monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
     monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    # Research org messages route through the agent kernel; the kernel pins
+    # agent directory/session roots back to its own PROJECT_ROOT
+    # (_ensure_agent_directory_root), so it must share the isolated tmp root.
+    monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
     return workspace
 
 
