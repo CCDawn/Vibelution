@@ -348,9 +348,20 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     });
 
     const rfProps = rfCalls[0];
-    const nodes = rfProps.nodes as Array<{ id: string; type?: string }>;
+    const nodes = rfProps.nodes as Array<{
+      id: string;
+      type?: string;
+      width?: number;
+      height?: number;
+      style?: { width?: number; height?: number };
+    }>;
     expect(nodes.map((node) => node.id)).toEqual(["protocol_design"]);
     expect(nodes.some((node) => node.type === "stageRegion")).toBe(false);
+    expect(nodes[0]).toEqual(expect.objectContaining({
+      width: 300,
+      height: 72,
+      style: { width: 300, height: 72 },
+    }));
 
     await act(async () => {
       root.unmount();
@@ -374,6 +385,20 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       { id: "stage:experiment", type: "stageRegion" },
       { id: "protocol_design", type: "agentTask" },
     ]);
+    expect(nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "stage:experiment",
+        width: 240,
+        height: 32,
+        style: { width: 240, height: 32 },
+      }),
+      expect.objectContaining({
+        id: "protocol_design",
+        width: 300,
+        height: 72,
+        style: { width: 300, height: 72 },
+      }),
+    ]));
     const backgroundElement = (Array.isArray(rfProps.children) ? rfProps.children : [rfProps.children]).find(
       (child: React.ReactElement) => child?.props?.gap != null,
     );

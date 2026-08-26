@@ -697,6 +697,12 @@ function WorkflowCanvasInner({
               ).length,
               layoutMode,
             },
+            // React Flow uses the intrinsic node dimensions to decide when a
+            // node is initialized and therefore eligible for painting/fitView.
+            // Keep these in sync with the committed layout box instead of
+            // relying on style alone (style is not part of nodeHasDimensions).
+            width: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_WIDTH : node.width,
+            height: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_HEIGHT : node.height,
             style: {
               width: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_WIDTH : node.width,
               height: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_HEIGHT : node.height,
@@ -745,6 +751,11 @@ function WorkflowCanvasInner({
                   ? { type: "source" as const }
                   : undefined,
           },
+          // ELK commits the geometry before React Flow measures the DOM. The
+          // width/height fields make that geometry visible to React Flow on
+          // the first render, including after a refresh or narrow resize.
+          width: node.width,
+          height: node.height,
           style: { width: node.width, height: node.height },
           selectable: true,
           draggable: manualLayoutEnabled && !manualLayoutLocked,
