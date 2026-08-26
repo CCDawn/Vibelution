@@ -4,8 +4,11 @@ together; crash injection never leaves a half commit."""
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+from core.web.routes.team_workflows.research_runtime import _map_node_not_ready_error
 from core.research.workflow.contracts import WorkflowCommandKind
+from core.web.services.team_workflow.research_runtime.command_service import NodeNotReadyError
 from tests._support.command_helpers import CommandHarness
 
 
@@ -190,6 +193,51 @@ def test_live_attempt_blocks_second_start(tmp_path: Path) -> None:
         assert harness.store.latest_event_sequence("run-test") == 3
     finally:
         harness.close()
+
+
+def test_node_not_ready_http_detail_preserves_structured_blockers() -> None:
+    readiness = SimpleNamespace(
+        blockers=(
+            SimpleNamespace(
+                to_dict=lambda: {
+                    "code": "node_live_attempt",
+                    "title": "已有运行中的尝试",
+                    "detail": "请等待当前尝试结束",
+                    "category": "execution",
+                }
+            ),
+            SimpleNamespace(
+                to_dict=lambda: {
+                    "code": "source_candidates_missing",
+                    "title": "缺少候选材料",
+                    "detail": "先补齐候选材料",
+                    "category": "dependency",
+                }
+            ),
+        )
+    )
+
+    mapped = _map_node_not_ready_error(NodeNotReadyError(readiness, 7))
+
+    assert mapped.status_code == 412
+    assert mapped.detail == {
+        "code": "node_not_ready",
+        "message": "node_not_ready",
+        "blockers": [
+            {
+                "code": "node_live_attempt",
+                "title": "已有运行中的尝试",
+                "detail": "请等待当前尝试结束",
+                "category": "execution",
+            },
+            {
+                "code": "source_candidates_missing",
+                "title": "缺少候选材料",
+                "detail": "先补齐候选材料",
+                "category": "dependency",
+            },
+        ],
+    }
 
 
 def test_retry_creates_new_attempt_with_retry_lineage(tmp_path: Path) -> None:

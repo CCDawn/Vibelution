@@ -12,6 +12,7 @@ from core.research.workflow.transitions import RunStatus, can_transition_run
 
 from ..readiness import NodeReadinessService
 from ..readiness.common import DomainReadinessContext
+from .archive_run import build_archive_run_offer
 from .cancel_run import build_cancel_run_offer
 from .extend_budget import build_extend_budget_offers
 from .fork_revision import build_fork_revision_offers
@@ -71,6 +72,7 @@ def build_command_offers(
     )
     offers.extend(build_extend_budget_offers(run=run))
     offers.append(build_reconcile_run_offer(run=run))
+    offers.append(build_archive_run_offer(run=run))
     offers.append(build_cancel_run_offer(run=run))
     return offers
 
