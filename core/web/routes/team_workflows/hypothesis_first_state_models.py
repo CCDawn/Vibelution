@@ -238,6 +238,7 @@ ActionPayload = (
     | HumanAdjudicationPayload
     | CreateFormalRunPayload
     | RunActionPayload
+    | RetryFormalNodePayload
     | RetryProgramHandoffPayload
     | RecordProgramReviewPayload
     | CreateFormalRevisionPayload

@@ -709,6 +709,10 @@ def test_formal_run_projects_available_retry_node_offer(
     assert actions[0].targetNodeId == "source_extraction"
     assert actions[0].payload.runId == "run-retry"
     assert actions[0].payload.nodeId == "source_extraction"
+    assert actions[0].model_dump(mode="json")["payload"] == {
+        "runId": "run-retry",
+        "nodeId": "source_extraction",
+    }
 
 
 @pytest.mark.parametrize("run_status", ["blocked", "failed"])
