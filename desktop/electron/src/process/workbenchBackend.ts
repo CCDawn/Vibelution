@@ -1708,6 +1708,7 @@ export async function executeMainLineWorkbench(
     ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
   const unverifiedHandles: number[] = [];
   let resolved: { port: number; note: string };
+  let unretiredRegisteredNote = "";
   try {
     const liveUnverifiedBrowserHandles = liveUnverifiedBrowserWindowHandles(
       previous,
@@ -1738,20 +1739,34 @@ export async function executeMainLineWorkbench(
       gracefulShutdown,
       forceRetireOnActiveWorkRefusal: false
     });
-    await retireRegisteredHandles({
-      pids: retainedRegisteredHandles,
-      port: resolved.port,
-      host,
-      signal: input.signal,
-      pidAlive: input.pidAlive,
-      killPid: input.killPid,
-      terminateProcessTree,
-      treePids: [...retainedBackendTreePids, ...retainedExtraPids],
-      expectedIdentities,
-      ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
-      reportUnverified: (pids) => unverifiedHandles.push(...pids),
-      connect: input.connect
-    });
+    try {
+      await retireRegisteredHandles({
+        pids: retainedRegisteredHandles,
+        port: resolved.port,
+        host,
+        signal: input.signal,
+        pidAlive: input.pidAlive,
+        killPid: input.killPid,
+        terminateProcessTree,
+        treePids: [...retainedBackendTreePids, ...retainedExtraPids],
+        expectedIdentities,
+        ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
+        reportUnverified: (pids) => unverifiedHandles.push(...pids),
+        connect: input.connect
+      });
+    } catch (error: unknown) {
+      // A registered handle that cannot be identity-verified while the
+      // resolved port has no listener is a stale record whose pid was reused
+      // by an unrelated process, not a live backend. Binding authority is the
+      // port probe; the kill decision stays with the identity-checked tree
+      // terminator. Mirror ignoredStaleDaemonPid: keep the failure visible as
+      // a lifecycle warning instead of stranding start/restart.
+      const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
+      if (await connect(resolved.port, host)) {
+        throw error;
+      }
+      unretiredRegisteredNote = `registered handle retirement stayed unverified while port ${resolved.port} was released: ${error instanceof Error ? error.message : String(error)}`;
+    }
     if (unverifiedHandles.length > 0) {
       throw new Error(`Refusing to start while unverified browser/window handles remain: ${[...new Set(unverifiedHandles)].join(",")}`);
     }
@@ -1881,6 +1896,7 @@ export async function executeMainLineWorkbench(
       reconciledDeadPids.size > 0
         ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
         : "",
+      unretiredRegisteredNote,
       ignoredStaleDaemonPid > 0
         ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
         : ""
