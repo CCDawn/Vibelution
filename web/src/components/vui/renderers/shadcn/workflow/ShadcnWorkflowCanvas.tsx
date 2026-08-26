@@ -278,8 +278,8 @@ function WorkflowCanvasInner({
   const nodesInitialized = useNodesInitialized();
   const manualLayoutEnabled = layoutMode === "serpentine";
   const manualNodeIdsKey = useMemo(
-    () => layout.nodes.filter((node) => node.kind === "task").map((node) => node.id).sort().join("\u0001"),
-    [layout.nodes],
+    () => graph.nodes.map((node) => node.nodeId).sort().join("\u0001"),
+    [graph.nodes],
   );
   const manualStageIdsKey = useMemo(
     () => graph.stages.map((stage) => stage.stageId).sort().join("\u0001"),

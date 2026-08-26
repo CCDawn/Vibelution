@@ -6,7 +6,7 @@
 
 三阶段科研工作流**运行态画布**：阶段分组、语义节点（Agent / 人工 / 系统 / 决策 / 起终点）、节点运行状态、语义边（主路径 / 门禁 / 重跑 / 修订 / 晋级 / 回滚 / 停止）、当前运行高亮、UI 选中与 Inspector 联动、画布内 pan/zoom 与「定位当前 / 适应全部」。
 
-布局所有权：**ELK 引擎 + auto-layout hook**（`renderers/shadcn/workflow/useWorkflowAutoLayout.ts`）。生产走 `?worker` 构建的 `elkjs` worker 引擎（`workflowElkClient.createWorkflowLayoutEngine`），每次画布挂载创建一次、卸载 terminate（StrictMode 不遗留 Worker）。结构不变时 status-only 更新**不触发重新布局**（几何零跳变），拓扑/尺寸变化才重跑 ELK，失败保留 last-good 并标记 degraded。
+布局所有权：**ELK 引擎 + auto-layout hook**（`renderers/shadcn/workflow/useWorkflowAutoLayout.ts`）。生产走 `?worker` 构建的 `elkjs` worker 引擎（`workflowElkClient.createWorkflowLayoutEngine`），每次画布挂载创建一次、卸载 terminate（StrictMode 不遗留 Worker）。结构不变时 status-only 更新**不触发重新布局**（几何零跳变），拓扑/尺寸变化才重跑 ELK。首帧先由 graph topology 产生有限的 deterministic fallback，手动布局 scope 直接由当前 graph 的 `structureKey + runId + nodeIds + stageIds` 校验；ELK 只异步增强几何，pending、约 3 秒超时、reject 或坏/非有限几何都保留同 scope 的 last-good，否则保留 fallback，并显示有限的 `workflow-degraded` 诊断，不把业务节点替换为空或长期遮成 loading。
 
 ### 适用范围
 
@@ -116,8 +116,8 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 选中卡片时点亮其入边和出边：描边加粗/提亮（idle 主路径改用 `--accent-cool`），箭头颜色跟描边；不抬 `zIndex`，也不因此展开标签
 - 状态栏、Inspector 或 URL `node=` 选中时，等首次 fit 结束后把该卡平移进视口（保持当前缩放）；画布上点击同一张卡不平移；卡片位置在拖动中变化时不再重复平移
 - 控件：放大、缩小、适应全部、定位当前工作。`compactControls` 只常驻这四项，把自动整理、撤销布局和锁定/解锁收进同一个 Radix 布局菜单；挑战杯正式工作台使用该模式，避免画布工具与流程主操作竞争注意力。
-- 数据 loading：由调用方 `VStateSurface` 处理；已有 graph 但 ELK 尚未提交几何时，canvas 显示“正在整理流程布局”；graph 确认无任务时显示明确 empty，不得只留下空网格
-- 布局失败：保留 last-good 几何并显示 `workflow-degraded` 诊断；不得静默清空节点
+- 数据 loading：由调用方 `VStateSurface` 处理；已有 graph 时首帧即显示 topology-derived fallback，ELK pending 不清空业务节点，也不让 canvas 长期只剩“正在整理流程布局…”；graph 确认无任务时显示明确 empty
+- 布局失败：保留同 scope 的 last-good 几何，否则使用稳定 fallback；约 3 秒超时、reject、坏/非有限几何均显示有限的 `workflow-degraded` 诊断，不得静默清空节点
 - **页面壳**：`VCanvasWorkbenchPage`，`layoutId` = `WORKBENCH_LAYOUT_IDS.researchFlow`
 - 画布默认 `height="100%"`；fill 宿主 absolute inset
 - **禁止**固定 `height={440}` 式死高

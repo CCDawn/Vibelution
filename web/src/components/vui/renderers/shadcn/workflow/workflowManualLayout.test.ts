@@ -89,6 +89,22 @@ describe("workflowManualLayout", () => {
     });
   });
 
+  it("does not reuse a saved arrangement after the graph stage set changes", () => {
+    const storage = memoryStorage();
+    persistWorkflowManualLayout(scope, {
+      positions: { collect: { x: 32, y: 64 } },
+      stageLabelOffsets: { research: { x: 16, y: 0 } },
+      edgeAnchors: {},
+      locked: false,
+    }, storage);
+    expect(readWorkflowManualLayout({ ...scope, stageIds: ["research", "review"] }, storage)).toEqual({
+      positions: {},
+      stageLabelOffsets: {},
+      edgeAnchors: {},
+      locked: false,
+    });
+  });
+
   it("reads legacy v1 positions and initializes stage label offsets", () => {
     const storage = memoryStorage();
     storage.setItem(workflowManualLayoutStorageKey(scope), JSON.stringify({

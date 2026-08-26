@@ -23,6 +23,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
 import {
+  createDeterministicWorkflowLayout,
   layoutDiagnostic,
   mergeRuntimeFields,
   useWorkflowAutoLayout,
@@ -309,7 +310,9 @@ describe("useWorkflowAutoLayout behavior", () => {
 
   it("runs one two-level layout round on first layout and reports committed nodes/edges", async () => {
     const engine = makeEngine();
-    await renderWith(makeGraph(["knowledge_collection", "experiment_design"]), engine);
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    const fallback = createDeterministicWorkflowLayout(graph);
+    await renderWith(graph, engine);
 
     // Two-level layout: one engine call per stage subgraph (meta row is
     // deterministic and engine-free).
@@ -320,6 +323,140 @@ describe("useWorkflowAutoLayout behavior", () => {
     expect(latest?.nodes.filter((node) => node.kind === "task")).toHaveLength(2);
     expect(latest?.edges).toHaveLength(1);
     expect(latest?.degraded).toBeNull();
+    expect(latest?.nodes.find((node) => node.id === "knowledge_collection"))
+      .not.toEqual(fallback.nodes.find((node) => node.id === "knowledge_collection"));
+  });
+
+  it("exposes every business node immediately while ELK is still pending", async () => {
+    const engine = makeEngine();
+    engine.layout.mockImplementation(() => new Promise<ElkNode>(() => {}));
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+
+    await act(async () => {
+      root.render(
+        <HookProbe
+          graph={graph}
+          createEngine={() => engine}
+          onValue={(value) => {
+            latest = value;
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(latest?.nodes.filter((node) => node.kind === "task").map((node) => node.id))
+      .toEqual(["knowledge_collection", "experiment_design"]);
+    expect(latest?.nodes.every((node) => [node.x, node.y, node.width, node.height].every(Number.isFinite)))
+      .toBe(true);
+  });
+
+  it("keeps the deterministic fallback and marks degraded when ELK never resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = makeEngine();
+      engine.layout.mockImplementation(() => new Promise<ElkNode>(() => {}));
+      const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+
+      await act(async () => {
+        root.render(
+          <HookProbe
+            graph={graph}
+            createEngine={() => engine}
+            onValue={(value) => {
+              latest = value;
+            }}
+          />,
+        );
+        await Promise.resolve();
+      });
+      expect(latest?.degraded).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3_001);
+        await Promise.resolve();
+      });
+
+      expect(latest?.nodes).toHaveLength(4);
+      expect(latest?.degraded?.reason).toContain("timed out");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the deterministic fallback when the first ELK run rejects", async () => {
+    const engine = makeEngine();
+    engine.layout.mockRejectedValue(new Error("layout engine unavailable"));
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+
+    await act(async () => {
+      root.render(
+        <HookProbe
+          graph={graph}
+          createEngine={() => engine}
+          onValue={(value) => {
+            latest = value;
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+    for (let i = 0; i < 20; i += 1) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    expect(latest?.nodes.filter((node) => node.kind === "task")).toHaveLength(2);
+    expect(latest?.degraded?.reason).toContain("layout engine unavailable");
+  });
+
+  it("rejects non-finite ELK geometry without dropping business nodes", async () => {
+    const engine = makeEngine();
+    engine.layout.mockImplementation(async (graph: ElkNode) => {
+      const laidOut = fakeLayout(graph);
+      const firstChild = laidOut.children?.[0];
+      if (firstChild) firstChild.x = Number.NaN;
+      return laidOut;
+    });
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+
+    await act(async () => {
+      root.render(
+        <HookProbe
+          graph={graph}
+          createEngine={() => engine}
+          onValue={(value) => {
+            latest = value;
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+    for (let i = 0; i < 20; i += 1) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    expect(latest?.nodes.filter((node) => node.kind === "task")).toHaveLength(2);
+    expect(latest?.nodes.every((node) => [node.x, node.y, node.width, node.height].every(Number.isFinite)))
+      .toBe(true);
+    expect(latest?.degraded?.reason).toContain("non-finite");
+  });
+
+  it("builds a stable fallback from graph topology without changing membership", () => {
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    const first = createDeterministicWorkflowLayout(graph, "serpentine");
+    const second = createDeterministicWorkflowLayout(graph, "serpentine");
+
+    expect(first).toEqual(second);
+    expect(first.nodes.filter((node) => node.kind === "task").map((node) => ({
+      id: node.id,
+      stageId: node.stageId,
+    }))).toEqual(graph.nodes.map((node) => ({ id: node.nodeId, stageId: node.stageId })));
+    expect(first.nodes.every((node) => [node.x, node.y, node.width, node.height].every(Number.isFinite)))
+      .toBe(true);
   });
 
   it("does not re-run ELK for status-only updates", async () => {
@@ -683,8 +820,6 @@ describe("useWorkflowAutoLayout behavior", () => {
     const engine = makeEngine();
     await renderWith(makeGraph(["knowledge_collection", "experiment_design"]), engine);
     expect(latest?.layoutRevision).toBe(1);
-    const goodNodes = latest?.nodes;
-
     engine.layout.mockRejectedValueOnce(new Error("layout engine crashed"));
     await renderWith(
       makeGraph(["knowledge_collection", "experiment_design", "execution_iteration"]),
@@ -693,8 +828,12 @@ describe("useWorkflowAutoLayout behavior", () => {
 
     expect(latest?.degraded).not.toBeNull();
     expect(latest?.degraded?.reason).toContain("layout engine crashed");
-    // last-good nodes stay committed.
-    expect(latest?.nodes).toEqual(goodNodes);
+    // The old topology is not a legal recovery scope for the new graph, so
+    // the current graph's deterministic fallback stays visible instead.
+    expect(latest?.nodes.filter((node) => node.kind === "task").map((node) => node.id))
+      .toEqual(["knowledge_collection", "experiment_design", "execution_iteration"]);
+    expect(latest?.nodes.every((node) => [node.x, node.y, node.width, node.height].every(Number.isFinite)))
+      .toBe(true);
     expect(latest?.layoutRevision).toBe(1);
 
     // Next successful run clears degraded.
