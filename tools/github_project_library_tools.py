@@ -16,10 +16,14 @@ GITHUB_PROJECT_LIBRARY_CLONE_TOOL_NAME = "github_project_library_clone_tool"
 
 def github_project_library_search_tool(query: str = "", limit: int = 12) -> str:
     """
-    Search the local memory-library GitHub project index.
+    Search the local memory-library GitHub project index before implementing a
+    non-trivial or unfamiliar feature.
 
-    Results are discovery cards (name, description, local path). Open the local
-    clone before treating code as evidence.
+    Multiword Chinese or English capability queries are ranked over project
+    metadata and a bounded local README token index. Results are discovery
+    cards with relevance explanations, never repository bodies. Compare the
+    best-fitting candidates, then inspect exact files in the fixed local clone
+    before treating a project as implementation evidence.
     """
 
     runtime = _current_runtime()
@@ -42,7 +46,10 @@ def github_project_library_search_tool(query: str = "", limit: int = 12) -> str:
                 "summary": payload.get("summary") or {},
                 "projects": projects,
                 "indexPath": payload.get("indexPath") or "",
-                "hint": "命中后请读取 localPath/absolutePath 下的本地仓，不要把网页当结论。",
+                "hint": (
+                    "按 searchScore 和 matchedTerms 选择最贴合的候选，再读取 localPath/absolutePath "
+                    "下固定 HEAD 的具体文件；不要把项目卡、README token 或网页摘要当实现结论。"
+                ),
             }
         )
     except Exception as exc:

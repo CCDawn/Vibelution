@@ -476,15 +476,18 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         "github_project_library_clone_tool",
     ]
 )
-DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
-    [
-        *[
-            name
-            for name in SESSION_PROTOCOL_PREFERRED_TOOLS
-            if name not in GENERATION_HANDOFF_MEMORY_TOOLS
-        ],
-        "github_project_library_search_tool",
-    ]
+_DEFAULT_SESSION_AGENT_PREFERRED_BASE = tuple(
+    name
+    for name in SESSION_PROTOCOL_PREFERRED_TOOLS
+    if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+)
+_DEFAULT_SESSION_REUSE_RESEARCH_INDEX = _DEFAULT_SESSION_AGENT_PREFERRED_BASE.index(
+    "apply_patch_tool"
+)
+DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
+    *_DEFAULT_SESSION_AGENT_PREFERRED_BASE[:_DEFAULT_SESSION_REUSE_RESEARCH_INDEX],
+    "github_project_library_search_tool",
+    *_DEFAULT_SESSION_AGENT_PREFERRED_BASE[_DEFAULT_SESSION_REUSE_RESEARCH_INDEX:],
 )
 
 

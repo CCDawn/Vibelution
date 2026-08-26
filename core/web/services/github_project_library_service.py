@@ -14,10 +14,13 @@ Not borrowed: blobless/partial clone; GitHub zipballs; Zoekt/Sourcegraph; dumpin
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
 import stat
+import unicodedata
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -49,6 +52,57 @@ _GITHUB_SPEC_RE = re.compile(
     re.IGNORECASE,
 )
 _SAFE_TOKEN_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_SEARCH_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_.+-]*|[\u3400-\u9fff]+", re.IGNORECASE)
+_README_NAMES = ("README.md", "README.rst", "README.txt", "README")
+_MAX_README_SEARCH_BYTES = 64 * 1024
+_README_TOKEN_CACHE: dict[str, tuple[int, int, Counter[str]]] = {}
+_CJK_SEARCH_ALIASES = (
+    ("智能体", "agent"),
+    ("代理", "agent"),
+    ("记忆", "memory"),
+    ("工作流", "workflow"),
+    ("编排", "workflow"),
+    ("知识库", "knowledge"),
+    ("知识", "knowledge"),
+    ("检索", "retrieval"),
+    ("搜索", "retrieval"),
+    ("文档", "document"),
+    ("解析", "convert"),
+    ("转换", "convert"),
+    ("评测", "evaluation"),
+    ("评估", "evaluation"),
+    ("权限", "approval"),
+    ("审批", "approval"),
+)
+_SEARCH_ALIASES = {
+    "agents": "agent",
+    "agentic": "agent",
+    "memories": "memory",
+    "workflows": "workflow",
+    "orchestration": "workflow",
+    "orchestrator": "workflow",
+    "orchestrate": "workflow",
+    "rag": "knowledge",
+    "knowledgebase": "knowledge",
+    "search": "retrieval",
+    "searching": "retrieval",
+    "retriever": "retrieval",
+    "documents": "document",
+    "docs": "document",
+    "parse": "convert",
+    "parser": "convert",
+    "parsing": "convert",
+    "conversion": "convert",
+    "converting": "convert",
+    "converter": "convert",
+    "eval": "evaluation",
+    "evals": "evaluation",
+    "benchmark": "evaluation",
+    "benchmarks": "evaluation",
+    "permission": "approval",
+    "permissions": "approval",
+    "approve": "approval",
+}
 
 
 class GithubProjectLibraryError(ValueError):
@@ -70,7 +124,6 @@ def initialize_github_project_library(*, project_root: Path | None = None) -> di
 
 def list_github_projects(*, query: str = "", project_root: Path | None = None, include_archived: bool = False) -> dict[str, Any]:
     root = github_project_library_root(project_root=project_root)
-    initialize_github_project_library(project_root=project_root or PROJECT_ROOT)
     registry = _read_registry(root)
     projects = [
         project
@@ -79,7 +132,7 @@ def list_github_projects(*, query: str = "", project_root: Path | None = None, i
     ]
     needle = trim_lines(str(query or ""), max_lines=2).strip().lower()
     if needle:
-        projects = [project for project in projects if _project_matches(project, needle)]
+        projects = _rank_projects(root, projects, needle)
     payload = _library_payload(root, {"projects": projects, "updatedAt": registry.get("updatedAt") or ""})
     payload["request"] = {"query": needle, "includeArchived": bool(include_archived)}
     return payload
@@ -100,10 +153,10 @@ def search_github_project_cards(*, query: str, limit: int = 8, project_root: Pat
                 "resultId": f"github-project:{project.get('projectId')}:{index + 1}",
                 "resultType": "github_project_card",
                 "title": str(project.get("name") or project.get("fullName") or "").strip(),
-                "score": 1.0,
+                "score": float(project.get("searchScore") or 0.0),
                 "rank": index + 1,
                 "searchBackend": "github_project_library",
-                "matchReason": "local_github_project_index",
+                "matchReason": str(project.get("matchReason") or "metadata_terms"),
                 "metadata": {
                     "fullName": str(project.get("fullName") or "").strip(),
                     "description": str(project.get("description") or "").strip(),
@@ -113,6 +166,8 @@ def search_github_project_cards(*, query: str, limit: int = 8, project_root: Pat
                     "headSha": str(project.get("headSha") or "").strip(),
                     "license": str(project.get("license") or "").strip(),
                     "status": str(project.get("status") or "").strip(),
+                    "matchedTerms": list(project.get("matchedTerms") or []),
+                    "searchScore": float(project.get("searchScore") or 0.0),
                 },
             }
         )
@@ -290,6 +345,7 @@ def fetch_github_repo_metadata(owner: str, repo: str) -> dict[str, Any]:
         "license": str(license_payload.get("spdx_id") or license_payload.get("name") or "").strip(),
         "language": str(payload.get("language") or "").strip(),
         "stars": int(payload.get("stargazers_count") or 0),
+        "topics": _string_list(payload.get("topics")),
         "sizeKb": int(payload.get("size") or 0),
         "private": bool(payload.get("private")),
         "visibility": str(payload.get("visibility") or ("private" if payload.get("private") else "public")).strip(),
@@ -337,11 +393,21 @@ def _project_api(root: Path, project: dict[str, Any]) -> dict[str, Any]:
         "license": str(project.get("license") or "").strip(),
         "language": str(project.get("language") or "").strip(),
         "stars": int(project.get("stars") or 0),
+        "topics": _string_list(project.get("topics")),
         "hasSubmodules": bool(project.get("hasSubmodules")),
         "status": str(project.get("status") or "").strip(),
         "clonedAt": str(project.get("clonedAt") or "").strip(),
         "updatedAt": str(project.get("updatedAt") or "").strip(),
         "error": str(project.get("error") or "").strip(),
+        **(
+            {
+                "searchScore": float(project.get("searchScore") or 0.0),
+                "matchedTerms": _string_list(project.get("matchedTerms")),
+                "matchReason": str(project.get("matchReason") or "").strip(),
+            }
+            if project.get("searchScore") is not None
+            else {}
+        ),
     }
 
 
@@ -358,6 +424,7 @@ def _project_record(metadata: dict[str, Any], *, status: str) -> dict[str, Any]:
         "license": str(metadata.get("license") or "").strip(),
         "language": str(metadata.get("language") or "").strip(),
         "stars": int(metadata.get("stars") or 0),
+        "topics": _string_list(metadata.get("topics")),
         "hasSubmodules": False,
         "status": status,
         "clonedAt": now if status == "ready" else "",
@@ -497,18 +564,173 @@ def _project_id(owner: str, repo: str) -> str:
     return f"{owner}__{repo}"
 
 
-def _project_matches(project: dict[str, Any], needle: str) -> bool:
-    haystack = " ".join(
-        [
-            str(project.get("name") or ""),
-            str(project.get("fullName") or ""),
-            str(project.get("description") or ""),
-            str(project.get("githubUrl") or ""),
-            str(project.get("language") or ""),
-            str(project.get("license") or ""),
-        ]
-    ).lower()
-    return needle in haystack
+def _rank_projects(root: Path, projects: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    query_terms = list(dict.fromkeys(_search_tokens(query)))
+    if not query_terms:
+        return []
+    documents = [_project_search_document(root, project) for project in projects]
+    document_count = max(1, len(documents))
+    average_length = sum(sum(document["terms"].values()) for document in documents) / document_count
+    document_frequency = {
+        term: sum(1 for document in documents if term in document["terms"])
+        for term in query_terms
+    }
+    ranked: list[dict[str, Any]] = []
+    normalized_query = _normalize_search_text(query)
+    for project, document in zip(projects, documents, strict=False):
+        counts: Counter[str] = document["terms"]
+        matched_terms = [term for term in query_terms if counts.get(term, 0) > 0]
+        coverage = len(matched_terms) / len(query_terms)
+        if not matched_terms or (len(query_terms) >= 3 and coverage < 0.34):
+            continue
+        length = max(1, sum(counts.values()))
+        bm25 = 0.0
+        for term in matched_terms:
+            frequency = float(counts[term])
+            df = document_frequency.get(term, 0)
+            idf = math.log(1.0 + (document_count - df + 0.5) / (df + 0.5))
+            denominator = frequency + 1.2 * (1.0 - 0.75 + 0.75 * length / max(1.0, average_length))
+            bm25 += idf * (frequency * 2.2) / denominator
+        normalized_bm25 = bm25 / (bm25 + max(1.0, len(query_terms) * 1.5))
+        metadata_text = str(document["metadataText"])
+        readme_text = str(document["readmeText"])
+        name_text = str(document["nameText"])
+        phrase_bonus = 0.0
+        if normalized_query and normalized_query in name_text:
+            phrase_bonus = 0.14
+            reason = "exact_name"
+        elif normalized_query and normalized_query in metadata_text:
+            phrase_bonus = 0.1
+            reason = "metadata_phrase"
+        else:
+            metadata_terms = set(document["metadataTerms"])
+            readme_terms = set(document["readmeTerms"])
+            in_metadata = any(term in metadata_terms for term in matched_terms)
+            in_readme = any(term in readme_terms for term in matched_terms)
+            if in_metadata and in_readme:
+                reason = "metadata_and_readme_terms"
+            elif in_metadata:
+                reason = "metadata_terms"
+            else:
+                reason = "readme_terms"
+        score = min(0.99, 0.04 + coverage * 0.62 + normalized_bm25 * 0.2 + phrase_bonus)
+        ranked.append(
+            {
+                **project,
+                "searchScore": round(score, 6),
+                "matchedTerms": matched_terms,
+                "matchReason": reason,
+            }
+        )
+    ranked.sort(
+        key=lambda item: (
+            float(item.get("searchScore") or 0.0),
+            int(item.get("stars") or 0),
+            str(item.get("fullName") or item.get("name") or "").lower(),
+        ),
+        reverse=True,
+    )
+    return ranked
+
+
+def _project_search_document(root: Path, project: dict[str, Any]) -> dict[str, Any]:
+    name_text = _normalize_search_text(
+        " ".join([str(project.get("name") or ""), str(project.get("fullName") or "")])
+    )
+    metadata_text = _normalize_search_text(
+        " ".join(
+            [
+                name_text,
+                str(project.get("description") or ""),
+                str(project.get("githubUrl") or ""),
+                str(project.get("language") or ""),
+                str(project.get("license") or ""),
+                *_string_list(project.get("topics")),
+                *_string_list(project.get("keywords")),
+                *_string_list(project.get("capabilities")),
+                *_string_list(project.get("useCases")),
+            ]
+        )
+    )
+    readme_text = _readme_search_text(root, str(project.get("projectId") or ""))
+    metadata_terms = _search_tokens(metadata_text)
+    readme_terms = _search_tokens(readme_text)
+    counts = Counter(readme_terms)
+    for term in metadata_terms:
+        counts[term] += 3
+    for term in _search_tokens(name_text):
+        counts[term] += 3
+    return {
+        "terms": counts,
+        "metadataTerms": metadata_terms,
+        "readmeTerms": readme_terms,
+        "metadataText": metadata_text,
+        "readmeText": _normalize_search_text(readme_text),
+        "nameText": name_text,
+    }
+
+
+def _readme_search_text(root: Path, project_id: str) -> str:
+    if not project_id:
+        return ""
+    repo = _repo_dir(root, project_id)
+    for name in _README_NAMES:
+        path = repo / name
+        if not path.is_file():
+            continue
+        try:
+            metadata = path.stat()
+            cache_key = str(path.resolve()).lower()
+            cached = _README_TOKEN_CACHE.get(cache_key)
+            if cached and cached[:2] == (metadata.st_mtime_ns, metadata.st_size):
+                return " ".join(cached[2].elements())
+            text = path.read_bytes()[:_MAX_README_SEARCH_BYTES].decode("utf-8", errors="ignore")
+            tokens = Counter(_search_tokens(text))
+            _README_TOKEN_CACHE[cache_key] = (metadata.st_mtime_ns, metadata.st_size, tokens)
+            return " ".join(tokens.elements())
+        except OSError:
+            return ""
+    return ""
+
+
+def _search_tokens(value: Any) -> list[str]:
+    text = _normalize_search_text(value)
+    tokens: list[str] = []
+    for raw in _SEARCH_TOKEN_RE.findall(text):
+        if re.fullmatch(r"[\u3400-\u9fff]+", raw):
+            matched = False
+            for phrase, canonical in _CJK_SEARCH_ALIASES:
+                if phrase in raw:
+                    tokens.append(canonical)
+                    matched = True
+            if not matched and len(raw) >= 2:
+                tokens.extend(raw[index : index + 2] for index in range(len(raw) - 1))
+            continue
+        token = raw.strip("._+-")
+        if not token:
+            continue
+        tokens.append(_canonical_search_token(token))
+    return tokens
+
+
+def _canonical_search_token(token: str) -> str:
+    aliased = _SEARCH_ALIASES.get(token, token)
+    if aliased in _SEARCH_ALIASES.values():
+        return aliased
+    if len(aliased) > 5 and aliased.endswith("ches"):
+        return aliased[:-2]
+    if len(aliased) > 4 and aliased.endswith("s") and not aliased.endswith("ss"):
+        return aliased[:-1]
+    return aliased
+
+
+def _normalize_search_text(value: Any) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value or "")).lower().split())
+
+
+def _string_list(value: Any) -> list[str]:
+    values = [value] if isinstance(value, str) else list(value or [])
+    return [str(item or "").strip() for item in values if str(item or "").strip()]
 
 
 def _confirmation_message(reason: str, metadata: dict[str, Any], visible_count: int) -> str:

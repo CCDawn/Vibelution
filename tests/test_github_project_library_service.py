@@ -43,6 +43,50 @@ def _fake_clone(dest, metadata):
     (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
 
 
+def _seed_search_projects(tmp_path):
+    root = library.github_project_library_root(project_root=tmp_path)
+    projects = [
+        {
+            **_metadata("mem0ai", "mem0"),
+            "description": "Universal memory layer for AI Agents",
+            "headSha": "a" * 40,
+            "status": "ready",
+        },
+        {
+            **_metadata("langgenius", "dify"),
+            "description": "Build Agentic workflows and RAG pipelines",
+            "headSha": "b" * 40,
+            "status": "ready",
+        },
+        {
+            **_metadata("microsoft", "markitdown"),
+            "description": "Convert files and office documents to Markdown",
+            "headSha": "c" * 40,
+            "status": "ready",
+        },
+        {
+            **_metadata("acme", "unrelated"),
+            "description": "A tiny terminal color utility",
+            "headSha": "d" * 40,
+            "status": "ready",
+        },
+    ]
+    registry = {"schemaVersion": 1, "updatedAt": "2026-08-26T00:00:00Z", "projects": projects}
+    library._write_registry(root, registry)
+    library._write_index(root, registry)
+    readmes = {
+        "mem0ai__mem0": "Hybrid semantic and BM25 retrieval with metadata filters and reranking.",
+        "langgenius__dify": "Workflow orchestration with knowledge retrieval and weighted ranking.",
+        "microsoft__markitdown": "Document parsing and converter plugins for PDF DOCX and PPTX.",
+        "acme__unrelated": "ANSI colors for command line output.",
+    }
+    for project_id, content in readmes.items():
+        repo = root / "repos" / project_id
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "README.md").write_text(content, encoding="utf-8")
+    return root
+
+
 def test_parse_github_spec_accepts_url_and_owner_repo():
     assert library.parse_github_spec("https://github.com/acme/widget.git") == ("acme", "widget")
     assert library.parse_github_spec("acme/widget") == ("acme", "widget")
@@ -217,6 +261,86 @@ def test_search_cards_are_metadata_only(tmp_path, monkeypatch):
     assert "excerpt" not in cards[0]
     assert "content" not in cards[0]
     assert cards[0]["metadata"]["absolutePath"].endswith("acme__widget")
+
+
+def test_list_is_pure_read_when_library_is_missing(tmp_path):
+    root = library.github_project_library_root(project_root=tmp_path)
+
+    payload = library.list_github_projects(query="agent memory", project_root=tmp_path)
+
+    assert payload["projects"] == []
+    assert payload["summary"]["projectCount"] == 0
+    assert root.exists() is False
+
+
+def test_list_query_never_rewrites_registry_or_index(tmp_path, monkeypatch):
+    root = _seed_search_projects(tmp_path)
+    registry_path = root / library.REGISTRY_NAME
+    index_path = root / library.INDEX_NAME
+    before = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in (registry_path, index_path)
+    }
+
+    monkeypatch.setattr(
+        library,
+        "_write_registry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("search must not write registry")),
+    )
+    monkeypatch.setattr(
+        library,
+        "_write_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("search must not write index")),
+    )
+
+    payload = library.list_github_projects(query="workflow orchestration", project_root=tmp_path)
+
+    assert payload["projects"][0]["projectId"] == "langgenius__dify"
+    assert {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in (registry_path, index_path)
+    } == before
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_project_id"),
+    [
+        ("agent memory", "mem0ai__mem0"),
+        ("workflow orchestration", "langgenius__dify"),
+        ("document parsing", "microsoft__markitdown"),
+        ("知识库检索", "langgenius__dify"),
+        ("文档解析", "microsoft__markitdown"),
+    ],
+)
+def test_search_ranks_multiword_and_chinese_capability_queries(tmp_path, query, expected_project_id):
+    _seed_search_projects(tmp_path)
+
+    payload = library.list_github_projects(query=query, project_root=tmp_path)
+
+    assert payload["projects"], query
+    first = payload["projects"][0]
+    assert first["projectId"] == expected_project_id
+    assert 0 < first["searchScore"] <= 1
+    assert first["matchedTerms"]
+    assert first["matchReason"] in {
+        "exact_name",
+        "metadata_phrase",
+        "metadata_terms",
+        "metadata_and_readme_terms",
+        "readme_terms",
+    }
+
+
+def test_search_cards_use_explainable_nonconstant_relevance_scores(tmp_path):
+    _seed_search_projects(tmp_path)
+
+    cards = library.search_github_project_cards(query="agent memory workflow", project_root=tmp_path)
+
+    assert len(cards) >= 2
+    assert cards[0]["score"] > cards[1]["score"]
+    assert cards[0]["score"] != 1.0
+    assert cards[0]["matchReason"] != "local_github_project_index"
+    assert cards[0]["metadata"]["matchedTerms"]
 
 
 def test_http_lists_library_and_requires_confirmation_for_unverified_license(tmp_path, monkeypatch):
