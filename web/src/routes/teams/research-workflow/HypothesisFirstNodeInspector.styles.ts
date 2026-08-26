@@ -18,6 +18,7 @@ const styles = {
   candidateChecklistList: "m-0 grid list-none gap-2 p-0",
   candidateChecklistItem: "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-2",
   candidateChecklistIdentity: "grid min-w-0 max-w-full gap-0.5 overflow-hidden [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&>strong]:min-w-0 [&>strong]:max-w-full [&>strong]:truncate [&>strong]:text-[var(--fg-tertiary)] [&>span]:min-w-0 [&>span]:truncate",
+  sourceError: "[font-size:var(--vui-font-2xs)] text-[var(--fg-danger)]",
   history: "grid gap-2 border-t border-[var(--vui-border-subtle)] pt-3",
   historySummary: "flex flex-wrap items-center justify-between gap-2",
   historyList: "m-0 grid list-none gap-2 p-0",

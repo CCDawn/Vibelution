@@ -20,6 +20,7 @@ import {
 import { queryKeys } from "../../../api/queryKeys";
 import type {
   CommandAction,
+  HypothesisFirstChainState,
   HypothesisFirstStateV2,
   MeetingRoundRecord,
   WorkflowProblem,
@@ -160,6 +161,122 @@ export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: strin
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Review round budget contract (shared with the workspace progress display):
+// 当前预算 N = V2 convergence.roundBudget ?? V1 chainState.roundBudget ?? 3
+// (= backend DEFAULT_ROUND_BUDGET). The raise-to-5 number is only the action
+// semantic of open-next-review; the server re-authorizes inside its lock and a
+// client can never lift the budget itself (see
+// tests/test_challenge_review_budget_consistency.py).
+// ---------------------------------------------------------------------------
+export const HYPOTHESIS_FIRST_DEFAULT_REVIEW_ROUND_BUDGET = 3;
+export const HYPOTHESIS_FIRST_MAX_REVIEW_ROUND_BUDGET = 5;
+
+type ReviewRoundBudgetSnapshot = {
+  stateV2?: { convergence?: { roundBudget?: number; roundIndex?: number } | null } | null;
+  chainState?: { roundBudget?: number; hypothesisRoundCount?: number } | null;
+};
+
+function usableBudget(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/** 当前预算 N，按统一契约解析；非法值一律回退到后端默认 3。 */
+export function resolveHypothesisFirstReviewRoundBudget(
+  snapshot: ReviewRoundBudgetSnapshot,
+): number {
+  const v2Budget = snapshot.stateV2?.convergence?.roundBudget;
+  if (usableBudget(v2Budget)) return Number(v2Budget);
+  const v1Budget = snapshot.chainState?.roundBudget;
+  if (usableBudget(v1Budget)) return Number(v1Budget);
+  return HYPOTHESIS_FIRST_DEFAULT_REVIEW_ROUND_BUDGET;
+}
+
+/** 当前轮序 M（开启新轮即 M+1）；快照缺失时返回 null，文案降级为不提轮次。 */
+export function resolveHypothesisFirstNextReviewRoundIndex(
+  snapshot: ReviewRoundBudgetSnapshot,
+): number | null {
+  const v2Index = snapshot.stateV2?.convergence?.roundIndex;
+  if (typeof v2Index === "number" && Number.isFinite(v2Index) && v2Index >= 0) {
+    return v2Index + 1;
+  }
+  const v1Count = snapshot.chainState?.hypothesisRoundCount;
+  if (typeof v1Count === "number" && Number.isFinite(v1Count) && v1Count >= 0) {
+    return v1Count + 1;
+  }
+  return null;
+}
+
+export function reviewRoundActionCopy(
+  budget: number,
+  nextRoundIndex: number | null,
+  lang: Language,
+): { label: string; detail: string } {
+  const isZh = lang === "zh";
+  const max = HYPOTHESIS_FIRST_MAX_REVIEW_ROUND_BUDGET;
+  if (budget < max) {
+    return {
+      label: isZh ? "提升预算并发起新一轮评审" : "Raise budget and open a new review round",
+      detail: nextRoundIndex !== null
+        ? (isZh
+          ? `当前预算 ${budget}/${max}，将开启第 ${nextRoundIndex} 轮评审。`
+          : `Current budget ${budget}/${max}; this opens review round ${nextRoundIndex}.`)
+        : (isZh
+          ? `当前预算 ${budget}/${max}，将开启新一轮评审。`
+          : `Current budget ${budget}/${max}; this opens another review round.`),
+    };
+  }
+  return {
+    label: isZh ? "发起新一轮评审" : "Open a new review round",
+    detail: nextRoundIndex !== null
+      ? (isZh
+        ? `当前预算 ${budget}/${max} 已达上限，将在预算内尝试开启第 ${nextRoundIndex} 轮。`
+        : `The budget is at its ${budget}/${max} limit; round ${nextRoundIndex} will be attempted within budget.`)
+      : (isZh
+        ? `当前预算 ${budget}/${max} 已达上限，将在预算内尝试开启新一轮。`
+        : `The budget is at its ${budget}/${max} limit; a new round will be attempted within budget.`),
+  };
+}
+
+export type DiscussionMemberCompletion = { spoken: number; total: number };
+
+/**
+ * x/y 位成员已发言：分母是房间成员数，分子按消息 sender 去重（仅统计已完成、
+ * 内容非空且归属房间成员的发言）。与 HypothesisFirstMeetingOps 的
+ * completedSourceMessageCount（完成消息条数统计）语义不同，互不复用。
+ */
+export function discussionMemberCompletion(detail: {
+  participants?: ReadonlyArray<{ participantId?: string; agentCode?: string; kind?: string }>;
+  rounds?: ReadonlyArray<{
+    messages?: ReadonlyArray<{
+      participantId?: string;
+      speakerCode?: string;
+      speakerTitle?: string;
+      status?: string;
+      content?: string;
+    }>;
+  }>;
+} | undefined): DiscussionMemberCompletion | null {
+  const participants = detail?.participants ?? [];
+  if (!participants.length) return null;
+  const memberKeys = new Set<string>();
+  for (const participant of participants) {
+    const key = String(participant.participantId ?? "").trim();
+    if (key) memberKeys.add(key);
+  }
+  if (!memberKeys.size) return null;
+  const spoken = new Set<string>();
+  for (const round of detail?.rounds ?? []) {
+    for (const message of round.messages ?? []) {
+      if (String(message.status ?? "").trim().toLowerCase() !== "completed") continue;
+      if (!String(message.content ?? "").trim()) continue;
+      const senderKey = String(message.participantId ?? "").trim();
+      if (senderKey && memberKeys.has(senderKey)) spoken.add(senderKey);
+    }
+  }
+  return { spoken: Math.min(spoken.size, memberKeys.size), total: memberKeys.size };
+}
+
 export function HypothesisFirstNodeInspector({
   lang = "zh",
   teamId,
@@ -225,16 +342,36 @@ export function HypothesisFirstNodeInspector({
     nextAction.targetNodeId,
     nodeId,
   );
-  const canonicalChecklistRows = chain.stateV2?.review.candidates.map((candidate) => ({
-    candidateId: candidate.candidateId,
-    roundIndex: candidate.roundIndex,
-    nodeId: `hf_meeting_${candidate.roundIndex}_${encodeURIComponent(candidate.candidateId)}`,
-    kind: candidate.lifecycle === "completed"
-      ? "confirmed" as const
-      : candidate.lifecycle === "failed" || candidate.actionability === "blocked"
-        ? "blocked" as const
-        : "pending" as const,
-  })) ?? null;
+  const canonicalChecklistRows = chain.stateV2?.review.candidates.map((candidate) => {
+    const pendingQueueKind: "discussing" | "inflight" | "queued" | undefined = (() => {
+      if (
+        candidate.lifecycle === "completed"
+        || candidate.lifecycle === "failed"
+        || candidate.actionability === "blocked"
+      ) {
+        return undefined;
+      }
+      // 开候选会串行、讨论线程池并发 2：discussion.running 即正在讨论，
+      // summarization/approval 在途的既不算讨论也不算排队。
+      if (candidate.discussion?.lifecycle === "running") return "discussing";
+      if (
+        candidate.summarization?.lifecycle === "running"
+        || candidate.approval?.lifecycle === "waiting_human"
+      ) return "inflight";
+      return "queued";
+    })();
+    return {
+      candidateId: candidate.candidateId,
+      roundIndex: candidate.roundIndex,
+      nodeId: `hf_meeting_${candidate.roundIndex}_${encodeURIComponent(candidate.candidateId)}`,
+      kind: candidate.lifecycle === "completed"
+        ? "confirmed" as const
+        : candidate.lifecycle === "failed" || candidate.actionability === "blocked"
+          ? "blocked" as const
+          : "pending" as const,
+      queueKind: pendingQueueKind,
+    };
+  }) ?? null;
   const nodeOwnsCurrentStep = formalRuntime
     || inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
   const reviewMeetings = questionMeetings.filter(
@@ -254,6 +391,18 @@ export function HypothesisFirstNodeInspector({
         kept: chain.selection?.selectedCandidateIds.length ?? 0,
       }
     : null;
+  const discussionCompletion = discussionMemberCompletion(roomQuery.data);
+  const showDiscussionCompletion = Boolean(
+    nodeOwnsCurrentStep
+    && scopedRoomId
+    && activeMeeting?.status === "open"
+    && discussionCompletion
+    && (
+      nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID
+      || nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID
+      || nodeId.startsWith("hf_meeting_")
+    ),
+  );
 
   if (!questionId) {
     return (
@@ -324,6 +473,13 @@ export function HypothesisFirstNodeInspector({
       {nodeOwnsCurrentStep && nextAction.disabledReason ? (
         <VStateRow tone="warning">{nextAction.disabledReason}</VStateRow>
       ) : null}
+      {showDiscussionCompletion ? (
+        <div role="status" className={styles.status} data-testid="discussion-member-completion">
+          {isZh
+            ? `${discussionCompletion?.spoken}/${discussionCompletion?.total} 位成员已发言`
+            : `${discussionCompletion?.spoken}/${discussionCompletion?.total} members have spoken`}
+        </div>
+      ) : null}
       {nodeOwnsCurrentStep ? (
         <>
           <InspectorBody
@@ -339,6 +495,7 @@ export function HypothesisFirstNodeInspector({
             onFormalRunCreated={onFormalRunCreated}
             onOpenQuestion={onOpenQuestion}
             stateV2={chain.stateV2}
+            chainState={chain.chainState}
             formalRuntime={formalRuntime}
           />
           {(
@@ -415,6 +572,8 @@ function ReviewCandidateChecklist({
     roundIndex: number;
     nodeId: string;
     kind: "confirmed" | "blocked" | "pending";
+    /** V2-only queue awareness; legacy projection rows omit it. */
+    queueKind?: "discussing" | "inflight" | "queued";
   }[];
   currentRoundIndex: number | null;
   lang: Language;
@@ -427,14 +586,24 @@ function ReviewCandidateChecklist({
   const confirmed = currentRounds.filter((state) => state.kind === "confirmed").length;
   const blocked = currentRounds.filter((state) => state.kind === "blocked").length;
   const pending = currentRounds.length - confirmed - blocked;
+  // 位次感知只在 V2 canonical rows 提供完整 queue 标签时启用，避免用旧会议
+  // 投影猜出一个假的排队数。
+  const allPendingTagged = currentRounds
+    .every((row) => row.kind !== "pending" || typeof row.queueKind === "string");
+  const discussing = allPendingTagged
+    ? currentRounds.filter((row) => row.kind === "pending" && row.queueKind === "discussing").length
+    : 0;
+  const queued = allPendingTagged
+    ? currentRounds.filter((row) => row.kind === "pending" && row.queueKind === "queued").length
+    : 0;
   const isZh = lang === "zh";
   return (
     <section className={styles.candidateChecklist} aria-label={isZh ? "候选确认清单" : "Candidate confirmation checklist"} data-testid="candidate-confirmation-checklist">
       <div className={styles.candidateChecklistSummary}>
         <strong>{isZh ? "候选确认清单" : "Candidate confirmation checklist"}</strong>
         <span>{isZh
-          ? `共 ${currentRounds.length} · 已确认 ${confirmed} · 待确认 ${pending}${blocked ? ` · 已阻塞 ${blocked}` : ""}`
-          : `${currentRounds.length} total · ${confirmed} confirmed · ${pending} pending${blocked ? ` · ${blocked} blocked` : ""}`}
+          ? `共 ${currentRounds.length} · 已确认 ${confirmed} · 待确认 ${pending}${blocked ? ` · 已阻塞 ${blocked}` : ""}${discussing || queued ? ` · 正在讨论 ${discussing} 个 · 排队等待 ${queued} 个` : ""}`
+          : `${currentRounds.length} total · ${confirmed} confirmed · ${pending} pending${blocked ? ` · ${blocked} blocked` : ""}${discussing || queued ? ` · ${discussing} in discussion · ${queued} queued` : ""}`}
         </span>
       </div>
       <ol className={styles.candidateChecklistList}>
@@ -502,7 +671,7 @@ function InspectorBody(props: {
   questionId: string;
   nodeId: string;
   liveMeetingRoundId: string;
-  nextAction: HypothesisFirstV2NextAction;
+  nextAction: HypothesisFirstNextAction;
   lang: Language;
   stageSummary?: { rounds: number; retries: number; kept: number } | null;
   onRetryCollection?: () => Promise<void>;
@@ -510,6 +679,7 @@ function InspectorBody(props: {
   onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
   onOpenQuestion: (questionId: string) => void;
   stateV2?: HypothesisFirstStateV2 | null;
+  chainState?: HypothesisFirstChainState | null;
   formalRuntime?: boolean;
 }) {
   const { nodeId, nextAction, teamId, questionId, liveMeetingRoundId, lang } = props;
@@ -629,6 +799,7 @@ function InspectorBody(props: {
         lang={lang}
         teamId={teamId}
         questionId={questionId}
+        stateV2={props.stateV2}
         onRetryCollection={props.onRetryCollection}
       />
     );
@@ -772,6 +943,14 @@ function InspectorBody(props: {
             teamId={teamId}
             questionId={questionId}
             meetingRoundId={liveMeetingRoundId}
+            roundBudget={resolveHypothesisFirstReviewRoundBudget({
+              stateV2: props.stateV2,
+              chainState: props.chainState,
+            })}
+            nextRoundIndex={resolveHypothesisFirstNextReviewRoundIndex({
+              stateV2: props.stateV2,
+              chainState: props.chainState,
+            })}
             lang={lang}
           />
         ) : null}
@@ -1269,16 +1448,25 @@ function HumanAdjudicationAction(props: {
   );
 }
 
-function NextReviewRoundButton(props: { teamId: string; questionId: string; meetingRoundId: string; lang: Language }) {
+function NextReviewRoundButton(props: {
+  teamId: string;
+  questionId: string;
+  meetingRoundId: string;
+  roundBudget: number;
+  nextRoundIndex: number | null;
+  lang: Language;
+}) {
   const queryClient = useQueryClient();
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  const max = HYPOTHESIS_FIRST_MAX_REVIEW_ROUND_BUDGET;
+  const copy = reviewRoundActionCopy(props.roundBudget, props.nextRoundIndex, props.lang);
   const mutation = useMutation({
     mutationFn: () =>
-      openNextHypothesisReviewRound(props.teamId, props.meetingRoundId, 5),
+      openNextHypothesisReviewRound(props.teamId, props.meetingRoundId, max),
     onSuccess: (payload) => {
       setBlockedReason(
         payload?.status === "budget_exhausted"
-          ? (props.lang === "zh" ? "轮次预算已达上限 5，无法再开启新的评审轮。" : "The round budget has reached its limit of 5; no new review round can be opened.")
+          ? (props.lang === "zh" ? `轮次预算已达上限 ${max}，无法再开启新的评审轮。` : `The round budget has reached its limit of ${max}; no new review round can be opened.`)
           : null,
       );
       invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
@@ -1295,6 +1483,9 @@ function NextReviewRoundButton(props: { teamId: string; questionId: string; meet
           summary={mutation.error instanceof Error ? mutation.error.message : "open_next_review_failed"}
         />
       ) : null}
+      <p className={styles.status} data-testid="next-review-round-budget">
+        {copy.detail}
+      </p>
       <VButton
         type="button"
         variant="primary"
@@ -1304,7 +1495,7 @@ function NextReviewRoundButton(props: { teamId: string; questionId: string; meet
         disabledReason={props.meetingRoundId ? undefined : (props.lang === "zh" ? "缺少上一轮评审标识" : "The previous review round ID is missing")}
         onPress={() => mutation.mutate()}
       >
-        {props.lang === "zh" ? "提升预算并发起新一轮评审" : "Increase budget and open a new review round"}
+        {copy.label}
       </VButton>
     </div>
   );
@@ -1364,17 +1555,87 @@ function OpenGenerationButton(props: {
   );
 }
 
+function collectionSourceChip(
+  lifecycle: string,
+  error: WorkflowProblem | null,
+  lang: Language,
+): { label: string; tone: "neutral" | "accent" | "success" | "warning" | "danger" } {
+  const isZh = lang === "zh";
+  if (error || lifecycle === "failed") return { label: isZh ? "失败" : "Failed", tone: "danger" };
+  switch (lifecycle) {
+    case "completed": return { label: isZh ? "已完成" : "Completed", tone: "success" };
+    case "running": return { label: isZh ? "搜集中" : "Collecting", tone: "accent" };
+    case "queued": return { label: isZh ? "排队中" : "Queued", tone: "neutral" };
+    case "waiting_human": return { label: isZh ? "待人工处理" : "Waiting for human", tone: "warning" };
+    case "cancelled":
+    case "superseded": return { label: isZh ? "已取消" : "Cancelled", tone: "neutral" };
+    default: return { label: isZh ? "等待开始" : "Pending", tone: "neutral" };
+  }
+}
+
+/** 长时间资料搜集的逐源可见性：sources 为空时整体降级隐藏，不留占位噪音。 */
+function CollectionSourceProgress({ sources, lang }: {
+  sources: HypothesisFirstStateV2["collection"]["requests"][number]["sources"];
+  lang: Language;
+}) {
+  if (!sources.length) return null;
+  const isZh = lang === "zh";
+  const completed = sources.filter((source) => !source.error && source.lifecycle === "completed").length;
+  const totalItems = sources.reduce((sum, source) => sum + (Number(source.itemCount) || 0), 0);
+  return (
+    <section
+      className={styles.candidateChecklist}
+      data-testid="collection-source-progress"
+      aria-label={isZh ? "逐源搜集进度" : "Per-source collection progress"}
+    >
+      <div className={styles.candidateChecklistSummary}>
+        <strong>{isZh ? "逐源搜集进度" : "Per-source collection"}</strong>
+        <span>{isZh
+          ? `已完成 ${completed}/${sources.length} 源 · 已获 ${totalItems} 条资料`
+          : `${completed}/${sources.length} sources done · ${totalItems} items`}
+        </span>
+      </div>
+      <ul className={styles.candidateChecklistList}>
+        {sources.map((source, index) => {
+          const chip = collectionSourceChip(source.lifecycle, source.error, lang);
+          return (
+            <li className={styles.candidateChecklistItem} key={String(source.sourceId || index)}>
+              <div className={styles.candidateChecklistIdentity}>
+                <strong>{source.label || String(source.sourceId || index)}</strong>
+                <span>{isZh ? `${Number(source.itemCount) || 0} 条` : `${Number(source.itemCount) || 0} items`}</span>
+              </div>
+              <VStatusChip tone={chip.tone}>{chip.label}</VStatusChip>
+            </li>
+          );
+        })}
+      </ul>
+      {sources.some((source) => source.error) ? (
+        <ul className="m-0 grid list-disc gap-1 pl-4">
+          {sources.filter((source) => source.error).map((source, index) => (
+            <li key={`${source.sourceId}:${index}`} className={styles.sourceError}>{source.error?.message}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 function CollectionTaskBody(props: {
   nextAction: HypothesisFirstNextAction;
   lang: Language;
   teamId: string;
   questionId: string;
+  stateV2?: HypothesisFirstStateV2 | null;
   onRetryCollection?: () => Promise<void>;
 }) {
   const queryClient = useQueryClient();
   const isZh = props.lang === "zh";
   const requestId = props.nextAction.collectionRequestId || "";
   const collectionRunId = props.nextAction.collectionRunId || "";
+  // 与 V2 adapter 的 active-request 规则一致：先取未完成请求，回退首个请求。
+  const activeRequest = props.stateV2?.collection.requests.find(
+    (request) => request.lifecycle !== "completed",
+  ) ?? props.stateV2?.collection.requests[0] ?? null;
   const canHandoff = props.nextAction.command === "retry_handoff"
     && Boolean(requestId)
     && Boolean(collectionRunId);
@@ -1408,6 +1669,9 @@ function CollectionTaskBody(props: {
           {props.nextAction.statusMessage || props.nextAction.recovery?.reason || (isZh ? "资料搜集" : "Evidence collection")}
         </VStateRow>
       </div>
+      {activeRequest ? (
+        <CollectionSourceProgress sources={activeRequest.sources} lang={props.lang} />
+      ) : null}
       {handoff.isError ? (
         <VErrorSummary
           label={isZh ? "交接失败" : "Handoff failed"}
