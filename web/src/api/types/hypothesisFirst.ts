@@ -532,6 +532,7 @@ export type ActionCommand =
   | "open_next_review"
   | "human_adjudication"
   | "create_formal_run"
+  | "retry_formal_node"
   | "reconcile_formal_run"
   | "cancel_run"
   | "archive_run"
@@ -556,6 +557,7 @@ export type ActionPayloadByCommand = {
   open_next_review: { previousMeetingRoundId: string; roundBudget: number };
   human_adjudication: { hypothesisRoundId: string };
   create_formal_run: { questionId: string; hypothesisRoundId: string };
+  retry_formal_node: { runId: string; nodeId: string };
   reconcile_formal_run: { runId: string };
   cancel_run: { runId: string };
   archive_run: { runId: string };

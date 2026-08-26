@@ -68,6 +68,7 @@ export type HypothesisFirstCommand =
   | "open_next_review"
   | "human_adjudication"
   | "retry_review_dispatch"
+  | "retry_formal_node"
   | "reconcile_formal_run"
   | "retry_program_handoff"
   | "record_program_review"

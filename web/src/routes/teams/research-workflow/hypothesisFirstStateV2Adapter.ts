@@ -281,6 +281,7 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
     case "retry_program_handoff": return "retry_program_handoff";
     case "record_program_review": return "record_program_review";
     case "create_formal_revision": return "create_formal_revision";
+    case "retry_formal_node": return "retry_formal_node";
     case "reconcile_formal_run": return "reconcile_formal_run";
     case "retry_review_dispatch": return "retry_review_dispatch";
     case "reopen_review": return "reopen_review";
