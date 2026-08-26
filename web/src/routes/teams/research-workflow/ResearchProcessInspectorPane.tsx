@@ -34,6 +34,7 @@ import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
+import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
@@ -140,6 +141,28 @@ export function ResearchProcessInspectorPane(props: {
     nextAction?.collectionRequestId
     && (nextAction.command === "retry_collection" || nextAction.command === "continue_collection"),
   );
+  // Formal-runtime recovery belongs to the run-level task surface.  The
+  // selected pipeline node is only a navigation anchor and may be stale or
+  // absent, so do not require an exact node-id match before exposing the
+  // server-authored recovery actions.
+  const formalRuntimeOwnsInspector = Boolean(
+    scope.panel === "node"
+    && scope.runId
+    && nextAction
+    && (
+      nextAction.stage === "converged"
+      || (
+        nextAction.stage === "blocked"
+        && (
+          ((nextAction as HypothesisFirstV2NextAction).canonicalActions ?? [])
+            .some((action) => action.targetPhase === "formal_runtime")
+          || nextAction.canonicalAction?.targetPhase === "formal_runtime"
+          || !isHypothesisFirstCanvasNode(scope.selectedNodeId)
+          || !isHypothesisFirstCanvasNode(nextAction.targetNodeId)
+        )
+      )
+    ),
+  );
 
   if (scope.panel === "progress") {
     return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
@@ -245,6 +268,33 @@ export function ResearchProcessInspectorPane(props: {
       />
     );
   }
+  if (formalRuntimeOwnsInspector && scope.selectedNodeId) {
+    return (
+      <HypothesisFirstNodeInspector
+        lang={lang}
+        teamId={scope.teamId}
+        questionId={scope.questionId || state.run?.questionId || ""}
+        nodeId={scope.selectedNodeId}
+        runId={scope.runId}
+        formalRuntime
+        discussionModel={discussionModel}
+        collectionChildStatus={collectionChildStatus}
+        onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
+        onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
+        onFormalRunCreated={({ runId, nodeId, questionId }) => actions.replaceParams({
+          runId,
+          node: nodeId,
+          questionId,
+          panel: "node",
+        })}
+        onRetryCollection={
+          onRecoverCollection && nextAction?.collectionRequestId
+            ? () => onRecoverCollection(nextAction.collectionRequestId || "")
+            : undefined
+        }
+      />
+    );
+  }
   // Hypothesis-first region cards: summary + deep link, in definition and run views alike.
   if (scope.selectedNodeId && isHypothesisFirstCanvasNode(scope.selectedNodeId)) {
     return (
@@ -254,6 +304,7 @@ export function ResearchProcessInspectorPane(props: {
         questionId={scope.questionId || state.run?.questionId || ""}
         nodeId={scope.selectedNodeId}
         runId={scope.runId}
+        formalRuntime={formalRuntimeOwnsInspector}
         discussionModel={discussionModel}
         collectionChildStatus={collectionChildStatus}
         onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}

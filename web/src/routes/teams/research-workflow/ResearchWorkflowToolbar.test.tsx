@@ -113,6 +113,21 @@ describe("ResearchWorkflowToolbar", () => {
     expect(markup).toContain('data-vui="status-chip"');
   });
 
+  it("labels formal runtime reconciliation and archived statuses", () => {
+    const reconciliation = renderToolbar({
+      ...BASE_PROPS,
+      runStatus: "reconciliation_required",
+    });
+    expect(reconciliation).toContain("需要对账");
+    expect(reconciliation).toContain('data-testid="research-run-status"');
+
+    const archived = renderToolbar({
+      ...BASE_PROPS,
+      runStatus: "archived",
+    });
+    expect(archived).toContain("已归档");
+  });
+
   it("says no experiment is selected when chrome identity is missing", () => {
     const markup = renderToolbar({
       ...BASE_PROPS,

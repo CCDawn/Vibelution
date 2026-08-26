@@ -260,6 +260,28 @@ def _map_query_error(exc: Exception) -> HTTPException:
     )
 
 
+def _map_node_not_ready_error(exc: NodeNotReadyError) -> HTTPException:
+    """Expose readiness blockers so a rejected retry is actionable in the UI."""
+    readiness = getattr(exc, "readiness", None)
+    blockers = []
+    for blocker in getattr(readiness, "blockers", ()) or ():
+        to_dict = getattr(blocker, "to_dict", None)
+        if callable(to_dict):
+            blockers.append(to_dict())
+        elif isinstance(blocker, dict):
+            blockers.append(dict(blocker))
+        else:
+            blockers.append({"detail": str(blocker)})
+    return HTTPException(
+        status_code=412,
+        detail={
+            "code": "node_not_ready",
+            "message": str(exc),
+            "blockers": blockers,
+        },
+    )
+
+
 @router.get(
     "/research/workflows/{workflow_id}/definition",
     response_model=ResearchWorkflowDefinitionResponse,
@@ -678,10 +700,7 @@ def research_workflow_command(
             detail={"code": "command_not_allowed", "message": str(exc)},
         ) from exc
     except NodeNotReadyError as exc:
-        raise HTTPException(
-            status_code=412,
-            detail={"code": "node_not_ready", "message": str(exc)},
-        ) from exc
+        raise _map_node_not_ready_error(exc) from exc
     except InvalidHumanTaskStateError as exc:
         raise HTTPException(
             status_code=409,

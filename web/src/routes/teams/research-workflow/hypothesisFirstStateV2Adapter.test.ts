@@ -148,6 +148,74 @@ function reviewCandidate(candidateId: string, lifecycle: ReviewCandidateState["l
 }
 
 describe("resolveHypothesisFirstNextActionFromV2", () => {
+  it("keeps every scoped command while preserving the first enabled legacy action", () => {
+    const resume = command({
+      command: "resume_discussion",
+      payload: { meetingRoundId: "meeting-1" },
+    }, "恢复讨论");
+    const stop = {
+      ...command({
+        command: "stop_discussion",
+        payload: { meetingRoundId: "meeting-1" },
+      }, "停止讨论"),
+      actionId: "action:stop-discussion",
+      enabled: false,
+      disabledReason: "停止讨论需要先确认当前轮次",
+      requiresConfirmation: true,
+      confirmationText: "停止后将关闭当前讨论轮次。",
+    } as CommandAction;
+    const regenerate = command({
+      command: "regenerate_summary",
+      payload: { meetingRoundId: "meeting-1" },
+    }, "重新整理纪要");
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      allowedActions: [resume, stop, regenerate],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.canonicalAction?.command).toBe("resume_discussion");
+    expect(action.command).toBe("resume_discussion");
+    expect(action.canonicalActions?.map((item) => item.command)).toEqual([
+      "resume_discussion",
+      "stop_discussion",
+      "regenerate_summary",
+    ]);
+    expect(action.canonicalActions?.[1]).toMatchObject({
+      enabled: false,
+      disabledReason: "停止讨论需要先确认当前轮次",
+      requiresConfirmation: true,
+    });
+  });
+
+  it("marks a failed formal runtime as blocked instead of converged", () => {
+    const reconcile = {
+      ...command({
+        command: "reconcile_formal_run",
+        payload: { runId: "formal-run-1" },
+      }, "核对正式运行状态"),
+      targetPhase: "formal_runtime",
+    } as CommandAction;
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "formal_runtime",
+      formalRuntime: {
+        ...stateV2().formalRuntime,
+        runId: "formal-run-1",
+        runStatus: "failed",
+        actionability: "blocked",
+      },
+      allowedActions: [reconcile],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).toBe("blocked");
+    expect(action.canonicalActions?.map((item) => item.command)).toEqual(["reconcile_formal_run"]);
+  });
+
   it("maps an official catalog cold start to the generation CTA", () => {
     const state = stateV2({
       allowedActions: [command({ command: "open_generation", payload: { questionId: "SCI-001" } }, "生成候选假说")],

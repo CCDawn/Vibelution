@@ -1200,6 +1200,141 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[data-testid="program-review-form"]')).toBeNull();
   });
 
+  it("shows all formal runtime recovery actions on the current task inspector", async () => {
+    const phase = {
+      lifecycle: "waiting_user" as const,
+      outcome: "none" as const,
+      actionability: "blocked" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    };
+    const reconcile = {
+      kind: "command" as const,
+      actionId: "formal:reconcile",
+      label: "核对正式运行状态",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "formal_runtime" as const,
+      targetNodeId: null,
+      command: "reconcile_formal_run" as const,
+      payload: { runId: "formal-run-1" },
+      inputSchemaRef: null,
+      idempotencyKey: "formal:reconcile:1",
+      expectedStateVersion: "state-1",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+    const stop = {
+      ...reconcile,
+      actionId: "formal:stop",
+      label: "停止正式运行",
+      command: "stop_discussion" as const,
+      payload: { meetingRoundId: "formal-run-1" },
+      requiresConfirmation: true,
+      confirmationText: "停止后需要重新确认正式运行状态。",
+    };
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "formal_runtime",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: { ...phase, accepted: true, latestHypothesisRoundId: "round-1", roundIndex: 1, roundBudget: 3 },
+        formalRuntime: {
+          ...phase,
+          runId: "formal-run-1",
+          runVersion: 2,
+          runStatus: "reconciliation_required",
+          completionKind: null,
+          lineageDisposition: "current",
+          isCurrentRevision: true,
+          parentRunId: null,
+          childRunIds: [],
+          currentNodeIds: ["protocol_design"],
+        },
+        allowedActions: [reconcile, stop],
+        problems: [],
+      } as HypothesisFirstStateV2,
+    }));
+
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="protocol_design"
+        runId="formal-run-1"
+        formalRuntime
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const actionList = container.querySelector('[data-testid="canonical-command-action-list"]');
+    expect(actionList).toBeTruthy();
+    expect(actionList?.textContent).toContain("核对正式运行状态");
+    expect(actionList?.textContent).toContain("停止正式运行");
+    expect(container.textContent).toContain("状态待确认");
+
+    const stopButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("停止正式运行"));
+    await act(async () => {
+      stopButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mockedExecuteCommand).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("停止后需要重新确认正式运行状态。");
+
+    const confirmButton = Array.from(document.body.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("确认执行"));
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", stop);
+  });
+
+  it("renders every formal delivery problem instead of only the first message", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: programState("program_delivery", {
+        actionability: "blocked",
+        lifecycle: "failed",
+        problems: [
+          {
+            code: "missing-context",
+            category: "dependency",
+            severity: "error",
+            message: "正式结果缺少交付上下文",
+            recoverable: true,
+            sourceKind: "delivery",
+            sourceId: "run-output-1",
+            detectedAt: "2026-08-25T00:00:00Z",
+          },
+          {
+            code: "missing-receipt",
+            category: "integrity",
+            severity: "error",
+            message: "缺少正式模型调用凭证",
+            recoverable: true,
+            sourceKind: "delivery",
+            sourceId: "run-output-1",
+            detectedAt: "2026-08-25T00:00:00Z",
+          },
+        ],
+      }),
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const summary = container.querySelector('[data-vui="error-summary"]');
+    expect(summary?.textContent).toContain("正式结果缺少交付上下文");
+    expect(summary?.textContent).toContain("缺少正式模型调用凭证");
+    expect(summary?.querySelectorAll("li")).toHaveLength(2);
+  });
+
   it("shows a terminal closure after all four program gates are approved", () => {
     mockedChain.mockReturnValue(chainData({ stateV2: programState("completed") }));
     render(
