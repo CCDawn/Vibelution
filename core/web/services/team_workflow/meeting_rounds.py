@@ -368,12 +368,25 @@ def persist_meeting_discussion_scope(
     """
 
     from core.research.workflow.contracts.discussion_scope import (
+        PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
         WorkflowDiscussionScopeV1,
     )
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
     normalized_meeting_id = str(meeting_round_id or "").strip()
+    if (
+        isinstance(discussion_scope, Mapping)
+        and str(discussion_scope.get("kind") or "").strip()
+        == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
+    ):
+        return persist_preformal_meeting_discussion_scope(
+            normalized_team_id,
+            normalized_meeting_id,
+            discussion_scope=discussion_scope,
+            discussion_scope_hash=discussion_scope_hash,
+            scope_authority=scope_authority,
+        )
     scope = WorkflowDiscussionScopeV1.from_mapping(discussion_scope)
     normalized_hash = str(discussion_scope_hash or "").strip().lower()
     if normalized_hash != scope.scope_hash:
@@ -398,6 +411,72 @@ def persist_meeting_discussion_scope(
             "researchProjectId": scope.researchProjectId,
             "workflowRunId": scope.workflowRunId,
             "workflowNodeId": scope.workflowNodeId,
+            "updatedAt": _utc_now(),
+        }
+        _append_round_record(normalized_team_id, updated)
+    return updated
+
+
+def persist_preformal_meeting_discussion_scope(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    discussion_scope: Mapping[str, Any],
+    discussion_scope_hash: str,
+    scope_authority: str,
+) -> dict[str, Any]:
+    """Append an exact preformal candidate binding to a legacy meeting.
+
+    Preformal review meetings intentionally have no formal workflow run.  The
+    binding is therefore kept as an append-only projection beside the legacy
+    ``MeetingRound`` fields, using the same writer and lifecycle lock as the
+    formal scope projection.
+    """
+
+    from core.research.workflow.contracts.discussion_scope import (
+        PreformalCandidateReviewScopeV1,
+    )
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_meeting_id = str(meeting_round_id or "").strip()
+    scope = PreformalCandidateReviewScopeV1.from_mapping(discussion_scope)
+    normalized_hash = str(discussion_scope_hash or "").strip().lower()
+    if normalized_hash != scope.scope_hash:
+        raise ContractValidationError(
+            "discussionScopeHash does not match the preformal discussion scope"
+        )
+    with _LOCK:
+        meeting = _load_meeting_round(normalized_team_id, normalized_meeting_id)
+        existing = meeting.get("discussionScope")
+        if isinstance(existing, Mapping):
+            try:
+                existing_scope = PreformalCandidateReviewScopeV1.from_mapping(existing)
+            except (ContractValidationError, TypeError, ValueError) as exc:
+                raise ContractValidationError(
+                    "meeting already carries a non-preformal discussion scope"
+                ) from exc
+            if existing_scope.key != scope.key:
+                raise ContractValidationError(
+                    "meeting is already bound to a different discussion scope"
+                )
+            existing_hash = str(
+                meeting.get("discussionScopeHash") or ""
+            ).strip().lower()
+            if existing_hash and existing_hash != scope.scope_hash:
+                raise ContractValidationError(
+                    "meeting preformal discussionScopeHash does not match its scope"
+                )
+            return meeting
+        updated = {
+            **meeting,
+            "discussionScope": scope.to_dict(),
+            "discussionScopeHash": scope.scope_hash,
+            "scopeAuthority": str(scope_authority or "").strip(),
+            "preformalDiscussion": True,
+            "selectionId": scope.selectionId,
+            "candidateId": scope.candidateId,
+            "roomId": scope.roomId,
             "updatedAt": _utc_now(),
         }
         _append_round_record(normalized_team_id, updated)

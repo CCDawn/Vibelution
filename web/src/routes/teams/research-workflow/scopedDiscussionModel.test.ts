@@ -148,4 +148,98 @@ describe("scoped discussion model", () => {
     expect(model.status).toBe("ready");
     expect(model.selectedRoundId).toBe("active-round");
   });
+
+  it("accepts a preformal candidate review without inventing a run id", () => {
+    const preformalScope = {
+      version: 1 as const,
+      kind: "preformal_candidate_review" as const,
+      teamId: "research-team",
+      questionId: "SCI-003",
+      selectionId: "selection-1",
+      candidateId: "h1",
+      meetingRoundId: "meeting-h1",
+      roomId: "room-h1",
+    };
+    const model = buildScopedDiscussionModel({
+      anchor: {
+        scope: preformalScope,
+        scopeHash: "preformal-hash",
+        roomId: "room-h1",
+        meetingRoundId: "meeting-h1",
+        questionId: "SCI-003",
+        selectionId: "selection-1",
+        candidateId: "h1",
+        deepLink: "/chat?room=room-h1",
+        status: "ready",
+        degradedReason: "",
+      },
+    });
+
+    expect(model.status).toBe("ready");
+    expect(model.returnTo).toBe(
+      "/teams?teamId=research-team&researchView=workflow&workflowId=challenge-cup-research&questionId=SCI-003&node=hf_review&panel=node",
+    );
+    expect(model.deepLink).toContain("returnTo=%2Fteams%3FteamId%3Dresearch-team");
+    expect(model.deepLink).not.toContain("runId");
+  });
+
+  it("rejects a preformal return route that attempts to add a formal run", () => {
+    const model = buildScopedDiscussionModel({
+      anchor: {
+        scope: {
+          version: 1,
+          kind: "preformal_candidate_review",
+          teamId: "research-team",
+          questionId: "SCI-003",
+          selectionId: "selection-1",
+          candidateId: "h1",
+          meetingRoundId: "meeting-h1",
+          roomId: "room-h1",
+        },
+        scopeHash: "preformal-hash",
+        roomId: "room-h1",
+        meetingRoundId: "meeting-h1",
+        questionId: "SCI-003",
+        selectionId: "selection-1",
+        candidateId: "h1",
+        deepLink: "/chat?room=room-h1",
+        returnTo:
+          "/teams?teamId=research-team&researchView=workflow&workflowId=challenge-cup-research&questionId=SCI-003&runId=fake&node=hf_review&panel=node",
+        status: "ready",
+        degradedReason: "",
+      },
+    });
+
+    expect(model.status).toBe("degraded");
+    expect(model.degradedReason).toBe(SCOPED_DISCUSSION_REASONS.invalidAnchor);
+  });
+
+  it("rejects a preformal anchor whose top-level room differs from its scope", () => {
+    const model = buildScopedDiscussionModel({
+      anchor: {
+        scope: {
+          version: 1,
+          kind: "preformal_candidate_review",
+          teamId: "research-team",
+          questionId: "SCI-003",
+          selectionId: "selection-1",
+          candidateId: "h1",
+          meetingRoundId: "meeting-h1",
+          roomId: "room-h1",
+        },
+        scopeHash: "preformal-hash",
+        roomId: "room-sibling",
+        meetingRoundId: "meeting-h1",
+        questionId: "SCI-003",
+        selectionId: "selection-1",
+        candidateId: "h1",
+        deepLink: "/chat?room=room-sibling",
+        status: "ready",
+        degradedReason: "",
+      },
+    });
+
+    expect(model.status).toBe("degraded");
+    expect(model.degradedReason).toBe(SCOPED_DISCUSSION_REASONS.invalidAnchor);
+  });
 });

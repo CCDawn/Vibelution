@@ -28,7 +28,9 @@ from urllib.parse import urlencode
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.discussion_scope import (
     CANDIDATE_REVIEW_SCOPE_KIND,
+    PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
     QUESTION_GENERATION_SCOPE_KIND,
+    PreformalCandidateReviewScopeV1,
     WorkflowDiscussionScopeV1,
     parse_discussion_scope,
 )
@@ -56,6 +58,17 @@ ROOM_SCOPE_MISMATCH = "room_scope_mismatch"
 ROOM_SCOPE_HASH_MISMATCH = "room_scope_hash_mismatch"
 ROOM_CLOSED = "room_closed"
 ROOM_UNREADABLE = "room_unreadable"
+PREFORMAL_SCOPE_MISSING = "preformal_scope_missing"
+PREFORMAL_SCOPE_INVALID = "preformal_scope_invalid"
+PREFORMAL_SCOPE_HASH_MISMATCH = "preformal_scope_hash_mismatch"
+PREFORMAL_BINDING_MISMATCH = "preformal_binding_mismatch"
+PREFORMAL_MEETING_MISSING = "preformal_meeting_missing"
+PREFORMAL_ROOM_MISSING = "preformal_room_missing"
+PREFORMAL_ROOM_SCOPE_MISMATCH = "preformal_room_scope_mismatch"
+PREFORMAL_MEETING_CLOSED = "preformal_meeting_closed"
+
+_PREFORMAL_SCOPE_AUTHORITY = "preformal_candidate_review_scope.v1"
+_PREFORMAL_SCOPE_SOURCE = "hypothesis_first_candidate_review.v1"
 
 _OUTPUT_FIELDS = (
     "scope",
@@ -305,6 +318,106 @@ def _scope_from_payload(
     return _scope_from_mapping(payload, allow_selection_parent=allow_selection_parent)
 
 
+_PREFORMAL_SCOPE_FIELDS = (
+    "version",
+    "kind",
+    "teamId",
+    "questionId",
+    "selectionId",
+    "candidateId",
+    "meetingRoundId",
+    "roomId",
+)
+_PREFORMAL_SCOPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "version": ("version", "scopeVersion"),
+    "kind": ("kind", "scopeKind"),
+    "teamId": ("teamId", "team_id"),
+    "questionId": ("questionId", "question_id", "question"),
+    "selectionId": ("selectionId", "selection_id"),
+    "candidateId": ("candidateId", "candidate_id"),
+    "meetingRoundId": ("meetingRoundId", "meeting_round_id"),
+    "roomId": ("roomId", "room_id", "linkedChatRoomId", "discussionRoomId"),
+}
+_PREFORMAL_SCOPE_NESTED_KEYS = (
+    "preformalDiscussionScope",
+    "preformalScope",
+    "preformalBinding",
+)
+
+
+def _preformal_scope_candidate(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    for key in _PREFORMAL_SCOPE_NESTED_KEYS:
+        nested = payload.get(key)
+        if isinstance(nested, Mapping):
+            return nested
+    nested = _scope_candidate(payload)
+    if isinstance(nested, Mapping) and (
+        _text(nested.get("kind")) == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
+    ):
+        return nested
+    if (
+        _text(payload.get("kind")) == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
+        or _text(payload.get("scopeKind")) == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
+        or _text(payload.get("scopeAuthority")) == _PREFORMAL_SCOPE_AUTHORITY
+    ):
+        return payload
+    return None
+
+
+def _preformal_scope_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    defaults: Mapping[str, Any] | None = None,
+    allow_legacy: bool = False,
+    include_legacy_scope_hash: bool = True,
+) -> tuple[PreformalCandidateReviewScopeV1 | None, str, str | None]:
+    """Parse a preformal binding, optionally projecting the six-field legacy record.
+
+    ``allow_legacy`` is used only after the chain has supplied the exact
+    selection/candidate/meeting/room references.  It is deliberately false
+    for generic workflow projections so a question or team room can never
+    become a current discussion by itself.
+    """
+
+    if not isinstance(payload, Mapping):
+        return None, "", "scope_not_object"
+    nested = _preformal_scope_candidate(payload)
+    if nested is None and not allow_legacy:
+        return None, "", "scope_missing"
+    source = nested if nested is not None else payload
+    supplied_hash = _text(
+        payload.get("discussionScopeHash")
+        or (source.get("discussionScopeHash") if isinstance(source, Mapping) else "")
+        or payload.get("scopeHash")
+        or (source.get("scopeHash") if isinstance(source, Mapping) else "")
+    )
+    if not include_legacy_scope_hash and nested is None:
+        supplied_hash = _text(
+            payload.get("discussionScopeHash")
+            or (source.get("discussionScopeHash") if isinstance(source, Mapping) else "")
+        )
+    candidate: dict[str, Any] = {}
+    for field in _PREFORMAL_SCOPE_FIELDS:
+        for alias in _PREFORMAL_SCOPE_ALIASES[field]:
+            if alias in source and source.get(alias) is not None:
+                candidate[field] = source.get(alias)
+                break
+    if nested is None:
+        # Legacy projection is allowed only after the owning chain supplied an
+        # exact selection/candidate/meeting/room binding.  A persisted explicit
+        # scope must stand on its own: never repair a damaged new envelope from
+        # loose outer fields or defaults.
+        for field, value in dict(defaults or {}).items():
+            if field in _PREFORMAL_SCOPE_FIELDS and not _text(candidate.get(field)):
+                candidate[field] = value
+        candidate.setdefault("version", 1)
+        candidate.setdefault("kind", PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND)
+    try:
+        return PreformalCandidateReviewScopeV1.from_mapping(candidate), supplied_hash, None
+    except (ContractValidationError, TypeError, ValueError) as exc:
+        return None, supplied_hash, _text(exc) or "scope_invalid"
+
+
 def _scope_equal(left: WorkflowDiscussionScopeV1, right: WorkflowDiscussionScopeV1) -> bool:
     return left.to_dict() == right.to_dict()
 
@@ -354,6 +467,19 @@ def _find_active_scope(projection: Mapping[str, Any]) -> tuple[WorkflowDiscussio
         )
         if scope is not None:
             return scope, supplied_hash, error
+    return None, "", "scope_missing"
+
+
+def _find_preformal_scope(
+    projection: Mapping[str, Any],
+) -> tuple[PreformalCandidateReviewScopeV1 | None, str, str | None]:
+    """Find an explicit chain binding for a review opened before a formal run."""
+
+    for payload in _nested_payloads(projection):
+        scope, supplied_hash, error = _preformal_scope_from_payload(payload)
+        if scope is None:
+            continue
+        return scope, supplied_hash, error
     return None, "", "scope_missing"
 
 
@@ -462,6 +588,220 @@ def _degraded(
     }
 
 
+def _preformal_degraded(
+    reason: str,
+    *,
+    scope: PreformalCandidateReviewScopeV1 | None = None,
+    room_id: str = "",
+    meeting_round_id: str = "",
+    question_id: str = "",
+    selection_id: str = "",
+    candidate_id: str = "",
+) -> dict[str, Any]:
+    if scope is not None:
+        scope_payload: dict[str, Any] | None = scope.to_dict()
+        scope_hash = scope.scope_hash
+        room_id = scope.roomId
+        meeting_round_id = scope.meetingRoundId
+        question_id = scope.questionId
+        selection_id = scope.selectionId
+        candidate_id = scope.candidateId
+    else:
+        scope_payload = None
+        scope_hash = ""
+    return {
+        "scope": scope_payload,
+        "scopeHash": scope_hash,
+        "roomId": room_id,
+        "meetingRoundId": meeting_round_id,
+        "questionId": question_id,
+        "selectionId": selection_id,
+        "candidateId": candidate_id,
+        "deepLink": "",
+        "returnTo": "",
+        "returnLabel": "",
+        "status": STATUS_DEGRADED,
+        "degradedReason": reason,
+    }
+
+
+def _preformal_ready(
+    scope: PreformalCandidateReviewScopeV1,
+) -> dict[str, Any]:
+    # A preformal review has no honest workflow run/node.  Return to the
+    # stable question review surface instead of manufacturing a formal run id.
+    return_to = "/teams?" + urlencode(
+        {
+            "teamId": scope.teamId,
+            "researchView": "workflow",
+            "workflowId": "challenge-cup-research",
+            "questionId": scope.questionId,
+            "node": "hf_review",
+            "panel": "node",
+        }
+    )
+    deep_link = "/chat?" + urlencode(
+        {
+            "room": scope.roomId,
+            "returnTo": return_to,
+            "returnLabel": "返回科研流程",
+        }
+    )
+    return {
+        "scope": scope.to_dict(),
+        "scopeHash": scope.scope_hash,
+        "roomId": scope.roomId,
+        "meetingRoundId": scope.meetingRoundId,
+        "questionId": scope.questionId,
+        "selectionId": scope.selectionId,
+        "candidateId": scope.candidateId,
+        "deepLink": deep_link,
+        "returnTo": return_to,
+        "returnLabel": "返回科研流程",
+        "status": STATUS_READY,
+        "degradedReason": "",
+    }
+
+
+def _preformal_ref_value(
+    meeting: Mapping[str, Any],
+    direct_keys: Iterable[str],
+    ref_keys: Iterable[str],
+) -> str:
+    direct = _first_text((meeting,), direct_keys)
+    if direct:
+        return direct
+    for ref_key in ref_keys:
+        prefix = f"{ref_key}:"
+        for list_key in ("inputArtifactRefs", "discussionItemRefs"):
+            for raw in list(meeting.get(list_key) or []):
+                value = _text(raw)
+                if value.startswith(prefix):
+                    return value.split(":", 1)[1].strip()
+    return ""
+
+
+def _preformal_meeting_binding(
+    meeting: Mapping[str, Any],
+    *,
+    scope: PreformalCandidateReviewScopeV1,
+) -> tuple[bool, str]:
+    """Validate a meeting against an exact preformal chain binding."""
+
+    if _meeting_id(meeting) != scope.meetingRoundId:
+        return False, PREFORMAL_BINDING_MISMATCH
+    meeting_question = _first_text((meeting,), ("questionId", "question"))
+    if not meeting_question or meeting_question.upper() != scope.questionId.upper():
+        return False, PREFORMAL_BINDING_MISMATCH
+    meeting_team = _first_text((meeting,), ("teamId", "researchTeamId"))
+    if meeting_team and meeting_team != scope.teamId:
+        return False, PREFORMAL_BINDING_MISMATCH
+    if _meeting_room_id(meeting) != scope.roomId:
+        return False, PREFORMAL_BINDING_MISMATCH
+    selection_id = _preformal_ref_value(
+        meeting,
+        ("selectionId", "selection_id"),
+        ("hypothesis_selection",),
+    )
+    candidate_id = _preformal_ref_value(
+        meeting,
+        ("candidateId", "candidate_id"),
+        ("hypothesis_candidate",),
+    )
+    if selection_id != scope.selectionId or candidate_id != scope.candidateId:
+        return False, PREFORMAL_BINDING_MISMATCH
+
+    explicit_scope = _preformal_scope_candidate(meeting)
+    if explicit_scope is not None:
+        stored_scope, supplied_hash, _error = _preformal_scope_from_payload(
+            meeting,
+            defaults=scope.to_dict(),
+            allow_legacy=False,
+            include_legacy_scope_hash=False,
+        )
+        if stored_scope is None:
+            return False, PREFORMAL_SCOPE_INVALID
+        if supplied_hash and not _scope_hash_is_valid(stored_scope, supplied_hash):
+            return False, PREFORMAL_SCOPE_HASH_MISMATCH
+        if stored_scope.to_dict() != scope.to_dict():
+            return False, PREFORMAL_BINDING_MISMATCH
+    return True, ""
+
+
+def _preformal_room_binding(
+    room: Mapping[str, Any],
+    *,
+    scope: PreformalCandidateReviewScopeV1,
+) -> tuple[bool, str]:
+    config = room.get("config") if isinstance(room.get("config"), Mapping) else room
+    if not isinstance(config, Mapping):
+        return False, PREFORMAL_ROOM_SCOPE_MISMATCH
+    source = _text(config.get("source"))
+    if source and source != _PREFORMAL_SCOPE_SOURCE:
+        return False, PREFORMAL_ROOM_SCOPE_MISMATCH
+    if not source:
+        return False, PREFORMAL_ROOM_SCOPE_MISMATCH
+    has_explicit_scope = _preformal_scope_candidate(config) is not None
+    stored_scope, supplied_hash, _error = _preformal_scope_from_payload(
+        config,
+        defaults={"roomId": scope.roomId},
+        allow_legacy=True,
+        include_legacy_scope_hash=False,
+    )
+    if stored_scope is None:
+        return False, PREFORMAL_ROOM_SCOPE_MISMATCH
+    if supplied_hash and not _scope_hash_is_valid(stored_scope, supplied_hash):
+        return False, PREFORMAL_SCOPE_HASH_MISMATCH
+    hash_keys = (
+        ("discussionScopeHash", "scopeHash")
+        if has_explicit_scope
+        else ("discussionScopeHash",)
+    )
+    for hash_key in hash_keys:
+        stored_hash = _text(config.get(hash_key))
+        if stored_hash and stored_hash.lower() != stored_scope.scope_hash.lower():
+            return False, PREFORMAL_SCOPE_HASH_MISMATCH
+    if stored_scope.to_dict() != scope.to_dict():
+        return False, PREFORMAL_ROOM_SCOPE_MISMATCH
+    return True, ""
+
+
+def _project_preformal_discussion_anchor(
+    scope: PreformalCandidateReviewScopeV1,
+    meetings: Any,
+    rooms: Any,
+) -> dict[str, Any]:
+    meeting_records = _records(meetings, "meetings")
+    matching_meetings = [
+        meeting
+        for meeting in meeting_records
+        if _meeting_id(meeting) == scope.meetingRoundId
+    ]
+    if len(matching_meetings) != 1:
+        return _preformal_degraded(
+            PREFORMAL_MEETING_MISSING,
+            scope=scope,
+        )
+    meeting = matching_meetings[0]
+    if _meeting_is_terminal(meeting):
+        return _preformal_degraded(PREFORMAL_MEETING_CLOSED, scope=scope)
+    valid, reason = _preformal_meeting_binding(meeting, scope=scope)
+    if not valid:
+        return _preformal_degraded(reason, scope=scope)
+
+    room_records = _records(rooms, "rooms")
+    room = next((item for item in room_records if _room_id(item) == scope.roomId), None)
+    if room is None:
+        return _preformal_degraded(PREFORMAL_ROOM_MISSING, scope=scope)
+    valid, reason = _preformal_room_binding(room, scope=scope)
+    if not valid:
+        return _preformal_degraded(reason, scope=scope)
+    readable, room_reason = _room_is_readable(room)
+    if not readable:
+        return _preformal_degraded(room_reason or ROOM_UNREADABLE, scope=scope)
+    return _preformal_ready(scope)
+
+
 def _ready(
     scope: WorkflowDiscussionScopeV1,
     room_id: str,
@@ -520,9 +860,37 @@ def project_active_discussion_anchor(
 
     scope, supplied_scope_hash, scope_error = _find_active_scope(workflow_projection)
     if scope is None:
+        preformal_scope, preformal_hash, preformal_error = _find_preformal_scope(
+            workflow_projection
+        )
+        if preformal_scope is not None:
+            if preformal_hash and not _scope_hash_is_valid(
+                preformal_scope, preformal_hash
+            ):
+                return _preformal_degraded(
+                    PREFORMAL_SCOPE_HASH_MISMATCH,
+                    scope=preformal_scope,
+                )
+            refs = _explicit_refs(workflow_projection)
+            for field, expected in (
+                ("meetingRoundId", preformal_scope.meetingRoundId),
+                ("roomId", preformal_scope.roomId),
+                ("selectionId", preformal_scope.selectionId),
+                ("candidateId", preformal_scope.candidateId),
+            ):
+                if refs[field] and refs[field] != expected:
+                    return _preformal_degraded(
+                        PREFORMAL_BINDING_MISMATCH,
+                        scope=preformal_scope,
+                    )
+            return _project_preformal_discussion_anchor(
+                preformal_scope,
+                meetings,
+                rooms,
+            )
         return _degraded(
             WORKFLOW_SCOPE_MISSING
-            if scope_error == "scope_missing"
+            if scope_error == "scope_missing" and preformal_error == "scope_missing"
             else WORKFLOW_SCOPE_INVALID
         )
     if supplied_scope_hash and not _scope_hash_is_valid(scope, supplied_scope_hash):
