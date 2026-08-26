@@ -1390,7 +1390,11 @@ def test_snapshot_projection_exposes_server_active_discussion_anchor() -> None:
     assert anchor["scopeHash"] == scope.scope_hash
     assert anchor["roomId"] == "room-discussion-anchor"
     assert anchor["meetingRoundId"] == "meeting-discussion-anchor"
-    assert anchor["deepLink"] == "/chat?room=room-discussion-anchor"
+    assert anchor["deepLink"].startswith("/chat?room=room-discussion-anchor&returnTo=")
+    assert anchor["returnTo"] == (
+        "/teams?teamId=research-team&researchView=workflow"
+        "&runId=run-discussion-anchor&node=hypothesis_design"
+    )
 
 
 def test_snapshot_projection_keeps_missing_discussion_authority_degraded() -> None:
