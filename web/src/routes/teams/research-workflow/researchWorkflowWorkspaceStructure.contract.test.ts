@@ -72,7 +72,7 @@ describe("research workflow workspace responsibility contract", () => {
     const toolbarStyles = readFileSync(resolve(root, "ResearchWorkflowToolbar.styles.ts"), "utf8");
     expect(source).toContain("responsive={{");
     expect(source).toContain('rail: { label: "研究阶段" }');
-    expect(source).toContain('inspector: { label: "当前任务" }');
+    expect(source).toMatch(/inspector:\s*{\s*label: "当前任务"/);
     expect(source).toContain("layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}");
     expect(source).toContain("toolbarClassName={styles.toolbar}");
     expect(workspaceStyles).toContain('toolbar: "!flex-nowrap overflow-hidden"');
