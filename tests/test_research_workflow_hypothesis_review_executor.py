@@ -29,6 +29,10 @@ from core.research.workflow.contracts import (
     ContractValidationError,
     HypothesisRound,
 )
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+    ModelInvocationStatus,
+)
 from core.web.services import (
     agent_directory_service,
     session_service,
@@ -706,6 +710,67 @@ def _complete_review_runners():
     }
 
 
+def _provider_bound_receipt(
+    receipt_id: str,
+    *,
+    question_stage: str = "review",
+    outcome_kinds: tuple[str, ...] = ("review",),
+    status: ModelInvocationStatus = ModelInvocationStatus.SUCCEEDED,
+) -> dict:
+    retry_count = 1 if status is ModelInvocationStatus.RETRIED else 0
+    return ModelInvocationReceipt.from_invocation(
+        receipt_id=receipt_id,
+        run_id="workflow-run-formal",
+        node_run_id=f"review-node-{receipt_id}",
+        scope={
+            "questionId": "SCI-096",
+            "workflowRunId": "workflow-run-formal",
+            "questionStage": question_stage,
+        },
+        provider="opencode",
+        model="deepseek-v4-flash",
+        requested_model="deepseek-v4-flash",
+        status=status,
+        request_content={"receiptId": receipt_id},
+        response_content={"ok": True},
+        started_at_ms=10,
+        finished_at_ms=20,
+        retry_count=retry_count,
+        metadata={
+            "questionStage": question_stage,
+            "outcomeKinds": list(outcome_kinds),
+        },
+        evidence_locator={"kind": "hypothesis_review_step"},
+    ).to_dict()
+
+
+def _provider_bound_review_runners(*, receipt_factory=None):
+    runners = _complete_review_runners()
+    call_index = 0
+
+    def wrap(name, runner):
+        def wrapped(*args):
+            nonlocal call_index
+            payload = runner(*args)
+            call_index += 1
+            receipt = (
+                receipt_factory(call_index, name)
+                if receipt_factory is not None
+                else _provider_bound_receipt(f"formal-review-{call_index}")
+            )
+            return hypothesis_review_executor.ProviderBoundReviewResult(
+                payload=payload,
+                model_invocation_receipt=receipt,
+            )
+
+        return wrapped
+
+    return {
+        key: wrap(key.removesuffix("_runner"), runner)
+        for key, runner in runners.items()
+    }
+
+
 def test_review_execution_mode_rejects_unknown_values():
     with pytest.raises(ContractValidationError, match="execution mode"):
         hypothesis_review_executor.execute_hypothesis_review(
@@ -734,6 +799,84 @@ def test_formal_review_stays_blocked_without_provider_bound_receipts():
             **runners,
             reviewer_assignments={"metareview": "coordinator"},
         )
+
+
+def test_formal_review_accepts_one_unique_provider_receipt_per_model_call():
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _direct_review_context(),
+        execution_mode="formal",
+        **_provider_bound_review_runners(),
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    receipts = result["modelInvocationReceipts"]
+    assert len(receipts) == 5  # 2 reflection + 1 pairwise + Pareto + MetaReview
+    assert len({item["receiptId"] for item in receipts}) == 5
+    assert {item["metadata"]["questionStage"] for item in receipts} == {"review"}
+    assert all("review" in item["metadata"]["outcomeKinds"] for item in receipts)
+
+
+@pytest.mark.parametrize(
+    ("receipt_factory", "message"),
+    [
+        (
+            lambda _index, _name: _provider_bound_receipt("duplicate-review-receipt"),
+            "duplicate",
+        ),
+        (
+            lambda index, _name: _provider_bound_receipt(
+                f"wrong-stage-{index}", question_stage="generation"
+            ),
+            "questionStage",
+        ),
+        (
+            lambda index, _name: _provider_bound_receipt(
+                f"wrong-outcome-{index}", outcome_kinds=("candidate",)
+            ),
+            "outcomeKinds",
+        ),
+        (
+            lambda _index, _name: None,
+            "receipt",
+        ),
+        (
+            lambda index, _name: _provider_bound_receipt(
+                f"partial-{index}", status=ModelInvocationStatus.PARTIAL
+            ),
+            "status",
+        ),
+    ],
+)
+def test_formal_review_rejects_unverifiable_provider_receipts(
+    receipt_factory, message
+):
+    with pytest.raises(ContractValidationError, match=message):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            execution_mode="formal",
+            **_provider_bound_review_runners(receipt_factory=receipt_factory),
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_formal_review_accepts_retried_provider_receipt():
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _direct_review_context(),
+        execution_mode="formal",
+        **_provider_bound_review_runners(
+            receipt_factory=lambda index, _name: _provider_bound_receipt(
+                f"retried-{index}",
+                status=(
+                    ModelInvocationStatus.RETRIED
+                    if index == 1
+                    else ModelInvocationStatus.SUCCEEDED
+                ),
+            )
+        ),
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    assert result["modelInvocationReceipts"][0]["status"] == "retried"
 
 
 def test_review_runner_scores_are_bounded_before_review_artifact_is_built():

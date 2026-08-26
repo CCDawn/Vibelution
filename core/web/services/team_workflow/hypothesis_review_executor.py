@@ -19,8 +19,8 @@ candidate hypotheses + evidence refs) into the content of a closable
 
 DEV fixtures are deterministic (seeded from the review context id).  The
 explicit ``DEV`` / ``FORMAL`` execution fence keeps those fixtures out of
-formal review: FORMAL requires all four real runners and currently remains
-blocked until the provider-bound model invocation receipt wiring is available.
+formal review: FORMAL requires all four real runners and one provider-bound
+model invocation receipt for every model call.
 Every step fails closed: a missing dimension, an invalid or missing
 comparison, an unclassified candidate, or a missing recommendation raises
 ``ContractValidationError`` before anything is persisted.
@@ -33,6 +33,7 @@ import json
 import random
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -43,6 +44,10 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.contracts.hypothesis_quality import (
     normalize_hypothesis_scores,
+)
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+    ModelInvocationStatus,
 )
 
 REFLECTION_ROLE = "research_evidence_reviewer"
@@ -58,6 +63,14 @@ class HypothesisReviewExecutionMode(str, Enum):
 
     DEV = "dev"
     FORMAL = "formal"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderBoundReviewResult:
+    """One parsed review payload paired with its provider-issued receipt."""
+
+    payload: Mapping[str, Any]
+    model_invocation_receipt: Mapping[str, Any] | None
 
 
 def normalize_execution_mode(value: Any) -> HypothesisReviewExecutionMode:
@@ -81,7 +94,7 @@ def _require_formal_prerequisites(
     pareto_runner: ParetoRunner | None,
     metareview_runner: MetaReviewRunner | None,
 ) -> None:
-    """Keep FORMAL out of the DEV fixture path until provider wiring is complete."""
+    """Keep FORMAL out of the DEV fixture path unless all runners are real."""
 
     runners = {
         "reflection": reflection_runner,
@@ -95,27 +108,78 @@ def _require_formal_prerequisites(
             "FORMAL hypothesis review requires all four real runners; missing: "
             + ", ".join(missing)
         )
-    # The current review runner adapter calls invoke_llm(), whose compatibility
-    # response deliberately does not expose TurnOutcome.model_invocation_receipt.
-    # Do not accept a runner-provided receipt-shaped field as a second authority.
-    # A later chain slice must bind invoke_llm_outcome() to the existing provider
-    # receipt registry before this fence can be opened.
-    raise ContractValidationError(
-        "FORMAL hypothesis review requires provider-bound model invocation receipt "
-        "authority; receipt wiring is not available at the executor boundary"
-    )
 
-ReflectionRunner = Callable[[dict[str, Any], dict[str, Any]], Mapping[str, Any] | None]
-PairwiseRunner = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], Mapping[str, Any] | None]
-ParetoRunner = Callable[[dict[str, dict[str, float]], dict[str, Any]], Mapping[str, Any] | None]
+
+ReviewRunnerResult = Mapping[str, Any] | ProviderBoundReviewResult | None
+ReflectionRunner = Callable[[dict[str, Any], dict[str, Any]], ReviewRunnerResult]
+PairwiseRunner = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], ReviewRunnerResult]
+ParetoRunner = Callable[[dict[str, dict[str, float]], dict[str, Any]], ReviewRunnerResult]
 MetaReviewRunner = Callable[
     [dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]],
-    Mapping[str, Any] | None,
+    ReviewRunnerResult,
 ]
 
 
 class HypothesisReviewExecutionError(RuntimeError):
     """Base error for hypothesis review execution."""
+
+
+def _validated_runner_payload(
+    produced: ReviewRunnerResult,
+    *,
+    step_label: str,
+    formal_receipts: list[dict[str, Any]] | None,
+) -> Mapping[str, Any] | None:
+    """Unwrap a runner output and verify its provider receipt in FORMAL mode."""
+
+    if isinstance(produced, ProviderBoundReviewResult):
+        payload = produced.payload
+    else:
+        payload = produced
+    if formal_receipts is None:
+        return payload
+    if not isinstance(produced, ProviderBoundReviewResult):
+        raise ContractValidationError(
+            f"FORMAL {step_label} must return a provider-bound model invocation receipt"
+        )
+    raw_receipt = produced.model_invocation_receipt
+    if not isinstance(raw_receipt, Mapping):
+        raise ContractValidationError(
+            f"FORMAL {step_label} is missing a provider-bound model invocation receipt"
+        )
+    try:
+        receipt = ModelInvocationReceipt.from_dict(raw_receipt)
+    except (ContractValidationError, TypeError, ValueError) as exc:
+        raise ContractValidationError(
+            f"FORMAL {step_label} model invocation receipt is invalid: {exc}"
+        ) from exc
+    if receipt.status not in {
+        ModelInvocationStatus.SUCCEEDED,
+        ModelInvocationStatus.RETRIED,
+    }:
+        raise ContractValidationError(
+            f"FORMAL {step_label} receipt status must be succeeded or retried"
+        )
+    question_stage = str(receipt.metadata.get("questionStage") or "").strip().lower()
+    if question_stage != "review":
+        raise ContractValidationError(
+            f"FORMAL {step_label} receipt questionStage must be review"
+        )
+    outcome_kinds = {
+        str(item or "").strip().lower()
+        for item in list(receipt.metadata.get("outcomeKinds") or [])
+        if str(item or "").strip()
+    }
+    if "review" not in outcome_kinds:
+        raise ContractValidationError(
+            f"FORMAL {step_label} receipt outcomeKinds must include review"
+        )
+    if any(item.get("receiptId") == receipt.receipt_id for item in formal_receipts):
+        raise ContractValidationError(
+            f"FORMAL hypothesis review contains duplicate receiptId {receipt.receipt_id}"
+        )
+    formal_receipts.append(receipt.to_dict())
+    return payload
 
 
 def _stable_hash(payload: Any) -> str:
@@ -173,6 +237,7 @@ def _reflection_step(
     *,
     runner: ReflectionRunner | None,
     agent_id: str,
+    formal_receipts: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     """Score every candidate independently on the five fixed dimensions."""
 
@@ -184,7 +249,11 @@ def _reflection_step(
         explicit_dimension_reviews: Any = None
         has_explicit_dimension_reviews = False
         if runner is not None:
-            produced = runner(dict(candidate), dict(context))
+            produced = _validated_runner_payload(
+                runner(dict(candidate), dict(context)),
+                step_label=f"reflection for candidate {candidate_id}",
+                formal_receipts=formal_receipts,
+            )
             if not isinstance(produced, Mapping):
                 raise ContractValidationError(
                     f"reflection runner must return a mapping for candidate {candidate_id}"
@@ -306,6 +375,7 @@ def _pairwise_step(
     agent_id: str,
     position_seed: str,
     round_id: str,
+    formal_receipts: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     """Compare every unordered pair once, in the recorded randomized order."""
 
@@ -315,7 +385,11 @@ def _pairwise_step(
         left = by_id[left_id]
         right = by_id[right_id]
         if runner is not None:
-            produced = runner(dict(left), dict(right), dict(context))
+            produced = _validated_runner_payload(
+                runner(dict(left), dict(right), dict(context)),
+                step_label=f"pairwise comparison {left_id} vs {right_id}",
+                formal_receipts=formal_receipts,
+            )
             if not isinstance(produced, Mapping):
                 raise ContractValidationError(
                     "pairwise runner must return a mapping for pair "
@@ -392,6 +466,7 @@ def _pareto_step(
     *,
     runner: ParetoRunner | None,
     agent_id: str,
+    formal_receipts: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     """Classify every candidate as Pareto front or dominated (fail closed)."""
 
@@ -399,7 +474,11 @@ def _pareto_step(
         str(item["candidateId"]): dict(item["scores"]) for item in candidates
     }
     if runner is not None:
-        produced = runner(scores_by_candidate, dict(context))
+        produced = _validated_runner_payload(
+            runner(scores_by_candidate, dict(context)),
+            step_label="Pareto classification",
+            formal_receipts=formal_receipts,
+        )
         if not isinstance(produced, Mapping):
             raise ContractValidationError("pareto runner must return a mapping")
         front = [str(item) for item in list(produced.get("paretoFrontCandidateIds") or [])]
@@ -476,15 +555,20 @@ def _metareview_step(
     runner: MetaReviewRunner | None,
     agent_id: str,
     round_id: str,
+    formal_receipts: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     """Produce the Coordinator MetaReview with recommendation and acceptance."""
 
     if runner is not None:
-        produced = runner(
-            dict(context),
-            [dict(item) for item in candidates],
-            [dict(item) for item in pairwise],
-            dict(pareto),
+        produced = _validated_runner_payload(
+            runner(
+                dict(context),
+                [dict(item) for item in candidates],
+                [dict(item) for item in pairwise],
+                dict(pareto),
+            ),
+            step_label="MetaReview",
+            formal_receipts=formal_receipts,
         )
         if not isinstance(produced, Mapping):
             raise ContractValidationError("metareview runner must return a mapping")
@@ -526,8 +610,7 @@ def execute_hypothesis_review(
 
     ``execution_mode`` defaults to ``DEV`` for existing fixture callers.  A
     ``FORMAL`` request is fenced before any review step: all four real runners
-    must be present, and provider-bound receipt wiring must be available before
-    this executor can be opened for persistence.
+    must be present, and every call must return a unique provider-bound receipt.
 
     Returns the candidate scores, pairwise comparisons, Pareto analysis, and
     MetaReview ready for ``HypothesisRound`` persistence, plus the role
@@ -545,6 +628,9 @@ def execute_hypothesis_review(
             pareto_runner=pareto_runner,
             metareview_runner=metareview_runner,
         )
+    formal_receipts: list[dict[str, Any]] | None = (
+        [] if mode is HypothesisReviewExecutionMode.FORMAL else None
+    )
     candidates = _context_candidates(context)
     assignments = dict(reviewer_assignments) if isinstance(reviewer_assignments, Mapping) else {}
     reflection_agent = str(assignments.get("reflection") or "").strip() or REFLECTION_ROLE
@@ -563,7 +649,11 @@ def execute_hypothesis_review(
     )[:16]
 
     reviewed_candidates = _reflection_step(
-        context, candidates, runner=reflection_runner, agent_id=reflection_agent
+        context,
+        candidates,
+        runner=reflection_runner,
+        agent_id=reflection_agent,
+        formal_receipts=formal_receipts,
     )
     comparisons = _pairwise_step(
         context,
@@ -572,8 +662,15 @@ def execute_hypothesis_review(
         agent_id=pairwise_agent,
         position_seed=seed,
         round_id=round_id,
+        formal_receipts=formal_receipts,
     )
-    pareto = _pareto_step(context, reviewed_candidates, runner=pareto_runner, agent_id=pareto_agent)
+    pareto = _pareto_step(
+        context,
+        reviewed_candidates,
+        runner=pareto_runner,
+        agent_id=pareto_agent,
+        formal_receipts=formal_receipts,
+    )
     meta_review = _metareview_step(
         context,
         reviewed_candidates,
@@ -582,8 +679,9 @@ def execute_hypothesis_review(
         runner=metareview_runner,
         agent_id=metareview_agent,
         round_id=round_id,
+        formal_receipts=formal_receipts,
     )
-    return {
+    result = {
         "schemaVersion": SCHEMA_VERSION,
         "executionMode": mode.value,
         "reviewContextId": str(context.get("contextId") or ""),
@@ -599,3 +697,6 @@ def execute_hypothesis_review(
             "metareview": metareview_agent,
         },
     }
+    if formal_receipts is not None:
+        result["modelInvocationReceipts"] = formal_receipts
+    return result
