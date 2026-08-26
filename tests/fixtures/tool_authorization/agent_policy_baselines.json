@@ -52,11 +52,11 @@
         "write_stdin",
         "grep_search_tool",
         "code_symbol_tool",
+        "github_project_library_search_tool",
         "apply_patch_tool",
         "run_test_for_tool",
         "cli_tool",
-        "conversation_log_inspect_tool",
-        "github_project_library_search_tool"
+        "conversation_log_inspect_tool"
       ],
       "expected_forbidden_tools": [],
       "migration_expectation": "preserve_exact_assignment",

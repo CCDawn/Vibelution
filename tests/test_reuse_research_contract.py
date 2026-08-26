@@ -85,6 +85,7 @@ def record_payload(root: Path) -> dict[str, object]:
         implementation_boundary="Only the task evidence contract changes.",
         verification_strategy="Run contract and closeout tests.",
         risk_notes=[],
+        source_refs=["acme__widget:README.md#overview"],
         project_root=root,
     )
 
@@ -119,7 +120,108 @@ def test_record_evidence_hydrates_candidate_metadata_and_loads_snapshot(tmp_path
             "status": "ready",
         }
     ]
+    assert payload["sourceRefs"] == [
+        {
+            "projectId": "acme__widget",
+            "headSha": candidate["head"],
+            "path": "README.md",
+            "symbol": "overview",
+            "blobSha": git(Path(candidate["repo"]), "rev-parse", f"{candidate['head']}:README.md"),
+        }
+    ]
     assert Path(contract.evidence_path(tmp_path, "reuse-task")).is_file()
+
+
+def test_record_evidence_requires_source_ref_bound_to_candidate(tmp_path: Path) -> None:
+    seed_task_repo(tmp_path)
+    seed_candidate(tmp_path)
+
+    with pytest.raises(contract.ReuseResearchEvidenceError, match="sourceRefs"):
+        contract.record_evidence(
+            tmp_path,
+            feature="Evidence-backed feature development",
+            decision="ADAPT",
+            local_reuse_decision="ADAPT",
+            local_owner_paths=["core/feature.py"],
+            candidate_ids=["acme__widget"],
+            borrowed_slices=["Use a fixed source location."],
+            rejected_alternatives=["Do not copy the whole repository."],
+            reason="The candidate lowers design risk.",
+            implementation_boundary="Only the evidence contract changes.",
+            verification_strategy="Run contract tests.",
+            risk_notes=[],
+            source_refs=[],
+            project_root=tmp_path,
+        )
+
+
+def test_record_evidence_rejects_source_ref_for_unselected_candidate(tmp_path: Path) -> None:
+    seed_task_repo(tmp_path)
+    seed_candidate(tmp_path)
+
+    with pytest.raises(contract.ReuseResearchEvidenceError, match="selected candidate"):
+        contract.record_evidence(
+            tmp_path,
+            feature="Evidence-backed feature development",
+            decision="ADAPT",
+            local_reuse_decision="ADAPT",
+            local_owner_paths=["core/feature.py"],
+            candidate_ids=["acme__widget"],
+            borrowed_slices=["Use a fixed source location."],
+            rejected_alternatives=["Do not copy the whole repository."],
+            reason="The candidate lowers design risk.",
+            implementation_boundary="Only the evidence contract changes.",
+            verification_strategy="Run contract tests.",
+            risk_notes=[],
+            source_refs=["other__project:README.md#overview"],
+            project_root=tmp_path,
+        )
+
+
+def test_record_evidence_rejects_missing_source_ref_file(tmp_path: Path) -> None:
+    seed_task_repo(tmp_path)
+    seed_candidate(tmp_path)
+
+    with pytest.raises(contract.ReuseResearchEvidenceError, match="file blob"):
+        contract.record_evidence(
+            tmp_path,
+            feature="Evidence-backed feature development",
+            decision="ADAPT",
+            local_reuse_decision="ADAPT",
+            local_owner_paths=["core/feature.py"],
+            candidate_ids=["acme__widget"],
+            borrowed_slices=["Use a fixed source location."],
+            rejected_alternatives=["Do not copy the whole repository."],
+            reason="The candidate lowers design risk.",
+            implementation_boundary="Only the evidence contract changes.",
+            verification_strategy="Run contract tests.",
+            risk_notes=[],
+            source_refs=["acme__widget:missing.py#missing_symbol"],
+            project_root=tmp_path,
+        )
+
+
+def test_record_evidence_rejects_source_ref_path_escape(tmp_path: Path) -> None:
+    seed_task_repo(tmp_path)
+    seed_candidate(tmp_path)
+
+    with pytest.raises(contract.ReuseResearchEvidenceError, match="source reference path"):
+        contract.record_evidence(
+            tmp_path,
+            feature="Evidence-backed feature development",
+            decision="ADAPT",
+            local_reuse_decision="ADAPT",
+            local_owner_paths=["core/feature.py"],
+            candidate_ids=["acme__widget"],
+            borrowed_slices=["Use a fixed source location."],
+            rejected_alternatives=["Do not copy the whole repository."],
+            reason="The candidate lowers design risk.",
+            implementation_boundary="Only the evidence contract changes.",
+            verification_strategy="Run contract tests.",
+            risk_notes=[],
+            source_refs=["acme__widget:../README.md"],
+            project_root=tmp_path,
+        )
 
 
 def test_adapt_rejects_candidate_with_unverified_license(tmp_path: Path) -> None:
@@ -156,4 +258,15 @@ def test_manifest_snapshot_validation_rejects_tampered_candidate_sha(tmp_path: P
     tampered["candidates"][0]["headSha"] = "0" * 40
 
     with pytest.raises(contract.ReuseResearchEvidenceError, match="commit"):
+        contract.validate_manifest_snapshot(tampered, tmp_path, project_root=tmp_path)
+
+
+def test_manifest_snapshot_validation_rejects_tampered_source_blob(tmp_path: Path) -> None:
+    seed_task_repo(tmp_path)
+    seed_candidate(tmp_path)
+    payload = record_payload(tmp_path)
+    tampered = json.loads(json.dumps(payload))
+    tampered["sourceRefs"][0]["blobSha"] = "0" * 40
+
+    with pytest.raises(contract.ReuseResearchEvidenceError, match="blob"):
         contract.validate_manifest_snapshot(tampered, tmp_path, project_root=tmp_path)

@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--implementation-boundary", required=True)
     record.add_argument("--verification-strategy", required=True)
     record.add_argument("--risk-note", action="append", default=[])
+    record.add_argument("--source-ref", action="append", default=[], required=True)
     return parser
 
 
@@ -62,6 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             implementation_boundary=args.implementation_boundary,
             verification_strategy=args.verification_strategy,
             risk_notes=args.risk_note,
+            source_refs=args.source_ref,
             project_root=args.project_root,
         )
     except (OSError, RuntimeError, ValueError, ReuseResearchEvidenceError) as exc:
