@@ -1678,6 +1678,43 @@ def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> No
     assert stop.payload.requestId == "request-running"
     assert stop.requiresConfirmation is True
 
+    needs_continue = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-needs-continue",
+                    "questionId": "SCI-001",
+                    "status": "pending",
+                    "collectionRunId": "child-needs-continue",
+                    "collectionRunStatus": "needs_continue",
+                    "searchEnvelope": {"keywords": ["water"]},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    assert needs_continue.currentPhase == "collection"
+    assert needs_continue.collection.lifecycle == "running"
+    assert needs_continue.collection.actionability == "blocked"
+    assert needs_continue.collection.requests[0].lifecycle == "failed"
+    assert needs_continue.collection.requests[0].actionability == "blocked"
+    assert needs_continue.collection.problems[0].code == "collection_run_needs_continue"
+    continuation = next(
+        action
+        for action in needs_continue.allowedActions
+        if action.kind == "command" and action.command == "continue_collection"
+    )
+    assert continuation.payload.requestId == "request-needs-continue"
+    assert continuation.payload.childRunId == "child-needs-continue"
+
     failed = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id="team-1",

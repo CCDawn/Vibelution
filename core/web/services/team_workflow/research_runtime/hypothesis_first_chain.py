@@ -3827,6 +3827,8 @@ def _process_collection_decisions(
         runs as source_collection_runs,
     )
 
+    background_payload = _hypothesis_collection_background_payload()
+
     persisted_ids = {
         str(item.get("decisionId") or "")
         for item in list(close_result.get("decisions") or [])
@@ -3922,7 +3924,7 @@ def _process_collection_decisions(
             source_collection_runs.start_source_collection_search_background(
                 team_id,
                 collection_run_id,
-                {"backgroundExecution": True},
+                background_payload,
             )
         except Exception as exc:
             start_error = {
@@ -3944,6 +3946,22 @@ def _process_collection_decisions(
                 for record in requests_out
             ]
     return {"requests": requests_out, "skipped": skipped}
+
+
+def _hypothesis_collection_background_payload() -> dict[str, Any]:
+    """Drain a normal hypothesis evidence plan within the executor hard cap.
+
+    The generic source-collection UI intentionally defaults to four queries per
+    operator-triggered batch.  Hypothesis-first collection is an automatic
+    workflow step, so it uses the executor's existing bounded maximum instead
+    of pausing a typical eight-query plan halfway through.
+    """
+    from core.web.services import team_workflow_orchestration_service as service
+
+    return {
+        "backgroundExecution": True,
+        "maxQueries": service.SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -4475,7 +4493,7 @@ def _recover_collection_request_locked(
         source_collection_runs.start_source_collection_search_background(
             normalized_team_id,
             run_id,
-            {"backgroundExecution": True},
+            _hypothesis_collection_background_payload(),
         )
     except Exception as exc:  # noqa: BLE001 - request remains visibly retryable
         failed = _update_collection_request(

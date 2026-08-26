@@ -1275,7 +1275,24 @@ def _collection_request_state(
     request_id = str(request.get("requestId") or "").strip()
     run_id = str(request.get("collectionRunId") or "").strip() or None
     updated_at = _timestamp(request)
-    if run_status in {"failed", "cancelled"}:
+    if run_status == "needs_continue":
+        continuation_problem = _problem(
+            "collection_run_needs_continue",
+            "资料搜集已完成本次批次，仍有检索任务需要继续。",
+            category="execution",
+            severity="warning",
+            source_kind="collection_run",
+            source_id=run_id,
+            detected_at=updated_at or _EPOCH,
+        )
+        child = _phase(
+            "failed",
+            "none",
+            "blocked",
+            updated_at=updated_at,
+            problems=[continuation_problem],
+        )
+    elif run_status in {"failed", "cancelled"}:
         child = _phase("failed", "none", "available", updated_at=updated_at)
     elif run_status in {"succeeded", "completed"}:
         child = _phase("completed", "succeeded", "terminal", updated_at=updated_at)
@@ -1293,7 +1310,13 @@ def _collection_request_state(
         request_phase = _phase("waiting_human", "none", "waiting_user", updated_at=updated_at)
     elif child["lifecycle"] == "failed":
         handoff = _phase()
-        request_phase = _phase("failed", "none", "available", updated_at=updated_at)
+        request_phase = _phase(
+            "failed",
+            "none",
+            child["actionability"],
+            updated_at=updated_at,
+            problems=child["problems"],
+        )
     elif run_id:
         handoff = _phase()
         request_phase = _phase("running", "none", "waiting_system", updated_at=updated_at)
@@ -2388,11 +2411,28 @@ def project_state_from_records(
         )
         for item in request_records
     ]
+    needs_continue_request_ids = {
+        str(item.get("requestId") or "").strip()
+        for item in request_records
+        if str(item.get("collectionRunStatus") or "").strip().lower()
+        == "needs_continue"
+    }
+    collection_problems = [
+        problem
+        for request_state in collection_requests
+        for problem in list(request_state.get("problems") or [])
+    ]
     collection_aggregate = _aggregate(collection_requests)
     if not collection_requests:
         collection_phase = _phase()
     elif collection_aggregate["blocked"]:
-        collection_phase = _phase("running", "none", "blocked", updated_at=computed_at)
+        collection_phase = _phase(
+            "running",
+            "none",
+            "blocked",
+            updated_at=computed_at,
+            problems=collection_problems,
+        )
     elif collection_aggregate["failed"]:
         collection_phase = _phase("failed", "none", "available", updated_at=computed_at)
     elif collection_aggregate["completed"] == collection_aggregate["total"]:
@@ -2650,7 +2690,21 @@ def project_state_from_records(
         handoff_lifecycle = str(
             (request_state.get("handoff") or {}).get("lifecycle") or ""
         ).lower()
-        if child_lifecycle == "failed" or request_lifecycle == "failed":
+        if request_id in needs_continue_request_ids:
+            allowed_actions.append(
+                _command_action(
+                    "continue_collection",
+                    action_id=f"continue-collection:{request_id}",
+                    label="继续资料搜集",
+                    target_phase="collection",
+                    target_node_id="hf_collection",
+                    payload={
+                        "requestId": request_id,
+                        "childRunId": child_run_id,
+                    },
+                )
+            )
+        elif child_lifecycle == "failed" or request_lifecycle == "failed":
             allowed_actions.append(
                 _command_action(
                     "retry_collection",

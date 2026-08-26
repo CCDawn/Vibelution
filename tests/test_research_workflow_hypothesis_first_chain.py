@@ -1078,7 +1078,7 @@ def test_collection_decisions_start_one_background_search_per_reused_run(
         {
             "teamId": "team-hf-start",
             "runId": "dprun-hf-start",
-            "payload": {"backgroundExecution": True},
+            "payload": {"backgroundExecution": True, "maxQueries": 12},
         }
     ]
 
@@ -1186,7 +1186,7 @@ def test_collection_request_recovery_reuses_child_run_without_resetting_chain(
     )
     facade_calls: list[dict] = []
     child_runs: set[str] = set()
-    started: list[str] = []
+    started: list[dict[str, object]] = []
 
     def fake_ensure(**kwargs):
         facade_calls.append(kwargs)
@@ -1195,7 +1195,7 @@ def test_collection_request_recovery_reuses_child_run_without_resetting_chain(
 
     monkeypatch.setattr(facade, "research_knowledge_collection_facade", fake_ensure)
     def fake_background(_team_id, run_id, _payload=None):
-        started.append(run_id)
+        started.append({"runId": run_id, "payload": dict(_payload or {})})
         time.sleep(0.02)
         return {"runId": run_id, "status": "running"}
 
@@ -1213,11 +1213,21 @@ def test_collection_request_recovery_reuses_child_run_without_resetting_chain(
     assert first["status"] == "recovered"
     assert second["status"] == "reused"
     assert child_runs == {"child-recovered"}
-    assert started == ["child-recovered"]
+    assert started == [
+        {
+            "runId": "child-recovered",
+            "payload": {"backgroundExecution": True, "maxQueries": 12},
+        }
+    ]
     assert [call["searchEnvelope"]["keywords"] for call in facade_calls] == [["recovery evidence"]]
     third = chain.recover_collection_request(team_id, request_id)
     assert third["status"] == "reused"
-    assert started == ["child-recovered"]
+    assert started == [
+        {
+            "runId": "child-recovered",
+            "payload": {"backgroundExecution": True, "maxQueries": 12},
+        }
+    ]
     records = chain._collection_requests(chain._records(team_id))
     assert len([record for record in records if record["requestId"] == request_id]) == 1
 
