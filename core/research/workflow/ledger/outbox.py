@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .records import OutboxRecord
+from .repository import MAX_OUTBOX_LEASE_ATTEMPTS
 
 
 def lease_ready_actions(
@@ -20,6 +21,7 @@ def lease_ready_actions(
     limit: int = 8,
     lease_ms: int = 30_000,
     action_kinds: tuple[str, ...] | None = None,
+    max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
 ) -> list[OutboxRecord]:
     future = store.submit(
         lambda uow: uow.repository.lease_outbox_actions(
@@ -28,6 +30,7 @@ def lease_ready_actions(
             limit=limit,
             lease_ms=lease_ms,
             action_kinds=action_kinds,
+            max_attempts=max_attempts,
         ),
         force_flush=True,
     )
