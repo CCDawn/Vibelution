@@ -520,6 +520,7 @@ export type ActionCommand =
   | "retry_generation"
   | "record_selection"
   | "retry_review_dispatch"
+  | "reopen_review"
   | "resume_discussion"
   | "stop_discussion"
   | "regenerate_summary"
@@ -531,6 +532,7 @@ export type ActionCommand =
   | "human_adjudication"
   | "create_formal_run"
   | "reconcile_formal_run"
+  | "archive_run"
   | "retry_program_handoff"
   | "record_program_review"
   | "create_formal_revision";
@@ -540,6 +542,7 @@ export type ActionPayloadByCommand = {
   retry_generation: { questionId: string; previousAttemptId: string };
   record_selection: { questionId: string; generationAttemptId: string };
   retry_review_dispatch: { selectionId: string; candidateIds: string[] };
+  reopen_review: { meetingRoundId: string };
   resume_discussion: { meetingRoundId: string };
   stop_discussion: { meetingRoundId: string };
   regenerate_summary: { meetingRoundId: string };
@@ -551,6 +554,7 @@ export type ActionPayloadByCommand = {
   human_adjudication: { hypothesisRoundId: string };
   create_formal_run: { questionId: string; hypothesisRoundId: string };
   reconcile_formal_run: { runId: string };
+  archive_run: { runId: string };
   retry_program_handoff: { runId: string; deliveryArtifactRef: string | null };
   record_program_review: { questionId: string; outputRunId: string };
   create_formal_revision: { runId: string; outputRecordId: string };

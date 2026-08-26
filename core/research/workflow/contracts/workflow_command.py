@@ -19,6 +19,7 @@ class WorkflowCommandKind(str, Enum):
     FORK_REVISION = "fork_revision"
     EXTEND_BUDGET = "extend_budget"
     CANCEL_RUN = "cancel_run"
+    ARCHIVE_RUN = "archive_run"
     RECONCILE_RUN = "reconcile_run"
 
 

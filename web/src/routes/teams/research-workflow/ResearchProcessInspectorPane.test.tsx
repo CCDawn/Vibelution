@@ -413,6 +413,32 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it("routes a formal run-level recovery action to the current-task inspector without requiring a canvas node match", async () => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", {
+        runId: "run-1",
+        questionId: "SCI-004",
+        selectedNodeId: "protocol_design",
+      }),
+      { kind: "idle" },
+      {
+        nextAction: {
+          stage: "converged",
+          targetNodeId: "protocol_design",
+          navigationLabel: "正式运行状态待确认",
+        },
+      },
+    );
+
+    expect(container.querySelector('[data-testid="mock-hypothesis-first-node-inspector"]')).not.toBeNull();
+    expect(hypothesisLeafHarness.props?.formalRuntime).toBe(true);
+    expect(hypothesisLeafHarness.props?.nodeId).toBe("protocol_design");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
 });
 
 describe("ResearchProcessInspectorPane collection recovery wiring", () => {

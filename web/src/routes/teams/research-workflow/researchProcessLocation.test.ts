@@ -33,9 +33,46 @@ describe("research process location", () => {
   it("accepts only current panels and never maps legacy stage panels", () => {
     expect(parseResearchProcessLocation(new URLSearchParams("panel=launch"))).toMatchObject({
       panel: "launch",
+      inspectorOpen: true,
     });
     expect(parseResearchProcessLocation(new URLSearchParams("panel=iteration"))).toMatchObject({
       panel: "node",
+      inspectorOpen: true,
     });
+  });
+
+  it("opens node and team deep links unless the URL records an explicit close", () => {
+    expect(parseResearchProcessLocation(new URLSearchParams("panel=node&node=source_finding")))
+      .toMatchObject({ panel: "node", inspectorOpen: true });
+    expect(parseResearchProcessLocation(new URLSearchParams("panel=team")))
+      .toMatchObject({ panel: "team", inspectorOpen: true });
+    expect(parseResearchProcessLocation(new URLSearchParams("panel=node&inspector=closed")))
+      .toMatchObject({ panel: "node", inspectorOpen: false });
+  });
+
+  it("clears the close marker on explicit panel or node navigation", () => {
+    const switchedPanel = patchResearchProcessSearch({
+      current: new URLSearchParams("panel=node&inspector=closed"),
+      teamId: "research-team",
+      patch: { panel: "team" },
+    });
+    expect(switchedPanel.has("inspector")).toBe(false);
+
+    const selectedNode = patchResearchProcessSearch({
+      current: new URLSearchParams("panel=team&inspector=closed"),
+      teamId: "research-team",
+      patch: { node: "source_finding", panel: "node" },
+    });
+    expect(selectedNode.has("inspector")).toBe(false);
+  });
+
+  it("preserves the close marker when React Flow clears an empty selection", () => {
+    const next = patchResearchProcessSearch({
+      current: new URLSearchParams("panel=node&inspector=closed&node=source_finding"),
+      teamId: "research-team",
+      patch: { node: null, panel: "node" },
+    });
+    expect(next.get("inspector")).toBe("closed");
+    expect(next.has("node")).toBe(false);
   });
 });

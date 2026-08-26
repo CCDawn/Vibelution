@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
+import { isFetchJsonHttpError } from "../../../api/client";
 import {
   executeHypothesisFirstCommand,
   isHypothesisFirstCommandStateConflict,
@@ -17,9 +18,16 @@ import {
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import type { CommandAction, HypothesisFirstStateV2, MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
+import type {
+  CommandAction,
+  HypothesisFirstStateV2,
+  MeetingRoundRecord,
+  WorkflowProblem,
+} from "../../../api/types/hypothesisFirst";
 import {
+  VActionGroup,
   VButton,
+  VConfirmDialog,
   VEmptyState,
   VErrorSummary,
   VInput,
@@ -50,6 +58,7 @@ import {
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
 import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
+import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
 import { invalidateHypothesisFirstQueries, useHypothesisFirstChain } from "./useHypothesisFirstChain";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
@@ -73,6 +82,8 @@ export type HypothesisFirstNodeInspectorProps = {
   }) => void;
   onRetryCollection?: () => Promise<void>;
   discussionModel?: ScopedDiscussionModel;
+  /** Formal run-level actions do not require a selected canvas node. */
+  formalRuntime?: boolean;
 };
 
 export function inspectorScopedRoomId(
@@ -161,6 +172,7 @@ export function HypothesisFirstNodeInspector({
   onFormalRunCreated,
   onRetryCollection,
   discussionModel,
+  formalRuntime = false,
 }: HypothesisFirstNodeInspectorProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -223,7 +235,8 @@ export function HypothesisFirstNodeInspector({
         ? "blocked" as const
         : "pending" as const,
   })) ?? null;
-  const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
+  const nodeOwnsCurrentStep = formalRuntime
+    || inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
   const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
   );
@@ -326,6 +339,7 @@ export function HypothesisFirstNodeInspector({
             onFormalRunCreated={onFormalRunCreated}
             onOpenQuestion={onOpenQuestion}
             stateV2={chain.stateV2}
+            formalRuntime={formalRuntime}
           />
           {(
             nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID
@@ -488,7 +502,7 @@ function InspectorBody(props: {
   questionId: string;
   nodeId: string;
   liveMeetingRoundId: string;
-  nextAction: HypothesisFirstNextAction;
+  nextAction: HypothesisFirstV2NextAction;
   lang: Language;
   stageSummary?: { rounds: number; retries: number; kept: number } | null;
   onRetryCollection?: () => Promise<void>;
@@ -496,6 +510,7 @@ function InspectorBody(props: {
   onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
   onOpenQuestion: (questionId: string) => void;
   stateV2?: HypothesisFirstStateV2 | null;
+  formalRuntime?: boolean;
 }) {
   const { nodeId, nextAction, teamId, questionId, liveMeetingRoundId, lang } = props;
   const isZh = lang === "zh";
@@ -509,6 +524,18 @@ function InspectorBody(props: {
     ),
     staleTime: 30_000,
   });
+  if (props.formalRuntime) {
+    return (
+      <FormalRuntimeActionBody
+        teamId={teamId}
+        questionId={questionId}
+        nextAction={nextAction}
+        stateV2={props.stateV2}
+        lang={lang}
+        onFormalRunCreated={props.onFormalRunCreated}
+      />
+    );
+  }
   if (nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID) {
     if (nextAction.stage === "selection_required") {
       return (
@@ -609,6 +636,16 @@ function InspectorBody(props: {
   if (nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID) {
     const summary = props.stageSummary;
     const programDelivery = props.stateV2?.programDelivery;
+    const canonicalActions = canonicalActionsFor(nextAction);
+    const humanAdjudication = canonicalActions.find(
+      (action): action is Extract<CommandAction, { command: "human_adjudication" }> => action.command === "human_adjudication",
+    );
+    // Human adjudication needs its rationale/decision form. Keep all other
+    // canonical actions visible alongside it, including a disabled
+    // adjudication action when the server says why it is unavailable.
+    const genericCanonicalActions = canonicalActions.filter(
+      (action) => action.command !== "human_adjudication" || !humanAdjudication?.enabled,
+    );
     if (props.stateV2?.currentPhase === "completed") {
       return (
         <div className={styles.task} data-testid="challenge-cup-workflow-completed">
@@ -625,14 +662,24 @@ function InspectorBody(props: {
     }
     if (props.stateV2?.currentPhase === "program_delivery") {
       if (programDelivery?.actionability === "blocked") {
+        const deliveryProblems = programDelivery.problems;
         return (
-          <VStateSurface
-            tone="error"
-            density="compact"
-            title={isZh ? "正式结果交付需要处理" : "Formal result delivery needs attention"}
-          >
-            <p>{programDelivery.problems[0]?.message || nextAction.disabledReason || nextAction.statusMessage}</p>
-            {nextAction.canonicalAction ? (
+          <div className={styles.task}>
+            <VErrorSummary
+              label={isZh ? "正式结果交付需要处理" : "Formal result delivery needs attention"}
+              summary={deliveryProblems[0]?.message || nextAction.disabledReason || nextAction.statusMessage || (isZh ? "正式结果交付被阻塞" : "Formal result delivery is blocked")}
+              details={deliveryProblems.length ? workflowProblemList(deliveryProblems) : undefined}
+              defaultOpen={deliveryProblems.length > 1}
+            />
+            {canonicalActions.length ? (
+              <CanonicalCommandActionList
+                teamId={teamId}
+                questionId={questionId}
+                actions={canonicalActions}
+                lang={lang}
+                onFormalRunCreated={props.onFormalRunCreated}
+              />
+            ) : nextAction.canonicalAction ? (
               <CanonicalCommandButton
                 teamId={teamId}
                 questionId={questionId}
@@ -640,7 +687,7 @@ function InspectorBody(props: {
                 lang={lang}
               />
             ) : null}
-          </VStateSurface>
+          </div>
         );
       }
       if (nextAction.canonicalAction?.command === "create_formal_revision") {
@@ -712,30 +759,39 @@ function InspectorBody(props: {
         {nextAction.stage === "converged" && nextAction.commandDetail ? (
           <p className={styles.status}>{nextAction.commandDetail}</p>
         ) : null}
-        {nextAction.command === "human_adjudication"
-          && nextAction.canonicalAction?.command === "human_adjudication" ? (
-            <HumanAdjudicationAction
-              teamId={teamId}
-              questionId={questionId}
-              action={nextAction.canonicalAction}
-              lang={lang}
-            />
-          ) : nextAction.command === "human_adjudication" ? (
-            <NextReviewRoundButton
-              teamId={teamId}
-              questionId={questionId}
-              meetingRoundId={liveMeetingRoundId}
-              lang={lang}
-            />
-          ) : nextAction.canonicalAction ? (
-            <CanonicalCommandButton
-              teamId={teamId}
-              questionId={questionId}
-              action={nextAction.canonicalAction}
-              lang={lang}
-              onFormalRunCreated={props.onFormalRunCreated}
-            />
-          ) : null}
+        {humanAdjudication?.enabled ? (
+          <HumanAdjudicationAction
+            teamId={teamId}
+            questionId={questionId}
+            action={humanAdjudication}
+            lang={lang}
+          />
+        ) : null}
+        {!humanAdjudication?.enabled && !genericCanonicalActions.length && nextAction.command === "human_adjudication" ? (
+          <NextReviewRoundButton
+            teamId={teamId}
+            questionId={questionId}
+            meetingRoundId={liveMeetingRoundId}
+            lang={lang}
+          />
+        ) : null}
+        {genericCanonicalActions.length ? (
+          <CanonicalCommandActionList
+            teamId={teamId}
+            questionId={questionId}
+            actions={genericCanonicalActions}
+            lang={lang}
+            onFormalRunCreated={props.onFormalRunCreated}
+          />
+        ) : !humanAdjudication && nextAction.canonicalAction ? (
+          <CanonicalCommandButton
+            teamId={teamId}
+            questionId={questionId}
+            action={nextAction.canonicalAction}
+            lang={lang}
+            onFormalRunCreated={props.onFormalRunCreated}
+          />
+        ) : null}
       </div>
     );
   }
@@ -745,6 +801,136 @@ function InspectorBody(props: {
         {isZh ? "下一步：返回流程画布，选择一个有效的假说先行节点。" : "Next: return to the workflow canvas and choose a valid hypothesis-first node."}
       </p>
     </VEmptyState>
+  );
+}
+
+/**
+ * V2 owns the complete command set. Legacy snapshots only carry the single
+ * command selected for the old inspector, so retain that as a compatibility
+ * fallback while never dropping server-authored disabled actions.
+ */
+function canonicalActionsFor(nextAction: HypothesisFirstNextAction): readonly CommandAction[] {
+  const v2Action = nextAction as HypothesisFirstV2NextAction;
+  if (Array.isArray(v2Action.canonicalActions) && v2Action.canonicalActions.length > 0) {
+    return v2Action.canonicalActions;
+  }
+  return v2Action.canonicalAction ? [v2Action.canonicalAction] : [];
+}
+
+function workflowProblemList(problems: readonly WorkflowProblem[]) {
+  return (
+    <ul className="m-0 grid list-disc gap-1 pl-4">
+      {problems.map((problem, index) => (
+        <li key={`${problem.code}:${problem.sourceId || ""}:${index}`}>{problem.message}</li>
+      ))}
+    </ul>
+  );
+}
+
+function CanonicalCommandActionList(props: {
+  teamId: string;
+  questionId: string;
+  actions: readonly CommandAction[];
+  lang: Language;
+  onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
+}) {
+  if (!props.actions.length) return null;
+  const isZh = props.lang === "zh";
+  return (
+    <section className={styles.task} data-testid="canonical-command-action-list" aria-label={isZh ? "可用操作" : "Available actions"}>
+      <VActionGroup ariaLabel={isZh ? "可用操作" : "Available actions"}>
+        {props.actions.map((action) => (
+          <CanonicalCommandButton
+            key={action.actionId}
+            teamId={props.teamId}
+            questionId={props.questionId}
+            action={action}
+            lang={props.lang}
+            onFormalRunCreated={props.onFormalRunCreated}
+          />
+        ))}
+      </VActionGroup>
+    </section>
+  );
+}
+
+function formalRuntimeStatusLabel(status: string | null | undefined, lang: Language): string {
+  const isZh = lang === "zh";
+  switch (String(status || "").trim().toLowerCase()) {
+    case "reconciliation_required": return isZh ? "状态待确认" : "Status needs reconciliation";
+    case "failed": return isZh ? "正式运行失败" : "Formal run failed";
+    case "cancelled": return isZh ? "正式运行已取消" : "Formal run cancelled";
+    case "archived": return isZh ? "正式运行已归档" : "Formal run archived";
+    case "succeeded": return isZh ? "正式运行已完成" : "Formal run succeeded";
+    case "waiting_human": return isZh ? "等待人工处理" : "Waiting for human action";
+    case "blocked": return isZh ? "正式运行被阻塞" : "Formal run blocked";
+    case "queued": return isZh ? "正式运行排队中" : "Formal run queued";
+    case "running": return isZh ? "正式运行中" : "Formal run running";
+    default: return isZh ? "正式运行状态待确认" : "Formal run status needs review";
+  }
+}
+
+function formalRuntimeStatusTone(status: string | null | undefined): "neutral" | "accent" | "success" | "warning" | "danger" {
+  switch (String(status || "").trim().toLowerCase()) {
+    case "succeeded": return "success";
+    case "failed":
+    case "cancelled":
+    case "blocked": return "danger";
+    case "reconciliation_required": return "warning";
+    case "running":
+    case "queued": return "accent";
+    default: return "neutral";
+  }
+}
+
+function FormalRuntimeActionBody(props: {
+  teamId: string;
+  questionId: string;
+  nextAction: HypothesisFirstV2NextAction;
+  stateV2?: HypothesisFirstStateV2 | null;
+  lang: Language;
+  onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
+}) {
+  const isZh = props.lang === "zh";
+  const runtime = props.stateV2?.formalRuntime;
+  const status = runtime?.runStatus || (props.nextAction.stage === "blocked" ? "blocked" : null);
+  const problems = [
+    ...(runtime?.problems ?? []),
+    ...(props.stateV2?.problems ?? []),
+  ].filter((problem, index, all) => all.findIndex((candidate) => (
+    candidate.code === problem.code
+    && candidate.sourceId === problem.sourceId
+    && candidate.message === problem.message
+  )) === index);
+  const actions = canonicalActionsFor(props.nextAction);
+  return (
+    <div className={styles.task} data-testid="formal-runtime-action-body">
+      <VStateRow tone={formalRuntimeStatusTone(status)}>
+        {formalRuntimeStatusLabel(status, props.lang)}
+      </VStateRow>
+      {runtime?.runId ? <p className={styles.status}>{isZh ? `运行：${runtime.runId}` : `Run: ${runtime.runId}`}</p> : null}
+      {problems.length ? (
+        <VErrorSummary
+          label={isZh ? "正式运行问题" : "Formal run problems"}
+          summary={problems[0].message}
+          details={problems.length ? workflowProblemList(problems) : undefined}
+          defaultOpen={problems.length > 1}
+        />
+      ) : null}
+      {actions.length ? (
+        <CanonicalCommandActionList
+          teamId={props.teamId}
+          questionId={props.questionId}
+          actions={actions}
+          lang={props.lang}
+          onFormalRunCreated={props.onFormalRunCreated}
+        />
+      ) : (
+        <VStateRow tone="warning">
+          {isZh ? "当前没有可执行的正式运行修复操作，请刷新状态。" : "No formal-run recovery action is available; refresh the state."}
+        </VStateRow>
+      )}
+    </div>
   );
 }
 
@@ -846,6 +1032,34 @@ function meetingHasDigestForHistory(meeting: MeetingRoundRecord): boolean {
   return Boolean(meeting.digestId || meeting.digestRef);
 }
 
+function errorRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function commandReadinessError(error: unknown): { message: string; blockers: readonly unknown[] } | null {
+  if (!isFetchJsonHttpError(error)) return null;
+  const payload = errorRecord(error.details);
+  const detail = errorRecord(payload?.detail) ?? payload;
+  const blockers = Array.isArray(detail?.blockers) ? detail.blockers : [];
+  const code = String(detail?.code || error.code || "").trim();
+  if (error.status !== 412 && code !== "node_not_ready") return null;
+  return {
+    message: String(detail?.message || error.message || "node_not_ready").trim(),
+    blockers,
+  };
+}
+
+function readinessBlockerLabel(blocker: unknown): string {
+  if (typeof blocker === "string") return blocker;
+  const value = errorRecord(blocker);
+  if (!value) return String(blocker ?? "");
+  const title = String(value.title || value.label || value.code || "").trim();
+  const detail = String(value.detail || value.message || "").trim();
+  return title && detail && title !== detail ? `${title}：${detail}` : title || detail;
+}
+
 function CanonicalCommandButton(props: {
   teamId: string;
   questionId: string;
@@ -854,6 +1068,7 @@ function CanonicalCommandButton(props: {
   onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
 }) {
   const queryClient = useQueryClient();
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const mutation = useMutation<unknown, Error, void>({
     mutationFn: () => executeHypothesisFirstCommand(
       props.teamId,
@@ -861,6 +1076,7 @@ function CanonicalCommandButton(props: {
       props.action,
     ),
     onSuccess: (response) => {
+      setConfirmationOpen(false);
       invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
       if (props.action.command !== "create_formal_run" || !props.onFormalRunCreated) {
         return;
@@ -884,19 +1100,36 @@ function CanonicalCommandButton(props: {
     },
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
+        setConfirmationOpen(false);
         invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
       }
     },
   });
   return (
     <div className={styles.task} data-testid={`canonical-command-${props.action.command}`}>
-      {mutation.isError ? (
-        <VErrorSummary
-          label={props.lang === "zh" ? "操作未完成" : "Action could not finish"}
-          summary={isHypothesisFirstCommandStateConflict(mutation.error)
-            ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
-            : mutation.error.message}
-        />
+      {mutation.isError ? (() => {
+        const readiness = commandReadinessError(mutation.error);
+        return (
+          <VErrorSummary
+            label={readiness
+              ? (props.lang === "zh" ? "节点尚未就绪" : "Node is not ready")
+              : (props.lang === "zh" ? "操作未完成" : "Action could not finish")}
+            summary={readiness?.message || (isHypothesisFirstCommandStateConflict(mutation.error)
+              ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+              : mutation.error.message)}
+            details={readiness?.blockers.length ? (
+              <ul className="m-0 grid list-disc gap-1 pl-4" data-testid="canonical-command-readiness-blockers">
+                {readiness.blockers.map((blocker, index) => (
+                  <li key={`${readinessBlockerLabel(blocker)}:${index}`}>{readinessBlockerLabel(blocker)}</li>
+                ))}
+              </ul>
+            ) : undefined}
+            defaultOpen={Boolean(readiness?.blockers.length)}
+          />
+        );
+      })() : null}
+      {!props.action.enabled && props.action.disabledReason ? (
+        <span className={styles.commandDetail} role="status">{props.action.disabledReason}</span>
       ) : null}
       <VButton
         type="button"
@@ -905,12 +1138,58 @@ function CanonicalCommandButton(props: {
         isPending={mutation.isPending}
         isDisabled={!props.action.enabled}
         disabledReason={props.action.disabledReason || undefined}
-        onPress={() => mutation.mutate()}
+        onPress={() => {
+          if (!props.action.enabled || mutation.isPending) return;
+          if (props.action.requiresConfirmation) {
+            setConfirmationOpen(true);
+            return;
+          }
+          mutation.mutate();
+        }}
       >
         {props.action.label}
       </VButton>
+      {props.action.requiresConfirmation ? (
+        <VConfirmDialog
+          open={confirmationOpen}
+          onOpenChange={(open) => {
+            if (!open && mutation.isPending) return;
+            setConfirmationOpen(open);
+          }}
+          title={props.action.label}
+          description={props.action.confirmationText || canonicalCommandConfirmationText(props.action.command, props.lang)}
+          tone={["stop_discussion", "archive_run"].includes(props.action.command) ? "danger" : "neutral"}
+          confirmLabel={props.lang === "zh" ? "确认执行" : "Confirm action"}
+          cancelLabel={props.lang === "zh" ? "取消" : "Cancel"}
+          confirmPending={mutation.isPending}
+          confirmDisabled={!props.action.enabled}
+          onConfirm={() => {
+            if (!props.action.enabled || mutation.isPending) return;
+            mutation.mutate();
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+function canonicalCommandConfirmationText(command: CommandAction["command"], lang: Language): string {
+  if (lang === "en") {
+    switch (command) {
+      case "stop_discussion": return "This closes the current discussion. You may need to review the resulting state before continuing.";
+      case "archive_run": return "This archives the terminal formal run so a replacement run can be created.";
+      case "reconcile_formal_run": return "This will reconcile the formal run against the durable workflow state.";
+      case "create_formal_revision": return "This will create a new formal revision from the current delivery result.";
+      default: return "Review the current workflow state before executing this action.";
+    }
+  }
+  switch (command) {
+    case "stop_discussion": return "这会关闭当前讨论，继续流程前可能需要重新确认结果。";
+    case "archive_run": return "这会归档当前终态正式运行，随后可重新创建正式运行。";
+    case "reconcile_formal_run": return "这会根据持久化工作流状态核对正式运行。";
+    case "create_formal_revision": return "这会基于当前交付结果创建新的正式修订。";
+    default: return "请先确认当前工作流状态，再执行此操作。";
+  }
 }
 
 function HumanAdjudicationAction(props: {

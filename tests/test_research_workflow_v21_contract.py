@@ -49,7 +49,7 @@ def test_v21_definition_freezes_version_governance_and_schema() -> None:
     node_ids = [node.nodeId for node in definition.nodes]
 
     assert definition.schemaVersion == "2.1.0"
-    assert len(node_ids) == 16
+    assert len(node_ids) == 17
     assert node_ids[-3:] == [
         "version_governance",
         "candidate_promotion",

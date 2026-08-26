@@ -104,3 +104,89 @@ def test_fence_release_requires_exact_identity(tmp_path, monkeypatch):
             inventory_hash=_inventory_hash("different"),
         )
     assert fence.read_fence("research-team") is not None
+
+
+def test_fence_lease_reclaims_expired_marker_and_records_owner(tmp_path, monkeypatch):
+    monkeypatch.setattr(fence, "research_workflow_data_root", lambda: tmp_path)
+    inventory_hash = _inventory_hash("lease")
+    acquired = fence.acquire_fence(
+        "research-team",
+        purge_plan_id="plan-lease",
+        inventory_hash=inventory_hash,
+        acquired_by="reset-test",
+        ttl_ms=100,
+        owner_pid=4242,
+        now_ms=1_750_000_000_000,
+    )
+
+    assert acquired["ownerPid"] == 4242
+    assert acquired["expiresAtMs"] == 1_750_000_000_100
+    assert acquired["ttlMs"] == 100
+    live = fence.inspect_fence(
+        "research-team",
+        now_ms=1_750_000_000_099,
+        owner_alive=lambda _pid: True,
+    )
+    assert live["status"] == "active"
+    assert live["activeFence"]["purgePlanId"] == "plan-lease"
+
+    expired = fence.inspect_fence(
+        "research-team",
+        now_ms=1_750_000_000_100,
+        owner_alive=lambda _pid: True,
+    )
+    assert expired["status"] == "expired"
+    assert expired["reclaimed"] is True
+    assert expired["activeFence"] is None
+    assert fence.read_fence("research-team") is None
+
+
+def test_fence_reclaims_known_dead_owner_before_ttl(tmp_path, monkeypatch):
+    monkeypatch.setattr(fence, "research_workflow_data_root", lambda: tmp_path)
+    inventory_hash = _inventory_hash("orphan")
+    fence.acquire_fence(
+        "research-team",
+        purge_plan_id="plan-orphan",
+        inventory_hash=inventory_hash,
+        ttl_ms=60_000,
+        owner_pid=4242,
+        now_ms=1_750_000_000_000,
+    )
+
+    state = fence.inspect_fence(
+        "research-team",
+        now_ms=1_750_000_000_001,
+        owner_alive=lambda _pid: False,
+    )
+    assert state["status"] == "orphaned"
+    assert state["ownerAlive"] is False
+    assert state["reclaimed"] is True
+    assert fence.read_fence("research-team") is None
+
+
+def test_fence_unknown_owner_stays_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(fence, "research_workflow_data_root", lambda: tmp_path)
+    inventory_hash = _inventory_hash("unknown-owner")
+    fence.acquire_fence(
+        "research-team",
+        purge_plan_id="plan-unknown-owner",
+        inventory_hash=inventory_hash,
+        ttl_ms=100,
+        owner_pid=4242,
+        now_ms=1_750_000_000_000,
+    )
+
+    state = fence.inspect_fence(
+        "research-team",
+        now_ms=1_750_000_000_100,
+        owner_alive=lambda _pid: None,
+    )
+    assert state["status"] == "unknown"
+    assert state["activeFence"] is not None
+    with pytest.raises(fence.ChallengeCupMaintenanceActiveError):
+        fence.assert_writes_allowed(
+            "research-team",
+            operation="question_launch",
+            now_ms=1_750_000_000_100,
+            owner_alive=lambda _pid: None,
+        )

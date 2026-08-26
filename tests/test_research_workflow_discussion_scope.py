@@ -4,6 +4,7 @@ import pytest
 
 from core.research.workflow.contracts import (
     ContractValidationError,
+    PreformalCandidateReviewScopeV1,
     WorkflowDiscussionScopeV1,
     canonical_discussion_scope,
     discussion_scope_hash,
@@ -80,3 +81,44 @@ def test_scope_parser_rejects_missing_and_unknown_fields():
         WorkflowDiscussionScopeV1.from_mapping(
             {**scope, "selectionId": "", "candidateId": ""}
         )
+
+
+def test_preformal_review_scope_has_no_fake_formal_run_and_is_replay_stable():
+    scope = PreformalCandidateReviewScopeV1.review(
+        teamId="team-1",
+        questionId="SCI-003",
+        selectionId="selection-1",
+        candidateId="H1",
+        meetingRoundId="meeting-1",
+        roomId="room-1",
+    )
+    replayed = PreformalCandidateReviewScopeV1.from_mapping(scope.to_dict())
+
+    assert replayed == scope
+    assert "workflowRunId" not in scope.to_dict()
+    assert "researchProjectId" not in scope.to_dict()
+    assert scope.scope_hash == replayed.scope_hash
+
+    with pytest.raises(ContractValidationError, match="meetingRoundId"):
+        PreformalCandidateReviewScopeV1.review(
+            teamId="team-1",
+            questionId="SCI-003",
+            selectionId="selection-1",
+            candidateId="H1",
+            roomId="room-1",
+        )
+
+
+def test_preformal_scope_rejects_formal_or_unknown_fields():
+    scope = {
+        "version": 1,
+        "kind": "preformal_candidate_review",
+        "teamId": "team-1",
+        "questionId": "SCI-003",
+        "selectionId": "selection-1",
+        "candidateId": "H1",
+        "meetingRoundId": "meeting-1",
+        "roomId": "room-1",
+    }
+    with pytest.raises(ContractValidationError, match="unsupported fields"):
+        PreformalCandidateReviewScopeV1.from_mapping({**scope, "workflowRunId": "run-1"})

@@ -26,10 +26,14 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from tests._support.team_workflow.helpers import (
+    _start_source_collection_run_with_problem_understanding,
+)
 from core.web.services.team_workflow.research_project_agent_sessions import (
     ResearchProjectAgentSessionError,
     resolve_research_project_agent_session,
 )
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch) -> None:
@@ -45,6 +49,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch) -> None:
         team_workflow_orchestration_service,
     ):
         monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
 
 
 def _project_and_agent(tmp_path, monkeypatch, *, project_name: str = "层级反馈实验"):
@@ -1097,7 +1102,7 @@ def test_source_stage_exact_replay_recovers_pre_submit_missing_session_without_d
         team_workflow_orchestration_service.LEGACY_PROJECT_ID,
         {"name": "会话恢复实验"},
     )["project"]
-    run = team_workflow_orchestration_service.start_source_collection_run(
+    run = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "session recovery",
@@ -1226,7 +1231,7 @@ def test_source_stage_new_task_records_missing_project_session_recovery(
         team_workflow_orchestration_service.LEGACY_PROJECT_ID,
         {"name": "新任务会话恢复实验"},
     )["project"]
-    run = team_workflow_orchestration_service.start_source_collection_run(
+    run = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "new task session recovery",
@@ -1276,7 +1281,7 @@ def test_source_stage_new_task_records_missing_project_session_recovery(
     assert recovered["task"]["turn"]["turnId"] == "turn-new-task-recovery"
 
 
-def test_source_stage_tasks_use_project_session_without_direct_session_and_retry_idempotently(
+def test_source_stage_tasks_use_project_session_without_reusing_direct_session_and_retry_idempotently(
     tmp_path, monkeypatch
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -1307,7 +1312,7 @@ def test_source_stage_tasks_use_project_session_without_direct_session_and_retry
         team_workflow_orchestration_service.LEGACY_PROJECT_ID,
         {"name": "可塑性规则实验"},
     )["project"]
-    run = team_workflow_orchestration_service.start_source_collection_run(
+    run = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "plasticity rules",
@@ -1359,9 +1364,11 @@ def test_source_stage_tasks_use_project_session_without_direct_session_and_retry
     assert second["sessionId"] == first["sessionId"]
     assert second["researchProjectId"] == project["projectId"]
     assert second["sessionTitle"] == "可塑性规则实验｜资料寻找"
-    assert not agent_directory_service.get_agent(agent["agentId"]).get(
+    direct_session_id = agent_directory_service.get_agent(agent["agentId"])[
         "directSessionId"
-    )
+    ]
+    assert direct_session_id
+    assert first["sessionId"] != direct_session_id
 
     with pytest.raises(
         team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
@@ -1520,7 +1527,7 @@ def test_formal_retry_selects_the_same_agent_previous_task_when_roles_match(
             },
         ],
     )
-    run = team_workflow_orchestration_service.start_source_collection_run(
+    run = _start_source_collection_run_with_problem_understanding(
         team["teamId"],
         {
             "topic": "agent-scoped retry",

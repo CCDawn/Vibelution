@@ -407,6 +407,60 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect(mockedReopenReview).toHaveBeenCalledWith("team-1", "meeting-1");
   });
 
+  it("executes the canonical reopen command for an orphaned review round", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("stopped"), meetingType: "hypothesis_review" },
+    });
+    mockedFetchMessages.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRoundId: "meeting-1",
+      messageCount: 0,
+      messages: [],
+    });
+    const canonicalAction = {
+      kind: "command" as const,
+      actionId: "reopen-review:meeting-1",
+      label: "重新发起评审讨论",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "review" as const,
+      targetNodeId: "hf_review",
+      command: "reopen_review" as const,
+      payload: { meetingRoundId: "meeting-1" },
+      inputSchemaRef: "hypothesis-first/reopen-review/v1",
+      idempotencyKey: "hf2:reopen-review:meeting-1",
+      expectedStateVersion: "hf2-action:origin:current",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+
+    render({
+      ...AUTO_ACTION,
+      stage: "blocked",
+      stateSource: "v2_canonical",
+      command: "reopen_review",
+      commandLabel: "重新发起评审讨论",
+      meetingRoundId: "meeting-1",
+      canonicalAction,
+      canonicalActions: [canonicalAction],
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重新发起评审讨论"));
+      const reopen = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("重新发起评审讨论"));
+      expect((reopen as HTMLButtonElement).disabled).toBe(false);
+      reopen?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", canonicalAction);
+    expect(mockedReopenReview).not.toHaveBeenCalled();
+  });
+
   it("restarts a candidate discussion when every speaker failed", async () => {
     mockedFetchMeetingRound.mockResolvedValue({
       schemaVersion: 1,

@@ -133,6 +133,7 @@ export function ResearchWorkflowToolbar(props: {
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
+  const runStatusBadge = researchRunStatusBadge(props.runStatus, lang);
   const selectedQuestionId = props.identity?.questionId || null;
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
@@ -193,6 +194,16 @@ export function ResearchWorkflowToolbar(props: {
           items={detailItems}
           trigger={<VButton type="button" density="compact" variant="secondary">{isZh ? "查看" : "View"}</VButton>}
         />
+        {runStatusBadge ? (
+          <VStatusChip
+            tone={runStatusBadge.tone}
+            role="status"
+            data-testid="research-run-status"
+            className={styles.trailing}
+          >
+            {runStatusBadge.label}
+          </VStatusChip>
+        ) : null}
         {props.onOpenTeamCommunication ? (
           <VButton
             type="button"
@@ -212,4 +223,25 @@ export function ResearchWorkflowToolbar(props: {
       </div>
     </VToolbar>
   );
+}
+
+function researchRunStatusBadge(
+  status: string | null | undefined,
+  lang: "zh" | "en",
+): { label: string; tone: "neutral" | "accent" | "success" | "warning" | "danger" } | null {
+  const normalized = String(status || "").trim().toLowerCase();
+  const isZh = lang === "zh";
+  switch (normalized) {
+    case "reconciliation_required":
+      return { label: isZh ? "需要对账" : "Needs reconciliation", tone: "warning" };
+    case "archived":
+      return { label: isZh ? "已归档" : "Archived", tone: "neutral" };
+    case "failed":
+      return { label: isZh ? "运行失败" : "Run failed", tone: "danger" };
+    case "cancelled":
+    case "canceled":
+      return { label: isZh ? "已取消" : "Cancelled", tone: "warning" };
+    default:
+      return null;
+  }
 }

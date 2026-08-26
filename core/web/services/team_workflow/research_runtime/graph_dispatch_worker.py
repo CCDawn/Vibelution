@@ -61,7 +61,9 @@ def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]
         "team_workflow_orchestration",
         "graph_dispatch_worker",
         event_code,
-        level="info" if outcome in {"committed", "settled", "deferred"} else "warning",
+        level="info"
+        if outcome in {"committed", "settled", "deferred", "recovered"}
+        else "warning",
         outcome=outcome,
         fields=fields,
     )
@@ -740,6 +742,47 @@ class GraphDispatchWorker:
         The next worker pass can resume it after the fence is released.
         """
 
+        now_ms = self._now()
+        # A process can die between the guard and this requeue.  Re-checking
+        # the fence here turns an expired/orphaned marker into an immediate
+        # retry instead of another fixed 60-second defer.  Unknown/corrupt
+        # state remains fail-closed and keeps the bounded maintenance delay.
+        from .challenge_cup_maintenance_fence import inspect_fence
+
+        fence_status = "unknown"
+        retry_at_ms = now_ms + 60_000
+        try:
+            fence_state = inspect_fence(
+                str(dispatch.team_id or ""),
+                now_ms=now_ms,
+            )
+            fence_status = str(fence_state.get("status") or "unknown")
+            if fence_state.get("activeFence") is None and fence_status in {
+                "absent",
+                "expired",
+                "orphaned",
+            }:
+                retry_at_ms = now_ms
+                _record_scene_event(
+                    "graph_dispatch.maintenance_recovered",
+                    outcome="recovered",
+                    fields={
+                        "teamId": str(dispatch.team_id or ""),
+                        "runId": str(dispatch.run_id or ""),
+                        "nodeId": str(dispatch.node_id or ""),
+                        "actionId": str(getattr(action, "action_id", "") or ""),
+                        "fenceStatus": fence_status,
+                    },
+                )
+        except Exception as exc:
+            # The original maintenance error is the useful user-facing
+            # problem.  Keep this diagnostic probe best-effort so a corrupt
+            # marker cannot accidentally turn the write guard fail-open.
+            fence_status = (
+                "corrupt"
+                if getattr(exc, "code", "") == "challenge_cup_maintenance_corrupt"
+                else "unknown"
+            )
         _record_scene_event(
             "graph_dispatch.deferred",
             outcome="deferred",
@@ -748,19 +791,23 @@ class GraphDispatchWorker:
                 "runId": str(dispatch.run_id or ""),
                 "nodeId": str(dispatch.node_id or ""),
                 "actionId": str(getattr(action, "action_id", "") or ""),
+                "fenceStatus": fence_status,
+                "retryAtMs": retry_at_ms,
+                "detail": str(detail or ""),
             },
         )
-        now_ms = self._now()
         outbox_api.requeue_action(
             self._store,
             action.action_id,
             self._owner,
             now_ms,
-            retry_at_ms=now_ms + 60_000,
+            retry_at_ms=retry_at_ms,
             problem_json=json.dumps(
                 {
                     "code": "challenge_cup_maintenance_active",
                     "detail": "workflow dispatch deferred by Challenge Cup maintenance",
+                    "reason": str(detail or ""),
+                    "fenceStatus": fence_status,
                 },
                 ensure_ascii=False,
             ),

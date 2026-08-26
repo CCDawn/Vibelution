@@ -25,6 +25,11 @@ type ResolveV2Options = {
   preferredMeetingRoundId?: string | null;
 };
 
+/** V2-only extension kept local so legacy next-action consumers remain stable. */
+export type HypothesisFirstV2NextAction = HypothesisFirstNextAction & {
+  canonicalActions?: readonly CommandAction[];
+};
+
 function reviewNodeId(candidate: ReviewCandidateState): string {
   return `hf_meeting_${candidate.roundIndex}_${encodeURIComponent(candidate.candidateId)}`;
 }
@@ -183,23 +188,34 @@ export function projectHypothesisFirstSelection(
   };
 }
 
+function commandActionsForPhase(
+  actions: readonly AllowedAction[],
+  phase: HypothesisFirstPhase,
+  reviewCandidate: ReviewCandidateState | null,
+): CommandAction[] {
+  const commands = actions.filter((action): action is CommandAction => (
+    action.kind === "command" && action.targetPhase === phase
+  ));
+  if (phase !== "review" || !reviewCandidate) return commands;
+  return commands.filter((action) => {
+    const payload = action.payload as Record<string, unknown>;
+    if (String(payload.meetingRoundId || "") === reviewCandidate.meetingRoundId) {
+      return true;
+    }
+    if (Array.isArray(payload.candidateIds)
+      && payload.candidateIds.some((candidateId) => String(candidateId) === reviewCandidate.candidateId)) {
+      return true;
+    }
+    return action.targetNodeId === reviewNodeId(reviewCandidate);
+  });
+}
+
 function firstEnabledCommand(
   actions: readonly AllowedAction[],
   phase: HypothesisFirstPhase,
   reviewCandidate: ReviewCandidateState | null,
 ): CommandAction | null {
-  const commands = actions.filter((action): action is CommandAction => (
-    action.kind === "command" && action.enabled && action.targetPhase === phase
-  ));
-  if (phase !== "review" || !reviewCandidate) return commands[0] ?? null;
-  return commands.find((action) => {
-    const payload = action.payload as Record<string, unknown>;
-    if (String(payload.meetingRoundId || "") === reviewCandidate.meetingRoundId) {
-      return true;
-    }
-    return Array.isArray(payload.candidateIds)
-      && payload.candidateIds.some((candidateId) => String(candidateId) === reviewCandidate.candidateId);
-  }) ?? null;
+  return commandActionsForPhase(actions, phase, reviewCandidate).find((action) => action.enabled) ?? null;
 }
 
 function firstReadyNavigation(
@@ -255,6 +271,7 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
     case "create_formal_revision": return "create_formal_revision";
     case "reconcile_formal_run": return "reconcile_formal_run";
     case "retry_review_dispatch": return "retry_review_dispatch";
+    case "reopen_review": return "reopen_review";
     case "resume_discussion": return "resume_discussion";
     case "stop_discussion": return "stop_discussion";
   }
@@ -293,7 +310,11 @@ function stageFor(state: HypothesisFirstStateV2): HypothesisFirstStage {
       if (state.convergence.accepted) return "converged";
       return state.convergence.lifecycle === "waiting_human" ? "next_review" : "blocked";
     case "formal_runtime":
-      return state.formalRuntime.runId ? "converged" : "converged";
+      if (state.formalRuntime.actionability === "blocked") return "blocked";
+      if (["failed", "cancelled", "reconciliation_required"].includes(String(state.formalRuntime.runStatus))) {
+        return "blocked";
+      }
+      return "converged";
     case "program_delivery": return "program_delivery";
     case "completed": return "completed";
   }
@@ -333,11 +354,16 @@ function defaultStatus(
 export function resolveHypothesisFirstNextActionFromV2(
   state: HypothesisFirstStateV2,
   options: ResolveV2Options = {},
-): HypothesisFirstNextAction {
+): HypothesisFirstV2NextAction {
   const reviewCandidate = state.currentPhase === "review"
     ? activeReviewCandidate(state, options)
     : null;
   const command = firstEnabledCommand(
+    state.allowedActions,
+    state.currentPhase,
+    reviewCandidate,
+  );
+  const canonicalActions = commandActionsForPhase(
     state.allowedActions,
     state.currentPhase,
     reviewCandidate,
@@ -357,14 +383,14 @@ export function resolveHypothesisFirstNextActionFromV2(
   return {
     stage: stageFor(state),
     targetNodeId: phaseTarget(state, reviewCandidate),
-    navigationLabel: navigation?.label || command?.label || "前往当前任务",
+    navigationLabel: navigation?.label || command?.label || canonicalActions[0]?.label || "前往当前任务",
     command: mappedCommand,
     commandLabel: command?.label,
     commandDetail: command?.confirmationText || defaultStatus(state, current),
-    disabledReason: current.actionability === "blocked"
-      ? current.problems[0]?.message || command?.disabledReason || "当前状态需要修复后才能继续"
-      : command && !command.enabled
-        ? command.disabledReason || undefined
+    disabledReason: command
+      ? undefined
+      : current.actionability === "blocked"
+        ? current.problems[0]?.message || "当前状态需要修复后才能继续"
         : undefined,
     recovery: null,
     statusMessage: defaultStatus(state, current),
@@ -377,6 +403,7 @@ export function resolveHypothesisFirstNextActionFromV2(
     stateSource: "v2_canonical",
     canonicalActionId: command?.actionId,
     canonicalAction: command || undefined,
+    canonicalActions,
     canonicalCommand: command?.command,
     expectedStateVersion: command?.expectedStateVersion,
     navigationDeepLink: navigation?.navigation.deepLink || undefined,

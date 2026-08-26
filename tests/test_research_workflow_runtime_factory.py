@@ -302,12 +302,16 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
 
         deadline = time.time() + 5
         pending = _pending_graph_dispatch(runtime.store, "run-test")
-        while time.time() < deadline and pending:
+        attempt = runtime.store.latest_attempt("run-test", "source_finding")
+        while time.time() < deadline and (
+            pending
+            or attempt is None
+            or attempt.status == "starting"
+        ):
             time.sleep(0.05)
             pending = _pending_graph_dispatch(runtime.store, "run-test")
+            attempt = runtime.store.latest_attempt("run-test", "source_finding")
         assert pending == []
-
-        attempt = runtime.store.latest_attempt("run-test", "source_finding")
         assert attempt is not None
         assert attempt.status != "starting"
     finally:

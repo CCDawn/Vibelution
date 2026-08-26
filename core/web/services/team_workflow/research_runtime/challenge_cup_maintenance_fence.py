@@ -19,8 +19,11 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import threading
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -31,6 +34,11 @@ from .paths import research_workflow_data_root
 RESEARCH_TEAM_ID = "research-team"
 FENCE_KIND = "challenge_cup_maintenance"
 SCHEMA_VERSION = 1
+# A reset is a bounded destructive operation, but it can legitimately span
+# several worker passes.  The lease is deliberately much longer than the
+# graph worker's retry delay.
+DEFAULT_FENCE_TTL_MS = 15 * 60 * 1000
+MAINTENANCE_FENCE_TTL_MS = DEFAULT_FENCE_TTL_MS
 _HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LOCK = threading.RLock()
 
@@ -132,6 +140,124 @@ def _utc_now() -> tuple[str, int]:
     )
 
 
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _iso_from_ms(value: int) -> str:
+    """Format a millisecond clock value without depending on local time."""
+
+    return (
+        datetime.fromtimestamp(int(value) / 1000, UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _clock_ms(value: Any | None) -> int:
+    if value is None:
+        return _now_ms()
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ChallengeCupMaintenanceError(
+            "challenge_cup_maintenance requires a valid nowMs.",
+            code="challenge_cup_maintenance_invalid_request",
+        ) from exc
+    if normalized <= 0:
+        raise ChallengeCupMaintenanceError(
+            "challenge_cup_maintenance requires a positive nowMs.",
+            code="challenge_cup_maintenance_invalid_request",
+        )
+    return normalized
+
+
+def _ttl_ms(value: Any) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ChallengeCupMaintenanceError(
+            "challenge_cup_maintenance requires a valid ttlMs.",
+            code="challenge_cup_maintenance_invalid_request",
+        ) from exc
+    if normalized <= 0:
+        raise ChallengeCupMaintenanceError(
+            "challenge_cup_maintenance requires a positive ttlMs.",
+            code="challenge_cup_maintenance_invalid_request",
+        )
+    return normalized
+
+
+def _owner_pid(
+    value: Any | None,
+    *,
+    default_current: bool = False,
+    require_positive: bool = False,
+) -> int:
+    if value is None and default_current:
+        return int(os.getpid())
+    try:
+        normalized = int(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise ChallengeCupMaintenanceError(
+            "challenge_cup_maintenance requires a valid ownerPid.",
+            code="challenge_cup_maintenance_invalid_request",
+        ) from exc
+    if normalized < 0 or (require_positive and normalized <= 0):
+        raise ChallengeCupMaintenanceError(
+            "challenge_cup_maintenance requires a positive ownerPid."
+            if require_positive
+            else "challenge_cup_maintenance requires a non-negative ownerPid.",
+            code="challenge_cup_maintenance_invalid_request",
+        )
+    return normalized
+
+
+def _default_owner_alive(pid: int) -> bool:
+    """Return process liveness while treating probe permission as alive.
+
+    A failed liveness probe is not permission to drop a destructive fence.
+    ``PermissionError`` therefore remains alive, matching the other local
+    process-lease implementations in this repository.
+    """
+
+    normalized = int(pid or 0)
+    if normalized <= 0:
+        return False
+    if normalized == os.getpid():
+        return True
+    try:
+        os.kill(normalized, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _owner_alive_value(
+    active: Mapping[str, Any],
+    owner_alive: Callable[[int], bool | None] | None,
+) -> bool | None:
+    """Resolve owner liveness; ``None`` means unknown and stays fail-closed."""
+
+    try:
+        pid = int(active.get("ownerPid") or 0)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    probe = owner_alive or _default_owner_alive
+    try:
+        result = probe(pid)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if result is None:
+        return None
+    return bool(result)
+
+
 def _fence_path() -> Path:
     return Path(research_workflow_data_root()) / f"{FENCE_KIND}.json"
 
@@ -169,7 +295,7 @@ def _read_active_fence() -> dict[str, Any] | None:
         raise ChallengeCupMaintenanceCorruptError() from exc
     if acquired_at_ms <= 0:
         raise ChallengeCupMaintenanceCorruptError()
-    return {
+    normalized: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "kind": FENCE_KIND,
         "teamId": RESEARCH_TEAM_ID,
@@ -179,6 +305,45 @@ def _read_active_fence() -> dict[str, Any] | None:
         "acquiredAtMs": acquired_at_ms,
         "acquiredBy": str(active.get("acquiredBy") or "system").strip()[:160] or "system",
     }
+    # V1 fences written before lease support remain readable, but their
+    # missing owner/expiry facts are intentionally unknown and therefore
+    # cannot be reclaimed automatically.
+    if "ownerPid" in active:
+        try:
+            owner_pid = int(active.get("ownerPid") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ChallengeCupMaintenanceCorruptError() from exc
+        if owner_pid < 0:
+            raise ChallengeCupMaintenanceCorruptError()
+        normalized["ownerPid"] = owner_pid
+    if "expiresAtMs" in active:
+        try:
+            expires_at_ms = int(active.get("expiresAtMs") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ChallengeCupMaintenanceCorruptError() from exc
+        if expires_at_ms <= 0:
+            raise ChallengeCupMaintenanceCorruptError()
+        normalized["expiresAtMs"] = expires_at_ms
+    if "expiresAt" in active:
+        expires_at = str(active.get("expiresAt") or "").strip()
+        if not expires_at or len(expires_at) > 80:
+            raise ChallengeCupMaintenanceCorruptError()
+        normalized["expiresAt"] = expires_at
+    if "ttlMs" in active:
+        try:
+            ttl_ms = int(active.get("ttlMs") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ChallengeCupMaintenanceCorruptError() from exc
+        if ttl_ms <= 0:
+            raise ChallengeCupMaintenanceCorruptError()
+        normalized["ttlMs"] = ttl_ms
+    # A lease marker must carry both machine-readable expiry and its readable
+    # counterpart.  Partial lease fields are untrusted rather than silently
+    # filled in from wall-clock time.
+    lease_fields = {"ownerPid", "expiresAtMs", "expiresAt"}
+    if lease_fields.intersection(active) and not lease_fields.issubset(normalized):
+        raise ChallengeCupMaintenanceCorruptError()
+    return normalized
 
 
 def _write_active_fence(active: Mapping[str, Any] | None) -> None:
@@ -195,13 +360,111 @@ def _write_active_fence(active: Mapping[str, Any] | None) -> None:
     )
 
 
-def read_fence(team_id: str) -> dict[str, Any] | None:
-    """Read the active governed fence for ``research-team``."""
+def _fence_state(
+    active: Mapping[str, Any],
+    *,
+    now_ms: int,
+    owner_alive: Callable[[int], bool | None] | None,
+) -> tuple[str, bool | None, bool]:
+    """Classify a fence without mutating it.
+
+    ``unknown`` is deliberately active.  A missing legacy owner or an
+    unavailable liveness probe must never turn a destructive boundary into an
+    implicit allow.  A known dead owner is reclaimable immediately; a known
+    expired lease is reclaimable even if the old process is still around,
+    because the owner must renew before the TTL elapses.
+    """
+
+    owner_alive_value = _owner_alive_value(active, owner_alive)
+    try:
+        expires_at_ms = int(active.get("expiresAtMs") or 0)
+    except (TypeError, ValueError):
+        expires_at_ms = 0
+    if expires_at_ms <= 0:
+        return "unknown", owner_alive_value, False
+    expired = int(now_ms) >= expires_at_ms
+    if owner_alive_value is None:
+        return "unknown", None, expired
+    if not expired and not owner_alive_value:
+        return "orphaned", False, False
+    if expired:
+        return "expired", owner_alive_value, True
+    return "active", owner_alive_value, False
+
+
+def _inspect_fence_locked(
+    *,
+    now_ms: int,
+    owner_alive: Callable[[int], bool | None] | None,
+    reap: bool = True,
+) -> dict[str, Any]:
+    active = _read_active_fence()
+    if active is None:
+        return {"status": "absent", "activeFence": None, "reclaimed": False}
+    status, owner_alive_value, expired = _fence_state(
+        active,
+        now_ms=now_ms,
+        owner_alive=owner_alive,
+    )
+    reclaimable = status in {"orphaned", "expired"}
+    if reclaimable and reap:
+        _write_active_fence(None)
+        return {
+            "status": status,
+            "activeFence": None,
+            "reclaimed": True,
+            "expired": expired,
+            "ownerAlive": owner_alive_value,
+        }
+    return {
+        "status": status,
+        "activeFence": copy.deepcopy(active),
+        "reclaimed": False,
+        "expired": expired,
+        "ownerAlive": owner_alive_value,
+    }
+
+
+def inspect_fence(
+    team_id: str,
+    *,
+    now_ms: int | None = None,
+    owner_alive: Callable[[int], bool | None] | None = None,
+    reap: bool = True,
+) -> dict[str, Any]:
+    """Return the fence state and reclaim known expired/orphaned leases.
+
+    This is the diagnostic/read path used by workers before they defer.  It
+    may clear only a fence whose lease is known expired or whose recorded
+    owner is known dead.  Corrupt and otherwise unknown markers raise or stay
+    active, preserving the existing fail-closed contract.
+    """
 
     _target_team_id(team_id)
+    current_ms = _clock_ms(now_ms)
     with _LOCK:
-        active = _read_active_fence()
-        return copy.deepcopy(active) if active is not None else None
+        return _inspect_fence_locked(
+            now_ms=current_ms,
+            owner_alive=owner_alive,
+            reap=reap,
+        )
+
+
+def read_fence(
+    team_id: str,
+    *,
+    now_ms: int | None = None,
+    owner_alive: Callable[[int], bool | None] | None = None,
+) -> dict[str, Any] | None:
+    """Read the active governed fence, reaping known stale leases."""
+
+    state = inspect_fence(
+        team_id,
+        now_ms=now_ms,
+        owner_alive=owner_alive,
+    )
+    active = state.get("activeFence")
+    return copy.deepcopy(active) if isinstance(active, Mapping) else None
 
 
 def acquire_fence(
@@ -210,6 +473,9 @@ def acquire_fence(
     purge_plan_id: str,
     inventory_hash: str,
     acquired_by: str = "system",
+    ttl_ms: int = DEFAULT_FENCE_TTL_MS,
+    owner_pid: int | None = None,
+    now_ms: int | None = None,
 ) -> dict[str, Any]:
     """Persist a reset fence, reusing only the exact same reset identity."""
 
@@ -217,8 +483,19 @@ def acquire_fence(
     plan_id = _required_text(purge_plan_id, field="purgePlanId", max_length=200)
     hash_value = _inventory_hash(inventory_hash)
     actor = _required_text(acquired_by, field="acquiredBy", max_length=160)
+    lease_ttl_ms = _ttl_ms(ttl_ms)
+    normalized_owner_pid = _owner_pid(
+        owner_pid,
+        default_current=True,
+        require_positive=True,
+    )
+    current_ms = _clock_ms(now_ms)
     with _LOCK:
-        existing = _read_active_fence()
+        state = _inspect_fence_locked(
+            now_ms=current_ms,
+            owner_alive=None,
+        )
+        existing = state.get("activeFence")
         if existing is not None:
             if (
                 existing["purgePlanId"] != plan_id
@@ -229,7 +506,9 @@ def acquire_fence(
                 **copy.deepcopy(existing),
                 "status": "reused",
             }
-        acquired_at, acquired_at_ms = _utc_now()
+        acquired_at_ms = current_ms
+        acquired_at = _iso_from_ms(acquired_at_ms)
+        expires_at_ms = acquired_at_ms + lease_ttl_ms
         active = {
             "schemaVersion": SCHEMA_VERSION,
             "kind": FENCE_KIND,
@@ -239,6 +518,10 @@ def acquire_fence(
             "acquiredAt": acquired_at,
             "acquiredAtMs": acquired_at_ms,
             "acquiredBy": actor,
+            "ownerPid": normalized_owner_pid,
+            "ttlMs": lease_ttl_ms,
+            "expiresAt": _iso_from_ms(expires_at_ms),
+            "expiresAtMs": expires_at_ms,
         }
         _write_active_fence(active)
         return {**copy.deepcopy(active), "status": "acquired"}
@@ -278,6 +561,8 @@ def assert_writes_allowed(
     *,
     operation: str,
     created_at_ms: int | None = None,
+    now_ms: int | None = None,
+    owner_alive: Callable[[int], bool | None] | None = None,
 ) -> dict[str, Any] | None:
     """Fail closed for new Challenge Cup writes while a fence is active.
 
@@ -290,9 +575,13 @@ def assert_writes_allowed(
     normalized_team_id = _optional_target_team_id(team_id)
     if normalized_team_id != RESEARCH_TEAM_ID:
         return None
-    with _LOCK:
-        active = _read_active_fence()
-    if active is None:
+    state = inspect_fence(
+        normalized_team_id,
+        now_ms=now_ms,
+        owner_alive=owner_alive,
+    )
+    active = state.get("activeFence")
+    if not isinstance(active, Mapping):
         return None
     if created_at_ms is not None:
         try:
@@ -309,11 +598,14 @@ def assert_writes_allowed(
 acquire = acquire_fence
 read = read_fence
 release = release_fence
+inspect = inspect_fence
 assert_write_allowed = assert_writes_allowed
 
 
 __all__ = [
     "FENCE_KIND",
+    "DEFAULT_FENCE_TTL_MS",
+    "MAINTENANCE_FENCE_TTL_MS",
     "RESEARCH_TEAM_ID",
     "SCHEMA_VERSION",
     "ChallengeCupMaintenanceActiveError",
@@ -325,6 +617,8 @@ __all__ = [
     "acquire_fence",
     "assert_write_allowed",
     "assert_writes_allowed",
+    "inspect",
+    "inspect_fence",
     "read",
     "read_fence",
     "release",

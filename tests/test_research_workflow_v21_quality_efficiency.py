@@ -9,6 +9,10 @@ import pytest
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.contracts import ArtifactManifest
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.web.services.team_workflow.research_runtime import (
+    problem_understanding_artifact_writer,
+    workflow_artifact_store,
+)
 from core.web.services.team_workflow.research_runtime.artifact_quality_gate import (
     ArtifactQualityError,
     validate_artifact_quality,
@@ -20,6 +24,9 @@ from core.web.services.team_workflow.research_runtime.artifact_reuse import (
 from core.web.services.team_workflow.research_runtime.budget_lifecycle import (
     reserve_node_budget,
     settle_budget_records,
+)
+from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+    canonical_sha256,
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
@@ -72,8 +79,93 @@ def _service(path: Path) -> ResearchWorkflowRuntimeService:
     )
 
 
+def _advance_to_source_finding(
+    service: ResearchWorkflowRuntimeService,
+    run: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    """Enter the graph through its canonical problem-understanding node.
+
+    These tests exercise source-finding budget behavior.  The production graph
+    still requires the entry node to complete first, so build that small
+    predecessor transition with the real node/checkpoint completion path rather
+    than manufacturing a downstream NodeRun.
+    """
+
+    source_collection_run_id = "source-run-quality"
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    service._store.update_run(
+        run["runId"],
+        {"sourceCollectionRunId": source_collection_run_id},
+    )
+    service.apply_node_command(
+        run["runId"],
+        "problem_understanding",
+        "start_execution",
+        payload={
+            "idempotencyKey": "start-quality-problem-understanding",
+            "leaseOwner": "quality-fixture",
+            "leaseSeconds": 60,
+            "deadlineSeconds": 900,
+        },
+    )
+    started = service.get_run(run["runId"])
+    problem_node_run = next(
+        item
+        for item in started["nodeRuns"]
+        if item["nodeId"] == "problem_understanding"
+    )
+    problem_payload = {
+        "scope": "quality fixture problem scope",
+        "subquestions": ["Which quality tradeoffs are testable?"],
+        "assumptions": ["fixture data is bounded"],
+        "known_unknowns": ["runtime evidence is not produced by this fixture"],
+        "human_gate": {
+            "required": True,
+            "decision": "approved",
+            "reviewer": "test-reviewer",
+            "decided_at": "2026-08-26T00:00:00Z",
+            "rationale": "Fixture precondition accepted.",
+        },
+    }
+    problem_understanding_artifact_writer.write_problem_understanding_artifact(
+        team_id=run["teamId"],
+        workflow_run_id=run["runId"],
+        source_collection_run_id=source_collection_run_id,
+        node_run_id=problem_node_run["nodeRunId"],
+        problem_understanding=problem_payload,
+    )
+    content_hash = canonical_sha256(problem_payload)
+    manifest = {
+        "artifactId": f"problem_understanding:{content_hash[:16]}",
+        "contentHash": content_hash,
+        "schemaVersion": "1.0.0",
+        "producerNodeRunId": problem_node_run["nodeRunId"],
+        "producerAttempt": problem_node_run["attempt"],
+        "inputSnapshotHash": problem_node_run["inputSnapshotHash"],
+        "configHash": "3" * 64,
+        "environmentSnapshotHash": "4" * 64,
+        "toolVersionHash": "5" * 64,
+        "sourceArtifactIds": [],
+        "cacheDisposition": "produced",
+        "createdAt": "2026-08-26T00:00:00Z",
+    }
+    return service.apply_node_command(
+        run["runId"],
+        "problem_understanding",
+        "complete_execution",
+        payload={
+            "idempotencyKey": "complete-quality-problem-understanding",
+            "leaseOwner": "quality-fixture",
+            "artifactManifests": [manifest],
+        },
+    )
+
+
 def test_run_initializes_stage_ledgers_and_budget_exhaustion_blocks_dispatch(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _service(tmp_path)
     run = service.create_run(
@@ -89,6 +181,7 @@ def test_run_initializes_stage_ledgers_and_budget_exhaustion_blocks_dispatch(
         "experiment_design",
         "execution_iteration",
     }
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
 
     with pytest.raises(ResearchWorkflowError) as exc:
         service.apply_node_command(
@@ -169,10 +262,7 @@ def test_agent_completion_settles_budget_and_task_bundle_with_real_artifact(
         ),
         idempotency_key="create-budget-settlement",
     )
-    service._store.update_run(
-        run["runId"],
-        {"sourceCollectionRunId": "source-run-quality"},
-    )
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
 
     def fake_start_stage_task(team_id: str, source_run_id: str, payload: dict) -> dict:
         return {
@@ -207,7 +297,9 @@ def test_agent_completion_settles_budget_and_task_bundle_with_real_artifact(
         },
     )
     started = service.get_run(run["runId"])
-    node_run = started["nodeRuns"][0]
+    node_run = next(
+        item for item in started["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
     manifest = {
         "artifactId": "source_candidate_batch:budget-quality",
         "contentHash": "2" * 64,

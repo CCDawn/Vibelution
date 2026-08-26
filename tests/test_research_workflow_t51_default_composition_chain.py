@@ -14,38 +14,58 @@ from pathlib import Path
 
 import pytest
 
-from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
+from core.research.competition.question_result_package import canonical_model_policy
+from core.research.workflow.challenge_cup_runtime import GraphDispatch, action_id_for
+from core.research.workflow.contracts import (
+    ActorRef,
+    CommandRequest,
+    ExecutionReceipt,
+    WorkflowCommandKind,
+)
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     server_operator_scope,
+)
+from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+    _persist_source_collection_run_id,
 )
 from core.web.services.team_workflow.research_runtime.runtime_factory import (
     build_workflow_runtime,
 )
 from tests._support.llm_turn_stub import install_fast_stage_writeback_llm_stub
 from tests._support.team_workflow.helpers import (
+    _start_source_collection_run_with_problem_understanding,
     _use_fake_local_research_config,
     _use_tmp_project_root,
 )
-from tests._support.workflow_ledger_helpers import build_event_record, build_run_record
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_event_record,
+    build_run_record,
+)
 
 
 def _seed_team_and_agents(tmp_path: Path):
     from core.web.services import agent_directory_service, team_service
-    from core.web.services.team_workflow import research_projects as research_project_service
+    from core.web.services.team_workflow import (
+        research_projects as research_project_service,
+    )
 
     finder = agent_directory_service.create_agent_instance(
         display_name="T518 Finder",
-        role_key="source_finder",
+        role_key="challenge_cup_search",
+        llm_bindings={"dialogue": {"modelId": "local/qwen3.5-9b"}},
         created_by="t518",
     )
     extractor = agent_directory_service.create_agent_instance(
         display_name="T518 Extractor",
-        role_key="source_extractor",
+        role_key="challenge_cup_extractor",
+        llm_bindings={"dialogue": {"modelId": "local/qwen3.5-9b"}},
         created_by="t518",
     )
     mapper = agent_directory_service.create_agent_instance(
         display_name="T518 Mapper",
-        role_key="source_relation_mapper",
+        role_key="challenge_cup_knowledge_manager",
+        llm_bindings={"dialogue": {"modelId": "local/qwen3.5-9b"}},
         created_by="t518",
     )
     team = team_service.create_team(
@@ -82,10 +102,28 @@ def _seed_team_and_agents(tmp_path: Path):
 
 
 def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -> None:
+    required_model_policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["local"],
+            "modelIds": ["qwen3.5-9b"],
+            "requireOfficialProvider": False,
+        }
+    )
+    def route(agent_key: str, product_role_id: str) -> dict[str, str]:
+        return {
+            "agentId": agents[agent_key],
+            "productRoleId": product_role_id,
+            "modelRef": "local/qwen3.5-9b",
+            "providerId": "local",
+            "modelId": "qwen3.5-9b",
+        }
+
     input_snapshot = {
         "teamId": team_id,
         "projectId": project_id,
         "questionId": "SCI-096",
+        "workflowId": "challenge-cup-research",
         "workflowVersionId": "challenge-cup-research-v2.1.0",
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
@@ -103,7 +141,29 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
         },
         "stopPolicy": {},
         "environmentSnapshotRef": "env-1",
-        "modelRoutingPolicy": {},
+        "modelRoutingPolicy": {
+            "requiredModelPolicy": required_model_policy,
+            "modelPolicySha256": required_model_policy["policySha256"],
+            "routes": {
+                "source_discovery": {
+                    "byProductRole": {
+                        "challenge_cup_search": route(
+                            "finderId", "challenge_cup_search"
+                        )
+                    }
+                },
+                "extraction": {
+                    "byProductRole": {
+                        "challenge_cup_extractor": route(
+                            "extractorId", "challenge_cup_extractor"
+                        ),
+                        "challenge_cup_knowledge_manager": route(
+                            "mapperId", "challenge_cup_knowledge_manager"
+                        ),
+                    }
+                },
+            },
+        },
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
@@ -159,6 +219,81 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
     store.submit(mutate, force_flush=True).result(timeout=10)
 
 
+def _seed_checkpoint_at_source_finding(runtime, *, team_id: str) -> None:
+    """Complete the unrelated entry checkpoint through the canonical graph API."""
+
+    node_id = "problem_understanding"
+    node_run_id = "nr-run-t518-problem_understanding-a1"
+    action_id = action_id_for("run-t518", node_id, 1)
+    started = runtime.coordinator.start_attempt(
+        GraphDispatch(
+            action_id=action_id,
+            run_id="run-t518",
+            node_run_id=node_run_id,
+            node_id=node_id,
+            attempt=1,
+            dispatch_kind="start",
+            input_snapshot_hash="c" * 64,
+            workflow_version_id="challenge-cup-research-v2.1.0",
+            team_id=team_id,
+        )
+    )
+    assert started.pending_action is not None
+    assert started.pending_action.node_id == node_id
+    advanced = runtime.coordinator.resume_action(
+        GraphDispatch(
+            action_id=action_id,
+            run_id="run-t518",
+            node_run_id=node_run_id,
+            node_id=node_id,
+            attempt=1,
+            dispatch_kind="resume_action",
+            receipt=ExecutionReceipt(
+                action_id=action_id,
+                node_run_id=node_run_id,
+                outcome="succeeded",
+                artifact_receipt_ids=(),
+                execution_anchor_id=None,
+                budget_receipt_id=None,
+                problem=None,
+                completed_at_ms=FIXED_NOW_MS,
+            ),
+        )
+    )
+    assert advanced.pending_action is not None
+    assert advanced.pending_action.node_id == "source_finding"
+
+
+def _seed_problem_context(runtime, *, seeded: dict[str, str]) -> None:
+    record = runtime.store.get_run("run-t518")
+    assert record is not None
+    snapshot = json.loads(record.input_snapshot_json)
+    required_model_policy = snapshot["modelRoutingPolicy"]["requiredModelPolicy"]
+    response = _start_source_collection_run_with_problem_understanding(
+        seeded["teamId"],
+        {
+            "researchProjectId": seeded["projectId"],
+            "questionId": "SCI-096",
+            "title": "T5.1-8 source authority",
+            "goal": "Deterministic three-node gate",
+            "topic": "spike train coding",
+            "requiredModelPolicy": required_model_policy,
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": seeded["finderId"]},
+            "querySeeds": ["spike train coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+            "scope": {
+                "workflowRunId": "run-t518",
+                "researchProjectId": seeded["projectId"],
+            },
+        },
+    )
+    source_run = response.get("run") if isinstance(response, dict) else {}
+    source_run_id = str((source_run or {}).get("runId") or "").strip()
+    assert source_run_id
+    _persist_source_collection_run_id(runtime.store, "run-t518", source_run_id)
+
+
 def _drive_until_node_succeeded(runtime, node_id: str, *, max_ticks: int = 80) -> None:
     for _ in range(max_ticks):
         attempt = runtime.store.latest_attempt("run-t518", node_id)
@@ -197,11 +332,57 @@ def _ensure_session_context_window(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _use_t518_model_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agent as agent_module
+    from config.public_config import build_effective_config
+    from core.web.services import session_service, team_workflow_orchestration_service
+
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "local": {
+                    "label": "T5.1 local fixture",
+                    "service_class": "local_runtime",
+                    "vendor": "custom",
+                    "driver": "openai",
+                    "base_url": "http://127.0.0.1:9/v1",
+                    "auth_kind": "none",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "protocols": {
+                        "default": "chat_completions",
+                        "allowed": ["chat_completions"],
+                    },
+                    "models": {
+                        "qwen3.5-9b": {
+                            "upstream_id": "qwen3.5-9b",
+                            "label": "T5.1 qwen fixture",
+                            "enabled": True,
+                            "context_window": 65536,
+                        }
+                    },
+                }
+            },
+            "profiles": {"primary": {"model_ref": "local/qwen3.5-9b"}},
+        }
+    }
+    runtime_config = build_effective_config(public_config)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: public_config,
+    )
+    monkeypatch.setattr(session_service, "get_config", lambda: runtime_config)
+    monkeypatch.setattr(agent_module, "get_config", lambda: runtime_config)
+
+
 def test_deterministic_composition_integration_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    _use_t518_model_library(monkeypatch)
     import core.infrastructure.path_containment as path_containment
 
     monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
@@ -221,6 +402,8 @@ def test_deterministic_composition_integration_gate(
             project_id=seeded["projectId"],
             agents=seeded,
         )
+        _seed_problem_context(runtime, seeded=seeded)
+        _seed_checkpoint_at_source_finding(runtime, team_id=seeded["teamId"])
 
         with server_operator_scope("u-1", roles=("operator",)):
             receipt = runtime.command_service.submit(

@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  RESEARCH_PROCESS_INSPECTOR_CLOSED,
   resolveResearchProcessAutofocus,
   shouldApplyCanvasNodeSelection,
+  shouldOpenResearchProcessInspector,
   shouldShowResearchProcessInspector,
 } from "./researchProcessPanelSelection";
 
 describe("researchProcessPanelSelection", () => {
+  it("opens workflow inspector panels by default and honors an explicit close marker", () => {
+    expect(shouldOpenResearchProcessInspector({ panel: "node", inspector: null })).toBe(true);
+    expect(shouldOpenResearchProcessInspector({ panel: "team", inspector: undefined })).toBe(true);
+    expect(shouldOpenResearchProcessInspector({
+      panel: "node",
+      inspector: RESEARCH_PROCESS_INSPECTOR_CLOSED,
+    })).toBe(false);
+    expect(shouldOpenResearchProcessInspector({ panel: "question", inspector: null })).toBe(false);
+  });
+
   it("does not let an empty canvas initialization replace a non-node panel", () => {
     expect(shouldApplyCanvasNodeSelection({ nodeId: null, panel: "agents" })).toBe(false);
     expect(shouldApplyCanvasNodeSelection({ nodeId: null, panel: "timeline" })).toBe(false);

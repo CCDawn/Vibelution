@@ -12,11 +12,14 @@ import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 export const SCOPED_DISCUSSION_READY = "ready" as const;
 export const SCOPED_DISCUSSION_DEGRADED = "degraded" as const;
 
-export type ScopedDiscussionKind = "question_generation" | "candidate_review";
+export type ScopedDiscussionKind =
+  | "question_generation"
+  | "candidate_review"
+  | "preformal_candidate_review";
 
-export type ScopedDiscussionScope = {
+export type FormalScopedDiscussionScope = {
   version: 1;
-  kind: ScopedDiscussionKind;
+  kind: "question_generation" | "candidate_review";
   teamId: string;
   researchProjectId: string;
   workflowRunId: string;
@@ -25,6 +28,21 @@ export type ScopedDiscussionScope = {
   selectionId?: string;
   candidateId?: string;
 };
+
+export type PreformalScopedDiscussionScope = {
+  version: 1;
+  kind: "preformal_candidate_review";
+  teamId: string;
+  questionId: string;
+  selectionId: string;
+  candidateId: string;
+  meetingRoundId: string;
+  roomId: string;
+};
+
+export type ScopedDiscussionScope =
+  | FormalScopedDiscussionScope
+  | PreformalScopedDiscussionScope;
 
 export type ActiveDiscussionAnchor = {
   scope: ScopedDiscussionScope | null;
@@ -129,8 +147,12 @@ export function buildScopedDiscussionReturnTo(scope: ScopedDiscussionScope): str
   params.set("researchView", "workflow");
   params.set("workflowId", CHALLENGE_CUP_WORKFLOW_ID);
   params.set("questionId", scope.questionId);
-  params.set("runId", scope.workflowRunId);
-  params.set("node", scope.workflowNodeId);
+  if (scope.kind === "preformal_candidate_review") {
+    params.set("node", "hf_review");
+  } else {
+    params.set("runId", scope.workflowRunId);
+    params.set("node", scope.workflowNodeId);
+  }
   params.set("panel", "node");
   return `/teams?${params.toString()}`;
 }
@@ -174,10 +196,14 @@ function normalizeScopedDiscussionReturnTo(
     researchView: "workflow",
     workflowId: CHALLENGE_CUP_WORKFLOW_ID,
     questionId: scope.questionId,
-    runId: scope.workflowRunId,
-    node: scope.workflowNodeId,
+    node: scope.kind === "preformal_candidate_review" ? "hf_review" : scope.workflowNodeId,
     panel: "node",
   };
+  if (scope.kind !== "preformal_candidate_review") {
+    expected.runId = scope.workflowRunId;
+  } else if (parsed.searchParams.has("runId")) {
+    return { ok: false };
+  }
   for (const [key, expectedValue] of Object.entries(expected)) {
     const values = parsed.searchParams.getAll(key);
     if (values.length > 1 || (values.length === 1 && values[0] !== expectedValue)) {
@@ -194,9 +220,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function asScope(value: unknown): ScopedDiscussionScope | null {
   if (!isRecord(value)) return null;
   const kind = text(value.kind);
+  if (kind === "preformal_candidate_review") {
+    const scope: PreformalScopedDiscussionScope = {
+      version: Number(value.version) === 1 ? 1 : (value.version as 1),
+      kind: "preformal_candidate_review",
+      teamId: text(value.teamId),
+      questionId: text(value.questionId),
+      selectionId: text(value.selectionId),
+      candidateId: text(value.candidateId),
+      meetingRoundId: text(value.meetingRoundId),
+      roomId: text(value.roomId),
+    };
+    if (
+      scope.version !== 1
+      || !scope.teamId
+      || !scope.questionId
+      || !scope.selectionId
+      || !scope.candidateId
+      || !scope.meetingRoundId
+      || !scope.roomId
+    ) {
+      return null;
+    }
+    return scope;
+  }
   const scope: ScopedDiscussionScope = {
     version: Number(value.version) === 1 ? 1 : (value.version as 1),
-    kind: kind as ScopedDiscussionKind,
+    kind: kind as "question_generation" | "candidate_review",
     teamId: text(value.teamId),
     researchProjectId: text(value.researchProjectId),
     workflowRunId: text(value.workflowRunId),
@@ -275,6 +325,13 @@ function parseAnchor(value: unknown):
     || anchor.questionId !== scope.questionId
     || anchor.selectionId !== text(scope.selectionId)
     || anchor.candidateId !== text(scope.candidateId)
+    || (
+      scope.kind === "preformal_candidate_review"
+      && (
+        anchor.meetingRoundId !== scope.meetingRoundId
+        || anchor.roomId !== scope.roomId
+      )
+    )
   ) {
     return { ok: false, model: anchorBase(SCOPED_DISCUSSION_REASONS.invalidAnchor, anchor) };
   }
