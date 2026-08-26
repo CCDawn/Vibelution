@@ -24,7 +24,7 @@
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 6 VERIFY    稳定修改批次按影响面跑最窄反馈测试；同一 HEAD/命令/输入未变不重复跑；完整 selector 计划留给最终 closeout 一次执行
 7 EVIDENCE  实现文件有变更时先 `reuse_research_evidence.py record`；logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
-8 INTEGRATE 默认用 `scripts/task_closeout.py` 一次完成最终验证、短时 integration claim、ff-only merge 与清理；不得先手动 closeout 后无参重跑
+8 INTEGRATE 默认用 `scripts/task_closeout.py` 一次完成最终验证、短时 integration claim、ff-only merge 与清理；不得先手动 closeout 后无参重跑，不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
 10 CLOSE     对用户汇报（根 `AGENTS.md` §5）；内部合入/清理仍做，不贴完成块
 ```

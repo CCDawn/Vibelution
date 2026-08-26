@@ -4,7 +4,7 @@
 - Owner: `codex-dev-loop-throughput-20260826`
 - Branch: `codex/development-loop-throughput`
 - Scope: Agent 验证提示词、本地质量门、managed closeout、`main` 集成锁与现行指南
-- Close condition: 已完成。gate-definition 同负载由 103.545 秒降至约 47.924 秒；pre-commit focused 由 13.822 秒降至 5.508 秒；行为契约已覆盖 manifest 复用、锁外验证和锁内复核。
+- Close condition: 已完成。gate-definition 同负载由 103.545 秒降至约 47.924 秒；pre-commit focused 由 13.822 秒降至 5.508 秒；131 项 Prompt 契约由 111.04 秒降至 62.03 秒；行为契约已覆盖 manifest 复用、锁外验证和锁内复核。
 
 ## 1. 目标
 
@@ -16,6 +16,7 @@
 2. 权威指南只描述手动 `closeout` + `verify-manifest`，没有登记 managed closeout。一旦 Agent先手动生成 manifest，再调用 managed closeout，后者会无条件重跑整套 selector 计划。
 3. `tests/README.md` 明确写着 closeout 不复用早期结果；Agent Prompt 又要求每个逻辑修改批次结束后跑测试，却没有禁止对同一 HEAD/同一命令重复验证。
 4. gate-definition 自测按单进程执行。相同 7 文件负载基线为 194 passed / 103.545 秒；4-worker `--dist load` 的 189 个 `not serial` 用例为 34.787 秒，5 个 `serial` 用例为 13.137 秒，合计 47.924 秒，预计减少约 53.7%。pre-commit 的 11 个 focused 用例从 13.822 秒降至 5.508 秒，预计减少约 60.2%。
+5. 未被矩阵显式认领的多个 changed test files 原本整包串行执行；131 项 Prompt 契约耗时 111.04 秒。按文件隔离并行后为 62.03 秒，减少约 44.1%。
 
 ## 3. 推荐路径
 
@@ -36,6 +37,7 @@
 - gate-definition 自测拆为 `not serial` 与 `serial` 两条明确命令。
 - `not serial` 使用 4 worker + `--dist load`，让单个大测试文件内互相隔离的用例跨 worker 分发；真实进程/环境医生仍保留 `serial`。
 - pre-commit 的 11 个 gate focused 用例使用相同的 4-worker `load` 策略。
+- changed-test fallback 对多个未标记 `serial` 的文件使用 bounded xdist + `loadfile`；显式 `serial` 文件拆到独立串行命令。
 
 ### 3.4 提示词约束
 

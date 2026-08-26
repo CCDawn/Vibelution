@@ -71,7 +71,7 @@ def test_proactive_self_review_and_local_main_merge_is_required() -> None:
 
     assert "主动自审当前任务 diff" in agents
     assert "不得把「等用户再说审查/合入」当作完成态" in agents
-    assert "不得以未主动审查合入结束" in agents
+    assert "未主动自审并合入本地 `main`" in agents
     assert "waiting for the user to request review or merge is not done" in standard
     assert "without waiting for the user to request review" in collaboration
     assert "不得等用户再下令审查/合入" in loop

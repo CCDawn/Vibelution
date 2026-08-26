@@ -96,7 +96,7 @@
   - 组件与 `*.styles.ts` / CSS module 类型必须同步（例如 `styles.gitValueChip` 等 key 先于用法存在）；`tsc` 红时禁止建议 force frontend rebuild，应先修类型再刷新。
   - 命令与触面表见 [loop.md](docs/guides/loop.md)；Launcher/workbench 预检债见 [07-launcher-runtime-workbench](docs/ops/config/07-launcher-runtime-workbench.md)。
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
-- 优先小范围验证；用户可见行为必须有测试与日志决策，关键运行/Agent/工具/配置路径需要可诊断 runtime-scene 证据。**同一 HEAD、同一命令且相关源码/测试/配置/依赖未变化时，复用已有通过结果，不得重复执行**；开发期只跑最窄反馈测试，完整 selector 计划默认只由最终 closeout 执行一次。已手动生成有效 manifest 时，后续 managed closeout 必须传 `--manifest`，不得无参重跑整套验证。
+- 验证去重：同一 HEAD/命令/输入未变则复用结果，不得重复执行；closeout 才跑完整 selector，manifest 传 `--manifest`。用户行为须测试和日志，关键路径须 runtime-scene 证据。
 - 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 config 只作 legacy/template。
 - Launcher 刷新使用 `%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" <start|stop|restart>`；若 active work 阻止刷新，报告：`有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。`
 - 任何新增或修改产品后台子进程 spawn 的路径，默认按 §2 无控制台红线实现与验证；能弹出可见控制台的路径不得合入。
