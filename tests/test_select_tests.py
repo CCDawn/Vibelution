@@ -185,7 +185,6 @@ def test_selector_matches_session_service_to_chat_validation_commands():
 def test_selector_matches_local_quality_gate_surfaces():
     result = select_tests.select_tests(
         [
-            ".githooks/pre-commit",
             ".github/workflows/ci.yml",
             "scripts/doctor.ps1",
             "scripts/local_quality_gate.py",
@@ -196,7 +195,6 @@ def test_selector_matches_local_quality_gate_surfaces():
 
     rule = next(rule for rule in result["matchedRules"] if rule["id"] == "local-quality-gate")
     assert set(rule["matchedFiles"]) == {
-        ".githooks/pre-commit",
         ".github/workflows/ci.yml",
         "scripts/doctor.ps1",
         "scripts/local_quality_gate.py",
@@ -207,6 +205,27 @@ def test_selector_matches_local_quality_gate_surfaces():
     assert any("tests/test_environment_doctor.py" in command for command in result["commands"])
     assert any("tests/test_select_tests.py" in command for command in result["commands"])
     assert "local-serial" in result["validationLayers"]
+
+
+def test_selector_scopes_pre_commit_hook_to_hook_contract_tests():
+    result = select_tests.select_tests(
+        [".githooks/pre-commit"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"] == [
+        {
+            "id": "pre-commit-hook",
+            "description": "Local pre-commit hook adapter and its shared-worktree Python fallback.",
+            "matchedFiles": [".githooks/pre-commit"],
+        }
+    ]
+    assert result["commands"] == [
+        "git diff --check",
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_local_quality_gate.py -k pre_commit -q",
+    ]
+    assert result["validationLayers"] == ["hygiene", "focused", "local-serial"]
 
 
 def test_selector_matches_chat_style_map_to_chat_validation_commands():
