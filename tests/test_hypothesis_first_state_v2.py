@@ -1739,6 +1739,344 @@ def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> No
     )
 
 
+def _collection_request_chain_record(
+    request_id: str,
+    *,
+    run_id: str,
+    status: str = "pending",
+    collection_run_status: str = "running",
+) -> dict[str, object]:
+    return {
+        "recordKind": "collection_request",
+        "requestId": request_id,
+        "questionId": "SCI-001",
+        "status": status,
+        "collectionRunId": run_id,
+        "collectionRunStatus": collection_run_status,
+        "searchEnvelope": {"keywords": ["water"]},
+    }
+
+
+def _collection_source_fact(**overrides: object) -> dict[str, object]:
+    fact: dict[str, object] = {
+        "lifecycle": "completed",
+        "outcome": "succeeded",
+        "actionability": "terminal",
+        "attempt": None,
+        "updatedAt": "2026-08-26T10:00:07Z",
+        "problems": [],
+        "sourceId": "q1",
+        "label": "alpha transformers",
+        "itemCount": 2,
+        "error": None,
+    }
+    fact.update(overrides)
+    return fact
+
+
+def _collection_search_failed_error() -> dict[str, object]:
+    return {
+        "code": "collection_source_search_failed",
+        "category": "execution",
+        "severity": "warning",
+        "message": "Crossref HTTP 503",
+        "recoverable": True,
+        "sourceKind": "collection_source",
+        "sourceId": "q2",
+        "detectedAt": "2026-08-26T10:01:00Z",
+    }
+
+
+def test_collection_request_projects_real_per_source_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2 as state_module,
+    )
+
+    requested_team_ids: list[str] = []
+
+    def fake_loader(team_id: str, run_ids: list[str]) -> dict[str, list[dict[str, object]]]:
+        requested_team_ids.append(team_id)
+        return {
+            "child-running": [
+                _collection_source_fact(),
+                _collection_source_fact(
+                    lifecycle="failed",
+                    outcome="none",
+                    actionability="available",
+                    updatedAt="2026-08-26T10:01:00Z",
+                    sourceId="q2",
+                    label="beta cortex",
+                    itemCount=0,
+                    error=_collection_search_failed_error(),
+                ),
+            ]
+        }
+
+    monkeypatch.setattr(state_module, "_load_collection_source_facts", fake_loader)
+
+    snapshot = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[_collection_request_chain_record("request-1", run_id="child-running")],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    request_state = snapshot.collection.requests[0]
+    assert [source.sourceId for source in request_state.sources] == ["q1", "q2"]
+    first, failed_source = request_state.sources
+    assert first.label == "alpha transformers"
+    assert first.itemCount == 2
+    assert first.lifecycle == "completed"
+    assert first.outcome == "succeeded"
+    assert first.actionability == "terminal"
+    assert first.error is None
+    assert failed_source.itemCount == 0
+    assert failed_source.error is not None
+    assert failed_source.error.code == "collection_source_search_failed"
+    assert failed_source.error.sourceId == "q2"
+    # Per-source progress stays telemetry: the request keeps its own phase.
+    assert request_state.lifecycle == "running"
+    # A source failure never replaces the child-run signal.
+    assert request_state.childRun.runId == "child-running"
+    # Loader receives the run ids referenced by durable requests only once per read.
+    assert requested_team_ids == ["team-1"] * len(requested_team_ids)
+
+
+def test_collection_source_states_from_groups_covers_partial_empty_and_retry() -> None:
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
+        _collection_source_states_from_events,
+    )
+
+    events: list[dict[str, object]] = [
+        {
+            "eventId": "e1",
+            "eventType": "search.failed",
+            "status": "blocked",
+            "queryId": "q-retry",
+            "query": "beta cortex",
+            "summary": "provider timeout",
+            "createdAt": "2026-08-26T09:00:00Z",
+        },
+        {
+            "eventId": "e2",
+            "eventType": "search.executed",
+            "status": "returned",
+            "queryId": "q-empty",
+            "query": "gamma empty",
+            "createdAt": "2026-08-26T09:30:00Z",
+        },
+        {
+            "eventId": "e3",
+            "eventType": "search.executed",
+            "status": "completed",
+            "queryId": "q-retry",
+            "query": "beta cortex",
+            "createdAt": "2026-08-26T10:00:00Z",
+        },
+        {
+            "eventId": "e4",
+            "eventType": "storage.data_record_written",
+            "status": "completed",
+            "queryId": "q-retry",
+            "refs": ["rec-1"],
+            "createdAt": "2026-08-26T10:00:04Z",
+        },
+        {
+            "eventId": "e5",
+            "eventType": "storage.data_record_written",
+            "status": "completed",
+            "queryId": "q-retry",
+            "refs": ["rec-2"],
+            "createdAt": "2026-08-26T10:00:05Z",
+        },
+        {
+            "eventId": "e6",
+            "eventType": "search.low_quality_rejected",
+            "status": "blocked",
+            "queryId": "q-retry",
+            "title": "Rejected low-quality source",
+            "createdAt": "2026-08-26T10:00:06Z",
+        },
+        {
+            "eventId": "e7",
+            "eventType": "assignment.no_query",
+            "status": "blocked",
+            "queryId": "",
+            "createdAt": "2026-08-26T10:00:07Z",
+        },
+    ]
+
+    sources = {source["sourceId"]: source for source in _collection_source_states_from_events(events)}
+
+    # Query order follows durable event order, never dictionary luck.
+    assert list(sources) == ["q-retry", "q-empty"]
+    retried = sources["q-retry"]
+    # A later successful attempt supersedes an earlier failure.
+    assert retried["lifecycle"] == "completed"
+    assert retried["outcome"] == "succeeded"
+    assert retried["actionability"] == "terminal"
+    assert retried["error"] is None
+    assert retried["itemCount"] == 2
+    # updatedAt tracks the newest observation for this source.
+    assert retried["updatedAt"] == "2026-08-26T10:00:06Z"
+
+    empty = sources["q-empty"]
+    assert empty["lifecycle"] == "completed"
+    assert empty["outcome"] == "empty"
+    assert empty["itemCount"] == 0
+
+
+def test_source_progress_is_representation_only_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2 as state_module,
+    )
+
+    chain_records = [_collection_request_chain_record("request-1", run_id="child-running")]
+
+    def projected(facts: dict[str, list[dict[str, object]]]) -> HypothesisFirstStateV2:
+        monkeypatch.setattr(
+            state_module,
+            "_load_collection_source_facts",
+            lambda _team_id, _run_ids: facts,
+        )
+        return HypothesisFirstStateV2.model_validate(
+            project_state_from_records(
+                team_id="team-1",
+                question_id="SCI-001",
+                reset_boundary=None,
+                chain_records=deepcopy(chain_records),
+                selection_records=[],
+                meeting_records=[],
+                digest_records=[],
+                decision_records=[],
+                hypothesis_round_records=[],
+            )
+        )
+
+    before_facts = {
+        "child-running": [
+            _collection_source_fact(itemCount=2),
+            _collection_source_fact(
+                lifecycle="failed",
+                outcome="none",
+                actionability="available",
+                sourceId="q2",
+                label="beta cortex",
+                itemCount=0,
+                error=_collection_search_failed_error(),
+            ),
+        ]
+    }
+    after_facts = {
+        "child-running": [
+            _collection_source_fact(itemCount=5),
+            # Same identity made progress past its failure during the round.
+            _collection_source_fact(
+                sourceId="q2",
+                label="beta cortex",
+                updatedAt="2026-08-26T11:01:00Z",
+            ),
+        ]
+    }
+
+    before = projected(before_facts)
+    after = projected(after_facts)
+
+    assert before.representationVersion is not None
+    assert before.representationVersion != after.representationVersion
+    assert before.stateVersion == after.stateVersion
+
+    # Identical facts stay byte-for-byte stable across replays.
+    replayed = projected(before_facts)
+    assert replayed.stateVersion == before.stateVersion
+    assert replayed.representationVersion == before.representationVersion
+
+
+def test_collection_source_facts_degrade_without_durable_search_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json as json_module
+
+    from core.web.services.team_workflow.source_collection import (
+        residual as sc_residual,
+    )
+
+    run_dir = tmp_path / "source_collection_runs" / "child-run-9"
+    run_dir.mkdir(parents=True)
+    events_path = run_dir / "search_events.jsonl"
+    events_path.write_text(
+        "\n".join(
+            json_module.dumps(event)
+            for event in (
+                {
+                    "eventId": "e1",
+                    "eventType": "search.executed",
+                    "status": "completed",
+                    "queryId": "q1",
+                    "query": "alpha transformers",
+                    "createdAt": "2026-08-26T10:00:00Z",
+                },
+                {
+                    "eventId": "e2",
+                    "eventType": "storage.data_record_written",
+                    "status": "completed",
+                    "queryId": "q1",
+                    "refs": ["rec-1"],
+                    "createdAt": "2026-08-26T10:00:02Z",
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sc_residual,
+        "_source_collection_storage_artifact_paths",
+        lambda team_id, run_id: {"searchEventsPath": tmp_path / "source_collection_runs" / run_id / "search_events.jsonl"},
+    )
+
+    def project() -> HypothesisFirstStateV2:
+        return HypothesisFirstStateV2.model_validate(
+            project_state_from_records(
+                team_id="team-1",
+                question_id="SCI-001",
+                reset_boundary=None,
+                chain_records=[
+                    _collection_request_chain_record("request-1", run_id="child-run-9")
+                ],
+                selection_records=[],
+                meeting_records=[],
+                digest_records=[],
+                decision_records=[],
+                hypothesis_round_records=[],
+            )
+        )
+
+    populated = project()
+    sources = populated.collection.requests[0].sources
+    assert [source.sourceId for source in sources] == ["q1"]
+    assert sources[0].label == "alpha transformers"
+    assert sources[0].itemCount == 1
+
+    # Missing log: the child simply has no per-source progress yet.
+    events_path.unlink()
+    degraded = project()
+    assert degraded.collection.requests[0].sources == []
+    assert degraded.collection.requests[0].childRun.runId == "child-run-9"
+
+
 def test_scope_cas_rejects_stale_state_version(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.web.services.team_workflow.research_runtime import (
         hypothesis_first_chain,

@@ -102,6 +102,28 @@ describe("researchWorkflowContextModel", () => {
     });
   });
 
+  it("labels review progress as a mutable current budget, not an immutable total", () => {
+    // The workspace resolves N via resolveHypothesisFirstRoundBudget
+    // (V2 convergence -> V1 chainState -> default 3); this template must keep
+    // expressing N as the current allowance ("当前预算"), never "共 N 轮".
+    const context = buildResearchWorkflowContext({
+      ...base,
+      nextAction: {
+        stage: "generation_missing",
+        targetNodeId: "hf_generation",
+        navigationLabel: "前往候选生成",
+        command: "open_generation",
+        commandLabel: "生成候选假说",
+      },
+      roundProgress: { current: 2, total: 4 },
+    });
+    expect(context.currentTask?.progress).toEqual({
+      current: 2,
+      total: 4,
+      label: "第 2 轮 / 当前预算 4",
+    });
+  });
+
   it("projects dispatch_never_started as failed_to_dispatch and keeps started runs normal", () => {
     expect(researchWorkflowDispatchStatus({
       runStatus: "failed",

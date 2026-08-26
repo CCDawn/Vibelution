@@ -16,12 +16,19 @@ import json
 import re
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MATRIX = Path(__file__).with_name("test_matrix.yaml")
-MAX_SELECTED_PYTEST_WORKERS = 4
+MAX_SELECTED_PYTEST_WORKERS = 6
+# Empirical cap for selector-built multi-file batches: on this 16-core Windows
+# machine the teams six-pack ran 109.7s (-n 4), 98.7s (-n 6), 115.6s (-n 8)
+# under --dist loadfile, because only a handful of heavy files dominate each
+# batch and extra workers mostly pay per-process import overhead.  This is
+# deliberately below the broad LOCAL_PARALLEL_COMMAND sweep suggestion.
+MAX_IMPORT_FALLBACK_TEST_FILES = 12
 LOCAL_PARALLEL_COMMAND = (
     '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q --maxfail=0'
 )
@@ -374,6 +381,50 @@ def _nearest_tested_python_frontier(
     return selected_tests
 
 
+def _frontier_test_distances(
+    changed_modules: set[str],
+    reverse_import_index: dict[str, set[str]],
+    test_import_index: dict[str, set[str]],
+) -> dict[str, int]:
+    """Return each candidate test's distance in product-import hops.
+
+    Distance 0 means the test imports a changed module directly; larger values
+    mean the test was found through an untested reverse-import ancestor.  This
+    ranks how close a fallback-selected test sits to the changed modules when
+    the selection has to be truncated.
+    """
+    distances_by_test: dict[str, int] = {}
+    visited: set[str] = set()
+    pending: deque[tuple[str, int]] = deque(
+        (module_name, 0) for module_name in sorted(changed_modules)
+    )
+    while pending:
+        module_name, distance = pending.popleft()
+        if module_name in visited:
+            continue
+        visited.add(module_name)
+        for test_file in test_import_index.get(module_name, set()):
+            distances_by_test.setdefault(test_file, distance)
+        for importer in reverse_import_index.get(module_name, set()):
+            if importer not in visited:
+                pending.append((importer, distance + 1))
+    return distances_by_test
+
+
+def _cap_import_fallback_tests(
+    selected_tests: list[str],
+    frontier_distances: dict[str, int],
+) -> tuple[list[str], list[str]]:
+    """Keep at most ``MAX_IMPORT_FALLBACK_TEST_FILES`` tests nearest the change."""
+    ranked = sorted(
+        selected_tests,
+        key=lambda test_file: (frontier_distances.get(test_file, sys.maxsize), test_file),
+    )
+    kept = sorted(ranked[:MAX_IMPORT_FALLBACK_TEST_FILES])
+    dropped = sorted(ranked[MAX_IMPORT_FALLBACK_TEST_FILES:])
+    return kept, dropped
+
+
 def _python_test_import_index(
     project_root: Path,
     source_modules: set[str],
@@ -587,22 +638,44 @@ def _python_fallback_selection(
         selected_tests = sorted(
             {test_path for tests in source_tests.values() for test_path in tests}
         )
+        truncated_from = len(selected_tests)
+        if truncated_from > MAX_IMPORT_FALLBACK_TEST_FILES:
+            frontier_distances = _frontier_test_distances(
+                source_modules,
+                reverse_import_index,
+                import_index,
+            )
+            kept_tests, dropped_tests = _cap_import_fallback_tests(
+                selected_tests,
+                frontier_distances,
+            )
+            notes.append(
+                f"Python import fallback matched {truncated_from} test files, exceeding the "
+                f"{MAX_IMPORT_FALLBACK_TEST_FILES}-file cap; validation was truncated to the "
+                f"{len(kept_tests)} files closest to a directly tested boundary (see "
+                f"python-import-fallback.droppedTests). Add focused matrix entries instead of "
+                "relying on the fallback."
+            )
+        else:
+            kept_tests, dropped_tests = selected_tests, []
         parallel_tests = [
-            test_path for test_path in selected_tests if test_path not in serial_tests
+            test_path for test_path in kept_tests if test_path not in serial_tests
         ]
         serial_selected_tests = [
-            test_path for test_path in selected_tests if test_path in serial_tests
+            test_path for test_path in kept_tests if test_path in serial_tests
         ]
-        fallback_rules.append(
-            {
-                "id": "python-import-fallback",
-                "description": (
-                    "Tests at the nearest statically provable Python import frontier."
-                ),
-                "matchedFiles": sorted(source_tests),
-                "selectedTests": selected_tests,
-            }
-        )
+        fallback_rule: dict[str, Any] = {
+            "id": "python-import-fallback",
+            "description": (
+                "Tests at the nearest statically provable Python import frontier."
+            ),
+            "matchedFiles": sorted(source_tests),
+            "selectedTests": kept_tests,
+        }
+        if dropped_tests:
+            fallback_rule["truncatedFrom"] = truncated_from
+            fallback_rule["droppedTests"] = dropped_tests
+        fallback_rules.append(fallback_rule)
         if parallel_tests:
             commands.append(_parallelize_pytest_command(_pytest_command(parallel_tests)))
             layers.append("focused")
@@ -654,6 +727,13 @@ def _dedupe_commands(commands: list[str]) -> list[str]:
 
 
 def _parallelize_pytest_command(command: str) -> str:
+    """Append bounded xdist arguments to a multi-file pytest batch.
+
+    The output stays parseable by ``local_quality_gate.parse_allowed_command``:
+    plain whitespace tokens plus one double-quoted pytest marker expression.
+    Single-file batches and commands that already carry ``-n`` are returned
+    unchanged.
+    """
     if " -m pytest " not in command:
         return command
     if re.search(r"(?:^|\s)(?:-n|--numprocesses)(?:\s|=)", command):
@@ -671,9 +751,18 @@ def _parallelize_pytest_command(command: str) -> str:
 
 
 def _rule_commands(rule: dict[str, Any]) -> list[str]:
+    """Materialize a rule's commands with selector-managed xdist parallelism.
+
+    Every multi-file pytest batch of a non-serial rule gets
+    ``-n min(MAX_SELECTED_PYTEST_WORKERS, files) --dist loadfile -m "not serial"``
+    appended so matrix entries do not need per-command parallel spellings.
+    Serial-layer rules keep their commands verbatim: their batches may depend on
+    processes, ports, Launcher/runtime lifecycle, Git state, or shared workspaces
+    that pytest-xdist cannot isolate, and ``-m "not serial"`` would silently
+    deselect their serial-marked coverage instead of running it elsewhere.
+    """
     commands = [str(command) for command in rule.get("commands", [])]
-    layers = _execution_layers(rule, ["focused"])
-    if "local-parallel" not in layers or "local-serial" in layers:
+    if "local-serial" in _execution_layers(rule, ["focused"]):
         return commands
     return [_parallelize_pytest_command(command) for command in commands]
 
@@ -939,6 +1028,14 @@ def main(argv: list[str] | None = None) -> int:
                 "or a direct test import.",
                 file=sys.stderr,
             )
+        for rule in result["matchedRules"]:
+            if isinstance(rule, dict) and rule.get("droppedTests"):
+                print(
+                    f"Import fallback cap: {rule['id']} selected {rule.get('truncatedFrom')} "
+                    f"test files, exceeding the {MAX_IMPORT_FALLBACK_TEST_FILES}-file cap; "
+                    f"truncated to {len(rule['selectedTests'])}. Add focused matrix entries.",
+                    file=sys.stderr,
+                )
     else:
         print("Changed files:")
         for changed_file in result["changedFiles"]:
