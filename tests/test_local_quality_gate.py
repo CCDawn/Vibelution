@@ -355,54 +355,75 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
 
 
 @pytest.mark.parametrize(
-    ("command", "kind", "argv_prefix"),
+    ("command", "kind", "argv_prefix", "cwd_suffix"),
     [
-        ("git diff --check", "diff-check", ["git", "diff", "--check"]),
+        ("git diff --check", "diff-check", ["git", "diff", "--check"], ""),
         (
             ".\\.venv\\Scripts\\python.exe -m pytest tests/test_select_tests.py -q",
             "pytest",
             [str(gate.PROJECT_PYTHON_NAME), "-m", "pytest"],
+            "",
         ),
         (
             ".\\.venv\\Scripts\\python.exe tests/select_tests.py "
             "--changed-file README.md --json",
             "selector",
             [str(gate.PROJECT_PYTHON_NAME), "tests/select_tests.py"],
+            "",
         ),
         (
             ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite --quick",
             "prompt-debugger",
             [str(gate.PROJECT_PYTHON_NAME), "tests/prompt_debugger.py"],
+            "",
         ),
         (
             "node web/node_modules/vitest/vitest.mjs run",
             "web-test",
             ["node", "node_modules/vitest/vitest.mjs", "run"],
+            "web",
+        ),
+        (
+            "node web/node_modules/vitest/vitest.mjs run src/example.test.ts --root web",
+            "web-test",
+            ["node", "web/node_modules/vitest/vitest.mjs", "run"],
+            "",
         ),
         (
             "npm --prefix web run build",
             "web-build",
             ["npm", "--prefix", "web", "run", "build"],
+            "",
         ),
         (
             "npm --prefix web exec -- tsc -b --pretty false",
             "web-typecheck",
             ["npm", "exec", "--", "tsc", "-b", "--pretty", "false"],
+            "web",
+        ),
+        (
+            "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false",
+            "web-typecheck",
+            ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json"],
+            "",
         ),
         (
             "npm --prefix web run check:bundle",
             "bundle-check",
             ["npm", "--prefix", "web", "run", "check:bundle"],
+            "",
         ),
         (
             "npm --prefix desktop/electron test",
             "electron-test",
             ["npm", "--prefix", "desktop/electron", "test"],
+            "",
         ),
         (
             "node 挑战杯/build_research_flow_site.mjs",
             "challenge-cup-build",
             ["node", "挑战杯/build_research_flow_site.mjs"],
+            "",
         ),
     ],
 )
@@ -411,12 +432,13 @@ def test_parse_allowed_command(
     command: str,
     kind: str,
     argv_prefix: list[str],
+    cwd_suffix: str,
 ) -> None:
     spec = gate.parse_allowed_command(command, git_repo)
 
     assert spec.kind == kind
     assert spec.argv[: len(argv_prefix)] == argv_prefix
-    expected_cwd = git_repo / "web" if kind in {"web-test", "web-typecheck"} else git_repo
+    expected_cwd = git_repo / cwd_suffix if cwd_suffix else git_repo
     assert spec.cwd == expected_cwd
 
 
@@ -469,6 +491,26 @@ def test_materialize_command_resolves_windowless_vitest_launcher(git_repo: Path)
     ]
     assert all(not argument.lower().endswith((".cmd", ".bat")) for argument in materialized.argv)
     assert materialized.cwd == git_repo / "web"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
+def test_materialize_command_keeps_root_bound_vitest_at_repository_root(git_repo: Path) -> None:
+    spec = gate.parse_allowed_command(
+        "node web/node_modules/vitest/vitest.mjs run src/example.test.ts --root web",
+        git_repo,
+    )
+
+    materialized = gate.materialize_command(spec)
+
+    assert Path(materialized.argv[0]).name.lower() == "node.exe"
+    assert materialized.argv[1:] == [
+        "web/node_modules/vitest/vitest.mjs",
+        "run",
+        "src/example.test.ts",
+        "--root",
+        "web",
+    ]
+    assert materialized.cwd == git_repo
 
 
 def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(

@@ -8,6 +8,9 @@ from tests import conftest as test_conftest
 from tests import select_tests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_TYPECHECK_COMMAND = (
+    "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
+)
 
 
 def test_matrix_loads_with_builtin_subset_parser():
@@ -218,7 +221,12 @@ def test_selector_matches_chat_style_map_to_chat_validation_commands():
     assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
-    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
+    assert all(
+        command.endswith(select_tests.FRONTEND_TEST_ROOT_ARGUMENT)
+        for command in result["commands"]
+        if command.startswith(select_tests.FRONTEND_TEST_COMMAND)
+    )
     assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
     assert not any(command == "npm --prefix web run build" for command in result["commands"])
 
@@ -236,7 +244,7 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
     assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
     assert any("src/routes/teams" in command for command in result["commands"])
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
-    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any("npm --prefix web run build" in command for command in result["commands"])
     assert not any("挑战杯/" in command for command in result["commands"])
     assert "frontend" in result["validationLayers"]
@@ -274,7 +282,7 @@ def test_selector_matches_large_file_split_extracted_paths():
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
     assert any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
     assert any("ChatCodingRoute" not in command and "--changed main" in command for command in result["commands"])
-    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
     assert not any(command == "npm --prefix web run build" for command in result["commands"])
 
@@ -287,7 +295,7 @@ def test_selector_uses_non_ui_frontend_fallback_without_vui_contracts():
 
     assert {rule["id"] for rule in result["matchedRules"]} == {"frontend-non-ui"}
     assert any("--changed main --passWithNoTests" in command for command in result["commands"])
-    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert not any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
 
@@ -507,7 +515,7 @@ def test_selector_keeps_frontend_validation_separate_from_remote_distributed():
     assert result["executionPlan"]["frontend"]["required"] is True
     assert result["executionPlan"]["remoteDistributed"]["recommended"] is False
     assert any("--changed main --passWithNoTests" in command for command in result["commands"])
-    assert any("tsc -b --pretty false" in command for command in result["commands"])
+    assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
     assert not any(command == "npm --prefix web run build" for command in result["commands"])
 
