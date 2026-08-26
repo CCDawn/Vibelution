@@ -1486,6 +1486,75 @@ describe("runWorkbenchLifecycle", () => {
     });
   });
 
+  it("restarts despite a pid-reused registered handle while the backend port is free", async () => {
+    const { spawnImpl, input, written } = harness();
+    let listening = false;
+    const wrappedSpawn = vi.fn((...args: Parameters<typeof spawnImpl>) => {
+      listening = true;
+      return spawnImpl(...args);
+    });
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "restart",
+      command: { commandId: "cmd_pid_reuse_restart", type: "restart", operation: "restart", noBrowser: true },
+      spawnImpl: wrappedSpawn,
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 123,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 123,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 123,
+        spawnExecutable: "C:/Python/python.exe"
+      }),
+      pidAlive: (pid) => pid === 51,
+      connect: async () => listening,
+      terminateProcessTree
+    });
+    expect(result.accepted).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).toHaveBeenCalledWith(51, expect.objectContaining({ pid: 51 }));
+    expect(written.at(-1)).toMatchObject({
+      observedState: "open",
+      lifecycleWarning: expect.stringContaining("registered handle retirement stayed unverified while port 8000 was released")
+    });
+  });
+
+  it("still refuses to start when retirement fails while the port is held again", async () => {
+    const { spawnImpl, input, written } = harness();
+    let retireAttempted = false;
+    const terminateProcessTree = vi.fn(async () => {
+      retireAttempted = true;
+      return false;
+    });
+    await expect(executeMainLineWorkbench({
+      ...input,
+      operation: "restart",
+      command: { commandId: "cmd_retire_fail_port_held", type: "restart", operation: "restart", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 51,
+        spawnPid: 51,
+        backendPort: 8000,
+        backendCreateTime: 123,
+        backendExecutable: "C:/Python/python.exe",
+        backendLaunchCreateTime: 123,
+        backendLaunchExecutable: "C:/Python/python.exe",
+        spawnCreateTime: 123,
+        spawnExecutable: "C:/Python/python.exe"
+      }),
+      pidAlive: (pid) => pid === 51,
+      connect: async (port) => port === 8000 && retireAttempted,
+      terminateProcessTree
+    })).rejects.toThrow("Failed to verify retirement of owned process tree 51");
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({ observedState: "failed" });
+  });
+
   it("does not re-persist reconciled backend handles when a later start preflight fails", async () => {
     const { spawnImpl, input } = harness();
     let written: Record<string, unknown> = {};
