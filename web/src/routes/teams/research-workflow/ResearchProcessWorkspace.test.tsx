@@ -51,6 +51,9 @@ const harness = vi.hoisted(() => ({
     questionId: "",
     questionScopeKey: "research-team::no-question",
     scopeMismatch: false,
+    stateV2: null,
+    v2ReadState: "route_unavailable",
+    stateSource: "v1_legacy",
     chainState: null,
     meetings: [] as unknown[],
     collectionRequests: [] as unknown[],
@@ -323,11 +326,15 @@ describe("ResearchProcessWorkspace", () => {
     harness.chain.chainState = null;
     harness.chain.questionId = "";
     harness.chain.scopeMismatch = false;
+    harness.chain.stateV2 = null;
+    harness.chain.v2ReadState = "route_unavailable";
+    harness.chain.stateSource = "v1_legacy";
     harness.chain.meetings = [];
     harness.chain.collectionRequests = [];
     harness.chain.reviewRoundLinks = [];
     harness.chain.selection = null;
     harness.chain.loading = false;
+    harness.chain.error = null;
     harness.chain.recoveryBusy = false;
     harness.chain.recoveryError = null;
   });
@@ -735,6 +742,66 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-task-status="blocked"]')).not.toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
+  });
+
+  it("suppresses phase inference while the canonical chain snapshot is still loading", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.stateV2 = null;
+    harness.chain.v2ReadState = "pending";
+    harness.chain.stateSource = "pending";
+    harness.chain.loading = true;
+    // Auxiliary reads can resolve before the V2 snapshot; that half-data must
+    // never flash a guessed stage or expose a write command.
+    harness.chain.meetings = [{
+      question: "SCI-096",
+      meetingRoundId: "meeting-1",
+      meetingType: "hypothesis_review",
+      mode: "review",
+      scopeHash: "scope-1",
+      participants: ["reviewer"],
+      status: "open",
+      startedAt: "2026-08-24T00:00:00Z",
+      roundIndex: 1,
+    }] as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    // Half-data must resolve into the existing blocked-task shape only; every
+    // guessed phase/command label stays hidden while the snapshot is missing.
+    expect(rendered.container.querySelector('[data-task-status="blocked"]')).not.toBeNull();
+    expect(rendered.container.textContent).toContain("当前流程需要处理");
+    expect(rendered.container.textContent).not.toContain("查看评审讨论");
+    expect(rendered.container.textContent).not.toContain("整理本轮结论");
+    expect(rendered.container.textContent).not.toContain("生成候选假说");
+  });
+
+  it("surfaces a v2_error read failure and withholds every legacy write action", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.stateV2 = null;
+    harness.chain.v2ReadState = "v2_error";
+    harness.chain.stateSource = "v2_error";
+    harness.chain.error = "规范流程快照读取失败（500）";
+    // A cached selection is exactly the half-data that used to unlock the
+    // legacy record-selection command during a V2 outage.
+    harness.chain.selection = {
+      questionId: "SCI-096",
+      selectionId: "selection-1",
+      selectedCandidateIds: ["candidate-1"],
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(rendered.container.querySelector('[role="alert"]')?.textContent).toContain("规范流程快照读取失败（500）");
+    // The outage resolves into the existing blocked-task shape with the error
+    // surfaced as its blocker; no legacy write command may appear.
+    expect(rendered.container.querySelector('[data-task-status="blocked"]')).not.toBeNull();
+    expect(rendered.container.textContent).toContain("当前流程需要处理");
+    expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
+    expect(rendered.container.textContent).not.toContain("生成候选假说");
   });
 
   it("submits the authoritative formal offer once from the fixed footer", async () => {

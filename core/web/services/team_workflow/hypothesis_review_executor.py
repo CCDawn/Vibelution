@@ -28,6 +28,7 @@ comparison, an unclassified candidate, or a missing recommendation raises
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import random
@@ -56,6 +57,11 @@ PARETO_ROLE = "research_theme_synthesizer"
 METAREVIEW_ROLE = "coordinator"
 
 SCHEMA_VERSION = 1
+
+# Reflection and pairwise fans out to one LLM call per candidate / pair; the
+# executor only parallelizes that IO wait (never the validation below), so the
+# review latency stays bounded instead of O(candidates + pairs) serial calls.
+MAX_CONCURRENT_REVIEW_CALLS = 4
 
 
 class HypothesisReviewExecutionMode(str, Enum):
@@ -187,6 +193,37 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _collect_runner_outputs(
+    calls: Sequence[Callable[[], ReviewRunnerResult]],
+    *,
+    max_concurrent_calls: int,
+) -> list[ReviewRunnerResult]:
+    """Invoke runner thunks and return their raw outputs in input order.
+
+    Only the IO-bound runner wait runs concurrently; receipt verification and
+    all payload validation stay sequential afterwards, so the assembled review
+    is deterministic and no partial output escapes.  ``max_concurrent_calls``
+    below 2 degrades to the fully serial loop where a failing call prevents
+    the later calls from being issued at all.  With real parallelism some
+    later calls may already be in flight when an earlier one fails — they
+    cannot be recalled — but the re-raised error is always the failing
+    input's own exception, selected by input order, never completion order.
+    """
+
+    limit = max(1, int(max_concurrent_calls))
+    outputs: list[ReviewRunnerResult] = []
+    if limit == 1 or len(calls) <= 1:
+        for call in calls:
+            outputs.append(call())
+        return outputs
+    workers = min(limit, len(calls))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(call) for call in calls]
+        for future in futures:
+            outputs.append(future.result())
+    return outputs
+
+
 def deterministic_pairwise_order(
     candidate_ids: Sequence[str],
     position_seed: str,
@@ -238,19 +275,32 @@ def _reflection_step(
     runner: ReflectionRunner | None,
     agent_id: str,
     formal_receipts: list[dict[str, Any]] | None,
+    max_concurrent_calls: int = MAX_CONCURRENT_REVIEW_CALLS,
 ) -> list[dict[str, Any]]:
     """Score every candidate independently on the five fixed dimensions."""
 
     context_id = str(context.get("contextId") or "")
+    # Phase 1 acquires the raw runner outputs (the only concurrent part);
+    # phase 2 validates receipts and payloads sequentially in input order, so
+    # the shared formal_receipts list is never touched from worker threads.
+    produced_by_candidate: list[ReviewRunnerResult] = []
+    if runner is not None:
+        produced_by_candidate = _collect_runner_outputs(
+            [
+                lambda candidate=candidate: runner(dict(candidate), dict(context))
+                for candidate in candidates
+            ],
+            max_concurrent_calls=max_concurrent_calls,
+        )
     reviewed: list[dict[str, Any]] = []
-    for candidate in candidates:
+    for index, candidate in enumerate(candidates):
         candidate_id = str(candidate["candidateId"])
         merged = dict(candidate)
         explicit_dimension_reviews: Any = None
         has_explicit_dimension_reviews = False
         if runner is not None:
             produced = _validated_runner_payload(
-                runner(dict(candidate), dict(context)),
+                produced_by_candidate[index],
                 step_label=f"reflection for candidate {candidate_id}",
                 formal_receipts=formal_receipts,
             )
@@ -376,17 +426,30 @@ def _pairwise_step(
     position_seed: str,
     round_id: str,
     formal_receipts: list[dict[str, Any]] | None,
+    max_concurrent_calls: int = MAX_CONCURRENT_REVIEW_CALLS,
 ) -> list[dict[str, Any]]:
     """Compare every unordered pair once, in the recorded randomized order."""
 
     by_id = {str(item["candidateId"]): item for item in candidates}
+    pairs = deterministic_pairwise_order(list(by_id), position_seed)
+    produced_by_pair: list[ReviewRunnerResult] = []
+    if runner is not None:
+        produced_by_pair = _collect_runner_outputs(
+            [
+                lambda left=by_id[left_id], right=by_id[right_id]: runner(
+                    dict(left), dict(right), dict(context)
+                )
+                for left_id, right_id in pairs
+            ],
+            max_concurrent_calls=max_concurrent_calls,
+        )
     comparisons: list[dict[str, Any]] = []
-    for left_id, right_id in deterministic_pairwise_order(list(by_id), position_seed):
+    for index, (left_id, right_id) in enumerate(pairs):
         left = by_id[left_id]
         right = by_id[right_id]
         if runner is not None:
             produced = _validated_runner_payload(
-                runner(dict(left), dict(right), dict(context)),
+                produced_by_pair[index],
                 step_label=f"pairwise comparison {left_id} vs {right_id}",
                 formal_receipts=formal_receipts,
             )
@@ -421,13 +484,10 @@ def _pairwise_step(
     covered = {
         frozenset((item["leftCandidateId"], item["rightCandidateId"])) for item in comparisons
     }
-    expected = {
-        frozenset(pair)
-        for pair in deterministic_pairwise_order(list(by_id), position_seed)
-    }
+    expected = {frozenset(pair) for pair in pairs}
     missing = expected - covered
     if missing:
-        for left_id, right_id in deterministic_pairwise_order(list(by_id), position_seed):
+        for left_id, right_id in pairs:
             if frozenset((left_id, right_id)) in missing:
                 raise ContractValidationError(
                     f"missing pairwise comparison between {left_id} and {right_id}"
@@ -605,12 +665,18 @@ def execute_hypothesis_review(
     metareview_runner: MetaReviewRunner | None = None,
     reviewer_assignments: Mapping[str, Any] | None = None,
     position_seed: str = "",
+    max_concurrent_calls: int | None = None,
 ) -> dict[str, Any]:
     """Run the four separated review steps over one bounded review context.
 
     ``execution_mode`` defaults to ``DEV`` for existing fixture callers.  A
     ``FORMAL`` request is fenced before any review step: all four real runners
     must be present, and every call must return a unique provider-bound receipt.
+    The reflection and pairwise runner calls run with bounded parallelism
+    (``max_concurrent_calls``; default ``MAX_CONCURRENT_REVIEW_CALLS``, values
+    below 2 fall back to fully serial invocation); results are always
+    assembled in input order and every step still fails closed on any
+    incomplete output.
 
     Returns the candidate scores, pairwise comparisons, Pareto analysis, and
     MetaReview ready for ``HypothesisRound`` persistence, plus the role
@@ -628,6 +694,9 @@ def execute_hypothesis_review(
             pareto_runner=pareto_runner,
             metareview_runner=metareview_runner,
         )
+    effective_concurrency = (
+        MAX_CONCURRENT_REVIEW_CALLS if max_concurrent_calls is None else int(max_concurrent_calls)
+    )
     formal_receipts: list[dict[str, Any]] | None = (
         [] if mode is HypothesisReviewExecutionMode.FORMAL else None
     )
@@ -654,6 +723,7 @@ def execute_hypothesis_review(
         runner=reflection_runner,
         agent_id=reflection_agent,
         formal_receipts=formal_receipts,
+        max_concurrent_calls=effective_concurrency,
     )
     comparisons = _pairwise_step(
         context,
@@ -663,6 +733,7 @@ def execute_hypothesis_review(
         position_seed=seed,
         round_id=round_id,
         formal_receipts=formal_receipts,
+        max_concurrent_calls=effective_concurrency,
     )
     pareto = _pareto_step(
         context,
