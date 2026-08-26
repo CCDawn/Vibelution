@@ -6,8 +6,15 @@ from pathlib import Path
 
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.web.services.team_workflow.research_runtime import (
+    problem_understanding_artifact_writer,
+    workflow_artifact_store,
+)
 from core.web.services.team_workflow.research_runtime.external_agent_task_failure import (
     block_external_agent_node_run,
+)
+from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+    canonical_sha256,
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
@@ -137,15 +144,101 @@ def _terminal_source_task() -> dict:
     }
 
 
+def _advance_to_source_finding(
+    service: ResearchWorkflowRuntimeService,
+    run: dict,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Complete the canonical problem_understanding entry node.
+
+    The v2.1 production graph enters through ``problem_understanding``;
+    ``source_finding`` only becomes ready after that node completes.  Drive the
+    real start/complete path with a written canonical artifact instead of
+    manufacturing a downstream NodeRun.
+    """
+
+    source_collection_run_id = "source-run-agent-reconcile"
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    service._store.update_run(
+        run["runId"],
+        {"sourceCollectionRunId": source_collection_run_id},
+    )
+    service.apply_node_command(
+        run["runId"],
+        "problem_understanding",
+        "start_execution",
+        payload={
+            "idempotencyKey": "start-reconcile-problem-understanding",
+            "leaseOwner": "reconcile-fixture",
+            "leaseSeconds": 60,
+            "deadlineSeconds": 900,
+        },
+    )
+    started = service.get_run(run["runId"])
+    problem_node_run = next(
+        item
+        for item in started["nodeRuns"]
+        if item["nodeId"] == "problem_understanding"
+    )
+    problem_payload = {
+        "scope": "reconcile fixture problem scope",
+        "subquestions": ["Which reconciliation invariants must hold?"],
+        "assumptions": ["fixture inputs are bounded"],
+        "known_unknowns": ["runtime evidence is out of scope here"],
+        "human_gate": {
+            "required": True,
+            "decision": "approved",
+            "reviewer": "test-reviewer",
+            "decided_at": "2026-08-26T00:00:00Z",
+            "rationale": "Fixture precondition accepted.",
+        },
+    }
+    problem_understanding_artifact_writer.write_problem_understanding_artifact(
+        team_id=run["teamId"],
+        workflow_run_id=run["runId"],
+        source_collection_run_id=source_collection_run_id,
+        node_run_id=problem_node_run["nodeRunId"],
+        problem_understanding=problem_payload,
+    )
+    content_hash = canonical_sha256(problem_payload)
+    manifest = {
+        "artifactId": f"problem_understanding:{content_hash[:16]}",
+        "contentHash": content_hash,
+        "schemaVersion": "1.0.0",
+        "producerNodeRunId": problem_node_run["nodeRunId"],
+        "producerAttempt": problem_node_run["attempt"],
+        "inputSnapshotHash": problem_node_run["inputSnapshotHash"],
+        "configHash": "3" * 64,
+        "environmentSnapshotHash": "4" * 64,
+        "toolVersionHash": "5" * 64,
+        "sourceArtifactIds": [],
+        "cacheDisposition": "produced",
+        "createdAt": "2026-08-26T00:00:00Z",
+    }
+    service.apply_node_command(
+        run["runId"],
+        "problem_understanding",
+        "complete_execution",
+        payload={
+            "idempotencyKey": "complete-reconcile-problem-understanding",
+            "leaseOwner": "reconcile-fixture",
+            "artifactManifests": [manifest],
+        },
+    )
+
+
 def _start_source_node(
     service: ResearchWorkflowRuntimeService,
     run: dict,
+    tmp_path: Path,
     terminal: dict,
     observed_status: dict[str, str],
     monkeypatch,
     *,
     budget_request: dict[str, int] | None = None,
 ) -> None:
+    _advance_to_source_finding(service, run, tmp_path, monkeypatch)
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.runs.start_source_collection_run",
         lambda _team_id, _payload: {"run": {"runId": "source-run-1"}},
@@ -219,7 +312,7 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     )
     terminal = _terminal_source_task()
     observed_status = {"value": "running"}
-    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
     observed_status["value"] = "completed"
 
     completed = service.get_run(run["runId"])
@@ -233,12 +326,15 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
         for item in completed["nodeRuns"]
         if item["nodeId"] == "source_extraction"
     )
-    manifest = completed["artifactManifests"][0]
+    manifest = next(
+        item
+        for item in completed["artifactManifests"]
+        if item["artifactId"].startswith("source_candidate_batch:")
+    )
     payload = completed["artifactPayloads"][manifest["artifactId"]]
     assert source_run["status"] == "succeeded"
     assert successor["status"] == "ready"
     assert completed["runtimeCurrentNodeIds"] == ["source_extraction"]
-    assert manifest["artifactId"].startswith("source_candidate_batch:")
     assert len(manifest["contentHash"]) == 64
     assert payload["queries"] == [
         "mechanism perspective",
@@ -249,20 +345,39 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     assert len(payload["counterEvidenceCandidateSources"]) == 1
     assert len(payload["searchTrace"]) == 3
     assert len(payload["candidateSources"]) == 3
-    assert completed["qualityGateEvaluations"][0]["status"] == "passed"
+    assert (
+        next(
+            item
+            for item in completed["qualityGateEvaluations"]
+            if item["nodeId"] == "source_finding"
+        )["status"]
+        == "passed"
+    )
     assert completed["budgetReservations"][0]["status"] == "settled"
     assert completed["budgetReservations"][0]["actual"] == {
         "tokens": 90,
         "toolCalls": 2,
         "wallClockSeconds": 10,
     }
-    assert completed["taskLeases"][0]["status"] == "succeeded"
+    assert next(
+        item
+        for item in completed["taskLeases"]
+        if item["idempotencyKey"] == "start-source-finding"
+    )["status"] == "succeeded"
     assert completed["taskBundles"][0]["status"] == "succeeded"
     assert [item["edgeId"] for item in completed["handoffs"]] == [
-        "e_find_extract"
+        "e_problem_find",
+        "e_find_extract",
     ]
-    assert len(replay["artifactManifests"]) == 1
-    assert len(replay["handoffs"]) == 1
+    # Each replay re-derives the same exactly-once artifacts and handoffs.
+    assert [
+        item["artifactId"].split(":", 1)[0]
+        for item in replay["artifactManifests"]
+    ] == ["problem_understanding", "source_candidate_batch"]
+    assert [item["edgeId"] for item in replay["handoffs"]] == [
+        "e_problem_find",
+        "e_find_extract",
+    ]
     assert len(
         [item for item in replay["nodeRuns"] if item["nodeId"] == "source_extraction"]
     ) == 1
@@ -289,6 +404,7 @@ def test_completed_task_exceeding_total_stage_budget_blocks_with_audited_overrun
     _start_source_node(
         service,
         run,
+        tmp_path,
         terminal,
         observed_status,
         monkeypatch,
@@ -335,8 +451,15 @@ def test_completed_task_exceeding_total_stage_budget_blocks_with_audited_overrun
     assert ledger["consumed"]["tokens"] == 10000
     assert ledger["remaining"]["tokens"] == 0
     assert ledger["stopReason"] == "budget_exceeded"
-    assert not blocked["handoffs"]
-    assert not blocked["artifactManifests"]
+    # The entry node's own artifacts exist, but the budget-blocked
+    # source_finding produced nothing downstream.
+    assert [item["edgeId"] for item in blocked["handoffs"]] == [
+        "e_problem_find"
+    ]
+    assert [
+        item["artifactId"].split(":", 1)[0]
+        for item in blocked["artifactManifests"]
+    ] == ["problem_understanding"]
     assert {event["type"] for event in replay["events"]} >= {
         "BudgetSettled",
         "BudgetOverrun",
@@ -364,6 +487,7 @@ def test_failed_task_overrun_uses_budget_exceeded_not_internal_settlement_error(
     _start_source_node(
         service,
         run,
+        tmp_path,
         terminal,
         observed_status,
         monkeypatch,
@@ -418,7 +542,7 @@ def test_source_task_review_disposition_defers_to_passed_artifact_gates(
     )
     terminal = _terminal_source_task()
     observed_status = {"value": "running"}
-    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
     observed_status["value"] = "needs_review"
 
     completed = service.get_run(run["runId"])
@@ -427,7 +551,14 @@ def test_source_task_review_disposition_defers_to_passed_artifact_gates(
         item for item in completed["nodeRuns"] if item["nodeId"] == "source_finding"
     )
     assert source_run["status"] == "succeeded"
-    assert completed["qualityGateEvaluations"][0]["status"] == "passed"
+    assert (
+        next(
+            item
+            for item in completed["qualityGateEvaluations"]
+            if item["nodeId"] == "source_finding"
+        )["status"]
+        == "passed"
+    )
     assert completed["runtimeCurrentNodeIds"] == ["source_extraction"]
 
 
@@ -466,7 +597,7 @@ def test_quality_gate_failure_settles_agent_budget_before_blocking(
     )
     terminal["materializedSources"] = terminal["result"]["materializedSources"]
     observed_status = {"value": "running"}
-    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
     observed_status["value"] = "needs_review"
 
     blocked = service.get_run(run["runId"])
@@ -506,7 +637,7 @@ def test_interrupted_agent_task_blocks_and_settles_budget(
     )
     terminal = _terminal_source_task()
     observed_status = {"value": "running"}
-    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
     observed_status["value"] = "interrupted"
 
     blocked = service.get_run(run["runId"])
@@ -543,7 +674,7 @@ def test_completed_task_recovers_one_internal_reconciliation_failure(
     )
     terminal = _terminal_source_task()
     observed_status = {"value": "running"}
-    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
     running = store.get_run(run["runId"])
     assert running is not None
     node_run = next(
@@ -580,5 +711,11 @@ def test_completed_task_recovers_one_internal_reconciliation_failure(
     assert source_run["sessionId"] == terminal["sessionId"]
     assert len(recovery_receipts) == 1
     assert len(recovery_events) == 1
-    assert len(replay["artifactManifests"]) == 1
-    assert len(replay["handoffs"]) == 1
+    assert [
+        item["artifactId"].split(":", 1)[0]
+        for item in replay["artifactManifests"]
+    ] == ["problem_understanding", "source_candidate_batch"]
+    assert [item["edgeId"] for item in replay["handoffs"]] == [
+        "e_problem_find",
+        "e_find_extract",
+    ]
