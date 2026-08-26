@@ -43,12 +43,9 @@
 # 实现文件变更：查看参数并记录任务级复用研究证据；候选元数据由 registry 自动补齐
 .\.venv\Scripts\python.exe scripts\reuse_research_evidence.py record --help
 
-# FE focused Vitest（cwd=web）
-node node_modules/vitest/vitest.mjs run --changed main --passWithNoTests
-npx tsc -b --pretty false
-
-# Web 增量 typecheck（仓库根执行，selector 的 allowlist 命令）
-npm --prefix web exec -- tsc -b --pretty false
+# FE focused Vitest（仓库根执行，selector 输出格式）
+node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web
+node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false
 
 # 连不上 / 无响应：先解析本机工作台实开 URL，再进下面三件套。不要默认打 :8000。
 # 必须在 Launcher 打开的那个 checkout 根目录跑（通常是本地 main），不要在任务 worktree 里跑。
