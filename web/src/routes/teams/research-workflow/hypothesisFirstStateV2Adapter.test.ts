@@ -13,7 +13,10 @@ import {
   HYPOTHESIS_FIRST_REVIEW_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
 } from "./hypothesisFirstCanvasRegion";
-import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
+import {
+  projectHypothesisFirstSelection,
+  resolveHypothesisFirstNextActionFromV2,
+} from "./hypothesisFirstStateV2Adapter";
 
 const idle: PhaseState = {
   lifecycle: "not_started",
@@ -410,5 +413,98 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     };
     const state = stateV2({ currentPhase: "review", allowedActions: [navigation] });
     expect(resolveHypothesisFirstNextActionFromV2(state).navigationDeepLink).toBe(navigation.navigation.deepLink);
+  });
+});
+
+describe("projectHypothesisFirstSelection", () => {
+  it("uses only a unique, current V2 selection phase as editable", () => {
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "selection",
+      generation: {
+        ...stateV2().generation,
+        lifecycle: "completed",
+        outcome: "succeeded",
+        actionability: "terminal",
+        candidateCount: 2,
+        candidateIds: ["cand-1", "cand-2"],
+      },
+      selection: { ...stateV2().selection, lifecycle: "waiting_human", actionability: "waiting_user" },
+      allowedActions: [command({
+        command: "record_selection",
+        payload: { questionId: "SCI-001", generationAttemptId: "generation-1" },
+      }, "记录选择")],
+    });
+
+    expect(projectHypothesisFirstSelection({ state })).toMatchObject({
+      status: "editable",
+      locked: false,
+      selectedCandidateIds: [],
+      selectionId: null,
+    });
+  });
+
+  it("projects the committed selection and locks mutation after selection or review facts", () => {
+    const committed = stateV2({
+      isInitial: false,
+      currentPhase: "selection",
+      selection: {
+        ...stateV2().selection,
+        lifecycle: "completed",
+        outcome: "succeeded",
+        actionability: "terminal",
+        selectionId: "selection-1",
+        selectedCandidateIds: ["cand-2", "cand-1"],
+      },
+      allowedActions: [command({
+        command: "record_selection",
+        payload: { questionId: "SCI-001", generationAttemptId: "generation-1" },
+      })],
+    });
+    const committedProjection = projectHypothesisFirstSelection({ state: committed });
+    expect(committedProjection).toMatchObject({
+      status: "committed",
+      locked: true,
+      selectedCandidateIds: ["cand-2", "cand-1"],
+      selectionId: "selection-1",
+    });
+
+    const reviewed = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      review: {
+        ...stateV2().review,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        activeRoundIndex: 1,
+        aggregate: { total: 1, completed: 0, pending: 1, failed: 0, blocked: 0 },
+        candidates: [reviewCandidate("cand-1", "waiting_human")],
+      },
+      allowedActions: [],
+    });
+    expect(projectHypothesisFirstSelection({ state: reviewed })).toMatchObject({
+      status: "locked",
+      locked: true,
+      selectedCandidateIds: [],
+    });
+  });
+
+  it("fails closed while V2 is loading, failed, or not unique", () => {
+    expect(projectHypothesisFirstSelection({ loading: true })).toMatchObject({
+      status: "locked",
+      locked: true,
+    });
+    expect(projectHypothesisFirstSelection({ error: new Error("state unavailable") })).toMatchObject({
+      status: "locked",
+      locked: true,
+    });
+    expect(projectHypothesisFirstSelection({ states: [] })).toMatchObject({
+      status: "locked",
+      locked: true,
+    });
+    expect(projectHypothesisFirstSelection({ states: [stateV2(), stateV2()] })).toMatchObject({
+      status: "locked",
+      locked: true,
+    });
   });
 });

@@ -7,6 +7,44 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../api/hypothesisFirst", () => ({
+  executeHypothesisFirstCommand: vi.fn(),
+  fetchHypothesisFirstStateV2: vi.fn().mockResolvedValue({
+    schemaVersion: 2,
+    contract: "hypothesis-first-state/v2",
+    teamId: "team-1",
+    questionId: "SCI-001",
+    currentPhase: "selection",
+    selection: {
+      lifecycle: "waiting_human",
+      outcome: "none",
+      actionability: "waiting_user",
+      selectionId: null,
+      selectedCandidateIds: [],
+    },
+    review: {
+      lifecycle: "not_started",
+      outcome: "none",
+      actionability: "idle",
+      aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 },
+      candidates: [],
+    },
+    allowedActions: [{
+      kind: "command",
+      actionId: "action:record-selection",
+      command: "record_selection",
+      label: "选择候选假说",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "selection",
+      targetNodeId: "hf_selection",
+      payload: { questionId: "SCI-001", generationAttemptId: "generation-1" },
+      inputSchemaRef: "hypothesis-first/record-selection/v1",
+      idempotencyKey: "idem:record-selection",
+      expectedStateVersion: "state-1",
+      requiresConfirmation: false,
+      confirmationText: null,
+    }],
+  }),
   fetchHypothesisSelectionContext: vi.fn(),
   fetchCandidateEvidenceTrail: vi.fn().mockResolvedValue({
     schemaVersion: 1,
@@ -14,6 +52,8 @@ vi.mock("../../../api/hypothesisFirst", () => ({
     questionId: "SCI-001",
     trails: [],
   }),
+  isHypothesisFirstCommandStateConflict: vi.fn().mockReturnValue(false),
+  isHypothesisFirstStateV2EndpointUnavailable: vi.fn().mockReturnValue(false),
   openHypothesisCandidateGeneration: vi.fn(),
   recordHypothesisSelection: vi.fn(),
 }));

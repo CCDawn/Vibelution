@@ -61,6 +61,127 @@ function phaseState(state: HypothesisFirstStateV2) {
   }
 }
 
+export type HypothesisFirstSelectionProjection = {
+  /** `editable` is the only state in which a new selection may be submitted. */
+  status: "editable" | "committed" | "locked";
+  locked: boolean;
+  selectedCandidateIds: string[];
+  selectionId: string | null;
+  lockReason: string | null;
+  canonicalAction?: Extract<CommandAction, { command: "record_selection" }>;
+};
+
+export type HypothesisFirstSelectionProjectionInput = {
+  /** The one server-authored V2 snapshot for this question. */
+  state?: HypothesisFirstStateV2 | null;
+  /** Optional envelope form used by adapters that may observe zero/many states. */
+  states?: readonly HypothesisFirstStateV2[] | null;
+  loading?: boolean;
+  error?: unknown;
+  /** Explicit count lets a caller fail closed when its source is ambiguous. */
+  stateCount?: number | null;
+  expectedTeamId?: string | null;
+  expectedQuestionId?: string | null;
+};
+
+function lockedSelectionProjection(
+  reason: string,
+  selectedCandidateIds: string[] = [],
+  selectionId: string | null = null,
+  status: "committed" | "locked" = "locked",
+): HypothesisFirstSelectionProjection {
+  return {
+    status,
+    locked: true,
+    selectedCandidateIds,
+    selectionId,
+    lockReason: reason,
+  };
+}
+
+function reviewHasFacts(state: HypothesisFirstStateV2): boolean {
+  const aggregate = state.review?.aggregate;
+  return Boolean(
+    state.review?.candidates?.length
+    || (aggregate && [aggregate.total, aggregate.completed, aggregate.pending, aggregate.failed, aggregate.blocked]
+      .some((value) => Number(value) > 0))
+    || state.review?.lifecycle !== "not_started"
+    || state.review?.outcome !== "none"
+    || state.review?.actionability !== "idle",
+  );
+}
+
+/**
+ * Project the only mutation-safe selection state from the canonical V2 read.
+ *
+ * Selection context is a candidate/detail read model, not proof that a new
+ * selection is still writable.  Once the V2 snapshot contains a selection or
+ * any review fact, this helper returns the committed IDs and locks mutation;
+ * loading, failed, ambiguous, stale, or malformed snapshots also fail closed.
+ */
+export function projectHypothesisFirstSelection(
+  input: HypothesisFirstSelectionProjectionInput,
+): HypothesisFirstSelectionProjection {
+  if (input.loading) return lockedSelectionProjection("state_loading");
+  if (input.error !== undefined && input.error !== null) {
+    return lockedSelectionProjection("state_error");
+  }
+
+  const states = input.states;
+  if (states && states.length !== 1) return lockedSelectionProjection("state_not_unique");
+  if (input.stateCount != null && input.stateCount !== 1) {
+    return lockedSelectionProjection("state_not_unique");
+  }
+  const state = states ? states[0] : input.state;
+  if (!state) return lockedSelectionProjection("state_unavailable");
+
+  if (
+    (input.expectedTeamId && state.teamId.trim() !== input.expectedTeamId.trim())
+    || (input.expectedQuestionId
+      && state.questionId.trim().toUpperCase() !== input.expectedQuestionId.trim().toUpperCase())
+  ) {
+    return lockedSelectionProjection("state_scope_mismatch");
+  }
+
+  const selectedCandidateIds = Array.isArray(state.selection?.selectedCandidateIds)
+    ? state.selection.selectedCandidateIds.map((candidateId) => String(candidateId))
+    : [];
+  const selectionId = String(state.selection?.selectionId || "").trim() || null;
+  const hasDuplicateSelectionId = new Set(selectedCandidateIds).size !== selectedCandidateIds.length;
+  if (hasDuplicateSelectionId) {
+    return lockedSelectionProjection("state_not_unique", selectedCandidateIds, selectionId);
+  }
+
+  if (selectionId || selectedCandidateIds.length > 0) {
+    return lockedSelectionProjection("selection_committed", selectedCandidateIds, selectionId, "committed");
+  }
+  if (reviewHasFacts(state)) return lockedSelectionProjection("review_has_facts");
+  if (state.currentPhase !== "selection") return lockedSelectionProjection("selection_not_current");
+
+  const recordSelectionActions = (state.allowedActions ?? []).filter(
+    (action): action is Extract<CommandAction, { command: "record_selection" }> => (
+      action.kind === "command"
+      && action.command === "record_selection"
+      && action.enabled
+      && action.targetPhase === "selection"
+    ),
+  );
+  if (recordSelectionActions.length !== 1) {
+    return lockedSelectionProjection(
+      recordSelectionActions.length === 0 ? "record_selection_unavailable" : "state_not_unique",
+    );
+  }
+
+  return {
+    status: "editable",
+    locked: false,
+    selectedCandidateIds,
+    selectionId,
+    lockReason: null,
+    canonicalAction: recordSelectionActions[0],
+  };
+}
+
 function firstEnabledCommand(
   actions: readonly AllowedAction[],
   phase: HypothesisFirstPhase,

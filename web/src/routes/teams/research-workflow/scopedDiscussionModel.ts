@@ -1,3 +1,5 @@
+import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
+
 /**
  * Pure client boundary for a server-authored active discussion anchor.
  *
@@ -33,6 +35,8 @@ export type ActiveDiscussionAnchor = {
   selectionId: string;
   candidateId: string;
   deepLink: string;
+  returnTo?: string;
+  returnLabel?: string;
   status: string;
   degradedReason: string;
 };
@@ -81,6 +85,10 @@ export type ScopedDiscussionModel = {
   query: ScopedDiscussionQuery | null;
   search: string;
   deepLink: string;
+  /** The canonical workflow route to return to after opening the room. */
+  returnTo?: string;
+  /** The server-authored (or stable fallback) label for the return action. */
+  returnLabel?: string;
   /** The one room round that belongs to the anchor; sibling rounds are omitted. */
   selectedRoundId: string;
 };
@@ -104,6 +112,79 @@ export const SCOPED_DISCUSSION_REASONS = {
 
 function text(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+const SCOPED_DISCUSSION_RETURN_ORIGIN = "http://vibelution.local";
+const SCOPED_DISCUSSION_RETURN_LABEL = "返回科研流程";
+
+/**
+ * The workflow route is intentionally derived from the validated discussion
+ * scope.  The server's first implementation emitted only the four fields it
+ * needed to reopen the canvas; the route adapter fills the remaining fields
+ * required to restore the current node panel deterministically.
+ */
+export function buildScopedDiscussionReturnTo(scope: ScopedDiscussionScope): string {
+  const params = new URLSearchParams();
+  params.set("teamId", scope.teamId);
+  params.set("researchView", "workflow");
+  params.set("workflowId", CHALLENGE_CUP_WORKFLOW_ID);
+  params.set("questionId", scope.questionId);
+  params.set("runId", scope.workflowRunId);
+  params.set("node", scope.workflowNodeId);
+  params.set("panel", "node");
+  return `/teams?${params.toString()}`;
+}
+
+type NormalizedReturnTo = { ok: true; value: string } | { ok: false };
+
+/**
+ * Accept only an internal /teams route whose supplied scope fields agree with
+ * the active discussion.  Missing fields are deliberately filled from the
+ * canonical scope so older server anchors remain navigable; a supplied wrong
+ * field is never silently repaired.
+ */
+function normalizeScopedDiscussionReturnTo(
+  value: unknown,
+  scope: ScopedDiscussionScope,
+): NormalizedReturnTo {
+  const raw = text(value);
+  const canonical = buildScopedDiscussionReturnTo(scope);
+  if (!raw) return { ok: true, value: canonical };
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) {
+    return { ok: false };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw, SCOPED_DISCUSSION_RETURN_ORIGIN);
+  } catch {
+    return { ok: false };
+  }
+  if (
+    parsed.origin !== SCOPED_DISCUSSION_RETURN_ORIGIN
+    || parsed.pathname !== "/teams"
+    || parsed.pathname.includes("\\")
+    || parsed.hash
+  ) {
+    return { ok: false };
+  }
+
+  const expected: Record<string, string> = {
+    teamId: scope.teamId,
+    researchView: "workflow",
+    workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+    questionId: scope.questionId,
+    runId: scope.workflowRunId,
+    node: scope.workflowNodeId,
+    panel: "node",
+  };
+  for (const [key, expectedValue] of Object.entries(expected)) {
+    const values = parsed.searchParams.getAll(key);
+    if (values.length > 1 || (values.length === 1 && values[0] !== expectedValue)) {
+      return { ok: false };
+    }
+  }
+  return { ok: true, value: canonical };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -157,6 +238,8 @@ function anchorBase(reason: string, anchor?: Partial<ActiveDiscussionAnchor> | n
     query: null,
     search: "",
     deepLink: "",
+    returnTo: "",
+    returnLabel: "",
     selectedRoundId: "",
   };
 }
@@ -177,6 +260,8 @@ function parseAnchor(value: unknown):
     selectionId: text(value.selectionId),
     candidateId: text(value.candidateId),
     deepLink: text(value.deepLink),
+    returnTo: text(value.returnTo),
+    returnLabel: text(value.returnLabel),
     status,
     degradedReason: text(value.degradedReason),
   };
@@ -206,10 +291,41 @@ function parseAnchor(value: unknown):
   } catch {
     return { ok: false, model: anchorBase(SCOPED_DISCUSSION_REASONS.invalidAnchor, anchor) };
   }
-  if (parsedLink.pathname !== "/chat" || parsedLink.searchParams.get("room") !== anchor.roomId) {
+  if (
+    !anchor.deepLink.startsWith("/")
+    || anchor.deepLink.startsWith("//")
+    || anchor.deepLink.startsWith("/\\")
+    || parsedLink.origin !== SCOPED_DISCUSSION_RETURN_ORIGIN
+    || parsedLink.pathname !== "/chat"
+    || parsedLink.pathname.includes("\\")
+    || parsedLink.hash
+    || parsedLink.searchParams.getAll("room").length !== 1
+    || parsedLink.searchParams.get("room") !== anchor.roomId
+  ) {
     return { ok: false, model: anchorBase(SCOPED_DISCUSSION_REASONS.invalidAnchor, anchor) };
   }
-  return { ok: true, anchor, scope };
+
+  const anchorReturnTo = normalizeScopedDiscussionReturnTo(anchor.returnTo, scope);
+  const linkReturnTo = normalizeScopedDiscussionReturnTo(
+    parsedLink.searchParams.get("returnTo"),
+    scope,
+  );
+  if (!anchorReturnTo.ok || !linkReturnTo.ok || anchorReturnTo.value !== linkReturnTo.value) {
+    return { ok: false, model: anchorBase(SCOPED_DISCUSSION_REASONS.invalidAnchor, anchor) };
+  }
+  const returnLabel = anchor.returnLabel
+    || text(parsedLink.searchParams.get("returnLabel"))
+    || SCOPED_DISCUSSION_RETURN_LABEL;
+  return {
+    ok: true,
+    anchor: {
+      ...anchor,
+      returnTo: anchorReturnTo.value,
+      returnLabel,
+      deepLink: parsedLink.toString(),
+    },
+    scope,
+  };
 }
 
 function roomScope(room: ScopedDiscussionRoom): { scope: ScopedDiscussionScope | null; scopeHash: string } {
@@ -258,6 +374,12 @@ export function buildScopedDiscussionModel(input: unknown): ScopedDiscussionMode
   const { anchor, scope } = parsed;
   const query: ScopedDiscussionQuery = { kind: "room", room: anchor.roomId };
   const search = `?room=${encodeURIComponent(anchor.roomId)}`;
+  const parsedDeepLink = new URL(anchor.deepLink, SCOPED_DISCUSSION_RETURN_ORIGIN);
+  parsedDeepLink.searchParams.delete("returnTo");
+  parsedDeepLink.searchParams.delete("returnLabel");
+  parsedDeepLink.searchParams.set("returnTo", anchor.returnTo || buildScopedDiscussionReturnTo(scope));
+  parsedDeepLink.searchParams.set("returnLabel", anchor.returnLabel || SCOPED_DISCUSSION_RETURN_LABEL);
+  const deepLink = `${parsedDeepLink.pathname}?${parsedDeepLink.searchParams.toString()}`;
   const model: ScopedDiscussionModel = {
     status: SCOPED_DISCUSSION_READY,
     degradedReason: "",
@@ -270,7 +392,9 @@ export function buildScopedDiscussionModel(input: unknown): ScopedDiscussionMode
     candidateId: anchor.candidateId,
     query,
     search,
-    deepLink: `/chat${search}`,
+    deepLink,
+    returnTo: anchor.returnTo || buildScopedDiscussionReturnTo(scope),
+    returnLabel: anchor.returnLabel || SCOPED_DISCUSSION_RETURN_LABEL,
     selectedRoundId: "",
   };
   if (rawRoom === undefined || rawRoom === null) return model;

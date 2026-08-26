@@ -5,7 +5,9 @@ import {
   executeHypothesisFirstCommand,
   fetchCandidateEvidenceTrail,
   fetchHypothesisSelectionContext,
+  fetchHypothesisFirstStateV2,
   isHypothesisFirstCommandStateConflict,
+  isHypothesisFirstStateV2EndpointUnavailable,
   recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
@@ -21,6 +23,7 @@ import {
   VErrorSummary,
   VStateSurface,
 } from "../../../components/vui";
+import { projectHypothesisFirstSelection } from "../research-workflow/hypothesisFirstStateV2Adapter";
 import { invalidateHypothesisFirstQueries } from "../research-workflow/useHypothesisFirstChain";
 import css from "./HypothesisSelectionList.styles";
 
@@ -50,7 +53,7 @@ export function HypothesisSelectionList({
   compact = false,
   hideSubmit = false,
   canonicalAction,
-  allowLegacyMutation = true,
+  allowLegacyMutation = false,
 }: HypothesisSelectionListProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -61,12 +64,43 @@ export function HypothesisSelectionList({
     staleTime: 15_000,
   });
   const context: HypothesisSelectionContext | undefined = contextQuery.data;
+  const stateV2Query = useQuery({
+    queryKey: queryKeys.hypothesisFirstChainStateV2(teamId, questionId),
+    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(teamId, questionId, { signal }),
+    enabled: Boolean(teamId && questionId),
+    retry: false,
+    staleTime: 15_000,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+  });
+  const selectionProjection = useMemo(
+    () => projectHypothesisFirstSelection({
+      state: stateV2Query.data,
+      loading: stateV2Query.isPending,
+      error: stateV2Query.error,
+      expectedTeamId: teamId,
+      expectedQuestionId: questionId,
+    }),
+    [questionId, stateV2Query.data, stateV2Query.error, stateV2Query.isPending, teamId],
+  );
+  const v2EndpointUnavailable = isHypothesisFirstStateV2EndpointUnavailable(stateV2Query.error);
+  const useLegacyFallback = Boolean(
+    allowLegacyMutation
+    && !stateV2Query.data
+    && v2EndpointUnavailable,
+  );
+  const canonicalSelection = selectionProjection.status === "editable"
+    ? selectionProjection.canonicalAction
+    : undefined;
+  const mutationCanonicalAction = canonicalSelection
+    ?? (useLegacyFallback ? canonicalAction : undefined);
   const serverBaseline = useMemo(
-    () =>
-      context?.latestSelection?.selectedCandidateIds ??
-      context?.defaultSelectedCandidateIds ??
-      [],
-    [context],
+    () => useLegacyFallback
+      ? context?.latestSelection?.selectedCandidateIds
+        ?? context?.defaultSelectedCandidateIds
+        ?? []
+      : selectionProjection.selectedCandidateIds,
+    [context, selectionProjection.selectedCandidateIds, useLegacyFallback],
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(serverBaseline);
   const previousServerBaseline = useRef<string[]>(serverBaseline);
@@ -78,12 +112,12 @@ export function HypothesisSelectionList({
 
   const recordMutation = useMutation<unknown, Error, HypothesisSelectionRecordPayload>({
     mutationFn: (input: HypothesisSelectionRecordPayload) => {
-      if (canonicalAction) {
-        return executeHypothesisFirstCommand(teamId, questionId, canonicalAction, {
+      if (mutationCanonicalAction) {
+        return executeHypothesisFirstCommand(teamId, questionId, mutationCanonicalAction, {
           candidateIds: input.selectedCandidateIds,
         });
       }
-      if (allowLegacyMutation) return recordHypothesisSelection(teamId, input);
+      if (useLegacyFallback) return recordHypothesisSelection(teamId, input);
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
     onSuccess: () => {
@@ -98,10 +132,7 @@ export function HypothesisSelectionList({
 
   const candidates = context?.candidates ?? [];
   const reviewClosed = context?.reviewMeeting?.status === "closed";
-  const effectiveSelectedIds =
-    context?.latestSelection?.selectedCandidateIds ??
-    context?.defaultSelectedCandidateIds ??
-    [];
+  const effectiveSelectedIds = serverBaseline;
   const effectiveSelectedIdSet = new Set(effectiveSelectedIds);
   const visibleCandidates = reviewClosed
     ? candidates.filter((candidate) => effectiveSelectedIdSet.has(candidate.hypothesis_id))
@@ -144,17 +175,19 @@ export function HypothesisSelectionList({
 
   const latestSelection = context.latestSelection;
   const dirty = !sameIdSet(selectedIds, serverBaseline);
-  const mutationAuthorized = Boolean(canonicalAction) || allowLegacyMutation;
+  const mutationAuthorized = Boolean(mutationCanonicalAction) || useLegacyFallback;
   const withinBounds =
     selectedIds.length >= HYPOTHESIS_SELECTION_MIN &&
     selectedIds.length <= HYPOTHESIS_SELECTION_MAX;
   const selectionMinimumHint = selectedIds.length <= HYPOTHESIS_SELECTION_MIN
+    && mutationAuthorized
     ? (isZh
       ? `已达到最低选择数（${HYPOTHESIS_SELECTION_MIN} 条）；如需更换，请先勾选另一条，再取消当前选择。`
       : `The minimum is ${HYPOTHESIS_SELECTION_MIN} selections. To replace one, select another first, then remove the current one.`)
     : null;
 
   const toggleCandidate = (candidateId: string, next: boolean) => {
+    if (!mutationAuthorized) return;
     if (!next && selectedIds.length <= HYPOTHESIS_SELECTION_MIN) {
       return;
     }
@@ -205,6 +238,7 @@ export function HypothesisSelectionList({
               variant="ghost"
               isDisabled={
                 recordMutation.isPending
+                || !mutationAuthorized
                 || selectedIds.length === candidates.length
                 || candidates.length > HYPOTHESIS_SELECTION_MAX
               }
@@ -245,6 +279,7 @@ export function HypothesisSelectionList({
           const hasTrail = trailEntries.length > 0;
           const checkDisabled =
             recordMutation.isPending ||
+            !mutationAuthorized ||
             (checked && selectedIds.length <= HYPOTHESIS_SELECTION_MIN) ||
             (!checked && selectedIds.length >= HYPOTHESIS_SELECTION_MAX);
           return (

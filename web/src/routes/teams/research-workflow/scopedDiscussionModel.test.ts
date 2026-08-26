@@ -42,8 +42,64 @@ describe("scoped discussion model", () => {
     expect(model.status).toBe("ready");
     expect(model.query).toEqual({ kind: "room", room: "room-h1" });
     expect(model.search).toBe("?room=room-h1");
-    expect(model.deepLink).toBe("/chat?room=room-h1");
+    expect(model.returnTo).toBe(
+      "/teams?teamId=research-team&researchView=workflow&workflowId=challenge-cup-research&questionId=SCI-096&runId=run-1&node=hypothesis-review&panel=node",
+    );
+    expect(model.returnLabel).toBe("返回科研流程");
+    expect(model.deepLink).toBe(
+      "/chat?room=room-h1&returnTo=%2Fteams%3FteamId%3Dresearch-team%26researchView%3Dworkflow%26workflowId%3Dchallenge-cup-research%26questionId%3DSCI-096%26runId%3Drun-1%26node%3Dhypothesis-review%26panel%3Dnode&returnLabel=%E8%BF%94%E5%9B%9E%E7%A7%91%E7%A0%94%E6%B5%81%E7%A8%8B",
+    );
     expect(model.selectedRoundId).toBe("");
+  });
+
+  it("rebuilds the canonical seven-field workflow return route from a legacy server route", () => {
+    const model = buildScopedDiscussionModel({
+      anchor: anchor({
+        returnTo: "/teams?teamId=research-team&researchView=workflow&runId=run-1&node=hypothesis-review",
+        deepLink: "/chat?room=room-h1&returnTo=%2Fteams%3FteamId%3Dresearch-team%26researchView%3Dworkflow%26runId%3Drun-1%26node%3Dhypothesis-review",
+      }),
+    });
+
+    expect(model.status).toBe("ready");
+    expect(new URLSearchParams(model.returnTo.split("?", 2)[1])).toEqual(
+      new URLSearchParams({
+        teamId: "research-team",
+        researchView: "workflow",
+        workflowId: "challenge-cup-research",
+        questionId: "SCI-096",
+        runId: "run-1",
+        node: "hypothesis-review",
+        panel: "node",
+      }),
+    );
+    expect(new URL(model.deepLink, "http://vibelution.local").searchParams.get("returnTo"))
+      .toBe(model.returnTo);
+  });
+
+  it("rejects an external deep link or return route", () => {
+    const externalDeepLink = buildScopedDiscussionModel(
+      anchor({ deepLink: "https://evil.example/chat?room=room-h1" }),
+    );
+    expect(externalDeepLink.status).toBe("degraded");
+    expect(externalDeepLink.degradedReason).toBe(SCOPED_DISCUSSION_REASONS.invalidAnchor);
+
+    const externalReturn = buildScopedDiscussionModel(
+      anchor({ returnTo: "https://evil.example/steal" }),
+    );
+    expect(externalReturn.status).toBe("degraded");
+    expect(externalReturn.degradedReason).toBe(SCOPED_DISCUSSION_REASONS.invalidAnchor);
+  });
+
+  it("rejects a return route bound to another workflow scope", () => {
+    const model = buildScopedDiscussionModel({
+      anchor: anchor({
+        returnTo: "/teams?teamId=research-team&researchView=workflow&workflowId=challenge-cup-research&questionId=SCI-097&runId=run-1&node=hypothesis-review&panel=node",
+      }),
+    });
+
+    expect(model.status).toBe("degraded");
+    expect(model.degradedReason).toBe(SCOPED_DISCUSSION_REASONS.invalidAnchor);
+    expect(model.deepLink).toBe("");
   });
 
   it("does not create a navigation target for a missing or degraded anchor", () => {
