@@ -29,6 +29,15 @@ DISCUSSION_SCOPE_KINDS = frozenset(
     }
 )
 
+# Candidate selection can open a review room before a formal research run has
+# been created.  Keep that identity separate from the formal scope rather
+# than manufacturing a workflowRunId for the pre-run state.
+PREFORMAL_DISCUSSION_SCOPE_VERSION = 1
+PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND = "preformal_candidate_review"
+PREFORMAL_DISCUSSION_SCOPE_KINDS = frozenset(
+    {PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND}
+)
+
 _BASE_FIELDS = frozenset(
     {
         "version",
@@ -323,6 +332,160 @@ class WorkflowDiscussionScopeV1:
     to_session_scope = session_scope_payload
 
 
+@dataclass(frozen=True, slots=True)
+class PreformalCandidateReviewScopeV1:
+    """Exact identity for a candidate-review room before a formal run exists.
+
+    The preformal envelope is intentionally not a ``WorkflowDiscussionScopeV1``:
+    there is no honest ``researchProjectId``/``workflowRunId``/node binding at
+    this stage.  It still carries the concrete meeting and room references so
+    a projector can cross-check all three persisted records instead of
+    guessing from a team room or a question alone.
+    """
+
+    version: int
+    kind: str
+    teamId: str
+    questionId: str
+    selectionId: str
+    candidateId: str
+    meetingRoundId: str
+    roomId: str
+
+    def __post_init__(self) -> None:
+        try:
+            version = int(self.version)
+        except (TypeError, ValueError) as exc:
+            raise ContractValidationError(
+                "Preformal discussion scope version must be an integer"
+            ) from exc
+        if version != PREFORMAL_DISCUSSION_SCOPE_VERSION:
+            raise ContractValidationError(
+                "Preformal discussion scope version must be "
+                f"{PREFORMAL_DISCUSSION_SCOPE_VERSION}"
+            )
+        normalized_kind = str(self.kind or "").strip()
+        if normalized_kind != PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND:
+            raise ContractValidationError(
+                "Preformal discussion scope kind must be "
+                f"{PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND}"
+            )
+        object.__setattr__(self, "version", PREFORMAL_DISCUSSION_SCOPE_VERSION)
+        object.__setattr__(self, "kind", normalized_kind)
+        for field, limit in (
+            ("teamId", 160),
+            ("questionId", 160),
+            ("selectionId", 160),
+            ("candidateId", 160),
+            ("meetingRoundId", 160),
+            ("roomId", 200),
+        ):
+            object.__setattr__(
+                self,
+                field,
+                _required_text(getattr(self, field), field, limit=limit),
+            )
+
+    @classmethod
+    def review(cls, **fields: Any) -> PreformalCandidateReviewScopeV1:
+        """Create an exact preformal candidate-review binding."""
+
+        allowed = {
+            "teamId",
+            "questionId",
+            "selectionId",
+            "candidateId",
+            "meetingRoundId",
+            "roomId",
+        }
+        fields = _factory_fields(fields, allowed=allowed)
+        return cls(
+            version=PREFORMAL_DISCUSSION_SCOPE_VERSION,
+            kind=PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
+            teamId=fields.get("teamId"),
+            questionId=fields.get("questionId"),
+            selectionId=fields.get("selectionId"),
+            candidateId=fields.get("candidateId"),
+            meetingRoundId=fields.get("meetingRoundId"),
+            roomId=fields.get("roomId"),
+        )
+
+    candidate_review = review
+
+    @classmethod
+    def from_mapping(
+        cls, payload: Mapping[str, Any]
+    ) -> PreformalCandidateReviewScopeV1:
+        if not isinstance(payload, Mapping):
+            raise ContractValidationError("Preformal discussion scope must be an object")
+        allowed = {
+            "version",
+            "kind",
+            "teamId",
+            "questionId",
+            "selectionId",
+            "candidateId",
+            "meetingRoundId",
+            "roomId",
+        }
+        unknown = sorted(str(key) for key in set(payload) - allowed)
+        if unknown:
+            raise ContractValidationError(
+                "Preformal discussion scope contains unsupported fields: "
+                + ", ".join(unknown)
+            )
+        return cls(
+            version=payload.get("version"),
+            kind=str(payload.get("kind") or "").strip(),
+            teamId=payload.get("teamId"),
+            questionId=payload.get("questionId"),
+            selectionId=payload.get("selectionId"),
+            candidateId=payload.get("candidateId"),
+            meetingRoundId=payload.get("meetingRoundId"),
+            roomId=payload.get("roomId"),
+        )
+
+    from_payload = from_mapping
+    from_dict = from_mapping
+
+    @property
+    def is_candidate_review(self) -> bool:
+        return True
+
+    @property
+    def key(self) -> str:
+        return (
+            f"v1|{self.kind}|{self.teamId}|{self.questionId}|{self.selectionId}|"
+            f"{self.candidateId}|{self.meetingRoundId}|{self.roomId}"
+        )
+
+    @property
+    def scope_hash(self) -> str:
+        return sha256_hex(self.to_dict())
+
+    @property
+    def scopeHash(self) -> str:
+        return self.scope_hash
+
+    def to_dict(self) -> dict[str, str | int]:
+        return {
+            "version": PREFORMAL_DISCUSSION_SCOPE_VERSION,
+            "kind": PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
+            "teamId": self.teamId,
+            "questionId": self.questionId,
+            "selectionId": self.selectionId,
+            "candidateId": self.candidateId,
+            "meetingRoundId": self.meetingRoundId,
+            "roomId": self.roomId,
+        }
+
+    def canonical_json(self) -> str:
+        return canonical_json(self.to_dict())
+
+
+DiscussionScopeEnvelope = WorkflowDiscussionScopeV1 | PreformalCandidateReviewScopeV1
+
+
 def parse_discussion_scope(
     payload: WorkflowDiscussionScopeV1 | Mapping[str, Any],
 ) -> WorkflowDiscussionScopeV1:
@@ -331,22 +494,37 @@ def parse_discussion_scope(
     return WorkflowDiscussionScopeV1.from_mapping(payload)
 
 
+def parse_discussion_scope_envelope(
+    payload: DiscussionScopeEnvelope | Mapping[str, Any],
+) -> DiscussionScopeEnvelope:
+    """Parse formal or preformal scope without weakening formal parsing."""
+
+    if isinstance(payload, (WorkflowDiscussionScopeV1, PreformalCandidateReviewScopeV1)):
+        return payload
+    if not isinstance(payload, Mapping):
+        raise ContractValidationError("Discussion scope must be an object")
+    kind = str(payload.get("kind") or payload.get("scopeKind") or "").strip()
+    if kind == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND:
+        return PreformalCandidateReviewScopeV1.from_mapping(payload)
+    return WorkflowDiscussionScopeV1.from_mapping(payload)
+
+
 def canonical_discussion_scope(
-    payload: WorkflowDiscussionScopeV1 | Mapping[str, Any],
+    payload: DiscussionScopeEnvelope | Mapping[str, Any],
 ) -> str:
-    return parse_discussion_scope(payload).canonical_json()
+    return canonical_json(parse_discussion_scope_envelope(payload).to_dict())
 
 
 def discussion_scope_key(
-    payload: WorkflowDiscussionScopeV1 | Mapping[str, Any],
+    payload: DiscussionScopeEnvelope | Mapping[str, Any],
 ) -> str:
-    return parse_discussion_scope(payload).key
+    return parse_discussion_scope_envelope(payload).key
 
 
 def discussion_scope_hash(
-    payload: WorkflowDiscussionScopeV1 | Mapping[str, Any],
+    payload: DiscussionScopeEnvelope | Mapping[str, Any],
 ) -> str:
-    return parse_discussion_scope(payload).scope_hash
+    return parse_discussion_scope_envelope(payload).scope_hash
 
 
 # Explicit ``*_for``/``*_json`` spellings mirror the older workflow contract
@@ -370,9 +548,14 @@ __all__ = [
     "CANDIDATE_REVIEW_SCOPE_KIND",
     "DISCUSSION_SCOPE_KINDS",
     "DISCUSSION_SCOPE_VERSION",
+    "PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND",
+    "PREFORMAL_DISCUSSION_SCOPE_KINDS",
+    "PREFORMAL_DISCUSSION_SCOPE_VERSION",
     "QUESTION_GENERATION_SCOPE_KIND",
-    "WorkflowDiscussionScopeV1",
+    "DiscussionScopeEnvelope",
     "DiscussionScopeV1",
+    "PreformalCandidateReviewScopeV1",
+    "WorkflowDiscussionScopeV1",
     "canonical_discussion_scope",
     "canonical_discussion_scope_json",
     "discussion_scope_hash",
@@ -380,5 +563,6 @@ __all__ = [
     "discussion_scope_key",
     "discussion_scope_key_for",
     "parse_discussion_scope",
+    "parse_discussion_scope_envelope",
     "session_scope_key",
 ]

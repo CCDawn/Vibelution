@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from core.research.competition.question_result_package import canonical_model_policy
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.models import ActorKind
 from core.web.services.team_workflow.research_runtime import (
@@ -48,6 +49,17 @@ def _action(*, attempt: int = 1, node_run_id: str = "node-1") -> PendingAction:
         input_artifact_refs=(),
         binding_snapshot_id="binding-1",
         budget_policy_hash="budget-1",
+    )
+
+
+def _formal_required_model_policy() -> dict[str, Any]:
+    return canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
     )
 
 
@@ -468,12 +480,32 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
         assert latest is not None
         action = _action(node_run_id=latest.node_run_id)
         ports = RealDomainPorts(harness.store)
+        required_model_policy = _formal_required_model_policy()
         snapshot = {
             "teamId": "team-1",
             "projectId": "project-1",
             "questionId": "SCI-096",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": False},
+            "modelRoutingPolicy": {
+                "requiredModelPolicy": required_model_policy,
+                "modelPolicySha256": required_model_policy["policySha256"],
+                "routes": {
+                    "reasoning": {
+                        "byProductRole": {
+                            "challenge_cup_experiment_revision": {
+                                "agentId": "agent-1",
+                                "productRoleId": "challenge_cup_experiment_revision",
+                                "modelRef": "dashscope_main/qwen3.6-plus",
+                                "providerId": "dashscope_main",
+                                "modelId": "qwen3.6-plus",
+                            }
+                        }
+                    }
+                },
+            },
         }
         fan_out = {
             "selection": {
@@ -1137,6 +1169,7 @@ def test_formal_create_continues_after_one_candidate_start_failure(
             ),
         )
         ports = RealDomainPorts(harness.store)
+        required_model_policy = _formal_required_model_policy()
         handle = ports._create_hypothesis_fan_out(
             action=action,
             binding=BindingResolution(
@@ -1154,6 +1187,31 @@ def test_formal_create_continues_after_one_candidate_start_failure(
                     {"candidateId": "H2"},
                     {"candidateId": "H3"},
                 ],
+            },
+            challenge_task_contract={
+                "questionId": "SCI-096",
+                "workflowId": "challenge-cup-research",
+                "workflowVersionId": "v2.1",
+                "workflowRunId": action.run_id,
+                "workflowNodeId": action.node_id,
+                "nodeRunId": action.node_run_id,
+                "nodeAttempt": action.attempt,
+                "agentId": "agent-1",
+                "modelPolicySha256": required_model_policy["policySha256"],
+                "requiredModelPolicy": required_model_policy,
+            },
+            model_invocation_receipt_binding={
+                "questionId": "SCI-096",
+                "questionRunId": action.run_id,
+                "workflowRunId": action.run_id,
+                "workflowId": "challenge-cup-research",
+                "workflowVersionId": "v2.1",
+                "formalNodeId": action.node_id,
+                "formalNodeRunId": action.node_run_id,
+                "formalNodeAttempt": action.attempt,
+                "questionStage": "generation",
+                "outcomeKinds": ["candidate"],
+                "modelPolicySha256": required_model_policy["policySha256"],
             },
         )
         assert started_candidates == ["H1", "H2", "H3"]
@@ -1255,10 +1313,12 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
             return {
                 "statement": f"statement-{candidate_id}",
                 "mechanism": f"mechanism-{candidate_id}",
+                "novelty_basis": f"novelty basis-{candidate_id}",
                 "predictions": [f"prediction-{candidate_id}"],
                 "falsificationCriteria": [f"falsify-{candidate_id}"],
                 "evidenceRefs": ["counter-1"],
                 "counterEvidenceRefs": ["counter-1"],
+                "boundary_conditions": [f"boundary-{candidate_id}"],
                 "scores": {
                     "novelty": 0.8,
                     "competitionFit": 0.7,
@@ -1316,7 +1376,9 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
         )
         starts: list[dict] = []
 
-        def start_retry(team_id: str, project_id: str, payload: dict) -> dict:
+        def start_retry(
+            team_id: str, project_id: str, payload: dict, **_kwargs: Any
+        ) -> dict:
             _ = team_id, project_id
             starts.append(dict(payload))
             return {
@@ -1388,11 +1450,37 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
                 ],
             },
         }
+        required_model_policy = _formal_required_model_policy()
         handle = ports._create_hypothesis_fan_out(
             action=second_action,
             binding=binding,
             snapshot=snapshot,
             fan_out=snapshot["hypothesisSelection"],
+            challenge_task_contract={
+                "questionId": "SCI-096",
+                "workflowId": "challenge-cup-research",
+                "workflowVersionId": "v2.1",
+                "workflowRunId": "run-1",
+                "workflowNodeId": "hypothesis_design",
+                "nodeRunId": "node-2",
+                "nodeAttempt": 2,
+                "agentId": "agent-1",
+                "modelPolicySha256": required_model_policy["policySha256"],
+                "requiredModelPolicy": required_model_policy,
+            },
+            model_invocation_receipt_binding={
+                "questionId": "SCI-096",
+                "questionRunId": "run-1",
+                "workflowRunId": "run-1",
+                "workflowId": "challenge-cup-research",
+                "workflowVersionId": "v2.1",
+                "formalNodeId": "hypothesis_design",
+                "formalNodeRunId": "node-2",
+                "formalNodeAttempt": 2,
+                "questionStage": "generation",
+                "outcomeKinds": ["candidate"],
+                "modelPolicySha256": required_model_policy["policySha256"],
+            },
         )
         retry_child = next(
             item for item in handle.scoped_handles if item.candidate_id == "H2"
