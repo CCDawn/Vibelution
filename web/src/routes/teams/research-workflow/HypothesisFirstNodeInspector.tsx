@@ -1073,10 +1073,7 @@ function FormalRuntimeActionBody(props: {
   const isZh = props.lang === "zh";
   const runtime = props.stateV2?.formalRuntime;
   const status = runtime?.runStatus || (props.nextAction.stage === "blocked" ? "blocked" : null);
-  const problems = [
-    ...(runtime?.problems ?? []),
-    ...(props.stateV2?.problems ?? []),
-  ].filter((problem, index, all) => all.findIndex((candidate) => (
+  const problems = (runtime?.problems ?? []).filter((problem, index, all) => all.findIndex((candidate) => (
     candidate.code === problem.code
     && candidate.sourceId === problem.sourceId
     && candidate.message === problem.message

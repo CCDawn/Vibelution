@@ -1331,6 +1331,72 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", archive);
   });
 
+  it("does not relabel hypothesis-stage problems as formal runtime problems", () => {
+    const phase = {
+      lifecycle: "running" as const,
+      outcome: "none" as const,
+      actionability: "blocked" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [{
+        code: "adapter_execution_exception",
+        category: "execution" as const,
+        severity: "error" as const,
+        message: "formal task authority is incomplete",
+        recoverable: true,
+        sourceKind: "formal_run" as const,
+        sourceId: "formal-run-1",
+        detectedAt: "2026-08-27T00:00:00Z",
+      }],
+    };
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "formal_runtime",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: { ...phase, problems: [], accepted: true, latestHypothesisRoundId: "round-1", roundIndex: 1, roundBudget: 3 },
+        formalRuntime: {
+          ...phase,
+          runId: "formal-run-1",
+          runVersion: 2,
+          runStatus: "blocked",
+          completionKind: null,
+          lineageDisposition: "current",
+          isCurrentRevision: true,
+          parentRunId: null,
+          childRunIds: [],
+          currentNodeIds: ["problem_understanding"],
+        },
+        allowedActions: [],
+        problems: [{
+          code: "review_meeting_missing",
+          category: "dependency",
+          severity: "warning",
+          message: "已记录选择，但候选评审会议尚未建立",
+          recoverable: true,
+          sourceKind: "hypothesis_first",
+          sourceId: "round-1",
+          detectedAt: "2026-08-26T00:00:00Z",
+        }],
+      } as HypothesisFirstStateV2,
+    }));
+
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="problem_understanding"
+        runId="formal-run-1"
+        formalRuntime
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("formal task authority is incomplete");
+    expect(container.textContent).not.toContain("已记录选择，但候选评审会议尚未建立");
+  });
+
   it("renders every formal delivery problem instead of only the first message", () => {
     mockedChain.mockReturnValue(chainData({
       stateV2: programState("program_delivery", {
