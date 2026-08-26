@@ -493,8 +493,11 @@ export function ResearchProcessWorkspace({
   const replaceParamsForInspector = useCallback((patch: Record<string, string | null | undefined>) => {
     const requestedNode = typeof patch.node === "string" ? patch.node.trim() : "";
     const requestedSemanticNode = hypothesisFirstSemanticNodeId(requestedNode);
+    const requestedRunId = typeof patch.runId === "string" ? patch.runId.trim() : "";
+    const formalRunSelected = Boolean(requestedRunId || location.runId);
     if (
-      patch.panel === "node"
+      !formalRunSelected
+      && patch.panel === "node"
       && requestedSemanticNode
       && requestedSemanticNode === semanticCurrentTaskNodeId
       && scopedDiscussionModel.status === "ready"

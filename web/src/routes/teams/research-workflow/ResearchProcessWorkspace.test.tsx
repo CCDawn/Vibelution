@@ -170,6 +170,7 @@ vi.mock("./ResearchWorkflowCanvasPane", () => ({
 vi.mock("./ResearchProcessInspectorPane", () => ({
   ResearchProcessInspectorPane: (props: {
     scope: { panel: string };
+    actions?: { replaceParams?: (patch: Record<string, string>) => void };
     archiveSummary?: unknown;
     allowLaunchPanel?: boolean;
     onRecoverCollection?: (requestId: string) => Promise<void>;
@@ -187,7 +188,18 @@ vi.mock("./ResearchProcessInspectorPane", () => ({
       data-collection-recovery-error={props.collectionRecoveryError || undefined}
       data-discussion-status={props.discussionModel?.status || undefined}
       data-discussion-room={props.discussionModel?.roomId || undefined}
-    />
+    >
+      <button
+        type="button"
+        data-testid="formal-run-created"
+        onClick={() => props.actions?.replaceParams?.({
+          runId: "run-new",
+          node: "hf_generation",
+          questionId: "SCI-096",
+          panel: "node",
+        })}
+      />
+    </div>
   ),
 }));
 
@@ -550,6 +562,62 @@ describe("ResearchProcessWorkspace", () => {
         "/chat?room=scoped-room-1&returnTo=%2Fteams%3FteamId%3Dresearch-team%26researchView%3Dworkflow%26workflowId%3Dchallenge-cup-research%26questionId%3DSCI-096%26runId%3Drun-1%26node%3Dhypothesis-generation%26panel%3Dnode&returnLabel=%E8%BF%94%E5%9B%9E%E7%A7%91%E7%A0%94%E6%B5%81%E7%A8%8B",
       );
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit formal-run handoff ahead of a stale discussion anchor", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-096";
+    harness.location.selectedNodeId = "hf_generation";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.chainState = {
+      questionId: "SCI-096",
+      candidateCount: 0,
+      hypothesisConverged: false,
+    } as never;
+    harness.runState.snapshot = {
+      launchContext: {
+        activeDiscussionAnchor: {
+          scope: {
+            version: 1,
+            kind: "question_generation",
+            teamId: "research-team",
+            researchProjectId: "project-x",
+            workflowRunId: "run-old",
+            workflowNodeId: "hypothesis-generation",
+            questionId: "SCI-096",
+          },
+          scopeHash: "scope-hash",
+          roomId: "stale-review-room",
+          meetingRoundId: "meeting-old",
+          questionId: "SCI-096",
+          selectionId: "",
+          candidateId: "",
+          deepLink: "/chat?room=stale-review-room",
+          status: "ready",
+          degradedReason: "",
+        },
+      },
+    } as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    await act(async () => {
+      (rendered.container.querySelector('[data-testid="formal-run-created"]') as HTMLButtonElement)
+        .click();
+    });
+
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      runId: "run-new",
+      node: "hf_generation",
+      questionId: "SCI-096",
+      panel: "node",
+    });
+    expect(rendered.container.querySelector('[data-testid="route-probe"]')?.textContent)
+      .not.toContain("/chat");
   });
 
   it("keeps an unresolved hypothesis gate current when convergence is already projected", async () => {
