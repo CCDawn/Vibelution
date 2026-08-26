@@ -284,6 +284,17 @@ def _materialize_claim_evidence_cards(
                 "candidateId": candidate_id,
                 "sourceId": source_ref,
                 "sourceRevision": "sha256:" + ("d" * 64),
+                "title": str(extraction.get("title") or "").strip(),
+                "source_type": str(extraction.get("source_type") or "").strip(),
+                "source_url": str(extraction.get("source_url") or source_ref).strip(),
+                "retrieved_at": str(extraction.get("retrieved_at") or "").strip(),
+                "fact": str(
+                    finding.get("fact") or extraction.get("fact") or quote
+                ).strip(),
+                "relation": str(extraction.get("relation") or "supports").strip(),
+                "verification_status": str(
+                    extraction.get("verification_status") or "full_text_checked"
+                ).strip(),
                 "locator": {"kind": "pdf_page", "page": page},
                 "quote": quote,
                 "evidenceKind": "primary_result",
@@ -526,6 +537,9 @@ def _result_for_stage(stage_id: str, *, team_id: str, run_id: str) -> dict[str, 
             candidate_id = str(candidate.get("candidateId") or "").strip()
             if not candidate_id:
                 continue
+            claim_text = (
+                f"Claim {index}: spike patterns carry measurable information."
+            )
             source_ref = str(
                 candidate.get("sourceUrl")
                 or candidate.get("sourceRef")
@@ -534,12 +548,27 @@ def _result_for_stage(stage_id: str, *, team_id: str, run_id: str) -> dict[str, 
             extractions.append(
                 {
                     "candidateId": candidate_id,
+                    "title": str(
+                        candidate.get("title") or f"T5.1 extraction {index}"
+                    ),
+                    "source_type": str(
+                        candidate.get("sourceType") or "peer_reviewed_paper"
+                    ),
+                    "source_url": source_ref,
+                    "retrieved_at": "2026-08-26T00:00:00Z",
+                    "fact": claim_text,
+                    "relation": "supports",
+                    "verification_status": "full_text_checked",
                     "decision": "keep",
                     "status": "extracted",
                     "summary": f"Extracted claim {index} for T5.1 gate.",
                     "keyFindings": [
                         {
-                            "finding": f"Claim {index}: spike patterns carry measurable information.",
+                            "finding": claim_text,
+                            "fact": claim_text,
+                            "quote": (
+                                f"Bounded source excerpt {index} for the T5.1 gate."
+                            ),
                             "citationLocator": {"page": str(index)},
                             "sourceRef": source_ref,
                             "evidenceRef": f"page:{index}",
@@ -547,13 +576,6 @@ def _result_for_stage(stage_id: str, *, team_id: str, run_id: str) -> dict[str, 
                     ],
                     "evidenceRefs": [
                         {"type": "page", "page": str(index), "sourceRef": source_ref}
-                    ],
-                    "claims": [
-                        {
-                            "claim": f"Claim {index}: spike patterns carry measurable information.",
-                            "sourceRef": source_ref,
-                            "page": str(index),
-                        }
                     ],
                 }
             )
