@@ -84,16 +84,8 @@ def _patch_approved_question(
     detail = _approved_detail(question_id, candidate_ids)
     monkeypatch.setattr(
         question_launch,
-        "challenge_question_run_summary",
-        lambda _team_id: {
-            "completedQuestionIds": [question_id],
-            "completedQuestionResults": [dict(detail["record"])],
-        },
-    )
-    monkeypatch.setattr(
-        question_launch,
-        "get_challenge_question_run_detail",
-        lambda _team_id, requested, *, run_id="": detail,
+        "_approved_details",
+        lambda _team_id: {question_id.upper(): detail},
     )
 
 
