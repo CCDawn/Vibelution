@@ -1198,6 +1198,18 @@ def _project_program_output_record(
             updated_at=_timestamp(record),
             problems=[*problems, validation_problem],
         )
+        actions.append(
+            _command_action(
+                "archive_run",
+                action_id=f"archive-formal-run:{run_id}",
+                label="归档并重建正式运行",
+                target_phase="program_delivery",
+                target_node_id="formal_runtime",
+                payload={"runId": run_id},
+                requires_confirmation=True,
+                confirmation_text="当前交付记录校验失败。归档正式运行后可重新创建并补齐上游证据。",
+            )
+        )
         return (
             {
                 **program_phase,
@@ -1217,7 +1229,7 @@ def _project_program_output_record(
                 "requiredGateCount": 4,
             },
             [*problems, validation_problem],
-            [],
+            actions,
             "program_delivery",
         )
     if approved_count == 4:
@@ -1301,6 +1313,7 @@ def _project_formal_and_program(
         dict(item)
         for item in formal_runs
         if str(item.get("questionId") or "").strip().upper() == question_id
+        and str(item.get("status") or "").strip().lower() != "archived"
     ]
     empty_formal = {
         **_phase(),
@@ -1467,8 +1480,38 @@ def _project_formal_and_program(
     }
     actions: list[dict[str, Any]] = []
     if lineage_conflict:
+        for leaf in leaves:
+            leaf_id = str(leaf.get("runId") or "").strip()
+            if not leaf_id:
+                continue
+            actions.append(
+                _command_action(
+                    "archive_run",
+                    action_id=f"archive-formal-run:{leaf_id}",
+                    label=f"归档分支 {leaf_id}",
+                    target_phase="formal_runtime",
+                    target_node_id="formal_runtime",
+                    payload={"runId": leaf_id},
+                    requires_confirmation=True,
+                    confirmation_text="归档不再保留为当前分支；请仅归档不应继续的正式运行。",
+                )
+            )
         return formal, empty_program, problems, actions, "formal_runtime"
-    if run_status in {"blocked", "reconciliation_required", "failed"}:
+    if run_status in {"failed", "cancelled"}:
+        actions.append(
+            _command_action(
+                "archive_run",
+                action_id=f"archive-formal-run:{current_id}",
+                label="归档失败运行并重建",
+                target_phase="formal_runtime",
+                target_node_id="formal_runtime",
+                payload={"runId": current_id},
+                requires_confirmation=True,
+                confirmation_text="归档当前终态运行后，可重新创建正式研究运行。",
+            )
+        )
+        return formal, empty_program, problems, actions, "formal_runtime"
+    if run_status in {"blocked", "reconciliation_required"}:
         actions.append(
             _command_action(
                 "reconcile_formal_run",
@@ -1579,18 +1622,13 @@ def _project_formal_and_program(
         "deliveryArtifactRef": artifact_ref,
         "handoffStatus": "needs_context" if delivery_status == "succeeded" else "not_started",
     }
-    command = "retry_program_handoff" if delivery_status == "succeeded" else "reconcile_formal_run"
     actions.append(
         _command_action(
-            command,
-            label="补齐交付上下文" if delivery_status == "succeeded" else "修复正式结果包",
+            "retry_program_handoff",
+            label="补齐交付上下文" if delivery_status == "succeeded" else "恢复结果交付",
             target_phase="program_delivery",
             target_node_id="program_delivery",
-            payload=(
-                {"runId": current_id, "deliveryArtifactRef": artifact_ref}
-                if command == "retry_program_handoff"
-                else {"runId": current_id}
-            ),
+            payload={"runId": current_id, "deliveryArtifactRef": artifact_ref},
         )
     )
     return formal, program, problems, actions, "program_delivery"
