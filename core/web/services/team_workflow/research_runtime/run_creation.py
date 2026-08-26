@@ -100,6 +100,191 @@ def _auto_open_candidate_generation(
         return {"status": "failed", "error": str(exc), "errorType": type(exc).__name__}
 
 
+def _formal_hypothesis_handoff(
+    team_id: str,
+    question_id: str,
+    *,
+    hypothesis_round_id: str,
+) -> dict[str, dict[str, Any]]:
+    """Freeze a complete converged-review handoff before creating a run.
+
+    Closed hypothesis rounds and meeting artifacts are append-only authorities.
+    Re-reading and validating them before the Ledger mutation makes the run
+    creation fail closed: an incomplete handoff never leaves a ``created`` run
+    behind, while a replay freezes the same immutable selection and evidence.
+    """
+
+    from core.research.workflow.contracts import HypothesisRound
+    from core.web.services.team_workflow import hypothesis_rounds, meeting_rounds
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_round_id = str(hypothesis_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff requires a round and confirmed candidate",
+            code="formal_hypothesis_handoff_incomplete",
+        )
+    try:
+        round_record = hypothesis_rounds.get_hypothesis_round(
+            team_id,
+            normalized_round_id,
+        )["round"]
+        parsed_round = HypothesisRound.from_dict(round_record)
+        parsed_round.validate_complete()
+    except Exception as exc:
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff has no complete closed review round",
+            code="formal_hypothesis_handoff_incomplete",
+        ) from exc
+    if parsed_round.question.upper() != normalized_question_id:
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff round belongs to another question",
+            code="formal_hypothesis_handoff_mismatch",
+        )
+    recommended_candidate_id = parsed_round.metaReview.recommendationCandidateId
+    if parsed_round.metaReview.accepted:
+        normalized_acceptance_kind = "meta_review"
+        accepted = parsed_round.metaReview.accepted
+    else:
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        accepted = any(
+            str(item.get("recordKind") or "") == "human_adjudication"
+            and str(item.get("questionId") or "").strip().upper()
+            == normalized_question_id
+            and str(item.get("hypothesisRoundId") or "").strip()
+            == normalized_round_id
+            and str(item.get("decision") or "").strip().lower() == "accepted"
+            for item in hypothesis_first_chain._records(team_id)
+        )
+        normalized_acceptance_kind = "human_adjudication"
+    if not accepted:
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff has no accepted convergence decision",
+            code="formal_hypothesis_handoff_incomplete",
+        )
+    candidate_snapshot = next(
+        (
+            item.to_dict()
+            for item in parsed_round.candidates
+            if item.candidateId == recommended_candidate_id
+        ),
+        None,
+    )
+    if candidate_snapshot is None:
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff candidate is missing from the closed round",
+            code="formal_hypothesis_handoff_incomplete",
+        )
+
+    refs_by_kind: dict[str, list[str]] = {
+        "meeting_round": [],
+        "meeting_digest": [],
+        "decision_record": [],
+    }
+    for ref in parsed_round.meetingRefs:
+        refs_by_kind.setdefault(ref.kind, []).append(ref.id)
+    if not all(refs_by_kind.get(kind) for kind in refs_by_kind):
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff is missing review evidence references",
+            code="formal_hypothesis_handoff_incomplete",
+        )
+
+    digest_records = meeting_rounds._read_jsonl(meeting_rounds._digests_path(team_id))
+    decision_records = meeting_rounds._read_jsonl(
+        meeting_rounds._decisions_path(team_id)
+    )
+    selection_ids: set[str] = set()
+    for meeting_id in refs_by_kind["meeting_round"]:
+        try:
+            meeting = meeting_rounds.get_meeting_round(team_id, meeting_id)[
+                "meetingRound"
+            ]
+        except Exception as exc:
+            raise ResearchWorkflowError(
+                "formal hypothesis handoff review meeting does not resolve",
+                code="formal_hypothesis_handoff_incomplete",
+            ) from exc
+        if (
+            str(meeting.get("meetingType") or "") != "hypothesis_review"
+            or str(meeting.get("status") or "") != "closed"
+            or str(meeting.get("question") or "").strip().upper()
+            != normalized_question_id
+        ):
+            raise ResearchWorkflowError(
+                "formal hypothesis handoff review meeting is not closed for this question",
+                code="formal_hypothesis_handoff_incomplete",
+            )
+        digest_id = str(meeting.get("digestId") or "").strip()
+        decision_ids = [
+            str(item or "").strip()
+            for item in list(meeting.get("decisionRefs") or [])
+            if str(item or "").strip()
+        ]
+        if (
+            digest_id not in refs_by_kind["meeting_digest"]
+            or any(item not in refs_by_kind["decision_record"] for item in decision_ids)
+            or meeting_rounds._latest_by_id(digest_records, "digestId", digest_id)
+            is None
+            or any(
+                meeting_rounds._latest_by_id(
+                    decision_records,
+                    "decisionId",
+                    decision_id,
+                )
+                is None
+                for decision_id in decision_ids
+            )
+        ):
+            raise ResearchWorkflowError(
+                "formal hypothesis handoff review evidence does not resolve",
+                code="formal_hypothesis_handoff_incomplete",
+            )
+        for ref in list(meeting.get("inputArtifactRefs") or []):
+            text = str(ref or "").strip()
+            if text.startswith("hypothesis_selection:"):
+                selection_id = text.split(":", 1)[1].strip()
+                if selection_id:
+                    selection_ids.add(selection_id)
+    if len(selection_ids) != 1:
+        raise ResearchWorkflowError(
+            "formal hypothesis handoff does not resolve one review selection",
+            code="formal_hypothesis_handoff_incomplete",
+        )
+    selection_id = next(iter(selection_ids))
+    evidence_refs = [
+        f"hypothesis_round:{parsed_round.roundId}",
+        *[
+            f"{kind}:{ref_id}"
+            for kind in ("meeting_round", "meeting_digest", "decision_record")
+            for ref_id in refs_by_kind[kind]
+        ],
+    ]
+    return {
+        "hypothesisSelection": {
+            "schemaVersion": 1,
+            "selectionId": selection_id,
+            "selectedCandidateIds": [recommended_candidate_id],
+            "candidateSnapshots": [candidate_snapshot],
+            "sourceRoundId": parsed_round.roundId,
+            "sourceScopeHash": parsed_round.scopeHash,
+        },
+        "hypothesisConvergenceHandoff": {
+            "schemaVersion": 1,
+            "roundId": parsed_round.roundId,
+            "selectionId": selection_id,
+            "confirmedCandidateId": recommended_candidate_id,
+            "acceptedByMetaReview": parsed_round.metaReview.accepted,
+            "acceptanceKind": normalized_acceptance_kind,
+            "metaReviewId": parsed_round.metaReview.metaReviewId,
+            "scopeHash": parsed_round.scopeHash,
+            "evidenceRefs": evidence_refs,
+        },
+    }
+
+
 def create_question_run(
     workflow_id: str,
     *,
@@ -108,6 +293,7 @@ def create_question_run(
     safety_limits: Mapping[str, Any],
     idempotency_key: str,
     catalog_run_authorization: Mapping[str, Any] | None = None,
+    formal_hypothesis_round_id: str = "",
 ) -> dict[str, Any]:
     if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
@@ -131,6 +317,15 @@ def create_question_run(
             "new Challenge runs require server-derived researchScopeEnvelope and catalogScope",
             code="invalid_run_input",
         )
+    if formal_hypothesis_round_id:
+        run_input = {
+            **run_input,
+            **_formal_hypothesis_handoff(
+                team_id,
+                question_id,
+                hypothesis_round_id=formal_hypothesis_round_id,
+            ),
+        }
     created = create_run(
         workflow_id,
         run_input=run_input,

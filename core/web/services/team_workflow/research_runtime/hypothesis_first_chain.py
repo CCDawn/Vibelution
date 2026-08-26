@@ -1895,6 +1895,9 @@ def _execute_v2_command_impl(
                     "maxRetries": 2,
                 },
                 idempotency_key=idempotency_key,
+                formal_hypothesis_round_id=str(
+                    payload.get("hypothesisRoundId") or ""
+                ),
             )
         elif command == "reconcile_formal_run":
             result = _submit_formal_v2_command(

@@ -631,7 +631,10 @@ def test_terminal_formal_run_offers_archive_instead_of_reconcile(
                 "question": "SCI-001",
                 "roundIndex": 1,
                 "status": "closed",
-                "metaReview": {"accepted": True},
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
             }],
             formal_runs=[{
                 "runId": "run-terminal",
@@ -665,7 +668,10 @@ def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
                 "question": "SCI-001",
                 "roundIndex": 1,
                 "status": "closed",
-                "metaReview": {"accepted": True},
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
             }],
             formal_runs=[{
                 "runId": "run-archived",

@@ -2834,10 +2834,16 @@ def project_state_from_records(
     # imported Challenge Program output already owns the next phase; emitting
     # the creation command there would let a first-enabled-command consumer
     # fork duplicate formal runs.
-    if converged and formal_phase is None:
+    confirmed_candidate_id = str(
+        (meta_review or {}).get("recommendationCandidateId") or ""
+    ).strip()
+    if converged and formal_phase is None and confirmed_candidate_id:
         allowed_actions.append(
             _command_action(
                 "create_formal_run",
+                action_id=(
+                    f"create-formal-run-v2:{convergence['latestHypothesisRoundId']}"
+                ),
                 label="创建正式研究运行",
                 target_phase="formal_runtime",
                 target_node_id="formal_runtime",
