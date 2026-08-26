@@ -129,9 +129,9 @@ rules:
       - "web/src/routes/chat/**"
       - "web/src/components/conversation/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/routes/ChatCodingRoute.layout.test.ts"
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
-      - "npm --prefix web exec -- tsc -b --pretty false"
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/ChatCodingRoute.layout.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts --root web"
+      - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
       - "Small Chat UI changes keep a focused route test, both VUI contracts, and incremental typecheck; they do not imply backend pytest or a full build."
 
@@ -339,9 +339,9 @@ rules:
       - "web/src/routes/TeamsRoute.*"
       - "web/src/routes/teams/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts"
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
-      - "npm --prefix web exec -- tsc -b --pretty false"
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts --root web"
+      - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
       - "Small Teams UI changes keep a focused route test, both VUI contracts, and incremental typecheck; they do not imply workflow pytest or a full build."
 
@@ -360,7 +360,7 @@ rules:
       - "web/public/**"
       - "web/scripts/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run"
+      - "node web/node_modules/vitest/vitest.mjs run --root web"
       - "npm --prefix web run build"
     notes:
       - "Full Vitest and Vite build are reserved for inputs that can change the build graph or generated output."
@@ -376,9 +376,9 @@ rules:
       - "web/src/components/**"
       - "web/src/app/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
-      - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests"
-      - "npm --prefix web exec -- tsc -b --pretty false"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web"
+      - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
       - "VUI/shadcn route contract + component design catalog are mandatory for any web UI path (root AGENTS.md §2)."
       - "The UI fallback keeps changed-file Vitest, both VUI contracts, and incremental typecheck; it is suppressed file-by-file when a focused frontend rule owns every changed file."
@@ -395,8 +395,8 @@ rules:
       - "web/src/i18n/**"
       - "web/bundleBudget.test.ts"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests"
-      - "npm --prefix web exec -- tsc -b --pretty false"
+      - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web"
+      - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
       - "Non-UI frontend changes use changed-file Vitest and incremental typecheck; VUI contracts are reserved for visible UI surfaces."
 

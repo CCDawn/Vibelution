@@ -5,9 +5,12 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const SRC = join(process.cwd(), "src");
+// This contract is executed both from web/ and by root-cwd selector commands.
+// Anchor the scan at the test file instead of the caller's working directory.
+const SRC = fileURLToPath(new URL("../..", import.meta.url));
 
 function walkTsx(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

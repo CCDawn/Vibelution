@@ -22,13 +22,22 @@ import json
 
 import pytest
 
+from core.llm.types import CanonicalItemIdentity, TurnOutcome
 from core.research.workflow.contracts import ContractValidationError
 from core.web.services.team_workflow import llm_review_runners
 from core.web.services.team_workflow.hypothesis_review_executor import (
+    ProviderBoundReviewResult,
     execute_hypothesis_review,
 )
+from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
 
 _FAKE_LLM = {"client": object(), "profileId": "primary", "modelId": "fake-review-model"}
+_FORMAL_FAKE_LLM = {
+    **_FAKE_LLM,
+    "providerId": "opencode",
+    "modelId": "deepseek-v4-flash",
+    "modelRef": "opencode/deepseek-v4-flash",
+}
 
 
 class _FakeResponse:
@@ -174,6 +183,178 @@ def _review_context() -> dict:
         "question": "SCI-096",
         "candidates": [_candidate("cand-a", "假说 A"), _candidate("cand-b", "假说 B")],
     }
+
+
+def _formal_review_context(**overrides) -> dict:
+    context = {
+        **_review_context(),
+        "questionId": "SCI-096",
+        "_modelInvocationReceiptAuthority": {
+            "schemaVersion": 1,
+            "authorityKind": "workflow_run",
+            "teamId": "team-1",
+            "questionId": "SCI-096",
+            "workflowRunId": "workflow-run-formal",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "workflow-version-formal",
+            "modelPolicySha256": "a" * 64,
+        },
+    }
+    context.update(overrides)
+    return context
+
+
+def _final_outcome(invocation_context, *, receipt=None) -> TurnOutcome:
+    identity = CanonicalItemIdentity(
+        session_id=invocation_context.session_id,
+        turn_id=str(invocation_context.metadata["turnId"]),
+        invocation_id=str(invocation_context.metadata["invocationId"]),
+        iteration=0,
+        item_id="review-final",
+    )
+    return TurnOutcome(
+        kind="final_answer",
+        identity=identity,
+        final_text=json.dumps({"outcome": "left_wins", "justification": "A 领先"}),
+        terminal_event_seen=True,
+        model_invocation_receipt=receipt,
+    )
+
+
+def test_review_receipt_context_binds_stable_unique_step_identity():
+    context = _formal_review_context()
+    route = {
+        "modelRef": "opencode/deepseek-v4-flash",
+        "providerId": "opencode",
+        "modelId": "deepseek-v4-flash",
+    }
+
+    first = meeting_receipt_authority.build_review_step_receipt_context(
+        context,
+        review_step="reflection",
+        identity_parts=("cand-a",),
+        session_id="team-1",
+        expected_model_route=route,
+    )
+    replay = meeting_receipt_authority.build_review_step_receipt_context(
+        context,
+        review_step="reflection",
+        identity_parts=("cand-a",),
+        session_id="team-1",
+        expected_model_route=route,
+    )
+    pairwise = meeting_receipt_authority.build_review_step_receipt_context(
+        context,
+        review_step="pairwise",
+        identity_parts=("cand-a", "cand-b"),
+        session_id="team-1",
+        expected_model_route=route,
+    )
+
+    assert first == replay
+    assert first["invocationId"] != pairwise["invocationId"]
+    assert first["questionStageBinding"]["questionStage"] == "review"
+    assert first["questionStageBinding"]["formalNodeId"] == "hypothesis_design"
+    assert first["outcomeKinds"] == ["review"]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"teamId": "wrong-team"},
+        {"questionId": "SCI-001"},
+    ],
+)
+def test_review_receipt_context_rejects_authority_scope_mismatch(overrides):
+    with pytest.raises(meeting_receipt_authority.MeetingReceiptAuthorityError):
+        meeting_receipt_authority.build_review_step_receipt_context(
+            _formal_review_context(**overrides),
+            review_step="reflection",
+            identity_parts=("cand-a",),
+            session_id="team-1",
+            expected_model_route={
+                "modelRef": "opencode/deepseek-v4-flash",
+                "providerId": "opencode",
+                "modelId": "deepseek-v4-flash",
+            },
+        )
+
+
+def test_review_receipt_context_rejects_invalid_model_route():
+    with pytest.raises(
+        meeting_receipt_authority.MeetingReceiptAuthorityError,
+        match="model route",
+    ):
+        meeting_receipt_authority.build_review_step_receipt_context(
+            _formal_review_context(),
+            review_step="reflection",
+            identity_parts=("cand-a",),
+            session_id="team-1",
+            expected_model_route={
+                "modelRef": "other/deepseek-v4-flash",
+                "providerId": "opencode",
+                "modelId": "deepseek-v4-flash",
+            },
+        )
+
+
+def test_receipt_required_runner_fails_before_provider_call_without_authority(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        llm_review_runners,
+        "invoke_llm_outcome",
+        lambda *_args, **_kwargs: calls.append(True),
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
+    )
+
+    with pytest.raises(ContractValidationError, match="authority"):
+        runners["reflection_runner"](_candidate("cand-a", "假说 A"), _review_context())
+    assert calls == []
+
+
+def test_receipt_required_runner_rejects_provider_outcome_without_receipt(monkeypatch):
+    monkeypatch.setattr(
+        llm_review_runners,
+        "invoke_llm_outcome",
+        lambda *_args, **kwargs: _final_outcome(kwargs["context"]),
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
+    )
+
+    with pytest.raises(ContractValidationError, match="receipt"):
+        runners["pairwise_runner"](
+            _candidate("cand-a", "假说 A"),
+            _candidate("cand-b", "假说 B"),
+            _formal_review_context(),
+        )
+
+
+def test_receipt_required_runner_returns_provider_bound_result(monkeypatch):
+    receipt = {
+        "receiptId": "provider-review-receipt",
+        "status": "succeeded",
+    }
+    monkeypatch.setattr(
+        llm_review_runners,
+        "invoke_llm_outcome",
+        lambda *_args, **kwargs: _final_outcome(kwargs["context"], receipt=receipt),
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
+    )
+
+    result = runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _formal_review_context(),
+    )
+
+    assert isinstance(result, ProviderBoundReviewResult)
+    assert result.payload["outcome"] == "left_wins"
+    assert result.model_invocation_receipt == receipt
 
 
 def test_review_runners_produce_executor_compatible_outputs(monkeypatch):

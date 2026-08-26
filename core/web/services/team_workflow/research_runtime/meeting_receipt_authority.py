@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,21 @@ def _policy_sha256(run_input: Mapping[str, Any]) -> str:
             "modelPolicySha256 must be a lowercase sha256 for meeting receipt authority"
         )
     return digest
+
+
+def _expected_model_route(route: Mapping[str, Any]) -> dict[str, str]:
+    normalized = {
+        "modelRef": str(route.get("modelRef") or "").strip(),
+        "providerId": str(route.get("providerId") or "").strip(),
+        "modelId": str(route.get("modelId") or "").strip(),
+    }
+    if (
+        not all(normalized.values())
+        or normalized["modelRef"].partition("/")[0].casefold()
+        != normalized["providerId"].casefold()
+    ):
+        raise MeetingReceiptAuthorityError("formal meeting effective model route is invalid")
+    return normalized
 
 
 def build_meeting_receipt_authority(
@@ -190,17 +206,7 @@ def build_speaker_receipt_context(
     ):
         raise MeetingReceiptAuthorityError("formal meeting receipt authority is invalid")
     route = expected_model_route if isinstance(expected_model_route, Mapping) else {}
-    expected_route = {
-        "modelRef": str(route.get("modelRef") or "").strip(),
-        "providerId": str(route.get("providerId") or "").strip(),
-        "modelId": str(route.get("modelId") or "").strip(),
-    }
-    if (
-        not all(expected_route.values())
-        or expected_route["modelRef"].partition("/")[0].casefold()
-        != expected_route["providerId"].casefold()
-    ):
-        raise MeetingReceiptAuthorityError("formal meeting effective model route is invalid")
+    expected_route = _expected_model_route(route)
     meeting_round_id = str(context.get("meetingRoundId") or "").strip()
     chat_room_round_id = str(context.get("roundId") or "").strip()
     participant_id = str(
@@ -250,6 +256,110 @@ def build_speaker_receipt_context(
     }
 
 
+def build_review_step_receipt_context(
+    context: Mapping[str, Any],
+    *,
+    review_step: str,
+    identity_parts: Sequence[Any],
+    session_id: str,
+    expected_model_route: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Bind one formal review step call to the server-owned WorkflowRun."""
+
+    authority = context.get("_modelInvocationReceiptAuthority")
+    if not isinstance(authority, Mapping):
+        return None
+    team_id = str(authority.get("teamId") or "").strip()
+    question_id = str(authority.get("questionId") or "").strip().upper()
+    workflow_run_id = str(authority.get("workflowRunId") or "").strip()
+    workflow_id = str(authority.get("workflowId") or "").strip()
+    workflow_version_id = str(authority.get("workflowVersionId") or "").strip()
+    policy_sha256 = str(authority.get("modelPolicySha256") or "").strip().lower()
+    context_question = str(
+        context.get("questionId") or context.get("question") or ""
+    ).strip().upper()
+    normalized_session_id = str(session_id or "").strip()
+    context_id = str(context.get("contextId") or "").strip()
+    normalized_step = str(review_step or "").strip().lower()
+    parts = [str(item or "").strip() for item in identity_parts]
+    if (
+        authority.get("schemaVersion") != 1
+        or str(authority.get("authorityKind") or "").strip() != "workflow_run"
+        or workflow_id != CHALLENGE_CUP_WORKFLOW_ID
+        or team_id != str(context.get("teamId") or "").strip()
+        or question_id != context_question
+        or any(
+            not value
+            for value in (
+                team_id,
+                question_id,
+                workflow_run_id,
+                workflow_version_id,
+                normalized_session_id,
+                context_id,
+            )
+        )
+        or len(policy_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in policy_sha256)
+    ):
+        raise MeetingReceiptAuthorityError("formal review receipt authority is invalid")
+    if normalized_step not in {"reflection", "pairwise", "pareto", "metareview"}:
+        raise MeetingReceiptAuthorityError("formal review receipt step is invalid")
+    if not parts or any(not part for part in parts):
+        raise MeetingReceiptAuthorityError("formal review receipt identity is incomplete")
+    route = _expected_model_route(expected_model_route)
+    identity_material = json.dumps(
+        {
+            "workflowRunId": workflow_run_id,
+            "contextId": context_id,
+            "step": normalized_step,
+            "identityParts": parts,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    identity_hash = hashlib.sha256(identity_material.encode("utf-8")).hexdigest()[:24]
+    turn_id = f"hypothesis-review:{normalized_step}:{identity_hash}"
+    invocation_id = f"hypothesis-review-invocation:{identity_hash}"
+    formal_node_run_id = f"hypothesis-review:{workflow_run_id}:{identity_hash}"
+    task_id = f"hypothesis-review-step:{normalized_step}:{identity_hash}"
+    from core.research.workflow.contracts.question_stage_binding import (
+        QuestionStageBinding,
+    )
+
+    stage_binding = QuestionStageBinding(
+        question_stage="review",
+        question_id=question_id,
+        question_run_id=workflow_run_id,
+        workflow_run_id=workflow_run_id,
+        workflow_id=workflow_id,
+        workflow_version_id=workflow_version_id,
+        formal_node_id="hypothesis_design",
+        formal_node_run_id=formal_node_run_id,
+        formal_node_attempt=1,
+        session_id=normalized_session_id,
+        task_id=task_id,
+        turn_id=turn_id,
+    )
+    return {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": workflow_run_id,
+        "modelPolicySha256": policy_sha256,
+        "questionStageBinding": stage_binding.to_dict(),
+        "outcomeKinds": ["review"],
+        "expectedModelRoute": route,
+        "invocationId": invocation_id,
+        "evidenceLocator": {
+            "kind": "hypothesis_review_step",
+            "executionKind": "hypothesis_review_executor",
+            "reviewContextId": context_id,
+            "reviewStep": normalized_step,
+            "identityParts": parts,
+        },
+    }
+
+
 def register_speaker_receipts(
     *,
     project_root: Path,
@@ -291,8 +401,9 @@ def register_speaker_receipts(
 __all__ = [
     "MeetingReceiptAuthorityError",
     "authority_from_created_run",
-    "build_speaker_receipt_context",
     "build_meeting_receipt_authority",
+    "build_review_step_receipt_context",
+    "build_speaker_receipt_context",
     "register_speaker_receipts",
     "resolve_active_question_authority",
 ]
