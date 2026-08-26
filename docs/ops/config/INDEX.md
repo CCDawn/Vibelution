@@ -27,6 +27,7 @@
 | 07 | [Launcher / Runtime / Workbench](./07-launcher-runtime-workbench.md) | 启动、窗口、运行时 |
 | 08 | [Git / UI / User](./08-git-ui-user.md) | 提交文案模型、UI、用户资料 |
 | 09 | [Agent 配置自检清单](./09-agent-checklist.md) | 交付前必过 |
+| 10 | [挑战杯 Qwen Agent 路由](./10-qwen-challenge-cup-agent-routing.md) | 模型分层、性价比、角色选择依据 |
 
 ## 实现权威（代码）
 
