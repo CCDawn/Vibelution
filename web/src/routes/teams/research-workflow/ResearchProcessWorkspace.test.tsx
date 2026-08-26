@@ -474,7 +474,9 @@ describe("ResearchProcessWorkspace", () => {
     await act(async () => command?.click());
 
     expect(rendered.container.querySelector('[data-testid="route-probe"]')?.textContent)
-      .toBe("/chat?room=scoped-room-1");
+      .toBe(
+        "/chat?room=scoped-room-1&returnTo=%2Fteams%3FteamId%3Dresearch-team%26researchView%3Dworkflow%26workflowId%3Dchallenge-cup-research%26questionId%3DSCI-096%26runId%3Drun-1%26node%3Dhypothesis-generation%26panel%3Dnode&returnLabel=%E8%BF%94%E5%9B%9E%E7%A7%91%E7%A0%94%E6%B5%81%E7%A8%8B",
+      );
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
