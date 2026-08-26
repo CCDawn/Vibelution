@@ -82,6 +82,32 @@ class HypothesisFirstStateSourceError(RuntimeError):
         super().__init__(message)
 
 
+def _record_projection_scene_event(
+    event_code: str,
+    *,
+    team_id: str,
+    question_id: str,
+    source_error_type: str = "",
+) -> None:
+    """Best-effort projection observability; never blocks the failing read."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "hypothesis_first_state",
+        event_code,
+        level="warning",
+        outcome="failed",
+        fields={
+            "teamId": str(team_id or ""),
+            "questionId": str(question_id or ""),
+            "sourceErrorType": source_error_type,
+        },
+    )
+
+
 def _source_file_cursor(path: Path) -> tuple[str, int, int]:
     """Return a cheap cross-process cursor for one append-only authority."""
 
@@ -2438,6 +2464,12 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
                 raise
             program_output = None
     except Exception as exc:
+        _record_projection_scene_event(
+            "state_projection.failed",
+            team_id=team_id,
+            question_id=normalized,
+            source_error_type=type(exc).__name__,
+        )
         raise HypothesisFirstStateSourceError(
             f"无法读取挑战杯流程权威状态：{type(exc).__name__}"
         ) from exc
