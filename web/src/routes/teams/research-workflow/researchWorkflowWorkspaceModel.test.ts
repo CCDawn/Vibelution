@@ -184,6 +184,31 @@ describe("researchWorkflowWorkspaceModel", () => {
       .toBe("source_finding");
   });
 
+  it("uses the current-task identity when another available offer targets the same node", () => {
+    const start = offer({
+      command: "start_node",
+      idempotencyKey: "offer:run-1:source_finding:start_node:v4",
+    });
+    const fork = offer({
+      command: "fork_revision",
+      idempotencyKey: "offer:run-1:fork_revision:v4",
+    });
+    const model = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: snapshot({
+        currentTask: formalTask({
+          key: start.idempotencyKey,
+          state: "waiting_user",
+          responsibility: "user",
+        }),
+        commandOffers: [start, fork],
+      }),
+      commandOffers: [start, fork],
+    }));
+
+    expect(model.primaryAction?.offer.command).toBe("start_node");
+    expect(model.primaryAction?.offer.idempotencyKey).toBe(start.idempotencyKey);
+  });
+
   it("fails closed when formal offers conflict or do not match the task", () => {
     const model = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: snapshot({

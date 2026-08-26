@@ -261,11 +261,19 @@ function matchingFormalOffer(
     && text(offer.nodeId) === taskNodeId
     && Number(offer.expectedRunVersion) === Number(runVersion)
   ));
-  if (matching.length !== 1) return null;
+  const identityMatching = matching.filter((offer) => (
+    text(offer.idempotencyKey) === text(task.key)
+  ));
+  const selected = identityMatching.length === 1
+    ? identityMatching[0]
+    : matching.length === 1
+      ? matching[0]
+      : null;
+  if (!selected) return null;
   return {
     source: "formal_runtime",
     kind: "command_offer",
-    offer: matching[0],
+    offer: selected,
   };
 }
 
