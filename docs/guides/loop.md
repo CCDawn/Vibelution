@@ -23,7 +23,7 @@
 4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 6 VERIFY    每个逻辑修改批次按影响面跑最小 lint/compile/test；FE 走 focused/changed Vitest + VUI contract + 增量 typecheck；所有验证在 merge 前完成
-7 EVIDENCE  logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
+7 EVIDENCE  实现文件有变更时先 `reuse_research_evidence.py record`；logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
 8 INTEGRATE 合入门全绿后必须主动 `git merge --ff-only`；不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
 10 CLOSE     对用户汇报（根 `AGENTS.md` §5）；内部合入/清理仍做，不贴完成块
@@ -39,6 +39,9 @@
 
 # pytest 聚焦
 .\.venv\Scripts\python.exe -m pytest tests\test_TARGET.py -q
+
+# 实现文件变更：查看参数并记录任务级复用研究证据；候选元数据由 registry 自动补齐
+.\.venv\Scripts\python.exe scripts\reuse_research_evidence.py record --help
 
 # FE focused Vitest（cwd=web）
 node node_modules/vitest/vitest.mjs run --changed main --passWithNoTests

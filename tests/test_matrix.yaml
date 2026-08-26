@@ -55,7 +55,7 @@ rules:
       - "tests/test_environment_doctor.py"
       - "tests/test_select_tests.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py tests/test_environment_doctor.py tests/test_select_tests.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py tests/test_environment_doctor.py tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_github_project_library_service.py -q"
     notes:
       - "Gate-definition changes must validate the gate itself even when the matrix changes in the same branch."
 

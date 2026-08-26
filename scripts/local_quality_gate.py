@@ -39,6 +39,8 @@ Outcome = Literal[
     "merge_conflict",
     "unsupported_validation_command",
     "gate_definition_dirty",
+    "reuse_research_missing",
+    "reuse_research_invalid",
 ]
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
@@ -47,6 +49,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from vibelution_storage import resolve_project_cache_home
+from scripts import reuse_research_contract
 
 GUARD_SCRIPT_CANDIDATES = (
     Path.home()
@@ -62,7 +65,7 @@ GUARD_SCRIPT_CANDIDATES = (
     / "scripts"
     / "agent_work_guard.py",
 )
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
 SHELL_META = re.compile(r"[|&;<>\r\n]|\$\(|`")
 FAILURE_SUMMARY_REDACTIONS = (
@@ -89,7 +92,8 @@ FAILURE_SUMMARY_REDACTIONS = (
 GATE_SELF_TEST_COMMAND = (
     ".\\.venv\\Scripts\\python.exe -m pytest "
     "tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
-    "tests/test_environment_doctor.py tests/test_select_tests.py -q"
+    "tests/test_environment_doctor.py tests/test_select_tests.py "
+    "tests/test_reuse_research_contract.py tests/test_github_project_library_service.py -q"
 )
 GATE_DEFINITION_FILES = frozenset(
     {
@@ -97,6 +101,8 @@ GATE_DEFINITION_FILES = frozenset(
         ".github/workflows/ci.yml",
         "scripts/doctor.ps1",
         "scripts/local_quality_gate.py",
+        "scripts/reuse_research_contract.py",
+        "scripts/reuse_research_evidence.py",
         "scripts/task_closeout.py",
         "tests/select_tests.py",
         "tests/test_matrix.yaml",
@@ -527,6 +533,30 @@ def bounded_failure_summary(summary: str) -> str:
     return redacted.splitlines()[0][:300] if redacted else ""
 
 
+def load_reuse_research_for_closeout(
+    root: Path,
+    task_id: str,
+    branch: str,
+) -> dict[str, object] | None:
+    return reuse_research_contract.load_and_validate_evidence(
+        root,
+        task_id=task_id,
+        branch=branch,
+        project_root=root,
+    )
+
+
+def validate_manifest_reuse_research(
+    snapshot: object,
+    root: Path,
+) -> dict[str, object]:
+    return reuse_research_contract.validate_manifest_snapshot(
+        snapshot,
+        root,
+        project_root=root,
+    )
+
+
 def manifest_payload(
     *,
     task_id: str,
@@ -539,6 +569,8 @@ def manifest_payload(
     commands: Sequence[ProcessResult],
     checks: dict[str, bool],
     outcome: Outcome,
+    reuse_research_required: bool = False,
+    reuse_research: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
@@ -562,6 +594,8 @@ def manifest_payload(
             for command in commands
         ],
         "checks": checks,
+        "reuseResearchRequired": reuse_research_required,
+        "reuseResearch": reuse_research,
         "outcome": outcome,
         "generatedAt": utc_now(),
     }
@@ -681,11 +715,14 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     files: list[str] = []
     validated_main_sha = ""
     head_sha = rev_parse(root, "HEAD")
+    reuse_research_required = False
+    reuse_research: dict[str, object] | None = None
     checks = {
         "worktreeClean": False,
         "claimValid": False,
         "mergePreflight": False,
         "commandsAllowlisted": False,
+        "reuseResearch": False,
     }
 
     def finish(outcome: Outcome) -> GateResult:
@@ -700,6 +737,8 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
             commands=commands,
             checks=checks,
             outcome=outcome,
+            reuse_research_required=reuse_research_required,
+            reuse_research=reuse_research,
         )
         path = write_manifest(root, task_id, payload)
         return GateResult(
@@ -722,6 +761,16 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     checks["claimValid"] = validate_claim(main_root, claim_id, files)
     if not checks["claimValid"]:
         return finish("claim_conflict")
+
+    reuse_research_required = reuse_research_contract.reuse_research_required(files)
+    if reuse_research_required:
+        try:
+            reuse_research = load_reuse_research_for_closeout(root, task_id, branch)
+        except reuse_research_contract.ReuseResearchEvidenceError:
+            return finish("reuse_research_invalid")
+        if reuse_research is None:
+            return finish("reuse_research_missing")
+    checks["reuseResearch"] = True
 
     try:
         specs = expected_closeout_commands(root, files, validated_main_sha, head_sha)
@@ -818,10 +867,22 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
         "claimValid",
         "mergePreflight",
         "commandsAllowlisted",
+        "reuseResearch",
     )
     if not isinstance(checks, dict) or not all(
         checks.get(name) is True for name in required_checks
     ):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    reuse_research_required = reuse_research_contract.reuse_research_required(files)
+    if payload.get("reuseResearchRequired") is not reuse_research_required:
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    snapshot = payload.get("reuseResearch")
+    if reuse_research_required:
+        try:
+            validate_manifest_reuse_research(snapshot, root)
+        except reuse_research_contract.ReuseResearchEvidenceError:
+            return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    elif snapshot is not None:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     try:
         expected_commands = expected_closeout_commands(

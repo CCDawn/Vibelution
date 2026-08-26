@@ -30,6 +30,12 @@ def test_managed_closeout_is_part_of_the_gate_definition() -> None:
     assert "tests/test_task_closeout.py" in gate.GATE_SELF_TEST_COMMAND
 
 
+def test_gate_definition_includes_reuse_research_contract() -> None:
+    assert "scripts/reuse_research_contract.py" in gate.GATE_DEFINITION_FILES
+    assert "scripts/reuse_research_evidence.py" in gate.GATE_DEFINITION_FILES
+    assert "tests/test_reuse_research_contract.py" in gate.GATE_SELF_TEST_COMMAND
+
+
 def test_commit_gate_blocks_direct_writes_on_main(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
     (git_repo / "direct-main-change.txt").write_text("blocked\n", encoding="utf-8")
@@ -177,7 +183,6 @@ def create_passed_manifest(
         "selected_validation",
         lambda changed: {"commands": ["git diff --check"]},
     )
-
     result = gate.run_closeout(git_repo, "main", "claim-test")
 
     assert result.outcome == "passed"
@@ -238,6 +243,18 @@ def create_recorded_contract_manifest(
                 status="passed",
             )
         )
+    reuse_snapshot = {
+        "schemaVersion": 1,
+        "taskId": "test-task",
+        "branch": "codex/test-task",
+        "decision": "ADAPT",
+        "candidates": [{"projectId": "acme__widget", "headSha": "a" * 40}],
+    }
+    monkeypatch.setattr(
+        gate,
+        "validate_manifest_reuse_research",
+        lambda *_args, **_kwargs: reuse_snapshot,
+    )
     payload = gate.manifest_payload(
         task_id="test-task",
         branch="codex/test-task",
@@ -252,8 +269,11 @@ def create_recorded_contract_manifest(
             "claimValid": True,
             "mergePreflight": True,
             "commandsAllowlisted": True,
+            "reuseResearch": True,
         },
         outcome="passed",
+        reuse_research_required=True,
+        reuse_research=reuse_snapshot,
     )
     return gate.write_manifest(git_repo, "test-task", payload)
 
@@ -469,6 +489,8 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
         "tests/test_ci_workflow_contract.py",
         "tests/test_environment_doctor.py",
         "tests/test_select_tests.py",
+        "tests/test_reuse_research_contract.py",
+        "tests/test_github_project_library_service.py",
         "-q",
     ]
     assert spec.cwd == git_repo
@@ -641,7 +663,6 @@ def test_closeout_writes_bounded_passed_manifest(
         "selected_validation",
         lambda changed: {"commands": ["git diff --check"]},
     )
-
     result = gate.run_closeout(git_repo, "main", "claim-test")
 
     assert result.outcome == "passed"
@@ -649,7 +670,7 @@ def test_closeout_writes_bounded_passed_manifest(
     assert result.manifest_path.is_relative_to(git_repo / ".git")
     assert git(git_repo, "status", "--porcelain").stdout.strip() == ""
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schemaVersion"] == 1
+    assert manifest["schemaVersion"] == 2
     assert manifest["taskId"] == "test-task"
     assert manifest["branch"] == "codex/test-task"
     assert manifest["claimId"] == "claim-test"
@@ -658,6 +679,9 @@ def test_closeout_writes_bounded_passed_manifest(
     assert manifest["checks"]["claimValid"] is True
     assert manifest["checks"]["mergePreflight"] is True
     assert manifest["checks"]["commandsAllowlisted"] is True
+    assert manifest["checks"]["reuseResearch"] is True
+    assert manifest["reuseResearchRequired"] is False
+    assert manifest["reuseResearch"] is None
     assert manifest["outcome"] == "passed"
     ancestry = git(
         git_repo,
@@ -673,6 +697,76 @@ def test_closeout_writes_bounded_passed_manifest(
     assert "prompt" not in serialized.lower()
     assert "stdout" not in serialized.lower()
     assert "stderr" not in serialized.lower()
+
+
+def test_closeout_rejects_implementation_change_without_reuse_research(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "core/feature.py", "VALUE = 1\n", "add feature")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["core/feature.py"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "reuse_research_missing"
+    assert result.commands == []
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["reuseResearchRequired"] is True
+    assert manifest["checks"]["reuseResearch"] is False
+
+
+def test_closeout_embeds_validated_reuse_research_for_implementation_change(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "core/feature.py", "VALUE = 1\n", "add feature")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["core/feature.py"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+    snapshot = {
+        "schemaVersion": 1,
+        "taskId": "test-task",
+        "branch": "codex/test-task",
+        "decision": "ADAPT",
+        "candidates": [{"projectId": "acme__widget", "headSha": "a" * 40}],
+    }
+    monkeypatch.setattr(
+        gate,
+        "load_reuse_research_for_closeout",
+        lambda *_args, **_kwargs: snapshot,
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "passed"
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["reuseResearchRequired"] is True
+    assert manifest["reuseResearch"] == snapshot
+    assert manifest["checks"]["reuseResearch"] is True
 
 
 def test_closeout_keeps_deleted_python_in_ownership_without_linting_it(
@@ -699,6 +793,23 @@ def test_closeout_keeps_deleted_python_in_ownership_without_linting_it(
         gate,
         "selected_validation",
         lambda changed: {"commands": ["git diff --check"]},
+    )
+    snapshot = {
+        "schemaVersion": 1,
+        "taskId": "test-task",
+        "branch": "codex/test-task",
+        "decision": "REFERENCE_ONLY",
+        "candidates": [{"projectId": "acme__widget", "headSha": "a" * 40}],
+    }
+    monkeypatch.setattr(
+        gate,
+        "load_reuse_research_for_closeout",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        gate,
+        "validate_manifest_reuse_research",
+        lambda payload, _root: payload,
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -891,7 +1002,7 @@ def test_verify_manifest_detects_stale_main(git_repo: Path) -> None:
     manifest.write_text(
         json.dumps(
             {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "outcome": "passed",
                 "validatedMainSha": "0" * 40,
                 "headSha": git(git_repo, "rev-parse", "HEAD").stdout.strip(),
@@ -1013,6 +1124,30 @@ def test_verify_manifest_rejects_tampered_authorization(
     assert result.outcome == "failed"
 
 
+def test_verify_manifest_rejects_tampered_reuse_research(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_recorded_contract_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    expected_snapshot = json.loads(json.dumps(payload["reuseResearch"]))
+
+    def validate_snapshot(snapshot: object, _root: Path) -> object:
+        if snapshot != expected_snapshot:
+            raise gate.reuse_research_contract.ReuseResearchEvidenceError(
+                "reuse research snapshot was tampered"
+            )
+        return snapshot
+
+    monkeypatch.setattr(gate, "validate_manifest_reuse_research", validate_snapshot)
+    payload["reuseResearch"]["candidates"][0]["headSha"] = "0" * 40
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
 def test_verify_manifest_rejects_empty_commands(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1116,6 +1251,7 @@ def test_verify_manifest_rejects_non_ancestor_validated_main(
             "claimValid": True,
             "mergePreflight": True,
             "commandsAllowlisted": True,
+            "reuseResearch": True,
         },
         outcome="passed",
     )
@@ -1372,6 +1508,17 @@ def test_closeout_appends_gate_self_tests_when_gate_definition_changes(
         gate,
         "selected_validation",
         lambda changed: {"commands": ["git diff --check"]},
+    )
+    monkeypatch.setattr(
+        gate,
+        "load_reuse_research_for_closeout",
+        lambda *_args, **_kwargs: {
+            "schemaVersion": 1,
+            "taskId": "test-task",
+            "branch": "codex/test-task",
+            "decision": "ADAPT",
+            "candidates": [{"projectId": "acme__widget", "headSha": "a" * 40}],
+        },
     )
     monkeypatch.setattr(
         gate,

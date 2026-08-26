@@ -79,6 +79,10 @@ Before writing changes to code, behavior, architecture, or validation boundaries
 
 Stop condition: if you cannot name the ranked choice, the parts to borrow, and the reuse / adapt-then-reuse / replace decision, the design is not ready to write. `FAST_PATCH` may use one local owner plus one ranked analog; `STANDARD_TASK` and `HIGH_RISK` must search far enough that a better scheme could still change the path. Use `briefbound-feature-reuse-research` when the reuse decision is still open.
 
+For any task whose committed diff changes implementation-bearing files, persist the resolved decision before `closeout` with `scripts/reuse_research_evidence.py record`. The record must name the feature, local owning paths and local reuse decision, one or more ranked mature-project candidates already present in the active GitHub library, the exact slices borrowed, rejected alternatives with reasons, the implementation boundary, verification strategy, and explicit risk notes. Do not hand-enter candidate URLs, clone paths, SHAs, licenses, or readiness: the command hydrates them from the active registry and verifies the local clone is clean and still at the registered HEAD. Existing suitable candidates are preferred; there is no per-task quota to clone new repositories.
+
+The task record lives outside the commit in the Git common-dir at `vibelution-cache/reuse_research/<task-id>.json`. `local_quality_gate.py closeout` snapshots it into manifest schema 2 before running expensive validation; missing evidence returns `reuse_research_missing`, while malformed, stale, dirty, unlicensed-for-reuse, or task-mismatched evidence returns `reuse_research_invalid`. `verify-manifest` revalidates the snapshot and pinned candidate commit. Changes limited to docs, tests, fixtures, or examples are exempt and must carry `reuseResearchRequired=false`; changing or deleting implementation files is not exempt.
+
 Root index: `AGENTS.md` §2.
 
 ## 3. Root-Cause Planning
