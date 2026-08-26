@@ -37,6 +37,22 @@ DEFAULT_DELIVERY_LEASE_MS = 30_000
 MAX_DELIVERY_ATTEMPTS = 3
 
 
+def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
+    """Best-effort worker observability; never breaks the delivery path."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "delivery_worker",
+        event_code,
+        level="info" if outcome in {"succeeded", "needs_context"} else "warning",
+        outcome=outcome,
+        fields=fields,
+    )
+
+
 class DeliveryOrchestrationWorker:
     def __init__(
         self,
@@ -88,6 +104,14 @@ class DeliveryOrchestrationWorker:
         except (TypeError, ValueError):
             run_id = ""
         if not run_id:
+            _record_scene_event(
+                "delivery.invalid_action",
+                outcome="failed",
+                fields={
+                    "actionId": str(getattr(action, "action_id", "") or ""),
+                    "code": "invalid_delivery_action",
+                },
+            )
             self._fail(
                 action,
                 now_ms=now_ms,
@@ -116,6 +140,15 @@ class DeliveryOrchestrationWorker:
             return
         except Exception as exc:  # noqa: BLE001 - transient failures requeue, never sink the action
             if action.attempt_count < self._max_attempts:
+                _record_scene_event(
+                    "delivery.requeued",
+                    outcome="requeued",
+                    fields={
+                        "runId": run_id,
+                        "attemptCount": int(getattr(action, "attempt_count", 0) or 0),
+                        "detail": str(exc)[:160],
+                    },
+                )
                 outbox_api.requeue_action(
                     self._store,
                     action.action_id,
@@ -246,6 +279,17 @@ class DeliveryOrchestrationWorker:
     ) -> None:
         """One tx: settle the outbox action + append the terminal event."""
         status = str(outcome.get("status") or "failed")
+        _record_scene_event(
+            "delivery.terminal",
+            outcome=status,
+            fields={
+                "teamId": str(getattr(run, "team_id", "") or ""),
+                "runId": str(getattr(run, "run_id", "") or ""),
+                "deliveryStatus": status,
+                "code": str(outcome.get("code") or ""),
+                "failedStep": str(outcome.get("failedStep") or ""),
+            },
+        )
         if status == "failed":
             try:
                 outcome.update(

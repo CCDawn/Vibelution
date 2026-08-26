@@ -51,6 +51,22 @@ from .iteration_route import branch_decision_from_run, routed_successors
 DEFAULT_START_DEADLINE_MS = 60_000
 
 
+def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
+    """Best-effort worker observability; never breaks the dispatch path."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "graph_dispatch_worker",
+        event_code,
+        level="info" if outcome in {"committed", "settled", "deferred"} else "warning",
+        outcome=outcome,
+        fields=fields,
+    )
+
+
 def _is_hypothesis_first_prelude(run: Any) -> bool:
     """Return whether a created run legitimately awaits hypothesis review."""
 
@@ -334,7 +350,7 @@ class GraphDispatchWorker:
                 created_at_ms=getattr(action, "created_at_ms", None),
             )
         except ChallengeCupMaintenanceError as exc:
-            self._defer_for_maintenance(action, str(exc))
+            self._defer_for_maintenance(action, dispatch, str(exc))
             return
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
@@ -406,7 +422,7 @@ class GraphDispatchWorker:
                     operation="workflow_dispatch_successor",
                 )
             except ChallengeCupMaintenanceError as exc:
-                self._defer_for_maintenance(action, str(exc))
+                self._defer_for_maintenance(action, dispatch, str(exc))
                 return
 
         if (
@@ -714,7 +730,9 @@ class GraphDispatchWorker:
 
         self._submit(mutate, force_flush=True).result(timeout=30)
 
-    def _defer_for_maintenance(self, action: Any, detail: str) -> None:
+    def _defer_for_maintenance(
+        self, action: Any, dispatch: GraphDispatch, detail: str
+    ) -> None:
         """Leave a leased dispatch pending while a governed reset drains.
 
         This is intentionally not ``_mark_blocked``: the maintenance fence
@@ -722,6 +740,16 @@ class GraphDispatchWorker:
         The next worker pass can resume it after the fence is released.
         """
 
+        _record_scene_event(
+            "graph_dispatch.deferred",
+            outcome="deferred",
+            fields={
+                "teamId": str(dispatch.team_id or ""),
+                "runId": str(dispatch.run_id or ""),
+                "nodeId": str(dispatch.node_id or ""),
+                "actionId": str(getattr(action, "action_id", "") or ""),
+            },
+        )
         now_ms = self._now()
         outbox_api.requeue_action(
             self._store,
@@ -765,6 +793,17 @@ class GraphDispatchWorker:
     def _mark_attempt_outcome(self, action: Any, dispatch: GraphDispatch) -> None:
         now_ms = self._now()
         outcome = dispatch.receipt.outcome if dispatch.receipt else "failed"
+        _record_scene_event(
+            "graph_dispatch.attempt_terminal",
+            outcome=str(outcome),
+            fields={
+                "teamId": str(dispatch.team_id or ""),
+                "runId": str(dispatch.run_id or ""),
+                "nodeId": str(dispatch.node_id or ""),
+                "dispatchKind": str(dispatch.dispatch_kind or ""),
+                "receiptOutcome": str(outcome),
+            },
+        )
         target_status = {
             "failed": NodeAttemptStatus.FAILED.value,
             "blocked": NodeAttemptStatus.BLOCKED.value,
@@ -1181,6 +1220,19 @@ class GraphDispatchWorker:
         readiness_hint: tuple[bool, list[Any]] | None = None,
     ) -> None:
         now_ms = self._now()
+        pending_node = getattr(result.pending_action, "node_id", "") or ""
+        _record_scene_event(
+            "graph_dispatch.committed",
+            outcome="committed",
+            fields={
+                "teamId": str(dispatch.team_id or ""),
+                "runId": str(dispatch.run_id or ""),
+                "nodeId": str(dispatch.node_id or ""),
+                "dispatchKind": str(dispatch.dispatch_kind or ""),
+                "pendingNodeId": str(pending_node),
+                "completed": bool(getattr(result, "completed", False)),
+            },
+        )
 
         def mutate(uow):
             acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
@@ -1668,6 +1720,16 @@ class GraphDispatchWorker:
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
         problem = problem_from_graph_error(detail)
+        _record_scene_event(
+            "graph_dispatch.blocked",
+            outcome="blocked",
+            fields={
+                "teamId": str(dispatch.team_id or ""),
+                "runId": str(dispatch.run_id or ""),
+                "nodeId": str(dispatch.node_id or ""),
+                "problemCode": str(problem.get("code") or ""),
+            },
+        )
 
         def mutate(uow):
             uow.repository.fail_outbox(
@@ -1719,6 +1781,18 @@ class GraphDispatchWorker:
                 f"transient_exhausted: {str(detail)[:400]}",
             )
             return
+        _record_scene_event(
+            "graph_dispatch.requeued",
+            outcome="requeued",
+            fields={
+                "teamId": str(getattr(dispatch, "team_id", "") or ""),
+                "runId": str(getattr(dispatch, "run_id", "") or ""),
+                "nodeId": str(getattr(dispatch, "node_id", "") or ""),
+                "attemptCount": int(getattr(action, "attempt_count", 0) or 0),
+                "errorType": type(detail).__name__ if not isinstance(detail, str) else "",
+                "detail": str(detail)[:160],
+            },
+        )
         outbox_api.requeue_action(
             self._store,
             action.action_id,
