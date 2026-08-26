@@ -1649,6 +1649,62 @@ def _ensure_problem_understanding_source_collection_run(
     return persisted_id
 
 
+def _formal_project_retry_payload(
+    action: PendingAction,
+    *,
+    team_id: str,
+    project_id: str,
+    agent_id: str,
+    task_kind: str,
+    store: WorkflowLedgerStore | None,
+) -> dict[str, Any]:
+    """Resolve the exact parent project task for one Ledger retry attempt."""
+
+    if int(action.attempt or 0) <= 1:
+        return {}
+    if store is None:
+        raise RuntimeError("formal project Agent retry requires the workflow Ledger")
+
+    def load_parent_node_run_id(repository: Any) -> str:
+        current = repository.get_attempt(action.node_run_id)
+        if current is None:
+            raise RuntimeError("formal project Agent retry attempt is missing")
+        parent_node_run_id = str(current.retry_of_node_run_id or "").strip()
+        if not parent_node_run_id:
+            raise RuntimeError("formal project Agent retry lineage is missing")
+        parent = repository.get_attempt(parent_node_run_id)
+        if (
+            parent is None
+            or parent.run_id != action.run_id
+            or parent.node_id != action.node_id
+        ):
+            raise RuntimeError("formal project Agent retry lineage identity mismatch")
+        return parent_node_run_id
+
+    parent_node_run_id = str(store.read(load_parent_node_run_id) or "").strip()
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        get_research_project_agent_task_status,
+    )
+
+    status = get_research_project_agent_task_status(team_id, project_id)
+    matches = [
+        dict(task)
+        for task in list(status.get("tasks") or [])
+        if str(task.get("workflowRunId") or "") == action.run_id
+        and str(task.get("nodeRunId") or "") == parent_node_run_id
+        and str(task.get("agentId") or "") == agent_id
+        and str(task.get("taskKind") or "") == task_kind
+    ]
+    if len(matches) != 1 or not str(matches[0].get("taskId") or "").strip():
+        raise RuntimeError(
+            "formal project Agent retry source task is missing or ambiguous"
+        )
+    return {
+        "formalRetry": True,
+        "retryTaskId": str(matches[0]["taskId"]),
+    }
+
+
 def _create_real_agent_task(
     action: PendingAction,
     binding: BindingResolution,
@@ -1747,6 +1803,14 @@ def _create_real_agent_task(
                 "selectedCandidateIds": selected,
                 "scope": dict(action.scope or {}),
             }
+        retry_payload = _formal_project_retry_payload(
+            action,
+            team_id=team_id,
+            project_id=project_id,
+            agent_id=binding.agent_id,
+            task_kind=spec.task_key,
+            store=store,
+        )
         started = start_research_project_agent_task(
             team_id,
             project_id,
@@ -1761,6 +1825,7 @@ def _create_real_agent_task(
                     input_snapshot.get("sourceCollectionRunId") or ""
                 ),
                 **scoped_payload,
+                **retry_payload,
             },
             _challenge_task_contract=challenge_task_contract,
             _model_invocation_receipt_binding=model_invocation_receipt_binding,
