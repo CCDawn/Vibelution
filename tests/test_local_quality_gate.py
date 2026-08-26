@@ -1674,6 +1674,7 @@ def test_closeout_appends_gate_self_tests_when_gate_definition_changes(
         "changed-python-ruff",
         "diff-check",
         "pytest",
+        "pytest",
     ]
 
 
