@@ -58,20 +58,20 @@ Team workflow 行为用例实现在 `tests/_support/team_workflow/`，由 **五�
 单域快速跑：
 
 ```bash
-py -3 -m pytest tests/test_team_workflow_source_collection_cases.py -q
+& '.\.venv\Scripts\python.exe' -m pytest tests/test_team_workflow_source_collection_cases.py -q
 # 或直接打 support（文件名非 test_*.py，需显式路径）：
-py -3 -m pytest tests/_support/team_workflow/cases_source_collection.py -q
+& '.\.venv\Scripts\python.exe' -m pytest tests/_support/team_workflow/cases_source_collection.py -q
 ```
 
 五域并行（PowerShell 请显式列出文件，勿依赖未展开的 `*_cases.py` glob）：
 
 ```bash
-py -3 -m pytest ^
-  tests/test_team_workflow_structure_cases.py ^
-  tests/test_team_workflow_source_collection_cases.py ^
-  tests/test_team_workflow_experiment_cases.py ^
-  tests/test_team_workflow_research_knowledge_cases.py ^
-  tests/test_team_workflow_remainder_cases.py ^
+& '.\.venv\Scripts\python.exe' -m pytest `
+  tests/test_team_workflow_structure_cases.py `
+  tests/test_team_workflow_source_collection_cases.py `
+  tests/test_team_workflow_experiment_cases.py `
+  tests/test_team_workflow_research_knowledge_cases.py `
+  tests/test_team_workflow_remainder_cases.py `
   -n 4 --dist loadfile -q
 ```
 
@@ -87,10 +87,10 @@ HTTP routes 现位于 `core/web/routes/team_workflows/` 包（不再是单文件
 
 ```bash
 # 根据当前分支相对 main 的变更给出分层验证建议
-python tests/select_tests.py --from-git main
+.\.venv\Scripts\python.exe tests/select_tests.py --from-git main
 
 # 只输出可复制执行的聚焦命令
-python tests/select_tests.py --from-git main --commands-only
+.\.venv\Scripts\python.exe tests/select_tests.py --from-git main --commands-only
 ```
 
 推荐顺序：
@@ -118,44 +118,44 @@ npm --prefix web run build
 
 ```bash
 # 广义串行全量，仅在发布前或定位复杂串行问题时使用
-pytest tests/ -v
+.\.venv\Scripts\python.exe -m pytest tests/ -v --maxfail=0
 
 # 运行特定模块测试
-pytest tests/test_memory.py -v
+.\.venv\Scripts\python.exe -m pytest tests/test_memory.py -v
 
 # 按关键字筛选
-pytest tests/test_code_analysis_tools.py -v -k "diff"
+.\.venv\Scripts\python.exe -m pytest tests/test_code_analysis_tools.py -v -k "diff"
 
 # 查看当前 pytest 文件数量
-python -c "from pathlib import Path; print(len(list(Path('tests').glob('test_*.py'))))"
+.\.venv\Scripts\python.exe -c "from pathlib import Path; print(len(list(Path('tests').glob('test_*.py'))))"
 
 # 遇错即停
-pytest tests/ -v -x
+.\.venv\Scripts\python.exe -m pytest tests/ -v -x
 ```
 
 ### 3.3 使用 test_runner.py
 
 ```bash
 # 批量串行运行完整测试（简洁模式）
-python tests/test_runner.py
+.\.venv\Scripts\python.exe tests/test_runner.py
 
 # 详细输出
-python tests/test_runner.py --verbose
+.\.venv\Scripts\python.exe tests/test_runner.py --verbose
 
 # 跳过慢速测试
-python tests/test_runner.py --fast
+.\.venv\Scripts\python.exe tests/test_runner.py --fast
 
 # 只使用进程级并行执行可并行测试文件（排除 serial）
-python tests/test_runner.py --parallel --workers 4
+.\.venv\Scripts\python.exe tests/test_runner.py --parallel --workers 4
 
 # 完整混合验证：not serial 并行 + serial 串行兜底
-python tests/test_runner.py --hybrid --workers 4
+.\.venv\Scripts\python.exe tests/test_runner.py --hybrid --workers 4
 
 # 快速并行：跳过 slow 和 serial 标记
-python tests/test_runner.py --fast --parallel --workers 4
+.\.venv\Scripts\python.exe tests/test_runner.py --fast --parallel --workers 4
 
 # 逐文件诊断：只在需要定位失败文件时使用
-python tests/test_runner.py --per-file
+.\.venv\Scripts\python.exe tests/test_runner.py --per-file
 ```
 
 `test_runner.py` 面向健康审计，会在构造 pytest 命令时显式覆盖项目默认的遇错即停设置，尽量收集同一批次里的多个失败；需要快速停在首个失败时，直接使用 `pytest ... -x`。
@@ -168,13 +168,13 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 ```bash
 # 直接使用 pytest-xdist
-pytest tests/ -n 4 --dist loadfile -m "not serial"
+.\.venv\Scripts\python.exe -m pytest tests/ -n 4 --dist loadfile -m "not serial" -q --maxfail=0
 
 # 使用项目 test runner
-python tests/test_runner.py --parallel --workers 4
+.\.venv\Scripts\python.exe tests/test_runner.py --parallel --workers 4
 
 # 使用项目 test runner 做完整混合验证
-python tests/test_runner.py --hybrid --workers 4
+.\.venv\Scripts\python.exe tests/test_runner.py --hybrid --workers 4
 ```
 
 并行策略：
@@ -195,13 +195,13 @@ python tests/test_runner.py --hybrid --workers 4
 
 ```bash
 # 手动输入变更文件并查看结构化结果
-python tests/select_tests.py --changed-file core/web/services/session_service.py --json
+.\.venv\Scripts\python.exe tests/select_tests.py --changed-file core/web/services/session_service.py --json
 
 # 从 git diff 读取变更文件
-python tests/select_tests.py --from-git HEAD~1
+.\.venv\Scripts\python.exe tests/select_tests.py --from-git HEAD~1
 
 # 只输出命令，便于复制到当前 worktree 执行
-python tests/select_tests.py --from-git main --commands-only
+.\.venv\Scripts\python.exe tests/select_tests.py --from-git main --commands-only
 ```
 
 使用原则：
@@ -251,7 +251,7 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 服务器分布式用于高吞吐 Python 回归：
 
 ```bash
-python scripts/remote_test_runner.py --backend docker --distributed
+.\.venv\Scripts\python.exe scripts/remote_test_runner.py --backend docker --distributed
 ```
 
 边界：
@@ -267,13 +267,13 @@ python scripts/remote_test_runner.py --backend docker --distributed
 
 ```bash
 # 测试指定工具（如 shell_tools, memory_tools, search_tools）
-python tests/prompt_debugger.py --tool shell_tools
+.\.venv\Scripts\python.exe tests/prompt_debugger.py --tool shell_tools
 
 # 运行内置测试用例集
-python tests/prompt_debugger.py --suite
+.\.venv\Scripts\python.exe tests/prompt_debugger.py --suite
 
 # 交互模式
-python tests/prompt_debugger.py "你的测试 prompt"
+.\.venv\Scripts\python.exe tests/prompt_debugger.py "你的测试 prompt"
 ```
 
 验证标准：
@@ -287,7 +287,7 @@ python tests/prompt_debugger.py "你的测试 prompt"
 不调用大模型，验证生命周期防断裂加固：
 
 ```bash
-python tests/simulate_lifecycle.py
+.\.venv\Scripts\python.exe tests/simulate_lifecycle.py
 ```
 
 测试内容：

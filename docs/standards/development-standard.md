@@ -546,12 +546,18 @@ Use existing test guidance in `tests/README.md`.
 Common commands:
 
 ```powershell
-pytest tests/ -v
-pytest tests/test_<module>.py -v
-pytest tests/test_<module>.py -v -k "<keyword>"
-python tests/test_runner.py
-python tests/test_runner.py --fast
-python tests/simulate_lifecycle.py
+# 先根据当前改动选择 focused 验证；完整入口与更多示例见 tests/README.md。
+& '.\.venv\Scripts\python.exe' tests/select_tests.py --from-git main
+& '.\.venv\Scripts\python.exe' tests/select_tests.py --from-git main --commands-only
+
+# 运行特定模块测试，或按关键字缩小范围。
+& '.\.venv\Scripts\python.exe' -m pytest tests/test_<module>.py -q
+& '.\.venv\Scripts\python.exe' -m pytest tests/test_<module>.py -q -k "<keyword>"
+
+# 需要扩大到完整 Python not-serial 回归时，显式收集全部失败。
+& '.\.venv\Scripts\python.exe' -m pytest tests/ -n 4 --dist loadfile -m "not serial" -q --maxfail=0
+& '.\.venv\Scripts\python.exe' tests/test_runner.py --hybrid --workers 4
+& '.\.venv\Scripts\python.exe' tests/simulate_lifecycle.py
 ```
 
 After adding or modifying tools, run prompt debugger coverage:

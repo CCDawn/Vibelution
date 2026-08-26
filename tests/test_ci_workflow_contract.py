@@ -25,3 +25,7 @@ def test_manual_ci_runs_reachable_fatal_ruff() -> None:
         "python -m ruff check --select E9,F63,F7,F82 agent.py config core scripts tools"
         in text
     )
+
+
+def test_manual_ci_collects_all_pytest_failures() -> None:
+    assert ".\\.venv\\Scripts\\python.exe -m coverage run -m pytest tests -q --maxfail=0" in workflow_text()

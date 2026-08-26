@@ -83,7 +83,7 @@ jobs:
       - name: Run pytest with coverage
         shell: pwsh
         run: |
-          .\.venv\Scripts\python.exe -m coverage run -m pytest tests -q
+          .\.venv\Scripts\python.exe -m coverage run -m pytest tests -q --maxfail=0
           .\.venv\Scripts\python.exe -m coverage report --skip-covered
 
   linux-sandbox:

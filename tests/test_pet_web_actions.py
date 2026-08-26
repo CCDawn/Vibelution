@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+import core.web.app as web_app
+from core.infrastructure import developer_sandbox
 from core.pet_system import pet_system as pet_system_module
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -21,6 +23,26 @@ def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+@pytest.fixture
+def isolated_pet_storage(tmp_path, monkeypatch):
+    """Keep Pet API behavior tests independent from the operator workspace and web build."""
+    workspace = tmp_path / "formal-workspace"
+    frontend_dist = tmp_path / "frontend-dist"
+    frontend_dist.mkdir()
+    (frontend_dist / "index.html").write_text("<div id=\"root\"></div>", encoding="utf-8")
+    monkeypatch.setattr(
+        developer_sandbox,
+        "formal_workspace_path",
+        lambda _project_root, *parts: workspace.joinpath(*parts),
+    )
+    monkeypatch.setattr(
+        web_app,
+        "build_serving_metadata",
+        lambda _project_root: {"frontend": {"dist": str(frontend_dist)}},
+    )
+    return workspace / "memory" / "pet_info.json"
+
+
 @pytest.mark.parametrize(
     ("action", "expected"),
     [
@@ -29,9 +51,10 @@ def _client() -> TestClient:
         ("care", {"hunger": 42, "energy": 78, "health": 72, "love": 54}),
     ],
 )
-def test_pet_actions_update_summary_and_record_scene_event(tmp_path, monkeypatch, action, expected):
+def test_pet_actions_update_summary_and_record_scene_event(
+    monkeypatch, isolated_pet_storage, action, expected
+):
     pet_system_module.reset_pet_system()
-    monkeypatch.chdir(tmp_path)
     recorded_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         pet_service,
@@ -53,7 +76,7 @@ def test_pet_actions_update_summary_and_record_scene_event(tmp_path, monkeypatch
     for field, value in expected.items():
         assert payload["summary"][field] == value
     assert payload["summary"]["name"] == "虾宝"
-    assert (tmp_path / "workspace" / "memory" / "pet_info.json").exists()
+    assert isolated_pet_storage.exists()
     assert len(recorded_events) == 1
     event_args, event_kwargs = recorded_events[0]
     assert event_args == ("pet", "action", "pet.action.applied")
@@ -65,9 +88,8 @@ def test_pet_actions_update_summary_and_record_scene_event(tmp_path, monkeypatch
         assert event_kwargs["fields"]["after"][event_field] == value
 
 
-def test_pet_action_rejects_unknown_action_and_records_scene_event(tmp_path, monkeypatch):
+def test_pet_action_rejects_unknown_action_and_records_scene_event(monkeypatch, isolated_pet_storage):
     pet_system_module.reset_pet_system()
-    monkeypatch.chdir(tmp_path)
     recorded_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         pet_service,

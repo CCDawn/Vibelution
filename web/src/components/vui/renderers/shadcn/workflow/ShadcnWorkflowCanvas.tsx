@@ -91,12 +91,12 @@ import {
 } from "./workflowSelectionFocus";
 import type { OrthogonalObstacle } from "./workflowOrthogonalRoute";
 
-export function workflowCanvasMinZoom(
+export function workflowCanvasInitialFitMinZoom(
   layoutMode: WorkflowCanvasLayoutMode,
   nodeCount: number,
-): number {
-  if (layoutMode === "serpentine" && nodeCount > 0 && nodeCount <= 5) return 0.5;
-  return layoutMode === "serpentine" ? 0.28 : 0.35;
+): number | undefined {
+  if (layoutMode === "serpentine" && nodeCount > 0 && nodeCount <= 5) return 0.8;
+  return undefined;
 }
 
 export type ShadcnWorkflowCanvasProps = {
@@ -269,10 +269,12 @@ function WorkflowCanvasInner({
   const programmaticFitRef = useRef(false);
   const canvasOriginSelectionRef = useRef<string | null>(null);
   const lastPannedSelectionRef = useRef<string | null>(null);
+  const initialFitWasPendingRef = useRef(false);
   const lastHostSizeRef = useRef({ width: 0, height: 0 });
-  const fitCanvas = useCallback((padding: number, duration = 0) => {
+  const initialFitMinZoom = workflowCanvasInitialFitMinZoom(layoutMode, graph.nodes.length);
+  const fitCanvas = useCallback((padding: number, duration = 0, minZoom?: number) => {
     programmaticFitRef.current = true;
-    void Promise.resolve(rf.fitView({ padding, duration })).finally(() => {
+    void Promise.resolve(rf.fitView({ padding, duration, minZoom })).finally(() => {
       programmaticFitRef.current = false;
     });
   }, [rf]);
@@ -584,10 +586,21 @@ function WorkflowCanvasInner({
     structureKey: layout.structureKey,
     nodesInitialized,
     fit: () => {
-      fitCanvas(0.08);
+      fitCanvas(0.08, 0, initialFitMinZoom);
     },
     acknowledgeInitialFit: layout.acknowledgeInitialFit,
   });
+
+  useEffect(() => {
+    if (pendingInitialFit) {
+      initialFitWasPendingRef.current = true;
+      return;
+    }
+    if (initialFitWasPendingRef.current) {
+      initialFitWasPendingRef.current = false;
+      lastPannedSelectionRef.current = null;
+    }
+  }, [pendingInitialFit]);
 
   useEffect(() => {
     userMovedViewportRef.current = false;
@@ -614,11 +627,11 @@ function WorkflowCanvasInner({
         return;
       }
       lastHostSizeRef.current = { width: box.width, height: box.height };
-      fitCanvas(0.08);
+      fitCanvas(0.08, 0, initialFitMinZoom);
     });
     observer.observe(host);
     return () => observer.disconnect();
-  }, [fitCanvas]);
+  }, [fitCanvas, initialFitMinZoom]);
 
   const markUserMovedViewport = useCallback(() => {
     if (!programmaticFitRef.current) {
@@ -939,7 +952,7 @@ function WorkflowCanvasInner({
           edges={edges}
           nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
-          minZoom={workflowCanvasMinZoom(layoutMode, graph.nodes.length)}
+          minZoom={layoutMode === "serpentine" ? 0.28 : 0.35}
           maxZoom={1.6}
           nodesDraggable={manualLayoutEnabled && !manualLayoutLocked}
           nodesConnectable={reconnectSession !== null}

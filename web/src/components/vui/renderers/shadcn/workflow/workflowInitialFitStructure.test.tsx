@@ -43,7 +43,7 @@ vi.mock("@xyflow/react", () => ({
 
 import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
-import { ShadcnWorkflowCanvas, workflowCanvasMinZoom } from "./ShadcnWorkflowCanvas";
+import { ShadcnWorkflowCanvas, workflowCanvasInitialFitMinZoom } from "./ShadcnWorkflowCanvas";
 import { WorkflowOrthogonalConnectionLine } from "./WorkflowOrthogonalConnectionLine";
 import { WORKFLOW_MANUAL_LAYOUT_GRID } from "./workflowManualLayout";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
@@ -63,12 +63,12 @@ vi.mock("./useWorkflowAutoLayout", () => ({
   })),
 }));
 
-describe("workflowCanvasMinZoom", () => {
-  it("keeps short serpentine workflows readable without constraining full graphs", () => {
-    expect(workflowCanvasMinZoom("serpentine", 3)).toBe(0.5);
-    expect(workflowCanvasMinZoom("serpentine", 5)).toBe(0.5);
-    expect(workflowCanvasMinZoom("serpentine", 6)).toBe(0.28);
-    expect(workflowCanvasMinZoom("stage-columns", 3)).toBe(0.35);
+describe("workflowCanvasInitialFitMinZoom", () => {
+  it("keeps the default short-flow view readable without removing overview zoom", () => {
+    expect(workflowCanvasInitialFitMinZoom("serpentine", 3)).toBe(0.8);
+    expect(workflowCanvasInitialFitMinZoom("serpentine", 5)).toBe(0.8);
+    expect(workflowCanvasInitialFitMinZoom("serpentine", 6)).toBeUndefined();
+    expect(workflowCanvasInitialFitMinZoom("stage-columns", 3)).toBeUndefined();
   });
 });
 
@@ -213,6 +213,34 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     expect(rfProps.fitView).toBeUndefined();
     expect(rfProps.fitViewOptions).toBeUndefined();
     expect(typeof rfProps.onMoveStart).toBe("function");
+  });
+
+  it("uses a readable initial fit for short serpentine workflows while keeping canvas zoom-out", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} layoutMode="serpentine" />);
+    });
+
+    const initialFit = vi.mocked(useWorkflowInitialFit).mock.calls.at(-1)?.[0]?.fit;
+    expect(initialFit).toBeTypeOf("function");
+    await act(async () => {
+      initialFit?.();
+    });
+
+    expect(fakeInstance.fitView).toHaveBeenCalledWith({
+      padding: 0.08,
+      duration: 0,
+      minZoom: 0.8,
+    });
+    expect(rfCalls[0].minZoom).toBe(0.28);
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
   });
 
   it("makes initial layout work perceptible instead of showing an empty grid", async () => {
@@ -501,6 +529,61 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       container.remove();
     });
     vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
+  it("re-centers the selected card after initial fit replaces an early focus move", async () => {
+    fakeInstance.getZoom.mockReturnValue(0.8);
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).toHaveBeenCalledTimes(1);
+
+    fakeInstance.setCenter.mockClear();
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: true });
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).not.toHaveBeenCalled();
+
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).toHaveBeenCalledWith(
+      190,
+      116,
+      expect.objectContaining({ zoom: 0.8, duration: 220 }),
+    );
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
     vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
   });
 
