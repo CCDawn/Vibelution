@@ -49,6 +49,7 @@ CANDIDATE_KIND = "hypothesis_candidate"
 GENERATION_ATTEMPT_KIND = "generation_attempt"
 HUMAN_ADJUDICATION_KIND = "human_adjudication"
 QUESTION_RESET_AUDIT_KIND = "question_reset_audit"
+SELECTION_COMMAND_OUTCOME_KIND = "selection_command_outcome"
 REQUEST_EVIDENCE_DECISION = "request_new_evidence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
@@ -102,6 +103,31 @@ class StateVersionConflictError(HypothesisFirstChainError):
         self.expected = expected
         self.actual = actual
         self.snapshot_path = snapshot_path
+
+
+class IdempotencyConflictError(HypothesisFirstChainError):
+    """Raised when one V2 selection key is reused for different input."""
+
+    code = "idempotency_conflict"
+    status_code = 409
+
+    def __init__(
+        self,
+        *,
+        action_id: str,
+        idempotency_key: str,
+        expected_input_digest: str,
+        actual_input_digest: str,
+    ) -> None:
+        super().__init__(
+            "idempotencyKey 已绑定到不同的选择输入，不能复用。"
+        )
+        self.action_id = action_id
+        self.idempotency_key = idempotency_key
+        self.expected_input_digest = expected_input_digest
+        self.actual_input_digest = actual_input_digest
+        self.expected = expected_input_digest
+        self.actual = actual_input_digest
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +212,36 @@ def _stable_hash(payload: Any) -> str:
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
     )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def selection_version_for(
+    *,
+    question_id: str,
+    selected_candidate_ids: Any,
+    previous_selection_id: str = "",
+    reset_id: str = "origin",
+    scope_hash: str = "",
+) -> str:
+    """Return the order-independent identity of one submitted selection.
+
+    Candidate ordering is presentation detail: the selection version is bound
+    to the normalized candidate set, question, previous selection and reset
+    boundary.  The durable scope is supplied by the caller, so the same
+    helper can be used by command execution, review links and the read model.
+    """
+
+    normalized_candidates = sorted(
+        _normalized_str_list(selected_candidate_ids)
+    )
+    return "hf2-selection:" + _stable_hash(
+        {
+            "questionId": str(question_id or "").strip().upper(),
+            "selectedCandidateIds": normalized_candidates,
+            "previousSelectionId": str(previous_selection_id or "").strip(),
+            "resetId": str(reset_id or "origin").strip() or "origin",
+            "scopeHash": str(scope_hash or "").strip(),
+        }
+    )[:24]
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -684,6 +740,335 @@ def _find_allowed_command(
     )
 
 
+def _current_reset_id(
+    team_id: str,
+    question_id: str,
+    *,
+    records: list[dict[str, Any]] | None = None,
+) -> str:
+    """Read the current reset fence without broadening the question scope."""
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    source = records if records is not None else _records(team_id)
+    reset_id = "origin"
+    for record in source:
+        if (
+            str(record.get("recordKind") or "") == QUESTION_RESET_AUDIT_KIND
+            and str(record.get("questionId") or "").strip().upper()
+            == normalized_question_id
+        ):
+            reset_id = str(record.get("resetId") or "origin").strip() or "origin"
+    return reset_id
+
+
+def _selection_command_input_digest(
+    *,
+    action_id: str,
+    question_id: str,
+    payload: Mapping[str, Any],
+    candidate_ids: Any,
+) -> str:
+    """Hash semantic selection input while ignoring presentation ordering."""
+
+    return _stable_hash(
+        {
+            "actionId": str(action_id or "").strip(),
+            "command": "record_selection",
+            "questionId": str(question_id or "").strip().upper(),
+            "payload": dict(payload),
+            "candidateIds": sorted(_normalized_str_list(candidate_ids)),
+        }
+    )
+
+
+def _selection_command_action_id(action_id: str, command: str) -> str:
+    """Resolve the only command whose replay must precede V2 CAS."""
+
+    if command:
+        return command
+    normalized_action_id = str(action_id or "").strip()
+    if normalized_action_id == "record-selection" or normalized_action_id.startswith(
+        "record-selection:"
+    ):
+        return "record_selection"
+    return ""
+
+
+def _selection_command_outcome(
+    team_id: str,
+    *,
+    question_id: str,
+    action_id: str,
+    idempotency_key: str,
+    reset_id: str,
+    records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Find a durable selection outcome in the existing chain ledger."""
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_reset_id = str(reset_id or "origin").strip() or "origin"
+    source = records if records is not None else _records(team_id)
+    for record in reversed(source):
+        if str(record.get("recordKind") or "") != SELECTION_COMMAND_OUTCOME_KIND:
+            continue
+        if str(record.get("teamId") or "").strip() != normalized_team_id:
+            continue
+        if str(record.get("questionId") or "").strip().upper() != normalized_question_id:
+            continue
+        if str(record.get("actionId") or "").strip() != str(action_id or "").strip():
+            continue
+        if str(record.get("idempotencyKey") or "").strip() != str(idempotency_key or "").strip():
+            continue
+        stored_reset_id = str(record.get("resetId") or "").strip()
+        if stored_reset_id != normalized_reset_id:
+            continue
+        return record
+    return None
+
+
+def _selection_command_outcome_for_version(
+    team_id: str,
+    *,
+    question_id: str,
+    action_id: str,
+    selection_version: str,
+    reset_id: str,
+    records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Find an earlier command outcome for the same selection version."""
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_action_id = str(action_id or "").strip()
+    normalized_version = str(selection_version or "").strip()
+    normalized_reset_id = str(reset_id or "origin").strip() or "origin"
+    source = records if records is not None else _records(team_id)
+    for record in reversed(source):
+        if str(record.get("recordKind") or "") != SELECTION_COMMAND_OUTCOME_KIND:
+            continue
+        if str(record.get("teamId") or "").strip() != normalized_team_id:
+            continue
+        if str(record.get("questionId") or "").strip().upper() != normalized_question_id:
+            continue
+        if str(record.get("actionId") or "").strip() != normalized_action_id:
+            continue
+        if str(record.get("selectionVersion") or "").strip() != normalized_version:
+            continue
+        stored_reset_id = str(record.get("resetId") or "").strip()
+        if stored_reset_id != normalized_reset_id:
+            continue
+        return record
+    return None
+
+
+def _selection_command_result(result: Any) -> dict[str, Any]:
+    """Keep the durable replay payload small but retain all navigation ids."""
+
+    selection = result.get("selection") if isinstance(result, Mapping) else {}
+    selection = dict(selection) if isinstance(selection, Mapping) else {}
+    review = result.get("reviewMeeting") if isinstance(result, Mapping) else {}
+    review = dict(review) if isinstance(review, Mapping) else {}
+    meeting = review.get("meetingRound")
+    meeting = dict(meeting) if isinstance(meeting, Mapping) else {}
+    review_meetings = review.get("reviewMeetings")
+    review_meetings = review_meetings if isinstance(review_meetings, list) else []
+    if not meeting:
+        first_review = review_meetings[0] if review_meetings else {}
+        first_review = first_review if isinstance(first_review, Mapping) else {}
+        meeting = (
+            dict(first_review.get("meetingRound"))
+            if isinstance(first_review.get("meetingRound"), Mapping)
+            else {}
+        )
+    meeting_round_id = str(
+        meeting.get("meetingRoundId")
+        or review.get("meetingRoundId")
+        or ""
+    ).strip()
+    room_id = str(
+        review.get("roomId")
+        or meeting.get("linkedChatRoomId")
+        or ""
+    ).strip()
+    chat_room_round_ids = _normalized_str_list(
+        review.get("chatRoomRoundIds") or meeting.get("chatRoomRoundIds")
+    )
+    round_id = str(review.get("roundId") or "").strip()
+    if not round_id and chat_room_round_ids:
+        round_id = chat_room_round_ids[-1]
+    return {
+        "selectionId": str(selection.get("selectionId") or "").strip(),
+        "selectedCandidateIds": _normalized_str_list(
+            selection.get("selectedCandidateIds")
+        ),
+        "meetingRoundId": meeting_round_id,
+        "roomId": room_id,
+        "roundId": round_id,
+        "chatRoomRoundIds": chat_room_round_ids,
+        "selection": selection,
+        "reviewMeeting": review,
+    }
+
+
+def _selection_command_replay(
+    outcome: Mapping[str, Any],
+    *,
+    team_id: str,
+    question_id: str,
+    action_id: str,
+    idempotency_key: str,
+    expected_state_version: str,
+) -> dict[str, Any]:
+    """Build a replay envelope without re-entering any owning mutation."""
+
+    return {
+        "schemaVersion": 2,
+        "teamId": team_id,
+        "questionId": question_id,
+        "command": "record_selection",
+        "actionId": action_id,
+        "idempotencyKey": idempotency_key,
+        "acceptedStateVersion": str(
+            outcome.get("acceptedStateVersion") or expected_state_version
+        ),
+        "status": "reused",
+        "result": dict(outcome.get("result") or {}),
+    }
+
+
+def _active_review_binding_groups(
+    team_id: str,
+    *,
+    question_id: str,
+    selection_version: str,
+    records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return active candidate-review groups for one selection version."""
+
+    from core.web.services.team_workflow import hypothesis_selection, meeting_rounds
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_version = str(selection_version or "").strip()
+    if not normalized_version:
+        return []
+    source = records if records is not None else _records(team_id)
+    try:
+        selection_payload = hypothesis_selection.list_hypothesis_selections(
+            team_id,
+            question_id=normalized_question_id,
+        )
+        selection_records = [
+            dict(record)
+            for record in list(selection_payload.get("selections") or [])
+            if isinstance(record, Mapping)
+        ]
+    except Exception:  # noqa: BLE001 - unreadable legacy selection is not authority
+        selection_records = []
+    selection_by_id: dict[str, dict[str, Any]] = {}
+    for record in selection_records:
+        selection_id = str(record.get("selectionId") or "").strip()
+        if selection_id:
+            selection_by_id[selection_id] = record
+    meetings = meeting_rounds.list_meeting_rounds(team_id).get("meetings") or []
+    meeting_by_id = {
+        str(item.get("meetingRoundId") or "").strip(): dict(item)
+        for item in meetings
+        if isinstance(item, Mapping) and str(item.get("meetingRoundId") or "").strip()
+    }
+    groups: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for link in _review_round_links(source):
+        if str(link.get("questionId") or "").strip().upper() != normalized_question_id:
+            continue
+        selection_id = str(link.get("selectionId") or "").strip()
+        linked_selection = selection_by_id.get(selection_id) or {}
+        version = str(link.get("selectionVersion") or "").strip()
+        if not version and linked_selection:
+            version = selection_version_for(
+                question_id=normalized_question_id,
+                selected_candidate_ids=linked_selection.get("selectedCandidateIds"),
+                previous_selection_id=str(
+                    linked_selection.get("previousSelectionId") or ""
+                ),
+                scope_hash=str(linked_selection.get("scopeHash") or ""),
+                reset_id=_current_reset_id(
+                    team_id,
+                    normalized_question_id,
+                    records=source,
+                ),
+            )
+        if version != normalized_version:
+            continue
+        meeting_id = str(link.get("meetingRoundId") or "").strip()
+        meeting = meeting_by_id.get(meeting_id)
+        if not meeting or str(meeting.get("status") or "").strip().lower() not in _ACTIVE_MEETING_STATUSES:
+            continue
+        round_index = int(link.get("roundIndex") or 1)
+        key = (version, selection_id, round_index)
+        group = groups.setdefault(
+            key,
+            {
+                "selectionVersion": version,
+                "selectionId": selection_id,
+                "roundIndex": round_index,
+                "links": [],
+                "meetings": {},
+            },
+        )
+        group["links"].append(dict(link))
+        group["meetings"][meeting_id] = meeting
+    return list(groups.values())
+
+
+def _review_binding_replay_result(
+    team_id: str,
+    group: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project an already-open binding into the selection service shape."""
+
+    links = sorted(
+        [dict(item) for item in list(group.get("links") or []) if isinstance(item, Mapping)],
+        key=lambda item: (
+            int(item.get("candidateOrder") or 0),
+            str(item.get("meetingRoundId") or ""),
+        ),
+    )
+    meetings = {
+        str(key): dict(value)
+        for key, value in dict(group.get("meetings") or {}).items()
+        if isinstance(value, Mapping)
+    }
+    review_meetings: list[dict[str, Any]] = []
+    for link in links:
+        meeting = meetings.get(str(link.get("meetingRoundId") or ""), {})
+        rounds = _normalized_str_list(meeting.get("chatRoomRoundIds"))
+        review_meetings.append(
+            {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": team_id,
+                "status": "reused",
+                "meetingRound": meeting,
+                "roomId": str(meeting.get("linkedChatRoomId") or ""),
+                "roundId": rounds[-1] if rounds else "",
+                "chatRoomRoundIds": rounds,
+                "link": link,
+            }
+        )
+    primary = review_meetings[0] if review_meetings else {}
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "status": "reused",
+        "meetingRound": primary.get("meetingRound") or {},
+        "roomId": str(primary.get("roomId") or ""),
+        "roundId": str(primary.get("roundId") or ""),
+        "chatRoomRoundIds": list(primary.get("chatRoomRoundIds") or []),
+        "link": primary.get("link") or {},
+        "reviewMeetings": review_meetings,
+        "candidateCount": len(review_meetings),
+    }
+
+
 def retry_review_dispatch(
     team_id: str,
     selection_id: str,
@@ -988,6 +1373,7 @@ def execute_v2_command(
     action_input = dict(action_input) if isinstance(action_input, Mapping) else {}
     if not action_id or not idempotency_key:
         raise ContractValidationError("actionId and idempotencyKey are required")
+    command = _selection_command_action_id(action_id, command)
     normalized_question_id = _command_question_id(
         team_id, command, payload, question_id=question_id
     )
@@ -995,6 +1381,206 @@ def execute_v2_command(
 
     normalized_team_id = assert_team_exists(team_id)
     with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
+        # Selection commands are the one V2 path whose external side effect
+        # can already have committed when the response is lost.  Look up the
+        # durable outcome before CAS so a retry with an old snapshot can be
+        # answered without invoking selection/meeting services again.
+        selection_version = ""
+        selection_input_digest = ""
+        if command == "record_selection":
+            payload_question_id = str(payload.get("questionId") or "").strip().upper()
+            if payload_question_id != normalized_question_id:
+                raise ContractValidationError(
+                    "record_selection payload.questionId must match the question scope"
+                )
+            records = _records(normalized_team_id)
+            reset_id = _current_reset_id(
+                normalized_team_id,
+                normalized_question_id,
+                records=records,
+            )
+            selected_candidate_ids = _normalized_str_list(
+                action_input.get("candidateIds")
+            )
+            selection_scope_hash = ""
+            try:
+                scope = _question_scope_envelope(
+                    normalized_team_id,
+                    normalized_question_id,
+                )
+                if all(
+                    str(scope.get(field) or "").strip()
+                    for field in (*_SCOPE_FIELDS, "agentId", "mode")
+                ):
+                    selection_scope_hash = scope_hash_for(
+                        **{field: str(scope[field]) for field in _SCOPE_FIELDS},
+                        agent_id=str(scope["agentId"]),
+                        mode=str(scope["mode"]),
+                    )
+            except Exception:  # noqa: BLE001 - partial legacy scope is handled below
+                # Scope validation remains owned by hypothesis_selection.  A
+                # partial test/legacy envelope simply uses the unscoped
+                # version identity rather than inventing a second scope.
+                selection_scope_hash = ""
+            selection_version = selection_version_for(
+                question_id=normalized_question_id,
+                selected_candidate_ids=selected_candidate_ids,
+                previous_selection_id=str(
+                    payload.get("previousSelectionId")
+                    or action_input.get("previousSelectionId")
+                    or ""
+                ),
+                reset_id=reset_id,
+                scope_hash=selection_scope_hash,
+            )
+            selection_input_digest = _selection_command_input_digest(
+                action_id=action_id,
+                question_id=normalized_question_id,
+                payload=payload,
+                candidate_ids=selected_candidate_ids,
+            )
+            existing_outcome = _selection_command_outcome(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                action_id=action_id,
+                idempotency_key=idempotency_key,
+                reset_id=reset_id,
+                records=records,
+            )
+            if existing_outcome is not None:
+                expected_digest = str(
+                    existing_outcome.get("inputDigest") or ""
+                ).strip()
+                if expected_digest != selection_input_digest:
+                    raise IdempotencyConflictError(
+                        action_id=action_id,
+                        idempotency_key=idempotency_key,
+                        expected_input_digest=expected_digest,
+                        actual_input_digest=selection_input_digest,
+                    )
+                return _selection_command_replay(
+                    existing_outcome,
+                    team_id=normalized_team_id,
+                    question_id=normalized_question_id,
+                    action_id=action_id,
+                    idempotency_key=idempotency_key,
+                    expected_state_version=expected,
+                )
+
+            # A second client key can race after the first key's outcome has
+            # been durably recorded.  The selection version is the business
+            # uniqueness fence, so alias the original result instead of
+            # invoking the owning selection service a second time.
+            version_outcome = _selection_command_outcome_for_version(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                action_id=action_id,
+                selection_version=selection_version,
+                reset_id=reset_id,
+                records=records,
+            )
+            if version_outcome is not None:
+                expected_digest = str(
+                    version_outcome.get("inputDigest") or ""
+                ).strip()
+                if expected_digest != selection_input_digest:
+                    raise HypothesisFirstChainError(
+                        "selectionVersion 已绑定到不同的选择输入，不能创建第二个活动评审"
+                    )
+                alias_outcome = {
+                    **dict(version_outcome),
+                    "outcomeId": f"hf2-selection-outcome-{_stable_hash({'actionId': action_id, 'idempotencyKey': idempotency_key})[:16]}",
+                    "idempotencyKey": idempotency_key,
+                    "acceptedStateVersion": expected,
+                    "createdAt": _utc_now(),
+                }
+                _append_jsonl(_storage_path(normalized_team_id), alias_outcome)
+                return _selection_command_replay(
+                    alias_outcome,
+                    team_id=normalized_team_id,
+                    question_id=normalized_question_id,
+                    action_id=action_id,
+                    idempotency_key=idempotency_key,
+                    expected_state_version=expected,
+                )
+
+            # A crash can leave the review binding durable but not the command
+            # outcome.  Reuse that binding as the recovery result and record a
+            # new outcome for this key; no selection or model call is needed.
+            active_bindings = _active_review_binding_groups(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                selection_version=selection_version,
+                records=records,
+            )
+            if active_bindings:
+                active_selection_ids = {
+                    str(item.get("selectionId") or "").strip()
+                    for item in active_bindings
+                }
+                if len(active_selection_ids) > 1:
+                    raise HypothesisFirstChainError(
+                        "同一 selectionVersion 存在多个活动评审绑定，已停止新的选择提交"
+                    )
+                active_binding = max(
+                    active_bindings,
+                    key=lambda item: int(item.get("roundIndex") or 0),
+                )
+                recovered_review = _review_binding_replay_result(
+                    normalized_team_id,
+                    active_binding,
+                )
+                recovered_candidate_ids = _normalized_str_list(
+                    [
+                        item.get("candidateId")
+                        for item in sorted(
+                            active_binding.get("links") or [],
+                            key=lambda item: (
+                                int(item.get("candidateOrder") or 0),
+                                str(item.get("createdAt") or ""),
+                                str(item.get("candidateId") or ""),
+                            ),
+                        )
+                        if isinstance(item, Mapping)
+                    ]
+                )
+                recovered_result = _selection_command_result(
+                    {
+                        "selection": {
+                            "selectionId": str(
+                                active_binding.get("selectionId") or ""
+                            ),
+                            "selectedCandidateIds": recovered_candidate_ids,
+                        },
+                        "reviewMeeting": recovered_review,
+                    }
+                )
+                recovered_result["selectionVersion"] = selection_version
+                outcome = {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "recordKind": SELECTION_COMMAND_OUTCOME_KIND,
+                    "outcomeId": f"hf2-selection-outcome-{_stable_hash({'actionId': action_id, 'idempotencyKey': idempotency_key})[:16]}",
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "actionId": action_id,
+                    "idempotencyKey": idempotency_key,
+                    "inputDigest": selection_input_digest,
+                    "selectionVersion": selection_version,
+                    "resetId": reset_id,
+                    "acceptedStateVersion": expected,
+                    "result": recovered_result,
+                    "createdAt": _utc_now(),
+                }
+                _append_jsonl(_storage_path(normalized_team_id), outcome)
+                return _selection_command_replay(
+                    outcome,
+                    team_id=normalized_team_id,
+                    question_id=normalized_question_id,
+                    action_id=action_id,
+                    idempotency_key=idempotency_key,
+                    expected_state_version=expected,
+                )
+
         snapshot = assert_expected_state_version(
             normalized_team_id,
             normalized_question_id,
@@ -1050,6 +1636,7 @@ def execute_v2_command(
                 raise ContractValidationError(
                     "record_selection requires input.candidateIds"
                 )
+            selected_candidate_ids = sorted(selected_candidate_ids)
             selection_payload = {
                 **_question_scope_envelope(
                     normalized_team_id,
@@ -1064,6 +1651,47 @@ def execute_v2_command(
                 selection_payload,
                 background=True,
             )
+            records = _records(normalized_team_id)
+            reset_id = _current_reset_id(
+                normalized_team_id,
+                normalized_question_id,
+                records=records,
+            )
+            selection_version = selection_version_for(
+                question_id=normalized_question_id,
+                selected_candidate_ids=selected_candidate_ids,
+                reset_id=reset_id,
+                scope_hash=selection_scope_hash,
+            )
+            selection_result = _selection_command_result(result)
+            selection_result["selectionVersion"] = selection_version
+            outcome = {
+                "schemaVersion": SCHEMA_VERSION,
+                "recordKind": SELECTION_COMMAND_OUTCOME_KIND,
+                "outcomeId": f"hf2-selection-outcome-{_stable_hash({'actionId': action_id, 'idempotencyKey': idempotency_key})[:16]}",
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "actionId": action_id,
+                "idempotencyKey": idempotency_key,
+                "inputDigest": selection_input_digest,
+                "selectionVersion": selection_version,
+                "resetId": reset_id,
+                "acceptedStateVersion": expected,
+                "result": selection_result,
+                "createdAt": _utc_now(),
+            }
+            with _LOCK:
+                existing_outcome = _selection_command_outcome(
+                    normalized_team_id,
+                    question_id=normalized_question_id,
+                    action_id=action_id,
+                    idempotency_key=idempotency_key,
+                    reset_id=reset_id,
+                )
+                if existing_outcome is None:
+                    _append_jsonl(_storage_path(normalized_team_id), outcome)
+                else:
+                    outcome = existing_outcome
         elif command == "approve_summary":
             meeting_id = str(payload.get("meetingRoundId") or "").strip()
             decision = str(action_input.get("decision") or "accepted").strip().lower()
@@ -1441,6 +2069,7 @@ def _record_review_round_link(
     round_budget: int = DEFAULT_ROUND_BUDGET,
     candidate_id: str = "",
     candidate_order: int | None = None,
+    selection_version: str = "",
 ) -> dict[str, Any]:
     link_id = f"hf-link-{_stable_hash({'meetingRoundId': meeting_round_id, 'roundIndex': round_index})[:16]}"
     record = {
@@ -1450,6 +2079,7 @@ def _record_review_round_link(
         "meetingRoundId": meeting_round_id,
         "previousMeetingRoundId": previous_meeting_round_id,
         "selectionId": selection_id,
+        "selectionVersion": str(selection_version or "").strip(),
         "collectionRequestId": collection_request_id,
         "questionId": question_id,
         "roundIndex": round_index,
@@ -1470,10 +2100,12 @@ def _record_review_round_link(
             meeting_round_id,
         )
         if existing is not None:
+            backfilled = dict(existing)
             for key in (
                 "previousMeetingRoundId",
                 "collectionRequestId",
                 "selectionId",
+                "selectionVersion",
                 "roundIndex",
                 "roundBudget",
                 "candidateId",
@@ -1481,12 +2113,22 @@ def _record_review_round_link(
             ):
                 existing_value = existing.get(key)
                 # Links written before roundBudget existed replay fine.
-                if key in {"roundBudget", "candidateId", "candidateOrder"} and existing_value is None:
+                if key in {
+                    "roundBudget",
+                    "candidateId",
+                    "candidateOrder",
+                    "selectionVersion",
+                } and existing_value is None:
+                    if key == "selectionVersion" and record.get(key):
+                        backfilled[key] = record[key]
                     continue
                 if existing_value != record.get(key):
                     raise HypothesisFirstChainError(
                         f"review round link for {meeting_round_id} is already bound to different content"
                     )
+            if backfilled != existing:
+                _append_jsonl(_storage_path(team_id), backfilled)
+                return backfilled
             return existing
         _append_jsonl(_storage_path(team_id), record)
     return record
@@ -1504,6 +2146,7 @@ def open_review_meeting_for_selection(
     meeting_round_id: str = "",
     round_budget: int = DEFAULT_ROUND_BUDGET,
     fan_out_selection: bool = False,
+    _selection_version: str = "",
     _formal_candidate_id: str = "",
     _formal_candidate_order: int | None = None,
 ) -> dict[str, Any]:
@@ -1539,6 +2182,20 @@ def open_review_meeting_for_selection(
         raise ContractValidationError(
             "selection requires at least one selectedCandidateId"
         )
+    selection_version = str(selection_record.get("selectionVersion") or "").strip()
+    if not selection_version:
+        selection_version = selection_version_for(
+            question_id=question_id,
+            selected_candidate_ids=selected_candidate_ids,
+            previous_selection_id=str(
+                selection_record.get("previousSelectionId") or ""
+            ),
+            reset_id=_current_reset_id(normalized_team_id, question_id),
+            scope_hash=str(selection_record.get("scopeHash") or ""),
+        )
+    if _selection_version:
+        selection_version = str(_selection_version).strip()
+    selection_record["selectionVersion"] = selection_version
 
     # Every selected hypothesis owns a review meeting. Receipt authority
     # constrains model invocation evidence; it must never decide whether a
@@ -1553,6 +2210,29 @@ def open_review_meeting_for_selection(
     # the same candidate-level meeting/link contract without inventing a
     # workflow identity.
     if not _formal_candidate_id:
+        active_bindings = _active_review_binding_groups(
+            normalized_team_id,
+            question_id=question_id,
+            selection_version=selection_version,
+        )
+        active_selection_ids = {
+            str(item.get("selectionId") or "").strip()
+            for item in active_bindings
+        }
+        if len(active_selection_ids) > 1:
+            raise HypothesisFirstChainError(
+                "同一 selectionVersion 存在多个活动评审绑定，无法安全恢复"
+            )
+        if active_bindings and str(
+            active_bindings[0].get("selectionId") or ""
+        ).strip() != selection_id:
+            return _review_binding_replay_result(
+                normalized_team_id,
+                max(
+                    active_bindings,
+                    key=lambda item: int(item.get("roundIndex") or 0),
+                ),
+            )
         if previous_meeting_round_id and not fan_out_selection:
             previous = meeting_rounds.get_meeting_round(
                 normalized_team_id, str(previous_meeting_round_id).strip()
@@ -1618,6 +2298,7 @@ def open_review_meeting_for_selection(
                     meeting_round_id=candidate_meeting_id,
                     round_budget=round_budget,
                     fan_out_selection=fan_out_selection,
+                    _selection_version=selection_version,
                     _formal_candidate_id=candidate_id,
                     _formal_candidate_order=candidate_order,
                 )
@@ -1710,6 +2391,7 @@ def open_review_meeting_for_selection(
             round_budget=round_budget,
             candidate_id=_formal_candidate_id,
             candidate_order=_formal_candidate_order,
+            selection_version=selection_version,
         )
         bound_round_ids = _normalized_str_list(existing_round.get("chatRoomRoundIds"))
         return {
@@ -1788,6 +2470,7 @@ def open_review_meeting_for_selection(
         round_budget=round_budget,
         candidate_id=_formal_candidate_id,
         candidate_order=_formal_candidate_order,
+        selection_version=selection_version,
     )
     return {
         **opened,

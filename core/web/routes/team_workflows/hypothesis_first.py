@@ -150,6 +150,7 @@ def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
         (
             hypothesis_first_chain.StateVersionConflictError,
             hypothesis_first_chain.StaleDigestError,
+            hypothesis_first_chain.IdempotencyConflictError,
         ),
     ):
         status_code = 409
@@ -755,6 +756,18 @@ def team_workflow_hypothesis_first_command(
                 "expectedStateVersion": exc.expected,
                 "actualStateVersion": exc.actual,
                 "snapshotUrl": exc.snapshot_path,
+            },
+        ) from exc
+    except hypothesis_first_chain.IdempotencyConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "actionId": exc.action_id,
+                "idempotencyKey": exc.idempotency_key,
+                "expectedInputDigest": exc.expected_input_digest,
+                "actualInputDigest": exc.actual_input_digest,
             },
         ) from exc
     except PermissionError as exc:

@@ -1288,6 +1288,406 @@ def test_scope_cas_rejects_stale_state_version(monkeypatch: pytest.MonkeyPatch) 
     assert raised.value.actual == "hf2-action:actual:new"
 
 
+def test_active_review_without_selection_context_stays_locked() -> None:
+    """A durable review binding must not reopen selection when its record is missing."""
+
+    state = project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-a",
+                "selectionId": "selection-1",
+                "selectionVersion": "selection-version-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 1,
+                "meetingRoundId": "review-a",
+                "questionId": "SCI-001",
+            },
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-b",
+                "selectionId": "selection-1",
+                "selectionVersion": "selection-version-1",
+                "candidateId": "candidate-b",
+                "candidateOrder": 1,
+                "roundIndex": 1,
+                "meetingRoundId": "review-b",
+                "questionId": "SCI-001",
+            },
+        ],
+        # Simulate a selection-context read that lost the selection record while
+        # the append-only review binding remains durable.
+        selection_records=[],
+        meeting_records=[
+            {
+                "meetingRoundId": "review-a",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "open",
+                "linkedChatRoomId": "room-a",
+                "chatRoomRoundIds": ["room-round-a"],
+            },
+            {
+                "meetingRoundId": "review-b",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "open",
+                "linkedChatRoomId": "room-b",
+                "chatRoomRoundIds": ["room-round-b"],
+            },
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+    )
+
+    assert state["selection"]["selectionId"] == "selection-1"
+    assert state["selection"]["selectedCandidateIds"] == [
+        "candidate-a",
+        "candidate-b",
+    ]
+    assert state["review"]["aggregate"]["total"] == 2
+    assert not any(
+        action.get("command") == "record_selection"
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    )
+
+
+def test_same_selection_version_with_two_active_bindings_fails_closed() -> None:
+    """Conflicting active bindings never reopen a new selection action."""
+
+    state = project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-a",
+                "selectionId": "selection-1",
+                "selectionVersion": "selection-version-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 1,
+                "meetingRoundId": "review-a",
+                "questionId": "SCI-001",
+            },
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-b",
+                "selectionId": "selection-2",
+                "selectionVersion": "selection-version-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 1,
+                "meetingRoundId": "review-b",
+                "questionId": "SCI-001",
+            },
+        ],
+        selection_records=[],
+        meeting_records=[
+            {
+                "meetingRoundId": "review-a",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "open",
+                "linkedChatRoomId": "room-a",
+                "chatRoomRoundIds": ["room-round-a"],
+            },
+            {
+                "meetingRoundId": "review-b",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "open",
+                "linkedChatRoomId": "room-b",
+                "chatRoomRoundIds": ["room-round-b"],
+            },
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+    )
+
+    assert any(
+        problem["code"] == "active_review_binding_conflict"
+        for problem in state["problems"]
+    )
+    assert state["review"]["actionability"] == "blocked"
+    assert not any(
+        action.get("command") == "record_selection"
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    )
+
+
+def _record_selection_command_request(
+    *,
+    key: str,
+    candidates: list[str],
+    expected_state_version: str = "hf2-action:origin:selection",
+) -> dict[str, object]:
+    return {
+        "actionId": "record-selection",
+        "idempotencyKey": key,
+        "expectedStateVersion": expected_state_version,
+        "command": "record_selection",
+        "payload": {
+            "questionId": "SCI-001",
+            "generationAttemptId": "attempt-1",
+        },
+        "input": {"candidateIds": candidates},
+    }
+
+
+def test_v2_selection_command_replays_original_ids_before_stale_cas(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_scope_envelope",
+        lambda *_args: {
+            "program": "program",
+            "theme": "theme",
+            "campaign": "campaign",
+            "question": "SCI-001",
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": "operator",
+            "mode": "dev",
+        },
+    )
+    snapshot = {
+        "stateVersion": "hf2-action:origin:selection",
+        "resetBoundary": {"resetId": "origin"},
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "record-selection",
+                "command": "record_selection",
+                "payload": {
+                    "questionId": "SCI-001",
+                    "generationAttemptId": "attempt-1",
+                },
+                "enabled": True,
+                "idempotencyKey": "selection-command-1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[dict[str, object]] = []
+
+    def record_selection(_team_id: str, payload: dict[str, object], **_kwargs):
+        calls.append(dict(payload))
+        return {
+            "status": "created",
+            "selection": {
+                "selectionId": "selection-1",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a", "candidate-b"],
+            },
+            "reviewMeeting": {
+                "status": "opened",
+                "meetingRound": {"meetingRoundId": "review-1"},
+                "roomId": "room-1",
+            },
+        }
+
+    monkeypatch.setattr(
+        hypothesis_selection,
+        "record_hypothesis_selection",
+        record_selection,
+    )
+    first = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        _record_selection_command_request(
+            key="selection-command-1",
+            candidates=[" candidate-b ", "candidate-a"],
+        ),
+        question_id="SCI-001",
+    )
+    replayed = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        _record_selection_command_request(
+            key="selection-command-1",
+            candidates=["candidate-a", " candidate-b "],
+            expected_state_version="hf2-action:stale:after-selection",
+        ),
+        question_id="SCI-001",
+    )
+
+    assert first["result"]["selection"]["selectionId"] == "selection-1"
+    assert replayed["status"] == "reused"
+    assert replayed["result"]["selectionId"] == "selection-1"
+    assert replayed["result"]["meetingRoundId"] == "review-1"
+    assert replayed["result"]["roomId"] == "room-1"
+    assert len(calls) == 1
+    assert calls[0]["selectedCandidateIds"] == ["candidate-a", "candidate-b"]
+
+    competing_key = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        _record_selection_command_request(
+            key="selection-command-1-competing-key",
+            candidates=["candidate-b", "candidate-a"],
+            expected_state_version="hf2-action:stale:after-selection",
+        ),
+        question_id="SCI-001",
+    )
+    assert competing_key["status"] == "reused"
+    assert competing_key["result"]["selectionId"] == "selection-1"
+    assert len(calls) == 1
+
+
+def test_v2_selection_command_rejects_same_key_with_different_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_scope_envelope",
+        lambda *_args: {"question": "SCI-001"},
+    )
+    snapshot = {
+        "stateVersion": "hf2-action:origin:selection",
+        "resetBoundary": {"resetId": "origin"},
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "record-selection",
+                "command": "record_selection",
+                "payload": {
+                    "questionId": "SCI-001",
+                    "generationAttemptId": "attempt-1",
+                },
+                "enabled": True,
+                "idempotencyKey": "selection-command-2",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls = 0
+
+    def record_selection(_team_id: str, payload: dict[str, object], **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {
+            "status": "created",
+            "selection": {
+                "selectionId": "selection-2",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": list(payload["selectedCandidateIds"]),
+            },
+            "reviewMeeting": {
+                "status": "opened",
+                "meetingRound": {"meetingRoundId": "review-2"},
+                "roomId": "room-2",
+            },
+        }
+
+    monkeypatch.setattr(
+        hypothesis_selection,
+        "record_hypothesis_selection",
+        record_selection,
+    )
+    hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        _record_selection_command_request(
+            key="selection-command-2",
+            candidates=["candidate-a", "candidate-b"],
+        ),
+        question_id="SCI-001",
+    )
+
+    with pytest.raises(hypothesis_first_chain.IdempotencyConflictError) as raised:
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            _record_selection_command_request(
+                key="selection-command-2",
+                candidates=["candidate-a", "candidate-c"],
+                expected_state_version="hf2-action:stale:after-selection",
+            ),
+            question_id="SCI-001",
+        )
+
+    assert raised.value.code == "idempotency_conflict"
+    assert calls == 1
+
+
+def test_v2_command_route_maps_idempotency_conflict_to_409(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conflict = hypothesis_first_routes.hypothesis_first_chain.IdempotencyConflictError(
+        action_id="record-selection",
+        idempotency_key="selection-command-3",
+        expected_input_digest="digest-a",
+        actual_input_digest="digest-b",
+    )
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_chain,
+        "execute_v2_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(conflict),
+    )
+    monkeypatch.setattr(
+        hypothesis_first_routes,
+        "server_operator_scope_from_http",
+        lambda _request: nullcontext(),
+    )
+    payload = HypothesisFirstCommandRequest.model_validate(
+        {
+            "actionId": "record-selection",
+            "idempotencyKey": "selection-command-3",
+            "expectedStateVersion": "hf2-action:origin:selection",
+            "payload": {
+                "questionId": "SCI-001",
+                "generationAttemptId": "attempt-1",
+            },
+            "input": {"candidateIds": ["candidate-a", "candidate-b"]},
+        }
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        hypothesis_first_routes.team_workflow_hypothesis_first_command(
+            "team-1",
+            payload,
+            Request({"type": "http", "method": "POST", "path": "/"}),
+            question_id="SCI-001",
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "idempotency_conflict"
+
+
 def test_v2_scope_lock_serializes_cross_process_claim_and_side_effect(
     tmp_path: Path,
 ) -> None:

@@ -306,6 +306,51 @@ def _canonical_hash(value: Any, *, length: int = 16) -> str:
     return hashlib.sha256(encoded).hexdigest()[:length]
 
 
+def _selection_version_for_link(
+    link: Mapping[str, Any],
+    *,
+    selection_by_id: Mapping[str, Mapping[str, Any]],
+    question_id: str,
+    reset_id: str,
+) -> str:
+    """Resolve a review link's selection version, including legacy links."""
+
+    explicit = str(link.get("selectionVersion") or "").strip()
+    if explicit:
+        return explicit
+    selection_id = str(link.get("selectionId") or "").strip()
+    selection = selection_by_id.get(selection_id)
+    if not isinstance(selection, Mapping):
+        return ""
+    return hypothesis_first_chain.selection_version_for(
+        question_id=question_id,
+        selected_candidate_ids=selection.get("selectedCandidateIds"),
+        previous_selection_id=str(selection.get("previousSelectionId") or ""),
+        reset_id=reset_id,
+        scope_hash=str(selection.get("scopeHash") or ""),
+    )
+
+
+def _ordered_link_candidate_ids(links: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Recover candidate order from durable review bindings only."""
+
+    ordered = sorted(
+        [item for item in links if isinstance(item, Mapping)],
+        key=lambda item: (
+            int(item.get("candidateOrder") or 0),
+            str(item.get("createdAt") or ""),
+            str(item.get("candidateId") or ""),
+        ),
+    )
+    return list(
+        dict.fromkeys(
+            str(item.get("candidateId") or "").strip()
+            for item in ordered
+            if str(item.get("candidateId") or "").strip()
+        )
+    )
+
+
 def _state_relevant(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
@@ -1455,17 +1500,173 @@ def project_state_from_records(
             "candidateIds": [],
         }
 
-    selection_records_latest = sorted(selections, key=lambda item: str(item.get("createdAt") or ""))
+    selection_records_latest = sorted(
+        selections, key=lambda item: str(item.get("createdAt") or "")
+    )
+    selection_record_by_id = {
+        str(item.get("selectionId") or "").strip(): item
+        for item in selection_records_latest
+        if str(item.get("selectionId") or "").strip()
+    }
     selection_record = selection_records_latest[-1] if selection_records_latest else None
     selection_id = str((selection_record or {}).get("selectionId") or "").strip() or None
+    reset_selection_id = reset_id
+    review_link_records = [
+        dict(item)
+        for item in _latest(
+            [record for record in chain if record.get("recordKind") == _REVIEW_LINK_KIND],
+            "linkId",
+        )
+        if str(item.get("questionId") or "").strip().upper()
+        == normalized_question_id
+    ]
+    meeting_by_id = {
+        str(item.get("meetingRoundId") or ""): item for item in meetings
+    }
+    links_by_group: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+    for item in review_link_records:
+        linked_selection_id = str(item.get("selectionId") or "").strip()
+        version = _selection_version_for_link(
+            item,
+            selection_by_id=selection_record_by_id,
+            question_id=normalized_question_id,
+            reset_id=reset_selection_id,
+        )
+        if linked_selection_id:
+            links_by_group.setdefault(
+                (
+                    linked_selection_id,
+                    version or f"legacy:{linked_selection_id}",
+                    int(item.get("roundIndex") or 1),
+                ),
+                [],
+            ).append(item)
+
+    active_binding_groups: list[dict[str, Any]] = []
+    for (group_selection_id, group_version, group_round), group_links in links_by_group.items():
+        group_meeting_ids = {
+            str(item.get("meetingRoundId") or "").strip()
+            for item in group_links
+            if str(item.get("meetingRoundId") or "").strip()
+        }
+        if any(
+            str(meeting_by_id.get(meeting_id, {}).get("status") or "").strip().lower()
+            in {"open", "summarizing", "awaiting_approval"}
+            for meeting_id in group_meeting_ids
+        ):
+            active_binding_groups.append(
+                {
+                    "selectionId": group_selection_id,
+                    "selectionVersion": group_version,
+                    "roundIndex": group_round,
+                    "links": group_links,
+                }
+            )
+
+    active_by_version: dict[str, list[dict[str, Any]]] = {}
+    for group in active_binding_groups:
+        active_by_version.setdefault(str(group["selectionVersion"]), []).append(group)
+    selection_integrity_problems: list[dict[str, Any]] = []
+    for version, groups in active_by_version.items():
+        if version.startswith("legacy:"):
+            selection_integrity_problems.append(
+                _problem(
+                    "review_binding_version_missing",
+                    "活动评审缺少可验证的 selectionVersion，当前选择已锁定并停止新的提交",
+                    category="integrity",
+                    source_kind="review_binding",
+                    source_id=version.removeprefix("legacy:") or None,
+                    detected_at=computed_at,
+                )
+            )
+        identities = {
+            str(group.get("selectionId") or "")
+            for group in groups
+        }
+        if len(identities) > 1:
+            selection_integrity_problems.append(
+                _problem(
+                    "active_review_binding_conflict",
+                    "同一选择版本存在多个活动评审绑定，当前选择已锁定并停止新的提交",
+                    category="integrity",
+                    source_kind="review_binding",
+                    source_id=version or None,
+                    detected_at=computed_at,
+                )
+            )
+
+    # When selection-context is missing, a durable active review binding is
+    # the remaining authority.  Prefer it over an unrelated latest selection
+    # record so a stale/empty context can never reopen the selector.
+    durable_binding = None
+    if active_binding_groups:
+        durable_binding = max(
+            active_binding_groups,
+            key=lambda item: (
+                int(item.get("roundIndex") or 0),
+                max(
+                    str(link.get("createdAt") or "")
+                    for link in list(item.get("links") or [])
+                ),
+            ),
+        )
+    if selection_record is None and durable_binding is not None:
+        selection_id = str(durable_binding.get("selectionId") or "").strip() or None
+    elif durable_binding is not None and selection_id:
+        selection_version = _selection_version_for_link(
+            dict(next(iter(durable_binding.get("links") or []))),
+            selection_by_id=selection_record_by_id,
+            question_id=normalized_question_id,
+            reset_id=reset_selection_id,
+        )
+        record_version = hypothesis_first_chain.selection_version_for(
+            question_id=normalized_question_id,
+            selected_candidate_ids=(selection_record or {}).get("selectedCandidateIds"),
+            previous_selection_id=str(
+                (selection_record or {}).get("previousSelectionId") or ""
+            ),
+            reset_id=reset_selection_id,
+            scope_hash=str((selection_record or {}).get("scopeHash") or ""),
+        )
+        if selection_version and selection_version == record_version and selection_id != str(
+            durable_binding.get("selectionId") or ""
+        ):
+            # Two ids for one active version are themselves an integrity
+            # conflict. Keep projecting the durable binding, which is the
+            # only identity that can safely navigate back to the review.
+            selection_id = str(durable_binding.get("selectionId") or "").strip() or selection_id
+
     selected_candidate_ids = [
         str(item).strip()
         for item in list((selection_record or {}).get("selectedCandidateIds") or [])
         if str(item).strip()
     ]
+    if durable_binding is not None and (
+        selection_record is None
+        or selection_id == str(durable_binding.get("selectionId") or "").strip()
+        and not selected_candidate_ids
+        or selection_integrity_problems
+    ):
+        durable_selection_id = str(durable_binding.get("selectionId") or "").strip()
+        durable_candidate_ids = _ordered_link_candidate_ids(
+            [
+                item
+                for item in review_link_records
+                if str(item.get("selectionId") or "").strip()
+                == durable_selection_id
+            ]
+        )
+        if durable_candidate_ids:
+            selected_candidate_ids = durable_candidate_ids
     if selection_id:
         selection = {
-            **_phase("completed", "succeeded", "terminal", updated_at=_timestamp(selection_record or {})),
+            **_phase(
+                "completed",
+                "succeeded",
+                "terminal",
+                updated_at=_timestamp(selection_record or {}),
+                problems=selection_integrity_problems,
+            ),
             "selectionId": selection_id,
             "selectedCandidateIds": selected_candidate_ids,
         }
@@ -1478,15 +1679,9 @@ def project_state_from_records(
     else:
         selection = {**_phase(), "selectionId": None, "selectedCandidateIds": []}
 
-    meeting_by_id = {
-        str(item.get("meetingRoundId") or ""): item for item in meetings
-    }
     links = [
         item
-        for item in _latest(
-            [record for record in chain if record.get("recordKind") == _REVIEW_LINK_KIND],
-            "linkId",
-        )
+        for item in review_link_records
         if not selection_id or str(item.get("selectionId") or "") == selection_id
     ]
     active_round = max((int(item.get("roundIndex") or 0) for item in links), default=0)
@@ -1513,7 +1708,22 @@ def project_state_from_records(
             )
         )
     review_aggregate = _aggregate(review_candidates)
-    if not review_candidates:
+    if selection_integrity_problems:
+        review_phase = _phase(
+            "running",
+            "none",
+            "blocked",
+            updated_at=computed_at,
+            problems=[
+                *selection_integrity_problems,
+                *[
+                    problem
+                    for item in review_candidates
+                    for problem in list(item.get("problems") or [])
+                ],
+            ],
+        )
+    elif not review_candidates:
         review_phase = _phase()
     elif review_aggregate["blocked"]:
         problems = [
@@ -1701,7 +1911,11 @@ def project_state_from_records(
             )
         )
     if review_candidates:
-        if review_aggregate["blocked"] and selection_id:
+        if (
+            review_aggregate["blocked"]
+            and selection_id
+            and not selection_integrity_problems
+        ):
             failed_candidate_ids = [
                 str(item.get("candidateId") or "")
                 for item in review_candidates
