@@ -1,4 +1,9 @@
-"""Canonical five-dimension hypothesis quality rubric and score normalization."""
+"""Canonical 5+2 hypothesis quality rubric and score normalization.
+
+The five decision dimensions drive the primary review and Pareto classification;
+the two auxiliary dimensions remain diagnostics and never silently change the
+primary ranking.
+"""
 
 from __future__ import annotations
 
@@ -92,7 +97,7 @@ _RUBRIC_BANDS: tuple[dict[str, Any], ...] = (
 
 
 def canonical_hypothesis_score_rubric() -> dict[str, Any]:
-    """Return the immutable rubric body used for prompt and snapshot hashes."""
+    """Return the immutable 5+2 rubric body used for prompt and snapshot hashes."""
 
     return {
         "version": HYPOTHESIS_SCORE_RUBRIC_VERSION,
@@ -117,7 +122,7 @@ def normalize_hypothesis_scores(
     raw_diagnostics: Mapping[str, Any] | None = None,
     allow_legacy_auxiliary_scores: bool = True,
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Split the five authoritative scores from optional legacy diagnostics."""
+    """Split five authoritative scores from the two optional diagnostics."""
 
     missing = [key for key in HYPOTHESIS_SCORE_DIMENSIONS if key not in raw_scores]
     if missing:
