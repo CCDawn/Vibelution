@@ -8,6 +8,7 @@ for domain objects (guarded by transition functions used in service layer).
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -19,6 +20,12 @@ from .records import (
     OutboxRecord,
     RunRecord,
 )
+
+# An action whose worker process dies (or whose lease keeps expiring) never
+# reaches the workers' transient-exhaustion branch, so the ledger itself must
+# stop re-leasing it. Higher than the workers' transient threshold (5), which
+# only covers errors raised inside the worker loop.
+MAX_OUTBOX_LEASE_ATTEMPTS = 12
 
 
 def _row_run(row: Any) -> RunRecord | None:
@@ -736,7 +743,13 @@ class WorkflowLedgerRepository:
         limit: int = 8,
         lease_ms: int = 30_000,
         action_kinds: tuple[str, ...] | None = None,
+        max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
     ) -> list[OutboxRecord]:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
+        self._fail_leases_over_attempt_gate(
+            now_ms=now_ms, max_attempts=max_attempts, action_kinds=action_kinds
+        )
         kind_filter = ""
         params: list[Any] = [now_ms]
         if action_kinds:
@@ -789,6 +802,41 @@ class WorkflowLedgerRepository:
                 )
             )
         return leased
+
+    def _fail_leases_over_attempt_gate(
+        self,
+        *,
+        now_ms: int,
+        max_attempts: int,
+        action_kinds: tuple[str, ...] | None,
+    ) -> None:
+        """Sweep actions at/over the lease-attempt gate to terminal failed in
+        the caller's unit of work. Scope and eligibility mirror the lease scan;
+        conditioning on the non-terminal statuses makes the failure marker land
+        exactly once per action even under competing sweeps."""
+        problem_json = json.dumps(
+            {"code": "lease_attempt_exhausted", "maxLeaseAttempts": int(max_attempts)}
+        )
+        params: list[Any] = [problem_json, now_ms, max_attempts, now_ms]
+        kind_filter = ""
+        if action_kinds:
+            placeholders = ",".join("?" for _ in action_kinds)
+            kind_filter = f"AND action_kind IN ({placeholders})"
+            params.extend(action_kinds)
+        params.append(now_ms)
+        self.execute(
+            f"""
+            UPDATE outbox_actions
+            SET status = 'failed', lease_owner = NULL, lease_expires_at_ms = NULL,
+                last_problem_json = ?, updated_at_ms = ?
+            WHERE status IN ('pending', 'leased')
+              AND attempt_count >= ?
+              AND available_at_ms <= ?
+              {kind_filter}
+              AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms <= ?)
+            """,
+            tuple(params),
+        )
 
     def get_outbox(self, action_id: str) -> OutboxRecord | None:
         row = self.execute(
