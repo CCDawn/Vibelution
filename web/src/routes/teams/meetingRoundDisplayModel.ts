@@ -1,7 +1,15 @@
 import type { MeetingSourceMessage } from "../../api/types/hypothesisFirst";
 
-const MACHINE_AGENT_ID = /^agent-\d{8}(?:-|$)/i;
+const MACHINE_AGENT_ID =
+  /^(?:agent-\d{8}(?:-[a-z0-9][a-z0-9._-]*)?|session-[a-z0-9][a-z0-9._-]*)$/i;
 const AGENT_CODE = /^A\d{3,}$/i;
+// Only trust a participant code when the session id uses the server's
+// timestamped, code-bearing shape.  Generic ids such as `session-a` are not
+// an identity mapping and must remain position-neutral in the UI.
+const CODE_BEARING_SESSION_ID = /^session-\d{8}-\d{6}-(a\d{3,})$/i;
+// Keep the legacy fixture/compatibility form deterministic without treating
+// a long runtime id (for example `agent-20260826-...`) as a display code.
+const NUMERIC_AGENT_ID = /^agent-(\d{1,3})$/i;
 
 export function isMachineAgentId(value: string): boolean {
   return MACHINE_AGENT_ID.test(value.trim());
@@ -22,10 +30,95 @@ export function meetingSpeakerLabel(
   return "发言人";
 }
 
-export function meetingSpeakerCode(rawId: string, index: number): string {
+function explicitAgentCode(rawId: string): string | null {
   const id = String(rawId || "").trim();
   if (AGENT_CODE.test(id)) return id.toUpperCase();
-  return `A${String(index + 1).padStart(3, "0")}`;
+  const sessionMatch = CODE_BEARING_SESSION_ID.exec(id);
+  return sessionMatch?.[1]?.toUpperCase() ?? null;
+}
+
+function neutralParticipantLabel(index: number): string {
+  return `第 ${index + 1} 位参与者`;
+}
+
+export function meetingSpeakerCode(rawId: string, index: number): string {
+  const id = String(rawId || "").trim();
+  const numericAgentMatch = NUMERIC_AGENT_ID.exec(id);
+  const numericAgentCode = numericAgentMatch
+    ? `A${numericAgentMatch[1].padStart(3, "0")}`
+    : null;
+  return (
+    explicitAgentCode(id) ?? numericAgentCode ?? neutralParticipantLabel(index)
+  );
+}
+
+type ResolvedSpeakerOrder = {
+  matchOrder: string[];
+  displayOrder: Array<string | null>;
+};
+
+function hasUniqueValues(values: readonly string[]): boolean {
+  return values.length > 0 && new Set(values).size === values.length;
+}
+
+function canMapSessionOrderToParticipants(
+  speakerOrder: readonly string[],
+  participants: readonly string[],
+): boolean {
+  if (
+    speakerOrder.length === 0 ||
+    speakerOrder.length !== participants.length ||
+    !speakerOrder.every(isMachineAgentId) ||
+    !speakerOrder.every(Boolean) ||
+    !participants.every((participant) =>
+      Boolean(explicitAgentCode(participant)),
+    ) ||
+    !hasUniqueValues(speakerOrder)
+  ) {
+    return false;
+  }
+  const participantCodes = participants.map(
+    (participant) => explicitAgentCode(participant) ?? "",
+  );
+  const speakerCodes = speakerOrder.map(
+    (speaker) => explicitAgentCode(speaker) ?? "",
+  );
+  return (
+    hasUniqueValues(participantCodes) &&
+    hasUniqueValues(speakerCodes) &&
+    speakerCodes.every((code) => participantCodes.includes(code))
+  );
+}
+
+function resolveSpeakerOrder(
+  participantsInput: readonly string[] | null | undefined,
+  speakerOrderInput: readonly string[] | null | undefined,
+): ResolvedSpeakerOrder {
+  const participants = (participantsInput ?? []).map((item) =>
+    String(item || "").trim(),
+  );
+  const speakerOrder = (speakerOrderInput ?? []).map((item) =>
+    String(item || "").trim(),
+  );
+  const hasSpeakerOrder = speakerOrder.some(Boolean);
+  const matchOrder = (hasSpeakerOrder ? speakerOrder : participants).filter(
+    Boolean,
+  );
+
+  if (
+    hasSpeakerOrder &&
+    canMapSessionOrderToParticipants(speakerOrder, participants)
+  ) {
+    return {
+      matchOrder,
+      displayOrder: speakerOrder.map((speaker) => explicitAgentCode(speaker)),
+    };
+  }
+
+  return {
+    matchOrder,
+    displayOrder: matchOrder.map((item) => explicitAgentCode(item)),
+  };
 }
 
 function messageSpeakerIds(message: MeetingSourceMessage): string[] {
@@ -34,12 +127,20 @@ function messageSpeakerIds(message: MeetingSourceMessage): string[] {
   return [
     message.participantId,
     message.agentId,
+    message.speakerCode,
+    message.sessionId,
     message.role,
-  ].map((item) => String(item || "").trim()).filter(Boolean);
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
 }
 
 function isCompletedSpeech(message: MeetingSourceMessage): boolean {
-  return String(message.status ?? "").trim().toLowerCase() === "completed";
+  return (
+    String(message.status ?? "")
+      .trim()
+      .toLowerCase() === "completed"
+  );
 }
 
 export type MeetingDiscussionProgress = {
@@ -55,11 +156,11 @@ export function meetingDiscussionProgress(input: {
   speakerOrder?: readonly string[] | null;
   messages?: readonly MeetingSourceMessage[] | null;
 }): MeetingDiscussionProgress {
-  const order = (
-    (input.speakerOrder && input.speakerOrder.length > 0)
-      ? input.speakerOrder
-      : (input.participants ?? [])
-  ).map((item) => String(item || "").trim()).filter(Boolean);
+  const resolvedOrder = resolveSpeakerOrder(
+    input.participants,
+    input.speakerOrder,
+  );
+  const order = resolvedOrder.matchOrder;
   const expected = order.length;
   const completed = (input.messages ?? []).filter(isCompletedSpeech);
   const spokenById = new Set(completed.flatMap(messageSpeakerIds));
@@ -67,7 +168,11 @@ export function meetingDiscussionProgress(input: {
   let nextIndex = -1;
   for (let index = 0; index < order.length; index += 1) {
     const id = order[index];
-    if (id && spokenById.has(id)) {
+    const displayId = resolvedOrder.displayOrder[index];
+    if (
+      id &&
+      (spokenById.has(id) || (displayId ? spokenById.has(displayId) : false))
+    ) {
       spoken += 1;
     } else if (nextIndex < 0) {
       nextIndex = index;
@@ -78,11 +183,21 @@ export function meetingDiscussionProgress(input: {
     nextIndex = spoken < expected ? spoken : -1;
   }
   const complete = expected > 0 && spoken >= expected;
-  const nextCode = !complete && nextIndex >= 0
-    ? meetingSpeakerCode(order[nextIndex] || "", nextIndex)
-    : null;
+  const nextCode =
+    !complete && nextIndex >= 0
+      ? meetingSpeakerCode(
+          resolvedOrder.displayOrder[nextIndex] || order[nextIndex] || "",
+          nextIndex,
+        )
+      : null;
   if (complete) {
-    return { spoken, expected, nextCode: null, complete, label: "讨论完成，待整理" };
+    return {
+      spoken,
+      expected,
+      nextCode: null,
+      complete,
+      label: "讨论完成，待整理",
+    };
   }
   const countLabel = `已发言 ${spoken}/${expected || 0}`;
   return {
@@ -90,7 +205,9 @@ export function meetingDiscussionProgress(input: {
     expected,
     nextCode,
     complete,
-    label: nextCode ? `${countLabel} · 待 ${nextCode}` : countLabel,
+    label: nextCode
+      ? `${countLabel} · ${nextCode.startsWith("第 ") ? "待" : "待 "}${nextCode}`
+      : countLabel,
   };
 }
 

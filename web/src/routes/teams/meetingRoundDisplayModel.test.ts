@@ -6,43 +6,69 @@ import {
   meetingDiscussionProgress,
   meetingMessageNeedsFullText,
   meetingSpeakerLabel,
+  meetingSpeakerCode,
 } from "./meetingRoundDisplayModel";
 import type { MeetingSourceMessage } from "../../api/types/hypothesisFirst";
 
 describe("meetingRoundDisplayModel", () => {
   it("hides machine agent ids and prefers a human role", () => {
     expect(isMachineAgentId("agent-20260722-220514-082385")).toBe(true);
-    expect(meetingSpeakerLabel({
-      agentId: "agent-20260722-220514-082385",
-      role: "评审",
-    })).toBe("评审");
-    expect(meetingSpeakerLabel({
-      agentId: "agent-20260722-220514-082385",
-      role: "source_ingestor",
-      speakerTitle: "A014 · 科研协调",
-    })).toBe("A014 · 科研协调");
-    expect(meetingSpeakerLabel({
-      agentId: "agent-20260722-220514-082385",
-    })).toBe("发言人");
+    expect(isMachineAgentId("session-20260826-101741-a015")).toBe(true);
+    expect(
+      meetingSpeakerLabel({
+        agentId: "agent-20260722-220514-082385",
+        role: "评审",
+      }),
+    ).toBe("评审");
+    expect(
+      meetingSpeakerLabel({
+        agentId: "agent-20260722-220514-082385",
+        role: "source_ingestor",
+        speakerTitle: "A014 · 科研协调",
+      }),
+    ).toBe("A014 · 科研协调");
+    expect(
+      meetingSpeakerLabel({
+        agentId: "session-20260826-101741-a015",
+      }),
+    ).toBe("发言人");
+    expect(meetingSpeakerCode("session-20260826-101741-a015", 0)).toBe("A015");
+    expect(meetingSpeakerCode("session-a015", 0)).toBe("第 1 位参与者");
+    expect(
+      meetingSpeakerLabel({
+        agentId: "agent-20260722-220514-082385",
+      }),
+    ).toBe("发言人");
     expect(meetingSpeakerLabel({ agentId: "白望舒" })).toBe("白望舒");
   });
 
   it("strips markdown markers so compact chrome is not source dumps", () => {
-    expect(displayMeetingMessageText("**分布/密度组** artifactPath", { collapseWhitespace: true }))
-      .toBe("分布/密度组 artifactPath");
-    expect(displayMeetingMessageText("确认：\n\n- **下一步**", { collapseWhitespace: true }))
-      .toBe("确认： - 下一步");
+    expect(
+      displayMeetingMessageText("**分布/密度组** artifactPath", {
+        collapseWhitespace: true,
+      }),
+    ).toBe("分布/密度组 artifactPath");
+    expect(
+      displayMeetingMessageText("确认：\n\n- **下一步**", {
+        collapseWhitespace: true,
+      }),
+    ).toBe("确认： - 下一步");
   });
 
   it("keeps long ledger dumps behind a full-text expander", () => {
     expect(meetingMessageNeedsFullText("短句")).toBe(false);
-    expect(meetingMessageNeedsFullText("确认：\n本轮评审输入已闭合")).toBe(true);
+    expect(meetingMessageNeedsFullText("确认：\n本轮评审输入已闭合")).toBe(
+      true,
+    );
     expect(meetingMessageNeedsFullText("a".repeat(81))).toBe(true);
   });
 });
 
 function speakers(count: number): string[] {
-  return Array.from({ length: count }, (_, index) => `agent-${index + 1}`);
+  return Array.from(
+    { length: count },
+    (_, index) => `A${String(index + 1).padStart(3, "0")}`,
+  );
 }
 
 function spoken(ids: readonly string[]): MeetingSourceMessage[] {
@@ -60,7 +86,12 @@ describe("meetingDiscussionProgress", () => {
       participants: speakers(9),
       messages: [],
     });
-    expect(progress).toMatchObject({ spoken: 0, expected: 9, complete: false, nextCode: "A001" });
+    expect(progress).toMatchObject({
+      spoken: 0,
+      expected: 9,
+      complete: false,
+      nextCode: "A001",
+    });
     expect(progress.label).toBe("已发言 0/9 · 待 A001");
   });
 
@@ -70,7 +101,12 @@ describe("meetingDiscussionProgress", () => {
       speakerOrder: order,
       messages: spoken(order.slice(0, 3)),
     });
-    expect(progress).toMatchObject({ spoken: 3, expected: 9, complete: false, nextCode: "A004" });
+    expect(progress).toMatchObject({
+      spoken: 3,
+      expected: 9,
+      complete: false,
+      nextCode: "A004",
+    });
     expect(progress.label).toBe("已发言 3/9 · 待 A004");
   });
 
@@ -80,7 +116,12 @@ describe("meetingDiscussionProgress", () => {
       speakerOrder: order,
       messages: spoken(order),
     });
-    expect(progress).toMatchObject({ spoken: 9, expected: 9, complete: true, nextCode: null });
+    expect(progress).toMatchObject({
+      spoken: 9,
+      expected: 9,
+      complete: true,
+      nextCode: null,
+    });
     expect(progress.label).toBe("讨论完成，待整理");
   });
 
@@ -90,5 +131,82 @@ describe("meetingDiscussionProgress", () => {
       messages: spoken(["A018"]),
     });
     expect(progress.label).toBe("已发言 1/3 · 待 A019");
+  });
+
+  it("maps a session speaker order to the room's real participant codes", () => {
+    const speakerOrder = [
+      "session-20260826-101741-a015",
+      "session-20260826-101741-a017",
+      "session-20260826-101741-a019",
+      "session-20260826-101741-a020",
+    ];
+    const progress = meetingDiscussionProgress({
+      participants: ["A015", "A017", "A019", "A020"],
+      speakerOrder,
+      messages: spoken([speakerOrder[0], speakerOrder[1]]),
+    });
+
+    expect(progress).toMatchObject({
+      spoken: 2,
+      expected: 4,
+      complete: false,
+      nextCode: "A019",
+    });
+    expect(progress.label).toBe("已发言 2/4 · 待 A019");
+  });
+
+  it("matches a mapped participant code when a message omits its session id", () => {
+    const progress = meetingDiscussionProgress({
+      participants: ["A015", "A017", "A019", "A020"],
+      speakerOrder: [
+        "session-20260826-101741-a015",
+        "session-20260826-101741-a017",
+        "session-20260826-101741-a019",
+        "session-20260826-101741-a020",
+      ],
+      messages: spoken(["A015"]),
+    });
+
+    expect(progress).toMatchObject({
+      spoken: 1,
+      expected: 4,
+      nextCode: "A017",
+    });
+    expect(progress.label).toBe("已发言 1/4 · 待 A017");
+  });
+
+  it("does not infer real participant codes from generic session ids", () => {
+    const progress = meetingDiscussionProgress({
+      participants: ["A015", "A017", "A019", "A020"],
+      speakerOrder: ["session-a", "session-b", "session-c", "session-d"],
+      messages: [],
+    });
+
+    expect(progress).toMatchObject({
+      spoken: 0,
+      expected: 4,
+      complete: false,
+      nextCode: "第 1 位参与者",
+    });
+    expect(progress.label).toBe("已发言 0/4 · 待第 1 位参与者");
+    expect(progress.label).not.toContain("A015");
+    expect(progress.label).not.toContain("A017");
+  });
+
+  it("uses a neutral position when session identities cannot be mapped safely", () => {
+    const progress = meetingDiscussionProgress({
+      participants: ["A015", "A017"],
+      speakerOrder: ["session-a", "session-b", "session-c"],
+      messages: [],
+    });
+
+    expect(progress).toMatchObject({
+      spoken: 0,
+      expected: 3,
+      complete: false,
+      nextCode: "第 1 位参与者",
+    });
+    expect(progress.label).toBe("已发言 0/3 · 待第 1 位参与者");
+    expect(progress.label).not.toContain("A001");
   });
 });
