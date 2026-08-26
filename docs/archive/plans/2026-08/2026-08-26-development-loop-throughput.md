@@ -31,6 +31,7 @@
 - 在没有持有 `integration/main` claim 时运行昂贵验证。
 - manifest 首次通过后才获取短 TTL 集成 claim；获取后再次复核 manifest，再执行 fast-forward merge。
 - 竞争期间 `main` 变化时返回 `stale_main`/validation failure，不强行合入；已有 manifest 路径随冲突结果返回，未变时重试不再跑测试。
+- 若首轮已因 `stale_main` 失败，允许同步最新 `main` 后用一次 15 分钟保留式重试，避免高频合入造成无限验证饿死；首轮仍禁止占锁跑测试。
 
 ### 3.3 消除质量门长尾
 

@@ -47,6 +47,8 @@
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>"
 # 若已手动 closeout，复用其精确绑定的 manifest，禁止再跑整套测试
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --manifest "<MANIFEST_PATH>"
+# 仅当锁外验证已因 main 前进返回 stale_main：同步最新 main 后，用一次保留式重试防止持续饿死
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --reserve-integration
 
 # FE focused Vitest（仓库根执行，selector 输出格式）
 node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web

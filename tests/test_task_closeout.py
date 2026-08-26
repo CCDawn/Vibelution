@@ -62,6 +62,29 @@ def test_integration_claim_conflict_preserves_prevalidated_manifest(
     assert events == ["closeout", "verify", "acquire"]
 
 
+def test_reserved_integration_claim_uses_bounded_validation_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def coordination(_context, *arguments):
+        captured.extend(arguments)
+        return {"claim": {"id": "claim-int"}}
+
+    monkeypatch.setattr(closeout, "_coordination_call", coordination)
+
+    claim_id = closeout.acquire_integration_claim(
+        context(tmp_path),
+        agent_id="agent-test",
+        reserve_validation=True,
+    )
+
+    assert claim_id == "claim-int"
+    assert captured[captured.index("--ttl-minutes") + 1] == "15"
+    assert "starvation fallback" in captured[captured.index("--note") + 1]
+
+
 @pytest.mark.parametrize("failure", ["unsafe_worktree_path", "dirty_main", "dirty_worktree"])
 def test_invalid_context_skips_claim_and_quality_gate(
     tmp_path: Path,
@@ -231,6 +254,48 @@ def test_failed_quality_gate_never_acquires_integration_claim(
     assert result.status == "validation_failed"
     assert result.merged is False
     assert events == []
+
+
+def test_reserved_retry_acquires_before_validation_and_releases_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+
+    def acquire(*_args, **kwargs):
+        assert kwargs["reserve_validation"] is True
+        events.append("acquire")
+        return "claim-int"
+
+    monkeypatch.setattr(closeout, "acquire_integration_claim", acquire)
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: events.append("closeout")
+        or gate.GateResult(outcome="failed", exit_code=1),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "release_claim",
+        lambda _ctx, claim_id, *, status, reason: events.append(f"release:{claim_id}:{status}"),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: pytest.fail("failed reserved validation must not merge"),
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        reserve_integration=True,
+    )
+
+    assert result.status == "validation_failed"
+    assert result.merged is False
+    assert events == ["acquire", "closeout", "release:claim-int:released"]
 
 
 def test_integration_release_failure_is_reported(
