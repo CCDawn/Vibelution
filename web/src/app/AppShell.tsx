@@ -2264,7 +2264,7 @@ export function AppShell() {
                         <div className={styles.activeWorkDetailTitle}>
                           <strong>{item.label}</strong>
                         </div>
-                        {item.summary ? <p>{item.summary}</p> : null}
+                        {item.fullSummary ? <p>{item.fullSummary}</p> : null}
                         {runIdDisplay ? (
                           <code title={item.runId || undefined}>{runIdDisplay}</code>
                         ) : null}

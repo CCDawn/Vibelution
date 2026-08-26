@@ -210,13 +210,19 @@ export function ResearchProcessWorkspace({
     chainQuestionId,
   ]);
 
+  const experimentChainSummary = hypothesisFirstChain.chainState
+    ? {
+        ...hypothesisFirstChain.chainState,
+        activeRoundIndex: hypothesisFirstChain.stateV2?.review.activeRoundIndex,
+      }
+    : null;
   const experimentIdentity = buildExperimentChromeIdentity({
     questionId: chainQuestionId,
     title: catalog.questions.find(
       (question) => question.questionId.toUpperCase() === chainQuestionId.toUpperCase(),
     )?.title ?? chainQuestionId,
     selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
-    chain: hypothesisFirstChain.chainState,
+    chain: experimentChainSummary,
   });
   const experimentOptions = useMemo(() => {
     const currentRun = runState.run;
@@ -235,13 +241,13 @@ export function ResearchProcessWorkspace({
         runId: currentRun?.runId ?? "",
         currentNodeId,
         selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
-        chain: hypothesisFirstChain.chainState,
+        chain: experimentChainSummary,
       },
     });
   }, [
     catalog.questions,
     chainQuestionId,
-    hypothesisFirstChain.chainState,
+    experimentChainSummary,
     hypothesisFirstChain.selection?.selectedCandidateIds,
     runState.run,
   ]);

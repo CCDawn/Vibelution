@@ -41,6 +41,7 @@ export type ExperimentChromeIdentity = {
 
 type ExperimentChainSummary = {
   meetingCount?: number;
+  activeRoundIndex?: number | null;
   roundBudget?: number;
   hypothesisConverged?: boolean;
 };
@@ -68,8 +69,13 @@ export function formatHypothesisSummary(
   // One logical review round fans out into one meeting per selected candidate.
   // meetingCount is a physical-room count, so normalize it by the fan-out
   // width before presenting a human-facing round number.
+  const canonicalRound = Number(chain?.activeRoundIndex ?? 0);
   const meetingCount = Number(chain?.meetingCount ?? 0);
-  const round = meetingCount > 0 ? Math.ceil(meetingCount / count) : 0;
+  const round = canonicalRound > 0
+    ? canonicalRound
+    : meetingCount > 0
+      ? Math.ceil(meetingCount / count)
+      : 0;
   if (round > 0) return `${count} 条假说评审中 · 第 ${round} 轮`;
   return `${count} 条假说待评审`;
 }
