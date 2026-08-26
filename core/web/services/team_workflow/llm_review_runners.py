@@ -24,8 +24,10 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from config import get_config
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
+from core.llm.agent_runtime import config_for_agent_llm_model
 from core.llm.client import model_invocation_receipt_context_scope
 from core.llm.invocation import invoke_llm_outcome
 from core.research.workflow.contracts import ContractValidationError
@@ -33,6 +35,9 @@ from core.research.workflow.contracts.hypothesis_quality import (
     AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
     HYPOTHESIS_SCORE_DIMENSIONS,
     canonical_hypothesis_score_rubric,
+)
+from core.web.services.team.team_constants import (
+    CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
 )
 from core.web.services.team_workflow.hypothesis_review_executor import (
     ProviderBoundReviewResult,
@@ -50,17 +55,30 @@ _MAX_MESSAGES = 40
 
 
 def resolve_review_llm() -> dict[str, Any] | None:
-    """Resolve the operator LLM for review calls; ``None`` keeps DEV fixtures.
+    """Resolve the Challenge Cup team LLM for review calls.
 
-    ``LLMConfig.ensure_defaults`` always materializes a default provider and
-    profile, so a constructable client alone does not mean a usable model.
-    The provider credentials are therefore checked explicitly: a provider
-    without a usable API key (inline value or populated env var) is treated
-    as unavailable and the deterministic DEV fixtures stay in charge.
+    Review and digest generation belong to the Challenge Cup workflow, so
+    they must use the same canonical model binding as its managed team
+    agents.  The global ``primary`` profile belongs to the operator and may
+    point at an unrelated or unavailable provider.  The selected team model
+    is projected onto an isolated runtime config; no operator config is
+    mutated.
+
+    A provider without usable credentials is treated as unavailable and the
+    deterministic DEV fixtures stay in charge.
     """
 
     try:
-        client = get_llm_client(profile_id=REVIEW_LLM_PROFILE_ID)
+        runtime_config = config_for_agent_llm_model(
+            get_config(),
+            model_id=CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
+            runtime_profile_id=REVIEW_LLM_PROFILE_ID,
+            slot="dialogue",
+        )
+        client = get_llm_client(
+            profile_id=REVIEW_LLM_PROFILE_ID,
+            config=runtime_config,
+        )
         model_id = str(getattr(getattr(client, "profile", None), "model", "") or "").strip()
         provider = getattr(client, "provider", None)
         api_key = str(getattr(provider, "api_key", "") or "").strip()

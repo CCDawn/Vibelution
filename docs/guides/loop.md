@@ -22,9 +22,9 @@
 3 RESEARCH  §2.2：评估本地 + 对照仓外成熟方案 → 评估排序，只借最符合项目的切片；未闭合不写
 4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
-6 VERIFY    每个逻辑修改批次按影响面跑最小 lint/compile/test；FE 走 focused/changed Vitest + VUI contract + 增量 typecheck；所有验证在 merge 前完成
+6 VERIFY    稳定修改批次按影响面跑最窄反馈测试；同一 HEAD/命令/输入未变不重复跑；完整 selector 计划留给最终 closeout 一次执行
 7 EVIDENCE  实现文件有变更时先 `reuse_research_evidence.py record`；logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
-8 INTEGRATE 合入门全绿后必须主动 `git merge --ff-only`；不得等用户再下令审查/合入
+8 INTEGRATE 默认用 `scripts/task_closeout.py` 一次完成最终验证、短时 integration claim、ff-only merge 与清理；不得先手动 closeout 后无参重跑，不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
 10 CLOSE     对用户汇报（根 `AGENTS.md` §5）；内部合入/清理仍做，不贴完成块
 ```
@@ -42,6 +42,13 @@
 
 # 实现文件变更：查看参数并记录任务级复用研究证据；候选元数据由 registry 自动补齐
 .\.venv\Scripts\python.exe scripts\reuse_research_evidence.py record --help
+
+# 最终一键收口：未生成 manifest 时只执行一次完整 selector 计划
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>"
+# 若已手动 closeout，复用其精确绑定的 manifest，禁止再跑整套测试
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --manifest "<MANIFEST_PATH>"
+# 仅当锁外验证已因 main 前进返回 stale_main：同步最新 main 后，用一次保留式重试防止持续饿死
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --reserve-integration
 
 # FE focused Vitest（仓库根执行，selector 输出格式）
 node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web

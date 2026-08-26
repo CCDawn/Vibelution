@@ -109,6 +109,14 @@ def test_active_component_request_guidance_is_retired_from_prompt_sources() -> N
     assert "<active_components>" not in to_string(built.prompt)
 
 
+def test_common_prompt_forbids_repeating_unchanged_validation() -> None:
+    common = Path("core/core_prompt/COMMON.md").read_text(encoding="utf-8")
+
+    assert "同一 HEAD" in common
+    assert "不重复执行" in common
+    assert "完整 selector" in common
+
+
 def test_agent_uses_unbound_client_when_protocol_disallows_tools() -> None:
     agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     base = SimpleNamespace(

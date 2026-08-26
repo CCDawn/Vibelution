@@ -447,6 +447,44 @@ def _pytest_command(test_files: list[str]) -> str:
     return f"{PYTHON_TEST_COMMAND_PREFIX} {' '.join(test_files)} -q"
 
 
+def _changed_test_is_serial(project_root: Path, relative_path: str) -> bool:
+    try:
+        path = project_root / relative_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return True
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if value is not None and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in targets
+        ):
+            return _pytestmark_contains_serial(value)
+    return False
+
+
+def _pytestmark_contains_serial(node: ast.AST) -> bool:
+    if isinstance(node, ast.Call):
+        return _pytestmark_contains_serial(node.func)
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return any(_pytestmark_contains_serial(item) for item in node.elts)
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "serial"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
+
+
 def _python_fallback_selection(
     changed_files: list[str],
     explicitly_owned_files: set[str],
@@ -478,8 +516,24 @@ def _python_fallback_selection(
                 "selectedTests": changed_test_files,
             }
         )
-        commands.append(_pytest_command(changed_test_files))
-        layers.append("focused")
+        serial_changed_tests = [
+            path
+            for path in changed_test_files
+            if _changed_test_is_serial(project_root, path)
+        ]
+        parallel_changed_tests = [
+            path for path in changed_test_files if path not in serial_changed_tests
+        ]
+        if parallel_changed_tests:
+            commands.append(
+                _parallelize_pytest_command(_pytest_command(parallel_changed_tests))
+            )
+            layers.append("focused")
+            if len(parallel_changed_tests) > 1:
+                layers.append("local-parallel")
+        if serial_changed_tests:
+            commands.append(_pytest_command(serial_changed_tests))
+            layers.extend(["focused", "local-serial"])
 
     uncovered_sources = sorted(
         path

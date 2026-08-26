@@ -25,6 +25,9 @@ from core.research.workflow.contracts import (
     HypothesisRound,
     scope_hash_for,
 )
+from core.web.services.team_workflow.jsonl_quarantine import (
+    read_jsonl_with_quarantine,
+)
 
 SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
@@ -73,25 +76,19 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _read_store(path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Read the ledger, quarantining corrupt lines instead of failing closed.
+
+    One torn write must not permanently brick every round read with a 422,
+    so bad lines are isolated to an append-only sidecar and reported through
+    ``corruptQuarantinedLineCount`` while the original file stays untouched
+    for concurrent appenders.
+    """
+    return read_jsonl_with_quarantine(path)
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ResearchHypothesisRoundError(
-                f"Invalid hypothesis round JSONL at line {line_number}."
-            ) from exc
-        if not isinstance(payload, dict):
-            raise ResearchHypothesisRoundError(
-                f"Invalid hypothesis round record at line {line_number}."
-            )
-        records.append(payload)
-    return records
+    return _read_store(path)[0]
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
@@ -675,7 +672,7 @@ def list_hypothesis_rounds(team_id: str) -> dict[str, Any]:
 
     normalized_team_id = assert_team_exists(team_id)
     with _LOCK:
-        records = _read_jsonl(_storage_path(normalized_team_id))
+        records, corrupt_count = _read_store(_storage_path(normalized_team_id))
     latest: dict[str, dict[str, Any]] = {}
     for record in records:
         latest[str(record.get("roundId") or "")] = record
@@ -685,6 +682,7 @@ def list_hypothesis_rounds(team_id: str) -> dict[str, Any]:
         "teamId": normalized_team_id,
         "roundCount": len(rounds),
         "rounds": rounds,
+        "corruptQuarantinedLineCount": corrupt_count,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
 
@@ -696,7 +694,7 @@ def get_hypothesis_round(team_id: str, round_id: str) -> dict[str, Any]:
     normalized_team_id = assert_team_exists(team_id)
     normalized_round_id = str(round_id or "").strip()
     with _LOCK:
-        records = _read_jsonl(_storage_path(normalized_team_id))
+        records, corrupt_count = _read_store(_storage_path(normalized_team_id))
         record = _latest_by_id(records, "roundId", normalized_round_id)
     if record is None:
         raise ResearchHypothesisRoundNotFoundError("Hypothesis round not found.")
@@ -704,5 +702,6 @@ def get_hypothesis_round(team_id: str, round_id: str) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "round": record,
+        "corruptQuarantinedLineCount": corrupt_count,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
