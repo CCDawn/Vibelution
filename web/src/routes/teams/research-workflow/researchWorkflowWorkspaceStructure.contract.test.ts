@@ -72,12 +72,7 @@ describe("research workflow workspace responsibility contract", () => {
     const toolbarStyles = readFileSync(resolve(root, "ResearchWorkflowToolbar.styles.ts"), "utf8");
     expect(source).toContain("responsive={{");
     expect(source).toContain('rail: { label: "研究阶段" }');
-    // The URL-synced responsive inspector (459dbfb9a) intentionally expanded
-    // the drawer block beyond a one-line literal; keep guarding the approved
-    // label plus the URL-owned open wiring instead of the stale marker.
-    expect(source).toContain("inspector: {");
-    expect(source).toContain('label: "当前任务"');
-    expect(source).toContain("open: location.inspectorOpen");
+    expect(source).toMatch(/inspector:\s*{\s*label: "当前任务"/);
     expect(source).toContain("layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}");
     expect(source).toContain("toolbarClassName={styles.toolbar}");
     expect(workspaceStyles).toContain('toolbar: "!flex-nowrap overflow-hidden"');

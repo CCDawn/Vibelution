@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.reuse_research_contract import (  # noqa: E402
     DECISIONS,
     LOCAL_REUSE_DECISIONS,
+    RESEARCH_MODES,
     ReuseResearchEvidenceError,
     evidence_path,
     record_evidence,
@@ -29,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     record = subparsers.add_parser("record")
     record.add_argument("--project-root", type=Path, default=Path.cwd())
     record.add_argument("--feature", required=True)
+    record.add_argument("--mode", choices=sorted(RESEARCH_MODES), default="EXTERNAL")
     record.add_argument("--decision", choices=sorted(DECISIONS), required=True)
     record.add_argument(
         "--local-reuse-decision",
@@ -36,14 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     record.add_argument("--local-owner", action="append", default=[], required=True)
-    record.add_argument("--candidate", action="append", default=[], required=True)
-    record.add_argument("--borrowed-slice", action="append", default=[], required=True)
-    record.add_argument("--rejected-alternative", action="append", default=[], required=True)
+    record.add_argument("--candidate", action="append", default=[])
+    record.add_argument("--borrowed-slice", action="append", default=[])
+    record.add_argument("--rejected-alternative", action="append", default=[])
     record.add_argument("--reason", required=True)
     record.add_argument("--implementation-boundary", required=True)
     record.add_argument("--verification-strategy", required=True)
     record.add_argument("--risk-note", action="append", default=[])
-    record.add_argument("--source-ref", action="append", default=[], required=True)
+    record.add_argument("--source-ref", action="append", default=[])
     return parser
 
 
@@ -64,6 +66,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             verification_strategy=args.verification_strategy,
             risk_notes=args.risk_note,
             source_refs=args.source_ref,
+            research_mode=args.mode,
             project_root=args.project_root,
         )
     except (OSError, RuntimeError, ValueError, ReuseResearchEvidenceError) as exc:
@@ -77,6 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "path": str(path),
                 "taskId": payload["taskId"],
                 "decision": payload["decision"],
+                "researchMode": payload["researchMode"],
                 "candidates": [
                     {
                         "projectId": candidate["projectId"],
