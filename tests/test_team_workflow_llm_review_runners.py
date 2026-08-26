@@ -19,11 +19,17 @@ No real model or network is involved.
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import pytest
 
 from core.llm.types import CanonicalItemIdentity, TurnOutcome
 from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+    ModelInvocationStatus,
+)
 from core.web.services.team_workflow import llm_review_runners
 from core.web.services.team_workflow.hypothesis_review_executor import (
     ProviderBoundReviewResult,
@@ -204,7 +210,7 @@ def _formal_review_context(**overrides) -> dict:
     return context
 
 
-def _final_outcome(invocation_context, *, receipt=None) -> TurnOutcome:
+def _final_outcome(invocation_context, *, receipt=None, final_text=None) -> TurnOutcome:
     identity = CanonicalItemIdentity(
         session_id=invocation_context.session_id,
         turn_id=str(invocation_context.metadata["turnId"]),
@@ -215,7 +221,11 @@ def _final_outcome(invocation_context, *, receipt=None) -> TurnOutcome:
     return TurnOutcome(
         kind="final_answer",
         identity=identity,
-        final_text=json.dumps({"outcome": "left_wins", "justification": "A 领先"}),
+        final_text=(
+            final_text
+            if final_text is not None
+            else json.dumps({"outcome": "left_wins", "justification": "A 领先"})
+        ),
         terminal_event_seen=True,
         model_invocation_receipt=receipt,
     )
@@ -441,7 +451,10 @@ def test_reflection_runner_fails_closed_on_missing_dimensions(monkeypatch):
             "scores": {"novelty": 0.5},
         }
     )
-    _install_fake_llm(monkeypatch, [payload])
+    # Reflection calls may run concurrently; every candidate must receive the
+    # same malformed payload so the failure surfaces from payload validation,
+    # not from an exhausted fake queue.
+    _install_fake_llm(monkeypatch, [payload, payload])
     context = _review_context()
     with pytest.raises(ContractValidationError):
         execute_hypothesis_review(
@@ -453,6 +466,129 @@ def test_reflection_runner_fails_closed_on_missing_dimensions(monkeypatch):
             metareview_runner=runners["metareview_runner"],
             reviewer_assignments={"metareview": "coordinator"},
         )
+
+
+def _formal_step_receipt(step: str, marker: str) -> dict:
+    receipt_id = f"provider-{step}-{marker}"
+    return ModelInvocationReceipt.from_invocation(
+        receipt_id=receipt_id,
+        run_id="workflow-run-formal",
+        node_run_id=f"review-node-{receipt_id}",
+        scope={
+            "questionId": "SCI-096",
+            "workflowRunId": "workflow-run-formal",
+            "questionStage": "review",
+        },
+        provider="opencode",
+        model="deepseek-v4-flash",
+        requested_model="deepseek-v4-flash",
+        status=ModelInvocationStatus.SUCCEEDED,
+        request_content={"receiptId": receipt_id},
+        response_content={"ok": True},
+        started_at_ms=10,
+        finished_at_ms=20,
+        retry_count=0,
+        metadata={"questionStage": "review", "outcomeKinds": ["review"]},
+        evidence_locator={"kind": "hypothesis_review_step"},
+    ).to_dict()
+
+
+def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypatch):
+    """FORMAL receipt binding must survive bounded-parallel execution.
+
+    ``model_invocation_receipt_context_scope`` is ContextVar-based: worker
+    threads do not inherit the caller's context.  The binding works only
+    because each runner enters the scope around its own invoke; this test
+    drives real concurrent reflection calls and asserts every in-flight call
+    reads back exactly the receipt authority minted for it.
+    """
+
+    from core.llm import client as llm_client
+
+    captured: list[dict[str, str]] = []
+    capture_lock = threading.Lock()
+    reflection_payload = json.dumps(
+        {
+            "claim": "假说 A",
+            "rationale": "五维评分依据。",
+            "differenceFromAlternatives": "机制不同",
+            "lineageRefs": [],
+            "scores": {
+                "novelty": 0.72,
+                "competitionFit": 0.65,
+                "falsifiability": 0.6,
+                "evidenceSupport": 0.55,
+                "feasibility": 0.8,
+            },
+            "reviewedBy": "llm",
+            "status": "reviewed",
+        },
+        ensure_ascii=False,
+    )
+    payload_by_purpose = {
+        "hypothesis_reflection": reflection_payload,
+        "hypothesis_pairwise": json.dumps(
+            {"outcome": "left_wins", "justification": "A 领先"}
+        ),
+        "hypothesis_pareto": json.dumps(
+            {
+                "paretoFrontCandidateIds": ["cand-a"],
+                "dominatedCandidateIds": ["cand-b"],
+                "notes": "B 被全维占优。",
+            }
+        ),
+        "hypothesis_metareview": json.dumps(
+            {
+                "recommendationCandidateId": "cand-a",
+                "rationale": "前沿且胜出。",
+                "riskNotes": "",
+                "accepted": True,
+            }
+        ),
+    }
+
+    def fake_invoke_llm_outcome(client, messages, context=None, **kwargs):
+        assert context is not None
+        purpose = str(context.metadata.get("purpose") or "")
+        invocation_id = str(context.metadata.get("invocationId") or "")
+        bound = llm_client._MODEL_INVOCATION_RECEIPT_CONTEXT.get()
+        record = {
+            "purpose": purpose,
+            "invocationId": invocation_id,
+            "scopeInvocationId": str((bound or {}).get("invocationId") or ""),
+        }
+        with capture_lock:
+            captured.append(record)
+        time.sleep(0.02)  # widen the concurrent window on purpose
+        return _final_outcome(
+            context,
+            receipt=_formal_step_receipt(purpose, invocation_id),
+            final_text=payload_by_purpose[purpose],
+        )
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", fake_invoke_llm_outcome)
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
+    )
+    context = _formal_review_context()
+
+    result = execute_hypothesis_review(
+        context,
+        execution_mode="formal",
+        **runners,
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    # Two concurrent reflections plus pairwise/pareto/metareview: every call
+    # must read back exactly its own binding while others are in flight.
+    purposes = [record["purpose"] for record in captured]
+    assert purposes.count("hypothesis_reflection") == 2
+    for record in captured:
+        assert record["scopeInvocationId"] == record["invocationId"]
+    assert len({record["invocationId"] for record in captured}) == len(captured)
+    receipts = result["modelInvocationReceipts"]
+    assert [item["status"] for item in receipts] == ["succeeded"] * 5
+    assert len({item["receiptId"] for item in receipts}) == 5
 
 
 def test_runners_compose_with_execute_hypothesis_review(monkeypatch):

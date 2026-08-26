@@ -19,6 +19,9 @@ no real model or network is involved.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from core.research.workflow.contracts import (
@@ -747,16 +750,20 @@ def _provider_bound_receipt(
 def _provider_bound_review_runners(*, receipt_factory=None):
     runners = _complete_review_runners()
     call_index = 0
+    # Reflection calls run concurrently now; receipt numbering must stay unique.
+    call_index_lock = threading.Lock()
 
     def wrap(name, runner):
         def wrapped(*args):
             nonlocal call_index
             payload = runner(*args)
-            call_index += 1
+            with call_index_lock:
+                call_index += 1
+                index = call_index
             receipt = (
-                receipt_factory(call_index, name)
+                receipt_factory(index, name)
                 if receipt_factory is not None
-                else _provider_bound_receipt(f"formal-review-{call_index}")
+                else _provider_bound_receipt(f"formal-review-{index}")
             )
             return hypothesis_review_executor.ProviderBoundReviewResult(
                 payload=payload,
@@ -896,3 +903,312 @@ def test_review_runner_scores_are_bounded_before_review_artifact_is_built():
             metareview_runner=runners["metareview_runner"],
             reviewer_assignments={"metareview": "coordinator"},
         )
+
+
+# ---------------------------------------------------------------------------
+# Bounded parallel runner execution (reflection + pairwise)
+# ---------------------------------------------------------------------------
+
+
+class _InFlightProbe:
+    """Thread-safe recorder of concurrent in-flight runner calls."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._inflight = 0
+        self.max_inflight = 0
+
+    def enter(self) -> None:
+        with self._lock:
+            self._inflight += 1
+            if self._inflight > self.max_inflight:
+                self.max_inflight = self._inflight
+
+    def exit(self) -> None:
+        with self._lock:
+            self._inflight -= 1
+
+    def assert_min_inflight(self, required: int, *, timeout: float = 5.0) -> None:
+        """Block until ``required`` calls overlap; a serial executor times out."""
+
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                reached = self.max_inflight >= required
+            if reached:
+                return
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    f"expected at least {required} concurrent review calls, "
+                    f"observed max in-flight {self.max_inflight}"
+                )
+            time.sleep(0.005)
+
+
+def _parallel_reflection_context(*candidate_ids: str) -> dict:
+    return {"contextId": "ctx-parallel", "candidates": _candidate_inputs(*candidate_ids)}
+
+
+def _marker_reflection_payload(candidate: dict, marker: str | None = None) -> dict:
+    candidate_id = str(candidate["candidateId"])
+    return {
+        "claim": str(candidate["claim"]),
+        "rationale": f"rationale:{marker or candidate_id}",
+        "differenceFromAlternatives": str(candidate["differenceFromAlternatives"]),
+        "scores": {dimension: 0.6 for dimension in SCORE_DIMENSIONS},
+    }
+
+
+def test_reflection_runner_calls_overlap_and_output_follows_input_order():
+    ids = [f"cand-{index}" for index in range(4)]
+    probe = _InFlightProbe()
+
+    def reflection(candidate, context):
+        probe.enter()
+        try:
+            # The first callers wait for a second concurrent call: a serial
+            # executor can never satisfy this and fails by timeout.
+            probe.assert_min_inflight(2)
+            return _marker_reflection_payload(candidate)
+        finally:
+            probe.exit()
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-parallel-reflection",
+        reflection_runner=reflection,
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    assert [item["candidateId"] for item in result["candidates"]] == ids
+    for item in result["candidates"]:
+        assert item["rationale"] == f"rationale:{item['candidateId']}"
+    assert probe.max_inflight >= 2
+
+
+def test_pairwise_runner_calls_overlap_and_comparisons_follow_input_order():
+    ids = ["cand-a", "cand-b", "cand-c", "cand-d"]
+    expected_pairs = hypothesis_review_executor.deterministic_pairwise_order(ids, "par-seed")
+    assert len(expected_pairs) == 6
+    probe = _InFlightProbe()
+
+    def pairwise(left, right, context):
+        probe.enter()
+        try:
+            probe.assert_min_inflight(2)
+            return {
+                "outcome": "left_wins",
+                "justification": (
+                    f"justify:{left['candidateId']}>{right['candidateId']}"
+                ),
+            }
+        finally:
+            probe.exit()
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-parallel-pairwise",
+        pairwise_runner=pairwise,
+        reviewer_assignments={"metareview": "coordinator"},
+        position_seed="par-seed",
+    )
+
+    comparisons = result["pairwiseComparisons"]
+    assert [
+        (item["leftCandidateId"], item["rightCandidateId"]) for item in comparisons
+    ] == expected_pairs
+    for item in comparisons:
+        assert item["justification"] == (
+            f"justify:{item['leftCandidateId']}>{item['rightCandidateId']}"
+        )
+    assert probe.max_inflight >= 2
+
+
+def test_parallel_results_are_assembled_by_input_order_not_completion_order():
+    ids = [f"cand-{index}" for index in range(5)]
+    delays = {index: 0.02 * (len(ids) - index) for index in range(len(ids))}
+
+    def reflection(candidate, context):
+        index = int(str(candidate["candidateId"]).rsplit("-", 1)[1])
+        time.sleep(delays[index])  # the last input finishes first
+        return _marker_reflection_payload(candidate)
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-reorder",
+        reflection_runner=reflection,
+        reviewer_assignments={"metareview": "coordinator"},
+        max_concurrent_calls=len(ids),
+    )
+
+    assert [item["candidateId"] for item in result["candidates"]] == ids
+    for item in result["candidates"]:
+        assert item["rationale"] == f"rationale:{item['candidateId']}"
+        assert set(item["scores"]) == set(SCORE_DIMENSIONS)
+
+
+def test_first_runner_failure_in_input_order_wins_without_partial_output():
+    ids = ["cand-a", "cand-b", "cand-c"]
+
+    def reflection(candidate, context):
+        candidate_id = str(candidate["candidateId"])
+        if candidate_id == "cand-a":
+            # Fails later in wall-clock than cand-b but sits earlier in input.
+            time.sleep(0.15)
+            raise ContractValidationError("late failure cand-a")
+        if candidate_id == "cand-b":
+            raise ContractValidationError("early failure cand-b")
+        return _marker_reflection_payload(candidate)
+
+    with pytest.raises(ContractValidationError, match="late failure cand-a"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _parallel_reflection_context(*ids),
+            round_id="round-first-failure",
+            reflection_runner=reflection,
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_max_concurrent_calls_one_keeps_serial_invocation_semantics():
+    ids = ["cand-a", "cand-b", "cand-c"]
+    expected_pairs = hypothesis_review_executor.deterministic_pairwise_order(ids, "serial-seed")
+    call_log: list[tuple[str, str]] = []
+    log_lock = threading.Lock()
+    probe = _InFlightProbe()
+
+    def track(step: str, key: str):
+        with log_lock:
+            call_log.append((step, key))
+
+    def reflection(candidate, context):
+        candidate_id = str(candidate["candidateId"])
+        probe.enter()
+        try:
+            track("reflection", candidate_id)
+            time.sleep(0.01)
+            return _marker_reflection_payload(candidate)
+        finally:
+            probe.exit()
+
+    def pairwise(left, right, context):
+        pair_key = f"{left['candidateId']}>{right['candidateId']}"
+        probe.enter()
+        try:
+            track("pairwise", pair_key)
+            return {"outcome": "left_wins", "justification": f"justify:{pair_key}"}
+        finally:
+            probe.exit()
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-serial",
+        reflection_runner=reflection,
+        pairwise_runner=pairwise,
+        reviewer_assignments={"metareview": "coordinator"},
+        position_seed="serial-seed",
+        max_concurrent_calls=1,
+    )
+
+    assert [item["candidateId"] for item in result["candidates"]] == ids
+    assert [
+        (item["leftCandidateId"], item["rightCandidateId"])
+        for item in result["pairwiseComparisons"]
+    ] == expected_pairs
+    assert call_log == [
+        *[("reflection", candidate_id) for candidate_id in ids],
+        *[
+            ("pairwise", f"{left}>{right}")
+            for left, right in expected_pairs
+        ],
+    ]
+    assert probe.max_inflight <= 1
+
+
+def test_bounded_pool_never_exceeds_the_injected_concurrency():
+    ids = [f"cand-{index}" for index in range(8)]
+    probe = _InFlightProbe()
+
+    def reflection(candidate, context):
+        probe.enter()
+        try:
+            time.sleep(0.02)
+            return _marker_reflection_payload(candidate)
+        finally:
+            probe.exit()
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-bound",
+        reflection_runner=reflection,
+        reviewer_assignments={"metareview": "coordinator"},
+        max_concurrent_calls=2,
+    )
+
+    assert [item["candidateId"] for item in result["candidates"]] == ids
+    assert probe.max_inflight <= 2
+
+
+def test_formal_parallel_review_collects_unique_receipts_in_input_order():
+    ids = ["cand-a", "cand-b", "cand-c"]
+    base_runners = _complete_review_runners()
+    markers: dict[str, list[str]] = {
+        "reflection": [f"formal-reflection:{candidate_id}" for candidate_id in ids],
+        "pairwise": [
+            f"formal-pairwise:{left}>{right}"
+            for left, right in hypothesis_review_executor.deterministic_pairwise_order(
+                ids, "formal-par"
+            )
+        ],
+        "pareto": ["formal-pareto:" + "|".join(sorted(ids))],
+        "metareview": ["formal-metareview:meta"],
+    }
+
+    def tagged(name, runner):
+        reflection_delays = {"cand-a": 0.09, "cand-b": 0.06, "cand-c": 0.03}
+
+        def wrapped(*args):
+            payload = runner(*args)
+            if name == "reflection":
+                marker = f"formal-reflection:{args[0]['candidateId']}"
+                time.sleep(reflection_delays[str(args[0]["candidateId"])])
+            elif name == "pairwise":
+                marker = f"formal-pairwise:{args[0]['candidateId']}>{args[1]['candidateId']}"
+            else:
+                marker = (
+                    "formal-pareto:" + "|".join(sorted(args[0]))
+                    if name == "pareto"
+                    else "formal-metareview:meta"
+                )
+            receipt = _provider_bound_receipt(marker)
+            return hypothesis_review_executor.ProviderBoundReviewResult(
+                payload=payload,
+                model_invocation_receipt=receipt,
+            )
+
+        return wrapped
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-formal-parallel",
+        execution_mode="formal",
+        reflection_runner=tagged("reflection", base_runners["reflection_runner"]),
+        pairwise_runner=tagged("pairwise", base_runners["pairwise_runner"]),
+        pareto_runner=tagged("pareto", base_runners["pareto_runner"]),
+        metareview_runner=tagged("metareview", base_runners["metareview_runner"]),
+        reviewer_assignments={"metareview": "coordinator"},
+        position_seed="formal-par",
+    )
+
+    receipts = result["modelInvocationReceipts"]
+    receipt_ids = [item["receiptId"] for item in receipts]
+    expected_ids = [
+        *markers["reflection"],
+        *markers["pairwise"],
+        *markers["pareto"],
+        *markers["metareview"],
+    ]
+    # Receipts are recorded in input order (candidates then pairs), not the
+    # deliberately inverted completion order of the tagged delays.
+    assert receipt_ids == expected_ids
+    assert len(set(receipt_ids)) == len(receipt_ids) == 3 + 3 + 1 + 1
+    assert all(item["metadata"]["questionStage"] == "review" for item in receipts)
