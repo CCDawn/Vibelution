@@ -17,9 +17,11 @@ These tests lock down that the window stays closed:
 - after re-authorization the owning mutation still recomputes the next round
   index from durable links and refuses to exceed the effective budget.
 
-No exploitable double-read window was found, so no xfail case is registered;
-if one is introduced later it belongs here as ``xfail(strict=False)`` with the
-exact interleaving documented.
+No exploitable double-read window was found.  A separate real read defect
+discovered while wiring this harness — ``_scope_records`` shadowing
+``round_ids`` and dropping every hypothesis round record on the canonical
+full-load path — is locked down at the bottom of this file as a plain
+regression case now that it is fixed.
 """
 
 from __future__ import annotations
@@ -267,38 +269,9 @@ class _EmptyQueryService:
         return {"runs": []}
 
 
-def _question_round_records() -> list[dict]:
-    """Read the durable hypothesis rounds of this question from the ledger."""
-    return [
-        dict(record)
-        for record in hypothesis_rounds._read_jsonl(
-            hypothesis_rounds._storage_path(TEAM_ID)
-        )
-        if str(record.get("question") or "").strip().upper() == QUESTION_ID
-    ]
-
-
-def _restore_dropped_round_records(sources: dict) -> dict:
-    """补偿已知的全量加载缺陷。
-
-    ``hypothesis_first_state_v2._scope_records`` 在遍历 meeting 的
-    ``chatRoomRoundIds`` 时复用了局部变量 ``round_ids``，遮蔽了外层
-    ``set(snapshot["targetRoundIds"])``；其返回值的 ``hypothesis_round_records``
-    过滤因此永远为空，canonical 全量加载路径丢弃全部假设轮记录。
-    这里在该函数返回值上把耐久假设轮记录补回去，仅用于在缺陷修复前让信封层
-    测试能走到新鲜重投影 + CAS 语义（见文件尾部的 xfail 用例）。
-    """
-    return {
-        **sources,
-        "hypothesis_round_records": _question_round_records(),
-    }
-
-
 def _envelope_env(
     tmp_path,
     monkeypatch,
-    *,
-    compensate_round_record_loss: bool = True,
 ) -> list[dict]:
     """Isolate storage and stub only the room-opening leaf of the fan-out.
 
@@ -374,19 +347,6 @@ def _envelope_env(
             "candidates": [{"candidateId": "candidate-1"}]
         },
     )
-    if compensate_round_record_loss:
-        original_scope_records = hypothesis_first_state_v2._scope_records
-
-        def compensated_scope_records(team_id, question_id):
-            return _restore_dropped_round_records(
-                original_scope_records(team_id, question_id)
-            )
-
-        monkeypatch.setattr(
-            hypothesis_first_state_v2,
-            "_scope_records",
-            compensated_scope_records,
-        )
     return opened
 
 
@@ -594,27 +554,21 @@ def test_published_budget_payload_cannot_be_raised_by_caller(
 # 锁定的是新鲜重投影 + CAS + 精确 payload 匹配把双读窗口闭合在鉴权阶段。
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "hypothesis_first_state_v2._scope_records 在遍历 meeting 的 "
-        "chatRoomRoundIds 时复用局部变量 round_ids（内层为 list），遮蔽外层 "
-        "round_ids = set(snapshot['targetRoundIds'])；返回值的 "
-        "hypothesis_round_records 过滤因此永远为空，canonical 全量加载路径丢失全部假设轮记录"
-        "（c70f3efe9 引入）。结果：收敛评审的 open_next_review / human_adjudication 在"
-        "正式读路径上永不发射（预算被误读为未开始），而纯投影与信封层防线均正常。"
-        "修复建议：循环内改用独立变量名（如 chat_bound_ids），并在过滤处恢复基于 "
-        "targetRoundIds 的集合判断；不要在本测试任务内修改源码。"
-    ),
-)
 def test_full_loader_projection_keeps_hypothesis_rounds_for_budget_gate(
     tmp_path,
     monkeypatch,
 ) -> None:
     """Canonical full loader must keep hypothesis rounds so the budget gate
-    can flip convergence into its terminal/open states; documents the real
-    read defect discovered while wiring the envelope harness."""
-    _envelope_env(tmp_path, monkeypatch, compensate_round_record_loss=False)
+    can flip convergence into its terminal/open states.
+
+    Regression anchor for the fixed read defect: ``_scope_records`` used to
+    rebind the outer ``round_ids = set(snapshot["targetRoundIds"])`` while
+    iterating meeting ``chatRoomRoundIds``, so ``hypothesis_round_records``
+    was always filtered against the wrong collection and came back empty —
+    starving convergence of ``open_next_review`` / ``human_adjudication`` on
+    the real read path (introduced by c70f3efe9, fixed by renaming the loop
+    local)."""
+    _envelope_env(tmp_path, monkeypatch)
     _seed_completed_round(round_index=1)
 
     snapshot = project_hypothesis_first_state_v2(TEAM_ID, QUESTION_ID)
