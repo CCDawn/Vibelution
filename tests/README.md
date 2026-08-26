@@ -216,11 +216,11 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 `scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
 
-- `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
-- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，在精确 HEAD 上独立执行一次完整 selector 计划，绑定 claim、本地 `main` SHA、HEAD SHA、命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。实现文件有变更时，它会先加载 `scripts/reuse_research_evidence.py record` 生成的任务证据，将 registry 自动解析的候选 URL、路径、固定 HEAD SHA、许可证和裁决快照写入 manifest；closeout 当前不复用或缓存早期迭代结果。
+- `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；只做 staged diff check 与 Python fatal Ruff。gate-definition 同时有 staged/unstaged 内容时拒绝提交；行为测试统一留给最终 closeout，避免同一批 gate 测试在 commit 与 closeout 重复执行。
+- `closeout --base main --claim-id <claim-id>`：针对已提交且 clean 的 task worktree，在精确 HEAD 上执行一次完整 selector，绑定 `active/ready` claim、本地 `main` SHA、HEAD SHA、命令和 merge preflight。实现文件有变更时加载 reuse evidence schema 3：已定位小修可用 `LOCAL_ONLY`，需要仓外对照时用 `EXTERNAL` 并固定候选 commit/blob。
 - `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、复用研究快照与固定候选 commit、allowlisted command 结果和 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
 
-日常收口首选单一入口 `scripts/task_closeout.py --task-worktree <path> --claim-id <id> --agent-id <id>`：它先在不持有全局 integration claim 的情况下执行一次完整 selector 计划，通过后才短时获取 `integration/main`，在锁内再次复核 manifest 并 fast-forward merge。不要先手动跑一遍 `closeout`，再无参调用 managed closeout；如果已经手动生成 manifest，必须追加 `--manifest <path>`，此时只复核精确绑定当前 HEAD/main/claim 的证据，不重复测试。若锁外验证已因 `main` 前进返回 `stale_main`，先同步最新 `main`，再用一次 `--reserve-integration` 重试；该防饿死路径会在验证期间持有 15 分钟租约，不能作为首轮默认。
+日常收口从 root local `main` cwd 调用 `scripts/task_closeout.py --task-worktree <path> --claim-id <id> --agent-id <id>`。它只跑一次 selector，再短时有界等待 `integration/main`；若仍冲突，返回 `manifest_path` / `next_action=retry_with_manifest`，后续必须带 `--manifest`，不得重测。`stale_main` 会返回一次性 token；同步最新 `main` 后才可用 `--reserve-integration --stale-retry-token <path>`。`merged_cleanup_pending` 已经合入，只运行 `--cleanup-only --branch <branch>`，不再验证或 merge。
 
 同一 HEAD、同一命令且相关源码、测试、配置和依赖未变化时，开发期复用已有通过结果。HEAD、命令、输入或本地 `main` 基线变化后必须重新验证；普通 pytest 输出和 Agent 文本报告不能替代 manifest。
 
@@ -231,7 +231,7 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | Mode | Outcome | 操作 |
 | --- | --- | --- |
 | `commit` | `passed` | 当前 commit 轻门通过，可继续 commit；该 mode 不生成 manifest |
-| `commit` | `failed` | 修复 staged diff、staged Python Ruff 或 gate focused self-test 的首个失败后重试 commit |
+| `commit` | `failed` | 修复 staged diff 或 staged Python fatal Ruff 的首个失败后重试 commit |
 | `commit` | `gate_definition_dirty` | 整文件 stage gate-definition 或拆成独立 commit，再重试 commit |
 | `closeout` | `passed` | 复核生成的 manifest 后进入本地 main fast-forward gate |
 | `closeout` | `failed` | 先按当前 branch 修复非法 task branch/precondition；若已有失败命令，则按首个失败命令及其 `failureSummary` 修复后重跑 closeout |
@@ -240,8 +240,8 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `closeout` | `dirty_worktree` | 提交或撤回本任务未提交内容，使 task worktree clean 后重跑 closeout |
 | `closeout` | `merge_conflict` | 仅在任务 worktree 解决冲突并重跑 closeout |
 | `closeout` | `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell，然后重跑 closeout |
-| `closeout` | `reuse_research_missing` | 对实现变更运行 `scripts/reuse_research_evidence.py record`，完成本地复用裁决和成熟候选证据后重跑 closeout |
-| `closeout` | `reuse_research_invalid` | 修正任务/分支绑定、候选 HEAD 或 clone clean 状态、许可证/风险说明等证据问题，重新记录后重跑 closeout |
+| `closeout` | `reuse_research_missing` | 已定位小修记录 `LOCAL_ONLY`；需要仓外对照的任务记录 `EXTERNAL`，然后重跑 closeout |
+| `closeout` | `reuse_research_invalid` | 修正 mode/任务绑定/本地 owner；EXTERNAL 再修候选 HEAD、clone、许可证或 source ref，重新记录后重跑 |
 | `verify-manifest` | `passed` | manifest 与当前 task branch/worktree/HEAD/changed files 一致，main 仍新鲜且是 task HEAD 祖先，claim、clean 状态、checks 与 commands 仍有效，可进入 merge gate |
 | `verify-manifest` | `failed` | manifest 不可读，或 schema/`outcome`/branch/worktree/HEAD/changed files/checks/commands 被篡改或不匹配；生成或选择正确 manifest，必要时重跑 closeout |
 | `verify-manifest` | `stale_main` | 当前本地 main 已变化或不再是 task HEAD 祖先；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |

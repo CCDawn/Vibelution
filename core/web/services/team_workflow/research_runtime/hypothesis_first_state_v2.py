@@ -55,7 +55,15 @@ _STATE_VERSION_IGNORED_KEYS = {
     "detectedAt",
     "itemCount",
     "expectedStateVersion",
+    # Per-source collection progress is wire-visible telemetry only
+    # (plan §4.4): it must change representationVersion/ETag but never
+    # stateVersion, otherwise background source completions would 409
+    # every outstanding command.  Collection commands are keyed on the
+    # request/child-run level, so source-level transitions are not
+    # command preconditions.
+    "sources",
 }
+_COLLECTION_SOURCE_EVENT_TAIL = 240
 _QUESTION_SNAPSHOT_CACHE_LOCK = threading.RLock()
 _QUESTION_SNAPSHOT_CACHE: dict[
     tuple[str, str],
@@ -1081,7 +1089,187 @@ def _aggregate(states: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     return result
 
 
-def _collection_request_state(request: Mapping[str, Any]) -> dict[str, Any]:
+def _read_collection_source_events(path: Path) -> list[dict[str, Any]]:
+    """Read the tail of one append-only source-collection search event log.
+
+    The durable authority for per-source (per-query) collection progress is
+    the child run's ``search_events.jsonl``.  Corrupt trailing lines are
+    tolerated by skipping them; the projector never writes to this store.
+    """
+
+    events: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed = json.loads(stripped)
+            except ValueError:
+                continue
+            if isinstance(parsed, Mapping):
+                events.append(dict(parsed))
+    return events[-_COLLECTION_SOURCE_EVENT_TAIL :]
+
+
+def _collection_source_states_from_events(
+    events: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Group one child run's search events into wire CollectionSourceState entries.
+
+    A "source" is one durable search query identity (``queryId``).  The last
+    decisive event (``search.executed`` / ``search.failed``) fixes the source
+    lifecycle; ``itemCount`` counts ``storage.data_record_written`` events so a
+    stored evidence item is counted exactly once.  Facts that are absent or
+    unreadable are left out instead of being inferred.
+    """
+
+    ordered: list[str] = []
+    grouped: dict[str, dict[str, Any]] = {}
+    for event in events:
+        query_id = str(event.get("queryId") or "").strip()
+        if not query_id:
+            continue
+        group = grouped.get(query_id)
+        if group is None:
+            group = {
+                "label": "",
+                "decisive": None,
+                "writtenCount": 0,
+            }
+            grouped[query_id] = group
+            ordered.append(query_id)
+        label = str(event.get("query") or "").strip()
+        if label:
+            group["label"] = label
+        event_type = str(event.get("eventType") or "").strip()
+        event_status = str(event.get("status") or "").strip().lower()
+        detected_at = str(event.get("createdAt") or "").strip() or None
+        if detected_at:
+            group["updatedAt"] = detected_at
+        if event_type == "storage.data_record_written":
+            group["writtenCount"] = int(group.get("writtenCount") or 0) + 1
+        elif event_type in {"search.executed", "search.failed"}:
+            group["decisive"] = {
+                "eventType": event_type,
+                "status": event_status,
+                "detectedAt": detected_at,
+                "summary": str(event.get("summary") or "").strip(),
+            }
+    sources: list[dict[str, Any]] = []
+    for query_id in ordered:
+        group = grouped[query_id]
+        decisive = group.get("decisive") if isinstance(group.get("decisive"), Mapping) else None
+        written_count = max(0, int(group.get("writtenCount") or 0))
+        updated_at = (
+            str(group.get("updatedAt") or "").strip()
+            or str((decisive or {}).get("detectedAt") or "")
+            or None
+        )
+        error = None
+        if decisive is not None and decisive.get("eventType") == "search.failed":
+            lifecycle = "failed"
+            outcome = "none"
+            actionability = "available"
+            message = str(decisive.get("summary") or "").strip()
+            error = _problem(
+                "collection_source_search_failed",
+                message or "资料搜集来源查询失败，可重试该轮资料搜集。",
+                category="execution",
+                severity="warning",
+                recoverable=True,
+                source_kind="collection_source",
+                source_id=query_id,
+                detected_at=updated_at or _EPOCH,
+            )
+        elif decisive is not None and decisive.get("eventType") == "search.executed":
+            # status "returned" means the search ran but fetched zero usable
+            # results; both map to completed with an honest outcome.
+            lifecycle = "completed"
+            outcome = "succeeded" if written_count > 0 else "empty"
+            actionability = "terminal"
+        else:
+            # Query planned but no decisive terminal fact yet: keep the child
+            # running signal without inventing per-source progress.
+            lifecycle = "running"
+            outcome = "none"
+            actionability = "waiting_system"
+        phase = _phase(
+            lifecycle,
+            outcome,
+            actionability,
+            updated_at=updated_at,
+        )
+        sources.append(
+            {
+                **phase,
+                "sourceId": query_id,
+                "label": str(group.get("label") or "").strip() or query_id,
+                "itemCount": written_count,
+                "error": error,
+            }
+        )
+    return sources
+
+
+def _load_collection_source_facts(
+    team_id: str,
+    run_ids: Sequence[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Load per-source facts for each referenced collection child run.
+
+    Read-only: missing event logs mean the child run has not recorded any
+    per-source progress yet and project as an empty list.  Present-but-broken
+    logs degrade the same way plus one scene event; they never fabricate
+    progress and never block the durable projection.
+    """
+
+    facts: dict[str, list[dict[str, Any]]] = {}
+    seen: set[str] = set()
+    for raw_run_id in run_ids:
+        run_id = str(raw_run_id or "").strip()
+        if not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        try:
+            from core.web.services.team_workflow.source_collection.residual import (
+                _source_collection_storage_artifact_paths,
+            )
+
+            path = _source_collection_storage_artifact_paths(team_id, run_id)[
+                "searchEventsPath"
+            ]
+        except Exception as exc:  # noqa: BLE001 - telemetry read must not break projection
+            _record_projection_scene_event(
+                "collection_source_events.unavailable",
+                team_id=team_id,
+                question_id="",
+                source_error_type=type(exc).__name__,
+            )
+            facts[run_id] = []
+            continue
+        try:
+            events = _read_collection_source_events(path)
+        except (OSError, ValueError) as exc:
+            # Missing file: child run simply has no progress yet.  Corrupt
+            # bytes/JSON: telemetry degrades to empty instead of lying.
+            _record_projection_scene_event(
+                "collection_source_events.unavailable",
+                team_id=team_id,
+                question_id="",
+                source_error_type=type(exc).__name__,
+            )
+            facts[run_id] = []
+            continue
+        facts[run_id] = _collection_source_states_from_events(events)
+    return facts
+
+
+def _collection_request_state(
+    request: Mapping[str, Any],
+    *,
+    source_facts: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     status = str(request.get("status") or "").strip().lower()
     run_status = str(request.get("collectionRunStatus") or "").strip().lower()
     request_id = str(request.get("requestId") or "").strip()
@@ -1125,6 +1313,19 @@ def _collection_request_state(request: Mapping[str, Any]) -> dict[str, Any]:
             "targetRoundIndex": request.get("targetRoundIndex"),
         }
     )
+    # Per-source progress is read-only telemetry gathered once per snapshot
+    # from the child run's durable search-event log.  ``source_facts=None``
+    # keeps the legacy empty projection for callers without a fact loader.
+    sources: list[dict[str, Any]] = []
+    if source_facts is not None:
+        for candidate in source_facts:
+            if not isinstance(candidate, Mapping):
+                continue
+            if not str(candidate.get("sourceId") or "").strip():
+                continue
+            if not str(candidate.get("label") or "").strip():
+                continue
+            sources.append(dict(candidate))
     return {
         **request_phase,
         "requestId": request_id,
@@ -1132,7 +1333,7 @@ def _collection_request_state(request: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(request.get("searchEnvelope"), Mapping)
         else 0,
         "childRun": child,
-        "sources": [],
+        "sources": sources,
         "handoff": handoff,
     }
 
@@ -2174,7 +2375,19 @@ def project_state_from_records(
         [record for record in chain if record.get("recordKind") == _COLLECTION_REQUEST_KIND],
         "requestId",
     )
-    collection_requests = [_collection_request_state(item) for item in request_records]
+    collection_source_facts = _load_collection_source_facts(
+        team_id,
+        [str(item.get("collectionRunId") or "") for item in request_records],
+    )
+    collection_requests = [
+        _collection_request_state(
+            item,
+            source_facts=collection_source_facts.get(
+                str(item.get("collectionRunId") or "").strip()
+            ),
+        )
+        for item in request_records
+    ]
     collection_aggregate = _aggregate(collection_requests)
     if not collection_requests:
         collection_phase = _phase()

@@ -14,7 +14,8 @@ from typing import Any, Iterable, Sequence
 from core.web.services import github_project_library_service as github_library
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+RESEARCH_MODES = frozenset({"LOCAL_ONLY", "EXTERNAL"})
 DECISIONS = frozenset({"REUSE", "ADAPT", "REFERENCE_ONLY", "BUILD_IN_HOUSE"})
 LOCAL_REUSE_DECISIONS = frozenset({"REUSE", "ADAPT", "REPLACE", "UNUSED"})
 UNVERIFIED_LICENSES = frozenset({"", "NOASSERTION", "OTHER"})
@@ -346,6 +347,7 @@ def record_evidence(
     verification_strategy: str,
     risk_notes: Sequence[str],
     source_refs: Sequence[str],
+    research_mode: str = "EXTERNAL",
     project_root: Path | str | None = None,
 ) -> dict[str, object]:
     repository = _repository_root(root)
@@ -357,28 +359,53 @@ def record_evidence(
     normalized_local_decision = str(local_reuse_decision or "").strip().upper()
     if normalized_local_decision not in LOCAL_REUSE_DECISIONS:
         raise ReuseResearchEvidenceError(f"Unknown local reuse decision: {local_reuse_decision}")
+    normalized_mode = str(research_mode or "").strip().upper()
+    if normalized_mode not in RESEARCH_MODES:
+        raise ReuseResearchEvidenceError(f"Unknown research mode: {research_mode}")
     risks = _text_list(risk_notes, field="riskNotes", required=False)
-    active_project_root = Path(project_root or repository).expanduser().resolve()
-    candidates, registry_updated_at = _candidate_records(
-        active_project_root,
-        candidate_ids,
-        decision=normalized_decision,
-        risk_notes=risks,
-    )
-    library_root = github_library.github_project_library_root(project_root=active_project_root)
-    source_ref_records = _source_ref_records(library_root, candidates, source_refs)
+    if normalized_mode == "LOCAL_ONLY":
+        if normalized_decision != "BUILD_IN_HOUSE":
+            raise ReuseResearchEvidenceError(
+                "LOCAL_ONLY requires decision BUILD_IN_HOUSE."
+            )
+        if candidate_ids or source_refs:
+            raise ReuseResearchEvidenceError(
+                "LOCAL_ONLY must not include external candidates or sourceRefs."
+            )
+        candidates: list[dict[str, str]] = []
+        source_ref_records: list[dict[str, str]] = []
+        registry_updated_at = ""
+    else:
+        active_project_root = Path(project_root or repository).expanduser().resolve()
+        candidates, registry_updated_at = _candidate_records(
+            active_project_root,
+            candidate_ids,
+            decision=normalized_decision,
+            risk_notes=risks,
+        )
+        library_root = github_library.github_project_library_root(project_root=active_project_root)
+        source_ref_records = _source_ref_records(library_root, candidates, source_refs)
     payload: dict[str, object] = {
         "schemaVersion": SCHEMA_VERSION,
         "taskId": task_id,
         "branch": branch,
+        "researchMode": normalized_mode,
         "feature": _text(feature, field="feature", limit=MAX_SHORT_TEXT),
         "decision": normalized_decision,
         "localReuseDecision": normalized_local_decision,
         "localOwnerPaths": _owner_paths(repository, local_owner_paths),
         "candidates": candidates,
         "sourceRefs": source_ref_records,
-        "borrowedSlices": _text_list(borrowed_slices, field="borrowedSlices"),
-        "rejectedAlternatives": _text_list(rejected_alternatives, field="rejectedAlternatives"),
+        "borrowedSlices": _text_list(
+            borrowed_slices,
+            field="borrowedSlices",
+            required=normalized_mode == "EXTERNAL",
+        ),
+        "rejectedAlternatives": _text_list(
+            rejected_alternatives,
+            field="rejectedAlternatives",
+            required=normalized_mode == "EXTERNAL",
+        ),
         "reason": _text(reason, field="reason", limit=MAX_LONG_TEXT),
         "implementationBoundary": _text(
             implementation_boundary,
@@ -416,6 +443,9 @@ def validate_evidence_payload(
         raise ReuseResearchEvidenceError("Reuse research evidence schemaVersion is invalid.")
     if payload.get("taskId") != task_id or payload.get("branch") != branch:
         raise ReuseResearchEvidenceError("Reuse research evidence is bound to another task branch.")
+    research_mode = str(payload.get("researchMode") or "")
+    if research_mode not in RESEARCH_MODES:
+        raise ReuseResearchEvidenceError("Reuse research mode is invalid.")
     decision = str(payload.get("decision") or "")
     if decision not in DECISIONS:
         raise ReuseResearchEvidenceError("Reuse research decision is invalid.")
@@ -425,7 +455,11 @@ def validate_evidence_payload(
     repository = _repository_root(root)
     _owner_paths(repository, payload.get("localOwnerPaths") or [])
     for field in ("borrowedSlices", "rejectedAlternatives"):
-        _text_list(payload.get(field) or [], field=field)
+        _text_list(
+            payload.get(field) or [],
+            field=field,
+            required=research_mode == "EXTERNAL",
+        )
     _text_list(payload.get("riskNotes") or [], field="riskNotes", required=False)
     for field, limit in (
         ("feature", MAX_SHORT_TEXT),
@@ -435,6 +469,17 @@ def validate_evidence_payload(
     ):
         _text(str(payload.get(field) or ""), field=field, limit=limit)
     candidates = payload.get("candidates")
+    source_refs = payload.get("sourceRefs")
+    if research_mode == "LOCAL_ONLY":
+        if decision != "BUILD_IN_HOUSE":
+            raise ReuseResearchEvidenceError(
+                "LOCAL_ONLY requires decision BUILD_IN_HOUSE."
+            )
+        if candidates != [] or source_refs != []:
+            raise ReuseResearchEvidenceError(
+                "LOCAL_ONLY must not include external candidates or sourceRefs."
+            )
+        return payload
     if not isinstance(candidates, list) or not 1 <= len(candidates) <= MAX_CANDIDATES:
         raise ReuseResearchEvidenceError("Reuse research candidates must contain 1-5 entries.")
     for candidate in candidates:
@@ -456,7 +501,6 @@ def validate_evidence_payload(
         str(candidate["projectId"]): str(candidate["headSha"])
         for candidate in candidates
     }
-    source_refs = payload.get("sourceRefs")
     if not isinstance(source_refs, list) or not 1 <= len(source_refs) <= MAX_SOURCE_REFS:
         raise ReuseResearchEvidenceError("Reuse research sourceRefs must contain 1-16 entries.")
     for source_ref in source_refs:
@@ -496,6 +540,8 @@ def load_and_validate_evidence(
     except (OSError, json.JSONDecodeError) as exc:
         raise ReuseResearchEvidenceError("Reuse research evidence is unreadable.") from exc
     validated = validate_evidence_payload(payload, repository, task_id=task_id, branch=branch)
+    if validated["researchMode"] == "LOCAL_ONLY":
+        return validated
     active_project_root = Path(project_root or repository).expanduser().resolve()
     candidate_ids = [str(item["projectId"]) for item in validated["candidates"]]
     live_candidates, _ = _candidate_records(
@@ -532,6 +578,8 @@ def validate_manifest_snapshot(
     task_id = str(payload.get("taskId") or "")
     branch = str(payload.get("branch") or "")
     validated = validate_evidence_payload(payload, repository, task_id=task_id, branch=branch)
+    if validated["researchMode"] == "LOCAL_ONLY":
+        return validated
     active_project_root = Path(project_root or repository).expanduser().resolve()
     library_root = github_library.github_project_library_root(project_root=active_project_root)
     for candidate in validated["candidates"]:
@@ -559,6 +607,7 @@ def validate_manifest_snapshot(
 __all__ = [
     "DECISIONS",
     "LOCAL_REUSE_DECISIONS",
+    "RESEARCH_MODES",
     "ReuseResearchEvidenceError",
     "evidence_path",
     "load_and_validate_evidence",

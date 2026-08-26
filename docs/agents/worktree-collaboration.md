@@ -68,7 +68,7 @@ Inside its own worktree, an Agent should:
 - commit locally;
 - self-review the current-task diff and merge readiness without waiting for the user to request review;
 - merge its own task branch into local `main` when the local merge gates pass, then immediately close its claim and clean only its task-owned resources without waiting for post-merge validation; waiting for the user to request merge is not done;
-- prefer `scripts/task_closeout.py` as the single final entry. If a valid manifest already exists, pass `--manifest`; never run manual closeout and then invoke managed closeout without that manifest.
+- invoke `scripts/task_closeout.py` from root local `main` as the single final entry. If a valid manifest exists or integration contention returns one, pass `--manifest`; never rerun selector tests for the same binding.
 - hand off to the main integration session only for large conflicts, cross-lane conflicts, hot-file/active-claim conflicts, release-sensitive work, unclear semantic conflicts, or explicit user-designated integration;
 - never push to GitHub unless the user explicitly authorizes remote sync or publication;
 - report the worktree path, branch, local commit SHA, changed files, pre-merge validation result, Launcher refresh need, project-memory update proposal, whether it self-merged, and the resulting cleanup or exact `cleanup pending` residue.
@@ -79,10 +79,10 @@ The session currently closing work into `main` should:
 
 - keep the main workspace clean before each merge;
 - expect task-owning Agents to self-review and self-merge routine clean branches before asking for integration help;
-- refuse to merge any claim that is not in `ready_for_merge` unless it is doing an explicit mainline repair or user-designated integration pass;
+- accept covering development claims in `active` or `ready`; queue-only `ready_for_merge` semantics remain for explicit handoff/integration lanes;
 - abort and restore `main` immediately if a blocked branch is accidentally merged and produces conflicts;
 - merge one task branch at a time;
-- hold the global `integration/main` claim only for final manifest verification and the fast-forward merge, never while expensive validation commands run;
+- hold `integration/main` only for final manifest verification and fast-forward merge. Bounded contention returns the existing manifest; the only validation-under-reservation exception is a one-use token issued after `stale_main`;
 - confirm each fast-forward merge succeeded and the target contains the merged task tip, then immediately clean that task's local resources;
 - handle semantic conflicts instead of letting Agents resolve them blindly;
 - keep successful merges on local `main`; do not push `main` after merge-result inspection unless the user explicitly asks to sync GitHub or publish;
@@ -96,6 +96,8 @@ Small conflicts contained entirely inside the owning Agent's claimed files shoul
 ## Cleanup
 
 All review, testing, quality gates, mergeability checks, and acceptance evidence belong before merge. The moment `git merge --ff-only <task-branch>` succeeds, the task is absorbed by local `main` and cleanup must start immediately; do not retain task resources while waiting for post-merge validation.
+
+If managed closeout reports `merged_cleanup_pending`, do not run validation or merge again. From root `main`, call `--cleanup-only --branch <task-branch>` so the idempotent safety checks can finish only the remaining task-owned cleanup.
 
 First remove only disposable files/directories, debug output, scratch artifacts, and background processes/listeners that are provably owned by the merged task. Use exact paths and exact process ownership; do not scan broadly or infer ownership. Then release only the task's claim, remove its junction when present, and remove its clean worktree and merged local branch:
 
