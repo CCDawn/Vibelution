@@ -509,20 +509,23 @@ def _formal_retry_actions(
         if str(raw_offer.get("command") or "").strip() != "retry_node":
             continue
         node_id = str(raw_offer.get("nodeId") or "").strip()
-        if not node_id or node_id in seen_node_ids:
+        offer_idempotency_key = str(
+            raw_offer.get("idempotencyKey") or ""
+        ).strip()
+        if not node_id or not offer_idempotency_key or node_id in seen_node_ids:
             continue
         seen_node_ids.add(node_id)
         label = str(raw_offer.get("label") or "").strip() or f"重试正式节点 {node_id}"
-        actions.append(
-            _command_action(
-                "retry_formal_node",
-                action_id=f"retry-formal-node:{run_id}:{node_id}",
-                label=label,
-                target_phase="formal_runtime",
-                target_node_id=node_id,
-                payload={"runId": run_id, "nodeId": node_id},
-            )
+        action = _command_action(
+            "retry_formal_node",
+            action_id=f"retry-formal-node:{run_id}:{node_id}",
+            label=label,
+            target_phase="formal_runtime",
+            target_node_id=node_id,
+            payload={"runId": run_id, "nodeId": node_id},
         )
+        action["idempotencyKey"] = offer_idempotency_key
+        actions.append(action)
     return actions
 
 

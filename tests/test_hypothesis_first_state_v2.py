@@ -707,6 +707,7 @@ def test_formal_run_projects_available_retry_node_offer(
     ]
     assert [action.command for action in actions] == ["retry_formal_node"]
     assert actions[0].targetNodeId == "source_extraction"
+    assert actions[0].idempotencyKey == "offer:retry"
     assert actions[0].payload.runId == "run-retry"
     assert actions[0].payload.nodeId == "source_extraction"
     assert actions[0].model_dump(mode="json")["payload"] == {
@@ -1781,8 +1782,14 @@ def test_v2_cancel_run_command_uses_formal_command_service(
             "available": True,
             "payload": {"retryKind": "same_node"},
         }],
+        [{
+            "command": "retry_node",
+            "nodeId": "source_extraction",
+            "available": True,
+            "payload": {"retryKind": "same_node"},
+        }],
     ],
-    ids=["unavailable", "tampered-node"],
+    ids=["unavailable", "tampered-node", "missing-idempotency"],
 )
 def test_submit_formal_retry_rejects_unavailable_or_tampered_offer(
     offers: list[dict[str, object]],
@@ -1843,6 +1850,7 @@ def test_submit_formal_retry_uses_current_offer_payload_and_node(
             "command": "retry_node",
             "nodeId": "source_extraction",
             "available": True,
+            "idempotencyKey": "offer:run-retry:source_extraction:retry_node:a2:v7",
             "payload": {"retryKind": "same_node"},
         }],
     }
@@ -1881,6 +1889,9 @@ def test_submit_formal_retry_uses_current_offer_payload_and_node(
     assert request.team_id == "team-1"
     assert request.node_id == "source_extraction"
     assert request.expected_run_version == 7
+    assert request.idempotency_key == (
+        "offer:run-retry:source_extraction:retry_node:a2:v7"
+    )
     assert request.payload == {"retryKind": "same_node"}
 
 

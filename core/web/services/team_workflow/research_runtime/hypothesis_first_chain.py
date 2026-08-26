@@ -1241,6 +1241,7 @@ def _submit_formal_v2_command(
         raise HypothesisFirstChainError(f"unsupported formal command: {command}") from exc
     payload: dict[str, Any] = {}
     command_node_id: str | None = None
+    command_idempotency_key = idempotency_key
     if kind is WorkflowCommandKind.RETRY_NODE:
         requested_node_id = str(node_id or "").strip()
         if not requested_node_id:
@@ -1286,8 +1287,16 @@ def _submit_formal_v2_command(
             raise HypothesisFirstChainError(
                 "formal node retry offer has an invalid payload"
             )
+        offered_idempotency_key = str(
+            offer.get("idempotencyKey") or ""
+        ).strip()
+        if not offered_idempotency_key:
+            raise HypothesisFirstChainError(
+                "formal node retry offer has no idempotency key"
+            )
         command_node_id = requested_node_id
         payload = dict(offered_payload)
+        command_idempotency_key = offered_idempotency_key
     if kind is WorkflowCommandKind.FORK_REVISION:
         snapshot = get_query_service().get_snapshot(team_id=team_id, run_id=run.run_id)
         snapshot_payload = snapshot.to_dict() if hasattr(snapshot, "to_dict") else snapshot
@@ -1337,7 +1346,7 @@ def _submit_formal_v2_command(
                 command=kind,
                 node_id=command_node_id,
                 expected_run_version=int(run.run_version),
-                idempotency_key=idempotency_key,
+                idempotency_key=command_idempotency_key,
                 payload=payload,
                 requested_by=ActorRef("user", actor_id or "operator"),
                 requested_at_ms=int(time.time() * 1000),
