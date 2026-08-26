@@ -50,6 +50,7 @@ import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import {
+  resolveHypothesisFirstRoundBudget,
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
 } from "./useHypothesisFirstChain";
@@ -122,6 +123,14 @@ export function ResearchProcessWorkspace({
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const chainQuestionId = location.questionId || runState.run?.questionId || "";
   const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId);
+  // Budget display contract (see resolveHypothesisFirstRoundBudget): current
+  // budget N = V2 convergence.roundBudget ?? V1 chainState.roundBudget ??
+  // backend default 3. "第 x 轮 / 当前预算 N" — N is the server-owned current
+  // allowance; a budget raise flows in with the next canonical read.
+  const currentRoundBudget = resolveHypothesisFirstRoundBudget({
+    stateV2: hypothesisFirstChain.stateV2,
+    chainState: hypothesisFirstChain.chainState,
+  });
   useHypothesisFirstChainInvalidation(teamId, chainQuestionId, runState.lastSequence);
   const activeDiscussionAnchor = useMemo(() => {
     for (const source of [
@@ -586,15 +595,18 @@ export function ResearchProcessWorkspace({
     roundProgress: hypothesisFirstChain.chainState
       ? {
           current: hypothesisFirstChain.chainState.meetingCount ?? 0,
-          total: hypothesisFirstChain.chainState.roundBudget ?? 3,
+          // Current budget N, not an immutable total; see currentRoundBudget.
+          total: currentRoundBudget,
         }
       : null,
   }), [
     chainQuestionId,
+    currentRoundBudget,
     displayError,
     hypothesisFirstChain.chainState,
     hypothesisFirstChain.questionId,
     hypothesisFirstChain.scopeMismatch,
+    hypothesisFirstChain.stateV2,
     hypothesisFirstReady,
     location.panel,
     location.runId,
@@ -744,7 +756,8 @@ export function ResearchProcessWorkspace({
               workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
                 ? {
                     current: hypothesisFirstChain.chainState.meetingCount ?? 0,
-                    budget: hypothesisFirstChain.chainState.roundBudget ?? 3,
+                    // Current budget N, not an immutable cap; see currentRoundBudget.
+                    budget: currentRoundBudget,
                   }
                 : null
             }

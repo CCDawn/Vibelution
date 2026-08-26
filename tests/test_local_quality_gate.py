@@ -399,7 +399,7 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
     assert result.commands == []
 
 
-def test_commit_gate_self_test_uses_bounded_test_level_parallelism(
+def test_commit_gate_defers_behavior_tests_to_closeout(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -425,8 +425,7 @@ def test_commit_gate_self_test_uses_bounded_test_level_parallelism(
     result = gate.run_commit_gate(git_repo)
 
     assert result.outcome == "passed"
-    self_test = next(argv for kind, argv in calls if kind == "gate-self-test")
-    assert self_test[-4:] == ["-n", "4", "--dist", "load"]
+    assert [kind for kind, _argv in calls] == ["diff-check"]
 
 
 @pytest.mark.parametrize(
@@ -1088,6 +1087,21 @@ def test_validate_claim_matches_central_guard_scope_semantics(
         git_repo,
         "claim-test",
         ["README.md", "scripts/local_quality_gate.py"],
+    )
+
+
+def test_validate_claim_accepts_ready_development_claim(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = active_claim("claim-test", ["scripts"])
+    status["claims"][0]["status"] = "ready"
+    monkeypatch.setattr(gate, "read_guard_status", lambda root: status)
+
+    assert gate.validate_claim(
+        git_repo,
+        "claim-test",
+        ["scripts/local_quality_gate.py"],
     )
 
 

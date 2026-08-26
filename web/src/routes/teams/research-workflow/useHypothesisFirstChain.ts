@@ -49,6 +49,31 @@ export const hypothesisFirstChainReviewRoundLinksKey = (teamId: string, question
   ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId] as const;
 
 /**
+ * Display contract for the current review-round budget N, shared with the
+ * workspace chrome. Keep the default in sync with
+ * core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py
+ * `DEFAULT_ROUND_BUDGET`. The separate increase-budget action cap
+ * (`MAX_ROUND_BUDGET = 5`) is action-side semantics and must not leak into
+ * this display value.
+ */
+export const HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET = 3;
+
+/**
+ * Current round budget for display: prefer the canonical V2 convergence
+ * snapshot, then the V1 compatibility projection, then the backend default.
+ * N is a mutable server-owned allowance ("当前预算 N"), not a hard total;
+ * after a budget raise the next canonical read carries the larger value.
+ */
+export function resolveHypothesisFirstRoundBudget(input: {
+  stateV2?: Pick<HypothesisFirstStateV2, "convergence"> | null;
+  chainState?: Pick<HypothesisFirstChainState, "roundBudget"> | null;
+}): number {
+  return input.stateV2?.convergence.roundBudget
+    ?? input.chainState?.roundBudget
+    ?? HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET;
+}
+
+/**
  * Which authority the returned chain data came from. Everything except
  * `v2_canonical` fails closed for legacy mutation gates because those gates
  * compare against `"v2_canonical"` only (plan §8.3: UI must know its source).
@@ -263,6 +288,8 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
     enabled: enabled && v2EndpointUnavailable,
     retry: false,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
     refetchInterval: (query) =>
       shouldPollQuestionScopedChain({
         questionId: requestedQuestionId,
@@ -275,11 +302,19 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId),
     queryFn: ({ signal }) => fetchHypothesisSelections(teamId, questionId, { signal }),
     enabled,
+    // Per-query override of the global focus default (app/providers.tsx): the
+    // chain ledgers must be current when the user returns to the tab without
+    // waiting for the next gated poll tick. Mirrors stateV2 above.
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
   const meetings = useQuery({
     queryKey: queryKeys.teamMeetingRounds(teamId),
     queryFn: ({ signal }) => fetchMeetingRounds(teamId, { signal }),
     enabled,
+    // See `selections`: same per-query focus/reconnect refresh contract.
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
     refetchInterval: (query) =>
       shouldPollMeetings((query.state.data?.meetings ?? []).filter((meeting) => (
         recordMatchesQuestion(meeting.question, requestedQuestionId)
@@ -291,6 +326,9 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryKey: hypothesisFirstChainCollectionRequestsKey(teamId, questionId),
     queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, { signal }),
     enabled,
+    // See `selections`: same per-query focus/reconnect refresh contract.
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
     refetchInterval: (query) =>
       shouldPollQuestionScopedChain({
         questionId: requestedQuestionId,
@@ -303,6 +341,9 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryKey: hypothesisFirstChainReviewRoundLinksKey(teamId, questionId),
     queryFn: ({ signal }) => fetchReviewRoundLinks(teamId, questionId, { signal }),
     enabled,
+    // See `selections`: same per-query focus/reconnect refresh contract.
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
   const selectionList = selections.data?.selections.filter((selection) => (

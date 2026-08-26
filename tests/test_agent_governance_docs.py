@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from core.prompt_manager.core_prompt_sources import CORE_PROMPT_NAMES, CORE_PROMPT_SPECS
+from core.prompt_manager.assembly_contract import estimate_prompt_tokens
+from core.prompt_manager.core_prompt_sources import (
+    CORE_PROMPT_NAMES,
+    CORE_PROMPT_SPECS,
+    strip_prompt_front_matter,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +35,15 @@ def test_three_core_prompt_sources_are_the_only_required_base():
         "core/core_prompt/SOUL.md",
         "AGENTS.md",
     ]
+
+
+def test_stable_core_keeps_prompt_budget_headroom() -> None:
+    content = "\n\n".join(
+        strip_prompt_front_matter((PROJECT_ROOT / spec.relative_path).read_text(encoding="utf-8"))
+        for spec in CORE_PROMPT_SPECS
+    )
+
+    assert estimate_prompt_tokens(content) <= 5400
 
 
 def test_global_governance_uses_root_agents_and_docs_standards():
@@ -88,7 +102,8 @@ def test_validation_and_managed_closeout_are_single_pass_by_default() -> None:
     assert "不得重复执行" in agents
     assert "scripts/task_closeout.py" in loop
     assert "--manifest" in loop
-    assert "不要先手动跑一遍 `closeout`" in testing
+    assert "next_action=retry_with_manifest" in testing
+    assert "不得重测" in testing
 
 
 def test_windows_no_console_red_line_is_normative():
@@ -117,8 +132,8 @@ def test_windows_no_console_red_line_is_normative():
     assert "CREATE_NEW_PROCESS_GROUP" in restarter
 
 
-def test_research_before_write_red_line_is_normative():
-    """Local reuse and external mature-scheme research are both required before writes."""
+def test_research_before_write_scales_external_work_by_risk():
+    """Local reuse stays mandatory while located small fixes can skip external scanning."""
 
     agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     standard = (PROJECT_ROOT / "docs" / "standards" / "development-standard.md").read_text(
@@ -133,18 +148,19 @@ def test_research_before_write_red_line_is_normative():
 
     assert "本地能复用 ≠ 本地就是好方案" in agents
     assert "改造后再复用" in agents
-    assert "二者都要做，不是二选一" in agents
     assert "评估排序" in agents
     assert "最符合本项目、最值得借鉴的部分" in agents
-    assert "### 2.2 Local Reuse And Mature-Scheme Research" in standard
+    assert "record --mode LOCAL_ONLY" in agents
+    assert "已定位小修/机械修改不得被强制仓外扫描拖慢" in agents
+    assert "### 2.2 Local Reuse And Risk-Scaled Mature-Scheme Research" in standard
     assert "adapt then reuse" in standard
     assert "Rank and extract" in standard
     assert "§2.2" in standards_index
-    assert "调研门未闭合" in loop
-    assert "评估排序" in loop
+    assert "已定位小修不付固定扫描成本" in loop
+    assert "仓外对照与排序" in loop
     assert "R10" in playbook
     assert "最值得借鉴的部分" in playbook
-    assert "不评估本地复用/改造" in route
+    assert "不评估本地复用" in route
 
 
 def test_governance_entry_links_resolve():

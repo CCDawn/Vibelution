@@ -19,11 +19,11 @@
 ```text
 1 CLASSIFY  tier + route.md 行
 2 LOCATE    ownership.md → 模块 README → 现有 test
-3 RESEARCH  §2.2：评估本地 + 对照仓外成熟方案 → 评估排序，只借最符合项目的切片；未闭合不写
+3 RESEARCH  §2.2：始终评估本地；架构/依赖/复杂能力/真实复用分歧才做仓外对照与排序；已定位小修不付固定扫描成本
 4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 6 VERIFY    稳定修改批次按影响面跑最窄反馈测试；同一 HEAD/命令/输入未变不重复跑；完整 selector 计划留给最终 closeout 一次执行
-7 EVIDENCE  实现文件有变更时先 `reuse_research_evidence.py record`；logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
+7 EVIDENCE  实现文件变更：已定位小修记 `LOCAL_ONLY`，需仓外对照记 `EXTERNAL`；logging/runtime 证据按影响面；验收在 merge 前闭合
 8 INTEGRATE 默认用 `scripts/task_closeout.py` 一次完成最终验证、短时 integration claim、ff-only merge 与清理；不得先手动 closeout 后无参重跑，不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
 10 CLOSE     对用户汇报（根 `AGENTS.md` §5）；内部合入/清理仍做，不贴完成块
@@ -40,15 +40,18 @@
 # pytest 聚焦
 .\.venv\Scripts\python.exe -m pytest tests\test_TARGET.py -q
 
-# 实现文件变更：查看参数并记录任务级复用研究证据；候选元数据由 registry 自动补齐
+# 实现文件变更：已定位小修用 LOCAL_ONLY；复杂/开放复用决策用默认 EXTERNAL
 .\.venv\Scripts\python.exe scripts\reuse_research_evidence.py record --help
 
-# 最终一键收口：未生成 manifest 时只执行一次完整 selector 计划
+# 最终收口必须从根 main cwd 调用；未生成 manifest 时只执行一次 selector 计划
+Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>"
-# 若已手动 closeout，复用其精确绑定的 manifest，禁止再跑整套测试
+# 已有 manifest 或 integration 冲突返回 manifest：原样复用，禁止再跑测试
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --manifest "<MANIFEST_PATH>"
-# 仅当锁外验证已因 main 前进返回 stale_main：同步最新 main 后，用一次保留式重试防止持续饿死
-.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --reserve-integration
+# 仅 stale_main：同步/提交最新 main 后，携带返回的一次性 token 做一次 reserve retry
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --reserve-integration --stale-retry-token "<TOKEN_PATH>"
+# merged_cleanup_pending 表示已合入，只补清理，不验证/不 merge
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --branch "codex/<TASK>" --agent-id "<AGENT_ID>" --cleanup-only
 
 # FE focused Vitest（仓库根执行，selector 输出格式）
 node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web
@@ -123,7 +126,7 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 | 需 remote push/PR/force | 停；要用户授权 |
 | 需 force、远端删除、或归属不明的删/重置 | 停；要确认；已合入本任务的安全本地清理不重复询问 |
 | SSOT 表填不出 | 停；不实现 |
-| 调研门未闭合（未评估本地复用/改造，未对照仓外方案，或未评估排序并选出最值得借鉴的部分） | 停；不实现 |
+| 未评估本地复用，或任务有复杂/开放复用决策却未完成必要仓外排序 | 停；不实现 |
 | 仅 archive 有「规定」 | 提炼到现行或标 historical；不直接执行 archive |
 
 ---

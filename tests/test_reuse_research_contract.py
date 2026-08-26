@@ -132,6 +132,70 @@ def test_record_evidence_hydrates_candidate_metadata_and_loads_snapshot(tmp_path
     assert Path(contract.evidence_path(tmp_path, "reuse-task")).is_file()
 
 
+def test_local_only_evidence_skips_external_registry_and_validates_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_task_repo(tmp_path)
+    monkeypatch.setattr(
+        contract,
+        "_read_registry",
+        lambda *_args, **_kwargs: pytest.fail("LOCAL_ONLY must not read the external registry"),
+    )
+
+    payload = contract.record_evidence(
+        tmp_path,
+        feature="Located closeout retry fix",
+        research_mode="LOCAL_ONLY",
+        decision="BUILD_IN_HOUSE",
+        local_reuse_decision="ADAPT",
+        local_owner_paths=["core/feature.py"],
+        candidate_ids=[],
+        borrowed_slices=[],
+        rejected_alternatives=[],
+        reason="The defect and owning surface are already confirmed locally.",
+        implementation_boundary="Only the bounded retry behavior changes.",
+        verification_strategy="Run the focused closeout contract tests.",
+        risk_notes=[],
+        source_refs=[],
+        project_root=tmp_path,
+    )
+
+    assert payload["researchMode"] == "LOCAL_ONLY"
+    assert payload["candidates"] == []
+    assert payload["sourceRefs"] == []
+    assert contract.load_and_validate_evidence(
+        tmp_path,
+        task_id="reuse-task",
+        branch="codex/reuse-task",
+        project_root=tmp_path,
+    ) == payload
+    assert contract.validate_manifest_snapshot(payload, tmp_path) == payload
+
+
+def test_local_only_rejects_external_candidate_fields(tmp_path: Path) -> None:
+    seed_task_repo(tmp_path)
+
+    with pytest.raises(contract.ReuseResearchEvidenceError, match="must not include"):
+        contract.record_evidence(
+            tmp_path,
+            feature="Located closeout retry fix",
+            research_mode="LOCAL_ONLY",
+            decision="BUILD_IN_HOUSE",
+            local_reuse_decision="ADAPT",
+            local_owner_paths=["core/feature.py"],
+            candidate_ids=["acme__widget"],
+            borrowed_slices=[],
+            rejected_alternatives=[],
+            reason="The defect and owning surface are already confirmed locally.",
+            implementation_boundary="Only the bounded retry behavior changes.",
+            verification_strategy="Run the focused closeout contract tests.",
+            risk_notes=[],
+            source_refs=[],
+            project_root=tmp_path,
+        )
+
+
 def test_record_evidence_requires_source_ref_bound_to_candidate(tmp_path: Path) -> None:
     seed_task_repo(tmp_path)
     seed_candidate(tmp_path)

@@ -314,6 +314,60 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.disabledReason).toBeUndefined();
   });
 
+  it("retries only the failed candidate summary instead of redispatching the review batch", () => {
+    const summaryProblem = {
+      code: "summary_draft_failed",
+      category: "execution" as const,
+      severity: "error" as const,
+      message: "Service temporarily unavailable",
+      recoverable: true,
+      sourceKind: "meeting_round",
+      sourceId: "meeting-cand-1",
+      detectedAt: "2026-08-26T15:24:12Z",
+    };
+    const failedCandidate = {
+      ...reviewCandidate("cand-1", "failed"),
+      actionability: "available" as const,
+      problems: [summaryProblem],
+      summarization: { ...idle, lifecycle: "running" as const, actionability: "waiting_system" as const },
+      approval: { ...idle },
+    };
+    const redispatch = command({
+      command: "retry_review_dispatch",
+      payload: { selectionId: "selection-1", candidateIds: ["cand-1"] },
+    }, "重试候选评审分发");
+    const regenerate = command({
+      command: "regenerate_summary",
+      payload: { meetingRoundId: "meeting-cand-1" },
+    }, "重试生成纪要");
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      review: {
+        ...stateV2().review,
+        lifecycle: "failed",
+        actionability: "available",
+        problems: [summaryProblem],
+        activeRoundIndex: 2,
+        aggregate: { total: 1, completed: 0, pending: 0, failed: 1, blocked: 0 },
+        candidates: [failedCandidate],
+      },
+      allowedActions: [redispatch, regenerate],
+      problems: [summaryProblem],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).toBe("blocked");
+    expect(action.command).toBe("retry_draft_summary");
+    expect(action.commandLabel).toBe("重试生成纪要");
+    expect(action.canonicalAction?.command).toBe("regenerate_summary");
+    expect(action.canonicalActions.map((item) => item.command)).toEqual([
+      "retry_review_dispatch",
+      "regenerate_summary",
+    ]);
+  });
+
   it("selects the exact pending candidate from a two-candidate review", () => {
     const completedNavigation: NavigationAction = {
       kind: "navigation",
