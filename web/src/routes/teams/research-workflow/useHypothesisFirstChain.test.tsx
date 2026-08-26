@@ -23,6 +23,7 @@ import {
   recoverCollectionRequest,
 } from "../../../api/hypothesisFirst";
 import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
+import { queryKeys } from "../../../api/queryKeys";
 import {
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -327,6 +328,29 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.reviewRoundLinks.map((link) => link.linkId)).toEqual(["hf-link-2"]);
   });
 
+  it("keeps decorated ledger list identities stable across unrelated re-renders", async () => {
+    mockAllResolved();
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    const before = {
+      meetings: latest!.meetings,
+      collectionRequests: latest!.collectionRequests,
+      reviewRoundLinks: latest!.reviewRoundLinks,
+    };
+    expect(before.meetings.length).toBeGreaterThan(0);
+
+    // A parent re-render (new element identity, unchanged query data) must not
+    // rebuild the memoized lists that downstream canvas composition depends on.
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.meetings).toBe(before.meetings);
+    expect(latest!.collectionRequests).toBe(before.collectionRequests);
+    expect(latest!.reviewRoundLinks).toBe(before.reviewRoundLinks);
+  });
+
   it("fails closed when a question-keyed chain payload belongs to another question", async () => {
     mockAllResolved();
     mocked.stateV2.mockResolvedValue({ ...stateV2Payload(), questionId: "Q-02" });
@@ -338,7 +362,7 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.chainState).toBeNull();
   });
 
-  it("surfaces the first query error", async () => {
+  it("marks a plain V2 read failure as v2_error and surfaces the first query error", async () => {
     mockAllResolved();
     mocked.stateV2.mockRejectedValue(new Error("chain unavailable"));
     let latest: HypothesisFirstChainData | null = null;
@@ -346,7 +370,8 @@ describe("useHypothesisFirstChain", () => {
     await flushQueries();
 
     expect(latest!.error).toBe("chain unavailable");
-    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.v2ReadState).toBe("v2_error");
+    expect(latest!.stateSource).toBe("v2_error");
     expect(mocked.chainState).not.toHaveBeenCalled();
   });
 
@@ -360,6 +385,7 @@ describe("useHypothesisFirstChain", () => {
     render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
     await flushQueries();
 
+    expect(latest!.v2ReadState).toBe("route_unavailable");
     expect(latest!.stateSource).toBe("v1_legacy");
     expect(latest!.stateV2).toBeNull();
     expect(latest!.chainState?.questionId).toBe("Q-01");
@@ -376,7 +402,8 @@ describe("useHypothesisFirstChain", () => {
     render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
     await flushQueries();
 
-    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.v2ReadState).toBe("v2_error");
+    expect(latest!.stateSource).toBe("v2_error");
     expect(latest!.chainState).toBeNull();
     expect(latest!.error).toBe("catalog question unknown");
     expect(mocked.chainState).not.toHaveBeenCalled();
@@ -386,8 +413,10 @@ describe("useHypothesisFirstChain", () => {
     latest = null;
     render(<Probe teamId="team-1" questionId="Q-02" onResult={(value) => { latest = value; }} />);
     await flushQueries();
-    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.v2ReadState).toBe("v2_error");
+    expect(latest!.stateSource).toBe("v2_error");
     expect(latest!.chainState).toBeNull();
+    expect(latest!.error).toBe("server failed");
     expect(mocked.chainState).not.toHaveBeenCalledWith("team-1", "Q-02", expect.anything());
   });
 
@@ -398,11 +427,41 @@ describe("useHypothesisFirstChain", () => {
     render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
     await flushQueries();
 
-    expect(latest!.stateSource).toBe("v2_canonical");
+    expect(latest!.v2ReadState).toBe("v2_error");
+    expect(latest!.stateSource).toBe("v2_error");
     expect(latest!.stateV2).toBeNull();
     expect(latest!.chainState).toBeNull();
     expect(latest!.error).toBe("Invalid hypothesis-first state V2 response");
     expect(mocked.chainState).not.toHaveBeenCalled();
+  });
+
+  it("stays pending with no phase data while the V2 snapshot is still loading", async () => {
+    // A cached question-scoped list may already resolve before the canonical
+    // snapshot arrives; that half-data must never become business state.
+    queryClient.setQueryData(queryKeys.teamMeetingRounds("team-1"), {
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingCount: 1,
+      meetings: [meetingRecord("hf-review-sel-2-r1")],
+    });
+    const never = new Promise(() => undefined);
+    mocked.chainState.mockReturnValue(never);
+    mocked.stateV2.mockImplementation(() => never);
+    mocked.selections.mockImplementation(() => never);
+    mocked.meetings.mockImplementation(() => never);
+    mocked.requests.mockImplementation(() => never);
+    mocked.links.mockImplementation(() => never);
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.loading).toBe(true);
+    expect(latest!.v2ReadState).toBe("pending");
+    expect(latest!.stateSource).toBe("pending");
+    expect(latest!.stateV2).toBeNull();
+    expect(latest!.chainState).toBeNull();
+    // The cached meeting stays available as evidence, not as an inference input.
+    expect(latest!.meetings.map((meeting) => meeting.meetingRoundId)).toEqual(["hf-review-sel-2-r1"]);
   });
 
   it("fails closed instead of using the legacy recovery mutation when V2 has no signed action", async () => {

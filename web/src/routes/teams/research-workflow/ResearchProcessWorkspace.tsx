@@ -291,32 +291,58 @@ export function ResearchProcessWorkspace({
   const collectionChildStatus = hypothesisFirstChain.collectionRequests.length > 0
     ? null
     : (runState.projection?.run.nodeRuns.source_finding?.status ?? null);
+  // Plan §8.3: only a route-level 404/501 may fall back to the V1 resolver.
+  // A scope whose V2 read never started (disabled / no-question launch lane)
+  // has nothing to infer from either, so it keeps the legacy launcher action.
+  const mayUseLegacyChainResolver = hypothesisFirstChain.v2ReadState === "route_unavailable"
+    || (!hypothesisFirstChain.loading && hypothesisFirstChain.v2ReadState === "pending");
 
-  const nextAction = useMemo(() => hypothesisFirstChain.stateV2
-    ? resolveHypothesisFirstNextActionFromV2(hypothesisFirstChain.stateV2)
-    : resolveHypothesisFirstNextAction({
-    run: runState.run
-      ? {
-          runId: runState.run.runId,
-          runtimeCurrentNodeIds: formalRuntimeCurrentNodeIds,
-        }
-      : null,
-    workflowActive,
-    questionId: chainQuestionId,
-    chainState: hypothesisFirstChain.chainState,
-    meetings: hypothesisFirstChain.meetings,
-    reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
-    selection: hypothesisFirstChain.selection,
-    collectionRequests: hypothesisFirstChain.collectionRequests,
-    collectionChildStatus,
-    selectedNodeId: location.selectedNodeId,
-    }), [
+  const nextAction = useMemo(() => {
+    if (hypothesisFirstChain.stateV2) {
+      return resolveHypothesisFirstNextActionFromV2(hypothesisFirstChain.stateV2);
+    }
+    if (mayUseLegacyChainResolver) {
+      return resolveHypothesisFirstNextAction({
+      run: runState.run
+        ? {
+            runId: runState.run.runId,
+            runtimeCurrentNodeIds: formalRuntimeCurrentNodeIds,
+          }
+        : null,
+      workflowActive,
+      questionId: chainQuestionId,
+      chainState: hypothesisFirstChain.chainState,
+      meetings: hypothesisFirstChain.meetings,
+      reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
+      selection: hypothesisFirstChain.selection,
+      collectionRequests: hypothesisFirstChain.collectionRequests,
+      collectionChildStatus,
+      selectedNodeId: location.selectedNodeId,
+      });
+    }
+    // Pending half-data or a failed canonical read must never be re-inferred
+    // into a business phase; surface waiting/error through the blocked shape.
+    const pending = hypothesisFirstChain.v2ReadState === "pending";
+    return {
+      stage: "blocked" as const,
+      targetNodeId: null,
+      navigationLabel: pending ? "正在读取研究状态" : "研究状态读取失败",
+      statusMessage: pending ? "正在读取研究状态" : undefined,
+      disabledReason: pending
+        ? undefined
+        : (hypothesisFirstChain.error || "无法获取权威流程快照，请刷新或稍后重试"),
+      recovery: null,
+    };
+  }, [
     hypothesisFirstChain.stateV2,
     hypothesisFirstChain.chainState,
     hypothesisFirstChain.collectionRequests,
     hypothesisFirstChain.meetings,
     hypothesisFirstChain.reviewRoundLinks,
     hypothesisFirstChain.selection,
+    hypothesisFirstChain.v2ReadState,
+    hypothesisFirstChain.error,
+    mayUseLegacyChainResolver,
     chainQuestionId,
     location.selectedNodeId,
     formalRuntimeCurrentNodeIds,

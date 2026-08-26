@@ -2728,16 +2728,16 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
         # side effect, which is not appropriate for a canonical projection.
         bound_round_ids: set[str] = set()
         for meeting in meeting_records:
-            round_ids = [
+            meeting_round_ids = [
                 str(round_id or "").strip()
                 for round_id in list(meeting.get("chatRoomRoundIds") or [])
                 if str(round_id or "").strip()
             ]
-            if round_ids:
+            if meeting_round_ids:
                 # The append-only list's final id is the current retry.  Do
                 # not spend a read on historical rounds that cannot affect
                 # the canonical projection.
-                bound_round_ids.add(round_ids[-1])
+                bound_round_ids.add(meeting_round_ids[-1])
         for round_id in bound_round_ids:
             work_run = _load_chat_room_round_snapshot(round_id)
             if not isinstance(work_run, Mapping):

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+from pathlib import Path
 
 import pytest
 
@@ -13,11 +16,18 @@ from core.research.workflow.contracts import (
     scope_hash_for,
 )
 from core.web.services import team_service
-from core.web.services.team_workflow import hypothesis_selection as selections
+from core.web.services.team_workflow import (
+    hypothesis_selection as selections,
+)
+from core.web.services.team_workflow import (
+    jsonl_quarantine,
+)
 from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain,
     question_launch,
 )
+
+_QUARANTINE_LOGGER = "core.web.services.team_workflow.jsonl_quarantine"
 
 _APPROVED_GATE_KEYS = (
     "H1_problem_understanding",
@@ -157,6 +167,7 @@ def test_record_single_selection_persists_append_only_record(tmp_path, monkeypat
 
     listed = selections.list_hypothesis_selections(team_id)
     assert listed["selectionCount"] == 1
+    assert listed["corruptQuarantinedLineCount"] == 0
     fetched = selections.get_hypothesis_selection(team_id, record["selectionId"])
     assert fetched["selection"]["selectionId"] == record["selectionId"]
     latest = selections.get_latest_hypothesis_selection(
@@ -502,3 +513,178 @@ def test_latest_selection_isolated_when_scopes_are_interleaved(tmp_path, monkeyp
     )
     assert latest_a["selection"]["selectedCandidateIds"] == ["hyp-c", "hyp-a"]
     assert latest_b["selection"]["selectedCandidateIds"] == ["hyp-b", "hyp-c"]
+
+
+def _append_raw_lines(storage_path: Path, texts: list[str]) -> None:
+    with open(storage_path, "a", encoding="utf-8") as handle:
+        handle.write("".join(text + "\n" for text in texts))
+
+
+def _sidecar_rows(storage_path: Path) -> list[dict]:
+    sidecar = storage_path.with_name(storage_path.name + ".corrupt.jsonl")
+    return [
+        json.loads(line)
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def test_corrupt_selection_lines_are_quarantined_instead_of_raising(
+    tmp_path, monkeypatch, caplog
+):
+    team_id = _team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    created = selections.record_hypothesis_selection(team_id, _selection())
+    selection_id = created["selection"]["selectionId"]
+    storage_path = Path(
+        selections.list_hypothesis_selections(team_id)["storagePath"]
+    )
+    corrupt_texts = ["{torn-write-not-json", json.dumps(["wrong", "shape"])]
+    _append_raw_lines(storage_path, corrupt_texts)
+    original_bytes = storage_path.read_bytes()
+
+    with caplog.at_level(logging.WARNING, logger=_QUARANTINE_LOGGER):
+        listed = selections.list_hypothesis_selections(team_id)
+        fetched = selections.get_hypothesis_selection(team_id, selection_id)
+        latest = selections.get_latest_hypothesis_selection(
+            team_id, "SCI-096", scope=_read_scope()
+        )
+
+    assert [item["selectionId"] for item in listed["selections"]] == [selection_id]
+    assert listed["selectionCount"] == 1
+    assert listed["corruptQuarantinedLineCount"] == 2
+    assert fetched["corruptQuarantinedLineCount"] == 2
+    assert fetched["selection"]["selectionId"] == selection_id
+    assert latest["corruptQuarantinedLineCount"] == 2
+    assert latest["selection"]["selectedCandidateIds"] == ["hyp-a", "hyp-b"]
+
+    # The ledger stays byte-identical; only the sidecar gains evidence.
+    assert storage_path.read_bytes() == original_bytes
+    rows = _sidecar_rows(storage_path)
+    assert len(rows) == 2
+    assert [row["lineHash"] for row in rows] == [
+        hashlib.sha256(text.encode("utf-8")).hexdigest() for text in corrupt_texts
+    ]
+    assert [row["lineNumber"] for row in rows] == [2, 3]
+    for row in rows:
+        assert set(row) == {"lineHash", "lineNumber", "quarantinedAt"}
+
+    count_warnings = [
+        record
+        for record in caplog.records
+        if record.name == _QUARANTINE_LOGGER and len(record.args) >= 2
+    ]
+    assert any(
+        str(storage_path) in record.getMessage() and record.args[1] == 2
+        for record in count_warnings
+    )
+    logged_text = "".join(record.getMessage() for record in caplog.records)
+    assert all(text not in logged_text for text in corrupt_texts)
+
+
+def test_selection_reads_do_not_grow_the_sidecar_on_repeat(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    selections.record_hypothesis_selection(team_id, _selection())
+    storage_path = Path(
+        selections.list_hypothesis_selections(team_id)["storagePath"]
+    )
+    _append_raw_lines(storage_path, ["{torn-write-not-json"])
+    first = selections.list_hypothesis_selections(team_id)
+    assert first["corruptQuarantinedLineCount"] == 1
+    sidecar = storage_path.with_name(storage_path.name + ".corrupt.jsonl")
+    sidecar_after_first = sidecar.read_bytes()
+
+    repeated_list = selections.list_hypothesis_selections(team_id)
+    repeated_get = selections.get_hypothesis_selection(
+        team_id, first["selections"][0]["selectionId"]
+    )
+    repeated_latest = selections.get_latest_hypothesis_selection(
+        team_id, "SCI-096", scope=_read_scope()
+    )
+
+    assert repeated_list["corruptQuarantinedLineCount"] == 1
+    assert repeated_get["corruptQuarantinedLineCount"] == 1
+    assert repeated_latest["corruptQuarantinedLineCount"] == 1
+    assert sidecar.read_bytes() == sidecar_after_first
+
+
+def test_clean_selection_ledger_reports_zero_quarantined_lines(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    created = selections.record_hypothesis_selection(team_id, _selection())
+
+    listed = selections.list_hypothesis_selections(team_id)
+    fetched = selections.get_hypothesis_selection(
+        team_id, created["selection"]["selectionId"]
+    )
+    latest = selections.get_latest_hypothesis_selection(
+        team_id, "SCI-096", scope=_read_scope()
+    )
+    storage_path = Path(listed["storagePath"])
+
+    assert listed["corruptQuarantinedLineCount"] == 0
+    assert fetched["corruptQuarantinedLineCount"] == 0
+    assert latest["corruptQuarantinedLineCount"] == 0
+    assert not storage_path.with_name(storage_path.name + ".corrupt.jsonl").exists()
+
+
+def test_jsonl_quarantine_helper_dedupes_and_ignores_a_broken_sidecar(tmp_path):
+    store = tmp_path / "ledger.jsonl"
+    sidecar = tmp_path / (store.name + ".corrupt.jsonl")
+    corrupt_a = "{broken-a"
+    keep = {"id": "keep"}
+    store.write_text(json.dumps(keep) + "\n" + corrupt_a + "\n", encoding="utf-8")
+    seeded_entry = {
+        "lineHash": hashlib.sha256(corrupt_a.encode("utf-8")).hexdigest(),
+        "lineNumber": 9,
+        "quarantinedAt": "2026-08-01T00:00:00Z",
+    }
+    seeded_row = json.dumps(seeded_entry, sort_keys=True)
+    sidecar.write_text("junk-not-json\n" + seeded_row + "\n", encoding="utf-8")
+
+    records, corrupt_count = jsonl_quarantine.read_jsonl_with_quarantine(store)
+
+    assert corrupt_count == 1
+    assert records == [keep]
+    # Junk rows are ignored and the known hash suppresses a duplicate append.
+    assert sidecar.read_text(encoding="utf-8").splitlines() == [
+        "junk-not-json",
+        seeded_row,
+    ]
+
+    repeat_count = jsonl_quarantine.read_jsonl_with_quarantine(store)[1]
+    assert repeat_count == 1
+
+    corrupt_b = "{broken-b"
+    store.write_text(
+        json.dumps(keep) + "\n" + corrupt_a + "\n" + corrupt_b + "\n", encoding="utf-8"
+    )
+    records_again, count_again = jsonl_quarantine.read_jsonl_with_quarantine(store)
+
+    assert count_again == 2
+    assert records_again == [keep]
+    rows = [
+        json.loads(row)
+        for row in sidecar.read_text(encoding="utf-8").splitlines()
+        if row.startswith("{")
+    ]
+    assert len(rows) == 2
+    assert rows[-1]["lineHash"] == hashlib.sha256(corrupt_b.encode("utf-8")).hexdigest()
+
+
+def test_jsonl_quarantine_helper_preserves_strict_io_behavior(tmp_path):
+    missing = tmp_path / "missing.jsonl"
+
+    assert jsonl_quarantine.read_jsonl_with_quarantine(missing) == ([], 0)
+    assert not missing.with_name(missing.name + ".corrupt.jsonl").exists()
+
+    class _UnreadableStore:
+        def exists(self) -> bool:
+            return True
+
+        def read_text(self, encoding: str) -> str:
+            raise PermissionError(13, "simulated unreadable store")
+
+    with pytest.raises(PermissionError):
+        jsonl_quarantine.read_jsonl_with_quarantine(_UnreadableStore())  # type: ignore[arg-type]
