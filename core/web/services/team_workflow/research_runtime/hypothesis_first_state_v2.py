@@ -61,6 +61,32 @@ _QUESTION_SNAPSHOT_CACHE: dict[
     tuple[str, str],
     tuple[tuple[tuple[str, int, int], ...], dict[str, Any]],
 ] = {}
+_CHAT_ROOM_ROUND_STOPPED_STATUSES = {
+    "cancelled",
+    "canceled",
+    "closed",
+    "idle",
+    "stopped",
+    "stopped_by_user",
+    "superseded",
+    "terminated",
+}
+_CHAT_ROOM_ROUND_FAILED_STATUSES = {
+    "error",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "stop_failed",
+}
+_CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES = {
+    "cancelled",
+    "canceled",
+    "force_stopped",
+    "orphan_reconciled",
+    "orphaned_room_reconciled",
+    "stopped",
+    "terminated",
+}
 
 
 class HypothesisFirstStateScopeError(ValueError):
@@ -515,7 +541,101 @@ def _navigation_action(
     }
 
 
-def _meeting_phase(meeting: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+def _linked_chat_room_round_problem(
+    meeting: Mapping[str, Any],
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Project a terminal linked room round as a meeting execution problem.
+
+    Meeting records are append-only workflow facts, while the chat-room
+    WorkRun is the authority for whether a bound discussion executor is still
+    alive.  Only an explicitly persisted terminal snapshot is strong enough to
+    override an ``open`` meeting; a missing snapshot deliberately preserves the
+    legacy projection instead of guessing that the round stopped.
+    """
+
+    if not isinstance(chat_room_round_snapshots, Mapping):
+        return None
+    round_ids = [
+        str(round_id or "").strip()
+        for round_id in list(meeting.get("chatRoomRoundIds") or [])
+        if str(round_id or "").strip()
+    ]
+    for round_id in round_ids:
+        snapshot = chat_room_round_snapshots.get(round_id)
+        if not isinstance(snapshot, Mapping):
+            continue
+        snapshot_id = str(
+            snapshot.get("runId") or snapshot.get("roundId") or ""
+        ).strip()
+        if snapshot_id and snapshot_id != round_id:
+            continue
+        status = str(
+            snapshot.get("status")
+            or snapshot.get("currentPhase")
+            or snapshot.get("phase")
+            or ""
+        ).strip().lower()
+        runtime_status = str(snapshot.get("runtimeStatus") or "").strip().lower()
+        reconciliation_source = str(
+            snapshot.get("reconciliationSource") or ""
+        ).strip().lower()
+        is_orphaned = (
+            reconciliation_source == "missing_process_controller"
+            or "orphan" in runtime_status
+            or "orphan" in reconciliation_source
+        )
+        is_stopped = status in _CHAT_ROOM_ROUND_STOPPED_STATUSES or runtime_status in {
+            *_CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES,
+        }
+        is_failed = status in _CHAT_ROOM_ROUND_FAILED_STATUSES or runtime_status in {
+            "error",
+            "failed",
+            "failed_provider",
+            "failed_runtime",
+        }
+        if not (is_orphaned or is_stopped or is_failed):
+            continue
+        if is_orphaned:
+            code = "discussion_round_orphaned"
+            fallback = "绑定的讨论轮次因执行器丢失已停止"
+        elif is_failed:
+            code = "discussion_round_failed"
+            fallback = "绑定的讨论轮次执行失败"
+        else:
+            code = "discussion_round_stopped"
+            fallback = "绑定的讨论轮次已停止"
+        reason = ""
+        for key in (
+            "forceStopReason",
+            "stopReason",
+            "reason",
+            "error",
+            "summary",
+            "runtimeStatus",
+            "reconciliationSource",
+        ):
+            candidate = str(snapshot.get(key) or "").strip()
+            if candidate:
+                reason = candidate
+                break
+        message = f"{fallback}：{reason}" if reason else fallback
+        return _problem(
+            code,
+            message,
+            category="execution",
+            source_kind="chat_room_round",
+            source_id=round_id,
+            detected_at=_timestamp(snapshot) or _timestamp(meeting) or _EPOCH,
+        )
+    return None
+
+
+def _meeting_phase(
+    meeting: Mapping[str, Any],
+    *,
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
+) -> tuple[dict[str, Any], str]:
     status = str(meeting.get("status") or "").strip().lower()
     updated_at = _timestamp(meeting)
     summary_error = meeting.get("summaryError") or meeting.get("summaryDraftError")
@@ -545,6 +665,22 @@ def _meeting_phase(meeting: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
             updated_at=updated_at,
             problems=[problem],
         ), status
+    linked_round_problem = None
+    if status in {"open", "summarizing"}:
+        linked_round_problem = _linked_chat_room_round_problem(
+            meeting,
+            chat_room_round_snapshots,
+        )
+    if linked_round_problem is not None:
+        return _phase(
+            "failed",
+            "none",
+            "blocked",
+            updated_at=updated_at
+            or linked_round_problem.get("detectedAt")
+            or _EPOCH,
+            problems=[linked_round_problem],
+        ), "linked_round_stopped"
     if status == "closed":
         return _phase("completed", "succeeded", "terminal", updated_at=updated_at), status
     if status == "awaiting_approval":
@@ -609,6 +745,7 @@ def _review_candidate(
     meeting: Mapping[str, Any] | None,
     return_to: str,
     dispatch_attempt: Mapping[str, Any] | None = None,
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not link or not meeting:
         attempt_lifecycle = str((dispatch_attempt or {}).get("lifecycle") or "").strip()
@@ -714,7 +851,10 @@ def _review_candidate(
             "approval": _phase(),
         }
 
-    candidate_phase, status = _meeting_phase(meeting)
+    candidate_phase, status = _meeting_phase(
+        meeting,
+        chat_room_round_snapshots=chat_room_round_snapshots,
+    )
     if status == "closed":
         discussion = _phase("completed", "succeeded", "terminal", updated_at=_timestamp(meeting))
         summarization = deepcopy(discussion)
@@ -791,6 +931,7 @@ def _meeting_recovery_actions(
     candidate_id: str | None,
     return_to: str,
     label: str,
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Project navigation and operator recovery commands for one meeting."""
 
@@ -817,6 +958,13 @@ def _meeting_recovery_actions(
         )
     ]
     status = str(meeting.get("status") or "").strip().lower()
+    if status in {"open", "summarizing"} and _linked_chat_room_round_problem(
+        meeting,
+        chat_room_round_snapshots,
+    ):
+        # The linked WorkRun is terminal, so there is no live executor to
+        # resume or stop.  Keep only the room navigation for inspection.
+        return actions, anchor
     stalled = _meeting_is_stalled(meeting)
     if status == "awaiting_approval":
         actions.append(
@@ -1427,6 +1575,7 @@ def project_state_from_records(
     formal_runs: Sequence[Mapping[str, Any]] = (),
     formal_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
     program_output: Mapping[str, Any] | None = None,
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
     return_to: str = "",
     include_source_cursor: bool = False,
 ) -> dict[str, Any]:
@@ -1456,6 +1605,11 @@ def project_state_from_records(
     reset = dict(reset_boundary or {})
     reset_id = str(reset.get("resetId") or "origin")
     reset_at = str(reset.get("resetAt") or "").strip() or None
+    room_round_snapshots = (
+        dict(chat_room_round_snapshots)
+        if isinstance(chat_room_round_snapshots, Mapping)
+        else {}
+    )
     computed_at = _latest_timestamp(
         chain,
         selections,
@@ -1467,6 +1621,7 @@ def project_state_from_records(
         formal_runs,
         formal_snapshots or {},
         program_output or {},
+        room_round_snapshots,
     )
     source_cursor = {
         "chain": _canonical_hash(chain, length=24),
@@ -1478,6 +1633,7 @@ def project_state_from_records(
         "formalRun": _canonical_hash(list(formal_runs), length=24),
         "formalSnapshot": _canonical_hash(dict(formal_snapshots or {}), length=24),
         "programOutput": _canonical_hash(dict(program_output or {}), length=24),
+        "chatRoomRound": _canonical_hash(room_round_snapshots, length=24),
     }
 
     candidates = sorted(
@@ -1541,10 +1697,27 @@ def project_state_from_records(
     generation_meeting_status = str(
         (generation_meeting or {}).get("status") or ""
     ).strip().lower()
-    if generation_meeting_status == "awaiting_approval":
-        generation_phase, _ = _meeting_phase(generation_meeting or {})
+    generation_phase = None
+    generation_projection_status = ""
+    if generation_meeting:
+        generation_phase, generation_projection_status = _meeting_phase(
+            generation_meeting,
+            chat_room_round_snapshots=room_round_snapshots,
+        )
+    if generation_projection_status == "linked_round_stopped":
         generation = {
-            **generation_phase,
+            **(generation_phase or _phase("failed", "none", "blocked")),
+            "attempt": attempt_wire,
+            "generationMeetingId": str(
+                (generation_meeting or {}).get("meetingRoundId") or ""
+            )
+            or None,
+            "candidateCount": len(candidate_ids),
+            "candidateIds": candidate_ids,
+        }
+    elif generation_meeting_status == "awaiting_approval":
+        generation = {
+            **(generation_phase or _phase()),
             "attempt": attempt_wire,
             "generationMeetingId": str(
                 (generation_meeting or {}).get("meetingRoundId") or ""
@@ -1610,7 +1783,8 @@ def project_state_from_records(
             "candidateIds": candidate_ids,
         }
     elif generation_meeting:
-        generation_phase, generation_status = _meeting_phase(generation_meeting)
+        generation_phase = generation_phase or _phase()
+        generation_status = generation_projection_status or generation_meeting_status
         if generation_status == "closed":
             generation_phase = _phase("completed", "empty", "available", updated_at=_timestamp(generation_meeting))
         generation = {
@@ -1861,12 +2035,13 @@ def project_state_from_records(
                 meeting=meeting,
                 return_to=return_to,
                 dispatch_attempt=dispatch_attempt_by_candidate.get(candidate_id),
+                chat_room_round_snapshots=room_round_snapshots,
             )
         )
     review_aggregate = _aggregate(review_candidates)
     if selection_integrity_problems:
         review_phase = _phase(
-            "running",
+            "failed",
             "none",
             "blocked",
             updated_at=computed_at,
@@ -1887,7 +2062,13 @@ def project_state_from_records(
             for item in review_candidates
             for problem in list(item.get("problems") or [])
         ]
-        review_phase = _phase("running", "none", "blocked", problems=problems)
+        review_phase = _phase(
+            "failed",
+            "none",
+            "blocked",
+            updated_at=computed_at,
+            problems=problems,
+        )
     elif review_aggregate["failed"]:
         review_phase = _phase(
             "failed",
@@ -2027,7 +2208,15 @@ def project_state_from_records(
                 payload={"questionId": normalized_question_id},
             )
         )
-    elif generation["outcome"] == "empty" or generation["lifecycle"] == "failed":
+    elif (
+        generation["outcome"] == "empty" or generation["lifecycle"] == "failed"
+    ) and not any(
+        problem.get("code") in {
+            "discussion_round_orphaned",
+            "discussion_round_stopped",
+        }
+        for problem in list(generation.get("problems") or [])
+    ):
         allowed_actions.append(
             _command_action(
                 "retry_generation",
@@ -2054,6 +2243,7 @@ def project_state_from_records(
             candidate_id=None,
             return_to=return_to,
             label="进入候选生成讨论室",
+            chat_room_round_snapshots=room_round_snapshots,
         )
         # A closed generation room is historical and has no actionable
         # navigation; awaiting approval and stalled/open recovery remain
@@ -2080,6 +2270,15 @@ def project_state_from_records(
             (review_aggregate["blocked"] or review_aggregate["failed"])
             and selection_id
             and not selection_integrity_problems
+            and not any(
+                problem.get("code")
+                in {
+                    "discussion_round_orphaned",
+                    "discussion_round_stopped",
+                }
+                for candidate in review_candidates
+                for problem in list(candidate.get("problems") or [])
+            )
         ):
             failed_candidate_ids = [
                 str(item.get("candidateId") or "")
@@ -2113,6 +2312,7 @@ def project_state_from_records(
                     candidate_id=str(candidate["candidateId"]),
                     return_to=return_to,
                     label="进入候选评审室",
+                    chat_room_round_snapshots=room_round_snapshots,
                 )
                 if str(candidate_meeting.get("status") or "").lower() != "closed":
                     allowed_actions.extend(candidate_actions)
@@ -2426,6 +2626,48 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
         and str(record.get("questionId") or "").strip().upper() == normalized
     ]
     reset_boundary = reset_records[-1] if reset_records else None
+    meeting_records = [
+        record
+        for record in snapshot["meetingRecords"]
+        if str(record.get("meetingRoundId") or "") in meeting_ids
+    ]
+    chat_room_round_snapshots: dict[str, dict[str, Any]] = {}
+    try:
+        # WorkRun snapshots are the read-only runtime authority.  Do not call
+        # chat-room detail here: that facade reconciles/repairs room state as a
+        # side effect, which is not appropriate for a canonical projection.
+        from core.web.services import chat_room_service
+
+        work_run_store = chat_room_service._work_run_store()
+        bound_round_ids = {
+            str(round_id or "").strip()
+            for meeting in meeting_records
+            for round_id in list(meeting.get("chatRoomRoundIds") or [])
+            if str(round_id or "").strip()
+        }
+        for round_id in bound_round_ids:
+            work_run = work_run_store.load_snapshot(
+                chat_room_service.RUN_KIND,
+                round_id,
+            )
+            if not isinstance(work_run, Mapping):
+                continue
+            snapshot_id = str(
+                work_run.get("runId") or work_run.get("roundId") or ""
+            ).strip()
+            if snapshot_id and snapshot_id != round_id:
+                continue
+            chat_room_round_snapshots[round_id] = dict(work_run)
+    except (OSError, TypeError, ValueError) as exc:
+        # Missing/unreadable runtime snapshots must not make the durable
+        # research ledger unavailable; the projector will retain the meeting's
+        # own status and avoid inferring a stop without strong evidence.
+        _record_projection_scene_event(
+            "chat_room_round_snapshot.unavailable",
+            team_id=team_id,
+            question_id=normalized,
+            source_error_type=type(exc).__name__,
+        )
     try:
         from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
         from core.web.services.team_workflow import challenge_question_runs
@@ -2483,9 +2725,7 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
             if str(record.get("questionId") or "").strip().upper() == normalized
         ],
         "meeting_records": [
-            record
-            for record in snapshot["meetingRecords"]
-            if str(record.get("meetingRoundId") or "") in meeting_ids
+            dict(record) for record in meeting_records
         ],
         "digest_records": [
             record
@@ -2505,6 +2745,7 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
         "formal_runs": formal_runs,
         "formal_snapshots": formal_snapshots,
         "program_output": program_output,
+        "chat_room_round_snapshots": chat_room_round_snapshots,
     }
 
 

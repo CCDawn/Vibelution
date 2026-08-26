@@ -1204,6 +1204,143 @@ def test_stalled_review_exposes_precise_discussion_recovery_actions() -> None:
     assert {"resume_discussion", "stop_discussion", "regenerate_summary"} <= commands
 
 
+def test_stopped_linked_chat_round_projects_review_as_blocked_without_fake_recovery() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-1"],
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-1": {
+                    "runId": "room-round-1",
+                    "runKind": "chat_room_round",
+                    "status": "stopped",
+                    "currentPhase": "stopped",
+                    "runtimeStatus": "orphan_reconciled",
+                    "reconciliationSource": "missing_process_controller",
+                    "summary": "群聊轮次已停止：0/4 位 Agent 已发言。后端进程已重启。",
+                    "updatedAt": "2026-08-26T02:17:41Z",
+                    "finishedAt": "2026-08-26T02:17:41Z",
+                }
+            },
+        )
+    )
+
+    candidate = state.review.candidates[0]
+    assert candidate.lifecycle == "failed"
+    assert candidate.actionability == "blocked"
+    assert candidate.discussion.lifecycle == "failed"
+    assert candidate.discussion.actionability == "blocked"
+    assert state.review.lifecycle == "failed"
+    assert state.review.actionability == "blocked"
+    assert state.currentPhase == "review"
+    assert any(
+        problem.code == "discussion_round_orphaned"
+        and "后端进程已重启" in problem.message
+        for problem in state.problems
+    )
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "resume_discussion" not in commands
+    assert "retry_review_dispatch" not in commands
+
+
+def test_missing_linked_chat_round_snapshot_does_not_guess_that_open_meeting_stopped() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-missing"],
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={},
+        )
+    )
+
+    assert state.review.candidates[0].lifecycle == "running"
+    assert state.review.candidates[0].actionability == "executing"
+    assert state.review.lifecycle == "running"
+    assert state.review.actionability == "waiting_system"
+
+
 def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> None:
     failed = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
@@ -1949,6 +2086,110 @@ def test_production_projector_reads_formal_and_program_authorities(
     assert state.formalRuntime.runId == "run-1"
     assert state.currentPhase == "program_delivery"
     assert state.programDelivery.outputRunId == "run-1"
+
+
+def test_production_projector_reads_bound_chat_round_work_run_without_room_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    state_module.clear_hypothesis_first_state_v2_cache()
+    monkeypatch.setattr(
+        "core.web.services.team_service.assert_team_exists",
+        lambda team_id: team_id,
+    )
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        lambda *_args: {
+            "targetMeetingIds": {"review-1"},
+            "targetRoundIds": set(),
+            "chainRecords": [
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            "selectionRecords": [
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            "meetingRecords": [
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-1"],
+                }
+            ],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [],
+        },
+    )
+
+    loaded: list[tuple[str, str]] = []
+
+    class WorkRunStore:
+        def load_snapshot(self, run_kind: str, run_id: str) -> dict[str, object]:
+            loaded.append((run_kind, run_id))
+            return {
+                "runId": run_id,
+                "runKind": run_kind,
+                "status": "stopped",
+                "currentPhase": "stopped",
+                "runtimeStatus": "orphan_reconciled",
+                "reconciliationSource": "missing_process_controller",
+                "summary": "后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
+                "finishedAt": "2026-08-26T02:17:41Z",
+            }
+
+    from core.web.services import chat_room_service
+
+    monkeypatch.setattr(chat_room_service, "_work_run_store", lambda: WorkRunStore())
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: type(
+            "QueryService",
+            (),
+            {"list_runs": lambda self, **_kwargs: {"runs": []}},
+        )(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("challenge_question_run_not_found")
+        ),
+    )
+
+    state = HypothesisFirstStateV2.model_validate(
+        state_module.project_hypothesis_first_state_v2("team-1", "SCI-001")
+    )
+
+    assert loaded == [(chat_room_service.RUN_KIND, "room-round-1")]
+    assert state.review.lifecycle == "failed"
+    assert state.review.actionability == "blocked"
+    assert state.review.candidates[0].discussion.actionability == "blocked"
+    assert any(
+        problem.code == "discussion_round_orphaned" for problem in state.problems
+    )
+    state_module.clear_hypothesis_first_state_v2_cache()
 
 
 def test_v2_route_maps_unavailable_authority_to_structured_503(
