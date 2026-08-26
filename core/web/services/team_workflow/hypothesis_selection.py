@@ -336,7 +336,77 @@ def _auto_open_review_meeting(
         }
 
 
+def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
+    """Best-effort selection observability; never breaks the append-only path."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "hypothesis_selection",
+        event_code,
+        level="info" if outcome != "failed" else "warning",
+        outcome=outcome,
+        fields=fields,
+    )
+
+
 def record_hypothesis_selection(
+    team_id: str,
+    payload: Mapping[str, Any] | None = None,
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
+) -> dict[str, Any]:
+    """Record one append-only selection and leave an observability event.
+
+    Thin wrapper over the append-only service: created/reused outcomes and
+    failures each leave a runtime-scene event so a selection that silently
+    lost its review fan-out stays diagnosable from the event stream.
+    """
+
+    request = dict(payload) if isinstance(payload, Mapping) else {}
+    try:
+        result = _record_hypothesis_selection_impl(
+            team_id,
+            payload,
+            agent_runner=agent_runner,
+            background=background,
+        )
+    except Exception as exc:
+        _record_scene_event(
+            "selection.record_failed",
+            outcome="failed",
+            fields={
+                "teamId": str(team_id or ""),
+                "questionId": str(request.get("questionId") or ""),
+                "errorType": type(exc).__name__,
+            },
+        )
+        raise
+    selection = result.get("selection") if isinstance(result, Mapping) else {}
+    review = result.get("reviewMeeting") if isinstance(result, Mapping) else {}
+    selected_ids = request.get("selectedCandidateIds")
+    _record_scene_event(
+        "selection.recorded",
+        outcome=str(result.get("status") or "created"),
+        fields={
+            "teamId": str(result.get("teamId") or team_id or ""),
+            "questionId": str(request.get("questionId") or ""),
+            "selectionId": str(selection.get("selectionId") or "")
+            if isinstance(selection, Mapping)
+            else "",
+            "candidateCount": len(selected_ids) if isinstance(selected_ids, list) else 0,
+            "reviewDispatchStatus": str(review.get("status") or "")
+            if isinstance(review, Mapping)
+            else "",
+        },
+    )
+    return result
+
+
+def _record_hypothesis_selection_impl(
     team_id: str,
     payload: Mapping[str, Any] | None = None,
     *,
