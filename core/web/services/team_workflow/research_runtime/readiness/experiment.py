@@ -83,7 +83,9 @@ def evaluate_hypothesis_design(
                 blocker(
                     "template_baseline_missing",
                     "模板基线缺失",
-                    "实验设计要求该题作用域下存在 frozen 的模板基线",
+                    "实验设计要求该题作用域下存在 frozen 的模板基线；"
+                    "请先通过 POST /teams/{team_id}/workflow-orchestration/template-baselines "
+                    "为该题创建并冻结模板基线，再启动实验设计节点",
                     remediation_kind=RemediationKind.RESOLVE_HUMAN,
                     remediation_label="冻结模板基线",
                 )

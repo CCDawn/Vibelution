@@ -149,14 +149,51 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return team_id, agents
 
 
-def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
+def _package_receipt_trace_refs() -> list[dict]:
+    """Five-kind invocation trace satisfying the formal receipt coverage gate."""
+
+    return [
+        {
+            "receiptId": f"trace-{kind}",
+            "receiptSha256": "a" * 64,
+            "nodeRunId": f"node-{kind}",
+            "sessionId": f"session-{kind}",
+            "turnId": f"turn-{kind}",
+            "outcomeKinds": [kind],
+            "evidenceLocator": {"kind": "turn_journal", "turnId": f"turn-{kind}"},
+            "evidenceLocatorSha256": "b" * 64,
+        }
+        for kind in ("candidate", "review", "revision", "plan", "final_output")
+    ]
+
+
+def _patch_approved_question(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from copy import deepcopy
+
+    from core.research.competition.result_set import CatalogScope, QuestionResult
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry,
+    )
+    from tests.test_catalog_execution_state_machine import _package
+
+    package = _package(CatalogScope.from_tracked_resources(), _QUESTION_ID)
+    package_path = tmp_path / "question-result-package.json"
+    package_path.write_text(
+        json.dumps(package.to_dict(), ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    run_id = package.run_id
+    trace_refs = _package_receipt_trace_refs()
     detail = {
         "teamId": "hf7",
         "questionId": _QUESTION_ID,
-        "selectedRunId": "stage1-sci-096-v1",
+        "selectedRunId": run_id,
         "record": {
+            "teamId": "hf7",
             "questionId": _QUESTION_ID,
-            "runId": "stage1-sci-096-v1",
+            "runId": run_id,
             "schemaVersion": 2,
             "submissionEligible": True,
             "status": "approved",
@@ -173,6 +210,31 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
                 "schemaValidation": "passed",
                 "citationValidation": "passed",
                 "officialModelCall": True,
+                "modelInvocationReceipts": "passed",
+            },
+            "modelInvocationReceiptRefs": QuestionResult.from_package(
+                package
+            ).manifest_entry()["receipts"],
+            "modelInvocationReceiptTraceRefs": trace_refs,
+            "modelInvocationReceiptCoverage": {
+                "status": "passed",
+                "coveredKinds": [
+                    "candidate",
+                    "final_output",
+                    "plan",
+                    "review",
+                    "revision",
+                ],
+                "missingKinds": [],
+                "receiptCount": len(trace_refs),
+            },
+            "resultPackage": {
+                "schemaVersion": package.schema_version,
+                "packageId": package.package_id,
+                "canonicalHash": package.canonical_hash,
+                "idempotencyKey": package.idempotency_key,
+                "modelPolicySha256": package.model_policy["policySha256"],
+                "locator": str(package_path),
             },
         },
         "output": {
@@ -204,6 +266,11 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
         question_launch,
         "get_challenge_question_run_detail",
         lambda _team_id, requested, *, run_id="": detail,
+    )
+    monkeypatch.setattr(
+        model_invocation_receipt_registry,
+        "question_model_invocation_receipt_refs",
+        lambda *args, **kwargs: deepcopy(trace_refs),
     )
 
 
@@ -367,7 +434,9 @@ def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
         },
         "stopPolicy": {},
         "environmentSnapshotRef": "env-1",
-        "modelRoutingPolicy": {},
+        # Meeting receipt authority requires a formal policy digest even in
+        # DEV fixtures; the value only needs the canonical sha256 format.
+        "modelRoutingPolicy": {"modelPolicySha256": "d" * 64},
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
@@ -563,6 +632,48 @@ def _close_first_meeting_with_envelope(
     )
 
 
+def _sibling_meeting_ids(team_id: str, meeting_round_id: str) -> list[str]:
+    """Other candidate meetings sharing this meeting's selection/round group."""
+    links = chain.list_review_round_links(team_id)["links"]
+    current = next(
+        link
+        for link in links
+        if str(link.get("meetingRoundId") or "") == meeting_round_id
+    )
+    selection_id = str(current.get("selectionId") or "")
+    round_index = int(current.get("roundIndex") or 0)
+    return [
+        str(link.get("meetingRoundId") or "")
+        for link in links
+        if str(link.get("selectionId") or "") == selection_id
+        and int(link.get("roundIndex") or 0) == round_index
+        and str(link.get("candidateId") or "").strip()
+        and str(link.get("meetingRoundId") or "") != meeting_round_id
+    ]
+
+
+def _close_sibling_meetings(
+    team_id: str, agent_ids: list[str], meeting_round_id: str, runtime
+) -> dict:
+    """Close the remaining candidate-sibling meetings (fan-in contract).
+
+    Candidate fan-out gives every selected hypothesis its own review meeting;
+    the selection-level HypothesisRound only generates after the whole
+    sibling group closes.  Siblings close with a select decision so no extra
+    collection runs appear alongside the envelope decision's request.
+    """
+    final_closure: dict = {}
+    for sibling_id in _sibling_meeting_ids(team_id, meeting_round_id):
+        _drive_to_awaiting_approval(team_id, sibling_id, agent_ids[0])
+        final_closure = chain.close_review_meeting(
+            team_id,
+            sibling_id,
+            _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+            runtime=runtime,
+        )
+    return final_closure
+
+
 def _digest_records(team_id: str) -> list[dict]:
     return meetings._read_jsonl(meetings._digests_path(team_id))
 
@@ -609,7 +720,7 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
     created_runs, facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -634,12 +745,17 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             assert "hypothesis_round_unconverged" in design_codes
             assert "template_baseline_missing" in design_codes
 
-            # 1. 假说选择（多选 hyp-a/hyp-b）→ 首轮讨论自动开启，房间双向互引。
+            # 1. 假说选择（多选 hyp-a/hyp-b）→ 每个候选各开一场评审会议
+            #    （fan-out），首轮讨论自动开启，房间双向互引。
             recorded = _open_first_meeting(team_id, agent_ids)
             selection = recorded["selection"]
             review = recorded["reviewMeeting"]
             meeting = review["meetingRound"]
             first_meeting_id = meeting["meetingRoundId"]
+            assert review["candidateCount"] == 2
+            sibling_meeting_id = review["reviewMeetings"][1]["meetingRound"][
+                "meetingRoundId"
+            ]
             assert review["discussion"]["background"] is True
             assert meeting["meetingType"] == "hypothesis_review"
             assert meeting["linkedChatRoomId"] == review["roomId"]
@@ -711,22 +827,13 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             assert memory["createdCount"] == len(agent_ids)
             assert _memory_candidate_count(team_id, agent_ids) == len(agent_ids)
 
-            generated = closed["hypothesisRound"]
-            assert generated["status"] == "created"
-            first_round = generated["round"]
-            assert first_round["status"] == "closed"
-            assert first_round["metaReview"]["accepted"] is True
-            assert {
-                item["id"]
-                for item in first_round["meetingRefs"]
-                if item["kind"] == "meeting_round"
-            } == {first_meeting_id}
-            assert {
-                item["id"] for item in first_round["lineage"] if item["kind"] == "candidate"
-            } == {"hyp-a", "hyp-b"}
-            assert not [
-                item for item in first_round["lineage"] if item["kind"] == "round"
-            ]
+            # fan-out 契约：只关掉 hyp-a 的会议时，selection 级轮次生成
+            # 等待兄弟会议（hyp-b），不产生半成品 HypothesisRound。
+            waiting = closed["hypothesisRound"]
+            assert waiting["status"] == "waiting_for_sibling_reviews"
+            assert waiting["missingCandidateIds"] == []
+            assert waiting["pendingMeetingRoundIds"] == [sibling_meeting_id]
+            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
 
             # 3. 自动搜集子运行：facade ensure 恰好一次，request 稳定互引。
             requests = closed["collection"]["requests"]
@@ -761,6 +868,31 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             assert replay["locator"]["runId"] == "dprun-hf7-1"
             assert replay["locator"]["scopeHash"] == meeting["scopeHash"]
             assert len(created_runs) == 1
+
+            # 3c. 关闭兄弟候选会议（select 决策，不触发新搜集）→ 首轮
+            #     HypothesisRound 由两个候选会议 fan-in 生成：meetingRefs
+            #     保留双会议权威，lineage 仍终止于完整候选集合。
+            sibling_closed = _close_sibling_meetings(
+                team_id, agent_ids, first_meeting_id, runtime
+            )
+            assert sibling_closed["collection"]["requests"] == []
+            assert len(created_runs) == 1
+            generated = sibling_closed["hypothesisRound"]
+            assert generated["status"] == "created"
+            first_round = generated["round"]
+            assert first_round["status"] == "closed"
+            assert first_round["metaReview"]["accepted"] is True
+            assert {
+                item["id"]
+                for item in first_round["meetingRefs"]
+                if item["kind"] == "meeting_round"
+            } == {first_meeting_id, sibling_meeting_id}
+            assert {
+                item["id"] for item in first_round["lineage"] if item["kind"] == "candidate"
+            } == {"hyp-a", "hyp-b"}
+            assert not [
+                item for item in first_round["lineage"] if item["kind"] == "round"
+            ]
 
             # 4. 门证据（关门后）：source_finding 放行；hypothesis_design 仍被
             #    知识缺口 + 未收敛阻断；command gate 同样拒绝（不只是探针）。
@@ -811,10 +943,11 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)[
                 "links"
             ]
-            assert [link["roundIndex"] for link in links] == [1, 2]
+            assert [link["roundIndex"] for link in links] == [1, 1, 2]
             assert links[0]["meetingRoundId"] == first_meeting_id
-            assert links[1]["previousMeetingRoundId"] == first_meeting_id
-            assert links[1]["collectionRequestId"] == request["requestId"]
+            assert links[1]["meetingRoundId"] == sibling_meeting_id
+            assert links[2]["previousMeetingRoundId"] == first_meeting_id
+            assert links[2]["collectionRequestId"] == request["requestId"]
 
             # 6. 第二轮关门（select_candidate，无新缺口）→ 第二个
             #    HypothesisRound lineage 回链第一轮；随后冻结模板基线。
@@ -890,7 +1023,7 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             assert state["selectionId"] == selection["selectionId"]
             assert state["firstMeetingClosed"] is True
             assert state["collectionReady"] is True
-            assert state["meetingCount"] == 2
+            assert state["meetingCount"] == 3
             assert state["hypothesisRoundCount"] == 2
     finally:
         runtime.close()
@@ -905,7 +1038,7 @@ def test_unclosed_or_artifactless_round_never_feeds_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
     _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -967,7 +1100,7 @@ def test_reselection_chain_and_round_lineage_walk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
     _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -984,8 +1117,11 @@ def test_reselection_chain_and_round_lineage_walk(
             closed = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
-            first_round = closed["hypothesisRound"]["round"]
             request = closed["collection"]["requests"][0]
+            sibling_closed = _close_sibling_meetings(
+                team_id, agent_ids, first_meeting_id, runtime
+            )
+            first_round = sibling_closed["hypothesisRound"]["round"]
             handoff = chain.record_collection_handoff(
                 team_id,
                 request["requestId"],
@@ -1099,7 +1235,7 @@ def test_closure_replay_produces_no_duplicate_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
     created_runs, _facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -1111,12 +1247,18 @@ def test_closure_replay_produces_no_duplicate_artifacts(
             first_meeting_id = recorded["reviewMeeting"]["meetingRound"][
                 "meetingRoundId"
             ]
+            sibling_meeting_id = recorded["reviewMeeting"]["reviewMeetings"][1][
+                "meetingRound"
+            ]["meetingRoundId"]
             payload = _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])])
             closed = _close_first_meeting_with_envelope(
                 team_id, agent_ids, first_meeting_id, runtime
             )
             request = closed["collection"]["requests"][0]
-            first_round_id = closed["hypothesisRound"]["round"]["roundId"]
+            sibling_closed = _close_sibling_meetings(
+                team_id, agent_ids, first_meeting_id, runtime
+            )
+            first_round_id = sibling_closed["hypothesisRound"]["round"]["roundId"]
 
             snapshot = {
                 "digests": len(_digest_records(team_id)),
@@ -1129,9 +1271,9 @@ def test_closure_replay_produces_no_duplicate_artifacts(
                 "facadeRuns": len(created_runs),
             }
             assert snapshot == {
-                "digests": 1,
-                "decisions": 1,
-                "memories": len(agent_ids),
+                "digests": 2,
+                "decisions": 2,
+                "memories": 2 * len(agent_ids),
                 "rounds": 1,
                 "requests": 1,
                 "facadeRuns": 1,
@@ -1177,9 +1319,10 @@ def test_closure_replay_produces_no_duplicate_artifacts(
 
             # 会议轮次记录本身也不产生重复（append-only 去重）。
             meeting_list = meetings.list_meeting_rounds(team_id)["meetings"]
-            assert [item["meetingRoundId"] for item in meeting_list] == [
-                first_meeting_id
-            ]
+            assert {item["meetingRoundId"] for item in meeting_list} == {
+                first_meeting_id,
+                sibling_meeting_id,
+            }
     finally:
         runtime.close()
 
@@ -1193,7 +1336,7 @@ def test_participant_role_tool_snapshot_and_single_collection_facade(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
     created_runs, facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -1262,7 +1405,7 @@ def test_interruption_replay_across_chain_points(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
     created_runs, _facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -1293,6 +1436,7 @@ def test_interruption_replay_across_chain_points(
                 team_id, agent_ids, first_meeting_id, runtime
             )
             request = closed["collection"]["requests"][0]
+            _close_sibling_meetings(team_id, agent_ids, first_meeting_id, runtime)
             reclosed = chain.close_review_meeting(
                 team_id,
                 first_meeting_id,
@@ -1330,7 +1474,7 @@ def test_interruption_replay_across_chain_points(
                 chain.list_review_round_links(team_id, question_id=_QUESTION_ID)[
                     "linkCount"
                 ]
-                == 2
+                == 3
             )
 
         # 点位 D：进程重启（全新 runtime 读同一 ledger）→ 状态完整重放，
@@ -1345,7 +1489,7 @@ def test_interruption_replay_across_chain_points(
             assert state["collectionRequestCount"] == 1
             assert state["pendingCollectionCount"] == 0
             assert state["collectionReady"] is True
-            assert state["meetingCount"] == 2
+            assert state["meetingCount"] == 3
             assert state["hypothesisRoundCount"] == 1
 
             design = _evaluate(runtime, team_id, "hypothesis_design")

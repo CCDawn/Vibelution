@@ -173,6 +173,7 @@ def resolve_scoped_discussion_room(
     participant_bindings: Sequence[Mapping[str, Any]],
     *,
     title: str = "",
+    participant_contexts_by_agent_id: Mapping[str, Mapping[str, Any]] | None = None,
     port: _ChatRoomPort | None = None,
 ) -> dict[str, Any]:
     """Resolve or create exactly one room for a canonical discussion scope.
@@ -208,6 +209,14 @@ def resolve_scoped_discussion_room(
         title=_text(title, limit=120)
         or f"{normalized_scope.questionId} | {normalized_scope.kind}",
         participant_session_ids=session_ids,
+        participant_contexts_by_agent_id=(
+            {
+                agent_id: dict(context)
+                for agent_id, context in dict(participant_contexts_by_agent_id).items()
+            }
+            if isinstance(participant_contexts_by_agent_id, Mapping)
+            else None
+        ),
         mode="round_robin",
         purpose="meeting",
         config=_room_config(normalized_scope),

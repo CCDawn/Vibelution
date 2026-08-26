@@ -300,6 +300,24 @@ def reset_singletons(request):
 
 
 @pytest.fixture(autouse=True)
+def isolate_team_workflow_review_llm(monkeypatch):
+    """Team-workflow review runners must never resolve a real model in tests.
+
+    ``llm_review_runners`` wires the operator-configured LLM into digest
+    drafting and the hypothesis review chain.  Tests must stay on the
+    deterministic DEV fixtures even when the host machine carries real
+    provider credentials, so resolution is pinned to ``None``; tests that
+    exercise the real path inject their own fake ``llm`` mapping.
+    """
+    try:
+        from core.web.services.team_workflow import llm_review_runners
+    except Exception:
+        return
+
+    monkeypatch.setattr(llm_review_runners, "resolve_review_llm", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")

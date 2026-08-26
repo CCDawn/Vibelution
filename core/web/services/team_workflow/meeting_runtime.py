@@ -413,6 +413,7 @@ def _resolve_scoped_meeting_room(
             None,
         )
 
+    from core.web.services import chat_room_service
     from core.web.services.team_workflow.discussion_room_runtime import (
         resolve_scoped_discussion_room,
     )
@@ -485,6 +486,11 @@ def _resolve_scoped_meeting_room(
         scope,
         bindings,
         title=f"{scope.questionId}{title_suffix}",
+        participant_contexts_by_agent_id=_derived_room_participant_contexts(
+            chat_room_service.get_chat_room_detail(base_room_id),
+            participant_resolution,
+            list(participant_resolution.get("participants") or []),
+        ),
     )
     room_id = str(room.get("roomId") or "").strip()
     if not room_id:
@@ -560,7 +566,7 @@ def _resolve_preformal_candidate_review_room(
         raise ResearchMeetingRuntimeError(
             "preformal candidate review room requires a resolved participant roster"
         )
-    participant_contexts = _preformal_candidate_room_participant_contexts(
+    participant_contexts = _derived_room_participant_contexts(
         chat_room_service.get_chat_room_detail(base_room_id),
         participant_resolution,
         participant_agent_ids,
@@ -580,12 +586,12 @@ def _resolve_preformal_candidate_review_room(
     return room_id
 
 
-def _preformal_candidate_room_participant_contexts(
+def _derived_room_participant_contexts(
     base_room: Mapping[str, Any] | None,
     participant_resolution: Mapping[str, Any],
     participant_agent_ids: Sequence[str],
 ) -> dict[str, dict[str, Any]]:
-    """Copy the fixed roster's team context into a derived candidate room."""
+    """Copy the fixed roster's team context into a derived discussion room."""
 
     allowed_agent_ids = set(_normalized_str_list(participant_agent_ids))
     role_by_agent_id = {
@@ -1834,7 +1840,12 @@ def draft_meeting_digest(
     *,
     drafter: Callable[[dict[str, Any], list[dict[str, Any]]], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Generate the Coordinator digest draft and move the meeting to ``awaiting_approval``."""
+    """Generate the Coordinator digest draft and move the meeting to ``awaiting_approval``.
+
+    Without an injected ``drafter`` the operator-configured LLM is tried
+    first; when no model is configured the deterministic DEV fixture
+    drafter keeps the previous behaviour.
+    """
     from core.web.services import team_service
 
     normalized_team_id = team_service.assert_team_exists(team_id)
@@ -1845,7 +1856,14 @@ def draft_meeting_digest(
         "meetingRound"
     ]
     source_messages = meeting_rounds.meeting_source_messages(meeting_round)
-    draft = build_meeting_digest_draft(meeting_round, source_messages, drafter=drafter)
+    effective_drafter = drafter
+    if effective_drafter is None:
+        from core.web.services.team_workflow.llm_review_runners import (
+            build_meeting_digest_drafter,
+        )
+
+        effective_drafter = build_meeting_digest_drafter()
+    draft = build_meeting_digest_draft(meeting_round, source_messages, drafter=effective_drafter)
     draft["sourceMessageContentHash"] = meeting_rounds.source_message_content_hash(
         source_messages
     )

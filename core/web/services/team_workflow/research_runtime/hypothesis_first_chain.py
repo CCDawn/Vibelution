@@ -3817,6 +3817,10 @@ def close_review_meeting(
     without rolling the closure back).  When a runtime is provided the parent
     runs' ``hypothesis_design`` readiness is re-checked outside any writer
     transaction.
+
+    When no review runner is injected the operator-configured LLM is tried
+    first; when no model is configured the deterministic DEV fixtures keep
+    the previous behaviour.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_rounds
@@ -3828,6 +3832,22 @@ def close_review_meeting(
     meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
         "meetingRound"
     ]
+    if (
+        reflection_runner is None
+        and pairwise_runner is None
+        and pareto_runner is None
+        and metareview_runner is None
+    ):
+        from core.web.services.team_workflow.llm_review_runners import (
+            build_hypothesis_review_runners,
+        )
+
+        real_runners = build_hypothesis_review_runners()
+        if real_runners:
+            reflection_runner = real_runners["reflection_runner"]
+            pairwise_runner = real_runners["pairwise_runner"]
+            pareto_runner = real_runners["pareto_runner"]
+            metareview_runner = real_runners["metareview_runner"]
     request = dict(payload) if isinstance(payload, Mapping) else {}
     meeting_type = str(meeting_round.get("meetingType") or "")
     if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
