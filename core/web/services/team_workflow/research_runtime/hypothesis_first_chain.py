@@ -1804,6 +1804,11 @@ def _execute_v2_command_impl(
                 normalized_team_id,
                 str(payload.get("meetingRoundId") or ""),
             )
+        elif command == "reopen_review":
+            result = reopen_failed_review_meeting(
+                normalized_team_id,
+                str(payload.get("meetingRoundId") or ""),
+            )
         elif command == "stop_discussion":
             result = meeting_rounds.supersede_empty_discussion_meeting(
                 normalized_team_id,

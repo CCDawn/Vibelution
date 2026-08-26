@@ -255,6 +255,7 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
     case "create_formal_revision": return "create_formal_revision";
     case "reconcile_formal_run": return "reconcile_formal_run";
     case "retry_review_dispatch": return "retry_review_dispatch";
+    case "reopen_review": return "reopen_review";
     case "resume_discussion": return "resume_discussion";
     case "stop_discussion": return "stop_discussion";
   }

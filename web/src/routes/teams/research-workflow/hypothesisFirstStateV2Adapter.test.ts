@@ -102,7 +102,7 @@ function command(
 ): CommandAction {
   const targetPhase = action.command === "record_selection"
     ? "selection"
-    : ["approve_summary", "retry_review_dispatch", "resume_discussion", "stop_discussion", "regenerate_summary"].includes(action.command)
+    : ["approve_summary", "retry_review_dispatch", "reopen_review", "resume_discussion", "stop_discussion", "regenerate_summary"].includes(action.command)
       ? "review"
     : action.command === "create_formal_run"
       ? "formal_runtime"
@@ -210,6 +210,39 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.stage).toBe("review_running");
     expect(action.statusMessage).toBe("本轮候选评审：已完成 0/2");
     expect(action.disabledReason).toBeUndefined();
+  });
+
+  it("surfaces the canonical reopen action for an orphaned review round", () => {
+    const blockedCandidate = {
+      ...reviewCandidate("cand-1", "failed"),
+      actionability: "blocked" as const,
+      discussion: { ...idle, lifecycle: "failed" as const, actionability: "blocked" as const },
+      summarization: { ...idle },
+      approval: { ...idle },
+    };
+    const reopen = command({
+      command: "reopen_review",
+      payload: { meetingRoundId: "meeting-cand-1" },
+    }, "重新发起评审讨论");
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      review: {
+        ...stateV2().review,
+        lifecycle: "failed",
+        actionability: "blocked",
+        activeRoundIndex: 1,
+        aggregate: { total: 1, completed: 0, pending: 0, failed: 1, blocked: 1 },
+        candidates: [blockedCandidate],
+      },
+      allowedActions: [reopen],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).toBe("blocked");
+    expect(action.command).toBe("reopen_review");
+    expect(action.canonicalAction?.command).toBe("reopen_review");
   });
 
   it("selects the exact pending candidate from a two-candidate review", () => {
