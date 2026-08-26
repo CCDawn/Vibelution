@@ -46,6 +46,31 @@ from .iteration_route import branch_decision_from_run, routed_successors
 DEFAULT_ADAPTER_DISPATCH_LEASE_MS = 150_000
 
 
+def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
+    """Best-effort worker observability; never breaks the dispatch path."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "adapter_dispatch_worker",
+        event_code,
+        level="info" if outcome in {"committed", "settled"} else "warning",
+        outcome=outcome,
+        fields=fields,
+    )
+
+
+def _action_identity(action: PendingAction) -> dict[str, Any]:
+    return {
+        "runId": str(getattr(action, "run_id", "") or ""),
+        "nodeId": str(getattr(action, "node_id", "") or ""),
+        "actionKind": str(getattr(action, "action_kind", "") or ""),
+        "actionId": str(getattr(action, "action_id", "") or ""),
+    }
+
+
 class _OutboxLeaseLost(RuntimeError):
     """The worker must stop projecting after its outbox lease is lost."""
 
@@ -304,6 +329,21 @@ class AdapterDispatchWorker:
                 # 进入 reconciliation_required 供对账（禁止静默吞掉）。
                 self._settle_domain_budget(
                     outbox, action, verified.budget_receipt, result.usage
+                )
+            if committed:
+                actor_kind = getattr(action, "actor_kind", None)
+                _record_scene_event(
+                    "adapter_dispatch.committed",
+                    outcome="committed",
+                    fields={
+                        **_action_identity(action),
+                        "actorKind": str(
+                            getattr(actor_kind, "value", actor_kind) or ""
+                        ),
+                        "budgetSettled": bool(
+                            committed and verified.budget_receipt
+                        ),
+                    },
                 )
         except Exception as exc:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
@@ -775,6 +815,15 @@ class AdapterDispatchWorker:
             }
             self.last_problem = problem
             self._mark_budget_settle_reconciliation(action, problem)
+            return
+        _record_scene_event(
+            "adapter_dispatch.budget_settled",
+            outcome="settled",
+            fields={
+                **_action_identity(action),
+                "reservationId": str(reservation.get("reservationId") or ""),
+            },
+        )
 
 
     def _mark_budget_settle_reconciliation(
@@ -784,6 +833,15 @@ class AdapterDispatchWorker:
         now_ms = self._now()
         problem_json = json.dumps(problem, ensure_ascii=False)
         recovery_id = new_id("rec")
+        _record_scene_event(
+            "adapter_dispatch.budget_settle_reconciliation",
+            outcome="reconciliation_required",
+            fields={
+                **_action_identity(action),
+                "reservationId": str(problem.get("reservationId") or ""),
+                "errorType": "BudgetSettleFailed",
+            },
+        )
 
         def mutate(uow):
             run = uow.repository.get_run(action.run_id)
@@ -861,6 +919,14 @@ class AdapterDispatchWorker:
         }
         if parsed and parsed.get("code") and parsed.get("code") != "workflow_blocked":
             problem["code"] = str(parsed.get("code") or code)
+        _record_scene_event(
+            "adapter_dispatch.attempt_blocked",
+            outcome="blocked",
+            fields={
+                **_action_identity(action),
+                "problemCode": str(problem.get("code") or ""),
+            },
+        )
 
         def mutate(uow):
             failed = uow.repository.fail_outbox(
@@ -889,6 +955,14 @@ class AdapterDispatchWorker:
 
     def _fail_attempt(self, outbox: Any, action: PendingAction, problem: dict) -> None:
         now_ms = self._now()
+        _record_scene_event(
+            "adapter_dispatch.attempt_failed",
+            outcome="failed",
+            fields={
+                **_action_identity(action),
+                "problemCode": str(problem.get("code") or ""),
+            },
+        )
 
         def mutate(uow):
             failed = uow.repository.fail_outbox(
@@ -957,6 +1031,15 @@ class AdapterDispatchWorker:
                 {"code": "transient_exhausted", "detail": str(detail)[:400]},
             )
             return
+        _record_scene_event(
+            "adapter_dispatch.requeued",
+            outcome="requeued",
+            fields={
+                **_action_identity(action),
+                "attemptCount": int(getattr(outbox, "attempt_count", 0) or 0),
+                "detail": str(detail)[:160],
+            },
+        )
         outbox_api.requeue_action(
             self._store,
             outbox.action_id,
