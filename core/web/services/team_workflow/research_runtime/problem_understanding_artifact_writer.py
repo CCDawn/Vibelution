@@ -174,6 +174,8 @@ def _formal_task_context(task_context: Mapping[str, Any]) -> dict[str, Any]:
 def _authoritative_problem_understanding_binding(
     team_id: str,
     task_context: Mapping[str, Any],
+    *,
+    require_turn_binding: bool = True,
 ) -> dict[str, Any]:
     """Reconcile task identity with the immutable workflow Ledger records."""
 
@@ -198,7 +200,7 @@ def _authoritative_problem_understanding_binding(
     session_id = _task_text(task, "sessionId")
     turn = task.get("turn") if isinstance(task.get("turn"), Mapping) else {}
     turn_id = str(turn.get("turnId") or "").strip()
-    if not turn_id:
+    if require_turn_binding and not turn_id:
         raise ValueError("Formal problem-understanding task requires turn binding.")
     agent_id = _task_text(task, "agentId")
     if task.get("teamRole") and str(task.get("teamRole")).strip() != "source_finder":
@@ -304,6 +306,7 @@ def build_problem_understanding_task_context(
         binding = _authoritative_problem_understanding_binding(
             team_id,
             {"teamId": str(team_id or "").strip(), "task": dict(task)},
+            require_turn_binding=False,
         )
     except ValueError as exc:
         return {

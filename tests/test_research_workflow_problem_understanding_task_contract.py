@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from core.web.services.team_workflow import research_project_agent_tasks
@@ -58,7 +60,14 @@ def test_problem_understanding_contract_is_bound_to_search_seat_and_node() -> No
 
 @pytest.mark.parametrize(
     "field",
-    ["taskKind", "workflowNodeId", "workflowRunId", "nodeRunId", "sessionId"],
+    [
+        "taskKind",
+        "workflowNodeId",
+        "workflowRunId",
+        "nodeRunId",
+        "sessionId",
+        "turn",
+    ],
 )
 def test_problem_writer_fails_closed_when_task_authority_is_incomplete(field: str) -> None:
     task = _task()
@@ -70,6 +79,48 @@ def test_problem_writer_fails_closed_when_task_authority_is_incomplete(field: st
             task_context={"teamId": "research-team", "task": task},
             problem_understanding=_payload(),
         )
+
+
+def test_problem_context_reads_frozen_scope_before_turn_is_bound(monkeypatch) -> None:
+    calls: list[bool] = []
+
+    def authoritative_binding(
+        _team_id: str,
+        _task_context: dict[str, object],
+        *,
+        require_turn_binding: bool = True,
+    ) -> dict[str, object]:
+        calls.append(require_turn_binding)
+        return {
+            "teamId": "research-team",
+            "researchProjectId": "project-1",
+            "questionId": "SCI-096",
+            "workflowRunId": "run-1",
+            "sourceCollectionRunId": "source-run-1",
+            "workflowNodeId": "problem_understanding",
+            "nodeRunId": "node-run-1",
+            "attemptNumber": 1,
+            "snapshot": SimpleNamespace(
+                snapshotHash="a" * 64,
+                researchScopeEnvelope={"question": "What is testable?"},
+                catalogScope={"questionId": "SCI-096"},
+            ),
+        }
+
+    monkeypatch.setattr(
+        writer,
+        "_authoritative_problem_understanding_binding",
+        authoritative_binding,
+    )
+
+    context = writer.build_problem_understanding_task_context(
+        "research-team",
+        _task(turn={}),
+    )
+
+    assert calls == [False]
+    assert context["status"] == "ready"
+    assert context["nodeRunId"] == "node-run-1"
 
 
 def test_problem_writer_uses_server_task_scope_not_payload_identity(monkeypatch) -> None:

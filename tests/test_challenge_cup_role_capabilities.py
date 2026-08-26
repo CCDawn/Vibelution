@@ -56,6 +56,7 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
             "news_search_tool",
             "search_summarize_sources_tool",
             "web_fetch_tool",
+            "challenge_cup_experiment_writeback_tool",
         },
         "challenge_cup_extractor": {
             "source_collection_context_tool",
@@ -359,4 +360,4 @@ def test_role_capability_contract_snapshot_is_stable():
     snapshot = svc.role_capability_contract_snapshot()
     assert [item["roleKey"] for item in snapshot] == sorted(item["roleKey"] for item in snapshot)
     assert {item["roleKey"] for item in snapshot} == set(svc.ROLE_CAPABILITY_CONTRACTS)
-    assert svc.role_capability_contract_fingerprint() == "dfbb58cd0ed9fb26537d77fac1d0b5c6a8921fbc6a5889412cb4c8cef2c8c91f"
+    assert svc.role_capability_contract_fingerprint() == "616aa2c8954ed19d1f2492f5befbbf69bae656adc52bbdbf4572bf789d64193d"

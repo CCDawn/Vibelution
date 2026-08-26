@@ -569,8 +569,9 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "batch_web_search_tool",
+                "challenge_cup_experiment_writeback_tool",
             ),
-            ("不写正式知识", "不运行 Shell"),
+            ("problemUnderstandingInput", "不写正式知识", "不运行 Shell"),
         ),
         "prompt-challenge-cup-extractor": (
             "challenge_cup_extractor",
