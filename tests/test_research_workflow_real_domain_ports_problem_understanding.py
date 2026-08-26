@@ -23,7 +23,10 @@ class _Repository:
 
     def get_run(self, run_id: str):  # noqa: ARG002 - the fixture has one run
         snapshot = self._store.snapshot_json
-        return SimpleNamespace(input_snapshot_json=snapshot)
+        return SimpleNamespace(
+            input_snapshot_json=snapshot,
+            workflow_id=self._store.workflow_id,
+        )
 
     def execute(self, _sql: str, params: tuple[str, int, str]):
         self._store.snapshot_json = params[0]
@@ -36,17 +39,26 @@ class _UnitOfWork:
 
 
 class _FakeStore:
-    def __init__(self, snapshot: dict[str, object] | None) -> None:
+    def __init__(
+        self,
+        snapshot: dict[str, object] | None,
+        *,
+        workflow_id: str = "",
+    ) -> None:
         self.snapshot_json = (
             json.dumps(snapshot, ensure_ascii=False) if snapshot is not None else ""
         )
+        self.workflow_id = workflow_id
 
     def submit(self, callback, *, force_flush: bool = False):  # noqa: ARG002
         callback(_UnitOfWork(self))
         return _Future()
 
     def get_run(self, run_id: str):  # noqa: ARG002
-        return SimpleNamespace(input_snapshot_json=self.snapshot_json)
+        return SimpleNamespace(
+            input_snapshot_json=self.snapshot_json,
+            workflow_id=self.workflow_id,
+        )
 
 
 def _action() -> SimpleNamespace:
@@ -119,9 +131,10 @@ def test_problem_understanding_reuses_existing_source_run(
 def test_problem_understanding_bootstrap_persists_source_run_before_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = _FakeStore(_snapshot())
+    store = _FakeStore(_snapshot(), workflow_id="ledger-workflow")
     started_source_runs: list[dict[str, object]] = []
     calls: list[str] = []
+    authority_calls: list[dict[str, object]] = []
 
     from core.web.services.team_workflow.research_runtime import (
         experiment_stage_bootstrap,
@@ -150,7 +163,8 @@ def test_problem_understanding_bootstrap_persists_source_run_before_task(
     monkeypatch.setattr(
         real_domain_ports,
         "_formal_task_authorities",
-        lambda **_kwargs: ({"server": "contract"}, {"receipt": "binding"}),
+        lambda **kwargs: authority_calls.append(kwargs)
+        or ({"server": "contract"}, {"receipt": "binding"}),
     )
     monkeypatch.setattr(
         experiment_stage_bootstrap,
@@ -197,6 +211,7 @@ def test_problem_understanding_bootstrap_persists_source_run_before_task(
     assert handle.task_id == "task-problem-1"
     assert len(started_source_runs) == 1
     assert calls == ["stage_bootstrap", "project_task"]
+    assert authority_calls[0]["workflow_id"] == "ledger-workflow"
     task_record = project_task_payloads[0]
     assert task_record["payload"]["sourceCollectionRunId"] == "source-run-1"
     assert task_record["kwargs"]["_challenge_task_contract"]["sourceCollectionRunId"] == (

@@ -697,6 +697,10 @@ class RealDomainPorts:
                         action=action,
                         input_snapshot=snapshot,
                         agent_id=binding.agent_id,
+                        workflow_id=str(
+                            getattr(self._store.get_run(action.run_id), "workflow_id", "")
+                            or ""
+                        ).strip(),
                     )
                 )
                 return self._create_hypothesis_fan_out(
@@ -1668,6 +1672,11 @@ def _create_real_agent_task(
             action=action,
             input_snapshot=input_snapshot,
             agent_id=binding.agent_id,
+            workflow_id=str(
+                getattr(store.get_run(action.run_id), "workflow_id", "")
+                if store is not None
+                else ""
+            ).strip(),
         )
     )
     source_collection_run_id = ""

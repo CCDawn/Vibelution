@@ -261,6 +261,7 @@ def _formal_task_authorities(
     action: Any,
     input_snapshot: Mapping[str, Any],
     agent_id: str,
+    workflow_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build both server-owned contracts for a Ledger ``PendingAction``.
 
@@ -277,7 +278,13 @@ def _formal_task_authorities(
     node_run_id = str(getattr(action, "node_run_id", "") or "").strip()
     question_id = str(snapshot.get("questionId") or "").strip().upper()
     project_id = str(snapshot.get("projectId") or "").strip()
-    workflow_id = str(snapshot.get("workflowId") or "").strip()
+    # ``workflowId`` belongs to the Ledger run envelope and is intentionally
+    # not part of ``WorkflowRunInputSnapshot``.  Real callers pass the Ledger
+    # identity explicitly; the snapshot fallback keeps older direct callers
+    # compatible without inventing a workflow identity.
+    workflow_id = str(workflow_id or "").strip() or str(
+        snapshot.get("workflowId") or ""
+    ).strip()
     workflow_version_id = str(snapshot.get("workflowVersionId") or "").strip()
     action_snapshot_hash = str(
         getattr(action, "input_snapshot_hash", "") or ""
