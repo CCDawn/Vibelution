@@ -8,6 +8,8 @@ export type ResearchProcessPanel =
   | "progress"
   | "question";
 
+export const RESEARCH_PROCESS_INSPECTOR_CLOSED = "closed";
+
 const RESEARCH_PROCESS_TOOL_PANELS: ReadonlySet<ResearchProcessPanel> = new Set([
   "agents",
   "team",
@@ -16,6 +18,22 @@ const RESEARCH_PROCESS_TOOL_PANELS: ReadonlySet<ResearchProcessPanel> = new Set(
   "progress",
   "launch",
 ]);
+
+/**
+ * The question archive owns the wide canvas and therefore has no inspector
+ * drawer. Every other workflow panel is rendered through the inspector slot.
+ * An explicit `inspector=closed` marker is the URL-level user intent that
+ * overrides the panel's normal open state.
+ */
+export function shouldOpenResearchProcessInspector({
+  panel,
+  inspector,
+}: {
+  panel: ResearchProcessPanel;
+  inspector: string | null | undefined;
+}): boolean {
+  return panel !== "question" && inspector !== RESEARCH_PROCESS_INSPECTOR_CLOSED;
+}
 
 export function shouldApplyCanvasNodeSelection({
   nodeId,

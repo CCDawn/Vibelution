@@ -23,9 +23,11 @@ const harness = vi.hoisted(() => ({
     selectedNodeId: null as string | null,
     questionId: "",
     panel: "" as string,
+    inspectorOpen: true,
     replaceParams: vi.fn(),
     openPanel: vi.fn(),
     selectNode: vi.fn(),
+    responsiveInspectorOnOpenChange: undefined as ((open: boolean) => void) | undefined,
   },
   runState: {
     run: null as unknown,
@@ -115,32 +117,49 @@ vi.mock("../../../components/vui", async () => {
       responsive?: {
         enabled?: boolean;
         rail?: { label?: string };
-        inspector?: { label?: string };
+        inspector?: {
+          label?: string;
+          open?: boolean;
+          onOpenChange?: (open: boolean) => void;
+        };
       };
-    }) => (
-      <div
-        data-testid={props.shellTestId ?? "research-process-workspace-shell"}
-        data-toolbar-class={props.toolbarClassName}
-        data-layout-id={props.layoutId}
-        data-responsive-enabled={String(props.responsive?.enabled)}
-        data-responsive-rail={props.responsive?.rail?.label}
-        data-responsive-inspector={props.responsive?.inspector?.label}
-      >
-        {props.toolbar}
-        <div data-vui="canvas-workbench-rail">{props.rail}</div>
-        <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
-        <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
-      </div>
-    ),
+    }) => {
+      harness.responsiveInspectorOnOpenChange = props.responsive?.inspector?.onOpenChange;
+      return (
+        <div
+          data-testid={props.shellTestId ?? "research-process-workspace-shell"}
+          data-toolbar-class={props.toolbarClassName}
+          data-layout-id={props.layoutId}
+          data-responsive-enabled={String(props.responsive?.enabled)}
+          data-responsive-rail={props.responsive?.rail?.label}
+          data-responsive-inspector={props.responsive?.inspector?.label}
+          data-responsive-inspector-open={String(props.responsive?.inspector?.open)}
+        >
+          {props.toolbar}
+          <div data-vui="canvas-workbench-rail">{props.rail}</div>
+          <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
+          <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
+        </div>
+      );
+    },
   };
 });
 vi.mock("./ResearchWorkflowCanvasPane", () => ({
-  ResearchWorkflowCanvasPane: (props: { error?: string | null; currentTaskNodeId?: string | null }) => (
+  ResearchWorkflowCanvasPane: (props: {
+    error?: string | null;
+    currentTaskNodeId?: string | null;
+    onSelectNode?: (nodeId: string | null) => void;
+  }) => (
     <div
       role={props.error ? "alert" : undefined}
       data-current-task-node={props.currentTaskNodeId || undefined}
     >
       {props.error || "加载流程定义"}
+      <button
+        type="button"
+        data-testid="research-workflow-canvas-node"
+        onClick={() => props.onSelectNode?.("source_finding")}
+      />
     </div>
   ),
 }));
@@ -290,6 +309,8 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.selectedNodeId = null;
     harness.location.questionId = "";
     harness.location.panel = "";
+    harness.location.inspectorOpen = true;
+    harness.responsiveInspectorOnOpenChange = undefined;
     harness.runState.error = null;
     harness.runState.run = null;
     harness.runState.projection = null;
@@ -358,6 +379,49 @@ describe("ResearchProcessWorkspace", () => {
     expect(shell?.getAttribute("data-responsive-enabled")).toBe("true");
     expect(shell?.getAttribute("data-responsive-rail")).toBe("研究阶段");
     expect(shell?.getAttribute("data-responsive-inspector")).toBe("当前任务");
+  });
+
+  it("binds node and team deep links to the responsive inspector open state", async () => {
+    harness.location.panel = "node";
+    harness.location.inspectorOpen = true;
+    const nodeRendered = await renderWorkspace();
+    root = nodeRendered.root;
+
+    expect(nodeRendered.container.querySelector('[data-testid="research-process-workspace-shell"]')
+      ?.getAttribute("data-responsive-inspector-open")).toBe("true");
+
+    await act(async () => {
+      harness.responsiveInspectorOnOpenChange?.(false);
+    });
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({ inspector: "closed" });
+
+    await act(async () => root?.unmount());
+    root = null;
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+    harness.location.replaceParams.mockClear();
+    harness.location.panel = "team";
+    harness.location.inspectorOpen = true;
+
+    const teamRendered = await renderWorkspace();
+    root = teamRendered.root;
+    expect(teamRendered.container.querySelector('[data-testid="research-process-workspace-shell"]')
+      ?.getAttribute("data-responsive-inspector-open")).toBe("true");
+  });
+
+  it("routes one canvas node click through the URL-owned selection callback", async () => {
+    harness.location.panel = "team";
+    harness.location.inspectorOpen = false;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    await act(async () => {
+      (rendered.container.querySelector('[data-testid="research-workflow-canvas-node"]') as HTMLButtonElement)
+        .click();
+    });
+
+    expect(harness.location.selectNode).toHaveBeenCalledTimes(1);
+    expect(harness.location.selectNode).toHaveBeenCalledWith("source_finding");
   });
 
   it("places the read-only question archive in the wide center pane", async () => {
@@ -880,10 +944,13 @@ describe("ResearchProcessWorkspace", () => {
   it("opens the inspector when the URL deep-links into a node panel", async () => {
     harness.location.panel = "node";
     harness.location.selectedNodeId = "source_finding";
+    harness.location.inspectorOpen = true;
     const rendered = await renderWorkspace();
     root = rendered.root;
 
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')
+      ?.getAttribute("data-responsive-inspector-open")).toBe("true");
   });
 
   it("applies the launch patch directly when switching to a checkpoint-less question", async () => {
