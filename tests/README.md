@@ -162,7 +162,7 @@ python tests/test_runner.py --per-file
 
 ### 3.4 进程级并行策略
 
-Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 和 `test_runner.py` 的默认入口仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行；影响面 selector 对只标记 `local-parallel` 的规则会自动输出 4-worker 并行命令，同时含 `local-serial` 的规则保持串行。
+Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 和 `test_runner.py` 的默认入口仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行；影响面 selector 对只标记 `local-parallel` 的规则会按显式测试文件数自动输出最多 4-worker 的并行命令，同时含 `local-serial` 的规则保持串行。
 
 推荐入口：
 
