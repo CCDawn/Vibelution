@@ -532,6 +532,61 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
   });
 
+  it("re-centers the selected card after initial fit replaces an early focus move", async () => {
+    fakeInstance.getZoom.mockReturnValue(0.8);
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).toHaveBeenCalledTimes(1);
+
+    fakeInstance.setCenter.mockClear();
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: true });
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).not.toHaveBeenCalled();
+
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).toHaveBeenCalledWith(
+      190,
+      116,
+      expect.objectContaining({ zoom: 0.8, duration: 220 }),
+    );
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
   it("does not pan when the user clicked a card on the canvas", async () => {
     vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
     const onSelectNode = vi.fn();
