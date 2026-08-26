@@ -1647,6 +1647,37 @@ def test_missing_linked_chat_round_snapshot_does_not_guess_that_open_meeting_sto
 
 
 def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> None:
+    running = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-running",
+                    "questionId": "SCI-001",
+                    "status": "pending",
+                    "collectionRunId": "child-running",
+                    "collectionRunStatus": "running",
+                    "searchEnvelope": {"keywords": ["water"]},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    stop = next(
+        action
+        for action in running.allowedActions
+        if action.kind == "command" and action.command == "stop_collection"
+    )
+    assert stop.payload.requestId == "request-running"
+    assert stop.requiresConfirmation is True
+
     failed = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id="team-1",

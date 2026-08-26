@@ -955,6 +955,7 @@ function ReviewHistory({
     );
   }
   const rounds = groupReviewHistoryMeetings(meetings);
+  const latestRound = rounds.at(-1)?.round ?? 0;
   return (
     <section className={styles.history} aria-label={isZh ? "假说评审历史" : "Hypothesis review history"}>
       <div className={styles.historySummary}>
@@ -975,13 +976,18 @@ function ReviewHistory({
           const archived = item.meetings.filter(meetingHasDigestForHistory).length;
           const allClosed = item.meetings.every((meeting) => meeting.status === "closed");
           const hasOpen = item.meetings.some((meeting) => meeting.status === "open");
+          const superseded = item.round < latestRound && !allClosed;
           const label = allClosed
             ? (isZh ? "已闭环" : "Closed")
-            : hasOpen
+            : superseded
+              ? (isZh ? "已结束" : "Ended")
+              : hasOpen
               ? (isZh ? "进行中" : "Active")
               : (isZh ? "待确认" : "Awaiting review");
-          const tone = allClosed ? "success" : hasOpen ? "accent" : "warning";
-          const progressCopy = item.meetings.length > 1
+          const tone = allClosed ? "success" : superseded ? "neutral" : hasOpen ? "accent" : "warning";
+          const progressCopy = superseded
+            ? (isZh ? "后续轮次已开始，本轮不再运行。" : "A later round has started; this round is no longer running.")
+            : item.meetings.length > 1
             ? (isZh
               ? `本轮 ${item.meetings.length} 个候选评审，已归档 ${archived}/${item.meetings.length}。`
               : `${archived}/${item.meetings.length} candidate reviews archived in this round.`)

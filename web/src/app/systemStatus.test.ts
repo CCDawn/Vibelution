@@ -1142,6 +1142,25 @@ describe("systemStatus", () => {
     ]);
   });
 
+  it("keeps the top-bar room summary compact while preserving the full topic for details", () => {
+    const fullTopic = "假说评审第 3 轮（批评与修订）：逐条批评上一轮观点、补充证据或新分歧；没有新内容请回复 pass。";
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_room_round: {
+          runId: "room-review-r3",
+          runKind: "chat_room_round",
+          status: "running",
+          roomId: "room-review",
+          topic: fullTopic,
+        },
+      }),
+    );
+
+    expect(indicator?.summary).toBe("假说评审第 3 轮（批评与修订）");
+    expect(indicator?.fullSummary).toBe(fullTopic);
+    expect(indicator?.items[0]?.fullSummary).toBe(fullTopic);
+  });
+
   it("ignores terminal active work snapshots", () => {
     expect(
       deriveActiveWorkIndicator(

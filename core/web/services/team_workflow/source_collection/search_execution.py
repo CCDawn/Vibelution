@@ -162,9 +162,10 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     filtered_excluded_count = 0
     duplicate_source_keys: list[str] = []
     excluded_source_keys: list[str] = []
+    cancelled = str(run.get("status") or "").strip().lower() == "cancelled"
 
     for assignment in assignments:
-        if attempted_query_count >= max_queries:
+        if cancelled or attempted_query_count >= max_queries:
             break
         assignment_id = s._trim_text(assignment.get("assignmentId"), max_length=128)
         agent_role = s._normalize_source_collection_agent_role(assignment.get("agentRole"))
@@ -200,6 +201,18 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         }
         for query in assigned_queries:
             if attempted_query_count >= max_queries:
+                break
+            try:
+                cancelled = (
+                    str(
+                        s.data_processing_service.get_processing_run(normalized_run_id).get("status")
+                        or ""
+                    ).strip().lower()
+                    == "cancelled"
+                )
+            except s.data_processing_service.DataProcessingError:
+                cancelled = True
+            if cancelled:
                 break
             query_id = s._trim_text(query.get("queryId"), max_length=160)
             query_text = s._trim_text(query.get("query"), max_length=1000)
@@ -563,7 +576,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             },
         },
     )
-    status_label = "executed" if created_records else ("excluded_filtered" if filtered_excluded_count else ("duplicates_skipped" if skipped_duplicate_count else ("partial" if executed_query_count or failed_query_count else "no_open_assignment")))
+    status_label = "cancelled" if cancelled or str(final_run.get("status") or "").strip().lower() == "cancelled" else ("executed" if created_records else ("excluded_filtered" if filtered_excluded_count else ("duplicates_skipped" if skipped_duplicate_count else ("partial" if executed_query_count or failed_query_count else "no_open_assignment"))))
     return {
         "schemaVersion": s.SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -732,7 +745,7 @@ def _source_collection_stage_round_status_after_search(
 ) -> str:
     s = _service()
     normalized = str(terminal_status or "").lower()
-    if normalized == "failed":
+    if normalized in {"failed", "cancelled"}:
         return "needs_attention"
     if normalized == "needs_continue":
         return "needs_continue"

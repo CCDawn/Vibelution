@@ -197,6 +197,33 @@ def delete_processing_run(run_id: str) -> dict[str, Any]:
     return {"schemaVersion": SCHEMA_VERSION, "runId": normalized_run_id, "deleted": True}
 
 
+def cancel_processing_run(run_id: str, *, reason: str = "operator_cancelled") -> dict[str, Any]:
+    """Mark one active run cancelled so domain workers can stop cooperatively."""
+
+    normalized_run_id = _safe_token(run_id, default="", max_length=96)
+    if not normalized_run_id:
+        raise DataProcessingNotFoundError("Data processing run id is required.")
+    with _LOCK:
+        run = _load_run(normalized_run_id)
+        if str(run.get("status") or "") != "cancelled":
+            _touch_run(normalized_run_id, status="cancelled")
+        cancelled = _load_run(normalized_run_id)
+        _append_jsonl(
+            _events_path(normalized_run_id),
+            _run_event(
+                "data_processing.run.cancelled",
+                normalized_run_id,
+                {"reason": _trim_text(reason, max_length=300) or "operator_cancelled"},
+            ),
+        )
+    _record_data_processing_event(
+        "data_processing.run.cancelled",
+        run_id=normalized_run_id,
+        fields={"reason": _trim_text(reason, max_length=300) or "operator_cancelled"},
+    )
+    return cancelled
+
+
 def list_records(run_id: str) -> dict[str, Any]:
     run = _load_run(run_id)
     records = _read_jsonl(_records_path(run["runId"]))
@@ -470,7 +497,10 @@ def _load_run(run_id: str) -> dict[str, Any]:
 def _touch_run(run_id: str, *, status: str | None = None) -> None:
     run = _load_run(run_id)
     run["updatedAt"] = _now_utc()
-    if status:
+    # Cancellation is terminal. A search call already in flight may finish
+    # after the operator stops the run; its stale preferred status must not
+    # reopen the run.
+    if status and str(run.get("status") or "") != "cancelled":
         run["status"] = _normalize_choice(status, RUN_STATUSES, default=run.get("status") or "draft")
     _write_json(_run_path(run_id), run)
 

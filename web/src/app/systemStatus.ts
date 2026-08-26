@@ -11,6 +11,7 @@ export type ActiveWorkIndicatorItem = {
   kind: ActiveWorkKind;
   label: string;
   summary: string;
+  fullSummary: string;
   status: string;
   runId: string;
   href: string;
@@ -575,22 +576,39 @@ function buildActiveWorkCandidate(
   }
 
   const label = activeWorkKindLabel(kind, lang);
-  const summary = activeWorkSummary(kind, run, runtime, lang, options);
+  const fullSummary = activeWorkSummary(kind, run, runtime, lang, options);
+  const summary = kind === "chat_room"
+    ? compactActiveWorkSummary(fullSummary)
+    : fullSummary;
   const runId = textValue(run.runId);
   const href = activeWorkHref(kind, run);
-  // User-facing detail: kind + summary only. Raw status/"id=…" made native title tooltips unreadable.
+  // Keep raw ids out of user-facing copy. The chip uses the compact summary;
+  // the popover reads fullSummary so long room topics stay available on demand.
   const detailParts = [label, summary].filter(Boolean);
 
   return {
     kind,
     label,
     summary,
+    fullSummary,
     status: status || "running",
     runId,
     href,
     detail: detailParts.join(" · "),
     tone: activeWorkTone(status),
   };
+}
+
+function compactActiveWorkSummary(value: string, maxLength = 72): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const boundary = normalized.search(/[：:。；;！？!?]/);
+  if (boundary >= 6 && boundary < maxLength) {
+    return normalized.slice(0, boundary).trim();
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 function normalizeWorkRunStatus(run: ActiveWorkRunSnapshot): string {

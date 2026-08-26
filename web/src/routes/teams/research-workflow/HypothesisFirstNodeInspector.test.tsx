@@ -749,6 +749,32 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("本轮 2 个候选评审，已归档 1/2");
   });
 
+  it("does not label an older non-terminal review round as active after a later round starts", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        questionId: "Q-01",
+        selectionId: "sel-1",
+      } as HypothesisFirstChainData["chainState"],
+      meetings: [
+        scopeMeeting({ meetingRoundId: "r1-stale", meetingType: "hypothesis_review", status: "open", roundIndex: 1 }),
+        scopeMeeting({ meetingRoundId: "r2-current", meetingType: "hypothesis_review", status: "open", roundIndex: 2 }),
+      ] as HypothesisFirstChainData["meetings"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("第 1 轮已结束");
+    expect(container.textContent).toContain("后续轮次已开始，本轮不再运行。");
+    expect(container.textContent).toContain("第 2 轮进行中");
+  });
+
   it("shows 资料搜集中 without a start-collection command", () => {
     mockedChain.mockReturnValue(chainData({
       selection: {
