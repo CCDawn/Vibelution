@@ -269,6 +269,7 @@ function WorkflowCanvasInner({
   const programmaticFitRef = useRef(false);
   const canvasOriginSelectionRef = useRef<string | null>(null);
   const lastPannedSelectionRef = useRef<string | null>(null);
+  const initialFitWasPendingRef = useRef(false);
   const lastHostSizeRef = useRef({ width: 0, height: 0 });
   const initialFitMinZoom = workflowCanvasInitialFitMinZoom(layoutMode, graph.nodes.length);
   const fitCanvas = useCallback((padding: number, duration = 0, minZoom?: number) => {
@@ -589,6 +590,17 @@ function WorkflowCanvasInner({
     },
     acknowledgeInitialFit: layout.acknowledgeInitialFit,
   });
+
+  useEffect(() => {
+    if (pendingInitialFit) {
+      initialFitWasPendingRef.current = true;
+      return;
+    }
+    if (initialFitWasPendingRef.current) {
+      initialFitWasPendingRef.current = false;
+      lastPannedSelectionRef.current = null;
+    }
+  }, [pendingInitialFit]);
 
   useEffect(() => {
     userMovedViewportRef.current = false;
