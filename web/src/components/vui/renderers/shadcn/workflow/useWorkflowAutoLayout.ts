@@ -5,8 +5,9 @@
  *   layout (zero ELK calls); runtime-only field updates merge into the
  *   cached geometry without relayout;
  * - monotonic token: stale async layouts never overwrite newer ones;
- * - last-good: a failed layout keeps the last committed result and sets
- *   `degraded` (never silently falls back to fixed coordinates);
+ * - recovery: a failed layout keeps the same-scope last-good result when
+ *   available, otherwise it keeps deterministic graph-derived geometry and
+ *   sets `degraded` without dropping business nodes;
  * - engine lifecycle: created once per canvas mount (StrictMode-safe:
  *   cleanup terminates the previous engine, remount creates a fresh one);
  * - fit protocol: `initialFitRevision` is set exactly once after the first
