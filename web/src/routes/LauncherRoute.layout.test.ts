@@ -14,6 +14,9 @@ import projectMaintenancePanelStyles from "./LauncherProjectMaintenancePanel.sty
 import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
 import startupSettingsPanelStylesSource from "./LauncherStartupSettingsPanel.styles.ts?raw";
 import startupSettingsPanelStyles from "./LauncherStartupSettingsPanel.styles";
+import portSettingsPanelSource from "./LauncherPortSettingsPanel.tsx?raw";
+import portSettingsPanelStylesSource from "./LauncherPortSettingsPanel.styles.ts?raw";
+import portSettingsPanelStyles from "./LauncherPortSettingsPanel.styles";
 import processMonitorPanelSource from "./LauncherProcessMonitorPanel.tsx?raw";
 import processMonitorPanelStylesSource from "./LauncherProcessMonitorPanel.styles.ts?raw";
 import processMonitorPanelStyles from "./LauncherProcessMonitorPanel.styles";
@@ -37,6 +40,7 @@ const launcherPanelStylesSource = [
   diagnosticsPanelStylesSource,
   projectMaintenancePanelStylesSource,
   startupSettingsPanelStylesSource,
+  portSettingsPanelStylesSource,
   processMonitorPanelStylesSource,
   branchInstancesPanelStylesSource,
 ].join("\n");
@@ -54,6 +58,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(developerModePanelSource).toContain("from \"../components/vui\"");
     expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
+    expect(portSettingsPanelSource).toContain("from \"../components/vui\"");
     expect(branchInstancesPanelSource).toContain("from \"../components/vui\"");
     expect(branchInstancesPanelStyles.statusTable).toBeTypeOf("string");
     expect(branchInstancesPanelStyles.statusTable).toContain("w-full");
@@ -64,17 +69,21 @@ describe("LauncherRoute layout contract", () => {
     expect(projectMaintenancePanelSource).toContain("listClassName={styles.segmentedControl}");
     expect(projectMaintenancePanelStyles.segmentedTrigger).toContain("data-[state=active]");
     expect(startupSettingsPanelSource).toContain('from "./LauncherStartupSettingsPanel.styles"');
+    expect(portSettingsPanelSource).toContain('from "./LauncherPortSettingsPanel.styles"');
     expect(developerModePanelSource).not.toContain("LauncherRoute.styles");
     expect(diagnosticsPanelSource).not.toContain("LauncherRoute.styles");
     expect(projectMaintenancePanelSource).not.toContain("LauncherRoute.styles");
     expect(startupSettingsPanelSource).not.toContain("LauncherRoute.styles");
+    expect(portSettingsPanelSource).not.toContain("LauncherRoute.styles");
     expect(routeSource).not.toContain("<VButton");
     expect(branchInstancesPanelSource).toContain("<VButton");
     expect(developerModePanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VButton");
+    expect(portSettingsPanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VNativeInput");
     expect(developerModePanelSource).toContain("<VStringSelect");
     expect(startupSettingsPanelSource).toContain("<VStringSelect");
+    expect(portSettingsPanelSource).toContain("<VNativeInput");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);
@@ -86,6 +95,11 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelSource).not.toMatch(/<input\b/);
     expect(startupSettingsPanelSource).not.toMatch(/<select\b/);
     expect(startupSettingsPanelSource).not.toMatch(/<textarea\b/);
+    expect(portSettingsPanelSource).not.toMatch(/<button\b/);
+    expect(portSettingsPanelSource).not.toMatch(/<input\b/);
+    expect(portSettingsPanelSource).not.toMatch(/<select\b/);
+    expect(portSettingsPanelSource).not.toMatch(/<textarea\b/);
+    expect(portSettingsPanelStyles.panel).toContain("overflow-hidden");
   });
 
   it("uses shell language state without loading the full app dictionary", () => {
@@ -99,6 +113,7 @@ describe("LauncherRoute layout contract", () => {
   it("loads secondary launcher panels as lazy route packs (T4)", () => {
     expect(homeRouteSource).toContain('import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel"');
     expect(routeSource).not.toContain('import("./LauncherStartupSettingsPanel")');
+    expect(routeSource).toContain('import { LauncherPortSettingsPanel } from "./LauncherPortSettingsPanel"');
     expect(routeSource).toContain('import("./LauncherProjectMaintenancePanel")');
     expect(routeSource).toContain('import("./LauncherDeveloperModePanel")');
     expect(routeSource).toContain('import("./LauncherDiagnosticsPanel")');
@@ -299,7 +314,6 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelStyles.settingField).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingToggle).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsSaveButton).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingError).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.windowModeTabsList).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.windowModeTabsTrigger).toContain("data-[state=active]");
     expect(developerModePanelStyles.developerPanel).toBeTypeOf("string");
@@ -342,7 +356,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("<details open");
     expect(routeSource).toContain("residualProcesses");
     expect(startupSettingsPanelSource).toContain("settingsPrimary");
-    expect(startupSettingsPanelSource).toContain("effectiveValue");
+    expect(portSettingsPanelSource).toContain("differingOverride");
     expect(developerModePanelStyles.dangerButton).toBeTypeOf("string");
     expect(launcherPanelStylesSource).toContain("settingsStrip");
     expect(launcherPanelStylesSource).toContain("developerPanel");
@@ -500,8 +514,7 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelStyles.settingsStrip).toContain("mx-2");
     expect(startupSettingsPanelStyles.settingsStrip).toContain("overflow-hidden");
     expect(startupSettingsPanelStyles.settingsPrimary).toContain("grid-cols-");
-    expect(startupSettingsPanelStyles.settingsPrimary).toContain("repeat(4,minmax(0,1fr))");
-    expect(startupSettingsPanelStyles.settingsPrimary).toContain("max-[1120px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(startupSettingsPanelStyles.settingsPrimary).toContain("minmax(160px,0.34fr)");
     expect(startupSettingsPanelStyles.settingsPrimary).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
     expect(startupSettingsPanelStyles.settingsBody).toContain("max-h-[46vh]");
     expect(startupSettingsPanelStyles.settingsBody).toContain("overflow-y-auto");
@@ -707,7 +720,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("force-kill");
   });
 
-  it("lets Launcher own startup settings without restarting immediately", () => {
+  it("keeps everyday startup settings on the home page and technical ports in tools", () => {
     expect(homeRouteSource).toContain("LauncherStartupSettingsPanel");
     expect(startupSettingsPanelSource).toContain("export function LauncherStartupSettingsPanel");
     expect(homeRouteSource).toContain("startupSettingsMutation");
@@ -722,27 +735,26 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("queryKeys.launcherStatus()");
     expect(startupSettingsPanelSource).toContain("configHash");
     expect(startupSettingsPanelSource).toContain("runtimeProfile");
-    expect(startupSettingsPanelSource).toContain("launcherControlPort");
-    expect(startupSettingsPanelSource).toContain("launcherControlPortHint");
-    expect(startupSettingsPanelSource).toContain("backendPortHint");
-    expect(startupSettingsPanelSource).toContain("frontendPortHint");
     expect(startupSettingsPanelSource).toContain("settingsWindow");
     expect(startupSettingsPanelSource).toContain("settingsTitle");
-    expect(startupSettingsPanelSource).toContain("backendPort");
-    expect(startupSettingsPanelSource).toContain("frontendPort");
-    expect(homeRouteSource).toContain("Launcher 端口");
-    expect(homeRouteSource).toContain("默认后端");
-    expect(homeRouteSource).toContain("开发前端");
-    expect(branchInstancesPanelSource).toContain('backend: "后端"');
-    expect(branchInstancesPanelSource).not.toContain("实例端口");
+    expect(startupSettingsPanelSource).not.toContain("launcherControlPort");
+    expect(startupSettingsPanelSource).not.toContain("backendPortHint");
+    expect(startupSettingsPanelSource).not.toContain("frontendPortHint");
+    expect(homeRouteSource).not.toContain("Launcher 端口");
+    expect(homeRouteSource).not.toContain("默认后端");
+    expect(homeRouteSource).not.toContain("开发前端");
+    expect(portSettingsPanelSource).toContain("launcherControlPort");
+    expect(portSettingsPanelSource).toContain("launcherControlPortHint");
+    expect(portSettingsPanelSource).toContain("backendPortHint");
+    expect(portSettingsPanelSource).toContain("frontendPortHint");
+    expect(portSettingsPanelSource).toContain("parsePortDraft");
+    expect(portSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
+    expect(portSettingsPanelSource).toContain('role="alert"');
     expect(startupSettingsPanelSource).toContain("windowSize");
     expect(startupSettingsPanelSource).toContain("windowSizeOptions");
     expect(startupSettingsPanelSource).toContain("interfaceLanguage");
     expect(startupSettingsPanelSource).toContain("preflightDoctor");
     expect(startupSettingsPanelSource).toContain("requireVenv");
-    expect(startupSettingsPanelSource).toContain("parsePortDraft");
-    expect(startupSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
-    expect(startupSettingsPanelSource).toContain('role="alert"');
     expect(homeRouteSource).toContain("configuredWindowMode");
     expect(homeRouteSource).toContain("effectiveWindowMode");
     expect(launcherApiSource).toContain("controlPort: setting.launcher.controlPort");
@@ -750,25 +762,27 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("windowModeMutation");
   });
 
-  it("collapses startup settings into an accessible summary that expands to the unchanged form", () => {
+  it("collapses startup settings into an accessible summary of only the active operating choices", () => {
     expect(startupSettingsPanelSource).toContain("<details");
     expect(startupSettingsPanelSource).toContain("<summary");
     expect(startupSettingsPanelSource).not.toContain("<details open");
     expect(startupSettingsPanelSource).toContain("onToggle={(event) => setSettingsOpen(event.currentTarget.open)}");
     expect(startupSettingsPanelSource).toContain("expandSettings");
     expect(startupSettingsPanelSource).toContain("collapseSettings");
-    // The concise summary is built from current profile, ports, and effective window mode.
+    // The concise home summary only names the profile and effective window mode.
     expect(startupSettingsPanelSource).toContain("runtimeProfileLabel(current.runtime.profile, uiLang)");
     expect(startupSettingsPanelSource).toContain("effectiveWindowModeLabel");
-    expect(startupSettingsPanelSource).toContain("effectiveControlPort || current.launcher.controlPort");
-    expect(startupSettingsPanelSource).toContain("effectiveBackendPort || current.workbench.backendPort");
-    expect(startupSettingsPanelSource).toContain("effectiveFrontendPort || current.workbench.frontendPort");
-    // The editable form stays inside the fold body with save/validation/window-mode semantics intact.
+    const summarySource = sourceSlice(startupSettingsPanelSource, "const settingsSummary", "function patchDraft");
+    expect(summarySource).not.toContain("effectiveControlPort");
+    expect(summarySource).not.toContain("effectiveBackendPort");
+    expect(summarySource).not.toContain("effectiveFrontendPort");
+    // The editable form stays inside the fold body with save/window-mode semantics intact.
     expect(startupSettingsPanelSource).toContain("settingsBody");
     expect(startupSettingsPanelSource).toContain("saveDraft");
-    expect(startupSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
     expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
     expect(startupSettingsPanelSource).toContain("controlsDisabled");
+    expect(portSettingsPanelSource).toContain("<details");
+    expect(portSettingsPanelSource).toContain("copy.portSettingsHint");
     // The collapsed summary title must stay on one line in the compact top strip.
     expect(startupSettingsPanelStyles.settingsTitle).toContain("shrink-0");
     expect(startupSettingsPanelStyles.settingsTitle).toContain("whitespace-nowrap");

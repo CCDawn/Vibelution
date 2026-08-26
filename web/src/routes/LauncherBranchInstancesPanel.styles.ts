@@ -19,7 +19,7 @@ const styles = {
   tabBody: "mt-1.5 flex min-h-0 min-w-0 flex-1 flex-col",
   tabHeader: "flex min-w-0 shrink-0 flex-wrap items-end justify-between gap-2",
   tabHint: "m-0 min-w-0 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
-  tabHeaderActions: "flex min-w-0 flex-wrap items-center gap-1.5",
+  tabHeaderActions: "ml-auto flex min-w-0 flex-wrap items-center gap-1.5",
   globalEmpty: "mt-1.5",
   pager: "inline-flex min-w-0 items-center gap-1.5",
   rangeLabel: "min-w-0 truncate text-[var(--fg-muted)]",

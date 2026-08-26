@@ -15,7 +15,6 @@ const styles = {
     "min-h-[25px] rounded-[calc(var(--radius-control)-2px)] border-0 bg-transparent px-[7px] py-[3px] [font-size:var(--vui-font-xs)] leading-none text-vui-fg-secondary " +
     "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-primary)_12%,var(--vui-control-muted))] data-[state=active]:text-vui-fg-primary",
   windowModeTabLabel: "inline-flex min-w-0 items-center gap-[5px]",
-  settingError: "col-span-full [font-size:var(--vui-font-xs)] text-[var(--state-error)]",
   settingField: "grid min-w-0 gap-[3px] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&>small]:min-w-0 [&>small]:truncate [&>small]:[font-size:var(--vui-font-xs)] [&>small]:text-[var(--fg-secondary)] [&_input]:min-h-7 [&_input]:w-full [&_input]:min-w-0 [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-[var(--border-soft)] [&_input]:bg-[var(--vui-surface-row)] [&_input]:px-[7px] [&_input]:py-[3px] [&_input]:[font-size:var(--vui-font-xs)] [&_input]:text-[var(--fg-primary)] [&_select]:min-h-7 [&_select]:w-full [&_select]:min-w-0 [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-[var(--border-soft)] [&_select]:bg-[var(--vui-surface-row)] [&_select]:px-[7px] [&_select]:py-[3px] [&_select]:[font-size:var(--vui-font-xs)] [&_select]:text-[var(--fg-primary)]",
   settingToggle: "inline-flex min-h-7 min-w-0 items-center gap-1.5 whitespace-nowrap self-end pb-px [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&_input]:m-0 [&_input]:h-3.5 [&_input]:w-3.5",
   settingsTitle: "m-0 shrink-0 whitespace-nowrap [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
@@ -29,7 +28,7 @@ const styles = {
   settingsSaveButton: `${primaryControl} justify-self-end self-end py-[3px]`,
   settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 w-full max-w-full gap-2 overflow-hidden ${panelSurface} px-2 py-1.5`,
   settingsPrimary:
-    "grid min-w-0 max-w-full grid-cols-[repeat(4,minmax(0,1fr))] items-end gap-1.5 max-[1120px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
+    "grid min-w-0 max-w-full grid-cols-[minmax(160px,0.34fr)] items-end gap-1.5 max-[620px]:grid-cols-[minmax(0,1fr)]",
   settingsWindow:
     "grid min-w-0 max-w-full grid-cols-[max-content_minmax(140px,0.4fr)_max-content] items-end gap-1.5 max-[860px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
   settingsSecondary:

@@ -16,8 +16,6 @@ import {
   filterBranchInstances,
   formatAdmissionReason,
   formatAttentionReason,
-  formatBackendStatus,
-  formatFrontendStatus,
   formatGitStatus,
   formatWorkbenchStatus,
   groupBranchInstances,
@@ -117,7 +115,6 @@ function SectionPager({
       <VButton type="button" density="compact" variant="secondary" isDisabled={page <= 1} onPress={onPrevious}>
         {previousLabel}
       </VButton>
-      <strong>{page}/{pageCount}</strong>
       <VButton type="button" density="compact" variant="secondary" isDisabled={page >= pageCount} onPress={onNext}>
         {nextLabel}
       </VButton>
@@ -153,7 +150,7 @@ export function LauncherBranchInstancesPanel({
   const labels = zh
     ? {
         all: "全部",
-        allHint: "已打开分支实例的完整列表",
+        allHint: "已打开的分支实例",
         running: "正在运行",
         runningHint: "后端或窗口仍活着的实例",
         attention: "需要处理",
@@ -182,8 +179,6 @@ export function LauncherBranchInstancesPanel({
         next: "下一页",
         selectPage: "选择本页可清理项",
         actions: "操作",
-        backend: "后端",
-        frontend: "前端",
         frontendMode: "前端模式",
         workbench: "Workbench 窗口",
         git: "Git",
@@ -214,7 +209,7 @@ export function LauncherBranchInstancesPanel({
       }
     : {
         all: "All",
-        allHint: "Full list of checked-out branch instances",
+        allHint: "Checked-out branch instances",
         running: "Running",
         runningHint: "Instances whose backend or window is still alive",
         attention: "Needs attention",
@@ -243,8 +238,6 @@ export function LauncherBranchInstancesPanel({
         next: "Next",
         selectPage: "Select cleanable items on this page",
         actions: "Actions",
-        backend: "Backend",
-        frontend: "Frontend",
         frontendMode: "Frontend mode",
         workbench: "Workbench window",
         git: "Git",
@@ -647,20 +640,6 @@ export function LauncherBranchInstancesPanel({
       },
     },
     {
-      id: "backend",
-      header: labels.backend,
-      width: 118,
-      minWidth: 100,
-      render: (item: LauncherBranchInstance) => formatBackendStatus(item, zh),
-    },
-    {
-      id: "frontend",
-      header: labels.frontend,
-      width: 118,
-      minWidth: 100,
-      render: (item: LauncherBranchInstance) => formatFrontendStatus(item, zh),
-    },
-    {
       id: "workbench",
       header: labels.workbench,
       width: 200,
@@ -725,13 +704,15 @@ export function LauncherBranchInstancesPanel({
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
       <div className={styles.panelHeader}>
         <p className={styles.panelEyebrow}>{copy.branchInstances}</p>
-        <p className={styles.controlWindow} role="status">
-          <span>{labels.controlWindow}</span>
-          <strong>{launcherTitle || "-"}</strong>
-          <VStatusChip tone={launcherOnline ? "success" : launcherReading ? "neutral" : "warning"}>
-            {launcherOnline ? labels.online : launcherReading ? labels.reading : labels.offline}
-          </VStatusChip>
-        </p>
+        {launcherReading || !launcherOnline ? (
+          <p className={styles.controlWindow} role="status">
+            <span>{labels.controlWindow}</span>
+            <strong>{launcherTitle || "-"}</strong>
+            <VStatusChip tone={launcherReading ? "neutral" : "warning"}>
+              {launcherReading ? labels.reading : labels.offline}
+            </VStatusChip>
+          </p>
+        ) : null}
       </div>
 
       {showListLoading ? (
@@ -808,14 +789,14 @@ export function LauncherBranchInstancesPanel({
           ) : (
             <div className={styles.tabBody}>
               <div className={styles.tabHeader}>
-                <p className={styles.tabHint}>{activeHint}</p>
+                {activeTab === "all" ? null : <p className={styles.tabHint}>{activeHint}</p>}
                 <div className={styles.tabHeaderActions}>
-                  {activeTab === "all" ? (
+                  {activeTab === "all" && cleanupSelected.length > 0 ? (
                     <VButton
                       type="button"
                       variant="danger"
                       density="compact"
-                      isDisabled={cleanupSelected.length === 0 || cleanupMutation.isPending}
+                      isDisabled={cleanupMutation.isPending}
                       onPress={() => askCleanup(cleanupSelected)}
                     >
                       {labels.cleanupSelected}

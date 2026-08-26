@@ -7,19 +7,10 @@ import { VButton, VNativeInput, VStringSelect, VTabs, VTooltip } from "../compon
 import styles from "./LauncherStartupSettingsPanel.styles";
 
 type LauncherStartupSettingsCopy = {
-  invalidPort: string;
   startupSettings: string;
   expandSettings: string;
   collapseSettings: string;
   runtimeProfile: string;
-  launcherControlPort: string;
-  launcherControlPortHint: string;
-  backendPort: string;
-  backendPortHint: string;
-  frontendPort: string;
-  frontendPortHint: string;
-  portOverride: string;
-  effectiveValue: string;
   windowMode: string;
   windowModeFullscreen: string;
   windowModeWindowed: string;
@@ -41,9 +32,6 @@ type LauncherStartupSettingsPanelProps = {
   configuredWindowMode: WorkbenchWindowMode;
   effectiveWindowModeLabel: string;
   windowModeDetail: string;
-  controlPortOverride: number;
-  backendPortOverride: number;
-  frontendPortOverride: number;
   pending: boolean;
   pendingWindowMode: WorkbenchWindowMode | "";
   onSave: (setting: LauncherStartupSettings) => void;
@@ -104,27 +92,6 @@ function runtimeProfileLabel(profile: string, lang: "zh" | "en") {
   return labels[profile]?.[lang] ?? profile;
 }
 
-function summaryPort(value: number): string {
-  return value > 0 ? String(value) : "-";
-}
-
-function parsePortDraft(value: string) {
-  if (!/^\d+$/.test(value.trim())) {
-    return null;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 && parsed < 65536 ? parsed : null;
-}
-
-function differingOverride(configured: number | string, override: number | string) {
-  const left = String(configured || "").trim();
-  const right = String(override || "").trim();
-  if (!right || right === "0") {
-    return "";
-  }
-  return left === right ? "" : right;
-}
-
 function windowSizeOptions(setting: LauncherStartupSettings, copy: LauncherStartupSettingsCopy) {
   const options = setting.workbench.windowSizeOptions.length
     ? [...setting.workbench.windowSizeOptions]
@@ -145,9 +112,6 @@ export function LauncherStartupSettingsPanel({
   configuredWindowMode,
   effectiveWindowModeLabel,
   windowModeDetail,
-  controlPortOverride,
-  backendPortOverride,
-  frontendPortOverride,
   pending,
   pendingWindowMode,
   onSave,
@@ -158,15 +122,9 @@ export function LauncherStartupSettingsPanel({
   const currentSignature = setting
     ? [
         setting.configHash,
-        setting.launcher.controlPort,
-        setting.launcher.controlPortEnvOverride,
         setting.runtime.profile,
         setting.runtime.preflightDoctor,
         setting.runtime.requireVenv,
-        setting.workbench.backendPort,
-        setting.workbench.frontendPort,
-        setting.workbench.backendPortEnvOverride,
-        setting.workbench.frontendPortEnvOverride,
         setting.workbench.windowMode,
         setting.workbench.windowModeEnvOverride,
         setting.workbench.windowSize,
@@ -176,25 +134,14 @@ export function LauncherStartupSettingsPanel({
     : `fallback:${configuredWindowMode}`;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draft, setDraft] = useState<LauncherStartupSettings>(() => current);
-  const [controlPortText, setControlPortText] = useState(() => String(current.launcher.controlPort));
-  const [backendPortText, setBackendPortText] = useState(() => String(current.workbench.backendPort));
-  const [frontendPortText, setFrontendPortText] = useState(() => String(current.workbench.frontendPort));
-  const [validationError, setValidationError] = useState("");
 
   useEffect(() => {
     setDraft(current);
-    setControlPortText(String(current.launcher.controlPort));
-    setBackendPortText(String(current.workbench.backendPort));
-    setFrontendPortText(String(current.workbench.frontendPort));
-    setValidationError("");
   }, [currentSignature]);
 
   const settingsSummary = [
     runtimeProfileLabel(current.runtime.profile, uiLang),
     effectiveWindowModeLabel,
-    `${copy.launcherControlPort} ${summaryPort(current.launcher.effectiveControlPort || current.launcher.controlPort)}`,
-    `${copy.backendPort} ${summaryPort(current.workbench.effectiveBackendPort || current.workbench.backendPort)}`,
-    `${copy.frontendPort} ${summaryPort(current.workbench.effectiveFrontendPort || current.workbench.frontendPort)}`,
   ].join(" · ");
 
   function patchDraft(next: Partial<LauncherStartupSettings>) {
@@ -208,41 +155,20 @@ export function LauncherStartupSettingsPanel({
   }
 
   function saveDraft() {
-    const controlPort = parsePortDraft(controlPortText);
-    const backendPort = parsePortDraft(backendPortText);
-    const frontendPort = parsePortDraft(frontendPortText);
-    if (!controlPort || !backendPort || !frontendPort) {
-      setValidationError(copy.invalidPort);
-      return;
-    }
-    setValidationError("");
-    onSave({
-      ...draft,
-      launcher: {
-        ...draft.launcher,
-        controlPort,
-      },
-      workbench: {
-        ...draft.workbench,
-        backendPort,
-        frontendPort,
-      },
-    });
+    onSave(draft);
   }
 
   function saveWindowMode(next: { windowMode: WorkbenchWindowMode }) {
     const mode = next.windowMode;
     patchDraft({ workbench: { ...draft.workbench, windowMode: mode } });
-    setValidationError("");
     if (mode !== current.workbench.windowMode) {
       onWindowModeChange({ mode, baseHash: current.configHash });
     }
   }
 
-  const controlOverride = differingOverride(current.launcher.controlPort, controlPortOverride);
-  const backendOverride = differingOverride(current.workbench.backendPort, backendPortOverride);
-  const frontendOverride = differingOverride(current.workbench.frontendPort, frontendPortOverride);
-  const windowSizeOverride = differingOverride(current.workbench.windowSize, current.workbench.windowSizeEnvOverride);
+  const windowSizeOverride = current.workbench.windowSize !== current.workbench.windowSizeEnvOverride
+    ? current.workbench.windowSizeEnvOverride
+    : "";
 
   return (
     <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
@@ -271,48 +197,6 @@ export function LauncherStartupSettingsPanel({
                   label: runtimeProfileLabel(profile, uiLang),
                 }))}
               />
-            </label>
-            <label className={styles.settingField}>
-              <VTooltip content={copy.launcherControlPortHint} width="wide">
-                <span tabIndex={0}>{copy.launcherControlPort}</span>
-              </VTooltip>
-              <VNativeInput
-                type="number"
-                min={1}
-                max={65535}
-                value={controlPortText}
-                disabled={controlsDisabled}
-                onChange={(event) => setControlPortText(event.target.value)}
-              />
-              {controlOverride ? <small>{copy.effectiveValue}: {controlOverride}</small> : null}
-            </label>
-            <label className={styles.settingField}>
-              <VTooltip content={copy.backendPortHint} width="wide">
-                <span tabIndex={0}>{copy.backendPort}</span>
-              </VTooltip>
-              <VNativeInput
-                type="number"
-                min={1}
-                max={65535}
-                value={backendPortText}
-                disabled={controlsDisabled}
-                onChange={(event) => setBackendPortText(event.target.value)}
-              />
-              {backendOverride ? <small>{copy.effectiveValue}: {backendOverride}</small> : null}
-            </label>
-            <label className={styles.settingField}>
-              <VTooltip content={copy.frontendPortHint} width="wide">
-                <span tabIndex={0}>{copy.frontendPort}</span>
-              </VTooltip>
-              <VNativeInput
-                type="number"
-                min={1}
-                max={65535}
-                value={frontendPortText}
-                disabled={controlsDisabled}
-                onChange={(event) => setFrontendPortText(event.target.value)}
-              />
-              {frontendOverride ? <small>{copy.effectiveValue}: {frontendOverride}</small> : null}
             </label>
           </div>
           <div className={styles.settingsWindow}>
@@ -373,7 +257,7 @@ export function LauncherStartupSettingsPanel({
                   label: option.label[uiLang] ?? option.size,
                 }))}
               />
-              {windowSizeOverride ? <small>{copy.effectiveValue}: {current.workbench.effectiveWindowSize}</small> : null}
+              {windowSizeOverride ? <small>{copy.windowSizeEnvOverride}: {current.workbench.effectiveWindowSize}</small> : null}
             </label>
             <VButton
               type="button"
@@ -419,7 +303,6 @@ export function LauncherStartupSettingsPanel({
               <span>{copy.requireVenv}</span>
             </label>
           </div>
-          {validationError ? <small className={styles.settingError} role="alert">{validationError}</small> : null}
         </div>
       </details>
     </div>

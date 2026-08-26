@@ -103,7 +103,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VToolbar");
     expect(panelSource).toContain("Launcher 控制窗口");
     expect(panelSource).toContain("读取中");
-    expect(panelSource).toContain('tone={launcherOnline ? "success" : launcherReading ? "neutral" : "warning"}');
+    expect(panelSource).toContain("launcherReading || !launcherOnline");
+    expect(panelSource).toContain('tone={launcherReading ? "neutral" : "warning"}');
     expect(panelSource).toContain("tone={runtimeTone(state)}");
     expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
     expect(panelSource).toContain('variant="primary"');
@@ -124,16 +125,16 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(BRANCH_INSTANCE_PAGE_SIZE).toBe(8);
   });
 
-  it("keeps a compact runtime presentation with backend/frontend/workbench/git/actions columns", () => {
+  it("keeps the default table focused on branch actions and puts runtime specifics in attention help", () => {
     expect(panelSource).toContain("header: copy.branchColumn");
     expect(panelSource).toContain("header: copy.instanceState");
-    expect(panelSource).toContain("header: labels.backend");
-    expect(panelSource).toContain("header: labels.frontend");
+    expect(panelSource).not.toContain("header: labels.backend");
+    expect(panelSource).not.toContain("header: labels.frontend");
     expect(panelSource).toContain("header: labels.workbench");
     expect(panelSource).toContain("header: labels.git");
     expect(panelSource).toContain("header: labels.actions");
-    expect(panelSource).toContain("formatBackendStatus");
-    expect(panelSource).toContain("formatFrontendStatus");
+    expect(panelSource).not.toContain("formatBackendStatus");
+    expect(panelSource).not.toContain("formatFrontendStatus");
     expect(panelSource).toContain("formatWorkbenchStatus");
     expect(panelSource).toContain("formatGitStatus");
     expect(panelSource).toContain("formatAttentionReason");
@@ -151,6 +152,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.panel).toContain("min-w-0");
     expect(panelStyles.panelBody).toContain("min-w-0");
     expect(panelStyles.tabBody).toContain("min-w-0");
+    expect(panelStyles.tabHeaderActions).toContain("ml-auto");
     expect(panelSource).toContain("minWidth: 150");
     expect(panelSource).toContain('id: "branch"');
     expect(panelSource).toMatch(/id: "branch"[\s\S]{0,180}?fill: true/);
@@ -216,6 +218,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain('activeTab === "all" ? [selectColumn, ...primaryColumns] : primaryColumns');
     expect(panelSource).toContain("isCleanupEligible(item) ? (");
     expect(panelSource).toContain("labels.cleanupSelected");
+    expect(panelSource).toContain('activeTab === "all" && cleanupSelected.length > 0');
+    expect(panelSource).toContain('activeTab === "all" ? null : <p className={styles.tabHint}>{activeHint}</p>');
+    expect(panelSource).not.toContain("<strong>{page}/{pageCount}</strong>");
     expect(panelSource).toContain("pageEligible = pagedAll.items.filter(isCleanupEligible)");
     expect(panelStyles.selectCell).toContain("w-9");
   });

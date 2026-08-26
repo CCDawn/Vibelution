@@ -68,6 +68,7 @@ import { formatUnknownLeaseDiagnostics } from "./launcherRegistryDiagnostics";
 import { LauncherRegistryDiagnosticsBanner } from "./LauncherRegistryDiagnosticsBanner";
 import { buildAllInstanceMonitorRows } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
+import { LauncherPortSettingsPanel } from "./LauncherPortSettingsPanel";
 
 const LauncherProjectMaintenancePanel = lazy(() =>
   import("./LauncherProjectMaintenancePanel").then((module) => ({ default: module.LauncherProjectMaintenancePanel })),
@@ -253,6 +254,8 @@ type LauncherCopy = {
   windowModeRestartRequired: string;
   windowModeEnvOverride: string;
   startupSettings: string;
+  portSettings: string;
+  portSettingsHint: string;
   expandSettings: string;
   collapseSettings: string;
   startupSettingsSaved: string;
@@ -1089,6 +1092,8 @@ export function LauncherToolsRoute() {
         windowModeRestartRequired: "下次启动或重启工作台生效",
         windowModeEnvOverride: "环境变量正在覆盖配置",
         startupSettings: "启动设置",
+        portSettings: "端口设置",
+        portSettingsHint: "仅在本地开发或排障时调整；通常无需修改。",
         expandSettings: "展开编辑",
         collapseSettings: "收起设置",
         startupSettingsSaved: "启动设置已保存",
@@ -1353,6 +1358,8 @@ export function LauncherToolsRoute() {
         windowModeRestartRequired: "Takes effect on next workbench start or restart",
         windowModeEnvOverride: "Environment override is active",
         startupSettings: "Startup Settings",
+        portSettings: "Port settings",
+        portSettingsHint: "Change only for local development or troubleshooting.",
         expandSettings: "Expand to edit",
         collapseSettings: "Collapse",
         startupSettingsSaved: "Startup settings saved",
@@ -2570,6 +2577,15 @@ export function LauncherToolsRoute() {
         data-vui-region="launcher-workspace"
       >
           <div className={styles.toolsWorkspace}>
+            <LauncherPortSettingsPanel
+              copy={copy}
+              setting={startupSettings}
+              controlPortOverride={controlPortOverride}
+              backendPortOverride={backendPortOverride}
+              frontendPortOverride={frontendPortOverride}
+              pending={startupSettingsMutation.isPending}
+              onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+            />
             <LauncherProcessMonitorPanel
               copy={{
                 ...copy,

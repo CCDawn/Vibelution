@@ -37,19 +37,10 @@ type BranchLifecycleRequest = {
 function startupCopy(lang: "zh" | "en") {
   return lang === "zh"
     ? {
-        invalidPort: "端口必须是 1-65535 的整数",
         startupSettings: "启动设置",
         expandSettings: "展开编辑",
         collapseSettings: "收起设置",
         runtimeProfile: "运行档位",
-        launcherControlPort: "Launcher 端口",
-        launcherControlPortHint: "本页控制面端口，不是某个分支实例的端口。",
-        backendPort: "默认后端",
-        backendPortHint: "启动主项目时的工作台后端默认值。",
-        frontendPort: "开发前端",
-        frontendPortHint: "Vite 开发热更新端口。",
-        portOverride: "端口被环境变量覆盖",
-        effectiveValue: "生效",
         windowMode: "启动窗口",
         windowModeFullscreen: "全屏",
         windowModeWindowed: "窗口化",
@@ -74,19 +65,10 @@ function startupCopy(lang: "zh" | "en") {
         notCheckedOut: "未打开",
       }
     : {
-        invalidPort: "Port must be an integer from 1 to 65535",
         startupSettings: "Startup settings",
         expandSettings: "Expand settings",
         collapseSettings: "Collapse settings",
         runtimeProfile: "Runtime profile",
-        launcherControlPort: "Launcher port",
-        launcherControlPortHint: "This is the Launcher control-plane port, not an instance port.",
-        backendPort: "Default backend",
-        backendPortHint: "Default workbench backend when starting the main project.",
-        frontendPort: "Development frontend",
-        frontendPortHint: "Vite development hot-reload port.",
-        portOverride: "Port is overridden by an environment variable",
-        effectiveValue: "Effective",
         windowMode: "Startup window",
         windowModeFullscreen: "Fullscreen",
         windowModeWindowed: "Windowed",
@@ -249,9 +231,6 @@ export function LauncherRoute() {
             configuredWindowMode={configuredWindowMode}
             effectiveWindowModeLabel={effectiveWindowMode === "windowed" ? copy.windowModeWindowed : copy.windowModeFullscreen}
             windowModeDetail={lang === "zh" ? "下次启动或重启工作台生效" : "Takes effect when the workbench next starts or restarts"}
-            controlPortOverride={setting?.launcher.controlPortEnvOverride || 0}
-            backendPortOverride={setting?.workbench.backendPortEnvOverride || 0}
-            frontendPortOverride={setting?.workbench.frontendPortEnvOverride || 0}
             pending={startupSettingsMutation.isPending || windowModeMutation.isPending}
             pendingWindowMode={windowModeMutation.isPending ? effectiveWindowMode : ""}
             onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
