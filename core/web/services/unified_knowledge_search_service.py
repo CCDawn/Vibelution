@@ -123,12 +123,23 @@ def search_unified_memory(
         _result_from_knowledge_item(item, rank=index + 1, backend=_backend_for_mode(effective_mode))
         for index, item in enumerate(matched_items[:bounded_limit])
     ]
-    catalog_results = _catalog_results(
-        agent_id=normalized_agent_id,
-        query=normalized_query,
-        limit=bounded_limit,
+    # An explicit knowledge-base scope or MemoryPolicy allow-list is a filter,
+    # not a request to mix in project-wide discovery cards from unrelated stores.
+    include_project_discovery = not normalized_base_id and not normalized_allowed_base_ids
+    catalog_results = (
+        _catalog_results(
+            agent_id=normalized_agent_id,
+            query=normalized_query,
+            limit=bounded_limit,
+        )
+        if include_project_discovery
+        else []
     )
-    github_results = _github_project_results(query=normalized_query, limit=bounded_limit)
+    github_results = (
+        _github_project_results(query=normalized_query, limit=bounded_limit)
+        if include_project_discovery
+        else []
+    )
     user_results = _user_content_results(
         include_user_content=bool(include_user_content),
         user_id=normalized_user_id,

@@ -79,6 +79,8 @@ def test_session_agent_tool_policy_exposes_explicit_terminal_protocol_without_wi
     assert "exec_command" in default_policy["allowedTools"]
     assert "write_stdin" in default_policy["allowedTools"]
     assert default_policy["preferredTools"][:2] == ["exec_command", "write_stdin"]
+    preferred = default_policy["preferredTools"]
+    assert preferred.index("github_project_library_search_tool") < preferred.index("apply_patch_tool")
     assert default_policy["maxCallsPerTurn"] == 32
 
     agent_directory_service.update_agent_instance(

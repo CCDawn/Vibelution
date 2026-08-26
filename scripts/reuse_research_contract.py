@@ -8,13 +8,13 @@ import os
 import re
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Sequence
 
 from core.web.services import github_project_library_service as github_library
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DECISIONS = frozenset({"REUSE", "ADAPT", "REFERENCE_ONLY", "BUILD_IN_HOUSE"})
 LOCAL_REUSE_DECISIONS = frozenset({"REUSE", "ADAPT", "REPLACE", "UNUSED"})
 UNVERIFIED_LICENSES = frozenset({"", "NOASSERTION", "OTHER"})
@@ -45,6 +45,7 @@ IMPLEMENTATION_SUFFIXES = frozenset(
 )
 EXEMPT_PREFIXES = ("docs/", "tests/", "test/", "fixtures/", "examples/")
 MAX_CANDIDATES = 5
+MAX_SOURCE_REFS = 16
 MAX_OWNER_PATHS = 8
 MAX_LIST_ITEMS = 8
 MAX_SHORT_TEXT = 240
@@ -255,6 +256,77 @@ def _candidate_records(
     return records, str(registry.get("updatedAt") or "")
 
 
+def _source_ref_parts(value: str) -> tuple[str, str, str]:
+    normalized = _text(value, field="sourceRefs", limit=MAX_LONG_TEXT)
+    project_id, separator, locator = normalized.partition(":")
+    path_text, symbol_separator, symbol = locator.rpartition("#")
+    if not separator or not PROJECT_ID_RE.fullmatch(project_id):
+        raise ReuseResearchEvidenceError(
+            "sourceRefs must use projectId:path#symbol."
+        )
+    if not symbol_separator:
+        path_text = locator
+    path = normalize_path(path_text)
+    relative = PurePosixPath(path)
+    if (
+        not path
+        or path.startswith("/")
+        or re.match(r"^[A-Za-z]:", path)
+        or relative.is_absolute()
+        or "." == str(relative)
+        or ".." in relative.parts
+    ):
+        raise ReuseResearchEvidenceError(
+            "Each source reference path must stay inside its candidate repository."
+        )
+    if not symbol_separator:
+        raise ReuseResearchEvidenceError(
+            "sourceRefs must use projectId:path#symbol."
+        )
+    normalized_path = relative.as_posix()
+    normalized_symbol = _text(symbol, field="sourceRefs symbol", limit=MAX_SHORT_TEXT)
+    return project_id, normalized_path, normalized_symbol
+
+
+def _source_ref_records(
+    library_root: Path,
+    candidates: Sequence[dict[str, str]],
+    values: Iterable[str],
+) -> list[dict[str, str]]:
+    refs = list(dict.fromkeys(_text(value, field="sourceRefs", limit=MAX_LONG_TEXT) for value in values))
+    if not refs:
+        raise ReuseResearchEvidenceError("sourceRefs requires at least one fixed source location.")
+    if len(refs) > MAX_SOURCE_REFS:
+        raise ReuseResearchEvidenceError(f"sourceRefs exceeds {MAX_SOURCE_REFS} items.")
+    by_project_id = {candidate["projectId"]: candidate for candidate in candidates}
+    records: list[dict[str, str]] = []
+    for value in refs:
+        project_id, path, symbol = _source_ref_parts(value)
+        candidate = by_project_id.get(project_id)
+        if candidate is None:
+            raise ReuseResearchEvidenceError(
+                f"sourceRefs must be bound to a selected candidate: {project_id}"
+            )
+        repo = _safe_repo_path(library_root, project_id)
+        head = candidate["headSha"]
+        object_ref = f"{head}:{path}"
+        object_type = _git(repo, "cat-file", "-t", object_ref)
+        if object_type.returncode != 0 or object_type.stdout.strip() != "blob":
+            raise ReuseResearchEvidenceError(
+                f"Source reference does not resolve to a file blob: {project_id}:{path}"
+            )
+        records.append(
+            {
+                "projectId": project_id,
+                "headSha": head,
+                "path": path,
+                "symbol": symbol,
+                "blobSha": _git_text(repo, "rev-parse", object_ref),
+            }
+        )
+    return records
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -273,6 +345,7 @@ def record_evidence(
     implementation_boundary: str,
     verification_strategy: str,
     risk_notes: Sequence[str],
+    source_refs: Sequence[str],
     project_root: Path | str | None = None,
 ) -> dict[str, object]:
     repository = _repository_root(root)
@@ -292,6 +365,8 @@ def record_evidence(
         decision=normalized_decision,
         risk_notes=risks,
     )
+    library_root = github_library.github_project_library_root(project_root=active_project_root)
+    source_ref_records = _source_ref_records(library_root, candidates, source_refs)
     payload: dict[str, object] = {
         "schemaVersion": SCHEMA_VERSION,
         "taskId": task_id,
@@ -301,6 +376,7 @@ def record_evidence(
         "localReuseDecision": normalized_local_decision,
         "localOwnerPaths": _owner_paths(repository, local_owner_paths),
         "candidates": candidates,
+        "sourceRefs": source_ref_records,
         "borrowedSlices": _text_list(borrowed_slices, field="borrowedSlices"),
         "rejectedAlternatives": _text_list(rejected_alternatives, field="rejectedAlternatives"),
         "reason": _text(reason, field="reason", limit=MAX_LONG_TEXT),
@@ -376,6 +452,31 @@ def validate_evidence_payload(
         license_id = str(candidate.get("license") or "")
         if license_id.upper() in UNVERIFIED_LICENSES and decision in {"REUSE", "ADAPT"}:
             raise ReuseResearchEvidenceError("Reuse research candidate license is unverified.")
+    candidate_heads = {
+        str(candidate["projectId"]): str(candidate["headSha"])
+        for candidate in candidates
+    }
+    source_refs = payload.get("sourceRefs")
+    if not isinstance(source_refs, list) or not 1 <= len(source_refs) <= MAX_SOURCE_REFS:
+        raise ReuseResearchEvidenceError("Reuse research sourceRefs must contain 1-16 entries.")
+    for source_ref in source_refs:
+        if not isinstance(source_ref, dict):
+            raise ReuseResearchEvidenceError("Reuse research source reference must be an object.")
+        project_id = str(source_ref.get("projectId") or "")
+        head = str(source_ref.get("headSha") or "")
+        if candidate_heads.get(project_id) != head:
+            raise ReuseResearchEvidenceError(
+                "Reuse research source reference is not bound to its candidate commit HEAD."
+            )
+        path = str(source_ref.get("path") or "")
+        symbol = str(source_ref.get("symbol") or "")
+        parsed_project_id, parsed_path, parsed_symbol = _source_ref_parts(
+            f"{project_id}:{path}#{symbol}"
+        )
+        if (parsed_project_id, parsed_path, parsed_symbol) != (project_id, path, symbol):
+            raise ReuseResearchEvidenceError("Reuse research source reference is not normalized.")
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", str(source_ref.get("blobSha") or "")):
+            raise ReuseResearchEvidenceError("Reuse research source reference blob is invalid.")
     return payload
 
 
@@ -405,6 +506,17 @@ def load_and_validate_evidence(
     )
     if live_candidates != validated["candidates"]:
         raise ReuseResearchEvidenceError("Candidate metadata or HEAD drifted from recorded evidence.")
+    library_root = github_library.github_project_library_root(project_root=active_project_root)
+    live_source_refs = _source_ref_records(
+        library_root,
+        live_candidates,
+        [
+            f"{item['projectId']}:{item['path']}#{item['symbol']}"
+            for item in validated["sourceRefs"]
+        ],
+    )
+    if live_source_refs != validated["sourceRefs"]:
+        raise ReuseResearchEvidenceError("Source reference blob drifted from recorded evidence.")
     return validated
 
 
@@ -431,6 +543,15 @@ def validate_manifest_snapshot(
         if completed.returncode != 0:
             raise ReuseResearchEvidenceError(
                 f"Candidate commit is unavailable for manifest verification: {project_id}"
+            )
+    for source_ref in validated["sourceRefs"]:
+        project_id = str(source_ref["projectId"])
+        repo = _safe_repo_path(library_root, project_id)
+        object_ref = f"{source_ref['headSha']}:{source_ref['path']}"
+        completed = _git(repo, "rev-parse", object_ref)
+        if completed.returncode != 0 or completed.stdout.strip() != source_ref["blobSha"]:
+            raise ReuseResearchEvidenceError(
+                f"Source reference blob is unavailable or mismatched: {project_id}:{source_ref['path']}"
             )
     return validated
 

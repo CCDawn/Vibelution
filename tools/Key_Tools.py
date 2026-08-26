@@ -2596,13 +2596,15 @@ def _build_key_tools() -> List[BaseTool]:
     @tool
     def github_project_library_search_tool(query: str = "", limit: int = 12) -> str:
         """
-        【开源项目索引】只读检索记忆库中已落盘的 GitHub 项目卡片。
+        【开源项目索引】开发非平凡或不熟悉功能前，先只读检索记忆库中已落盘的 GitHub 项目卡片。
 
-        命中后请读取 localPath/absolutePath 下的本地仓再调研，不要把网页或 API 摘要当结论。
-        未命中时改用 github_project_library_clone_tool 克隆公开仓的默认主干最新提交。
+        支持中英文、多词能力查询；平台会在项目元数据和有界本地 README token 上排序，返回 searchScore、
+        matchedTerms 和 matchReason，但绝不返回仓库正文。按项目贴合度选择候选后，再读取 localPath/absolutePath
+        下固定 HEAD 的具体文件再形成实现依据；项目卡、README token、网页或 API 摘要只用于发现候选。
+        索引没有合适候选时，再用 github_project_library_clone_tool 克隆公开仓的默认主干最新提交。
 
         Args:
-            query: 按名字、描述、fullName、语言或许可过滤；空则列出当前索引
+            query: 中英文能力、组件或问题关键词；支持多词查询，空则列出当前索引
             limit: 最多返回结果数，范围 1-25
 
         Returns:
@@ -2620,11 +2622,11 @@ def _build_key_tools() -> List[BaseTool]:
         【开源项目落盘】把高价值公开 GitHub 仓的默认主干最新提交克隆进记忆库，或对已有本地仓执行 fetch。
 
         只克隆公开仓，浅克隆（--depth 1 --single-branch），默认不拉子模块。单仓约 1GB 或可见项目达到 20 个时返回 confirmation_required，
-        需用户确认后再带 confirm=true 重试。禁止把整仓正文写入正式知识库。
+        用户确认后可带 confirm=true 重试。整仓正文不会写入正式知识库。
 
         Args:
             repo: GitHub URL、owner/repo，或已有项目的 projectId
-            confirm: 突破数量/体积闸门时必须为 true
+            confirm: 用户确认突破数量/体积闸门时设为 true
             action: clone（默认）或 fetch
 
         Returns:
