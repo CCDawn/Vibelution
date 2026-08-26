@@ -257,7 +257,7 @@ export function HypothesisFirstMeetingOps(props: {
   });
   const reopenReviewMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
-      if (canonicalAction && ["retry_review_dispatch", "resume_discussion", "stop_discussion"].includes(canonicalAction.command)) {
+      if (canonicalAction && ["retry_review_dispatch", "reopen_review", "resume_discussion", "stop_discussion"].includes(canonicalAction.command)) {
         return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
       }
       if (allowLegacyMutation) return reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId);

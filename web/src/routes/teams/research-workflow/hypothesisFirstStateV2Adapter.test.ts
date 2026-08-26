@@ -311,6 +311,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.stage).toBe("blocked");
     expect(action.command).toBe("reopen_review");
     expect(action.canonicalAction?.command).toBe("reopen_review");
+    expect(action.disabledReason).toBeUndefined();
   });
 
   it("selects the exact pending candidate from a two-candidate review", () => {
