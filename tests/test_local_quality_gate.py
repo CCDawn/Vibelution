@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -143,6 +144,41 @@ def test_pre_commit_missing_project_python_fails_with_repair_command(
         "scripts/vibelution_launcher.ps1 -Action repair-deps"
         in result.stderr.splitlines()
     )
+
+
+def test_pre_commit_uses_primary_worktree_python_from_linked_worktree(
+    git_repo: Path,
+    tmp_path: Path,
+) -> None:
+    task_worktree = tmp_path / "task-worktree"
+    git(git_repo, "worktree", "add", "-b", "codex/hook-python", str(task_worktree))
+    hook_dir = task_worktree / ".githooks"
+    hook_dir.mkdir()
+    shutil.copyfile(
+        gate.PROJECT_ROOT / ".githooks" / "pre-commit",
+        hook_dir / "pre-commit",
+    )
+    primary_python = git_repo / ".venv" / "Scripts" / "python.exe"
+    primary_python.parent.mkdir(parents=True)
+    invocation_path = tmp_path / "hook-python-invocation.txt"
+    primary_python.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOOK_PYTHON_INVOCATION\"\n",
+        encoding="utf-8",
+    )
+    primary_python.chmod(0o755)
+
+    result = subprocess.run(
+        [str(_git_sh_exe()), ".githooks/pre-commit"],
+        cwd=task_worktree,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "HOOK_PYTHON_INVOCATION": str(invocation_path)},
+    )
+
+    assert not (task_worktree / ".venv").exists()
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert invocation_path.read_text(encoding="utf-8").splitlines()[-1] == "commit"
 
 
 def commit_file(root: Path, path: str, content: str, message: str) -> None:
