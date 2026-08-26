@@ -36,13 +36,24 @@ rules:
       - "Pure test-tooling changes do not require Launcher refresh."
       - "Remote distributed testing is a speed path for Python not-serial coverage; it is not a complete gate."
 
-  - id: local-quality-gate
-    description: "Local commit hook, closeout manifest, doctor, selector, and manual CI contracts."
+  - id: pre-commit-hook
+    description: "Local pre-commit hook adapter and its shared-worktree Python fallback."
     executionLayers:
       - "focused"
       - "local-serial"
     paths:
       - ".githooks/pre-commit"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py -k pre_commit -q"
+    notes:
+      - "Hook-only changes run the hook contract tests; closeout keeps its full gate-definition self-test."
+
+  - id: local-quality-gate
+    description: "Closeout manifest, doctor, selector, and manual CI contracts."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
       - ".github/workflows/ci.yml"
       - "scripts/doctor.ps1"
       - "scripts/local_quality_gate.py"
