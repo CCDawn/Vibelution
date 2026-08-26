@@ -8,10 +8,18 @@ if [ "$current_branch" = "main" ]; then
   exit 1
 fi
 
-if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
-  project_python="$repo_root/.venv/Scripts/python.exe"
-elif [ -x "$repo_root/.venv/bin/python" ]; then
-  project_python="$repo_root/.venv/bin/python"
+dependency_root=$repo_root
+if [ ! -x "$dependency_root/.venv/Scripts/python.exe" ] && [ ! -x "$dependency_root/.venv/bin/python" ]; then
+  git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  case "$git_common_dir" in
+    */.git) dependency_root=${git_common_dir%/.git} ;;
+  esac
+fi
+
+if [ -x "$dependency_root/.venv/Scripts/python.exe" ]; then
+  project_python="$dependency_root/.venv/Scripts/python.exe"
+elif [ -x "$dependency_root/.venv/bin/python" ]; then
+  project_python="$dependency_root/.venv/bin/python"
 else
   project_python=""
 fi
