@@ -66,6 +66,7 @@ EXCLUDED_NAMES = {
     ".ruff_cache",
     ".runtime",
     ".venv",
+    ".worktrees",
     "__pycache__",
     "coverage",
     "dist",

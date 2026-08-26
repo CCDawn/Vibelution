@@ -26,11 +26,16 @@ from typing import Any
 
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
+from core.llm.client import model_invocation_receipt_context_scope
+from core.llm.invocation import invoke_llm_outcome
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.hypothesis_quality import (
     AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
     HYPOTHESIS_SCORE_DIMENSIONS,
     canonical_hypothesis_score_rubric,
+)
+from core.web.services.team_workflow.hypothesis_review_executor import (
+    ProviderBoundReviewResult,
 )
 
 REVIEW_LLM_PROFILE_ID = "primary"
@@ -71,6 +76,10 @@ def resolve_review_llm() -> dict[str, Any] | None:
         "client": client,
         "profileId": REVIEW_LLM_PROFILE_ID,
         "modelId": model_id,
+        "providerId": str(getattr(provider, "provider_id", "") or "").strip(),
+        "modelRef": (
+            f"{str(getattr(provider, 'provider_id', '') or '').strip()}/{model_id}"
+        ),
     }
 
 
@@ -105,7 +114,9 @@ def _invoke_review_llm(
     system_prompt: str,
     user_payload: Mapping[str, Any],
     session_id: str,
-) -> dict[str, Any]:
+    receipt_context: Mapping[str, Any] | None = None,
+    require_provider_receipt: bool = False,
+) -> dict[str, Any] | ProviderBoundReviewResult:
     """Run one review model call and parse its JSON object output."""
 
     messages: list[Any] = [
@@ -115,24 +126,84 @@ def _invoke_review_llm(
             "content": json.dumps(dict(user_payload), ensure_ascii=False),
         },
     ]
-    response = invoke_llm(
-        llm["client"],
-        messages,
-        context=LLMInvocationContext(
-            surface=REVIEW_LLM_SURFACE,
-            run_kind="team_workflow_review",
-            session_id=session_id,
-            agent_id=agent_id,
-            llm_slot="dialogue",
-            cache_scope=REVIEW_LLM_CACHE_SCOPE,
-            cache_partition=f"{session_id}:{purpose}",
-            prompt_purpose=purpose,
-            conversation_bound=False,
-            metadata={"purpose": purpose, "reviewProfileId": llm["profileId"]},
-        ),
+    receipt_binding = (
+        receipt_context.get("questionStageBinding")
+        if isinstance(receipt_context, Mapping)
+        and isinstance(receipt_context.get("questionStageBinding"), Mapping)
+        else {}
     )
-    content = str(getattr(response, "content", "") or "")
-    return _parse_json_object(content, what=f"review step `{purpose}`")
+    receipt_session_id = str(receipt_binding.get("sessionId") or "").strip()
+    turn_id = str(receipt_binding.get("turnId") or "").strip()
+    invocation_id = str(
+        receipt_context.get("invocationId") if isinstance(receipt_context, Mapping) else ""
+    ).strip()
+    if require_provider_receipt and (
+        not isinstance(receipt_context, Mapping)
+        or not receipt_session_id
+        or not turn_id
+        or not invocation_id
+    ):
+        raise ContractValidationError(
+            f"review step `{purpose}` requires server-owned provider receipt authority"
+        )
+    invocation_context = LLMInvocationContext(
+        surface=REVIEW_LLM_SURFACE,
+        run_kind="team_workflow_review",
+        run_id=invocation_id if require_provider_receipt else "",
+        session_id=receipt_session_id if require_provider_receipt else session_id,
+        agent_id=agent_id,
+        llm_slot="dialogue",
+        cache_scope=REVIEW_LLM_CACHE_SCOPE,
+        cache_partition=f"{session_id}:{purpose}",
+        prompt_purpose=purpose,
+        conversation_bound=False,
+        metadata={
+            "purpose": purpose,
+            "reviewProfileId": llm["profileId"],
+            **(
+                {"turnId": turn_id, "invocationId": invocation_id}
+                if require_provider_receipt
+                else {}
+            ),
+        },
+    )
+    if not require_provider_receipt:
+        response = invoke_llm(
+            llm["client"],
+            messages,
+            context=invocation_context,
+        )
+        content = str(getattr(response, "content", "") or "")
+        return _parse_json_object(content, what=f"review step `{purpose}`")
+    with model_invocation_receipt_context_scope(receipt_context):
+        outcome = invoke_llm_outcome(
+            llm["client"],
+            messages,
+            context=invocation_context,
+        )
+    identity = getattr(outcome, "identity", None)
+    if (
+        str(getattr(outcome, "kind", "") or "") != "final_answer"
+        or str(getattr(identity, "session_id", "") or "") != receipt_session_id
+        or str(getattr(identity, "turn_id", "") or "") != turn_id
+        or str(getattr(identity, "invocation_id", "") or "") != invocation_id
+    ):
+        raise ContractValidationError(
+            f"review step `{purpose}` did not return the bound final provider outcome"
+        )
+    raw_receipt = getattr(outcome, "model_invocation_receipt", None)
+    if not isinstance(raw_receipt, Mapping) or not raw_receipt:
+        raise ContractValidationError(
+            f"review step `{purpose}` completed without a provider receipt"
+        )
+    payload = _parse_json_object(
+        str(getattr(outcome, "final_text", "") or ""),
+        what=f"review step `{purpose}`",
+    )
+    return ProviderBoundReviewResult(
+        payload=payload,
+        model_invocation_receipt=dict(raw_receipt),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +392,8 @@ def _context_digest_refs(context: Mapping[str, Any]) -> list[str]:
 
 def build_hypothesis_review_runners(
     llm: Mapping[str, Any] | None = None,
+    *,
+    require_provider_receipts: bool = False,
 ) -> dict[str, Any] | None:
     """Return the four real-LLM review runners, or ``None`` if unavailable."""
 
@@ -331,6 +404,39 @@ def build_hypothesis_review_runners(
 
     def _context_session(context: Mapping[str, Any]) -> str:
         return str(context.get("teamId") or "") or session_id
+
+    def _receipt_context(
+        context: Mapping[str, Any],
+        *,
+        review_step: str,
+        identity_parts: Sequence[Any],
+    ) -> Mapping[str, Any] | None:
+        if not require_provider_receipts:
+            return None
+        from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+            MeetingReceiptAuthorityError,
+            build_review_step_receipt_context,
+        )
+
+        try:
+            receipt_context = build_review_step_receipt_context(
+                context,
+                review_step=review_step,
+                identity_parts=identity_parts,
+                session_id=_context_session(context),
+                expected_model_route={
+                    "modelRef": resolved.get("modelRef"),
+                    "providerId": resolved.get("providerId"),
+                    "modelId": resolved.get("modelId"),
+                },
+            )
+        except MeetingReceiptAuthorityError as exc:
+            raise ContractValidationError(str(exc)) from exc
+        if receipt_context is None:
+            raise ContractValidationError(
+                f"formal {review_step} runner requires server-owned receipt authority"
+            )
+        return receipt_context
 
     def reflection_runner(candidate: dict[str, Any], context: dict[str, Any]):
         refs_whitelist = [
@@ -353,8 +459,19 @@ def build_hypothesis_review_runners(
                 "allowedRatings": list(DIMENSION_REVIEW_RATINGS),
             },
             session_id=_context_session(context),
+            receipt_context=_receipt_context(
+                context,
+                review_step="reflection",
+                identity_parts=(str(candidate.get("candidateId") or ""),),
+            ),
+            require_provider_receipt=require_provider_receipts,
         )
-        result = dict(produced)
+        provider_receipt = None
+        if isinstance(produced, ProviderBoundReviewResult):
+            provider_receipt = produced.model_invocation_receipt
+            result = dict(produced.payload)
+        else:
+            result = dict(produced)
         result["reviewedBy"] = f"llm:{resolved['modelId']}"
         rows = result.get("dimensionReviews")
         if isinstance(rows, list) and rows:
@@ -362,6 +479,8 @@ def build_hypothesis_review_runners(
                 if isinstance(row, dict):
                     row.setdefault("hypothesis_id", str(candidate.get("candidateId") or ""))
                     row.setdefault("reviewer", result["reviewedBy"])
+        if provider_receipt is not None:
+            return ProviderBoundReviewResult(result, provider_receipt)
         return result
 
     def pairwise_runner(
@@ -381,6 +500,15 @@ def build_hypothesis_review_runners(
                 },
             },
             session_id=_context_session(context),
+            receipt_context=_receipt_context(
+                context,
+                review_step="pairwise",
+                identity_parts=(
+                    str(left.get("candidateId") or ""),
+                    str(right.get("candidateId") or ""),
+                ),
+            ),
+            require_provider_receipt=require_provider_receipts,
         )
 
     def pareto_runner(scores_by_candidate: dict[str, dict[str, float]], context: dict[str, Any]):
@@ -397,6 +525,12 @@ def build_hypothesis_review_runners(
                 },
             },
             session_id=_context_session(context),
+            receipt_context=_receipt_context(
+                context,
+                review_step="pareto",
+                identity_parts=tuple(sorted(scores_by_candidate)),
+            ),
+            require_provider_receipt=require_provider_receipts,
         )
 
     def metareview_runner(
@@ -420,9 +554,24 @@ def build_hypothesis_review_runners(
                 "pareto": dict(pareto),
             },
             session_id=_context_session(context),
+            receipt_context=_receipt_context(
+                context,
+                review_step="metareview",
+                identity_parts=tuple(
+                    sorted(str(item.get("candidateId") or "") for item in candidates)
+                ),
+            ),
+            require_provider_receipt=require_provider_receipts,
         )
-        result = dict(produced)
+        provider_receipt = None
+        if isinstance(produced, ProviderBoundReviewResult):
+            provider_receipt = produced.model_invocation_receipt
+            result = dict(produced.payload)
+        else:
+            result = dict(produced)
         result["reviewerAgentId"] = f"llm:{resolved['modelId']}"
+        if provider_receipt is not None:
+            return ProviderBoundReviewResult(result, provider_receipt)
         return result
 
     return {

@@ -185,13 +185,13 @@ python tests/test_runner.py --hybrid --workers 4
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
 - **Teams / team_workflow / structure packs** 未标 `serial`，应走 `local-parallel` 或 `test_runner.py --parallel`；不要误当成必须串行的 Launcher 层。
-- **前端 Vitest** 默认 `pool=forks` + `fileParallelism` + `maxWorkers=50%`（见 `web/vite.config.ts`）。全量：`npm --prefix web run test`；也可 `npm --prefix web run test:parallel`。
+- **前端 Vitest** 默认 `pool=forks` + `fileParallelism` + `maxWorkers=25%`（见 `web/vite.config.ts`）；只有 `test:parallel` 显式提高到 `50%`。全量：`npm --prefix web run test`；也可 `npm --prefix web run test:parallel`。
 
 ### 3.5 使用影响面测试选择器
 
 `tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，会把包含至少两个显式测试文件且尚未配置 xdist 的 pytest 命令改写为最多 4-worker 的 `loadfile` 并行执行，单文件、非 pytest 命令和已有 xdist 参数保持不变。
 
-选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。
+选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。选择器输出的 Vitest 命令从仓库根执行并固定追加 `--root web`，TypeScript 则固定为 `node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false`，因此不会误扫 `.worktrees` 或 `.runtime`。
 
 ```bash
 # 手动输入变更文件并查看结构化结果

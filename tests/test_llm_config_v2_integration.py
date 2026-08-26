@@ -272,6 +272,6 @@ def test_selector_adds_provider_config_protocol_matrix_for_convergence_paths() -
     assert any("tests/test_llm_protocol_resolver.py" in command for command in result["commands"])
     assert (
         "node web/node_modules/vitest/vitest.mjs run src/routes/configProviderLogic.test.ts "
-        "src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts"
+        "src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts --root web"
     ) in result["commands"]
     assert "npm --prefix web run build" in result["commands"]

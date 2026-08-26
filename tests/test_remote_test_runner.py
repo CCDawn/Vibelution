@@ -176,6 +176,22 @@ def test_create_source_archive_can_embed_extra_files(tmp_path):
         assert archive.extractfile(".remote-test/remote-targets.txt").read().decode("utf-8") == "tests/test_a.py\n"
 
 
+def test_create_source_archive_excludes_task_worktrees(tmp_path):
+    project = tmp_path / "project"
+    (project / "scripts").mkdir(parents=True)
+    (project / "scripts" / "remote_test_runner.py").write_text("runner", encoding="utf-8")
+    task_worktree_file = project / ".worktrees" / "other-task" / "tests" / "test_private.py"
+    task_worktree_file.parent.mkdir(parents=True)
+    task_worktree_file.write_text("private", encoding="utf-8")
+    archive_path = tmp_path / "source.tar.gz"
+
+    file_count = remote_test_runner.create_source_archive(project, archive_path)
+
+    assert file_count == 1
+    with tarfile.open(archive_path, "r:gz") as archive:
+        assert archive.getnames() == ["scripts/remote_test_runner.py"]
+
+
 def test_remote_script_prepares_venv_and_captures_log():
     script = remote_test_runner.build_remote_script(make_config(), "20260621T000000Z")
 

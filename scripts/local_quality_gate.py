@@ -204,6 +204,18 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
             [argv[0], "exec", "--", *argv[5:]],
             root / "web",
         )
+    if normalized == [
+        "node",
+        "web/node_modules/typescript/bin/tsc",
+        "-b",
+        "web/tsconfig.json",
+        "--pretty",
+        "false",
+    ]:
+        # Root-cwd selector commands pin the TypeScript project explicitly.
+        # Unlike the historical npm --prefix form above, this command is safe
+        # to execute unchanged at the repository root.
+        return CommandSpec("web-typecheck", argv, root)
     if normalized and normalized[0] in python_tokens:
         canonical = [str(PROJECT_PYTHON_NAME), *argv[1:]]
         if argv[1:3] == ["-m", "pytest"]:
@@ -223,11 +235,16 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
     if normalized == ["npm", "--prefix", "desktop/electron", "test"]:
         return CommandSpec("electron-test", argv, root)
     if normalized[:3] == ["node", "web/node_modules/vitest/vitest.mjs", "run"]:
+        if normalized[-2:] == ["--root", "web"]:
+            # Current selector output is self-contained: Vitest receives the
+            # frontend root even when the command is copied from repository
+            # root, so it loads web/vite.config.ts and ignores sibling trees.
+            return CommandSpec("web-test", argv, root)
         # Frontend selectors intentionally use paths relative to ``web`` (for example
         # ``src/routes/...``).  Running the node entrypoint from the repository root
         # skips web/vite.config.ts, so Vitest loses its project test plugins as well.
-        # Preserve the allowlisted selector text while executing it in its declared
-        # frontend project root.
+        # Preserve historic selector text by executing it in its declared frontend
+        # project root; new selector commands use the explicit --root branch above.
         return CommandSpec(
             "web-test",
             [argv[0], "node_modules/vitest/vitest.mjs", *argv[2:]],
