@@ -73,6 +73,28 @@ _LOCK = threading.RLock()
 _RECOVERY_LOCKS: dict[str, threading.Lock] = {}
 
 
+def _record_scene_event(
+    event_code: str,
+    *,
+    outcome: str,
+    fields: dict[str, Any] | None = None,
+    level: str = "info",
+) -> None:
+    """Best-effort observability event; diagnostics never break the chain."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "hypothesis_first_chain",
+        event_code,
+        level=level,
+        outcome=outcome,
+        fields=fields or {},
+    )
+
+
 class HypothesisFirstChainError(RuntimeError):
     """Base error for hypothesis-first chain orchestration."""
 
@@ -1359,6 +1381,56 @@ def execute_v2_command(
 ) -> dict[str, Any]:
     """Execute one V2 command under scope-lock reauthorization and CAS.
 
+    Thin observability wrapper: every command outcome (executed, idempotent
+    replay, rejection, or failure) leaves a runtime-scene event so chain
+    stalls can be diagnosed without replaying the JSONL ledger.
+    """
+
+    started = time.perf_counter()
+    envelope = dict(request) if isinstance(request, Mapping) else {}
+    command = str(envelope.get("command") or "").strip()
+    action_id = str(envelope.get("actionId") or "").strip()
+    identity = {
+        "teamId": str(team_id or ""),
+        "questionId": str(question_id or ""),
+        "command": command,
+        "actionId": action_id,
+    }
+    try:
+        result = _execute_v2_command_impl(team_id, request, question_id=question_id)
+    except Exception as exc:
+        _record_scene_event(
+            "command.failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                **identity,
+                "errorType": type(exc).__name__,
+                "durationMs": round((time.perf_counter() - started) * 1000, 1),
+            },
+        )
+        raise
+    replayed = str(result.get("status") or "").strip() == "reused"
+    _record_scene_event(
+        "command.executed",
+        outcome="reused" if replayed else "executed",
+        fields={
+            **identity,
+            "replay": replayed,
+            "durationMs": round((time.perf_counter() - started) * 1000, 1),
+        },
+    )
+    return result
+
+
+def _execute_v2_command_impl(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    question_id: str = "",
+) -> dict[str, Any]:
+    """Execute one V2 command under scope-lock reauthorization and CAS.
+
     This is deliberately a small compatibility envelope over existing owning
     services.  It does not duplicate their facts or invent a second ledger;
     each branch calls the existing idempotent mutation and returns its result.
@@ -2424,6 +2496,17 @@ def open_review_meeting_for_selection(
                 round_index=normalized_round_index,
                 lifecycle="queued",
             )
+        _record_scene_event(
+            "review_dispatch.started",
+            outcome="started",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": question_id,
+                "selectionId": selection_id,
+                "roundIndex": normalized_round_index,
+                "candidateCount": len(selected_candidate_ids),
+            },
+        )
         opened_candidates: list[dict[str, Any]] = []
         for candidate_order, candidate_id in enumerate(selected_candidate_ids):
             candidate_meeting_id = (
@@ -2486,6 +2569,19 @@ def open_review_meeting_for_selection(
                     error=str(exc),
                     error_type=type(exc).__name__,
                 )
+                _record_scene_event(
+                    "review_dispatch.candidate_failed",
+                    outcome="failed",
+                    level="warning",
+                    fields={
+                        "teamId": normalized_team_id,
+                        "questionId": question_id,
+                        "selectionId": selection_id,
+                        "candidateId": candidate_id,
+                        "roundIndex": normalized_round_index,
+                        "errorType": type(exc).__name__,
+                    },
+                )
                 raise
             _append_review_dispatch_attempt_state(
                 normalized_team_id,
@@ -2499,6 +2595,17 @@ def open_review_meeting_for_selection(
                 meeting_round_id=candidate_meeting_id,
             )
             opened_candidates.append(opened_candidate)
+        _record_scene_event(
+            "review_dispatch.completed",
+            outcome="completed",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": question_id,
+                "selectionId": selection_id,
+                "roundIndex": normalized_round_index,
+                "openedCount": len(opened_candidates),
+            },
+        )
         discussion_drivers: list[dict[str, Any]] = []
         if background and agent_runner is None:
             for opened in opened_candidates:
