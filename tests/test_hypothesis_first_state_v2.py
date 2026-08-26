@@ -1287,6 +1287,90 @@ def test_stopped_linked_chat_round_projects_review_as_blocked_without_fake_recov
     assert "retry_review_dispatch" not in commands
 
 
+@pytest.mark.parametrize("current_round_status", ["running", "closed"])
+def test_historical_stopped_linked_chat_round_does_not_block_current_round(
+    current_round_status: str,
+) -> None:
+    """Only the latest bound room round can block an open meeting."""
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-old", "room-round-current"],
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-old": {
+                    "runId": "room-round-old",
+                    "runKind": "chat_room_round",
+                    "status": "stopped",
+                    "currentPhase": "stopped",
+                    "runtimeStatus": "orphan_reconciled",
+                    "reconciliationSource": "missing_process_controller",
+                },
+                "room-round-current": {
+                    "runId": "room-round-current",
+                    "runKind": "chat_room_round",
+                    "status": current_round_status,
+                    "currentPhase": current_round_status,
+                    "runtimeStatus": current_round_status,
+                },
+            },
+        )
+    )
+
+    assert state.review.candidates[0].lifecycle == "running"
+    assert state.review.candidates[0].actionability == "executing"
+    assert state.review.lifecycle == "running"
+    assert state.review.actionability == "waiting_system"
+    assert not any(
+        problem.code
+        in {
+            "discussion_round_orphaned",
+            "discussion_round_stopped",
+            "discussion_round_failed",
+        }
+        for problem in state.problems
+    )
+
+
 def test_missing_linked_chat_round_snapshot_does_not_guess_that_open_meeting_stopped() -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
@@ -1554,6 +1638,7 @@ def test_same_selection_version_with_two_active_bindings_fails_closed() -> None:
         problem["code"] == "active_review_binding_conflict"
         for problem in state["problems"]
     )
+    assert state["review"]["lifecycle"] == "running"
     assert state["review"]["actionability"] == "blocked"
     assert not any(
         action.get("command") == "record_selection"
@@ -2144,25 +2229,26 @@ def test_production_projector_reads_bound_chat_round_work_run_without_room_recon
         },
     )
 
-    loaded: list[tuple[str, str]] = []
+    loaded: list[str] = []
 
-    class WorkRunStore:
-        def load_snapshot(self, run_kind: str, run_id: str) -> dict[str, object]:
-            loaded.append((run_kind, run_id))
-            return {
-                "runId": run_id,
-                "runKind": run_kind,
-                "status": "stopped",
-                "currentPhase": "stopped",
-                "runtimeStatus": "orphan_reconciled",
-                "reconciliationSource": "missing_process_controller",
-                "summary": "后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
-                "finishedAt": "2026-08-26T02:17:41Z",
-            }
+    def load_chat_round_snapshot(round_id: str) -> dict[str, object]:
+        loaded.append(round_id)
+        return {
+            "runId": round_id,
+            "runKind": "chat_room_round",
+            "status": "stopped",
+            "currentPhase": "stopped",
+            "runtimeStatus": "orphan_reconciled",
+            "reconciliationSource": "missing_process_controller",
+            "summary": "后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
+            "finishedAt": "2026-08-26T02:17:41Z",
+        }
 
-    from core.web.services import chat_room_service
-
-    monkeypatch.setattr(chat_room_service, "_work_run_store", lambda: WorkRunStore())
+    monkeypatch.setattr(
+        state_module,
+        "_load_chat_room_round_snapshot",
+        load_chat_round_snapshot,
+    )
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
         lambda: type(
@@ -2182,7 +2268,7 @@ def test_production_projector_reads_bound_chat_round_work_run_without_room_recon
         state_module.project_hypothesis_first_state_v2("team-1", "SCI-001")
     )
 
-    assert loaded == [(chat_room_service.RUN_KIND, "room-round-1")]
+    assert loaded == ["room-round-1"]
     assert state.review.lifecycle == "failed"
     assert state.review.actionability == "blocked"
     assert state.review.candidates[0].discussion.actionability == "blocked"

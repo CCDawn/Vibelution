@@ -64,7 +64,6 @@ _QUESTION_SNAPSHOT_CACHE: dict[
 _CHAT_ROOM_ROUND_STOPPED_STATUSES = {
     "cancelled",
     "canceled",
-    "closed",
     "idle",
     "stopped",
     "stopped_by_user",
@@ -87,6 +86,7 @@ _CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES = {
     "stopped",
     "terminated",
 }
+_CHAT_ROOM_RUN_KIND = "chat_room_round"
 
 
 class HypothesisFirstStateScopeError(ValueError):
@@ -561,74 +561,95 @@ def _linked_chat_room_round_problem(
         for round_id in list(meeting.get("chatRoomRoundIds") or [])
         if str(round_id or "").strip()
     ]
-    for round_id in round_ids:
-        snapshot = chat_room_round_snapshots.get(round_id)
-        if not isinstance(snapshot, Mapping):
-            continue
-        snapshot_id = str(
-            snapshot.get("runId") or snapshot.get("roundId") or ""
-        ).strip()
-        if snapshot_id and snapshot_id != round_id:
-            continue
-        status = str(
-            snapshot.get("status")
-            or snapshot.get("currentPhase")
-            or snapshot.get("phase")
-            or ""
-        ).strip().lower()
-        runtime_status = str(snapshot.get("runtimeStatus") or "").strip().lower()
-        reconciliation_source = str(
-            snapshot.get("reconciliationSource") or ""
-        ).strip().lower()
-        is_orphaned = (
-            reconciliation_source == "missing_process_controller"
-            or "orphan" in runtime_status
-            or "orphan" in reconciliation_source
-        )
-        is_stopped = status in _CHAT_ROOM_ROUND_STOPPED_STATUSES or runtime_status in {
-            *_CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES,
-        }
-        is_failed = status in _CHAT_ROOM_ROUND_FAILED_STATUSES or runtime_status in {
-            "error",
-            "failed",
-            "failed_provider",
-            "failed_runtime",
-        }
-        if not (is_orphaned or is_stopped or is_failed):
-            continue
-        if is_orphaned:
-            code = "discussion_round_orphaned"
-            fallback = "绑定的讨论轮次因执行器丢失已停止"
-        elif is_failed:
-            code = "discussion_round_failed"
-            fallback = "绑定的讨论轮次执行失败"
-        else:
-            code = "discussion_round_stopped"
-            fallback = "绑定的讨论轮次已停止"
-        reason = ""
-        for key in (
-            "forceStopReason",
-            "stopReason",
-            "reason",
-            "error",
-            "summary",
-            "runtimeStatus",
-            "reconciliationSource",
-        ):
-            candidate = str(snapshot.get(key) or "").strip()
-            if candidate:
-                reason = candidate
-                break
-        message = f"{fallback}：{reason}" if reason else fallback
-        return _problem(
-            code,
-            message,
-            category="execution",
-            source_kind="chat_room_round",
-            source_id=round_id,
-            detected_at=_timestamp(snapshot) or _timestamp(meeting) or _EPOCH,
-        )
-    return None
+    # ``chatRoomRoundIds`` is append-only: a retry appends a new room round
+    # and the last bound id is the only current execution authority.  Older
+    # terminal rounds remain useful history but must not block a newer round.
+    round_id = round_ids[-1] if round_ids else ""
+    if not round_id:
+        return None
+    snapshot = chat_room_round_snapshots.get(round_id)
+    if not isinstance(snapshot, Mapping):
+        return None
+    snapshot_id = str(
+        snapshot.get("runId") or snapshot.get("roundId") or ""
+    ).strip()
+    if snapshot_id and snapshot_id != round_id:
+        return None
+    status = str(
+        snapshot.get("status")
+        or snapshot.get("currentPhase")
+        or snapshot.get("phase")
+        or ""
+    ).strip().lower()
+    runtime_status = str(snapshot.get("runtimeStatus") or "").strip().lower()
+    reconciliation_source = str(
+        snapshot.get("reconciliationSource") or ""
+    ).strip().lower()
+    is_orphaned = (
+        reconciliation_source == "missing_process_controller"
+        or "orphan" in runtime_status
+        or "orphan" in reconciliation_source
+    )
+    is_stopped = status in _CHAT_ROOM_ROUND_STOPPED_STATUSES or runtime_status in {
+        *_CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES,
+    }
+    is_failed = status in _CHAT_ROOM_ROUND_FAILED_STATUSES or runtime_status in {
+        "error",
+        "failed",
+        "failed_provider",
+        "failed_runtime",
+    }
+    if not (is_orphaned or is_stopped or is_failed):
+        return None
+    if is_orphaned:
+        code = "discussion_round_orphaned"
+        fallback = "绑定的讨论轮次因执行器丢失已停止"
+    elif is_failed:
+        code = "discussion_round_failed"
+        fallback = "绑定的讨论轮次执行失败"
+    else:
+        code = "discussion_round_stopped"
+        fallback = "绑定的讨论轮次已停止"
+    reason = ""
+    for key in (
+        "forceStopReason",
+        "stopReason",
+        "reason",
+        "error",
+        "summary",
+        "runtimeStatus",
+        "reconciliationSource",
+    ):
+        candidate = str(snapshot.get(key) or "").strip()
+        if candidate:
+            reason = candidate
+            break
+    message = f"{fallback}：{reason}" if reason else fallback
+    return _problem(
+        code,
+        message,
+        category="execution",
+        source_kind="chat_room_round",
+        source_id=round_id,
+        detected_at=_timestamp(snapshot) or _timestamp(meeting) or _EPOCH,
+    )
+
+
+def _load_chat_room_round_snapshot(round_id: str) -> Mapping[str, Any] | None:
+    """Read one chat-room WorkRun through the public runtime-store API.
+
+    ``chat_room_service`` exposes only active/latest summaries; the projector
+    needs an arbitrary bound round and must not call its reconciliation facade.
+    ``WorkRunStore.load_snapshot`` is a read-only infrastructure accessor, so
+    this keeps the projection independent of the service's private store
+    factory and its side effects.
+    """
+
+    from core.runtime_manager import work_run_store
+
+    return work_run_store.WorkRunStore(
+        root=work_run_store.WORK_RUNS_DIR,
+    ).load_snapshot(_CHAT_ROOM_RUN_KIND, round_id)
 
 
 def _meeting_phase(
@@ -2041,7 +2062,11 @@ def project_state_from_records(
     review_aggregate = _aggregate(review_candidates)
     if selection_integrity_problems:
         review_phase = _phase(
-            "failed",
+            # Integrity conflicts keep the review locked, but they are not a
+            # terminal execution failure.  Keep the pre-existing lifecycle so
+            # this stopped-round fix does not alter an unrelated selection
+            # recovery contract.
+            "running",
             "none",
             "blocked",
             updated_at=computed_at,
@@ -2636,20 +2661,20 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
         # WorkRun snapshots are the read-only runtime authority.  Do not call
         # chat-room detail here: that facade reconciles/repairs room state as a
         # side effect, which is not appropriate for a canonical projection.
-        from core.web.services import chat_room_service
-
-        work_run_store = chat_room_service._work_run_store()
-        bound_round_ids = {
-            str(round_id or "").strip()
-            for meeting in meeting_records
-            for round_id in list(meeting.get("chatRoomRoundIds") or [])
-            if str(round_id or "").strip()
-        }
+        bound_round_ids: set[str] = set()
+        for meeting in meeting_records:
+            round_ids = [
+                str(round_id or "").strip()
+                for round_id in list(meeting.get("chatRoomRoundIds") or [])
+                if str(round_id or "").strip()
+            ]
+            if round_ids:
+                # The append-only list's final id is the current retry.  Do
+                # not spend a read on historical rounds that cannot affect
+                # the canonical projection.
+                bound_round_ids.add(round_ids[-1])
         for round_id in bound_round_ids:
-            work_run = work_run_store.load_snapshot(
-                chat_room_service.RUN_KIND,
-                round_id,
-            )
+            work_run = _load_chat_room_round_snapshot(round_id)
             if not isinstance(work_run, Mapping):
                 continue
             snapshot_id = str(
