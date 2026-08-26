@@ -202,8 +202,74 @@ def test_complete_turn_does_not_invent_example_local_candidates(
 
 
 def test_completed_project_agent_task_is_closed_before_successor_dispatch(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tests._support.team_workflow.helpers import _use_tmp_project_root
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    from core.web.services import (
+        agent_directory_service,
+        session_service,
+        team_service,
+        team_workflow_orchestration_service,
+    )
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        start_research_project_agent_task,
+        update_research_project_agent_task_status,
+    )
+
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *_args, **_kwargs: {
+            "accepted": True,
+            "turnId": "turn-p0",
+            "status": "running",
+            "acceptedAt": "2026-08-26T00:00:00+00:00",
+        },
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="P0 假设设计 Agent",
+        role_key="challenge_cup_experiment_planner",
+    )
+    team = team_service.create_team(
+        name="P0 假设设计团队",
+        members=[
+            {
+                "agentId": agent["agentId"],
+                "agentName": agent["displayName"],
+                "role": "experiment_planner",
+            }
+        ],
+    )
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "P0 假设设计项目"},
+    )["project"]
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "hypothesis_design",
+            "idempotencyKey": "hypothesis-p0",
+            "workflowRunId": "run-p0",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "nr-hypothesis-p0",
+            "sourceCollectionRunId": "sc-p0",
+        },
+    )
+    task = started["task"]
+    completed = update_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+        task["taskId"],
+        status="completed",
+        result_refs=["challenge-sci-096"],
+    )
+    assert completed["status"] == "completed"
+
     calls: list[object] = []
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
@@ -227,7 +293,7 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
         return {
             "tasks": [
                 {
-                    "taskId": "task-p0",
+                    "taskId": task["taskId"],
                     "status": "completed",
                     "resultRefs": ["challenge-sci-096"],
                 }
@@ -254,14 +320,14 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
             budget_policy_hash="",
         ),
         handle=AgentTaskHandle(
-            session_id="session-p0",
-            session_attempt=1,
-            task_id="task-p0",
-            turn_id="turn-p0",
+            session_id=task["sessionId"],
+            session_attempt=task["sessionAttempt"],
+            task_id=task["taskId"],
+            turn_id=task["turn"]["turnId"],
         ),
         input_snapshot={
-            "teamId": "team-p0",
-            "projectId": "project-p0",
+            "teamId": team["teamId"],
+            "projectId": project["projectId"],
             "sourceCollectionRunId": "sc-p0",
         },
     )
@@ -269,6 +335,6 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
     assert refs[0]["kind"] == "hypothesis_set"
     assert calls[0] == "collect"
     assert calls[1] == (
-        ("team-p0", "project-p0"),
+        (team["teamId"], project["projectId"]),
         {},
     )
