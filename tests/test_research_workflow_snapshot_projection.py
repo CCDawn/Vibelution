@@ -1029,7 +1029,7 @@ def test_snapshot_v2_current_task_and_stage_progress_are_explicit() -> None:
         {
             "id": "knowledge_collection",
             "completed": 0,
-            "total": 5,
+            "total": 6,
             "blocked": 0,
             "state": "current",
         },
