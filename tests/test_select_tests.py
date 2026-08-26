@@ -570,6 +570,116 @@ def test_selector_uses_default_when_no_rule_matches():
     assert result["validationLayers"] == ["hygiene", "focused"]
 
 
+def test_selector_uses_static_python_imports_for_unmapped_product_sources(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "direct.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "package_child.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_static_imports.py").write_text(
+        "import core.direct\nfrom core import package_child\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["core/direct.py", "core/package_child.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    fallback = result["matchedRules"][0]
+    assert fallback["id"] == "python-import-fallback"
+    assert fallback["matchedFiles"] == ["core/direct.py", "core/package_child.py"]
+    assert fallback["selectedTests"] == ["tests/test_static_imports.py"]
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_static_imports.py -q"
+    ]
+    assert result["coverageGaps"] == []
+    assert result["validationLayers"] == ["focused"]
+
+
+def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_unmapped.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["tests/test_unmapped.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"][0]["id"] == "changed-python-test-fallback"
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_unmapped.py -q"
+    ]
+    assert result["coverageGaps"] == []
+
+
+def test_selector_separates_serial_static_import_tests(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_parallel.py").write_text(
+        "import core.module\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_serial.py").write_text(
+        "import core.module\npytestmark = pytest.mark.serial\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["core/module.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_parallel.py -q",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q",
+    ]
+    assert result["validationLayers"] == ["focused", "local-serial"]
+
+
+def test_selector_reports_unmapped_python_source_as_coverage_gap(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "orphan.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_unrelated.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    result = select_tests.select_tests(
+        ["core/orphan.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"] == []
+    assert result["commands"] == []
+    assert result["coverageGaps"] == [
+        {"path": "core/orphan.py", "reason": "no-static-test-import"}
+    ]
+    assert any("No static test import" in note for note in result["notes"])
+
+
+def test_selector_keeps_explicit_matrix_rule_ahead_of_static_import_fallback():
+    result = select_tests.select_tests(
+        ["core/web/services/session_service.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert [rule["id"] for rule in result["matchedRules"]] == ["web-session-chat"]
+    assert result["coverageGaps"] == []
+
+
 def test_selector_deduplicates_commands_across_rules():
     result = select_tests.select_tests(
         [
