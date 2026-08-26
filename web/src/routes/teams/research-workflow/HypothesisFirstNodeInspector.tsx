@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
+import { isFetchJsonHttpError } from "../../../api/client";
 import {
   executeHypothesisFirstCommand,
   isHypothesisFirstCommandStateConflict,
@@ -1031,6 +1032,34 @@ function meetingHasDigestForHistory(meeting: MeetingRoundRecord): boolean {
   return Boolean(meeting.digestId || meeting.digestRef);
 }
 
+function errorRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function commandReadinessError(error: unknown): { message: string; blockers: readonly unknown[] } | null {
+  if (!isFetchJsonHttpError(error)) return null;
+  const payload = errorRecord(error.details);
+  const detail = errorRecord(payload?.detail) ?? payload;
+  const blockers = Array.isArray(detail?.blockers) ? detail.blockers : [];
+  const code = String(detail?.code || error.code || "").trim();
+  if (error.status !== 412 && code !== "node_not_ready") return null;
+  return {
+    message: String(detail?.message || error.message || "node_not_ready").trim(),
+    blockers,
+  };
+}
+
+function readinessBlockerLabel(blocker: unknown): string {
+  if (typeof blocker === "string") return blocker;
+  const value = errorRecord(blocker);
+  if (!value) return String(blocker ?? "");
+  const title = String(value.title || value.label || value.code || "").trim();
+  const detail = String(value.detail || value.message || "").trim();
+  return title && detail && title !== detail ? `${title}：${detail}` : title || detail;
+}
+
 function CanonicalCommandButton(props: {
   teamId: string;
   questionId: string;
@@ -1078,14 +1107,27 @@ function CanonicalCommandButton(props: {
   });
   return (
     <div className={styles.task} data-testid={`canonical-command-${props.action.command}`}>
-      {mutation.isError ? (
-        <VErrorSummary
-          label={props.lang === "zh" ? "操作未完成" : "Action could not finish"}
-          summary={isHypothesisFirstCommandStateConflict(mutation.error)
-            ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
-            : mutation.error.message}
-        />
-      ) : null}
+      {mutation.isError ? (() => {
+        const readiness = commandReadinessError(mutation.error);
+        return (
+          <VErrorSummary
+            label={readiness
+              ? (props.lang === "zh" ? "节点尚未就绪" : "Node is not ready")
+              : (props.lang === "zh" ? "操作未完成" : "Action could not finish")}
+            summary={readiness?.message || (isHypothesisFirstCommandStateConflict(mutation.error)
+              ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
+              : mutation.error.message)}
+            details={readiness?.blockers.length ? (
+              <ul className="m-0 grid list-disc gap-1 pl-4" data-testid="canonical-command-readiness-blockers">
+                {readiness.blockers.map((blocker, index) => (
+                  <li key={`${readinessBlockerLabel(blocker)}:${index}`}>{readinessBlockerLabel(blocker)}</li>
+                ))}
+              </ul>
+            ) : undefined}
+            defaultOpen={Boolean(readiness?.blockers.length)}
+          />
+        );
+      })() : null}
       {!props.action.enabled && props.action.disabledReason ? (
         <span className={styles.commandDetail} role="status">{props.action.disabledReason}</span>
       ) : null}
