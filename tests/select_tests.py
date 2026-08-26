@@ -9,11 +9,13 @@ tool still works in a fresh Python environment.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import fnmatch
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,8 @@ REMOTE_DISTRIBUTED_COMMAND = (
 )
 FRONTEND_BUILD_COMMAND = "npm --prefix web run build"
 FRONTEND_TEST_COMMAND = "node web/node_modules/vitest/vitest.mjs run"
+PYTHON_PRODUCT_ROOTS = ("core", "config", "tools")
+PYTHON_TEST_COMMAND_PREFIX = ".\\.venv\\Scripts\\python.exe -m pytest"
 LLM_PROVIDER_CONFIG_V2_RULE = {
     "id": "llm-provider-config-v2",
     "description": "Provider-scoped config, catalog, discovery, protocol, migration, and frontend convergence.",
@@ -224,6 +228,217 @@ def normalize_path(value: str) -> str:
     return normalized
 
 
+def _is_python_product_path(path: str) -> bool:
+    normalized = normalize_path(path)
+    if not normalized.endswith(".py"):
+        return False
+    return normalized == "agent.py" or any(
+        normalized.startswith(f"{root}/") for root in PYTHON_PRODUCT_ROOTS
+    )
+
+
+def _is_python_test_path(path: str) -> bool:
+    normalized = normalize_path(path)
+    return (
+        normalized.startswith("tests/")
+        and normalized.endswith(".py")
+        and Path(normalized).name.startswith("test_")
+    )
+
+
+def _module_name_for_python_path(path: str) -> str | None:
+    """Return the importable module name for a supported product source path."""
+    normalized = normalize_path(path)
+    if not _is_python_product_path(normalized):
+        return None
+    module_name = normalized.removesuffix(".py").replace("/", ".")
+    if module_name.endswith(".__init__"):
+        return module_name.removesuffix(".__init__")
+    return module_name
+
+
+def _python_test_import_index(
+    project_root: Path,
+    source_modules: set[str],
+) -> tuple[dict[str, set[str]], set[str]]:
+    """Build a conservative source-module to test-file index without importing code.
+
+    Only tests containing an import spelling relevant to a changed module are
+    parsed.  `from package import child` is indexed as `package.child` only
+    when that exact child is among the changed source modules, which avoids
+    guesses based on arbitrary imported symbols.
+    """
+    index: dict[str, set[str]] = {}
+    serial_tests: set[str] = set()
+    tests_root = project_root / "tests"
+    if not tests_root.is_dir() or not source_modules:
+        return index, serial_tests
+
+    source_module_parents = {
+        module_name.rpartition(".")[0]
+        for module_name in source_modules
+        if "." in module_name
+    }
+    import_fragments = {
+        fragment
+        for module_name in source_modules
+        for fragment in (f"import {module_name}", f"from {module_name}")
+    }
+    import_fragments.update(
+        f"from {parent_module} import" for parent_module in source_module_parents
+    )
+
+    for test_path in tests_root.rglob("test_*.py"):
+        relative_path = test_path.relative_to(project_root).as_posix()
+        try:
+            source = test_path.read_text(encoding="utf-8")
+            if not any(fragment in source for fragment in import_fragments):
+                continue
+            tree = ast.parse(source, filename=relative_path)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            # A broken test must be fixed by its owner.  Treating it as an
+            # import edge would hide that separate collection failure.
+            continue
+        if "pytest.mark.serial" in source:
+            serial_tests.add(relative_path)
+
+        imported_modules: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules.update(
+                    alias.name for alias in node.names if alias.name in source_modules
+                )
+                continue
+            if not isinstance(node, ast.ImportFrom) or not node.module:
+                continue
+            if node.module in source_modules:
+                imported_modules.add(node.module)
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                candidate = f"{node.module}.{alias.name}"
+                if candidate in source_modules:
+                    imported_modules.add(candidate)
+
+        for module_name in imported_modules:
+            index.setdefault(module_name, set()).add(relative_path)
+
+    return index, serial_tests
+
+
+def _pytest_command(test_files: list[str]) -> str:
+    return f"{PYTHON_TEST_COMMAND_PREFIX} {' '.join(test_files)} -q"
+
+
+def _python_fallback_selection(
+    changed_files: list[str],
+    explicitly_owned_files: set[str],
+    project_root: Path,
+) -> dict[str, Any]:
+    """Return fallback validation for Python paths left out of the matrix.
+
+    The matrix remains the authority for known high-risk surfaces.  This
+    fallback handles only the uncovered remainder and never claims that the
+    generic runner smoke validates a product file.
+    """
+    fallback_rules: list[dict[str, Any]] = []
+    commands: list[str] = []
+    layers: list[str] = []
+    notes: list[str] = []
+    coverage_gaps: list[dict[str, str]] = []
+
+    changed_test_files = sorted(
+        path
+        for path in changed_files
+        if _is_python_test_path(path) and path not in explicitly_owned_files
+    )
+    if changed_test_files:
+        fallback_rules.append(
+            {
+                "id": "changed-python-test-fallback",
+                "description": "Run changed Python test files not owned by a matrix rule.",
+                "matchedFiles": changed_test_files,
+                "selectedTests": changed_test_files,
+            }
+        )
+        commands.append(_pytest_command(changed_test_files))
+        layers.append("focused")
+
+    uncovered_sources = sorted(
+        path
+        for path in changed_files
+        if _is_python_product_path(path) and path not in explicitly_owned_files
+    )
+    if not uncovered_sources:
+        return {
+            "matchedRules": fallback_rules,
+            "commands": commands,
+            "layers": layers,
+            "notes": notes,
+            "coverageGaps": coverage_gaps,
+        }
+
+    source_modules = {
+        module_name
+        for source_path in uncovered_sources
+        if (module_name := _module_name_for_python_path(source_path))
+    }
+    import_index, serial_tests = _python_test_import_index(project_root, source_modules)
+    source_tests: dict[str, list[str]] = {}
+    for source_path in uncovered_sources:
+        module_name = _module_name_for_python_path(source_path)
+        selected_tests = sorted(import_index.get(module_name or "", set()))
+        if selected_tests:
+            source_tests[source_path] = selected_tests
+            continue
+        coverage_gaps.append(
+            {
+                "path": source_path,
+                "reason": "no-static-test-import",
+            }
+        )
+
+    if source_tests:
+        selected_tests = sorted(
+            {test_path for tests in source_tests.values() for test_path in tests}
+        )
+        parallel_tests = [
+            test_path for test_path in selected_tests if test_path not in serial_tests
+        ]
+        serial_selected_tests = [
+            test_path for test_path in selected_tests if test_path in serial_tests
+        ]
+        fallback_rules.append(
+            {
+                "id": "python-import-fallback",
+                "description": "Tests that statically import uncovered Python product modules.",
+                "matchedFiles": sorted(source_tests),
+                "selectedTests": selected_tests,
+            }
+        )
+        if parallel_tests:
+            commands.append(_parallelize_pytest_command(_pytest_command(parallel_tests)))
+            layers.append("focused")
+            if len(parallel_tests) > 1:
+                layers.append("local-parallel")
+        if serial_selected_tests:
+            commands.append(_pytest_command(serial_selected_tests))
+            layers.extend(["focused", "local-serial"])
+
+    if coverage_gaps:
+        notes.append(
+            "No static test import was found for the listed Python product files; "
+            "add a focused matrix rule or a direct test import before treating them as covered."
+        )
+    return {
+        "matchedRules": fallback_rules,
+        "commands": commands,
+        "layers": layers,
+        "notes": notes,
+        "coverageGaps": coverage_gaps,
+    }
+
+
 def path_matches(pattern: str, changed_path: str) -> bool:
     pattern = normalize_path(pattern)
     changed_path = normalize_path(changed_path)
@@ -345,6 +560,7 @@ def select_tests(
     matrix: dict[str, Any],
     *,
     include_always: bool = True,
+    project_root: Path = PROJECT_ROOT,
 ) -> dict[str, Any]:
     normalized_files = [normalize_path(path) for path in changed_files if path.strip()]
     matched_rules: list[dict[str, Any]] = []
@@ -374,6 +590,9 @@ def select_tests(
         if _is_frontend_specialized_rule(rule)
         for changed_file in matched_files
     }
+    explicitly_owned_files = {
+        changed_file for _rule, matched_files in rule_matches for changed_file in matched_files
+    }
     for rule, matched_files in rule_matches:
         if rule.get("fallback", False):
             # Keep only files not owned by a focused frontend rule.  This is
@@ -396,7 +615,17 @@ def select_tests(
         notes.extend(str(note) for note in rule.get("notes", []))
         validation_layers.extend(_execution_layers(rule, ["focused"]))
 
-    if not matched_rules:
+    python_fallback = _python_fallback_selection(
+        normalized_files,
+        explicitly_owned_files,
+        project_root,
+    )
+    matched_rules.extend(python_fallback["matchedRules"])
+    commands.extend(python_fallback["commands"])
+    notes.extend(python_fallback["notes"])
+    validation_layers.extend(python_fallback["layers"])
+
+    if not matched_rules and not python_fallback["coverageGaps"]:
         default = matrix.get("default", {})
         if isinstance(default, dict):
             commands.extend(str(command) for command in default.get("commands", []))
@@ -410,6 +639,7 @@ def select_tests(
         "matchedRules": matched_rules,
         "commands": _dedupe_commands(commands),
         "notes": _dedupe_commands(notes),
+        "coverageGaps": python_fallback["coverageGaps"],
         "validationLayers": validation_layers,
         "executionPlan": build_execution_plan(validation_layers),
     }
@@ -514,6 +744,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.commands_only:
         print("\n".join(result["commands"]))
+        for gap in result["coverageGaps"]:
+            print(
+                "Coverage gap: "
+                f"{gap['path']} ({gap['reason']}); add a focused matrix rule "
+                "or a direct test import.",
+                file=sys.stderr,
+            )
     else:
         print("Changed files:")
         for changed_file in result["changedFiles"]:
@@ -536,6 +773,10 @@ def main(argv: list[str] | None = None) -> int:
             print("Notes:")
             for note in result["notes"]:
                 print(f"  - {note}")
+        if result["coverageGaps"]:
+            print("Coverage gaps:")
+            for gap in result["coverageGaps"]:
+                print(f"  - {gap['path']}: {gap['reason']}")
 
     return 0
 
