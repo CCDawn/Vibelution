@@ -120,6 +120,7 @@ _OPERATOR_ONLY_COMMANDS = frozenset(
         WorkflowCommandKind.EXTEND_BUDGET,
         WorkflowCommandKind.RESOLVE_HUMAN_TASK,
         WorkflowCommandKind.FORK_REVISION,
+        WorkflowCommandKind.ARCHIVE_RUN,
         WorkflowCommandKind.RECONCILE_RUN,
     }
 )
@@ -150,6 +151,7 @@ class WorkflowCommandService:
             WorkflowCommandKind.RESOLVE_HUMAN_TASK: self._handle_resolve_human_task,
             WorkflowCommandKind.EXTEND_BUDGET: self._handle_extend_budget,
             WorkflowCommandKind.RECONCILE_RUN: self._handle_reconcile_run,
+            WorkflowCommandKind.ARCHIVE_RUN: self._handle_archive_run,
             WorkflowCommandKind.REBIND_NODE: self._handle_rebind_node,
             WorkflowCommandKind.FORK_REVISION: self._handle_fork_revision,
         }
@@ -257,7 +259,10 @@ class WorkflowCommandService:
         Privileged roles are required for high-impact commands.
         """
         from .operator_authorization import current_server_operator
-        from .operator_permissions import require_operator_permission
+        from .operator_permissions import (
+            operator_has_privileged_role,
+            require_operator_permission,
+        )
 
         context = current_server_operator()
         if context is None or not context.operator_id:
@@ -277,6 +282,11 @@ class WorkflowCommandService:
             )
         except PermissionError as exc:
             raise CommandForbiddenError("command_forbidden") from exc
+        if (
+            request.command is WorkflowCommandKind.ARCHIVE_RUN
+            and not operator_has_privileged_role(context.roles)
+        ):
+            raise CommandForbiddenError("command_forbidden")
 
     def _replay(self, existing: Any, request_hash: str) -> CommandReceipt:
         if existing.request_hash != request_hash:
@@ -725,6 +735,85 @@ class WorkflowCommandService:
                 payload={
                     "reconciled": True,
                     "artifactReceiptIds": list(artifact_receipt_ids),
+                },
+                now_ms=now_ms,
+            )
+        )
+        return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
+
+    def _handle_archive_run(
+        self, uow, request: CommandRequest, request_hash: str
+    ) -> CommandReceipt:
+        """Archive a terminal run without reviving its execution state."""
+
+        now_ms = self._clock()
+        run = uow.repository.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        try:
+            current = RunStatus(run.status)
+        except ValueError as exc:
+            raise WorkflowCommandError("archive_run 的当前 run 状态无效") from exc
+        if current not in {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.RECONCILIATION_REQUIRED,
+        }:
+            raise WorkflowCommandError(
+                f"archive_run 不能归档 {current.value} 状态的 run"
+            )
+        require_run_transition(current, RunStatus.ARCHIVED)
+        reason = str(request.payload.get("reason") or "operator archived").strip()
+        if not reason:
+            reason = "operator archived"
+
+        cancelled_outbox_count = 0
+        for attempt in uow.repository.list_attempts(request.run_id):
+            cancelled_outbox_count += uow.repository.cancel_outbox_by_node_run(
+                attempt.node_run_id, now_ms
+            )
+
+        command_id = new_id("cmd")
+        accepted_version, sequence = _bump(
+            uow, request, event_count=1, now_ms=now_ms
+        )
+        uow.repository.insert_command(
+            _command_record(
+                command_id=command_id,
+                request=request,
+                request_hash=request_hash,
+                accepted_run_version=accepted_version,
+                now_ms=now_ms,
+            )
+        )
+        if not uow.repository.update_run_status(
+            request.run_id,
+            request.team_id,
+            RunStatus.ARCHIVED.value,
+            now_ms,
+            completion_kind=run.completion_kind,
+            terminal_reason=run.terminal_reason,
+            blocked_problem_json=run.blocked_problem_json,
+        ):
+            raise WorkflowCommandError("archive_run 未能更新目标 run")
+        uow.repository.insert_event(
+            _event_record(
+                run_id=request.run_id,
+                sequence=sequence,
+                event_id=new_id("evt"),
+                run_version=accepted_version,
+                event_type="run_archived",
+                correlation_id=request.idempotency_key,
+                payload={
+                    "commandId": command_id,
+                    "archivedFromStatus": current.value,
+                    "terminalReason": run.terminal_reason,
+                    "previousCompletedAtMs": run.completed_at_ms,
+                    "archiveReason": reason,
+                    "reason": reason,
+                    "cancelledOutboxCount": cancelled_outbox_count,
+                    "requestedBy": request.requested_by.to_dict(),
                 },
                 now_ms=now_ms,
             )
