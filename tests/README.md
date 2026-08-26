@@ -217,8 +217,8 @@ python tests/select_tests.py --from-git main --commands-only
 `scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
 
 - `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
-- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，在精确 HEAD 上独立执行一次完整 selector 计划，绑定 claim、本地 `main` SHA、HEAD SHA、命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。closeout 当前不复用或缓存早期迭代结果。
-- `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、allowlisted command 结果与 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
+- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，在精确 HEAD 上独立执行一次完整 selector 计划，绑定 claim、本地 `main` SHA、HEAD SHA、命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。实现文件有变更时，它会先加载 `scripts/reuse_research_evidence.py record` 生成的任务证据，将 registry 自动解析的候选 URL、路径、固定 HEAD SHA、许可证和裁决快照写入 manifest；closeout 当前不复用或缓存早期迭代结果。
+- `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、复用研究快照与固定候选 commit、allowlisted command 结果和 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
 
 首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。CI/`workflow_dispatch` 按需使用，不是默认日常本地闭环；remote push 也不是默认本地闭环的一部分。
 
@@ -236,6 +236,8 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `closeout` | `dirty_worktree` | 提交或撤回本任务未提交内容，使 task worktree clean 后重跑 closeout |
 | `closeout` | `merge_conflict` | 仅在任务 worktree 解决冲突并重跑 closeout |
 | `closeout` | `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell，然后重跑 closeout |
+| `closeout` | `reuse_research_missing` | 对实现变更运行 `scripts/reuse_research_evidence.py record`，完成本地复用裁决和成熟候选证据后重跑 closeout |
+| `closeout` | `reuse_research_invalid` | 修正任务/分支绑定、候选 HEAD 或 clone clean 状态、许可证/风险说明等证据问题，重新记录后重跑 closeout |
 | `verify-manifest` | `passed` | manifest 与当前 task branch/worktree/HEAD/changed files 一致，main 仍新鲜且是 task HEAD 祖先，claim、clean 状态、checks 与 commands 仍有效，可进入 merge gate |
 | `verify-manifest` | `failed` | manifest 不可读，或 schema/`outcome`/branch/worktree/HEAD/changed files/checks/commands 被篡改或不匹配；生成或选择正确 manifest，必要时重跑 closeout |
 | `verify-manifest` | `stale_main` | 当前本地 main 已变化或不再是 task HEAD 祖先；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |

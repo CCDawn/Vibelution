@@ -124,7 +124,7 @@ def test_clone_is_idempotent_when_local_copy_exists(tmp_path, monkeypatch):
     assert clone_calls["count"] == 1
 
 
-def test_clone_requires_confirmation_when_library_is_full(tmp_path, monkeypatch):
+def test_clone_warns_but_does_not_require_confirmation_when_library_is_large(tmp_path, monkeypatch):
     monkeypatch.setattr(library, "MAX_PROJECTS", 1)
     monkeypatch.setattr(library, "fetch_github_repo_metadata", lambda owner, repo: _metadata(owner, repo))
 
@@ -147,16 +147,12 @@ def test_clone_requires_confirmation_when_library_is_full(tmp_path, monkeypatch)
     library._write_registry(root, registry)
     library._write_index(root, registry)
 
-    blocked = library.clone_github_project("acme/widget", project_root=tmp_path)
-    assert blocked["status"] == "confirmation_required"
-    assert blocked["reason"] == "repo_count_limit"
-
-    confirmed_calls = {"clone": 0}
+    clone_calls = {"count": 0}
 
     def fake_run_git(args, *, cwd, timeout=15.0, env=None):
         dest = root / "repos" / "acme__widget"
         if _is_clone(args):
-            confirmed_calls["clone"] += 1
+            clone_calls["count"] += 1
             _fake_clone(dest, _metadata())
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args == ["rev-parse", "HEAD"]:
@@ -166,9 +162,37 @@ def test_clone_requires_confirmation_when_library_is_full(tmp_path, monkeypatch)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(library, "run_git", fake_run_git)
-    confirmed = library.clone_github_project("acme/widget", confirm=True, project_root=tmp_path)
-    assert confirmed["status"] == "cloned"
-    assert confirmed_calls["clone"] == 1
+    cloned = library.clone_github_project("acme/widget", project_root=tmp_path)
+    assert cloned["status"] == "cloned"
+    assert cloned["warnings"] == ["project_count_above_soft_threshold"]
+    assert clone_calls["count"] == 1
+
+
+@pytest.mark.parametrize("license_id", ["", "NOASSERTION"])
+def test_clone_requires_confirmation_when_license_is_unverified(tmp_path, monkeypatch, license_id):
+    monkeypatch.setattr(
+        library,
+        "fetch_github_repo_metadata",
+        lambda owner, repo: _metadata(owner, repo, license=license_id),
+    )
+
+    blocked = library.clone_github_project("acme/widget", project_root=tmp_path)
+
+    assert blocked["status"] == "confirmation_required"
+    assert blocked["reason"] == "license_unverified"
+
+
+def test_clone_requires_confirmation_when_repository_is_oversized(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        library,
+        "fetch_github_repo_metadata",
+        lambda owner, repo: _metadata(owner, repo, sizeKb=library.MAX_REPO_SIZE_KB + 1),
+    )
+
+    blocked = library.clone_github_project("acme/widget", project_root=tmp_path)
+
+    assert blocked["status"] == "confirmation_required"
+    assert blocked["reason"] == "repo_size_limit"
 
 
 def test_search_cards_are_metadata_only(tmp_path, monkeypatch):
@@ -195,15 +219,30 @@ def test_search_cards_are_metadata_only(tmp_path, monkeypatch):
     assert cards[0]["metadata"]["absolutePath"].endswith("acme__widget")
 
 
-def test_http_lists_library_and_requires_confirmation(tmp_path, monkeypatch):
+def test_http_lists_library_and_requires_confirmation_for_unverified_license(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from core.web.app import create_app
     from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 
     monkeypatch.setattr(library, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(library, "MAX_PROJECTS", 0)
-    monkeypatch.setattr(library, "fetch_github_repo_metadata", lambda owner, repo: _metadata(owner, repo))
+    monkeypatch.setattr(
+        library,
+        "fetch_github_repo_metadata",
+        lambda owner, repo: _metadata(owner, repo, license="NOASSERTION"),
+    )
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "core.web.app.build_serving_metadata",
+        lambda root: {
+            "schemaVersion": 1,
+            "apiContractVersion": "v1",
+            "frontend": {"buildKey": "test", "release": "test", "dist": str(dist)},
+            "backend": {},
+        },
+    )
     client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
     listed = client.get("/api/memory/github-projects")
@@ -213,6 +252,7 @@ def test_http_lists_library_and_requires_confirmation(tmp_path, monkeypatch):
     blocked = client.post("/api/memory/github-projects", json={"spec": "acme/widget"})
     assert blocked.status_code == 200, blocked.text
     assert blocked.json()["status"] == "confirmation_required"
+    assert blocked.json()["reason"] == "license_unverified"
 
 
 def test_rejects_private_repositories(tmp_path, monkeypatch):

@@ -35,8 +35,9 @@ LIBRARY_DIRNAME = "github-projects"
 REGISTRY_NAME = "registry.json"
 INDEX_NAME = "INDEX.md"
 REPOS_DIRNAME = "repos"
-MAX_PROJECTS = 20
+MAX_PROJECTS = 20  # Soft growth-warning threshold; not a clone quota.
 MAX_REPO_SIZE_KB = 1_048_576  # GitHub `size` is KiB; ~1 GiB
+UNVERIFIED_LICENSES = {"", "NOASSERTION", "OTHER"}
 CLONE_TIMEOUT_SECONDS = 600.0
 FETCH_TIMEOUT_SECONDS = 180.0
 GITHUB_API_TIMEOUT_SECONDS = 15.0
@@ -144,15 +145,17 @@ def clone_github_project(
             raise GithubProjectLibraryError("Only public GitHub repositories can be cloned into the memory library.")
         size_kb = int(metadata.get("sizeKb") or 0)
         visible_count = _visible_project_count(registry, exclude_id=project_id)
-        needs_confirm = (visible_count >= MAX_PROJECTS) or (size_kb > MAX_REPO_SIZE_KB)
+        warnings = _clone_warnings(visible_count)
+        needs_confirm = (size_kb > MAX_REPO_SIZE_KB) or _license_requires_confirmation(metadata)
         if needs_confirm and not confirm:
-            reason = "repo_count_limit" if visible_count >= MAX_PROJECTS else "repo_size_limit"
+            reason = "repo_size_limit" if size_kb > MAX_REPO_SIZE_KB else "license_unverified"
             return {
                 "ok": False,
                 "status": "confirmation_required",
                 "reason": reason,
                 "message": _confirmation_message(reason, metadata, visible_count),
                 "metadata": metadata,
+                "warnings": warnings,
                 "library": _library_payload(root, registry),
             }
         dest = _repo_dir(root, project_id)
@@ -198,6 +201,7 @@ def clone_github_project(
             "status": "cloned",
             "message": "已克隆默认主干最新提交到记忆库（不含历史）。后续调研请读本地路径，不要把网页当结论。",
             "project": _project_api(root, record),
+            "warnings": warnings,
             "library": _library_payload(root, registry),
         }
 
@@ -307,6 +311,9 @@ def _library_payload(root: Path, registry: dict[str, Any]) -> dict[str, Any]:
             "readyCount": ready_count,
             "archivedCount": archived_count,
             "maxProjects": MAX_PROJECTS,
+            "projectWarningThreshold": MAX_PROJECTS,
+            "projectCountWarning": len([item for item in projects if item.get("status") != "archived"])
+            >= MAX_PROJECTS,
             "maxRepoSizeKb": MAX_REPO_SIZE_KB,
         },
         "projects": projects,
@@ -506,10 +513,21 @@ def _project_matches(project: dict[str, Any], needle: str) -> bool:
 
 def _confirmation_message(reason: str, metadata: dict[str, Any], visible_count: int) -> str:
     full_name = str(metadata.get("fullName") or "").strip()
-    if reason == "repo_count_limit":
-        return f"记忆库已有 {visible_count} 个开源项目（上限 {MAX_PROJECTS}）。确认后再克隆 {full_name}。"
+    if reason == "license_unverified":
+        license_id = str(metadata.get("license") or "未识别").strip() or "未识别"
+        return f"{full_name} 的许可证为 {license_id}，不能自动判定复用边界。确认后仅克隆作本地研究，不代表允许复制代码。"
     size_kb = int(metadata.get("sizeKb") or 0)
     return f"{full_name} 约 {size_kb} KiB，超过单仓约 1GB 上限。确认后再克隆默认主干最新提交。"
+
+
+def _license_requires_confirmation(metadata: dict[str, Any]) -> bool:
+    return str(metadata.get("license") or "").strip().upper() in UNVERIFIED_LICENSES
+
+
+def _clone_warnings(visible_count: int) -> list[str]:
+    if visible_count >= MAX_PROJECTS:
+        return ["project_count_above_soft_threshold"]
+    return []
 
 
 def _clone_git_args(clone_url: str, dest: Path, default_branch: str) -> list[str]:
