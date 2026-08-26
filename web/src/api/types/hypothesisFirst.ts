@@ -533,6 +533,7 @@ export type ActionCommand =
   | "human_adjudication"
   | "create_formal_run"
   | "reconcile_formal_run"
+  | "cancel_run"
   | "archive_run"
   | "retry_program_handoff"
   | "record_program_review"
@@ -556,6 +557,7 @@ export type ActionPayloadByCommand = {
   human_adjudication: { hypothesisRoundId: string };
   create_formal_run: { questionId: string; hypothesisRoundId: string };
   reconcile_formal_run: { runId: string };
+  cancel_run: { runId: string };
   archive_run: { runId: string };
   retry_program_handoff: { runId: string; deliveryArtifactRef: string | null };
   record_program_review: { questionId: string; outputRunId: string };

@@ -1906,6 +1906,13 @@ def _execute_v2_command_impl(
                 command="reconcile_run",
                 idempotency_key=idempotency_key,
             )
+        elif command == "cancel_run":
+            result = _submit_formal_v2_command(
+                normalized_team_id,
+                run_id=str(payload.get("runId") or ""),
+                command="cancel_run",
+                idempotency_key=idempotency_key,
+            )
         elif command == "archive_run":
             result = _submit_formal_v2_command(
                 normalized_team_id,

@@ -652,6 +652,45 @@ def test_terminal_formal_run_offers_archive_instead_of_reconcile(
     assert commands == ["archive_run"]
 
 
+def test_created_formal_run_offers_cancel_before_archive() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
+            }],
+            formal_runs=[{
+                "runId": "run-created",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": "created",
+                "runVersion": 1,
+            }],
+        )
+    )
+
+    actions = [
+        action for action in state.allowedActions if action.kind == "command"
+    ]
+    assert [action.command for action in actions] == ["cancel_run"]
+    assert actions[0].payload.runId == "run-created"
+    assert actions[0].requiresConfirmation is True
+
+
 def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
@@ -1488,7 +1527,14 @@ def test_v2_archive_run_command_uses_formal_command_service(
     )
     calls: list[tuple[str, str, str, str]] = []
 
-    def submit(team_id: str, *, run_id: str, command: str, idempotency_key: str, **_kwargs):
+    def submit(
+        team_id: str,
+        *,
+        run_id: str,
+        command: str,
+        idempotency_key: str,
+        **_kwargs,
+    ):
         calls.append((team_id, run_id, command, idempotency_key))
         return {"status": "accepted"}
 
@@ -1511,6 +1557,62 @@ def test_v2_archive_run_command_uses_formal_command_service(
         "run-terminal",
         "archive_run",
         "hf2:archive-formal-run:run-terminal",
+    )]
+
+
+def test_v2_cancel_run_command_uses_formal_command_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:created-run",
+        "allowedActions": [{
+            "kind": "command",
+            "actionId": "cancel-formal-run:run-created",
+            "command": "cancel_run",
+            "payload": {"runId": "run-created"},
+            "enabled": True,
+            "idempotencyKey": "hf2:cancel-formal-run:run-created",
+        }],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[tuple[str, str, str, str]] = []
+
+    def submit(team_id: str, *, run_id: str, command: str, idempotency_key: str, **_kwargs):
+        calls.append((team_id, run_id, command, idempotency_key))
+        return {"status": "accepted"}
+
+    monkeypatch.setattr(hypothesis_first_chain, "_submit_formal_v2_command", submit)
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "cancel-formal-run:run-created",
+            "idempotencyKey": "hf2:cancel-formal-run:run-created",
+            "expectedStateVersion": "hf2-action:created-run",
+            "command": "cancel_run",
+            "payload": {"runId": "run-created"},
+        },
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["status"] == "accepted"
+    assert calls == [(
+        "team-1",
+        "run-created",
+        "cancel_run",
+        "hf2:cancel-formal-run:run-created",
     )]
 
 
