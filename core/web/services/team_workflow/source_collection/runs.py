@@ -411,6 +411,68 @@ def preview_source_collection_runs_reset(team_id: str, run_ids: set[str]) -> dic
     }
 
 
+def stop_source_collection_search(
+    team_id: str,
+    run_id: str,
+    *,
+    reason: str = "operator stopped stuck collection",
+) -> dict[str, Any]:
+    """Stop one team-owned collection run and clear its active work marker."""
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = s._normalize_required_id(run_id, "Data processing run id is required.")
+    team = s.team_service.get_team(normalized_team_id)
+    try:
+        run = s.data_processing_service.get_processing_run(normalized_run_id)
+    except s.data_processing_service.DataProcessingError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    if not s._source_collection_run_belongs_to_team(run, normalized_team_id):
+        raise s.TeamWorkflowOrchestrationError(
+            "Data processing run does not belong to this team."
+        )
+    cancelled_run = s.data_processing_service.cancel_processing_run(
+        normalized_run_id,
+        reason=reason,
+    )
+    assignments = s.data_processing_service.list_collection_assignments(
+        normalized_run_id
+    ).get("assignments", [])
+    records = s.data_processing_service.list_records(normalized_run_id).get("records", [])
+    snapshot = s._persist_source_collection_work_run(
+        normalized_team_id,
+        normalized_run_id,
+        status="cancelled",
+        current_phase="cancelled",
+        run=cancelled_run,
+        team=team,
+        assignments=[item for item in list(assignments or []) if isinstance(item, dict)],
+        records=[item for item in list(records or []) if isinstance(item, dict)],
+        summary="资料搜索已由操作员停止。",
+        active=False,
+        extra={"stopReason": s._trim_text(reason, max_length=300)},
+    )
+    result = {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "status": "cancelled",
+        "run": cancelled_run,
+        "activeWorkRun": snapshot,
+        "sourceCollectionSummary": s._source_collection_assignment_stage_summary(
+            [item for item in list(assignments or []) if isinstance(item, dict)]
+        ),
+    }
+    s._sync_source_collection_stage_round_after_search(
+        normalized_team_id,
+        normalized_run_id,
+        result,
+        terminal_status="cancelled",
+        terminal_summary="资料搜索已由操作员停止。",
+    )
+    return result
+
+
 def reset_source_collection_runs_for_question(
     team_id: str,
     run_ids: set[str],

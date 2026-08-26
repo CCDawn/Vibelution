@@ -2448,6 +2448,19 @@ def project_state_from_records(
                     payload={"requestId": request_id, "childRunId": child_run_id},
                 )
             )
+        elif child_run_id and request_lifecycle == "running":
+            allowed_actions.append(
+                _command_action(
+                    "stop_collection",
+                    action_id=f"stop-collection:{request_id}",
+                    label="停止资料搜集",
+                    target_phase="collection",
+                    target_node_id="hf_collection",
+                    payload={"requestId": request_id, "childRunId": child_run_id},
+                    requires_confirmation=True,
+                    confirmation_text="这会停止当前资料搜集；停止后可重试或重置本题。",
+                )
+            )
         elif not child_run_id:
             allowed_actions.append(
                 _command_action(

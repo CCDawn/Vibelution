@@ -527,6 +527,7 @@ export type ActionCommand =
   | "approve_summary"
   | "retry_collection"
   | "continue_collection"
+  | "stop_collection"
   | "handoff_collection"
   | "open_next_review"
   | "human_adjudication"
@@ -549,6 +550,7 @@ export type ActionPayloadByCommand = {
   approve_summary: { meetingRoundId: string };
   retry_collection: { requestId: string; childRunId: string | null };
   continue_collection: { requestId: string; childRunId: string };
+  stop_collection: { requestId: string; childRunId: string };
   handoff_collection: { requestId: string; childRunId: string };
   open_next_review: { previousMeetingRoundId: string; roundBudget: number };
   human_adjudication: { hypothesisRoundId: string };

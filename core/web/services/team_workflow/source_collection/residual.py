@@ -2930,6 +2930,8 @@ def _source_collection_work_run_terminal_phase(result: dict[str, Any]) -> str:
     status = s._source_collection_work_run_terminal_status(result)
     if status == "failed":
         return "failed"
+    if status == "cancelled":
+        return "cancelled"
     if status == "needs_continue":
         return "waiting_for_next_batch"
     return "completed"
@@ -2937,6 +2939,8 @@ def _source_collection_work_run_terminal_phase(result: dict[str, Any]) -> str:
 
 def _source_collection_work_run_terminal_status(result: dict[str, Any]) -> str:
     s = _service()
+    if str(result.get("status") or "").strip().lower() == "cancelled":
+        return "cancelled"
     if str(result.get("status") or "") == "duplicates_skipped":
         return "completed"
     if s._source_collection_count(result.get("failedQueryCount")) and not s._source_collection_count(result.get("executedQueryCount")):
@@ -2951,6 +2955,8 @@ def _source_collection_work_run_terminal_status(result: dict[str, Any]) -> str:
 
 def _source_collection_work_run_terminal_summary(result: dict[str, Any]) -> str:
     s = _service()
+    if s._source_collection_work_run_terminal_status(result) == "cancelled":
+        return "资料搜索已由操作员停止。"
     if s._source_collection_work_run_terminal_status(result) == "failed":
         return "资料搜索执行失败，等待检查搜索错误。"
     record_count = s._source_collection_count(result.get("recordCount"))

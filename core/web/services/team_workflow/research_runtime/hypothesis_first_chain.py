@@ -1833,6 +1833,11 @@ def _execute_v2_command_impl(
                 normalized_team_id,
                 str(payload.get("requestId") or ""),
             )
+        elif command == "stop_collection":
+            result = stop_collection_request(
+                normalized_team_id,
+                str(payload.get("requestId") or ""),
+            )
         elif command == "handoff_collection":
             result = record_collection_handoff(
                 normalized_team_id,
@@ -4531,6 +4536,50 @@ def recover_collection_request(
         )
 
 
+def stop_collection_request(team_id: str, request_id: str) -> dict[str, Any]:
+    """Stop one running child collection and make the request retry/reset safe."""
+
+    from core.web.services import team_service
+    from core.web.services.team_workflow.source_collection import runs as source_collection_runs
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        raise HypothesisFirstChainError("Collection request id is required.")
+    request = _latest_by_id(
+        _collection_requests(_records(normalized_team_id)),
+        "requestId",
+        normalized_request_id,
+    )
+    if request is None:
+        raise HypothesisFirstChainNotFoundError(
+            f"Collection request {normalized_request_id} not found."
+        )
+    run_id = str(request.get("collectionRunId") or "").strip()
+    if not run_id:
+        updated = _update_collection_request(
+            normalized_team_id,
+            normalized_request_id,
+            status="failed",
+            collectionRunStatus="cancelled",
+            stopReason="missing_collection_run",
+        )
+        return {"status": "stopped", "request": updated, "run": {}}
+    stopped = source_collection_runs.stop_source_collection_search(
+        normalized_team_id,
+        run_id,
+    )
+    updated = _update_collection_request(
+        normalized_team_id,
+        normalized_request_id,
+        status="failed",
+        collectionRunStatus="cancelled",
+        stoppedAt=_utc_now(),
+        stopReason="operator_stopped",
+    )
+    return {"status": "stopped", "request": updated, "run": stopped}
+
+
 def _requests_for_collection_run(
     team_id: str, collection_run_id: str
 ) -> list[dict[str, Any]]:
@@ -4727,11 +4776,12 @@ def notify_collection_run_terminal(
     requests = _requests_for_collection_run(normalized_team_id, run_id)
     if not requests:
         return {"status": "ignored", "reason": "no_bound_request"}
-    if status in {"failed", "needs_continue"}:
+    if status in {"failed", "needs_continue", "cancelled"}:
         updated = [
             _update_collection_request(
                 normalized_team_id,
                 str(record.get("requestId") or ""),
+                **({"status": "failed"} if status == "cancelled" else {}),
                 collectionRunStatus=status,
             )
             for record in requests
@@ -4745,6 +4795,9 @@ def notify_collection_run_terminal(
         return {"status": "ignored", "reason": "non_completed"}
     last: dict[str, Any] = {"status": "ignored"}
     for record in requests:
+        if str(record.get("collectionRunStatus") or "").strip().lower() == "cancelled":
+            last = {"status": "ignored", "reason": "collection_run_cancelled"}
+            continue
         request_id = str(record.get("requestId") or "")
         if not request_id:
             continue
