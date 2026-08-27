@@ -8,6 +8,23 @@ from ._canonical import canonical_json, sha256_hex
 from ._validation import ContractValidationError
 from .artifact_manifest import ArtifactManifest
 from .artifact_receipt import ArtifactReceipt, BudgetReceipt
+from .audit_sampling import (
+    DRIFT_SENTINEL_COUNT,
+    DRIFT_SENTINEL_GATE,
+    GATES,
+    REVIEW_STATUSES,
+    RUN_PHASE_VALUES,
+    SAMPLE_KIND_VALUES,
+    STRATA_AXES,
+    AuditSampleManifest,
+    DriftSentinelSelection,
+    QuestionSampleAssignment,
+    SampleKind,
+    SentinelExclusion,
+    audit_sample_manifest_hash,
+    drift_sentinel_selection_hash,
+    parse_sample_kind,
+)
 from .automation_policy import (
     AUTO_ADVANCE_CAPABILITIES,
     AUTO_ADVANCE_DRAIN_MODES,
