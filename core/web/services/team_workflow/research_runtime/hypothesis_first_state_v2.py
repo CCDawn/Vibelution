@@ -13,6 +13,7 @@ import re
 import threading
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -95,6 +96,18 @@ _CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES = {
     "terminated",
 }
 _CHAT_ROOM_RUN_KIND = "chat_room_round"
+# A meeting-driven execution whose last observable activity (attempt
+# heartbeat, meeting update, or bound chat-room WorkRun update) is older than
+# this is treated as a zombie: the projector stops reporting ``executing`` and
+# exposes operator recovery commands.  Healthy discussions tick the bound
+# WorkRun on every speaker message and the meeting record on every status
+# transition, so genuine progress produces signals minutes apart; the observed
+# failure mode stays silent for hours (e.g. SCI-003 froze for ~30h with
+# candidateCount=0).  15 minutes therefore tolerates slow model turns while
+# surfacing real deaths.  Module constant so operations/tests can tune the
+# window without touching the projection logic.
+_EXECUTION_HEARTBEAT_STALE_AFTER_SECONDS = 15 * 60
+_MEETING_HEARTBEAT_STALE_OPEN_STATUSES = {"open", "summarizing"}
 
 
 class HypothesisFirstStateScopeError(ValueError):
@@ -354,6 +367,141 @@ def _latest_timestamp(*values: Any) -> str:
     for value in values:
         visit(value)
     return max(found, default=_EPOCH)
+
+
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    """Parse one durable ISO-8601 timestamp; unreadable values yield ``None``."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_iso_timestamp(*values: Any) -> str:
+    """Return the chronologically newest readable timestamp of the inputs."""
+
+    latest_text = ""
+    latest_parsed: datetime | None = None
+    for value in values:
+        text = str(value or "").strip()
+        parsed = _parse_iso_timestamp(text)
+        if parsed is None:
+            continue
+        if latest_parsed is None or parsed > latest_parsed:
+            latest_parsed = parsed
+            latest_text = text
+    return latest_text
+
+
+def _execution_heartbeat_is_stale(last_progress_at: Any) -> bool:
+    """Whether the last observable activity is older than the stale window.
+
+    Unreadable or missing timestamps deliberately keep the legacy projection:
+    staleness must be proven from durable facts, never guessed from their
+    absence.
+    """
+
+    parsed = _parse_iso_timestamp(last_progress_at)
+    if parsed is None:
+        return False
+    age_seconds = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return age_seconds > float(_EXECUTION_HEARTBEAT_STALE_AFTER_SECONDS)
+
+
+def _meeting_last_progress_at(
+    meeting: Mapping[str, Any],
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
+) -> str:
+    """Latest activity across one meeting and its current bound room round.
+
+    The meeting record moves on status/digest transitions, while the bound
+    chat-room WorkRun snapshot moves on every speaker message, so together
+    they are the freshest durable heartbeat for a meeting-driven execution.
+    As elsewhere in this projector only the append-only final round id is
+    treated as the current execution.
+    """
+
+    values = [_timestamp(meeting) or ""]
+    if isinstance(chat_room_round_snapshots, Mapping):
+        round_ids = [
+            str(round_id or "").strip()
+            for round_id in list(meeting.get("chatRoomRoundIds") or [])
+            if str(round_id or "").strip()
+        ]
+        round_id = round_ids[-1] if round_ids else ""
+        snapshot = chat_room_round_snapshots.get(round_id)
+        if isinstance(snapshot, Mapping):
+            for key in ("updatedAt", "startedAt", "finishedAt"):
+                values.append(str(snapshot.get(key) or "").strip())
+    return _latest_iso_timestamp(*values)
+
+
+def _heartbeat_stale_problem(
+    *,
+    code: str,
+    message: str,
+    source_kind: str,
+    source_id: str | None,
+    last_progress_at: str,
+) -> dict[str, Any]:
+    """Build the structured heartbeat-stale problem entry.
+
+    ``detectedAt``/``lastHeartbeatAt`` are derived from the durable activity
+    itself (not the wall clock) so repeated reads of an unchanged chain stay
+    byte-stable and cannot churn the CAS state version.
+    """
+
+    problem = _problem(
+        code,
+        message,
+        category="stale",
+        severity="warning",
+        source_kind=source_kind,
+        source_id=source_id,
+        detected_at=last_progress_at or _EPOCH,
+    )
+    problem["lastHeartbeatAt"] = last_progress_at or None
+    return problem
+
+
+def _meeting_heartbeat_stale_problem(
+    meeting: Mapping[str, Any],
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Heartbeat-stale problem for one open meeting-driven execution, else None."""
+
+    status = str(meeting.get("status") or "").strip().lower()
+    if status not in _MEETING_HEARTBEAT_STALE_OPEN_STATUSES:
+        return None
+    last_progress = _meeting_last_progress_at(meeting, chat_room_round_snapshots)
+    if not _execution_heartbeat_is_stale(last_progress):
+        return None
+    is_generation = (
+        str(meeting.get("meetingType") or "").strip().lower()
+        == _GENERATION_MEETING_TYPE
+    )
+    code = (
+        "generation_heartbeat_stale"
+        if is_generation
+        else "review_heartbeat_stale"
+    )
+    subject = "候选生成" if is_generation else "候选评审"
+    return _heartbeat_stale_problem(
+        code=code,
+        message=(
+            f"{subject}讨论自 {last_progress} 起无任何推进，执行器可能已停止"
+        ),
+        source_kind="meeting_round",
+        source_id=str(meeting.get("meetingRoundId") or "") or None,
+        last_progress_at=last_progress,
+    )
 
 
 def _canonical_hash(value: Any, *, length: int = 16) -> str:
@@ -803,6 +951,21 @@ def _meeting_phase(
     if status == "awaiting_approval":
         return _phase("waiting_human", "none", "waiting_user", updated_at=updated_at), status
     if status in {"open", "summarizing"}:
+        stale_problem = _meeting_heartbeat_stale_problem(
+            meeting,
+            chat_room_round_snapshots,
+        )
+        if stale_problem is not None:
+            # A zombie execution is still nominally running (no terminal fact
+            # exists to claim failure), but it must stop reporting ``executing``
+            # so users can tell a live discussion from a dead one.
+            return _phase(
+                "running",
+                "none",
+                "blocked",
+                updated_at=updated_at,
+                problems=[stale_problem],
+            ), status
         return _phase("running", "none", "executing", updated_at=updated_at), status
     if status in {"blocked", "stalled"}:
         problem = _problem(
@@ -868,12 +1031,41 @@ def _review_candidate(
         attempt_lifecycle = str((dispatch_attempt or {}).get("lifecycle") or "").strip()
         if attempt_lifecycle in {"queued", "running"}:
             # Dispatch intent is durable but the meeting side effect has not
-            # landed yet (in flight, or interrupted mid-fan-out).
+            # landed yet (in flight, or interrupted mid-fan-out).  A silently
+            # running intent is a zombie like any other executor: past the
+            # stale window it stops reporting waiting_system and the
+            # round-level retry_review_dispatch command becomes the recovery
+            # entry.  ``queued`` keeps the legacy waiting_system contract: it
+            # means no executor picked the intent up yet, not a dead one.
+            in_flight_updated_at = _timestamp(dispatch_attempt or {})
+            in_flight_problems: list[dict[str, Any]] = []
+            in_flight_actionability = "waiting_system"
+            if (
+                attempt_lifecycle == "running"
+                and _execution_heartbeat_is_stale(in_flight_updated_at)
+            ):
+                in_flight_actionability = "blocked"
+                in_flight_problems.append(
+                    _heartbeat_stale_problem(
+                        code="review_dispatch_heartbeat_stale",
+                        message=(
+                            f"候选评审分发自 {in_flight_updated_at} 起未建立会议，"
+                            "分发可能已中断"
+                        ),
+                        source_kind="review_dispatch_attempt",
+                        source_id=str(
+                            (dispatch_attempt or {}).get("attemptId") or ""
+                        ).strip()
+                        or None,
+                        last_progress_at=in_flight_updated_at,
+                    )
+                )
             in_flight = _phase(
                 "queued",
                 "none",
-                "waiting_system",
-                updated_at=_timestamp(dispatch_attempt or {}),
+                in_flight_actionability,
+                updated_at=in_flight_updated_at,
+                problems=in_flight_problems,
                 attempt=_dispatch_attempt_view(dispatch_attempt or {}),
             )
             return {
@@ -1097,6 +1289,15 @@ def _meeting_recovery_actions(
             )
         return actions, anchor
     stalled = _meeting_is_stalled(meeting)
+    # A heartbeat-stale open meeting has no explicit stall marker and no
+    # terminal bound round, yet nothing has progressed for minutes.  Review
+    # rounds get the guarded reopen recovery (the owning service still
+    # rechecks terminality and completed messages under its lock); generation
+    # recovery is owned by the attempt-level ``retry_generation`` action.
+    heartbeat_stale = (
+        _meeting_heartbeat_stale_problem(meeting, chat_room_round_snapshots)
+        is not None
+    )
     if status == "awaiting_approval":
         actions.append(
             _command_action(
@@ -1144,6 +1345,20 @@ def _meeting_recovery_actions(
                 "regenerate_summary",
                 action_id=f"regenerate-summary:{meeting_id}",
                 label="重试生成纪要",
+                target_phase=target_phase,
+                target_node_id=target_node_id,
+                payload={"meetingRoundId": meeting_id},
+            )
+        )
+    elif heartbeat_stale and (
+        str(meeting.get("meetingType") or "").strip().lower()
+        == _REVIEW_MEETING_TYPE
+    ):
+        actions.append(
+            _command_action(
+                "reopen_review",
+                action_id=f"reopen-review:{meeting_id}",
+                label="重新发起评审讨论",
                 target_phase=target_phase,
                 target_node_id=target_node_id,
                 payload={"meetingRoundId": meeting_id},
@@ -2177,12 +2392,58 @@ def project_state_from_records(
             "cancelled": "available",
             "superseded": "terminal",
         }[active_attempt_lifecycle]
+        attempt_problems: list[dict[str, Any]] = []
+        if active_attempt_lifecycle == "running":
+            # The attempt heartbeat alone freezes at dispatch time; the bound
+            # generation meeting (plus its current room round) carries the
+            # live execution signal, so staleness is judged on the newest of
+            # the two.
+            attempt_meeting_id = str(
+                generation_attempt.get("meetingRoundId") or ""
+            ).strip()
+            attempt_meeting = next(
+                (
+                    item
+                    for item in meetings
+                    if str(item.get("meetingRoundId") or "") == attempt_meeting_id
+                ),
+                None,
+            )
+            progress_values = [
+                str(generation_attempt.get("heartbeatAt") or "").strip()
+            ]
+            if attempt_meeting is not None:
+                progress_values.append(
+                    _meeting_last_progress_at(
+                        attempt_meeting,
+                        room_round_snapshots,
+                    )
+                )
+            last_progress = _latest_iso_timestamp(*progress_values)
+            if _execution_heartbeat_is_stale(last_progress):
+                actionability = "blocked"
+                attempt_problems.append(
+                    _heartbeat_stale_problem(
+                        code="generation_heartbeat_stale",
+                        message=(
+                            f"候选生成自 {last_progress} 起无任何推进，"
+                            "执行器可能已停止"
+                        ),
+                        source_kind="generation_attempt",
+                        source_id=str(
+                            generation_attempt.get("attemptId") or ""
+                        ).strip()
+                        or None,
+                        last_progress_at=last_progress,
+                    )
+                )
         generation = {
             **_phase(
                 active_attempt_lifecycle,
                 "none",
                 actionability,
                 updated_at=_timestamp(generation_attempt),
+                problems=attempt_problems,
                 attempt=attempt_wire,
             ),
             "generationMeetingId": str(
@@ -2701,13 +2962,21 @@ def project_state_from_records(
             )
         )
     elif (
-        generation["outcome"] == "empty" or generation["lifecycle"] == "failed"
-    ) and not any(
-        problem.get("code") in {
-            "discussion_round_orphaned",
-            "discussion_round_stopped",
-        }
-        for problem in list(generation.get("problems") or [])
+        (
+            generation["outcome"] == "empty"
+            or generation["lifecycle"] == "failed"
+            or any(
+                problem.get("code") == "generation_heartbeat_stale"
+                for problem in list(generation.get("problems") or [])
+            )
+        )
+        and not any(
+            problem.get("code") in {
+                "discussion_round_orphaned",
+                "discussion_round_stopped",
+            }
+            for problem in list(generation.get("problems") or [])
+        )
     ):
         allowed_actions.append(
             _command_action(
@@ -2767,6 +3036,10 @@ def project_state_from_records(
                 in {
                     "discussion_round_orphaned",
                     "discussion_round_stopped",
+                    # A heartbeat-stale open meeting owns its precise recovery
+                    # through reopen_review; a re-dispatch could fan out a
+                    # second meeting beside the stuck one.
+                    "review_heartbeat_stale",
                 }
                 for candidate in review_candidates
                 for problem in list(candidate.get("problems") or [])
