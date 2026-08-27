@@ -44,11 +44,13 @@ from .automation_policy import (
     MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO,
     MAX_AUTO_REVISION_ROUNDS_DEFAULT,
 )
+from .candidate_diversity import MAX_FINALIST_LIMIT
 
 EVOLUTION_LINEAGE_SCHEMA_VERSION = 1
 
-#: Decision #2: at most three candidates may enter the finalist set.
-FINALIST_LIMIT = 3
+#: Decision #2: at most three candidates may enter the finalist set.  Bound
+#: to the candidate-diversity screening contract, which owns this ruling.
+FINALIST_LIMIT = MAX_FINALIST_LIMIT
 
 #: Decision #3: the mandatory exception-review marker once the revision
 #: budget is exhausted (recorded here; executed by the review pipeline only).
