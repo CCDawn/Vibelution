@@ -5,6 +5,7 @@ import sys
 import time
 from contextlib import nullcontext
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -2362,6 +2363,341 @@ def test_missing_linked_chat_round_snapshot_does_not_guess_that_open_meeting_sto
     assert state.review.candidates[0].actionability == "executing"
     assert state.review.lifecycle == "running"
     assert state.review.actionability == "waiting_system"
+
+
+def _iso_minute_offset(minutes: float) -> str:
+    moment = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _generation_heartbeat_fixture(
+    *,
+    heartbeat_minutes_ago: float,
+) -> dict[str, object]:
+    heartbeat_at = _iso_minute_offset(heartbeat_minutes_ago)
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-003",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-003",
+                    "meetingRoundId": "candgen-1",
+                    "lifecycle": "running",
+                    "queuedAt": _iso_minute_offset(heartbeat_minutes_ago + 5),
+                    "startedAt": heartbeat_at,
+                    "heartbeatAt": heartbeat_at,
+                    "createdAt": _iso_minute_offset(heartbeat_minutes_ago + 5),
+                    "updatedAt": heartbeat_at,
+                }
+            ],
+            selection_records=[],
+            meeting_records=[
+                {
+                    "meetingRoundId": "candgen-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-003",
+                    "status": "open",
+                    "linkedChatRoomId": "room-generation",
+                    "chatRoomRoundIds": ["room-round-1"],
+                    "createdAt": _iso_minute_offset(heartbeat_minutes_ago + 5),
+                    "updatedAt": heartbeat_at,
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-1": {
+                    "runId": "room-round-1",
+                    "runKind": "chat_room_round",
+                    "status": "running",
+                    "updatedAt": heartbeat_at,
+                }
+            },
+        )
+    )
+
+
+def test_generation_running_with_fresh_heartbeat_keeps_executing() -> None:
+    state = _generation_heartbeat_fixture(heartbeat_minutes_ago=1)
+
+    assert state.generation.lifecycle == "running"
+    assert state.generation.actionability == "executing"
+    assert not any(
+        problem.code.endswith("_heartbeat_stale") for problem in state.problems
+    )
+    assert "retry_generation" not in {
+        action.command for action in state.allowedActions if action.kind == "command"
+    }
+    assert any(
+        action.kind == "navigation" and action.actionId == "open-generation-room:candgen-1"
+        for action in state.allowedActions
+    )
+
+
+def test_stale_generation_heartbeat_blocks_and_offers_retry() -> None:
+    state = _generation_heartbeat_fixture(heartbeat_minutes_ago=30 * 60)
+
+    assert state.generation.lifecycle == "running"
+    assert state.generation.actionability == "blocked"
+    stale = next(
+        problem for problem in state.problems if problem.code == "generation_heartbeat_stale"
+    )
+    assert stale.category == "stale"
+    # The stale verdict is computed from the same durable activity that the
+    # phase reports, so the problem timestamp must equal the phase heartbeat.
+    assert stale.lastHeartbeatAt == state.generation.updatedAt
+    assert stale.recoverable is True
+    assert state.currentPhase == "generation"
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_generation"
+    )
+    assert retry.payload.questionId == "SCI-003"
+    assert retry.payload.previousAttemptId == "attempt-1"
+    assert retry.expectedStateVersion == state.stateVersion
+
+
+def test_generation_heartbeat_stale_window_is_tunable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2 as state_v2,
+    )
+
+    monkeypatch.setattr(
+        state_v2,
+        "_EXECUTION_HEARTBEAT_STALE_AFTER_SECONDS",
+        10 * 24 * 3600,
+    )
+    state = _generation_heartbeat_fixture(heartbeat_minutes_ago=30 * 60)
+
+    assert state.generation.actionability == "executing"
+    assert "retry_generation" not in {
+        action.command for action in state.allowedActions if action.kind == "command"
+    }
+
+
+def _review_meeting_fixture(*, updated_minutes_ago: float) -> dict[str, object]:
+    updated_at = _iso_minute_offset(updated_minutes_ago)
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-review"],
+                    "createdAt": _iso_minute_offset(updated_minutes_ago + 5),
+                    "updatedAt": updated_at,
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-review": {
+                    "runId": "room-round-review",
+                    "runKind": "chat_room_round",
+                    "status": "running",
+                    "updatedAt": updated_at,
+                }
+            },
+        )
+    )
+
+
+def test_stale_review_meeting_blocks_candidate_and_offers_reopen() -> None:
+    state = _review_meeting_fixture(updated_minutes_ago=30 * 60)
+
+    candidate = state.review.candidates[0]
+    assert candidate.lifecycle == "running"
+    assert candidate.actionability == "blocked"
+    assert candidate.discussion.actionability == "blocked"
+    assert state.review.actionability == "blocked"
+    stale = next(
+        problem
+        for problem in state.problems
+        if problem.code == "review_heartbeat_stale"
+    )
+    assert stale.category == "stale"
+    assert stale.lastHeartbeatAt == candidate.updatedAt
+    assert state.currentPhase == "review"
+    commands = {
+        action.command for action in state.allowedActions if action.kind == "command"
+    }
+    assert "reopen_review" in commands
+    assert "resume_discussion" not in commands
+    assert "retry_review_dispatch" not in commands
+
+
+def test_fresh_review_heartbeat_keeps_executing() -> None:
+    state = _review_meeting_fixture(updated_minutes_ago=2)
+
+    assert state.review.candidates[0].actionability == "executing"
+    assert state.review.actionability == "waiting_system"
+    assert not any(
+        problem.code.endswith("_heartbeat_stale") for problem in state.problems
+    )
+    assert "reopen_review" not in {
+        action.command for action in state.allowedActions if action.kind == "command"
+    }
+
+
+def test_stale_review_dispatch_intent_offers_retry_dispatch() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_dispatch_attempt",
+                    "attemptId": "dispatch-1",
+                    "attemptNumber": 1,
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "roundIndex": 1,
+                    "questionId": "SCI-001",
+                    "lifecycle": "running",
+                    "createdAt": _iso_minute_offset(30 * 60 + 5),
+                    "updatedAt": _iso_minute_offset(30 * 60),
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    candidate = state.review.candidates[0]
+    assert candidate.lifecycle == "queued"
+    assert candidate.actionability == "blocked"
+    stale = next(
+        problem
+        for problem in state.problems
+        if problem.code == "review_dispatch_heartbeat_stale"
+    )
+    assert stale.sourceId == "dispatch-1"
+    assert stale.lastHeartbeatAt == candidate.updatedAt
+    assert state.currentPhase == "review"
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_review_dispatch"
+    )
+    assert retry.payload.selectionId == "selection-1"
+    assert retry.payload.candidateIds == ["candidate-1"]
+
+
+def test_v2_retry_generation_command_opens_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:stale-generation",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "retry-generation",
+                "command": "retry_generation",
+                "payload": {
+                    "questionId": "SCI-003",
+                    "previousAttemptId": "attempt-1",
+                },
+                "enabled": True,
+                "idempotencyKey": "hf2:retry-generation:attempt-1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[tuple[str, str]] = []
+
+    def open_generation(team_id: str, question_id: str, **_kwargs):
+        calls.append((team_id, question_id))
+        return {"status": "created", "generationAttemptId": "attempt-2"}
+
+    monkeypatch.setattr(
+        hypothesis_first_chain, "open_candidate_generation_meeting", open_generation
+    )
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "retry-generation",
+            "idempotencyKey": "hf2:retry-generation:attempt-1",
+            "expectedStateVersion": "hf2-action:stale-generation",
+            "command": "retry_generation",
+            "payload": {
+                "questionId": "SCI-003",
+                "previousAttemptId": "attempt-1",
+            },
+        },
+        question_id="SCI-003",
+    )
+
+    assert result["result"]["status"] == "created"
+    assert calls == [("team-1", "SCI-003")]
 
 
 def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> None:

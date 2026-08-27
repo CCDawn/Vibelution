@@ -47,7 +47,9 @@ def _fragment(candidate_id: str) -> dict:
     return {
         "statement": f"statement {candidate_id}",
         "mechanism": f"mechanism {candidate_id}",
+        "novelty_basis": f"novelty basis {candidate_id}",
         "predictions": [f"prediction {candidate_id}"],
+        "boundary_conditions": [f"boundary {candidate_id}"],
         "falsificationCriteria": [f"falsify {candidate_id}"],
         "evidenceRefs": ["counter-1"],
         "counterEvidenceRefs": ["counter-1"],
