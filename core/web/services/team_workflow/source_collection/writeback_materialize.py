@@ -997,6 +997,7 @@ def _source_collection_stage_writeback_closure_summary(
     relation_edge_claim_count = 0
     materialized_relation_edge_count = 0
     relation_edges_not_materialized = False
+    relation_dangling_edge_count = 0
     excluded_source_count = s._source_collection_count(materialized_sources.get("excludedSourceCount"))
     if stage_id == "finding" or agent_role == "source_finder":
         target_label = "原始资料"
@@ -1034,10 +1035,13 @@ def _source_collection_stage_writeback_closure_summary(
         )
         relation_edge_claim_count = len(s._source_collection_agent_graph_edges(agent_graph))
         materialized_relation_edge_count = s._source_collection_count(materialized_candidate_graph.get("edgeCount"))
+        relation_dangling_edge_count = s._source_collection_count(materialized_candidate_graph.get("danglingEdgeCount"))
         relation_edges_not_materialized = relation_edge_claim_count > 0 and materialized_relation_edge_count <= 0
         artifact_status = (
             "candidate_graph_relation_edges_missing"
             if relation_edges_not_materialized
+            else "candidate_graph_dangling_edges"
+            if relation_dangling_edge_count > 0
             else "candidate_graph_ready"
             if success_count
             else "no_effect"
@@ -1046,6 +1050,12 @@ def _source_collection_stage_writeback_closure_summary(
             retry_instruction = (
                 "本轮声称生成了候选关系，但候选图没有物化任何可用边。"
                 "请在 Agent 私聊中读取本轮候选图节点，使用节点的 candidateId（不要使用 n1、n2 等展示别名）重新回写关系。"
+            )
+        elif relation_dangling_edge_count > 0:
+            retry_instruction = (
+                f"本轮有 {relation_dangling_edge_count} 条候选关系边因端点不在本轮候选图节点表中被丢弃。"
+                "请调用 source_collection_context_tool 重读本批候选的完整 candidateId（主题枢纽端点用已声明主题的 source-theme ID），"
+                "不要发明 rh_claim 之类的逻辑端点，重新回写这些关系。"
             )
     elif stage_id == "ingestion" or agent_role == "source_ingestor":
         target_label = "入库审核包"
@@ -1059,6 +1069,7 @@ def _source_collection_stage_writeback_closure_summary(
         success_count > 0
         and (not coverage or complete)
         and not relation_edges_not_materialized
+        and not relation_dangling_edge_count
     )
     if not artifact_complete and excluded_source_count > 0 and (not coverage or complete):
         artifact_complete = True
@@ -1095,6 +1106,12 @@ def _source_collection_stage_writeback_closure_summary(
         message = (
             f"Agent 声称生成了 {relation_edge_claim_count} 条候选关系，但候选图实际物化为 "
             f"{materialized_relation_edge_count} 条；请按真实 candidateId 重新建图。"
+        )
+    elif relation_dangling_edge_count > 0:
+        user_status = "partial"
+        message = (
+            f"候选关系图已生成，但有 {relation_dangling_edge_count} 条边的端点不在本轮节点表中，"
+            "已被丢弃；请按真实 candidateId 补齐这些关系后再推进。"
         )
     elif success_count > 0 and (not coverage or complete) and task_checklist_complete:
         user_status = "success"
@@ -1258,6 +1275,7 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
         "nodeCount": s._source_collection_count(graph_summary.get("nodeCount")),
         "edgeCount": s._source_collection_count(graph_summary.get("edgeCount")),
         "missingLinkCount": s._source_collection_count(graph_summary.get("missingLinkCount")),
+        "danglingEdgeCount": s._source_collection_count(graph_summary.get("danglingEdgeCount")),
         "unreviewedNodeCount": s._source_collection_count(graph_summary.get("unreviewedNodeCount")),
         "inputCandidateCount": s._source_collection_count(graph_summary.get("inputCandidateCount")),
         "filteredCandidateCount": s._source_collection_count(graph_summary.get("filteredCandidateCount")),
@@ -1726,6 +1744,7 @@ def _source_collection_stage_writeback_candidate_graph_summary(
         "nodeCount": s._source_collection_count(graph.get("nodeCount")),
         "edgeCount": s._source_collection_count(graph.get("edgeCount")),
         "missingLinkCount": s._source_collection_count(graph.get("missingLinkCount")),
+        "danglingEdgeCount": s._source_collection_count(graph.get("danglingEdgeCount")),
         "unreviewedNodeCount": s._source_collection_count(graph.get("unreviewedNodeCount")),
         "inputCandidateCount": s._source_collection_count(graph.get("inputCandidateCount")),
         "filteredCandidateCount": s._source_collection_count(graph.get("filteredCandidateCount")),
@@ -1915,6 +1934,7 @@ def _merge_source_collection_stage_writeback_agent_graph(
         and s._trim_text(edge.get("targetCandidateId"), max_length=160)
         and s._trim_text(edge.get("relation"), max_length=160)
     }
+    dangling_edge_count = 0
     for edge in s._source_collection_agent_graph_edges(agent_graph):
         source_id = s._trim_text(edge.get("sourceCandidateId"), max_length=160)
         target_id = s._trim_text(edge.get("targetCandidateId"), max_length=160)
@@ -1927,7 +1947,10 @@ def _merge_source_collection_stage_writeback_agent_graph(
         if source_id in node_ids and target_id in node_ids:
             edges.append(edge)
         else:
+            # Fail-closed: 端点未命中节点表的边降级为 missingLink，并单独计数，
+            # 供 relations 阶段完整性判定（danglingEdgeCount>0 即图不完整）。
             missing_links.append(edge)
+            dangling_edge_count += 1
         seen_edges.add(edge_key)
     summary = merged_graph.get("summary") if isinstance(merged_graph.get("summary"), dict) else {}
     summary = dict(summary)
@@ -1936,6 +1959,7 @@ def _merge_source_collection_stage_writeback_agent_graph(
             "nodeCount": len(nodes),
             "edgeCount": len(edges),
             "missingLinkCount": len(missing_links),
+            "danglingEdgeCount": dangling_edge_count,
             "unreviewedNodeCount": len(unreviewed_nodes),
             "agentRelationNodeCount": len(s._source_collection_agent_graph_nodes(agent_graph)),
             "agentRelationEdgeCount": len(s._source_collection_agent_graph_edges(agent_graph)),

@@ -132,3 +132,63 @@ def test_relation_prompt_candidate_graph_predicate_preserves_evidence_refs() -> 
             "evidenceRefs": ["record-a#results"],
         }
     ]
+
+
+def test_relation_prompt_binds_candidate_relations_endpoints_to_real_nodes() -> None:
+    prompt = "\n".join(stage_writeback_prompt_lines("relations"))
+
+    # 端点绑定规则：先读真实节点，再写边；禁止发明逻辑端点；后果是降级并阻塞下游。
+    assert "`candidateRelations[]`" in prompt
+    assert "完整 `candidateId`" in prompt
+    assert "source-theme:<themeId>" in prompt
+    assert "rh_claim" in prompt
+    assert "计入 `missingLinks`" in prompt
+    assert "阻塞下游 knowledge_ingestion" in prompt
+
+
+def test_merge_counts_dangling_edges_without_counting_contract_missing_links() -> None:
+    payload = _source_collection_stage_writeback_agent_graph_payload(
+        {
+            "candidateRelations": [
+                {
+                    "from": "candidate-source-a",
+                    "to": "candidate-source-b",
+                    "type": "candidate_supports_candidate",
+                    "evidenceRefs": ["record-a#p2"],
+                },
+                {
+                    "from": "candidate-source-a",
+                    "to": "rh_claim",
+                    "type": "candidate_supports_claim",
+                },
+            ],
+            # 契约型证据缺口是合法产物，形状为 id/description/...，
+            # 不参与边合并，也不得计入 danglingEdgeCount。
+            "missingLinks": [
+                {
+                    "id": "gap-cross-domain",
+                    "description": "缺少跨被试重复验证。",
+                    "neededEvidence": ["跨数据集复现结果"],
+                    "blocksConclusion": "预测编码通用性",
+                }
+            ],
+        }
+    )
+
+    graph = _merge_source_collection_stage_writeback_agent_graph(
+        {
+            "nodes": [
+                {"candidateId": "candidate-source-a"},
+                {"candidateId": "candidate-source-b"},
+            ]
+        },
+        payload,
+    )
+
+    summary = graph["summary"]
+    assert summary["agentRelationEdgeCount"] == 2
+    assert summary["edgeCount"] == 1
+    assert summary["danglingEdgeCount"] == 1
+    assert summary["missingLinkCount"] == 1
+    dangling_edge = graph["missingLinks"][0]
+    assert dangling_edge["targetCandidateId"] == "rh_claim"
