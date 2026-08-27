@@ -176,9 +176,9 @@ def test_problem_understanding_writeback_tool_description_exposes_human_gate_con
 
     assert "record_problem_understanding" in description
     assert "human_gate" in description
-    assert "required 必须为 true" in description
+    assert "required 固定为 true" in description
     assert "pending / approved / revision_requested / rejected" in description
-    assert "rationale 必须是非空字符串" in description
+    assert "rationale 为非空字符串" in description
     assert "不要加入 review_points" in description
 
 
