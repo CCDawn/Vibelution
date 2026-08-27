@@ -1036,6 +1036,94 @@ def test_start_source_collection_stage_session_task_submits_project_session_task
     assert explicit_duplicate["taskId"] == explicit_once["taskId"]
     assert len(submitted) == 3
 
+
+def test_formal_run_stage_sessions_do_not_inherit_other_runs(tmp_path, monkeypatch):
+    """Finding stage sessions are scoped to their own formal workflow run.
+
+    The stage-session resolver previously used the flat per-agent registry
+    key, so a formal run inherited the dprun-era session (with its stale
+    prompt context) of the same Agent.  With a workflow run binding the
+    second formal run must open its own session while continuity inside one
+    run is preserved.
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    submitted: list[dict] = []
+
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        submitted.append({"sessionId": session_id, "content": content})
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": f"turn-scoped-{len(submitted)}",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+
+    def _start_run():
+        return _start_source_collection_run_with_problem_understanding(
+            team["teamId"],
+            {
+                "topic": "脑启发路由",
+                "goal": "搜集神经机制启发算法资料",
+                "agentRoles": ["source_finder"],
+                "agentIds": {"source_finder": finder["agentId"]},
+                "querySeeds": ["brain-inspired routing"],
+                "promptCachePolicy": {"requirement": "disabled"},
+            },
+        )
+
+    def _start_finding(source_run_id):
+        return team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            source_run_id,
+            {
+                "stageId": "finding",
+                "agentId": finder["agentId"],
+                "agentRole": "source_finder",
+            },
+        )
+
+    run_a = _start_run()
+    run_b = _start_run()
+    workflow_run_a = str(run_a["run"]["scope"]["workflowRunId"])
+    workflow_run_b = str(run_b["run"]["scope"]["workflowRunId"])
+    assert workflow_run_a and workflow_run_b and workflow_run_a != workflow_run_b
+
+    task_a1 = _start_finding(run_a["run"]["runId"])
+    task_a2 = _start_finding(run_a["run"]["runId"])
+    task_b = _start_finding(run_b["run"]["runId"])
+
+    # 同一 run 内：session 连续性保留（复用同一 canonical session）。
+    assert task_a1["sessionCreated"] is True
+    assert task_a2["sessionId"] == task_a1["sessionId"]
+    assert task_a2["sessionCreated"] is False
+
+    # 跨 run：第二个 formal run 不得继承第一个 run 的 session。
+    assert task_b["sessionCreated"] is True
+    assert task_b["sessionId"] != task_a1["sessionId"]
+
+    binding_a = session_service.get_session_detail(task_a1["sessionId"])["experimentBinding"]
+    assert binding_a["workflowRunId"] == workflow_run_a
+    assert binding_a["workflowNodeId"] == "source_collection"
+    binding_b = session_service.get_session_detail(task_b["sessionId"])["experimentBinding"]
+    assert binding_b["workflowRunId"] == workflow_run_b
+    assert binding_b["workflowNodeId"] == "source_collection"
+
+    # 派发的任务消息只进入自己 run 的 session。
+    assert submitted[0]["sessionId"] == task_a1["sessionId"]
+    assert submitted[1]["sessionId"] == task_a2["sessionId"]
+    assert submitted[2]["sessionId"] == task_b["sessionId"]
+
+
 def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

@@ -51,6 +51,10 @@ class ProjectionInputs:
     discussion_projection: Mapping[str, Any] | None = None
     discussion_meetings: Any = None
     discussion_rooms: Any = None
+    # Execution anchors for the latest attempt per node (already normalized to
+    # mappings by the query layer).  They let currentTask surface the live
+    # Agent task identity during dispatch instead of only after final commit.
+    execution_anchors: tuple[Mapping[str, Any], ...] = ()
 
 
 def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkflowSnapshot:
@@ -100,6 +104,7 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         active_node_ids=active_ids,
         command_offers=inputs.command_offers,
         safety_limits=safety_limits,
+        execution_anchors=inputs.execution_anchors,
     )
     retry = _retry_summary(
         run=run,
@@ -299,6 +304,19 @@ def _task_id(item: HumanTaskSummary | Mapping[str, Any] | None) -> str | None:
     return _as_optional_str(value)
 
 
+def _execution_anchor_by_node_run(
+    execution_anchors: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    by_node_run: dict[str, Mapping[str, Any]] = {}
+    for item in execution_anchors:
+        if not isinstance(item, Mapping):
+            continue
+        node_run_id = _as_optional_str(item.get("nodeRunId"))
+        if node_run_id:
+            by_node_run[node_run_id] = item
+    return by_node_run
+
+
 def _current_task(
     *,
     run: RunRecord,
@@ -308,8 +326,16 @@ def _current_task(
     active_node_ids: Sequence[str],
     command_offers: Sequence[CommandOffer],
     safety_limits: Mapping[str, Any],
+    execution_anchors: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any] | None:
     latest_by_node = _latest_attempt_by_node(attempts)
+    anchor_by_node_run = _execution_anchor_by_node_run(execution_anchors)
+
+    def anchor_for(node_attempt: NodeAttemptRecord | None) -> Mapping[str, Any] | None:
+        if node_attempt is None:
+            return None
+        return anchor_by_node_run.get(node_attempt.node_run_id)
+
     active_node_id = str(
         active_node_ids[0] if active_node_ids else run.active_node_id or ""
     ).strip()
@@ -388,6 +414,7 @@ def _current_task(
             identity_offer=None,
             problem={},
             status="succeeded",
+            anchor=anchor_for(latest),
         )
 
     if run.status in _TERMINAL_RUN_STATUS:
@@ -406,6 +433,7 @@ def _current_task(
             identity_offer=None,
             problem=problem,
             status=run.status,
+            anchor=anchor_for(latest),
         )
 
     if latest is None and task is None and start_offer is None:
@@ -464,6 +492,7 @@ def _current_task(
         identity_offer=identity_offer,
         problem=problem,
         status=latest.status if latest is not None else run.status,
+        anchor=anchor_for(latest),
     )
 
 
@@ -548,6 +577,7 @@ def _task_projection(
     identity_offer: CommandOffer | None,
     problem: Mapping[str, Any],
     status: str,
+    anchor: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     node = _definition_node(definition, node_id)
     actor_kind = latest.actor_kind if latest is not None else (
@@ -568,19 +598,29 @@ def _task_projection(
     )
     task_id = _task_id(task)
     node_run_id = latest.node_run_id if latest is not None else None
+    anchor_payload = anchor if isinstance(anchor, Mapping) else {}
+    anchor_id = _as_optional_str(anchor_payload.get("anchorId")) or (
+        latest.execution_anchor_id if latest is not None else None
+    )
+    anchor_task_id = _as_optional_str(anchor_payload.get("taskId"))
+    anchor_session_id = _as_optional_str(anchor_payload.get("sessionId"))
+    anchor_turn_id = _as_optional_str(anchor_payload.get("turnId"))
     offer_idempotency_key = (
         _as_optional_str(identity_offer.idempotency_key)
         if identity_offer is not None
         else None
     )
     return {
-        "key": task_id or node_run_id or offer_idempotency_key or f"{run.run_id}:{state}",
+        "key": task_id or anchor_task_id or node_run_id or offer_idempotency_key or f"{run.run_id}:{state}",
         "nodeId": node_id,
         "stageId": stage_id,
         "nodeRunId": node_run_id,
         "attempt": latest.attempt if latest is not None else None,
         "actorKind": actor_kind,
-        "taskId": task_id,
+        "taskId": task_id or anchor_task_id,
+        "sessionId": anchor_session_id,
+        "turnId": anchor_turn_id,
+        "executionAnchorId": anchor_id,
         "status": "blocked" if state in {"blocked_retryable", "blocked_terminal"} else status,
         "state": state,
         "kind": (

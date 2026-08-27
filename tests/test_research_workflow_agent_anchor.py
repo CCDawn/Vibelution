@@ -100,6 +100,150 @@ def _seed(harness: CommandHarness, action: PendingAction, attempt_node_id: str) 
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
+def test_dispatch_publishes_provisional_anchor_and_moves_attempt_to_running(tmp_path: Path) -> None:
+    """Turn accepted = real execution signal: anchor visible before the long turn."""
+
+    from core.web.services.team_workflow.research_runtime.domain_ports import (
+        AgentTaskHandle,
+        BindingResolution,
+    )
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        publish_agent_task_started_anchor,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        binding = BindingResolution(agent_id="agent-finder", role_key="source_finder")
+        handle = AgentTaskHandle(
+            session_id="session-finding",
+            session_attempt=1,
+            task_id="stagetask-finding",
+            turn_id="turn-finding",
+        )
+
+        def attempt_row():
+            return harness.store.submit(
+                lambda uow: uow.repository.get_attempt(action.node_run_id),
+                force_flush=True,
+            ).result(timeout=10)
+
+        assert str(attempt_row().status) == "dispatching"
+        assert str(attempt_row().execution_anchor_id or "") == ""
+
+        publish_agent_task_started_anchor(
+            harness.store, action=action, binding=binding, handle=handle
+        )
+
+        row = attempt_row()
+        assert str(row.status) == "running"
+        assert str(row.execution_anchor_id or "") != ""
+        anchor = harness.store.submit(
+            lambda uow: uow.repository.get_anchor_by_node_run(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        assert anchor is not None
+        assert str(anchor[5] or "") == "session-finding"
+        assert str(anchor[7] or "") == "stagetask-finding"
+        assert str(anchor[8] or "") == "turn-finding"
+        assert str(anchor[12] or "") == "running"
+        anchor_json = json.loads(anchor[13])
+        assert anchor_json.get("provisional") is True
+        assert anchor_json.get("taskId") == "stagetask-finding"
+
+        # The authoritative commit still lands on top of the provisional
+        # anchor: the adapter worker finishes and the attempt reaches
+        # succeeded with the anchor finalized.
+        ports = FakeDomainPorts()
+        registry = ActionRegistry()
+        registry.register(AgentActionAdapter(ports))
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=ports,
+            successor_fn=lambda node: ("source_extraction",),
+        )
+        worker.run_once()
+        row = attempt_row()
+        assert str(row.status) == "succeeded"
+        anchor = harness.store.submit(
+            lambda uow: uow.repository.get_anchor_by_node_run(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        assert str(anchor[12] or "") == "bound"
+        # The commit's own handle is authoritative and replaced the
+        # provisional task identity.
+        assert str(anchor[7] or "") == "task-act-agen"
+    finally:
+        harness.close()
+
+
+def test_provisional_anchor_never_resurrects_terminal_attempt(tmp_path: Path) -> None:
+    from core.web.services.team_workflow.research_runtime.domain_ports import (
+        AgentTaskHandle,
+        BindingResolution,
+    )
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        publish_agent_task_started_anchor,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_command_record,
+        build_run_record,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+
+        def mutate(uow):
+            if uow.repository.get_run("run-test") is None:
+                uow.repository.insert_run(build_run_record(run_id="run-test", last_event_sequence=1))
+            if uow.repository.get_command("cmd-driver") is None:
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id="cmd-driver", run_id="run-test", idempotency_key="cmd-driver"
+                    )
+                )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-test-source_finding-a1",
+                    run_id="run-test",
+                    node_id="source_finding",
+                    attempt=1,
+                    status="failed",
+                    command_id="cmd-driver",
+                    started_at_ms=FIXED_NOW_MS,
+                )
+            )
+
+        harness.store.submit(mutate, force_flush=True).result(timeout=10)
+        action = _agent_action()
+        publish_agent_task_started_anchor(
+            harness.store,
+            action=action,
+            binding=BindingResolution(agent_id="agent-finder", role_key="source_finder"),
+            handle=AgentTaskHandle(
+                session_id="session-finding",
+                session_attempt=1,
+                task_id="stagetask-finding",
+                turn_id="turn-finding",
+            ),
+        )
+        row = harness.store.submit(
+            lambda uow: uow.repository.get_attempt(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        assert str(row.status) == "failed"
+        assert harness.store.submit(
+            lambda uow: uow.repository.get_anchor_by_node_run(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10) is None
+    finally:
+        harness.close()
+
+
 def test_agent_anchor_must_be_complete_for_running(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:

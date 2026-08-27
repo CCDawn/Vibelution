@@ -59,6 +59,7 @@ import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
+import { useResearchFormalRunPromotion } from "./useResearchFormalRunPromotion";
 import { useResearchProcessAutofocus } from "./useResearchProcessAutofocus";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
@@ -280,6 +281,16 @@ export function ResearchProcessWorkspace({
     || hypothesisFirstChain.stateV2?.convergence.accepted
     || hypothesisFirstChain.chainState?.hypothesisConverged
   );
+  // The canonical V2 state owns the current formal run id; the promotion hook
+  // moves it into the URL when the deep link named only the question.
+  const stateV2FormalRunId = String(
+    hypothesisFirstChain.stateV2?.formalRuntime.runId ?? "",
+  ).trim() || null;
+  useResearchFormalRunPromotion({
+    activeRunId: location.runId,
+    promotedRunId: stateV2FormalRunId,
+    replaceParams: location.replaceParams,
+  });
   const formalRuntimeCurrentNodeIds = formalRuntimeActive
     ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)
     : EMPTY_RUNTIME_NODE_IDS;
@@ -375,9 +386,14 @@ export function ResearchProcessWorkspace({
   // resolved next action as the authority: meeting gates deliberately outrank
   // both an early convergence projection and ancillary queries that are still
   // loading. Otherwise a pending candidate confirmation is replaced by a
-  // hidden formal node and cannot be located.
+  // hidden formal node and cannot be located. Once the canonical V2 state has
+  // entered the formal_runtime phase, hypothesis-first no longer owns the
+  // current task: the formal run's own snapshot (including a blocked node's
+  // retry recovery) is the authority, and a hypothesis card bound to a formal
+  // node id would render as an unknown-card empty state.
   const hypothesisFirstOwnsCurrentTask = !hypothesisFirstChain.scopeMismatch
     && safeNextAction.stage !== "converged"
+    && hypothesisFirstChain.stateV2?.currentPhase !== "formal_runtime"
     && Boolean(
       hypothesisFirstChain.stateV2
       ||
