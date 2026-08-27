@@ -1,17 +1,17 @@
 # 虚拟人生活插件 PRD 与实施规划
 
-- Status: `draft`
+- Status: `active-plan`
 - Owner: Vibelution product planning
 - Scope: 按单个 Agent 启用的独立虚构人物生活插件；包含生活心跳、主动活动、心情、次日规划、日记、长期记忆、工具包、提示词包、主动消息和隔离验收
 - Planning snapshot: Vibelution `main@527819208e191897cd6de68e1140fb407f939f50`；外部参考固定到 `menglimi/astrbot_plugin_private_companion@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`
 - Supersedes: 无
-- Implementation link: 尚未开始；本文件只用于继续商讨和后续实施交接
-- Validation: 用户决策复核、本地 owning surface 核查、外部参考代码切片核查、Markdown/链接检查、任务图依赖检查、`git diff --check`
+- Implementation link: `codex/virtual-human-life-plugin`；后端生活域、Agent-scoped API、Prompt Pack、工具包、主动轮次与生命周期已进入集成验收，正式 VUI 前端等待隔离预览 `APPROVED`
+- Validation: 用户决策复核、本地 owning surface 核查、外部参考代码切片核查、插件/API/工具/主动轮次测试、生命周期回归、前端合同与构建、浏览器运行时验收、`git diff --check`
 - Close condition: 用户批准后转为 `user-approved`；实施开始后转为 `active-plan`；实施完成、被替代或放弃时转为 `implemented`、`superseded` 或 `historical` 并按项目规则归档
 
 ## 1. 文档边界
 
-本文件是产品需求、架构和任务图的讨论基线，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或现有代码事实。当前没有授权实施；任何代码、API、存储、迁移、UI 或运行时变更都必须在用户明确批准本方案后另行开始。
+本文件是产品需求、架构和任务图的实施基线，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或现有代码事实。用户已批准按本方案开发；其中生产前端仍遵守隔离预览审批门，收到 `APPROVED` 前只允许只读接入勘察，不修改正式 UI owning surface。
 
 ## 2. 已冻结的产品决策
 
@@ -778,6 +778,7 @@ web/src/routes/                             Agent 插件设置和生活面板
 ### 22.1 主要参考
 
 - [`menglimi/astrbot_plugin_private_companion`](https://github.com/menglimi/astrbot_plugin_private_companion/tree/8c2d982b1148d521e0a4889f4ba1b8309b011d5e)，本次固定参考 `main@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`、metadata `6.4.1`；参考插件 manifest、生活状态、日程、主动消息、作用域隔离和配置思路。此前调研 tip `5bc3c9b47cbfff00c93c5a94558b6261426a3245` 仅保留为历史快照，不再作为实现依据。
+- 实施收口时又按本地 active registry 的当前候选 `e82c20908da50a0c6b524a43760590f95f752552` 复核上述机制；候选更新未改变 `REFERENCE_ONLY` 裁决，根许可证仍未确认。
 - [SillyTavern](https://github.com/SillyTavern/SillyTavern)：参考角色卡、World Info、群聊和分支交互。
 - [Generative Agents](https://arxiv.org/abs/2304.03442)：参考 observation、planning、reflection 和 memory retrieval。
 - [APScheduler](https://apscheduler.readthedocs.io/)：参考 persistent scheduling、misfire、coalescing 和并发语义，不作为 MVP 必选依赖。
@@ -1042,4 +1043,4 @@ Critical Path：
 
 ## 28. 用户批准门
 
-本文件落盘不构成实现授权。后续开始 Task 1 前，必须取得用户对本 PRD 的明确批准；批准范围必须明确包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。若用户继续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API 或 UI 结果，应更新本文档并重新检查任务图后再实施。
+用户已明确批准按本方案实施，并授权在独立 `codex/*` 分支连续开发至完成；批准范围包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。正式前端另受隔离预览门保护：用户回复 `APPROVED` 后才写入生产 UI。若后续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API 或 UI 结果，应更新本文档并重新检查任务图后再实施。

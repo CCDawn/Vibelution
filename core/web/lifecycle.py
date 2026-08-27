@@ -197,6 +197,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_workflow_runtime_task = asyncio.create_task(
         asyncio.to_thread(_start_research_workflow_runtime)
     )
+    from .services.virtual_human_life_service import run_virtual_human_life_runtime
+
+    startup_virtual_human_life_task = asyncio.create_task(
+        run_virtual_human_life_runtime()
+    )
 
     def consume_startup_task_result(task: asyncio.Task[Any], *, message: str) -> None:
         try:
@@ -249,6 +254,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Research workflow Ledger runtime failed during startup."
         )
     )
+    startup_virtual_human_life_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Virtual human life runtime stopped unexpectedly."
+        )
+    )
     startup_scene_event_task: asyncio.Task[Any] | None = None
     try:
         # Schedule the informational event immediately before yield, but do not
@@ -269,6 +279,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "session_catalog",
                         "agent_inbox_recovery",
                         "external_agent_task_reconcile",
+                        "virtual_human_life",
                     ],
                 )
             )
@@ -277,6 +288,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         yield
     finally:
         shutdown_session_catalog_on_shutdown()
+        from .services.virtual_human_life_service import stop_virtual_human_life_runtime
+
+        stop_virtual_human_life_runtime()
         for startup_task in (
             startup_routes_task,
             startup_cli_reconcile_task,
@@ -287,6 +301,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,
             startup_workflow_runtime_task,
+            startup_virtual_human_life_task,
             startup_scene_event_task,
         ):
             if startup_task is None:

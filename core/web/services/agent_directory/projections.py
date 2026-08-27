@@ -712,6 +712,31 @@ def active_agent_runtime(
         agent_snapshot.get("permissionPreset") if agent_snapshot else "",
         runtime_tool_source=str(runtime_tool_source or "").strip(),
     )
+    externally_blocked_tools: list[str] = []
+    if agent_id:
+        try:
+            from core.agent_plugins.virtual_human_life.manifest import (
+                VIRTUAL_HUMAN_TOOL_NAMES,
+            )
+            from core.web.services.virtual_human_life_service import (
+                virtual_human_binding,
+            )
+
+            plugin_binding = virtual_human_binding(agent_id)
+            if not plugin_binding or not bool(plugin_binding.get("enabled")):
+                externally_blocked_tools = list(VIRTUAL_HUMAN_TOOL_NAMES)
+        except Exception:
+            # Plugin visibility is a deny-first boundary. If its binding cannot be
+            # resolved, keep the normal Agent surface intact but hide this plugin's
+            # tools until the binding can be read again.
+            externally_blocked_tools = [
+                "virtual_human_status_tool",
+                "virtual_human_schedule_tool",
+                "virtual_human_activity_tool",
+                "virtual_human_diary_tool",
+                "virtual_human_relationship_tool",
+                "virtual_human_proactive_message_tool",
+            ]
     context = {
         "agentId": str(agent_id or "").strip(),
         "sessionId": str(session_id or "").strip(),
@@ -732,6 +757,7 @@ def active_agent_runtime(
             else None
         ),
         "toolPolicy": tool_policy,
+        "externallyBlockedTools": externally_blocked_tools,
         "memoryPolicy": memory_policy,
         "delegationPolicy": delegation_policy,
         "supervisionPolicy": supervision_policy,

@@ -2,6 +2,7 @@
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
+    navCompanions: "虚拟人",
     navChatRooms: "群聊",
     sessionBinding: "会话绑定",
     sessionBindingHistorical: "当前显示历史会话",
@@ -89,6 +90,7 @@ export const dictionaryChat = {
   },
   en: {
     navChat: "Chat",
+    navCompanions: "Virtual Humans",
     navChatRooms: "Rooms",
     sessionBinding: "Session binding",
     sessionBindingHistorical: "Historical session visible",

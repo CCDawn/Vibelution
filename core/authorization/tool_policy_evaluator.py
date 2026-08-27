@@ -132,6 +132,7 @@ def evaluate_tool_policy(
     registry_version: int,
     registry_fingerprint: str,
     available_tool_names: Iterable[str] | None = None,
+    externally_blocked_tools: Iterable[str] | None = None,
     generated_at: str = "",
 ) -> AuthorizationDecision:
     """Resolve one immutable decision without I/O or fail-open fallback."""
@@ -168,6 +169,11 @@ def evaluate_tool_policy(
         else {_resolve_alias(str(name or "").strip(), alias_map) for name in available_tool_names if str(name or "").strip()}
     )
     available.intersection_update(known_names)
+    externally_blocked = {
+        str(name or "").strip()
+        for name in (externally_blocked_tools or ())
+        if str(name or "").strip()
+    }
 
     visible: list[str] = []
     executable: list[str] = []
@@ -182,6 +188,7 @@ def evaluate_tool_policy(
             turn_denied=turn_denied,
             allowed_capabilities=allowed_capabilities,
             available=available,
+            externally_blocked=externally_blocked,
         )
         if visibility_reason is not None:
             denied[name] = visibility_reason
@@ -264,12 +271,19 @@ def _visibility_deny_reason(
     turn_denied: set[str],
     allowed_capabilities: set[str],
     available: set[str],
+    externally_blocked: set[str],
 ) -> ToolDenyReason | None:
     name = descriptor.name
     if not descriptor.enabled:
         return ToolDenyReason(ToolDenyCode.TOOL_DISABLED, "visibility", "Tool is disabled in the Registry")
     if name in blocked:
         return ToolDenyReason(ToolDenyCode.AGENT_BLOCKED, "visibility", "Tool is blocked by the Agent policy")
+    if name in externally_blocked:
+        return ToolDenyReason(
+            ToolDenyCode.NOT_ASSIGNED,
+            "visibility",
+            "Tool is not assigned because its plugin binding is disabled for the Agent",
+        )
     if name not in allowed:
         return ToolDenyReason(ToolDenyCode.NOT_ASSIGNED, "visibility", "Tool is not assigned to the Agent")
     if name in turn_denied:

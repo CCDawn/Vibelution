@@ -162,4 +162,16 @@ describe("router route contracts", () => {
       }),
     );
   });
+
+  it("keeps the companion lobby separate while reusing the native Chat route for a person", () => {
+    const lobbyRoute = findWorkbenchRoute("companions");
+    expectRouteErrorSurface(lobbyRoute, "workbench");
+    expectLazyFallback(lobbyRoute, "正在打开工作台", "workbench");
+
+    const companionChatRoute = findWorkbenchRoute("companions/:agentId");
+    expectRouteErrorSurface(companionChatRoute, "workbench");
+    const chatMarkup = lazyFallbackMarkup(companionChatRoute);
+    expect(chatMarkup).toContain('data-route-loading="chat"');
+    expect(chatMarkup).toContain('data-vui="chat-session-workbench-shell"');
+  });
 });

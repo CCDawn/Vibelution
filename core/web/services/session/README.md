@@ -16,6 +16,7 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 | You are changing… | Open first |
 |-------------------|------------|
 | Submit / guidance / edit-resubmit | `submit.py` |
+| Trusted plugin proactive turn without a user message | `proactive.py` |
 | Turn schedule / executor handoff | `schedule.py` |
 | Run turn / continuation loop | `worker.py` |
 | Stream capture / UI batching | `stream_capture.py` |
@@ -51,6 +52,7 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
+| First-party plugin proactive admission / revision-fence cancellation | `proactive.py` | user-message persistence, a second executor, arbitrary plugin sources |
 | Turn queue / schedule / executor handoff | `schedule.py` | candidate store, full worker loop |
 | `_run_session_turn` / continuation loop | `worker.py` | team SC search, SSE transport |
 | UI stream to journal / live_output batching | `stream_capture.py` | list cache, SSE transport publish |

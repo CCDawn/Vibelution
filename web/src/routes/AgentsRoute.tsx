@@ -2517,6 +2517,10 @@ export function AgentsRoute() {
         onOpenRoute: (route: string) => navigate(route),
       } : null,
     },
+    virtualHumanPlugin: {
+      agentId: selectedAgent.agentId,
+      lang,
+    },
     activity: {
       runtimeFocus: {
         copy: {

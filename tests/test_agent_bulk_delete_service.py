@@ -2,6 +2,7 @@ import threading
 
 import pytest
 
+from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
 from core.web.services import (
     agent_bulk_delete_service,
     agent_directory_service,
@@ -9,6 +10,9 @@ from core.web.services import (
     chat_room_service,
     session_service,
     team_service,
+)
+from core.web.services.virtual_human_life_service import (
+    set_virtual_human_life_service_for_tests,
 )
 
 
@@ -42,6 +46,57 @@ def test_bulk_purge_blocks_agent_delete_when_session_purge_staging_fails(tmp_pat
     detail = session_service.get_session_detail(agent_session["id"])
     assert detail["agentId"] == agent_session["agentId"]
     assert detail["agentStatusCode"] == "archived_agent"
+
+
+def test_purge_restores_virtual_human_plugin_when_registry_commit_fails(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent_session = session_service.create_chat_session(title="Plugin Purge Compensation")
+    agent_id = agent_session["agentId"]
+    life_service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda target_id, include_archived=False: agent_directory_service.get_agent(
+            target_id,
+            include_archived=include_archived,
+        ),
+        agent_lister=lambda: agent_directory_service.list_agents(
+            include_archived=False,
+            detail="summary",
+        ),
+        plugin_root_resolver=lambda target_id: (
+            tmp_path / "workspace" / "agents" / target_id / "plugins" / "virtual-human-life"
+        ),
+    )
+    set_virtual_human_life_service_for_tests(life_service)
+    try:
+        enabled = life_service.set_binding(agent_id, enabled=True, expected_version=0)
+        plugin_root = life_service.plugin_root(agent_id)
+        assert plugin_root.exists()
+
+        agent_directory_service.archive_agent_instance(
+            agent_id,
+            repair_mode_bindings=False,
+        )
+        assert agent_directory_service.get_agent(agent_id, include_archived=True)["status"] == "archived"
+        assert life_service.binding_for(agent_id)["enabled"] is False
+
+        def fail_registry_commit(_state):
+            raise OSError("agent registry unavailable")
+
+        monkeypatch.setattr(agent_directory_service, "save_state", fail_registry_commit)
+        with pytest.raises(OSError, match="agent registry unavailable"):
+            agent_directory_service.purge_archived_agent_instance(agent_id)
+
+        restored = life_service.binding_for(agent_id)
+        assert restored is not None
+        assert restored["enabled"] is False
+        assert restored["bindingRevision"] == enabled["bindingRevision"] + 1
+        assert plugin_root.exists()
+        assert (plugin_root / "state.json").exists()
+        assert agent_directory_service.get_agent(agent_id, include_archived=True)["status"] == "archived"
+        staging_parent = tmp_path / ".tmp" / "virtual-human-life-purge"
+        assert not list(staging_parent.iterdir())
+    finally:
+        set_virtual_human_life_service_for_tests(None)
 
 
 def test_bulk_purge_rolls_back_staged_sessions_when_agent_delete_fails(tmp_path, monkeypatch):

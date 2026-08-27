@@ -151,6 +151,7 @@ def _context_segment(
     *,
     placement: str,
     stability: str,
+    trust: str = "",
     cache_hit: bool | None = None,
 ) -> dict[str, Any] | None:
     text = _coerce_text(block).strip()
@@ -182,7 +183,8 @@ def _context_segment(
         stability=prompt_stability,
         trust=(
             PromptTrust.OPERATOR_CONTROLLED
-            if normalized_key in {"prompt_template", "agent_prompt_snapshot"}
+            if str(trust or "").strip() == "operator_controlled"
+            or normalized_key in {"prompt_template", "agent_prompt_snapshot"}
             else PromptTrust.DERIVED_RUNTIME
         ),
         source=f"context_engine.{normalized_key}",
@@ -529,6 +531,32 @@ def build_agent_context(
         )
         if segment is not None
     ]
+    # Trusted first-party Agent plugins append bounded segments. Providers fail
+    # closed and unbound/disabled Agents return no placeholder segment.
+    try:
+        from core.web.services.virtual_human_life_service import (
+            build_virtual_human_prompt_segments,
+        )
+
+        for plugin_segment in build_virtual_human_prompt_segments(
+            normalized_agent_id,
+            session_id=session_id,
+            run_id=run_id,
+        ):
+            normalized_plugin_segment = _context_segment(
+                _coerce_text(plugin_segment.get("key")).strip(),
+                _coerce_text(plugin_segment.get("block")).strip(),
+                placement=_coerce_text(plugin_segment.get("placement")).strip()
+                or "volatile_turn",
+                stability=_coerce_text(plugin_segment.get("stability")).strip()
+                or "turn_dynamic",
+                trust=_coerce_text(plugin_segment.get("trust")).strip(),
+            )
+            if normalized_plugin_segment is not None:
+                context_segments.append(normalized_plugin_segment)
+    except Exception:
+        # Plugin context must never break ordinary Agent turns.
+        pass
     if assembly_context is not None:
         context_segments = _resolve_context_segments(
             context_segments,

@@ -41,6 +41,7 @@ export function loadChatCodingRouteChunk(
 }
 
 const ChatCodingRoute = lazyRoute(loadChatCodingRouteChunk);
+const CompanionsRoute = lazyRoute(() => import("../routes/CompanionsRoute").then((module) => ({ default: module.CompanionsRoute })));
 const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
 const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
 const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
@@ -123,6 +124,24 @@ export const router = createBrowserRouter([
       { index: true, element: <HomeRedirect /> },
       {
         path: "chat",
+        ...guardedLazyElement(
+          <WorkbenchDomainRoute domain="chat">
+            <ChatCodingRoute />
+          </WorkbenchDomainRoute>,
+          "workbench",
+          "chat",
+        ),
+      },
+      {
+        path: "companions",
+        ...guardedLazyElement(
+          <WorkbenchDomainRoute domain="chat">
+            <CompanionsRoute />
+          </WorkbenchDomainRoute>,
+        ),
+      },
+      {
+        path: "companions/:agentId",
         ...guardedLazyElement(
           <WorkbenchDomainRoute domain="chat">
             <ChatCodingRoute />
