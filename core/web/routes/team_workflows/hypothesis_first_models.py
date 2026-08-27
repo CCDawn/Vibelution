@@ -464,3 +464,18 @@ class QuestionRunResetResponse(BaseModel):
     questionId: str = ""
     removed: dict[str, int] = Field(default_factory=dict)
     nextAction: dict[str, str] = Field(default_factory=dict)
+
+
+class AnomalyInboxResponse(BaseModel):
+    """One anomaly-inbox projection (R4.3) for the operations console.
+
+    ``inbox`` is the verbatim ``AnomalyInbox.to_dict()`` projection (sorted,
+    merged, fail-closed contract shape); the route never reshapes it.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    inbox: dict[str, Any] = Field(default_factory=dict)

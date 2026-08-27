@@ -52,6 +52,17 @@ DEFAULT_REAL_FAILURE_BUDGET = 3
 MAX_REAL_START_ATTEMPTS = 3
 REAL_BATCH_PROJECTION_SCHEMA_VERSION = 1
 
+# Zero-click campaign targets (decision §1.2): at least 85% of completed
+# questions must close automatically; escalation above 15% is a stop line.
+AUTO_CLOSE_RATE_TARGET = 0.85
+ESCALATION_RATE_STOP_LINE = 0.15
+
+DRAIN_STATE_NONE = "none"
+DRAIN_STATE_DRAINING = "draining"
+DRAIN_STATE_DRAINED = "drained"
+STOP_REASON_FAILURE_BUDGET_EXHAUSTED = "failure_budget_exhausted"
+STOP_REASON_CANCELLED_BY_OPERATOR = "cancelled_by_operator"
+
 _TERMINAL_STATUSES = {
     QuestionStatus.SUCCEEDED,
     QuestionStatus.FAILED,
@@ -165,8 +176,17 @@ def project_real_batch_state(
     consecutive_failures: int = 0,
     failure_budget: int = DEFAULT_REAL_FAILURE_BUDGET,
     cancelled: bool = False,
+    concurrency_limit: int | None = None,
 ) -> dict[str, Any]:
-    """Project the real batch state into the typed public camelCase shape."""
+    """Project the real batch state into the typed public camelCase shape.
+
+    The observability fields (drain state, auto-close/escalation rates, stop
+    reason) are read-only derivations of the same state; they never change
+    execution, gate or authorization semantics. The ``requested`` drain state
+    is intentionally not derivable here: it describes an in-flight cancel
+    request before any projection observed it, so clients synthesize it while
+    the cancel call is pending.
+    """
     summary = state.outcome_summary()
     refs = dict(run_refs or {})
     awaiting = dict(awaiting_approval or {})
@@ -189,6 +209,37 @@ def project_real_batch_state(
         else ""
     )
     result_manifest = build_result_set(state).manifest()
+
+    if not cancelled:
+        drain_state = DRAIN_STATE_NONE
+    elif summary["running"] > 0:
+        drain_state = DRAIN_STATE_DRAINING
+    else:
+        # No in-flight run remains. This never promises an instantly residue-
+        # free batch: awaiting-approval and blocked records may still exist.
+        drain_state = DRAIN_STATE_DRAINED
+
+    # Auto-close accounting: totalCompleted counts every terminal question;
+    # autoClosed counts package-backed successes that needed no human approval
+    # inside the batch loop; escalated counts failures plus questions awaiting
+    # human approval. Operator-cancelled pending items are excluded from the
+    # escalation side so a deliberate cancel is not an anomaly.
+    total_completed = summary["succeeded"] + summary["failed"] + summary["blocked"]
+    auto_closed = summary["succeeded"]
+    escalated = summary["failed"] + len(awaiting)
+    auto_close_rate = (auto_closed / total_completed) if total_completed else None
+    escalation_rate = (escalated / total_completed) if total_completed else None
+
+    breaker_open = circuit_breaker_tripped(
+        consecutive_failures, failure_budget=failure_budget
+    )
+    if breaker_open:
+        stop_reason = STOP_REASON_FAILURE_BUDGET_EXHAUSTED
+    elif cancelled:
+        stop_reason = STOP_REASON_CANCELLED_BY_OPERATOR
+    else:
+        stop_reason = ""
+
     return {
         "schemaVersion": REAL_BATCH_PROJECTION_SCHEMA_VERSION,
         "planId": state.plan.plan_id,
@@ -219,9 +270,7 @@ def project_real_batch_state(
         "awaitingApprovalQuestionIds": sorted(awaiting),
         "consecutiveFailures": int(consecutive_failures),
         "failureBudget": int(failure_budget),
-        "circuitBreakerOpen": circuit_breaker_tripped(
-            consecutive_failures, failure_budget=failure_budget
-        ),
+        "circuitBreakerOpen": breaker_open,
         "cancelled": bool(cancelled),
         "gateComplete": summary["succeeded"] == len(state.plan.question_ids),
         "checkpointSha256": checkpoint_sha256,
@@ -229,4 +278,20 @@ def project_real_batch_state(
         "packageQualitySummary": state.package_quality_summary(),
         "lastUpdatedAt": updated_at,
         "canResume": bool(pending_ids or awaiting) and not cancelled,
+        # Read-only observability extensions (R4.2).
+        "drainState": drain_state,
+        "concurrencyLimit": (
+            int(concurrency_limit) if concurrency_limit else None
+        ),
+        "totalCompletedCount": total_completed,
+        "autoClosedCount": auto_closed,
+        "escalatedCount": escalated,
+        "autoCloseRate": auto_close_rate,
+        "escalationRate": escalation_rate,
+        "autoCloseTarget": AUTO_CLOSE_RATE_TARGET,
+        "escalationStopLine": ESCALATION_RATE_STOP_LINE,
+        "stopReason": stop_reason,
+        "remainingFailureBudget": max(
+            0, int(failure_budget) - int(consecutive_failures)
+        ),
     }

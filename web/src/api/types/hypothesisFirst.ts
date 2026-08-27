@@ -816,6 +816,55 @@ export type ReviewRoundLinkListResponse = {
   storagePath?: string;
 };
 
+// ---------------------------------------------------------------------------
+// Anomaly inbox (R4.3) — verbatim shape of the server contract projection
+// ---------------------------------------------------------------------------
+
+export type AnomalySeverity = "critical" | "high" | "medium";
+
+export type AnomalyKind =
+  | "blocked_run"
+  | "heartbeat_stale"
+  | "needs_human_gate"
+  | "claim_disputed"
+  | "review_disagreement_escalation"
+  | "drift_sentinel_hit"
+  | "budget_exhausted"
+  | "retry_budget_exhausted";
+
+export type AnomalyInboxScope = {
+  teamId: string;
+  questionId: string;
+  runId: string;
+  nodeId: string;
+  meetingRoundId: string;
+};
+
+export type AnomalyInboxItem = {
+  kind: AnomalyKind;
+  scope: AnomalyInboxScope;
+  severity: AnomalySeverity;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  summary: string;
+  recommendedAction: string | null;
+  evidence: string[];
+};
+
+export type AnomalyInboxProjection = {
+  schemaVersion: number;
+  ruleId: string;
+  generatedAt: string;
+  items: AnomalyInboxItem[];
+};
+
+export type AnomalyInboxResponse = {
+  schemaVersion: number;
+  teamId: string;
+  questionId: string;
+  inbox: AnomalyInboxProjection;
+};
+
 export type QuestionRunResetImpact = {
   candidateCount: number;
   selectionCount: number;

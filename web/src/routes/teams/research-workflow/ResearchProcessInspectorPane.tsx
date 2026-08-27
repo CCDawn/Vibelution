@@ -19,6 +19,7 @@ import {
   EvidenceGraphView,
   HypothesisFirstNodeInspector,
   ResearchAgentBindingPanel,
+  ResearchAnomalyInboxPanel,
   ResearchProcessDefinitionNodePanel,
   ResearchProcessNodeInspector,
   ResearchRunLaunchPanel,
@@ -165,7 +166,22 @@ export function ResearchProcessInspectorPane(props: {
   );
 
   if (scope.panel === "progress") {
-    return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
+    // R4.3: the anomaly inbox sits directly below the batch console so the
+    // operator sees the single anomaly queue next to batch observability.
+    // The progress panel itself is untouched.
+    return (
+      <div className={styles.progressStack} data-vui="research-progress-stack">
+        <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />
+        <ResearchAnomalyInboxPanel
+          teamId={scope.teamId}
+          questionId={scope.questionId}
+          lang={lang}
+          onOpenItem={({ questionId, runId, nodeId }) => actions.replaceParams(runId
+            ? { runId, questionId: questionId || scope.questionId, node: nodeId || null, panel: "node" }
+            : { questionId: questionId || scope.questionId, panel: "question" })}
+        />
+      </div>
+    );
   }
   if (scope.panel === "question") {
     if (!scope.questionId) {

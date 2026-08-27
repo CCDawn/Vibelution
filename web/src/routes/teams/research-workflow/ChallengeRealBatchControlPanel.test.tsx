@@ -75,6 +75,17 @@ function projection(overrides: Record<string, unknown> = {}) {
     gateComplete: false,
     lastUpdatedAt: "2026-08-23T05:00:00Z",
     canResume: true,
+    drainState: "none",
+    concurrencyLimit: 4,
+    totalCompletedCount: 45,
+    autoClosedCount: 40,
+    escalatedCount: 5,
+    autoCloseRate: 40 / 45,
+    escalationRate: 5 / 45,
+    autoCloseTarget: 0.85,
+    escalationStopLine: 0.15,
+    stopReason: "",
+    remainingFailureBudget: 2,
     ...overrides,
   };
 }
@@ -152,6 +163,17 @@ describe("ChallengeRealBatchControlPanel", () => {
     expect(markup).toContain("待处理");
     expect(markup).toContain(">80</strong>");
     expect(markup).toContain("待人工审核");
+    expect(markup).toContain("运行观察");
+    expect(markup).toContain("进行中 / 并发上限");
+    expect(markup).toContain("2 / 4");
+    expect(markup).toContain("自动闭环率");
+    expect(markup).toContain("40/45");
+    expect(markup).toContain("目标 ≥85%");
+    expect(markup).toContain("异常升级率");
+    expect(markup).toContain("5/45");
+    expect(markup).toContain("停止线 ≤15%");
+    expect(markup).toContain("停止原因：无");
+    expect(markup).toContain("剩余失败预算 2/3");
     expect(markup).toContain("最近事件");
     expect(markup).toContain("realCampaignAllowed=false");
     expect(markup).toContain("尚未视为已授权");
@@ -215,6 +237,63 @@ describe("ChallengeRealBatchControlPanel", () => {
       expect.objectContaining({ confirmed: true }),
     );
     await view.unmount();
+  });
+
+  it("renders the drain badge, closed-loop accounting and stop reason while draining", () => {
+    queryState.current.data = projection({
+      cancelled: true,
+      canResume: false,
+      drainState: "draining",
+      stopReason: "cancelled_by_operator",
+      statusSummary: { pending: 80, running: 2, succeeded: 40, failed: 1, blocked: 2 },
+    });
+    const markup = renderPanel();
+
+    expect(markup).toContain("排空中");
+    expect(markup).toContain("停止原因：操作员已取消，停止新派遣");
+  });
+
+  it("marks a drained batch and the failure-budget stop reason without promising residue-free state", () => {
+    queryState.current.data = projection({
+      cancelled: true,
+      canResume: false,
+      drainState: "drained",
+      statusSummary: { pending: 0, running: 0, succeeded: 40, failed: 1, blocked: 4 },
+      stopReason: "failure_budget_exhausted",
+      circuitBreakerOpen: true,
+      consecutiveFailures: 3,
+      remainingFailureBudget: 0,
+    });
+    const markup = renderPanel();
+
+    expect(markup).toContain("已排空");
+    expect(markup).toContain("停止原因：连续失败达到预算，已停止派遣");
+    expect(markup).toContain("剩余失败预算 0/3");
+  });
+
+  it("derives drain and rates locally when the service payload predates the observability fields", () => {
+    queryState.current.data = projection({
+      cancelled: true,
+      canResume: false,
+      drainState: undefined,
+      concurrencyLimit: undefined,
+      totalCompletedCount: undefined,
+      autoClosedCount: undefined,
+      escalatedCount: undefined,
+      autoCloseRate: undefined,
+      escalationRate: undefined,
+      autoCloseTarget: undefined,
+      escalationStopLine: undefined,
+      stopReason: undefined,
+      remainingFailureBudget: undefined,
+      statusSummary: { pending: 0, running: 1, succeeded: 40, failed: 1, blocked: 4 },
+    });
+    const markup = renderPanel();
+
+    expect(markup).toContain("排空中");
+    expect(markup).toContain("1 / —");
+    expect(markup).toContain("40/45");
+    expect(markup).toContain("(2/45");
   });
 
   it("requires confirmation for cancel and never polls on mount", async () => {

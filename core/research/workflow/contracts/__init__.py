@@ -6,6 +6,25 @@ from this package boundary instead of growing ``models.py``.
 
 from ._canonical import canonical_json, sha256_hex
 from ._validation import ContractValidationError
+from .anomaly_inbox import (
+    ANOMALY_INBOX_RULE_ID,
+    ANOMALY_INBOX_SCHEMA_VERSION,
+    ANOMALY_KIND_BLOCKED_RUN,
+    ANOMALY_KIND_BUDGET_EXHAUSTED,
+    ANOMALY_KIND_CLAIM_DISPUTED,
+    ANOMALY_KIND_DRIFT_SENTINEL_HIT,
+    ANOMALY_KIND_HEARTBEAT_STALE,
+    ANOMALY_KIND_NEEDS_HUMAN_GATE,
+    ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED,
+    ANOMALY_KIND_REVIEW_DISAGREEMENT_ESCALATION,
+    ANOMALY_KIND_SEVERITY,
+    ANOMALY_KINDS,
+    ANOMALY_SEVERITIES,
+    AnomalyInbox,
+    AnomalyInboxItem,
+    AnomalyInboxScope,
+    AnomalyKind,
+)
 from .artifact_manifest import ArtifactManifest
 from .artifact_receipt import ArtifactReceipt, BudgetReceipt
 from .audit_sampling import (
@@ -327,6 +346,19 @@ from .workflow_snapshot import (
 
 __all__ = [    "ACCEPTED_REVIEW_STATUS",
     "ADDENDUM_STATUSES",
+    "ANOMALY_INBOX_RULE_ID",
+    "ANOMALY_INBOX_SCHEMA_VERSION",
+    "ANOMALY_KIND_BLOCKED_RUN",
+    "ANOMALY_KIND_BUDGET_EXHAUSTED",
+    "ANOMALY_KIND_CLAIM_DISPUTED",
+    "ANOMALY_KIND_DRIFT_SENTINEL_HIT",
+    "ANOMALY_KIND_HEARTBEAT_STALE",
+    "ANOMALY_KIND_NEEDS_HUMAN_GATE",
+    "ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED",
+    "ANOMALY_KIND_REVIEW_DISAGREEMENT_ESCALATION",
+    "ANOMALY_KIND_SEVERITY",
+    "ANOMALY_KINDS",
+    "ANOMALY_SEVERITIES",
     "AUTO_ADVANCE_CAPABILITIES",
     "AUTO_ADVANCE_DRAIN_MODES",
     "AUTO_ADVANCE_EXECUTION_MODES",
@@ -341,6 +373,10 @@ __all__ = [    "ACCEPTED_REVIEW_STATUS",
     "AuditSampleManifest",
     "AutoAdvancePolicyV2",
     "AutomationPolicyValidationError",
+    "AnomalyInbox",
+    "AnomalyInboxItem",
+    "AnomalyInboxScope",
+    "AnomalyKind",
     "BASELINE_STATUSES",
     "BLOCKER_CAMPAIGN_THEME_MISMATCH",
     "BLOCKER_DEV_THEME_ONLY",
