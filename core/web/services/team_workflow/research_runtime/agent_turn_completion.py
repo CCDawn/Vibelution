@@ -54,7 +54,46 @@ AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES = frozenset(
 # there is no silent downgrade, archive, or success reclassification.
 MAX_AGENT_TURN_CONTINUATIONS = 3
 
+# A source-collection stage task whose canonical status settled to
+# "completed" is domain-verified finished work: the writeback tool downgrades
+# any completed-but-gate-failed outcome to "needs_review", so canonical
+# "completed" implies the stage completion gate passed and the node's work
+# product (materialized records / artifact refs) exists.  The bounded
+# continuation consults this authority at both decision points: a parked turn
+# whose task already settled must not trigger a "继续" LLM round-trip, and a
+# failed continuation turn must not retroactively poison an attempt whose
+# main turn already completed the work.  The failure itself is never
+# swallowed -- it stays visible in the session turn record and is surfaced as
+# a structured warning scene event.
+_STAGE_TASK_SETTLED_COMPLETED_STATUS = "completed"
+
 DEFAULT_AGENT_TURN_TIMEOUT_MS = 120_000
+
+
+def _stage_task_work_already_complete(*, team_id: str, task_id: str) -> bool:
+    """Read the stage-task authority: did this node's work already settle?"""
+
+    normalized_team = str(team_id or "").strip()
+    normalized_task = str(task_id or "").strip()
+    if not normalized_team or not normalized_task:
+        return False
+    try:
+        from core.web.services.team_workflow.source_collection.stage_task_query import (
+            get_source_collection_stage_session_task,
+        )
+
+        record = get_source_collection_stage_session_task(normalized_team, normalized_task)
+    except Exception:
+        # Read-only optimization guard: when the authority cannot answer, keep
+        # the existing continuation/failure semantics (fail-closed).
+        return False
+    task_record = record.get("task") if isinstance(record, dict) else None
+    if not isinstance(task_record, dict):
+        return False
+    return (
+        str(task_record.get("status") or "").strip().lower()
+        == _STAGE_TASK_SETTLED_COMPLETED_STATUS
+    )
 
 
 def _persist_question_model_invocation_receipts(
@@ -138,6 +177,26 @@ class TurnNotReadyError(RuntimeError):
     def __init__(self, message: str, *, snapshot: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.snapshot = dict(snapshot or {})
+
+
+def _turn_terminal_failure_detail(exc: Exception) -> dict[str, Any] | None:
+    """Parse the canonical ``agent_turn_terminal_failed`` rejection, if exc is one.
+
+    ``wait_for_agent_turn_terminal`` signals a failure-terminal turn by raising
+    ``RuntimeError(json.dumps({code: agent_turn_terminal_failed, ...}))``.  Any
+    other error shape (anchor incomplete, arbitrary runtime error,
+    ``TurnNotReadyError``) must keep propagating untouched.
+    """
+
+    try:
+        detail = json.loads(str(exc))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(detail, dict):
+        return None
+    if str(detail.get("code") or "").strip() != "agent_turn_terminal_failed":
+        return None
+    return detail
 
 
 def wait_for_agent_turn_terminal(
@@ -409,6 +468,22 @@ def _wait_with_bounded_turn_continuation(
     audited.  Exhausting the budget raises ``agent_turn_continuation_exhausted``
     with the full turn chain; a failure is never downgraded into success.
 
+    Source-collection family turns are additionally anchored to their domain
+    authority (the stage task store) at both decision points:
+
+    - Before submitting a continuation: if the stage task already settled to
+      canonical ``completed`` (completion gate passed during the parked main
+      turn), the work is done and a ``继续`` round-trip must not be spent on
+      it -- the parked snapshot is returned as the attempt verdict with a
+      structured scene event.
+    - When a continuation turn fails terminally: if the stage task settled
+      ``completed``, the attempt is judged by the main turn's snapshot (its
+      receipts and writeback are the real work) and the continuation failure
+      is surfaced as a structured warning -- it is never silently swallowed
+      (the session turn record keeps the failure and its user-readable
+      reason).  If the authority does not confirm completed work, the
+      failure raises as before (fail-closed).
+
     Research-project tasks are excluded: their task authority
     (``research_project_agent_tasks`` reconcile) deliberately classifies a
     needs_continue session as ``stopped/session_needs_continue``; reviving
@@ -426,21 +501,91 @@ def _wait_with_bounded_turn_continuation(
     else:
         reconcilable = AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
         continuable = AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
+    source_collection_scope = (
+        adapter_spec is not None and adapter_spec.family == "source_collection"
+    )
+    team_id = str(input_snapshot.get("teamId") or "").strip()
+    original_turn_id = handle.turn_id
+    original_snapshot: dict[str, Any] | None = None
     turn_chain: list[str] = [handle.turn_id]
     continuations: list[dict[str, Any]] = []
     turn_id = handle.turn_id
-    while True:
-        snapshot = wait_for_agent_turn_terminal(
-            handle.session_id,
-            turn_id,
-            timeout_ms=timeout_ms,
-            poll_ms=poll_ms,
-            reconcilable_terminal_statuses=reconcilable,
+
+    def _rescue_settled_main_turn(failed_turn_id: str, status: str) -> None:
+        _record_turn_continuation_scene_event(
+            "agent_turn.continuation_failed_work_complete",
+            level="warning",
+            outcome="resolved_by_stage_task_authority",
+            fields={
+                "sessionId": handle.session_id,
+                "mainTurnId": original_turn_id,
+                "failedTurnId": failed_turn_id,
+                "failedTurnStatus": status,
+                "turnChain": list(turn_chain),
+                "continuationsUsed": len(continuations),
+                "taskId": str(handle.task_id or ""),
+                "workflowRunId": str(action.run_id or ""),
+                "workflowNodeId": str(action.node_id or ""),
+            },
         )
+
+    while True:
+        try:
+            snapshot = wait_for_agent_turn_terminal(
+                handle.session_id,
+                turn_id,
+                timeout_ms=timeout_ms,
+                poll_ms=poll_ms,
+                reconcilable_terminal_statuses=reconcilable,
+            )
+        except TurnNotReadyError:
+            raise
+        except RuntimeError as exc:
+            failure_detail = _turn_terminal_failure_detail(exc)
+            if failure_detail is None:
+                raise
+            failure_status = str(failure_detail.get("terminalStatus") or "").strip().lower()
+            if (
+                source_collection_scope
+                and original_snapshot is not None
+                and _stage_task_work_already_complete(
+                    team_id=team_id, task_id=handle.task_id
+                )
+            ):
+                # The main turn finished the work before parking; a later
+                # continuation turn's failure must not erase that.  Judge the
+                # attempt by the main turn and expose the failure as a
+                # structured warning instead of poisoning the verdict.  The
+                # failure itself stays visible in the session turn record.
+                _rescue_settled_main_turn(turn_id, failure_status)
+                return original_snapshot, original_turn_id, continuations
+            raise
         status = str(
             snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus") or ""
         ).strip().lower()
         if status not in continuable:
+            return snapshot, turn_id, continuations
+        if original_snapshot is None:
+            original_snapshot = snapshot
+        if source_collection_scope and _stage_task_work_already_complete(
+            team_id=team_id, task_id=handle.task_id
+        ):
+            # Parked turn, but the stage-task authority already settled the
+            # work as gate-verified complete: there is nothing left to
+            # continue, so do not spend a "继续" LLM round-trip (and its
+            # protocol-error failure surface) on finished work.
+            _record_turn_continuation_scene_event(
+                "agent_turn.continuation_not_needed_work_complete",
+                outcome="settled",
+                fields={
+                    "sessionId": handle.session_id,
+                    "mainTurnId": original_turn_id,
+                    "pausedStatus": status,
+                    "taskId": str(handle.task_id or ""),
+                    "workflowRunId": str(action.run_id or ""),
+                    "workflowNodeId": str(action.node_id or ""),
+                },
+            )
             return snapshot, turn_id, continuations
         if len(continuations) >= MAX_AGENT_TURN_CONTINUATIONS:
             raise RuntimeError(
