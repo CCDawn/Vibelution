@@ -45,7 +45,7 @@ import {
   type GuardStateId,
   type PreviewViewportId,
 } from "./model";
-import { singleActionPreviewStyles as styles } from "./styles";
+import { singleActionPreviewStyles as styles } from "./index.styles";
 
 const QUESTION_OPTIONS = [
   { id: "sci-002", label: "SCI-002 · Will the Navier–Stokes problem ever be solved?", description: "数学" },
