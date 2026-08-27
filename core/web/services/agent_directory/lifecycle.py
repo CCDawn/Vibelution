@@ -204,19 +204,31 @@ def agent_archive_protected(agent: dict[str, Any]) -> bool:
 
 def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) -> dict[str, Any]:
     s = _service()
-    with s._STATE_LOCK:
-        state = s.load_state()
-        agent = s._find_agent(state, agent_id)
-        if agent is None:
-            raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
-        if s._agent_archive_protected(agent):
-            raise s.AgentDirectoryError("Protected core Agent cannot be archived.")
-        agent["status"] = "archived"
-        agent["updatedAt"] = s.utc_now_iso()
-        s.save_state(state)
+    from core.web.services.virtual_human_life_service import (
+        prepare_virtual_human_agent_archive,
+        rollback_virtual_human_agent_archive,
+    )
+
+    plugin_restore_token = prepare_virtual_human_agent_archive(agent_id)
+    try:
+        with s._STATE_LOCK:
+            state = s.load_state()
+            agent = s._find_agent(state, agent_id)
+            if agent is None:
+                raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+            if s._agent_archive_protected(agent):
+                raise s.AgentDirectoryError("Protected core Agent cannot be archived.")
+            agent["status"] = "archived"
+            agent["updatedAt"] = s.utc_now_iso()
+            s.save_state(state)
+    except Exception:
+        rollback_virtual_human_agent_archive(plugin_restore_token)
+        raise
     s._record_agent_event("agent.archived", agent, lifecycle=True)
     if repair_mode_bindings:
-        from core.web.services.agent_mode_binding_service import remove_agent_from_mode_bindings
+        from core.web.services.agent_mode_binding_service import (
+            remove_agent_from_mode_bindings,
+        )
 
         remove_agent_from_mode_bindings(agent_id)
     return s._agent_to_api(agent)
@@ -338,41 +350,62 @@ def purge_archived_agent_instance(
         tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
         memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
 
-    workspace_result = s._delete_purged_agent_workspace(agent_snapshot)
-    if list(workspace_result.get("skippedPaths") or []):
-        skipped = ", ".join(str(item) for item in list(workspace_result.get("skippedPaths") or [])[:3])
-        raise s.AgentDirectoryError(f"Agent workspace could not be fully deleted: {skipped}")
+    from core.web.services.virtual_human_life_service import (
+        commit_virtual_human_agent_purge,
+        prepare_virtual_human_agent_archive,
+        rollback_virtual_human_agent_archive,
+    )
 
-    with s._STATE_LOCK:
-        state = s.load_state()
-        agent = s._find_agent(state, normalized_agent_id)
-        if agent is None:
-            raise s.AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        current_status = str(agent.get("status") or "active").strip() or "active"
-        if current_status != "archived" and not allow_active:
-            raise s.AgentDirectoryError("Only archived Agents can be permanently deleted.")
-        if s._agent_archive_protected(agent) and not _allow_protected_system_repair:
-            raise s.AgentDirectoryError("Protected core Agent cannot be purged.")
-        agents = [
-            item
-            for item in state.get("agents") or []
-            if not (
-                isinstance(item, dict)
-                and str(item.get("agentId") or "").strip() == normalized_agent_id
+    plugin_restore_token = prepare_virtual_human_agent_archive(
+        normalized_agent_id,
+        stage_workspace=True,
+    )
+    try:
+        workspace_result = s._delete_purged_agent_workspace(agent_snapshot)
+        if list(workspace_result.get("skippedPaths") or []):
+            skipped = ", ".join(
+                str(item) for item in list(workspace_result.get("skippedPaths") or [])[:3]
             )
-        ]
-        state["agents"] = agents
-        removed_tool_policy = False
-        removed_memory_policy = False
-        if tool_policy_id and tool_policy_id != s.DEFAULT_TOOL_POLICY_ID and s._count_policy_refs(agents, "toolPolicyId", tool_policy_id) == 0:
-            policies = s._tool_policies(state)
-            removed_tool_policy = policies.pop(tool_policy_id, None) is not None
-            state["toolPolicies"] = policies
-        if memory_policy_id and s._count_policy_refs(agents, "memoryPolicyId", memory_policy_id) == 0:
-            policies = s._memory_policies(state)
-            removed_memory_policy = policies.pop(memory_policy_id, None) is not None
-            state["memoryPolicies"] = policies
-        s.save_state(state)
+            raise s.AgentDirectoryError(
+                f"Agent workspace could not be fully deleted: {skipped}"
+            )
+
+        with s._STATE_LOCK:
+            state = s.load_state()
+            agent = s._find_agent(state, normalized_agent_id)
+            if agent is None:
+                raise s.AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+            current_status = str(agent.get("status") or "active").strip() or "active"
+            if current_status != "archived" and not allow_active:
+                raise s.AgentDirectoryError("Only archived Agents can be permanently deleted.")
+            if s._agent_archive_protected(agent) and not _allow_protected_system_repair:
+                raise s.AgentDirectoryError("Protected core Agent cannot be purged.")
+            agents = [
+                item
+                for item in state.get("agents") or []
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("agentId") or "").strip() == normalized_agent_id
+                )
+            ]
+            state["agents"] = agents
+            removed_tool_policy = False
+            removed_memory_policy = False
+            if tool_policy_id and tool_policy_id != s.DEFAULT_TOOL_POLICY_ID and s._count_policy_refs(agents, "toolPolicyId", tool_policy_id) == 0:
+                policies = s._tool_policies(state)
+                removed_tool_policy = policies.pop(tool_policy_id, None) is not None
+                state["toolPolicies"] = policies
+            if memory_policy_id and s._count_policy_refs(agents, "memoryPolicyId", memory_policy_id) == 0:
+                policies = s._memory_policies(state)
+                removed_memory_policy = policies.pop(memory_policy_id, None) is not None
+                state["memoryPolicies"] = policies
+            s.save_state(state)
+    except Exception as exc:
+        try:
+            rollback_virtual_human_agent_archive(plugin_restore_token)
+        except Exception as rollback_exc:
+            raise exc from rollback_exc
+        raise
 
     result = {
         "agentId": normalized_agent_id,
@@ -387,6 +420,7 @@ def purge_archived_agent_instance(
         "toolPolicyId": tool_policy_id,
         "memoryPolicyId": memory_policy_id,
     }
+    commit_virtual_human_agent_purge(plugin_restore_token)
     s._record_agent_purged_event(agent_snapshot, result)
     return result
 

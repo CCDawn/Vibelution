@@ -4,6 +4,7 @@ export type AgentCenterPane = "overview" | "config" | "activity";
 
 export type AgentCenterReturnLabel =
   | "agents"
+  | "companions"
   | "tools"
   | "teams"
   | "chat"

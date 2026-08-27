@@ -395,6 +395,46 @@ def _finish_session_turn_worker(
     s._publish_session_detail_snapshot(session_id)
 
 
+def _proactive_turn_is_current(context: dict[str, Any]) -> bool:
+    if str(context.get("origin") or "") != "proactive_plugin":
+        return True
+    from core.web.services.virtual_human_life_service import (
+        proactive_context_is_current,
+    )
+
+    return bool(proactive_context_is_current(context))
+
+
+def _cancel_stale_proactive_turn(context: dict[str, Any], *, reason: str) -> None:
+    if str(context.get("origin") or "") != "proactive_plugin":
+        return
+    from core.web.services.session.proactive import cancel_proactive_turn_context
+
+    cancel_proactive_turn_context(context, reason=reason)
+
+
+def _finalize_proactive_delivery_after_persist(
+    context: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Best-effort plugin receipt after the assistant item is already durable.
+
+    Receipt bookkeeping must never rewrite a successfully persisted Session turn as
+    failed. A later heartbeat or operator action can inspect/reconcile the still-open
+    delivery attempt without corrupting the conversation's terminal state.
+    """
+
+    if str(context.get("origin") or "") != "proactive_plugin":
+        return None
+    try:
+        from core.web.services.virtual_human_life_service import (
+            finalize_proactive_delivery,
+        )
+
+        return finalize_proactive_delivery(context)
+    except Exception:
+        return None
+
+
 def _abort_session_turn_for_stop(
     *,
     session_id: str,
@@ -426,6 +466,11 @@ def _abort_session_turn_for_stop(
             "stopReason": trim_lines(stop_reason, max_lines=2),
         },
     )
+    if str(context.get("origin") or "") == "proactive_plugin":
+        _cancel_stale_proactive_turn(context, reason=stop_reason or "proactive_turn_stopped")
+        if finish_worker:
+            _finish_session_turn_worker(session_id, turn_id, turn_control)
+        return True
     s._persist_session_turn_result(
         session_id,
         s._build_stopped_turn_result(stop_reason),
@@ -442,12 +487,26 @@ def _abort_session_turn_for_stop(
 def _run_session_turn(context: dict[str, Any]) -> None:
     """Run one scheduled turn inside a scoped child trace span."""
 
+    s = _service()
+
     from core.logging.trace_context import (
         TraceContext,
         bind_trace_context,
         get_current_trace_context,
         new_trace_context,
     )
+
+    if not _proactive_turn_is_current(context):
+        _cancel_stale_proactive_turn(context, reason="binding_revision_fence_before_prepare")
+        turn_control = context.get("turn_control")
+        if not isinstance(turn_control, s.SessionTurnControl):
+            turn_control = s._get_session_turn_control(str(context.get("session_id") or "").strip())
+        _finish_session_turn_worker(
+            str(context.get("session_id") or "").strip(),
+            str(context.get("turn_id") or "").strip(),
+            turn_control,
+        )
+        return
 
     parent_context = TraceContext.from_carrier(context.get("trace_context_carrier"))
     if parent_context is None:
@@ -1419,6 +1478,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 # Context composition is already available through live output and the
                 # conversation journal.  A durable WorkRun rewrite here blocks the
                 # imminent model request and is immediately superseded by model_request.
+                if not _proactive_turn_is_current(context):
+                    _cancel_stale_proactive_turn(
+                        context,
+                        reason="binding_revision_fence_before_model_request",
+                    )
+                    return
                 tool_scope = ToolExecutionScope(session_id=session_id, turn_id=turn_id)
                 with (
                     s.session_reference_context(context.get("session_references") or []),
@@ -1468,6 +1533,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     "toolCallCount": len(turn_capture.tool_calls),
                 },
             )
+            if not _proactive_turn_is_current(context):
+                _cancel_stale_proactive_turn(
+                    context,
+                    reason="binding_revision_fence_before_assistant_persist",
+                )
+                return
             s._persist_session_turn_result(
                 session_id,
                 result,
@@ -1477,6 +1548,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 user_message_source=str(context.get("user_message_source") or "").strip(),
                 turn_id=turn_id,
             )
+            _finalize_proactive_delivery_after_persist(context)
             if s._is_session_turn_current(session_id, turn_id):
                 s._set_session_running(session_id, False, turn_id=turn_id)
                 s._publish_session_detail_snapshot(session_id)
@@ -1509,6 +1581,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         if s._is_session_turn_current(session_id, turn_id):
             s._persist_session_turn_failure(session_id, context, exc)
     finally:
+        if str(context.get("origin") or "") == "proactive_plugin":
+            from core.web.services.session.proactive import (
+                release_proactive_turn_context,
+            )
+
+            release_proactive_turn_context(context)
         _finish_session_turn_worker(session_id, turn_id, turn_control)
 
 def _run_session_continuation_loop(

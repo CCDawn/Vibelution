@@ -91,6 +91,7 @@ from core.web.services.team_workflow.research_project_agent_tasks import (
     ResearchProjectAgentTaskError,
     get_research_project_agent_task_context,
     get_research_project_agent_task_status,
+    reconcile_research_project_agent_task_statuses,
     require_research_project_agent_task,
     require_research_project_experiment_plan,
     start_research_project_agent_task,

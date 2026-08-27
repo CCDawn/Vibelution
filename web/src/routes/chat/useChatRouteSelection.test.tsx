@@ -165,6 +165,25 @@ describe("useChatRouteSelection committed-location contract", () => {
     expect(committedSearch()).toContain("session=session-b");
   });
 
+  it("opens a companion through the sole Chat route writer and clears that context on ordinary navigation", () => {
+    mount(["/chat"]);
+    act(() => {
+      latest().openCompanionSession("session-nora", "agent/nora", {
+        returnLabel: "人物大厅",
+      });
+    });
+    expect(router.state.location.pathname).toBe("/chat");
+    expect(committedSearch()).toContain("session=session-nora");
+    expect(committedSearch()).toContain("companion=agent%2Fnora");
+    expect(committedSearch()).toContain("returnTo=%2Fcompanions");
+    expect(committedSearch()).toContain("returnLabel=%E4%BA%BA%E7%89%A9%E5%A4%A7%E5%8E%85");
+
+    act(() => {
+      latest().openSession("session-ordinary");
+    });
+    expect(committedSearch()).toBe("?session=session-ordinary");
+  });
+
   it("openRoom pushes and openProjectBus commits the explicit project bus route", () => {
     mount(["/chat?session=session-a"]);
     act(() => {

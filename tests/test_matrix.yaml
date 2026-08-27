@@ -125,6 +125,31 @@ rules:
     notes:
       - "New *_service.py facades must appear in core/web/services/README.md (regen via scripts/_gen_services_readme.py)."
 
+  - id: virtual-human-life-plugin
+    description: "Agent-scoped virtual human life plugin, proactive turns, API, and tool bundle."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/agent_plugins/__init__.py"
+      - "core/agent_plugins/virtual_human_life/**"
+      - "core/web/services/agent_plugin_service.py"
+      - "core/web/services/session/proactive.py"
+      - "core/web/services/tool_catalog.py"
+      - "core/web/services/virtual_human_life_service.py"
+      - "core/web/routes/agent_plugin*.py"
+      - "core/web/routes/virtual_human_life*.py"
+      - "tools/virtual_human_life_tools.py"
+      - "tools/Key_Tools.py"
+      - "tests/test_virtual_human_life_api.py"
+      - "tests/test_virtual_human_life_plugin.py"
+      - "tests/test_virtual_human_life_tools.py"
+      - "tests/test_virtual_human_session_proactive.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_virtual_human_life_api.py tests/test_virtual_human_life_plugin.py tests/test_virtual_human_life_tools.py tests/test_virtual_human_session_proactive.py -q"
+    notes:
+      - "The plugin remains isolated by agentId binding; this batch owns its domain, proactive receipt, API, and tool authorization contracts."
+
   - id: web-session-chat
     description: "Direct chat, session routes, and room service/route behavior."
     executionLayers:

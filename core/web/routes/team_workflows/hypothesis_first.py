@@ -19,6 +19,7 @@ from core.research.workflow.contracts import (
     ContractValidationError,
     scope_hash_for,
 )
+from core.web.services import chat_room_service
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow import (
     hypothesis_rounds,
@@ -157,8 +158,13 @@ def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
             hypothesis_first_chain.StateVersionConflictError,
             hypothesis_first_chain.StaleDigestError,
             hypothesis_first_chain.IdempotencyConflictError,
+            chat_room_service.ChatRoomBusyError,
         ),
     ):
+        # A busy linked chat room is a transient conflict on a V2 retry path
+        # (retry_generation / resume_discussion / reopen_review restart room
+        # rounds): 409 lets the client re-poll and retry instead of reading a
+        # 500 as a server fault (SCI-096 UX follow-up).
         status_code = 409
     elif isinstance(
         exc,
@@ -183,6 +189,7 @@ def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
 _DOMAIN_ERRORS = (
     TeamServiceError,
     ContractValidationError,
+    chat_room_service.ChatRoomBusyError,
     hypothesis_selection.ResearchHypothesisSelectionError,
     meeting_rounds.ResearchMeetingRoundError,
     meeting_runtime.ResearchMeetingRuntimeError,

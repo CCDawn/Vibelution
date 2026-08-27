@@ -57,6 +57,8 @@ describe("agentRouteBulkModel", () => {
   it("formats bulk summary and center return labels", () => {
     expect(agentBulkActionSummary("archive", 2, 1, 0, ["ok"], "zh")).toContain("成功 2");
     expect(agentCenterReturnLabel("teams", "zh")).toBe("返回团队");
+    expect(agentCenterReturnLabel("companions", "zh")).toBe("返回人物大厅");
+    expect(agentCenterReturnLabel("companions", "en")).toBe("Back to companion lobby");
     expect(safeAgentCenterReturnTo("/teams?x=1")).toContain("/teams");
   });
 

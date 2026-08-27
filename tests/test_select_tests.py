@@ -187,6 +187,28 @@ def test_selector_matches_session_service_to_chat_validation_commands():
     assert not any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
+def test_selector_matches_virtual_human_plugin_to_focused_validation_commands():
+    result = select_tests.select_tests(
+        [
+            "core/agent_plugins/virtual_human_life/service.py",
+            "core/web/routes/virtual_human_life.py",
+            "tools/virtual_human_life_tools.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    plugin_rule = next(
+        rule for rule in result["matchedRules"] if rule["id"] == "virtual-human-life-plugin"
+    )
+    assert plugin_rule["matchedFiles"] == [
+        "core/agent_plugins/virtual_human_life/service.py",
+        "core/web/routes/virtual_human_life.py",
+        "tools/virtual_human_life_tools.py",
+    ]
+    assert any("tests/test_virtual_human_life_plugin.py" in command for command in result["commands"])
+    assert result["coverageGaps"] == []
+
+
 def test_selector_matches_local_quality_gate_surfaces():
     result = select_tests.select_tests(
         [

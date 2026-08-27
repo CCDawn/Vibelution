@@ -24,7 +24,7 @@ import time
 
 import pytest
 
-from core.llm.types import CanonicalItemIdentity, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
@@ -709,3 +709,90 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
     assert result["candidates"][0]["reviewedBy"] == f"llm:{_FAKE_LLM['modelId']}"
     assert result["metaReview"]["recommendationCandidateId"] == "cand-a"
     assert result["metaReview"]["accepted"] is True
+
+
+# ---------------------------------------------------------------------------
+# Review-call timeout budget (SCI-096: a hung review-profile call pinned the
+# meeting in summarizing for 33+ minutes while holding the summary lock)
+# ---------------------------------------------------------------------------
+
+
+def test_review_llm_call_timeout_seconds_env_override(monkeypatch):
+    monkeypatch.delenv(
+        llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, raising=False
+    )
+    default = llm_review_runners.review_llm_call_timeout_seconds()
+    assert default == llm_review_runners.REVIEW_LLM_CALL_TIMEOUT_SECONDS
+    assert 120 <= default <= 180
+
+    monkeypatch.setenv(
+        llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, "42.5"
+    )
+    assert llm_review_runners.review_llm_call_timeout_seconds() == 42.5
+
+    for junk in ("not-a-number", "0", "-3"):
+        monkeypatch.setenv(
+            llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, junk
+        )
+        assert (
+            llm_review_runners.review_llm_call_timeout_seconds()
+            == llm_review_runners.REVIEW_LLM_CALL_TIMEOUT_SECONDS
+        )
+
+
+def test_digest_drafter_times_out_with_structured_error(monkeypatch):
+    release = threading.Event()
+
+    def hanging_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        # Simulate the wedged provider transport: never returns on its own.
+        assert release.wait(timeout=10), "test cleanup must release the worker"
+        return _FakeResponse("{}")
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", hanging_invoke_llm)
+    monkeypatch.setattr(
+        llm_review_runners, "review_llm_call_timeout_seconds", lambda: 0.2
+    )
+
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+    try:
+        with pytest.raises(llm_review_runners.ReviewLLMTimeoutError) as exc_info:
+            drafter(_meeting_round(), _source_messages())
+    finally:
+        release.set()
+
+    error = exc_info.value
+    assert isinstance(error, LLMError)
+    assert error.category == "timeout"
+    assert error.retryable is True
+    assert error.purpose == "meeting_digest"
+    assert error.timeout_seconds == 0.2
+    assert "meeting_digest" in str(error)
+
+
+def test_receipt_bound_runner_times_out_with_structured_error(monkeypatch):
+    release = threading.Event()
+
+    def hanging_invoke_outcome(client, messages, tools=None, context=None, **kwargs):
+        assert release.wait(timeout=10), "test cleanup must release the worker"
+        raise AssertionError("the hung call must not produce an outcome")
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", hanging_invoke_outcome)
+    monkeypatch.setattr(
+        llm_review_runners, "review_llm_call_timeout_seconds", lambda: 0.2
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
+    )
+    context = _formal_review_context()
+    try:
+        with pytest.raises(llm_review_runners.ReviewLLMTimeoutError) as exc_info:
+            runners["pairwise_runner"](
+                _candidate("cand-a", "假说 A"),
+                _candidate("cand-b", "假说 B"),
+                context,
+            )
+    finally:
+        release.set()
+
+    assert exc_info.value.purpose == "hypothesis_pairwise"
+    assert exc_info.value.category == "timeout"

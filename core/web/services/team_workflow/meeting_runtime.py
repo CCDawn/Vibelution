@@ -2262,8 +2262,19 @@ def _prepare_meeting_summary_draft_locked(
             normalized_team_id, normalized_round_id, drafter=drafter
         )
     except Exception as exc:
+        # A review-profile LLM call that exceeds its wall-clock budget must
+        # surface as a distinct recoverable failure (SCI-096): the meeting
+        # stays in ``summarizing`` with a structured summaryDraftError, the
+        # per-meeting lock is released by this return, and the retry path
+        # (summary-draft / regenerate_summary) regenerates from the bound
+        # source messages without reopening the discussion.
+        from core.web.services.team_workflow.llm_review_runners import (
+            ReviewLLMTimeoutError,
+        )
+
+        timed_out = isinstance(exc, ReviewLLMTimeoutError)
         error = {
-            "code": "summary_draft_failed",
+            "code": "summary_draft_timeout" if timed_out else "summary_draft_failed",
             "message": str(exc),
             "remediationLabel": "重试生成纪要",
         }

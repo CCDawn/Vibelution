@@ -208,6 +208,12 @@ from .session.submit import (
     submit_session_message,
     submit_session_message_lightweight,
 )
+from .session.proactive import (
+    cancel_proactive_turn_context,
+    cancel_virtual_human_proactive_turns,
+    release_proactive_turn_context,
+    submit_session_proactive_turn,
+)
 from .session.schedule import (
     _cancel_queued_scheduler_context,
     _cancel_queued_session_turn,

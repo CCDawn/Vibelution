@@ -37,6 +37,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
 import { archiveAgent, updateAgent } from "../../api/agents";
+import { listVirtualHumanCompanions } from "../../api/agentPlugins";
 import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -61,6 +62,7 @@ import {
   SessionTurnAcceptedResponse,
   ConversationMessage,
   ToolCall,
+  VirtualHumanCompanion,
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
@@ -156,6 +158,8 @@ import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
+import { CompanionLifeRail } from "../companions/CompanionLifeRail";
+import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
 import {
@@ -679,6 +683,9 @@ export function ChatCodingRoute() {
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
+  const requestedCompanionId = useMemo(() => {
+    return String(new URLSearchParams(location.search).get("companion") || "").trim();
+  }, [location.search]);
   const workflowSessionAnchor = useMemo(() => {
     // Task 7: exact node session anchors — never invent agent default DM.
     try {
@@ -772,6 +779,30 @@ export function ChatCodingRoute() {
     return () => observer.disconnect();
   }, []);
   const pageVisible = usePageVisibility();
+  const companionMode = Boolean(requestedCompanionId && requestedSessionId && !requestedRoomId);
+  const companionsQuery = useQuery({
+    queryKey: queryKeys.virtualHumanCompanions(),
+    queryFn: listVirtualHumanCompanions,
+    enabled: companionMode,
+    refetchInterval: companionMode && pageVisible ? 30_000 : false,
+  });
+  const activeCompanion = useMemo<VirtualHumanCompanion | null>(() => {
+    if (!companionMode) return null;
+    return (companionsQuery.data ?? []).find((companion) => (
+      companion.agentId === requestedCompanionId
+      && companion.directSessionId === requestedSessionId
+    )) ?? null;
+  }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
+  const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
+    ? "loading"
+    : companionsQuery.isError && !companionsQuery.data
+      ? "error"
+      : activeCompanion
+        ? "ready"
+        : "missing";
+  const companionRailError = companionsQuery.isError
+    ? describeError(companionsQuery.error, lang === "zh" ? "人物状态载入失败" : "Failed to load companion")
+    : "";
   const [chatStartupDataReady, setChatStartupDataReady] = useState(false);
   const [startupDetailSettledSessionId, setStartupDetailSettledSessionId] = useState("");
   const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady);
@@ -2782,7 +2813,17 @@ export function ChatCodingRoute() {
         </VButton>
       ) : null
       }
-      statusRail={(
+      statusRail={companionMode ? (
+      <CompanionLifeRail
+        className={statusRailClassName}
+        collapsed={statusRailCollapsed}
+        overlayOpen={statusRailOverlayOpen}
+        companion={activeCompanion}
+        state={companionRailState}
+        errorMessage={companionRailError}
+        lang={lang}
+      />
+      ) : (
       <Suspense fallback={null}>
       <ChatStatusRail
         statusRailClassName={statusRailClassName}
@@ -2859,8 +2900,8 @@ export function ChatCodingRoute() {
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            showSessionTabs={Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
-            showAgentFallbackTab
+            showSessionTabs={!companionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+            showAgentFallbackTab={!companionMode}
             workspaceActiveTab={workspace.activeTab}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
@@ -3203,7 +3244,17 @@ export function ChatCodingRoute() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       /> : null
       }
-      conversationIndex={(
+      conversationIndex={companionMode ? (
+      <CompanionPersonRail
+        className={conversationIndexPaneClassName}
+        collapsed={conversationIndexCollapsed}
+        overlayOpen={conversationIndexOverlayOpen}
+        companion={activeCompanion}
+        state={companionRailState}
+        errorMessage={companionRailError}
+        lang={lang}
+      />
+      ) : (
       <ChatConversationIndexRail
         conversationIndexPaneClassName={conversationIndexPaneClassName}
         conversationIndexCollapsed={conversationIndexCollapsed}

@@ -162,4 +162,14 @@ describe("router route contracts", () => {
       }),
     );
   });
+
+  it("keeps the companion lobby separate while the native Chat route owns person conversations", () => {
+    const lobbyRoute = findWorkbenchRoute("companions");
+    expectRouteErrorSurface(lobbyRoute, "workbench");
+    expectLazyFallback(lobbyRoute, "正在打开工作台", "workbench");
+
+    const chatRoute = findWorkbenchRoute("chat");
+    expectRouteErrorSurface(chatRoute, "workbench");
+    expect(lazyFallbackMarkup(chatRoute)).toContain('data-vui="chat-session-workbench-shell"');
+  });
 });

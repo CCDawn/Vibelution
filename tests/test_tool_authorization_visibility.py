@@ -32,6 +32,74 @@ def test_enforced_authorization_requires_agent_and_turn_identity():
         )
 
 
+def test_enforced_authorization_applies_plugin_binding_fence_after_policy():
+    registry = {
+        "registryVersion": 1,
+        "registryFingerprint": "registry-test",
+        "descriptors": [
+            {
+                "name": "grep_search_tool",
+                "enabled": True,
+                "capabilities": ["workspace_read"],
+                "risk": "read",
+                "approval": "never",
+                "aliases": [],
+            },
+            {
+                "name": "virtual_human_status_tool",
+                "enabled": True,
+                "capabilities": ["life_state"],
+                "risk": "read",
+                "approval": "never",
+                "aliases": [],
+            },
+        ],
+        "tools": [
+            {
+                "name": "grep_search_tool",
+                "enabled": True,
+                "runtimeActive": True,
+                "llmVisible": True,
+            },
+            {
+                "name": "virtual_human_status_tool",
+                "enabled": True,
+                "runtimeActive": True,
+                "llmVisible": True,
+            },
+        ],
+    }
+    report = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-a",
+            "turnId": "turn-a",
+            "agent": {"agentId": "agent-a", "primaryMode": "chat", "metadata": {}},
+            "toolPolicy": {
+                "policyId": "tool-agent-a",
+                "policyVersion": 1,
+                "allowedTools": ["grep_search_tool", "virtual_human_status_tool"],
+                "blockedTools": [],
+                "preferredTools": [],
+                "networkAccess": "restricted",
+                "mutationAccess": "controlled",
+                "delegationAccess": "none",
+                "maxCallsPerTurn": 4,
+                "approvalOverrides": {},
+            },
+            "externallyBlockedTools": ["virtual_human_status_tool"],
+        },
+        registry_payload=registry,
+    )
+
+    decision = report.decision
+    assert decision.visible_tools == ("grep_search_tool",)
+    assert decision.executable_tools == ("grep_search_tool",)
+    reason = decision.deny_reason_for("virtual_human_status_tool")
+    assert reason is not None
+    assert reason.code.value == "not_assigned"
+    assert reason.phase == "visibility"
+
+
 def test_bind_authorization_runtime_fills_identity_without_policy():
     runtime = bind_authorization_runtime(
         current_runtime={},

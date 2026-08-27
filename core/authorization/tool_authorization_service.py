@@ -204,6 +204,10 @@ def _resolve_authorization(
             }
         )
     )
+    externally_blocked_tools = _coerce_str_list(
+        runtime_values.get("externallyBlockedTools")
+        or runtime_values.get("externally_blocked_tools")
+    )
     decision = evaluate_tool_policy(
         agent_id=_coerce_text(runtime_values.get("agentId") or agent.get("agentId")).strip(),
         policy=policy,
@@ -212,6 +216,7 @@ def _resolve_authorization(
         registry_version=_safe_int(payload.get("registryVersion"), 0),
         registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
         available_tool_names=available_names,
+        externally_blocked_tools=externally_blocked_tools,
         generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
     )
     deny_counts = Counter(reason.code.value for _, reason in decision.denied)

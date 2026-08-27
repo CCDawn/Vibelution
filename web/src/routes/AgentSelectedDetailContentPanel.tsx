@@ -31,6 +31,9 @@ const AgentConfigReferencesPanePanel = lazy(() =>
 const AgentConfigChangeHistoryPanel = lazy(() =>
   import("./AgentConfigChangeHistoryPanel").then((m) => ({ default: m.AgentConfigChangeHistoryPanel })),
 );
+const AgentVirtualHumanPluginPanel = lazy(() =>
+  import("./agent-plugins/AgentVirtualHumanPluginPanel").then((m) => ({ default: m.AgentVirtualHumanPluginPanel })),
+);
 
 type AgentSelectedDetailHeaderProps = Omit<
   ComponentProps<typeof AgentDetailHeaderPanel>,
@@ -51,6 +54,7 @@ export type AgentSelectedDetailContentPanelProps = {
   configPrimary: ComponentProps<typeof AgentConfigPrimaryPanePanel>;
   configPolicies: ComponentProps<typeof AgentConfigPolicyPanePanel>;
   configReferences: ComponentProps<typeof AgentConfigReferencesPanePanel>;
+  virtualHumanPlugin: ComponentProps<typeof AgentVirtualHumanPluginPanel>;
   activity: ComponentProps<typeof AgentActivityPanePanel>;
   /** Prefer opening ops when agent has health issues. */
   preferOpsSection?: boolean;
@@ -99,6 +103,7 @@ export function AgentSelectedDetailContentPanel({
   configPrimary,
   configPolicies,
   configReferences,
+  virtualHumanPlugin,
   activity,
   preferOpsSection = false,
 }: AgentSelectedDetailContentPanelProps) {
@@ -166,6 +171,7 @@ export function AgentSelectedDetailContentPanel({
               ) : null}
               {configSection === "capability" ? (
                 <>
+                  <AgentVirtualHumanPluginPanel {...virtualHumanPlugin} />
                   <AgentConfigPolicyPanePanel {...configPolicies} />
                   <AgentConfigReferencesPanePanel {...configReferences} />
                 </>

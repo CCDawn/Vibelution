@@ -850,6 +850,7 @@ export function AppShell() {
   }, [lang, location.search, returnNavigationTarget]);
   const activePrimaryRouteLabel = useMemo(() => {
     const pathname = location.pathname;
+    if (pathname.startsWith("/companions")) return t("navCompanions");
     if (pathname.startsWith("/chat")) return t("navChat");
     if (pathname.startsWith("/supervised-evolution")) return t("navSupervisedEvolution");
     if (pathname.startsWith("/self-evolution")) return t("navSelfEvolution");
@@ -2305,6 +2306,21 @@ export function AppShell() {
           ) : (
             <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Chat is disabled" : "对话未启用"}>
               {t("navChat")}
+            </span>
+          )}
+          {chatEnabled ? (
+            <VRouteLinkButton
+              chrome="shell-nav"
+              to="/companions"
+              className={shellPrimaryNavClass(location.pathname, "/companions")}
+              aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined}
+              onClick={(event) => handlePrimaryNavClick(event, "/companions")}
+            >
+              {t("navCompanions")}
+            </VRouteLinkButton>
+          ) : (
+            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Chat is disabled" : "对话未启用"}>
+              {t("navCompanions")}
             </span>
           )}
           {supervisedEvolutionEnabled ? (

@@ -85,6 +85,7 @@
 | --- | --- | --- | --- | --- |
 | `agent_bulk_delete_service.py` | Bulk Agent delete/archive orchestration helpers. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py` |
 | `agent_bulk_edit_service.py` | Bulk Agent edit orchestration helpers. | — | `agents.py` | `test_agent_bulk_edit_service.py` |
+| `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | `core/agent_plugins/` | `agent_plugins.py` | `test_virtual_human_life_api.py` |
 | `agent_operation_service.py` | Shared Agent create semantics for routes and governed lifecycle tools. | — | `agents.py`, `tools/project_operation_tools.py` | `test_project_operation_tools.py`, `test_agent_lifecycle_create_delete.py` |
 | `agent_config_change_service.py` | Append-only private drafts and revision evidence for Agent configuration. | — | `agents.py` | `test_agent_config_change_service.py` |
 | `agent_config_workspace_service.py` | Read-only Agent configuration workspace aggregation. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_config_change_service.py`, `test_agent_config_workspace_routes.py` |
@@ -99,6 +100,7 @@
 | `project_agent_bus_service.py` | Project-level Agent communication bus. | — | `project_agent_bus.py` | `test_agent_orphan_team_private_sessions.py`, `test_developer_sandbox_path_routing.py`, `test_project_agent_bus_routes.py` |
 | `prompt_template_service.py` | Prompt template index service for AgentInstance configuration. | — | `agents.py` | `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py`, `test_agent_lifecycle_reset_policy.py` |
 | `supervised_agent_service.py` | Persistent AgentInstance alignment for supervised evolution roles. | — | `agents.py`, `evolution.py` | `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py`, `test_agent_lifecycle_reset_policy.py` |
+| `virtual_human_life_service.py` | Web/runtime facade for the trusted virtual-human-life plugin. | `core/agent_plugins/virtual_human_life/` | `virtual_human_life.py` | `test_virtual_human_life_api.py`, `test_virtual_human_life_plugin.py`, `test_virtual_human_session_proactive.py` |
 
 ## Chat room / conversation index
 

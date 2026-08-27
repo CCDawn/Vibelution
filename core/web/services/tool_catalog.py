@@ -37,6 +37,7 @@ _CATEGORY_SCOPES = {
     "runtime_control": ("runtime",),
     "media_research": ("media",),
     "custom_generated": ("custom",),
+    "virtual_life": ("agent",),
 }
 _DESTRUCTIVE_RISK_TAGS = {"delete_or_cleanup", "project_rollback"}
 _EXECUTE_RISK_TAGS = {
@@ -167,6 +168,7 @@ CATEGORY_LABELS = {
     "self_model": "Self model",
     "media_research": "Media and knowledge",
     "custom_generated": "Custom generated",
+    "virtual_life": "Virtual human life",
     "uncategorized": "Uncategorized",
 }
 
@@ -839,9 +841,67 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["team_knowledge_rating"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "virtual_human_status_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "life_state", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "virtual_human_schedule_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "life_schedule", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "virtual_human_activity_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "life_activity", "structured_result"],
+        "riskTags": ["session_state_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "virtual_human_diary_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "life_diary", "structured_result"],
+        "riskTags": ["memory_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "virtual_human_relationship_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "life_relationship", "structured_result"],
+        "riskTags": ["memory_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "virtual_human_proactive_message_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "proactive_message", "structured_result"],
+        "riskTags": ["session_state_write", "session_wake"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
 }
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "bundleId": "virtual_human_life",
+        "label": "虚拟人生活工具包",
+        "description": "仅对已启用插件的 Agent 生效：查询和推进自己的生活、日记、关系与受控主动消息。",
+        "category": "virtual_life",
+        "toolNames": [
+            "virtual_human_status_tool",
+            "virtual_human_schedule_tool",
+            "virtual_human_activity_tool",
+            "virtual_human_diary_tool",
+            "virtual_human_relationship_tool",
+            "virtual_human_proactive_message_tool",
+        ],
+        "preferredToolNames": [
+            "virtual_human_status_tool",
+            "virtual_human_schedule_tool",
+            "virtual_human_activity_tool",
+            "virtual_human_diary_tool",
+            "virtual_human_relationship_tool",
+            "virtual_human_proactive_message_tool",
+        ],
+    },
     {
         "bundleId": "pure_chat",
         "label": "纯聊天 / 无工具",
