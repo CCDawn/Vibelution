@@ -488,7 +488,7 @@ def test_project_task_reconcile_lag_is_live_progressing(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        "core.web.services.team_workflow.research_project_agent_tasks.reconcile_research_project_agent_task_statuses",
         lambda _team_id, _project_id: None,
     )
     monkeypatch.setattr(

@@ -592,12 +592,12 @@ def _require_project_task_terminal(
         raise RuntimeError("input snapshot has no projectId for project Agent task completion")
     from core.web.services.team_workflow.research_project_agent_tasks import (
         _read_research_project_agent_task_record,
-        get_research_project_agent_task_status,
+        reconcile_research_project_agent_task_statuses,
     )
 
     # Reconcile the canonical turn into the task store first, then read the
     # internal record so status and contract come from one server authority.
-    get_research_project_agent_task_status(team_id, project_id)
+    reconcile_research_project_agent_task_statuses(team_id, project_id)
     task = _read_research_project_agent_task_record(team_id, project_id, task_id)
     if task is None:
         raise RuntimeError("completed project Agent task is missing from its authority")
