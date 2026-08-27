@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { queryKeys } from "../../../api/queryKeys";
@@ -8,6 +8,10 @@ import type {
   ChallengeDeliverablesInspection,
   ChallengeSubmissionReadiness,
 } from "../../../api/types/challengeCup";
+import {
+  observeSubmissionReadinessChanged,
+  trackDeliverablesExport,
+} from "../challengeCupTelemetry";
 import { VButton, VStateSurface, VStatusChip } from "../../../components/vui";
 import styles from "./ChallengeSubmissionReadinessPanel.styles";
 
@@ -63,16 +67,42 @@ export function ChallengeSubmissionReadinessPanel({
   });
   const [deliverablesInspection, setDeliverablesInspection] = useState<ChallengeDeliverablesInspection | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  // Edge-triggered milestone evidence: the final competition gate flipping
+  // ready/blocked deserves one durable event per transition.
+  const readinessStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const readiness = submissionReadinessQuery.data;
+    if (!readiness) return;
+    const status = String(readiness.status);
+    const previousStatus = readinessStatusRef.current;
+    readinessStatusRef.current = status;
+    if (previousStatus === null || previousStatus === status) return;
+    observeSubmissionReadinessChanged({
+      teamId,
+      previousStatus,
+      status,
+      blockerCodes: readiness.blockers.map((blocker) => blocker.code),
+      blockerCount: readiness.blockerCount,
+    });
+  }, [submissionReadinessQuery.data, teamId]);
   async function inspectSubmissionDeliverables(): Promise<ChallengeDeliverablesInspection> {
     return exportResearchDeliverables<ChallengeDeliverablesInspection>(teamId, { requestedByAgent: "Challenge Cup Delivery" });
   }
   const exportMutation = useMutation({
+    onMutate: () => ({
+      telemetry: trackDeliverablesExport({ teamId }),
+    }),
     mutationFn: inspectSubmissionDeliverables,
-    onSuccess: (result) => {
+    onSuccess: (result, _vars, ctx) => {
+      ctx?.telemetry?.succeeded({
+        inspectionStatus: result.status,
+        blockerCount: result.blockers.length,
+      });
       setExportError(null);
       setDeliverablesInspection(result);
     },
-    onError: (reason: unknown) => {
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
       setExportError(reason instanceof Error ? reason.message : String(reason));
     },
   });

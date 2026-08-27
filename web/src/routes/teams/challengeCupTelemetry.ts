@@ -94,6 +94,76 @@ export function trackWorkflowOfferSubmit(fields: ChallengeCupActionFields): User
   return startUserAction("challenge_workflow_offer_submit", fields);
 }
 
+// ---- deep-experiment track (experiment loop + research loops) ----
+
+export function trackExperimentPlanCreate(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_plan_create", fields);
+}
+
+export function trackEngineeringProxyMaterialize(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_engineering_proxy_materialize", fields);
+}
+
+export function trackExperimentHypothesisReview(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_hypothesis_review", fields);
+}
+
+export function trackScientificHypothesisComplete(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_scientific_hypothesis_complete", fields);
+}
+
+export function trackExperimentHypothesisRevisionCreate(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_hypothesis_revision_create", fields);
+}
+
+export function trackExperimentDesignFreeze(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_design_freeze", fields);
+}
+
+export function trackExperimentHypothesisResume(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_hypothesis_resume", fields);
+}
+
+export function trackExperimentBaselineRegister(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_baseline_register", fields);
+}
+
+export function trackExperimentSmokeRun(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_smoke_run", fields);
+}
+
+export function trackExperimentSmokeResultRegister(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_smoke_result_register", fields);
+}
+
+export function trackExperimentFullRunResultRegister(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_full_run_result_register", fields);
+}
+
+export function trackExperimentKnowledgeIngestionRequest(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_experiment_knowledge_ingestion_request", fields);
+}
+
+export function trackResearchLoopCreate(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_research_loop_create", fields);
+}
+
+export function trackResearchLoopEvidenceRecord(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_research_loop_evidence_record", fields);
+}
+
+export function trackResearchLoopDecisionRecord(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_research_loop_decision_record", fields);
+}
+
+export function trackResearchLoopIterationMaterialize(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_research_loop_iteration_materialize", fields);
+}
+
+export function trackDeliverablesExport(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_deliverables_export", fields);
+}
+
 // ---- anomaly observations (all bounded: ref-guarded or inherently rare) ----
 
 export function observeWorkflowStreamInterrupted(input: {
@@ -300,5 +370,25 @@ export function observeChallengeTeamAgentsAutoRepair(input: {
       ...errorSummaryFields(input.error),
     },
     { level: input.error ? "warning" : "info", forceTimeline: true },
+  );
+}
+
+export function observeSubmissionReadinessChanged(input: {
+  teamId: string;
+  previousStatus: string;
+  status: string;
+  blockerCodes: string[];
+  blockerCount: number;
+}): void {
+  postUserActionObservation(
+    "challenge_submission_readiness_changed",
+    {
+      teamId: input.teamId,
+      previousStatus: input.previousStatus,
+      status: input.status,
+      blockerCodes: input.blockerCodes.slice(0, 12),
+      blockerCount: input.blockerCount,
+    },
+    { level: input.status === "ready" ? "info" : "warning", forceTimeline: true },
   );
 }

@@ -1453,6 +1453,15 @@ def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
         "_sync_llm_key_env_from_persisted_user_env",
         lambda *, command_type: {"ok": True, "commandType": command_type, "syncedCount": 0},
     )
+    # Command finalization reconciles the runtime snapshot; without this stub
+    # the reconcile scans real host processes and can emit
+    # workbench.consistency.closed_residual_cleanup_* events on machines that
+    # host unmanaged dev servers, making the expected event stream ambiguous.
+    monkeypatch.setattr(
+        daemon,
+        "residual_process_payload",
+        lambda *args, **kwargs: {"count": 0, "items": []},
+    )
     monkeypatch.setattr(
         daemon.supervised_control_service,
         "_LOCAL_START_SUPERVISED_RUN",
@@ -1617,6 +1626,15 @@ def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
         "_sync_llm_key_env_from_persisted_user_env",
         lambda *, command_type: {"ok": True, "commandType": command_type, "syncedCount": 0},
     )
+    # Command finalization reconciles the runtime snapshot; without this stub
+    # the reconcile scans real host processes and can emit
+    # workbench.consistency.closed_residual_cleanup_* events on machines that
+    # host unmanaged dev servers, making the expected event stream ambiguous.
+    monkeypatch.setattr(
+        daemon,
+        "residual_process_payload",
+        lambda *args, **kwargs: {"count": 0, "items": []},
+    )
     monkeypatch.setattr(
         daemon.supervised_control_service,
         "_LOCAL_RETRY_SUPERVISED_RUN",
@@ -1633,7 +1651,17 @@ def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
     assert result["snapshot"]["retryOfRunId"] == "web-supervised-old"
     assert result["sourceFreshness"]["sourceFresh"] is True
     assert result["llmKeyEnvSync"] == {"ok": True, "commandType": "retry_supervised_run", "syncedCount": 0}
-    assert [event_type for event_type, _payload in scene_events] == ["supervised_run.preflight.source_fresh"]
+    assert scene_events == [
+        (
+            "supervised_run.preflight.source_fresh",
+            {
+                "processSourceSignature": "sig-current",
+                "diskSourceSignature": "sig-current",
+                "sourceFresh": True,
+                "signaturePathsCount": len(daemon._SOURCE_SIGNATURE_PATHS),
+            },
+        )
+    ]
 
 
 def test_handle_retry_supervised_run_blocks_stale_supervised_source(monkeypatch):

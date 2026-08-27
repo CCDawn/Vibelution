@@ -418,19 +418,23 @@ class WorkflowCommandService:
         request_hash: str,
         prepared_artifact: PreparedHumanAcceptanceArtifact | None = None,
     ) -> CommandReceipt:
+        from .command_offers.retry_node import succeeded_node_rerun_available
+
         node_id = request.node_id
         latest = uow.repository.latest_attempt(request.run_id, node_id)
         if latest is None:
             raise CommandNotAllowedError("该节点没有可重试的 attempt")
+        run = uow.repository.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
         if latest.status not in (
             NodeAttemptStatus.FAILED.value,
             NodeAttemptStatus.BLOCKED.value,
             NodeAttemptStatus.CANCELLED.value,
+        ) and not succeeded_node_rerun_available(
+            node_id=node_id, latest=latest, run=run
         ):
             raise CommandNotAllowedError(f"attempt {latest.status} 不可重试")
-        run = uow.repository.get_run(request.run_id)
-        if run is None:
-            raise RunNotFoundError(request.run_id)
         persist_prepared_human_acceptance_artifact(
             uow,
             run=run,

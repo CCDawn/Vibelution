@@ -24,14 +24,27 @@ import {
   observeRealBatchAuthorizeShapeInvalid,
   observeRealBatchPhaseChanged,
   observeRealBatchPollLoopStopped,
+  observeSubmissionReadinessChanged,
   observeWorkflowReplayFailed,
   observeWorkflowReplayResync,
   observeWorkflowStreamFrameInvalid,
   observeWorkflowStreamInterrupted,
   observeWorkflowStreamReconnected,
+  trackDeliverablesExport,
   trackDevBatchRun,
   trackDevReadinessRun,
+  trackEngineeringProxyMaterialize,
   trackExperimentActivation,
+  trackExperimentBaselineRegister,
+  trackExperimentDesignFreeze,
+  trackExperimentFullRunResultRegister,
+  trackExperimentHypothesisResume,
+  trackExperimentHypothesisReview,
+  trackExperimentHypothesisRevisionCreate,
+  trackExperimentKnowledgeIngestionRequest,
+  trackExperimentPlanCreate,
+  trackExperimentSmokeResultRegister,
+  trackExperimentSmokeRun,
   trackHypothesisCandidateGenerationOpen,
   trackHypothesisSelectionRecord,
   trackQuestionPublishSubmit,
@@ -41,7 +54,12 @@ import {
   trackRealBatchAuthorize,
   trackRealBatchCancel,
   trackRealBatchStart,
+  trackResearchLoopCreate,
+  trackResearchLoopDecisionRecord,
+  trackResearchLoopEvidenceRecord,
+  trackResearchLoopIterationMaterialize,
   trackResearchRunCreate,
+  trackScientificHypothesisComplete,
   trackWorkflowHumanGateResolve,
   trackWorkflowOfferSubmit,
 } from "./challengeCupTelemetry";
@@ -62,6 +80,23 @@ const TRACKER_CASES: Array<[string, () => UserActionTracker]> = [
   ["challenge_dev_batch_run", () => trackDevBatchRun({ teamId: "research-team" })],
   ["challenge_workflow_human_gate_resolve", () => trackWorkflowHumanGateResolve({ teamId: "research-team" })],
   ["challenge_workflow_offer_submit", () => trackWorkflowOfferSubmit({ teamId: "research-team" })],
+  ["challenge_experiment_plan_create", () => trackExperimentPlanCreate({ teamId: "research-team" })],
+  ["challenge_experiment_engineering_proxy_materialize", () => trackEngineeringProxyMaterialize({ teamId: "research-team" })],
+  ["challenge_experiment_hypothesis_review", () => trackExperimentHypothesisReview({ teamId: "research-team" })],
+  ["challenge_experiment_scientific_hypothesis_complete", () => trackScientificHypothesisComplete({ teamId: "research-team" })],
+  ["challenge_experiment_hypothesis_revision_create", () => trackExperimentHypothesisRevisionCreate({ teamId: "research-team" })],
+  ["challenge_experiment_design_freeze", () => trackExperimentDesignFreeze({ teamId: "research-team" })],
+  ["challenge_experiment_hypothesis_resume", () => trackExperimentHypothesisResume({ teamId: "research-team" })],
+  ["challenge_experiment_baseline_register", () => trackExperimentBaselineRegister({ teamId: "research-team" })],
+  ["challenge_experiment_smoke_run", () => trackExperimentSmokeRun({ teamId: "research-team" })],
+  ["challenge_experiment_smoke_result_register", () => trackExperimentSmokeResultRegister({ teamId: "research-team" })],
+  ["challenge_experiment_full_run_result_register", () => trackExperimentFullRunResultRegister({ teamId: "research-team" })],
+  ["challenge_experiment_knowledge_ingestion_request", () => trackExperimentKnowledgeIngestionRequest({ teamId: "research-team" })],
+  ["challenge_research_loop_create", () => trackResearchLoopCreate({ teamId: "research-team" })],
+  ["challenge_research_loop_evidence_record", () => trackResearchLoopEvidenceRecord({ teamId: "research-team" })],
+  ["challenge_research_loop_decision_record", () => trackResearchLoopDecisionRecord({ teamId: "research-team" })],
+  ["challenge_research_loop_iteration_materialize", () => trackResearchLoopIterationMaterialize({ teamId: "research-team" })],
+  ["challenge_deliverables_export", () => trackDeliverablesExport({ teamId: "research-team" })],
 ];
 
 function postedPayloads(): Array<Record<string, unknown>> {
@@ -292,5 +327,29 @@ describe("challengeCupTelemetry round-2 observations", () => {
     expect(payloads[0].fields).toMatchObject({ outcome: "repaired" });
     expect(payloads[1]).toMatchObject({ level: "warning" });
     expect(payloads[1].fields).toMatchObject({ outcome: "failed", errorName: "Error" });
+  });
+
+  it("reports submission readiness transitions with bounded blocker codes", () => {
+    observeSubmissionReadinessChanged({
+      teamId: "research-team",
+      previousStatus: "blocked",
+      status: "ready",
+      blockerCodes: [],
+      blockerCount: 0,
+    });
+    observeSubmissionReadinessChanged({
+      teamId: "research-team",
+      previousStatus: "ready",
+      status: "blocked",
+      blockerCodes: Array.from({ length: 20 }, (_, i) => `blocker_${i}`),
+      blockerCount: 20,
+    });
+    const payloads = postedPayloads();
+    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_submission_readiness_changed_observed");
+    expect(payloads[0]).toMatchObject({ level: "info" });
+    expect(payloads[0].fields).toMatchObject({ previousStatus: "blocked", status: "ready" });
+    expect(payloads[1]).toMatchObject({ level: "warning" });
+    const fields = payloads[1].fields as Record<string, unknown>;
+    expect((fields.blockerCodes as string[]).length).toBeLessThanOrEqual(12);
   });
 });
