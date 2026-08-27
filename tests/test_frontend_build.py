@@ -617,3 +617,137 @@ def test_python_launcher_and_runtime_manager_delegate_to_the_shared_builder(monk
         "workbench.restart.build_preflight_skipped_current",
         "workbench.restart.build_preflight_skipped_current",
     ]
+
+
+# --- governed runtime home migration for serving-frontend leases ---
+
+def _governed_frontend_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Create a fully migrated governed project; return (root, runtime_home)."""
+    from vibelution_storage import (
+        PROJECTS_HOME_ENV,
+        resolve_project_storage_paths,
+        storage_migration_state_path,
+    )
+
+    projects_home = tmp_path / "projects-home"
+    project_root = tmp_path / "checkout"
+    project_root.mkdir(parents=True)
+    identity = project_root / ".vibelution" / "project.json"
+    identity.parent.mkdir(parents=True)
+    identity.write_text(json.dumps({"schemaVersion": 1, "projectId": "leases-project"}), encoding="utf-8")
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(projects_home))
+    target = resolve_project_storage_paths(project_root, projects_home=projects_home)
+    marker = storage_migration_state_path(target)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "completed",
+                "projectId": target.project_id,
+                "instanceId": target.instance_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return project_root, target.runtime
+
+
+def test_serving_leases_dir_follows_governed_runtime_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project_root, runtime_home = _governed_frontend_project(tmp_path, monkeypatch)
+    assert frontend_build.serving_frontend_leases_dir(project_root) == (
+        runtime_home / frontend_build.SERVING_FRONTEND_LEASES_DIR_NAME
+    )
+    # Pre-governance checkouts keep resolving to checkout .runtime.
+    legacy_root = tmp_path / "legacy-checkout"
+    legacy_root.mkdir()
+    assert frontend_build.serving_frontend_leases_dir(legacy_root) == (
+        legacy_root / ".runtime" / frontend_build.SERVING_FRONTEND_LEASES_DIR_NAME
+    )
+
+
+def test_gc_scans_legacy_lease_dir_and_never_deletes_fingerprints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = time.time()
+    project_root, runtime_home = _governed_frontend_project(tmp_path, monkeypatch)
+    active = _release(project_root, "release-active", key="active")
+    served_from_governed = _release(project_root, "release-governed", key="governed")
+    served_from_legacy = _release(project_root, "release-legacy", key="legacy")
+    removable = _release(project_root, "release-removable", key="removable")
+    _activate(project_root, active.name, key="active")
+
+    governed_lease = frontend_build.serving_frontend_lease_path(
+        project_root, pid=404, create_time=4.0
+    )
+    governed_lease.parent.mkdir(parents=True, exist_ok=True)
+    governed_lease.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "servingFrontendRelease": served_from_governed.name,
+            "pid": 404,
+            "createTime": 4.0,
+            "executable": "python.exe",
+        }),
+        encoding="utf-8",
+    )
+    legacy_lease = (
+        project_root / ".runtime" / frontend_build.SERVING_FRONTEND_LEASES_DIR_NAME / "lease-505-5000.json"
+    )
+    legacy_lease.parent.mkdir(parents=True)
+    legacy_lease.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "servingFrontendRelease": served_from_legacy.name,
+            "pid": 505,
+            "createTime": 5.0,
+            "executable": "python.exe",
+        }),
+        encoding="utf-8",
+    )
+    # Both fingerprint copies carry a verifiable live backend identity so the
+    # scan stays in the "verified" branch; GC must still never delete them.
+    governed_fingerprint = runtime_home / "running-code-fingerprint.json"
+    governed_fingerprint.parent.mkdir(parents=True, exist_ok=True)
+    governed_fingerprint.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "servingFrontendRelease": active.name,
+            "pid": 404,
+            "createTime": 4.0,
+            "executable": "python.exe",
+        }),
+        encoding="utf-8",
+    )
+    legacy_fingerprint = project_root / ".runtime" / "running-code-fingerprint.json"
+    legacy_fingerprint.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "servingFrontendRelease": served_from_legacy.name,
+            "pid": 505,
+            "createTime": 5.0,
+            "executable": "python.exe",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(frontend_build, "inspect_process_identity", lambda _identity: {"status": "match"})
+    os.utime(removable, (now - 10_000, now - 10_000))
+
+    result = frontend_build.gc_frontend_releases(
+        project_root,
+        now=now,
+        release_retention_seconds=3600,
+        keep_release_count=0,
+    )
+
+    # A lease left behind at the pre-migration location still protects its
+    # release from deletion.
+    assert result["leaseStatus"] == "verified"
+    assert served_from_legacy.is_dir()
+    assert served_from_governed.is_dir()
+    assert active.is_dir()
+    assert not removable.exists()
+    # Fingerprint copies are never treated as GC-managed leases.
+    assert governed_fingerprint.is_file()
+    assert legacy_fingerprint.is_file()

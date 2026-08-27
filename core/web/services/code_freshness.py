@@ -1,9 +1,12 @@
 """Running-code freshness detection.
 
 The workbench backend snapshots the git commit it was started from
-(``.runtime/running-code-fingerprint.json``). ``resolve_code_freshness``
-compares that snapshot with the current disk HEAD so the UI can tell the
-user the running instance is behind the repository and a restart is needed.
+(``running-code-fingerprint.json`` under the governed project runtime home).
+``resolve_code_freshness`` compares that snapshot with the current disk HEAD
+so the UI can tell the user the running instance is behind the repository and
+a restart is needed.  Reads fall back to the legacy checkout-relative
+``.runtime/`` location so a backend that started before the storage migration
+(or an in-flight upgrade) stays visible until its own next snapshot.
 
 Git calls go through ``core.infrastructure.no_console_git`` (CREATE_NO_WINDOW +
 GIT_OPTIONAL_LOCKS=0), matching the Windows no-console red line and the
@@ -22,9 +25,16 @@ from typing import Any
 
 from core.infrastructure.no_console_git import run_git
 from core.runtime_manager.process_identity import capture_process_identity
+from vibelution_storage import (
+    ProjectStorageMigrationStateError,
+    resolve_project_runtime_home,
+)
 
 FINGERPRINT_SCHEMA_VERSION = 1
-FINGERPRINT_RELATIVE = Path(".runtime") / "running-code-fingerprint.json"
+FINGERPRINT_NAME = "running-code-fingerprint.json"
+# Pre-governance checkout-relative snapshot location.  Writes go to the active
+# runtime home instead; this stays readable for pre-migration instances.
+LEGACY_FINGERPRINT_RELATIVE = Path(".runtime") / FINGERPRINT_NAME
 GIT_TIMEOUT_SECONDS = 10
 
 
@@ -57,7 +67,37 @@ def _short_sha(value: str) -> str:
 
 
 def running_code_fingerprint_path(project_root: Path | str) -> Path:
-    return Path(project_root) / FINGERPRINT_RELATIVE
+    """Governed snapshot write path under the active project runtime home.
+
+    Identity-less or pre-governance instances resolve to the checkout
+    ``.runtime`` location because the shared storage resolver owns that
+    fallback.  A present-but-invalid migration marker raises
+    ``ProjectStorageMigrationStateError`` (fail closed) so callers never route
+    this file into storage the boundary rejects.
+    """
+    return resolve_project_runtime_home(project_root) / FINGERPRINT_NAME
+
+
+def legacy_running_code_fingerprint_path(project_root: Path | str) -> Path:
+    """Pre-governance checkout location, kept readable during migration."""
+    return Path(project_root) / LEGACY_FINGERPRINT_RELATIVE
+
+
+def running_code_fingerprint_read_paths(project_root: Path | str) -> list[Path]:
+    """Snapshot locations to inspect: governed first, then the legacy copy."""
+    try:
+        governed = [resolve_project_runtime_home(project_root) / FINGERPRINT_NAME]
+    except ProjectStorageMigrationStateError:
+        # A present-but-invalid marker fails closed on reads too; do not
+        # quietly redirect this read to checkout storage instead.
+        return []
+    paths = list(governed)
+    # Resolve both sides so Windows short-path aliases (ADMINI~1 vs the long
+    # user directory) cannot report the same physical file as two candidates.
+    legacy = legacy_running_code_fingerprint_path(project_root).resolve()
+    if os.path.normcase(str(legacy)) != os.path.normcase(str(Path(paths[0]).resolve())):
+        paths.append(legacy)
+    return paths
 
 
 def serving_frontend_lease_path(project_root: Path | str, *, pid: int, create_time: float) -> Path:
@@ -118,7 +158,16 @@ def write_running_code_fingerprint(
         )
     if isinstance(serving_metadata, dict):
         payload["apiContractVersion"] = str(serving_metadata.get("apiContractVersion") or "v1")
-    path = running_code_fingerprint_path(root)
+    try:
+        path = running_code_fingerprint_path(root)
+    except ProjectStorageMigrationStateError as exc:
+        # Fail closed: a present-but-invalid migration marker must not route
+        # the snapshot (or its lease) back into checkout storage. Best-effort
+        # contract: report the failure instead of crashing startup.
+        payload["written"] = False
+        payload["errorType"] = type(exc).__name__
+        payload["errorMessage"] = str(exc)
+        return payload
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -154,7 +203,7 @@ def write_running_code_fingerprint(
                 lease_tmp.write_text(json.dumps(lease_payload, ensure_ascii=False, indent=2), encoding="utf-8")
                 lease_tmp.replace(lease_path)
                 payload["servingLeasePath"] = str(lease_path)
-            except OSError as exc:
+            except (OSError, ProjectStorageMigrationStateError) as exc:
                 payload["servingLeaseErrorType"] = type(exc).__name__
     except OSError as exc:
         payload["written"] = False
@@ -164,14 +213,18 @@ def write_running_code_fingerprint(
 
 
 def read_running_code_fingerprint(project_root: Path | str) -> dict[str, Any] | None:
-    path = running_code_fingerprint_path(project_root)
-    try:
-        parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(parsed, dict) or int(parsed.get("schemaVersion") or 0) != FINGERPRINT_SCHEMA_VERSION:
-        return None
-    return parsed
+    """Read the governed snapshot first, falling back to the legacy copy."""
+    for path in running_code_fingerprint_read_paths(project_root):
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(parsed, dict)
+            and int(parsed.get("schemaVersion") or 0) == FINGERPRINT_SCHEMA_VERSION
+        ):
+            return parsed
+    return None
 
 
 def read_frontend_build_provenance(project_root: Path | str) -> dict[str, Any] | None:

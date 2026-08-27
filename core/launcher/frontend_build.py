@@ -23,6 +23,10 @@ from typing import Any
 
 from core.infrastructure.codex_sandbox.process import terminate_process_tree
 from core.runtime_manager.process_identity import inspect_process_identity
+from vibelution_storage import (
+    ProjectStorageMigrationStateError,
+    resolve_project_runtime_home,
+)
 
 BUILD_SCHEMA_VERSION = 2
 RELEASES_DIR_NAME = ".vibelution-builds"
@@ -72,7 +76,31 @@ def frontend_build_lock_path(project_root: Path | str) -> Path:
 
 
 def serving_frontend_leases_dir(project_root: Path | str) -> Path:
-    return Path(project_root) / ".runtime" / SERVING_FRONTEND_LEASES_DIR_NAME
+    """Governed lease write path under the active project runtime home.
+
+    Identity-less or pre-governance instances resolve to checkout ``.runtime``
+    because the shared storage resolver owns that fallback.  A present-but-
+    invalid migration marker raises ``ProjectStorageMigrationStateError`` so
+    lease writes fail closed instead of bypassing the boundary.
+    """
+    return resolve_project_runtime_home(project_root) / SERVING_FRONTEND_LEASES_DIR_NAME
+
+
+def serving_frontend_leases_read_dirs(project_root: Path | str) -> list[Path]:
+    """Lease directories to scan: governed first, plus pre-migration fallback."""
+    try:
+        governed = [resolve_project_runtime_home(project_root) / SERVING_FRONTEND_LEASES_DIR_NAME]
+    except ProjectStorageMigrationStateError:
+        # Fail-closed marker boundary: do not route this read to checkout
+        # storage either; the caller's "unknown" handling stays conservative.
+        return []
+    dirs = list(governed)
+    # Resolve both sides so Windows short-path aliases (ADMINI~1 vs the long
+    # user directory) cannot report the same physical directory as two homes.
+    legacy = Path(project_root).resolve() / ".runtime" / SERVING_FRONTEND_LEASES_DIR_NAME
+    if os.path.normcase(str(legacy)) != os.path.normcase(str(Path(dirs[0]).resolve())):
+        dirs.append(legacy)
+    return dirs
 
 
 def serving_frontend_lease_path(
@@ -438,22 +466,31 @@ def _serving_frontend_release_leases(project_root: Path | str) -> dict[str, Any]
     """Read all serving leases and verify their process identities.
 
     A single ``running-code-fingerprint.json`` cannot represent two isolated
-    backends.  Newer processes write one identity-bound lease per generation;
-    the legacy fingerprint is still inspected so an older live process never
-    becomes invisible to GC.  Unknown or mismatched identity is deliberately
-    conservative: no release is deleted in that scan.
+    backends.  Newer processes write one identity-bound lease per generation
+    under the governed runtime home.  Both lease directories (governed and the
+    pre-governance checkout ``.runtime`` copy) are scanned, and both fingerprint
+    copies are still inspected, so an older live process never becomes invisible
+    to GC across the storage migration.  Unknown or mismatched identity is
+    deliberately conservative: no release is deleted in that scan.
     """
+
+    from core.web.services.code_freshness import running_code_fingerprint_read_paths
 
     root = Path(project_root).resolve()
     lease_paths: list[Path] = []
-    lease_dir = serving_frontend_leases_dir(root)
-    try:
-        lease_paths.extend(path for path in lease_dir.iterdir() if path.is_file() and path.name.endswith(".json"))
-    except OSError:
-        pass
-    legacy_path = root / ".runtime" / "running-code-fingerprint.json"
-    if legacy_path.is_file():
-        lease_paths.append(legacy_path)
+    for lease_dir in serving_frontend_leases_read_dirs(root):
+        try:
+            lease_paths.extend(path for path in lease_dir.iterdir() if path.is_file() and path.name.endswith(".json"))
+        except OSError:
+            pass
+    # Fingerprints double as legacy-style leases but are never unlinked here:
+    # freshness owns their lifecycle and a stale-but-dead snapshot is rewritten
+    # by the next backend start anyway.
+    protected_lease_keys: set[str] = set()
+    for fingerprint_path in running_code_fingerprint_read_paths(root):
+        if fingerprint_path.is_file():
+            lease_paths.append(fingerprint_path)
+            protected_lease_keys.add(str(fingerprint_path.resolve()).lower())
 
     releases: set[str] = set()
     unknown = False
@@ -465,6 +502,7 @@ def _serving_frontend_release_leases(project_root: Path | str) -> dict[str, Any]
         if key in seen_paths:
             continue
         seen_paths.add(key)
+        is_protected_fingerprint = key in protected_lease_keys
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
@@ -473,7 +511,7 @@ def _serving_frontend_release_leases(project_root: Path | str) -> dict[str, Any]
         if not isinstance(payload, dict):
             unknown = True
             continue
-        if path != legacy_path:
+        if not is_protected_fingerprint:
             try:
                 lease_schema = int(payload.get("schemaVersion") or 0)
             except (TypeError, ValueError):
@@ -501,7 +539,7 @@ def _serving_frontend_release_leases(project_root: Path | str) -> dict[str, Any]
             continue
         if status_name == "dead":
             stale.append(str(path))
-            if path != legacy_path:
+            if not is_protected_fingerprint:
                 try:
                     path.unlink()
                 except OSError:

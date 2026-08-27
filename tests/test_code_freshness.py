@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from core.web.services import code_freshness
 
 
@@ -330,3 +332,110 @@ def test_resolve_freshness_verdict_combinations(tmp_path: Path, monkeypatch) -> 
     result = code_freshness.resolve_code_freshness(project_root=tmp_path)
     assert result["verdict"] == "unknown"
     assert result["backend"]["reason"] == "no_running_fingerprint"
+
+
+# --- governed runtime home migration (write to governed, read with fallback) ---
+
+def _governed_project(tmp_path: Path, monkeypatch, *, project_id: str = "freshness-project"):
+    """Create a fully migrated governed project; return (root, runtime_home)."""
+    from vibelution_storage import (
+        PROJECTS_HOME_ENV,
+        resolve_project_storage_paths,
+        storage_migration_state_path,
+    )
+
+    projects_home = tmp_path / "projects-home"
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    identity = project_root / ".vibelution" / "project.json"
+    identity.parent.mkdir(parents=True)
+    identity.write_text(json.dumps({"schemaVersion": 1, "projectId": project_id}), encoding="utf-8")
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(projects_home))
+    target = resolve_project_storage_paths(project_root, projects_home=projects_home)
+    marker = storage_migration_state_path(target)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "completed",
+                "projectId": target.project_id,
+                "instanceId": target.instance_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return project_root, target.runtime
+
+
+def test_write_running_fingerprint_targets_governed_runtime_home(tmp_path: Path, monkeypatch) -> None:
+    project_root, runtime_home = _governed_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        code_freshness,
+        "_capture_git_text",
+        lambda root, args: "govhead000001" if args[:2] == ["rev-parse", "HEAD"] else "main",
+    )
+
+    result = code_freshness.write_running_code_fingerprint(project_root=project_root, source="test")
+
+    governed_path = runtime_home / "running-code-fingerprint.json"
+    assert result["written"] is True
+    assert result["path"] == str(governed_path)
+    assert governed_path.is_file()
+    assert not (project_root / ".runtime" / "running-code-fingerprint.json").exists()
+    parsed = code_freshness.read_running_code_fingerprint(project_root)
+    assert parsed is not None
+    assert parsed["runningHead"] == "govhead000001"
+
+
+def test_read_running_fingerprint_prefers_governed_over_legacy_copy(tmp_path: Path, monkeypatch) -> None:
+    project_root, runtime_home = _governed_project(tmp_path, monkeypatch)
+
+    def _snapshot(head: str) -> str:
+        return json.dumps({"schemaVersion": 1, "runningHead": head})
+
+    legacy_path = code_freshness.legacy_running_code_fingerprint_path(project_root)
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(_snapshot("legacyhead0001"), encoding="utf-8")
+    # No governed copy yet: the pre-migration backend stays visible.
+    parsed = code_freshness.read_running_code_fingerprint(project_root)
+    assert parsed is not None
+    assert parsed["runningHead"] == "legacyhead0001"
+
+    governed_path = runtime_home / "running-code-fingerprint.json"
+    governed_path.parent.mkdir(parents=True, exist_ok=True)
+    governed_path.write_text(_snapshot("govhead000002"), encoding="utf-8")
+    parsed = code_freshness.read_running_code_fingerprint(project_root)
+    assert parsed is not None
+    assert parsed["runningHead"] == "govhead000002"
+    # Legacy copy remains readable in place; reads never migrate or delete.
+    assert legacy_path.is_file()
+
+
+def test_invalid_migration_marker_blocks_fingerprint_read_and_write(tmp_path: Path, monkeypatch) -> None:
+    from vibelution_storage import ProjectStorageMigrationStateError
+    from vibelution_storage import resolve_project_storage_paths, storage_migration_state_path
+
+    project_root, _runtime_home = _governed_project(tmp_path, monkeypatch)
+    target = resolve_project_storage_paths(project_root)
+    storage_migration_state_path(target).write_text(
+        json.dumps({"schemaVersion": 1, "status": "pending"}),
+        encoding="utf-8",
+    )
+    # A legal snapshot in the legacy location must NOT be consulted once the
+    # present marker fails closed.
+    legacy_path = code_freshness.legacy_running_code_fingerprint_path(project_root)
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        json.dumps({"schemaVersion": 1, "runningHead": "legacyhead0002"}),
+        encoding="utf-8",
+    )
+    assert code_freshness.read_running_code_fingerprint(project_root) is None
+
+    monkeypatch.setattr(code_freshness, "_capture_git_text", lambda root, args: "x" if args[:2] == ["rev-parse", "HEAD"] else "main")
+    with pytest.raises(ProjectStorageMigrationStateError):
+        code_freshness.running_code_fingerprint_path(project_root)
+
+    result = code_freshness.write_running_code_fingerprint(project_root=project_root, source="test")
+    assert result["written"] is False
+    assert result["errorType"] == ProjectStorageMigrationStateError.__name__

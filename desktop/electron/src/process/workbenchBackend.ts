@@ -10,7 +10,7 @@ import {
   unlinkSync,
   writeFileSync
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 import {
@@ -25,6 +25,7 @@ import {
   type PythonOwnedProcessTreeTerminator
 } from "./pythonJsonBridge.js";
 import {
+  resolveActiveCanonicalRuntimeHome,
   resolveCanonicalRuntimeHome,
   resolveCheckoutRuntimeHome,
   resolveLauncherRuntimeDir,
@@ -58,7 +59,11 @@ import type { MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.j
 export const DEFAULT_WORKBENCH_HOST = "127.0.0.1";
 export const DEFAULT_WORKBENCH_PORT = 8000;
 export const WEB_WORKBENCH_SCRIPT = ["scripts", "web_workbench.py"] as const;
+// Pre-governance checkout-relative fingerprint location. Reads fall back to it
+// during the storage migration; the governed write side lives in Python
+// (code_freshness.running_code_fingerprint_path), Electron only ever reads.
 export const RUNNING_CODE_FINGERPRINT_RELATIVE = [".runtime", "running-code-fingerprint.json"] as const;
+const RUNNING_CODE_FINGERPRINT_NAME = "running-code-fingerprint.json";
 export const FRONTEND_BUILD_TIMEOUT_MS = 120_000;
 
 export type WorkbenchFrontendBuildErrorCode =
@@ -396,10 +401,6 @@ export async function mainLineBackendIsReachable(
   return observation.backendListening || observation.backendAlive;
 }
 
-export function runningCodeFingerprintPath(workspaceRoot: string): string {
-  return join(workspaceRoot, ...RUNNING_CODE_FINGERPRINT_RELATIVE);
-}
-
 export function sameProjectRoot(left: string, right: string): boolean {
   const normalize = (value: string): string => value.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   const a = normalize(left);
@@ -407,13 +408,49 @@ export function sameProjectRoot(left: string, right: string): boolean {
   return Boolean(a) && a === b;
 }
 
-export function readRunningCodeFingerprint(workspaceRoot: string): Record<string, unknown> | null {
+function sameFilesystemPath(left: string, right: string): boolean {
+  const normalize = (value: string): string =>
+    process.platform === "win32" ? value.toLowerCase() : value;
+  return normalize(resolvePath(left)) === normalize(resolvePath(right));
+}
+
+/**
+ * Fingerprint locations in read order: the governed runtime home first, then
+ * the pre-governance checkout copy so an instance that started before (or
+ * during) the storage migration stays visible. A present-but-invalid migration
+ * marker fails closed on both runtimes and yields no candidate at all, which
+ * makes reuse checks conservatively restart instead of reading bypassed
+ * storage.
+ */
+export function runningCodeFingerprintReadPaths(workspaceRoot: string): string[] {
+  const paths: string[] = [];
   try {
-    const parsed = JSON.parse(readFileSync(runningCodeFingerprintPath(workspaceRoot), "utf8")) as unknown;
-    return isRecord(parsed) ? parsed : null;
+    const canonicalHome = resolveActiveCanonicalRuntimeHome(workspaceRoot);
+    if (canonicalHome) {
+      paths.push(join(canonicalHome, RUNNING_CODE_FINGERPRINT_NAME));
+    }
   } catch {
-    return null;
+    return paths;
   }
+  const legacy = join(workspaceRoot, ...RUNNING_CODE_FINGERPRINT_RELATIVE);
+  if (!paths.some((existing) => sameFilesystemPath(existing, legacy))) {
+    paths.push(legacy);
+  }
+  return paths;
+}
+
+export function readRunningCodeFingerprint(workspaceRoot: string): Record<string, unknown> | null {
+  for (const path of runningCodeFingerprintReadPaths(workspaceRoot)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (isRecord(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Missing or unreadable candidate: keep consulting the legacy location.
+    }
+  }
+  return null;
 }
 
 export function readWorkspaceGitHead(workspaceRoot: string): string {

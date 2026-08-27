@@ -104,8 +104,13 @@ export function resolveLauncherRuntimeDir(workspaceRoot: string): string {
  * canonical instance runtime authoritative, even before its first state file
  * is written. Falling back based on whichever state.json happens to exist
  * creates competing port records and can route a live window to a stale port.
+ *
+ * Throws on a present-but-invalid marker (fail closed, matching the Python
+ * ProjectStorageMigrationStateError boundary), and returns null when the
+ * project has no identity or no completed marker yet (pre-governance, where
+ * checkout `.runtime` stays authoritative).
  */
-function resolveActiveCanonicalRuntimeHome(workspaceRoot: string): string | null {
+export function resolveActiveCanonicalRuntimeHome(workspaceRoot: string): string | null {
   const projectId = readProjectId(workspaceRoot);
   const canonicalHome = resolveCanonicalRuntimeHome(workspaceRoot);
   if (!projectId || !canonicalHome) {

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { probeBackendHealthy, waitForBackendHealthy, workbenchHealthUrl } from "../src/process/workbenchBackendHealth.js";
@@ -21,11 +21,13 @@ import {
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   mainLineRunningCodeIsCurrent,
+  readRunningCodeFingerprint,
   resolveBindableWorkbenchPort,
   reclaimStaleWorkbenchBackend,
   resolveNoConsolePython,
   resolveNodeExecutable,
   runWaitable,
+  runningCodeFingerprintReadPaths,
   sameProjectRoot,
   spawnWorkbenchBackend,
   type WorkbenchFrontendBuildChild,
@@ -33,7 +35,7 @@ import {
   workbenchBackendArgs,
   workbenchBackendEnv
 } from "../src/process/workbenchBackend.js";
-import { resolveCanonicalRuntimeHome } from "../src/lifecycle/projectStoragePaths.js";
+import { instanceIdForProject, resolveCanonicalRuntimeHome } from "../src/lifecycle/projectStoragePaths.js";
 import { ACTIVE_WORK_BLOCK_MESSAGE_STOP, blockLifecycleIfActiveWork } from "../src/process/activeWorkGuard.js";
 import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
@@ -2082,5 +2084,90 @@ describe("parseWorkbenchLifecycleResult", () => {
 describe("blockLifecycleIfActiveWork", () => {
   it("does not block when the snapshot list is empty", () => {
     expect(blockLifecycleIfActiveWork("stop", [])).toBeNull();
+  });
+});
+
+describe("running code fingerprint governed read paths", () => {
+  function writeGovernedWorkspace(dir: string, projectId: string): string {
+    process.env.VIBELUTION_PROJECTS_HOME = join(dir, "projects");
+    mkdirSync(join(dir, ".vibelution"), { recursive: true });
+    writeFileSync(join(dir, ".vibelution", "project.json"), JSON.stringify({ schemaVersion: 1, projectId }), "utf8");
+    const canonicalHome = resolveCanonicalRuntimeHome(dir) || "";
+    mkdirSync(dirname(canonicalHome), { recursive: true });
+    writeFileSync(
+      join(dirname(canonicalHome), "storage-migration.json"),
+      JSON.stringify({ schemaVersion: 1, status: "completed", projectId, instanceId: instanceIdForProject(dir) }),
+      "utf8"
+    );
+    return canonicalHome;
+  }
+
+  function withProjectsHome(body: (dir: string) => void): void {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-fingerprint-reads-"));
+    const previousProjectsHome = process.env.VIBELUTION_PROJECTS_HOME;
+    try {
+      body(dir);
+    } finally {
+      if (previousProjectsHome === undefined) {
+        delete process.env.VIBELUTION_PROJECTS_HOME;
+      } else {
+        process.env.VIBELUTION_PROJECTS_HOME = previousProjectsHome;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("reads the governed copy first when governed and checkout copies both exist", () => {
+    withProjectsHome((dir) => {
+      const canonicalHome = writeGovernedWorkspace(dir, "fingerprint-project");
+      const legacyPath = join(dir, ".runtime", "running-code-fingerprint.json");
+      mkdirSync(dirname(legacyPath), { recursive: true });
+      writeFileSync(legacyPath, JSON.stringify({ schemaVersion: 1, runningHead: "legacy-head" }), "utf8");
+      const governedPath = join(canonicalHome, "running-code-fingerprint.json");
+      mkdirSync(canonicalHome, { recursive: true });
+      writeFileSync(governedPath, JSON.stringify({ schemaVersion: 1, runningHead: "governed-head" }), "utf8");
+
+      expect(readRunningCodeFingerprint(dir)).toMatchObject({ runningHead: "governed-head" });
+      expect(runningCodeFingerprintReadPaths(dir)[0]).toBe(governedPath);
+    });
+  });
+
+  it("falls back to the checkout copy for a migrated project before its first governed snapshot", () => {
+    withProjectsHome((dir) => {
+      writeGovernedWorkspace(dir, "fingerprint-migrating");
+      const legacyPath = join(dir, ".runtime", "running-code-fingerprint.json");
+      mkdirSync(dirname(legacyPath), { recursive: true });
+      writeFileSync(legacyPath, JSON.stringify({ schemaVersion: 1, runningHead: "pre-migration-head" }), "utf8");
+
+      expect(readRunningCodeFingerprint(dir)).toMatchObject({ runningHead: "pre-migration-head" });
+    });
+  });
+
+  it("keeps reading the checkout copy for a pre-governance project", () => {
+    withProjectsHome((dir) => {
+      const legacyPath = join(dir, ".runtime", "running-code-fingerprint.json");
+      mkdirSync(dirname(legacyPath), { recursive: true });
+      writeFileSync(legacyPath, JSON.stringify({ schemaVersion: 1, runningHead: "identity-less-head" }), "utf8");
+
+      expect(readRunningCodeFingerprint(dir)).toMatchObject({ runningHead: "identity-less-head" });
+    });
+  });
+
+  it("returns nothing on an invalid migration marker instead of falling back to checkout storage", () => {
+    withProjectsHome((dir) => {
+      const canonicalHome = writeGovernedWorkspace(dir, "fingerprint-broken-marker");
+      // Present but not completed: fail closed on both runtimes.
+      writeFileSync(
+        join(dirname(canonicalHome), "storage-migration.json"),
+        JSON.stringify({ schemaVersion: 1, status: "pending", projectId: "fingerprint-broken-marker", instanceId: instanceIdForProject(dir) }),
+        "utf8"
+      );
+      const legacyPath = join(dir, ".runtime", "running-code-fingerprint.json");
+      mkdirSync(dirname(legacyPath), { recursive: true });
+      writeFileSync(legacyPath, JSON.stringify({ schemaVersion: 1, runningHead: "untrusted-head" }), "utf8");
+
+      expect(runningCodeFingerprintReadPaths(dir)).toEqual([]);
+      expect(readRunningCodeFingerprint(dir)).toBeNull();
+    });
   });
 });
