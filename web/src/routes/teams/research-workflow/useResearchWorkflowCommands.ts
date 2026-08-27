@@ -6,7 +6,7 @@ import type {
   WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
-import { trackResearchRunCreate } from "../challengeCupTelemetry";
+import { trackResearchRunCreate, trackWorkflowOfferSubmit } from "../challengeCupTelemetry";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
@@ -86,12 +86,21 @@ export function useResearchWorkflowCommands(options: {
 
   const submitOffer = useCallback(
     async (offer: CommandOffer) => {
+      if (offerPendingRef.current) return;
+      const telemetry = trackWorkflowOfferSubmit({
+        teamId: options.teamId,
+        runId: options.runId,
+        command: offer.command,
+        nodeId: offer.nodeId ?? "",
+        idempotencyKey: offer.idempotencyKey,
+        expectedRunVersion: offer.expectedRunVersion,
+      });
       if (!submitFormalOffer) {
         const reason = new Error("正式命令通道未就绪");
+        telemetry.failed(reason, { stage: "channel_unavailable" });
         setError(reason.message);
         throw reason;
       }
-      if (offerPendingRef.current) return;
       offerPendingRef.current = true;
       setBusy(true);
       setError(null);
@@ -99,6 +108,10 @@ export function useResearchWorkflowCommands(options: {
         try {
           await submitFormalOffer(offer);
         } catch (reason) {
+          telemetry.failed(reason, {
+            stage: "submit",
+            runVersionConflict: isRunVersionConflict(reason),
+          });
           setError(commandErrorMessage(reason));
           if (isRunVersionConflict(reason)) {
             try {
@@ -112,9 +125,11 @@ export function useResearchWorkflowCommands(options: {
         try {
           await refresh();
         } catch (reason) {
+          telemetry.failed(reason, { stage: "refresh" });
           setError(commandErrorMessage(reason));
           throw reason;
         }
+        telemetry.succeeded();
       } finally {
         offerPendingRef.current = false;
         setBusy(false);

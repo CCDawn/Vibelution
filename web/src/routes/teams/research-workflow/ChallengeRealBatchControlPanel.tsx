@@ -11,6 +11,7 @@ import {
 import { queryKeys } from "../../../api/queryKeys";
 import {
   observeRealBatchAuthorizeShapeInvalid,
+  observeRealBatchPhaseChanged,
   observeRealBatchPollLoopStopped,
   trackRealBatchAuthorize,
   trackRealBatchCancel,
@@ -347,12 +348,50 @@ export function ChallengeRealBatchControlPanel({
     },
   });
 
+  // Edge-triggered batch progress evidence: emit one observation per phase
+  // transition so unattended gate runs leave a durable trail without per-poll noise.
+  const batchPhaseRef = useRef<string | null>(null);
+
   useEffect(() => {
     setAuthorization(null);
     setConfirmAction(null);
     setPollingState(false);
     setEvents([]);
+    batchPhaseRef.current = null;
   }, [selectedPlanId, teamId]);
+
+  useEffect(() => {
+    if (!status) return;
+    const phase = !status.exists
+      ? "absent"
+      : status.cancelled
+        ? "cancelled"
+        : status.circuitBreakerOpen
+          ? "circuit_breaker"
+          : status.gateComplete
+            ? "gate_complete"
+            : status.statusSummary.running > 0
+              ? "running"
+              : status.failedCount > 0 || status.blockedCount > 0
+                ? "degraded"
+                : status.canResume
+                  ? "resumable"
+                  : "idle";
+    const previousPhase = batchPhaseRef.current;
+    batchPhaseRef.current = phase;
+    if (previousPhase === null || previousPhase === phase) return;
+    observeRealBatchPhaseChanged({
+      teamId,
+      planId: selectedPlanId,
+      previousPhase,
+      phase,
+      succeededCount: status.succeededCount,
+      failedCount: status.failedCount,
+      blockedCount: status.blockedCount,
+      pendingCount: status.pendingCount,
+      totalAttempts: status.totalAttempts,
+    });
+  }, [status, selectedPlanId, teamId]);
 
   useEffect(() => {
     if (!pollingEnabled || !teamId.trim()) return undefined;

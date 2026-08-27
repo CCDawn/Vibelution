@@ -11,7 +11,10 @@ import {
   recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import { trackHypothesisSelectionRecord } from "../challengeCupTelemetry";
+import {
+  observeHypothesisLegacyFallback,
+  trackHypothesisSelectionRecord,
+} from "../challengeCupTelemetry";
 import type {
   CommandAction,
   HypothesisSelectionContext,
@@ -90,6 +93,14 @@ export function HypothesisSelectionList({
     && !stateV2Query.data
     && v2EndpointUnavailable,
   );
+  // Bounded degradation evidence: the V2 chain endpoint is the canonical path;
+  // falling back to the legacy mutation signals backend API degradation.
+  const legacyFallbackObservedRef = useRef(false);
+  useEffect(() => {
+    if (legacyFallbackObservedRef.current || !useLegacyFallback) return;
+    legacyFallbackObservedRef.current = true;
+    observeHypothesisLegacyFallback({ teamId, questionId });
+  }, [useLegacyFallback, teamId, questionId]);
   const canonicalSelection = selectionProjection.status === "editable"
     ? selectionProjection.canonicalAction
     : undefined;
