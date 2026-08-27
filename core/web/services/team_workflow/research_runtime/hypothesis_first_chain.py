@@ -30,7 +30,7 @@ import hashlib
 import json
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,6 +96,80 @@ def _record_scene_event(
         outcome=outcome,
         fields=fields or {},
     )
+
+
+# ---------------------------------------------------------------------------
+# automation policy shadow evaluation (R1.4, advisory-only)
+
+
+def _policy_shadow_scope(meeting_round: Mapping[str, Any]) -> dict[str, str]:
+    """Best-effort scope snapshot for shadow records; never raises."""
+    try:
+        return _scope_envelope_for_meeting(meeting_round)
+    except Exception:  # noqa: BLE001 - advisory record only
+        return {}
+
+
+def _pending_handoff_count(team_id: str, question_id: str) -> int:
+    """Mirror the ``chain_state`` pending-handoff input (same records read)."""
+    normalized = str(question_id or "").strip().upper()
+    return sum(
+        1
+        for record in _collection_requests(_records(team_id))
+        if str(record.get("questionId") or "").upper() == normalized
+        and str(record.get("status") or "") != "handed_off"
+    )
+
+
+def _record_policy_shadow_decisions(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    build_evaluations: Callable[[], list[tuple[str, dict[str, Any], dict[str, Any]]]],
+) -> None:
+    """Record automation-policy shadow evaluations beside real decision points.
+
+    R1.4 shadow core: evaluates what a configured shadow automation policy
+    (``VIBELUTION_AUTO_ADVANCE_POLICY_PATH``) *would* decide if it were active
+    at these decision points and appends human-comparison records to the
+    dedicated shadow store.  Purely advisory — no execution branch reads these
+    records, no command is emitted, and with no policy configured this is a
+    no-op before any context I/O, so the executing chain stays byte-identical.
+    """
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            policy_shadow_evaluator,
+        )
+
+        policy = policy_shadow_evaluator.load_shadow_policy_from_environment()
+        if policy is None:
+            return
+        scope = _policy_shadow_scope(meeting_round)
+        question_id = str(meeting_round.get("question") or "").strip()
+        recorded = 0
+        for decision_point, context, actual_outcome in build_evaluations():
+            policy_shadow_evaluator.record_policy_shadow_decision(
+                team_id=team_id,
+                question_id=question_id,
+                policy=policy,
+                decision_point=decision_point,
+                context=context,
+                actual_outcome=actual_outcome,
+                scope=scope,
+            )
+            recorded += 1
+        if recorded:
+            _record_scene_event(
+                "policy_shadow_evaluations_recorded",
+                outcome="recorded",
+                fields={"decisionPointCount": recorded},
+            )
+    except Exception as exc:  # noqa: BLE001 - shadow recording must never break the chain
+        _record_scene_event(
+            "policy_shadow_evaluation_failed",
+            outcome="shadow_record_failed",
+            fields={"error": str(exc)},
+            level="warning",
+        )
 
 
 class HypothesisFirstChainError(RuntimeError):
@@ -3697,6 +3771,39 @@ def _close_generation_meeting(
     candidates = _append_generation_candidates(
         normalized_team_id, closed_record, proposals
     )
+    # Shadow decision point "meeting_close" (generation digest confirmation):
+    # advisory record only; the return value and every executed branch below
+    # are identical with or without a configured shadow policy.
+    _record_policy_shadow_decisions(
+        normalized_team_id,
+        meeting_round,
+        lambda: [
+            (
+                "meeting_close",
+                {
+                    "meetingRoundId": normalized_round_id,
+                    "meetingType": str(meeting_round.get("meetingType") or ""),
+                    "closureApproved": True,
+                    "digestConfirmed": bool(digest_draft),
+                    "decisionsResolved": bool(
+                        [
+                            item
+                            for item in list(request.get("decisions") or [])
+                            if isinstance(item, Mapping)
+                        ]
+                    ),
+                    "closedBy": str(request.get("closedBy") or "").strip(),
+                    "candidateCount": len(candidates),
+                },
+                {
+                    "outcome": "generation_digest_approved",
+                    "outcomeClass": "acted",
+                    "command": "close_generation_meeting",
+                    "ref": f"meeting_round:{normalized_round_id}",
+                },
+            )
+        ],
+    )
     return {
         **result,
         "candidates": candidates,
@@ -5134,6 +5241,70 @@ def close_review_meeting(
             runtime=runtime,
             trigger=f"close:{normalized_round_id}",
         )
+
+    # Shadow decision points after the review closure settled: "meeting_close"
+    # (autoCloseMeetingRound) and "converge_question" (autoConvergeQuestion,
+    # mirroring the chain_state convergence gates).  Advisory records only —
+    # the returned result below is identical with or without shadow policy.
+    generated_round = (
+        dict(hypothesis_round.get("round"))
+        if isinstance(hypothesis_round.get("round"), Mapping)
+        else {}
+    )
+    generated_meta_review = (
+        dict(generated_round.get("metaReview"))
+        if isinstance(generated_round.get("metaReview"), Mapping)
+        else {}
+    )
+    new_request_count = len(list(collection.get("requests") or []))
+    skipped_count = len(list(collection.get("skipped") or []))
+    _record_policy_shadow_decisions(
+        normalized_team_id,
+        closed_record,
+        lambda: [
+            (
+                "meeting_close",
+                {
+                    "meetingRoundId": normalized_round_id,
+                    "meetingType": HYPOTHESIS_REVIEW_MEETING_TYPE,
+                    "closureApproved": str(closed_record.get("status") or "") == "closed",
+                    "digestConfirmed": bool(list(result.get("decisions") or [])),
+                    "decisionsResolved": skipped_count == 0,
+                    "unresolvedDecisionCount": skipped_count,
+                    "closedBy": str(request.get("closedBy") or "").strip(),
+                },
+                {
+                    "outcome": "review_meeting_closed",
+                    "outcomeClass": "acted",
+                    "command": "close_review_meeting",
+                    "ref": f"meeting_round:{normalized_round_id}",
+                },
+            ),
+            (
+                "converge_question",
+                {
+                    "roundId": str(hypothesis_round.get("roundId") or ""),
+                    "latestRoundClosed": str(generated_round.get("status") or "") == "closed",
+                    "metaReviewAccepted": generated_meta_review.get("accepted") is True,
+                    "newEvidenceRequestCount": new_request_count,
+                    "pendingHandoffCount": _pending_handoff_count(
+                        normalized_team_id,
+                        str(closed_record.get("question") or ""),
+                    ),
+                },
+                {
+                    "outcome": (
+                        "requested_new_evidence"
+                        if new_request_count
+                        else "closed_without_new_evidence"
+                    ),
+                    "outcomeClass": "escalated" if new_request_count else "acted",
+                    "command": "close_review_meeting",
+                    "ref": f"meeting_round:{normalized_round_id}",
+                },
+            ),
+        ],
+    )
     return {
         **result,
         "collection": collection,
