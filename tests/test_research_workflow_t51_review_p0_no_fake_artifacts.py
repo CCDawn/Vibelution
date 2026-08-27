@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -281,10 +282,16 @@ def test_complete_turn_does_not_invent_example_local_candidates(
         )
 
 
-def test_source_collection_turn_never_receives_reconcilable_statuses(
+def test_source_collection_turn_receives_continuable_not_project_statuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only research_project turns may treat ``needs_continue`` as reconcilable."""
+    """Source-collection turns get the continuable set, never the project one.
+
+    ``needs_continue``/``paused_limit`` are resumable protocol states, so the
+    source-collection adapter waits with the continuable reconcilable set and
+    continues the turn itself; the project-task reconcilable set stays
+    reserved for research_project turns.
+    """
     captured_kwargs: list[dict[str, object]] = []
 
     def record_wait(*_args: object, **kwargs: object) -> dict[str, object]:
@@ -303,6 +310,16 @@ def test_source_collection_turn_never_receives_reconcilable_statuses(
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.stage_writeback.reconcile_source_collection_stage_session_task_after_turn",
         lambda *_a, **_k: reconciles.append({"called": True}),
+    )
+    submits: list[dict[str, object]] = []
+
+    def fail_submit(*_args: object, **kwargs: object) -> dict[str, object]:
+        submits.append(dict(kwargs))
+        raise AssertionError("continuation must not fire for a ready terminal")
+
+    monkeypatch.setattr(
+        "core.web.services.session.submit.submit_session_message",
+        fail_submit,
     )
 
     refs = complete_agent_turn_outputs(
@@ -334,12 +351,282 @@ def test_source_collection_turn_never_receives_reconcilable_statuses(
 
     assert refs == []
     assert reconciles == [{"called": True}]
+    assert submits == []
     assert len(captured_kwargs) == 1
-    # A source_collection turn must keep needs_continue fatal: the default
-    # (empty) reconcilable set, never the project-task one.
-    assert (
-        captured_kwargs[0].get("reconcilable_terminal_statuses") == frozenset()
+    # A source_collection turn must never receive the project-task
+    # reconcilable set; it gets the protocol continuable set instead.
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES,
     )
+
+    assert (
+        captured_kwargs[0].get("reconcilable_terminal_statuses")
+        == AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
+    )
+    assert "needs_continue" in captured_kwargs[0].get(
+        "reconcilable_terminal_statuses"
+    )
+    assert "paused_limit" in captured_kwargs[0].get(
+        "reconcilable_terminal_statuses"
+    )
+
+
+def test_source_collection_needs_continue_turn_is_continued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A parked needs_continue turn is continued on the same session.
+
+    The node must not fail: the adapter submits the canonical continue
+    request, keeps waiting on the new turn, and downstream SC reconciliation
+    anchors to the final continuation turn.
+    """
+    wait_calls: list[tuple[object, dict[str, object]]] = []
+
+    def scripted_wait(session_id, turn_id, **kwargs):
+        wait_calls.append((turn_id, dict(kwargs)))
+        if turn_id == "turn-sc-park":
+            assert kwargs["reconcilable_terminal_statuses"] == frozenset(
+                {"needs_continue", "paused_limit"}
+            )
+            return {
+                "terminal": True,
+                "isRunning": False,
+                "terminalStatus": "needs_continue",
+            }
+        return {"terminal": True, "isRunning": False, "terminalStatus": "ready"}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        scripted_wait,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_a, **_k: [],
+    )
+    reconciles: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_writeback.reconcile_source_collection_stage_session_task_after_turn",
+        lambda *_a, **kwargs: reconciles.append(dict(kwargs)),
+    )
+    audit_events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        lambda component, phase, event_code, **kwargs: audit_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        ),
+    )
+    submits: list[dict[str, object]] = []
+
+    def fake_submit(session_id, content, **kwargs):
+        submits.append(
+            {
+                "sessionId": session_id,
+                "content": content,
+                **kwargs,
+            }
+        )
+        return {"accepted": True, "turnId": "turn-sc-continued", "status": "running"}
+
+    monkeypatch.setattr(
+        "core.web.services.session.submit.submit_session_message",
+        fake_submit,
+    )
+
+    refs = complete_agent_turn_outputs(
+        action=PendingAction(
+            action_id="act-sc-cont",
+            run_id="run-sc-cont",
+            node_run_id="nr-sc-cont",
+            node_id="source_finding",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="",
+        ),
+        handle=AgentTaskHandle(
+            session_id="session-sc-cont",
+            session_attempt=1,
+            task_id="task-sc-cont",
+            turn_id="turn-sc-park",
+        ),
+        input_snapshot={
+            "teamId": "team-sc-cont",
+            "projectId": "project-sc-cont",
+            "sourceCollectionRunId": "sc-cont",
+        },
+    )
+
+    assert refs == []
+    assert [turn for turn, _ in wait_calls] == [
+        "turn-sc-park",
+        "turn-sc-continued",
+    ]
+    assert len(submits) == 1
+    submit = submits[0]
+    assert submit["sessionId"] == "session-sc-cont"
+    assert submit["content"] == "继续"
+    assert submit["message_source"] == "agent_inbox"
+    metadata = submit["message_metadata"]
+    assert metadata["continuationAttempt"] == 1
+    assert metadata["continuationOfTurnId"] == "turn-sc-park"
+    assert metadata["continuationPausedStatus"] == "needs_continue"
+    assert metadata["workflowRunId"] == "run-sc-cont"
+    assert "kind" not in metadata
+    assert len(reconciles) == 1
+    assert reconciles[0]["turn_id"] == "turn-sc-continued"
+    # Every continuation is an auditable protocol step: requested + submitted
+    # scene events carry who/attempt/turn chain.
+    audit_codes = [event["eventCode"] for event in audit_events]
+    assert audit_codes == [
+        "agent_turn.continuation_requested",
+        "agent_turn.continuation_submitted",
+    ]
+    submitted_event = next(
+        event
+        for event in audit_events
+        if event["eventCode"] == "agent_turn.continuation_submitted"
+    )
+    assert submitted_event["component"] == "team_workflow_orchestration"
+    assert submitted_event["phase"] == "agent_turn_completion"
+    assert submitted_event["fields"]["continuationAttempt"] == 1
+    assert submitted_event["fields"]["fromTurnId"] == "turn-sc-park"
+    assert submitted_event["fields"]["toTurnId"] == "turn-sc-continued"
+
+
+def test_source_collection_turn_continuation_exhaustion_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Beyond the bounded budget the node fails with a readable problem code."""
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        MAX_AGENT_TURN_CONTINUATIONS,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        lambda _s, turn_id, **_k: {
+            "terminal": True,
+            "isRunning": False,
+            "terminalStatus": "paused_limit",
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_a, **_k: [],
+    )
+    submits: list[str] = []
+
+    def fake_submit(_session_id, _content, **_kwargs):
+        submits.append(_content)
+        next_turn = f"turn-sc-exhausted-{len(submits)}"
+        return {"accepted": True, "turnId": next_turn, "status": "running"}
+
+    monkeypatch.setattr(
+        "core.web.services.session.submit.submit_session_message",
+        fake_submit,
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        complete_agent_turn_outputs(
+            action=PendingAction(
+                action_id="act-sc-exh",
+                run_id="run-sc-exh",
+                node_run_id="nr-sc-exh",
+                node_id="source_finding",
+                attempt=1,
+                actor_kind=ActorKind.AGENT,
+                action_kind="start_agent_task",
+                input_snapshot_hash="a" * 64,
+                input_artifact_refs=(),
+                binding_snapshot_id=None,
+                budget_policy_hash="",
+            ),
+            handle=AgentTaskHandle(
+                session_id="session-sc-exh",
+                session_attempt=1,
+                task_id="task-sc-exh",
+                turn_id="turn-sc-exhausted-0",
+            ),
+            input_snapshot={
+                "teamId": "team-sc-exh",
+                "projectId": "project-sc-exh",
+                "sourceCollectionRunId": "sc-exh",
+            },
+        )
+
+    problem = json.loads(str(excinfo.value))
+    assert problem["code"] == "agent_turn_continuation_exhausted"
+    assert problem["terminalStatus"] == "paused_limit"
+    assert problem["continuationsUsed"] == MAX_AGENT_TURN_CONTINUATIONS
+    assert problem["maxContinuations"] == MAX_AGENT_TURN_CONTINUATIONS
+    assert problem["turnChain"] == [
+        "turn-sc-exhausted-0",
+        "turn-sc-exhausted-1",
+        "turn-sc-exhausted-2",
+        "turn-sc-exhausted-3",
+    ]
+    assert len(submits) == MAX_AGENT_TURN_CONTINUATIONS
+
+
+def test_source_collection_turn_continuation_not_accepted_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected continuation submission is a loud failure, not a retry loop."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        lambda _s, _t, **_k: {
+            "terminal": True,
+            "isRunning": False,
+            "terminalStatus": "needs_continue",
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(
+        "core.web.services.session.submit.submit_session_message",
+        lambda *_a, **_k: {"accepted": False, "turnId": "", "status": "rejected"},
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        complete_agent_turn_outputs(
+            action=PendingAction(
+                action_id="act-sc-rej",
+                run_id="run-sc-rej",
+                node_run_id="nr-sc-rej",
+                node_id="source_finding",
+                attempt=1,
+                actor_kind=ActorKind.AGENT,
+                action_kind="start_agent_task",
+                input_snapshot_hash="a" * 64,
+                input_artifact_refs=(),
+                binding_snapshot_id=None,
+                budget_policy_hash="",
+            ),
+            handle=AgentTaskHandle(
+                session_id="session-sc-rej",
+                session_attempt=1,
+                task_id="task-sc-rej",
+                turn_id="turn-sc-rej",
+            ),
+            input_snapshot={
+                "teamId": "team-sc-rej",
+                "projectId": "project-sc-rej",
+                "sourceCollectionRunId": "sc-rej",
+            },
+        )
+
+    problem = json.loads(str(excinfo.value))
+    assert problem["code"] == "agent_turn_continuation_not_accepted"
+    assert problem["continuationAttempt"] == 1
 
 
 def test_completed_project_agent_task_is_closed_before_successor_dispatch(
