@@ -5176,6 +5176,20 @@ class TestToolMessageFlow:
         assert "OSError" in payload["summary"]
         assert payload["evidence"]
 
+    def test_infer_result_from_tool_outputs_include_status_false_keeps_diagnostics(self):
+        payload = infer_result_from_tool_outputs(
+            [
+                "普通输出",
+                "Traceback ...\nOSError: [Errno 22] Invalid argument\n更多上下文",
+            ],
+            include_status=False,
+        )
+
+        assert "status" not in payload
+        assert "OSError" in payload["summary"]
+        assert payload["evidence"]
+        assert payload["findings"]
+
     def test_compact_tool_output_for_diagnosis_keeps_tail_evidence(self):
         raw = ("A" * 5000) + "\nOSError: [Errno 22] Invalid argument\n" + ("B" * 5000)
 

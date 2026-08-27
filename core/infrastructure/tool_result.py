@@ -1322,8 +1322,19 @@ def render_tool_result_for_model(
     return _render(bounded_content, truncated=True)[:bounded_limit]
 
 
-def infer_result_from_tool_outputs(tool_outputs: List[str]) -> Dict[str, Any]:
-    """从最近工具输出中提炼结构化诊断结果。"""
+def infer_result_from_tool_outputs(
+    tool_outputs: List[str],
+    *,
+    include_status: bool = True,
+) -> Dict[str, Any]:
+    """从最近工具输出中提炼结构化诊断结果。
+
+    ``include_status=False`` 供模型已给出真实可见回答的场景使用： harvested
+    exception lines stay as diagnostic context, but the payload no longer
+    carries a ``status`` verdict, because tool outputs may legitimately
+    mention ``TimeoutError``/HTTP failure text (honest fetch-failure reports)
+    and that must not re-stamp the whole turn as ``partial``.
+    """
     haystack = "\n".join(str(item or "") for item in tool_outputs if str(item or "").strip())
     if not haystack:
         return {}
@@ -1352,14 +1363,16 @@ def infer_result_from_tool_outputs(tool_outputs: List[str]) -> Dict[str, Any]:
     if not evidence and not findings:
         return {}
 
-    return {
-        "status": "partial",
+    payload: Dict[str, Any] = {
         "summary": evidence[0] if evidence else "最近工具输出已包含可用异常线索。",
         "findings": findings[:3],
         "evidence": evidence[:3],
         "recommended_next_action": "根据现有异常证据直接收束，不再继续扩散读取。",
         "confidence": "medium",
     }
+    if include_status:
+        payload["status"] = "partial"
+    return payload
 
 
 def compact_tool_output_for_diagnosis(text: str, max_chars: int = 6000) -> str:

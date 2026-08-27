@@ -3384,7 +3384,11 @@ class SelfEvolvingAgent:
                     parsed_payload = {}
             inferred_payload: Dict[str, Any] = {}
             if not parsed_payload:
-                inferred_payload = infer_result_from_tool_outputs(getattr(self, "_recent_tool_outputs", []))
+                # 模型已给出可见回答时，工具输出中的异常字样只作诊断上下文，不得裁决整轮状态。
+                inferred_payload = infer_result_from_tool_outputs(
+                    getattr(self, "_recent_tool_outputs", []),
+                    include_status=not bool(partial_visible),
+                )
             metadata_status = str(
                 (getattr(self, "_last_turn_metadata", {}) or {}).get("status") or ""
             ).strip().lower()
