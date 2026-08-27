@@ -180,34 +180,36 @@ def test_heartbeat_persists_typed_event_and_advances_run_version(
 ) -> None:
     service, _client = _runtime(tmp_path)
     run = _run(service)
+    # The v2.1 graph enters through problem_understanding; heartbeat
+    # semantics are node-agnostic, so drive the entry node directly.
     started = service.apply_node_command(
         run["runId"],
-        "source_finding",
+        "problem_understanding",
         "start_execution",
         payload={
-            "idempotencyKey": "source-lease-1",
-            "leaseOwner": "worker-source-1",
-            "taskId": "task-source-1",
-            "sessionId": "session-source-1",
+            "idempotencyKey": "entry-lease-1",
+            "leaseOwner": "worker-entry-1",
+            "taskId": "task-entry-1",
+            "sessionId": "session-entry-1",
         },
     )
     heartbeat = service.apply_node_command(
         run["runId"],
-        "source_finding",
+        "problem_understanding",
         "heartbeat_execution",
         payload={
-            "idempotencyKey": "source-heartbeat-1",
-            "leaseOwner": "worker-source-1",
+            "idempotencyKey": "entry-heartbeat-1",
+            "leaseOwner": "worker-entry-1",
             "leaseSeconds": 90,
         },
     )
     repeated = service.apply_node_command(
         run["runId"],
-        "source_finding",
+        "problem_understanding",
         "heartbeat_execution",
         payload={
-            "idempotencyKey": "source-heartbeat-1",
-            "leaseOwner": "worker-source-1",
+            "idempotencyKey": "entry-heartbeat-1",
+            "leaseOwner": "worker-entry-1",
             "leaseSeconds": 90,
         },
     )
@@ -215,8 +217,8 @@ def test_heartbeat_persists_typed_event_and_advances_run_version(
     assert heartbeat["runVersion"] > started["runVersion"]
     event = heartbeat["events"][-1]
     assert event["type"] == "LeaseHeartbeat"
-    assert event["nodeId"] == "source_finding"
-    assert event["summary"]["leaseOwner"] == "worker-source-1"
+    assert event["nodeId"] == "problem_understanding"
+    assert event["summary"]["leaseOwner"] == "worker-entry-1"
     assert event["summary"]["heartbeatAt"]
     assert event["summary"]["leaseExpiresAt"]
     assert repeated["runVersion"] == heartbeat["runVersion"]
