@@ -185,6 +185,7 @@ from .runtime_scene.query import (
     _runtime_scene_severity_summary,
     _runtime_scene_sidecar_compare_payload,
     _runtime_scene_signal_raw_refs,
+    _runtime_scene_user_action_signal_line,
     _safe_current_runtime_scene_dir_for_retention,
     _sync_runtime_scene_package_sidecars_if_stale,
     _truncate_prompt_index_text,
@@ -192,6 +193,7 @@ from .runtime_scene.query import (
     get_runtime_scene_detail,
     list_runtime_scene_evidence_for_agent,
     list_runtime_scenes,
+    query_browser_user_action_telemetry,
     read_runtime_scene_file,
 )
 from .runtime_scene.diagnosis import (

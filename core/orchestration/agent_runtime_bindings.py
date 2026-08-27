@@ -417,6 +417,7 @@ _TOOL_SURFACE_GROUPS: Dict[str, str] = {
     "web_fetch_tool": "web",
     "image2_generate_tool": "media",
     "conversation_log_inspect_tool": "diagnostics",
+    "user_action_telemetry_query_tool": "diagnostics",
     "get_core_context_tool": "memory",
     "get_current_goal_tool": "memory",
     "search_memory_tool": "memory",

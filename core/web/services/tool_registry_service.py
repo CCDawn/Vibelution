@@ -97,6 +97,7 @@ SAFE_BUILTIN_TEST_ARGS: dict[str, dict[str, Any]] = {
     "get_git_status_summary_tool": {"limit": 3},
     "get_recent_changes_tool": {"limit": 3},
     "conversation_log_inspect_tool": {"limit": 1, "max_events": 200},
+    "user_action_telemetry_query_tool": {"scene_limit": 2},
     "get_self_model_tool": {},
     "task_list_tool": {},
 }
@@ -107,6 +108,7 @@ SAFE_BUILTIN_TEST_REASONS: dict[str, str] = {
     "get_git_status_summary_tool": "Reads a short Git status summary with a fixed limit.",
     "get_recent_changes_tool": "Reads recent Git change summaries with a fixed limit.",
     "conversation_log_inspect_tool": "Reads a compact summary of recent conversation logs with fixed limits.",
+    "user_action_telemetry_query_tool": "Reads a compact user-action telemetry aggregation with a fixed scene limit.",
     "get_self_model_tool": "Reads the persisted self model with no caller-supplied arguments.",
     "task_list_tool": "Reads the current task list with no caller-supplied arguments.",
 }

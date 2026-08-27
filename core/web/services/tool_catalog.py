@@ -375,6 +375,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["session_data_access"],
         "permissionTier": LOW_PERMISSION_TIER,
     },
+    "user_action_telemetry_query_tool": {
+        "category": "workspace_read",
+        "capabilityTags": ["runtime_scenes", "user_action_telemetry", "diagnostics", "read_only"],
+        "riskTags": ["session_data_access"],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
     "history_search_tool": {
         "category": "conversation_history",
         "capabilityTags": ["conversation_history", "search", "read_only"],
@@ -931,6 +937,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "challenge_cup_experiment_writeback_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
+            "user_action_telemetry_query_tool",
         ],
         "preferredToolNames": [
             "challenge_cup_experiment_context_tool",
@@ -951,6 +958,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "challenge_cup_experiment_context_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
+            "user_action_telemetry_query_tool",
         ],
         "preferredToolNames": [
             "challenge_cup_iteration_context_tool",

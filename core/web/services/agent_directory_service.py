@@ -400,6 +400,7 @@ _LEGACY_SESSION_AGENT_ALLOWED_TOOLS = (
     "get_recent_changes_tool",
     "explain_current_worktree_tool",
     "conversation_log_inspect_tool",
+    "user_action_telemetry_query_tool",
 )
 _LEGACY_SESSION_AGENT_PREFERRED_TOOLS = (
     "grep_search_tool",

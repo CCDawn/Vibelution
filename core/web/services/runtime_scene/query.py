@@ -888,6 +888,12 @@ def build_runtime_scene_prompt_index(limit: int = 3) -> str:
             lines.append(f"- 首个信号: `{first_signal_code}`")
         if next_step:
             lines.append(f"- agent 下一步: {next_step}")
+        if directory_name:
+            user_action_signal = s._runtime_scene_user_action_signal_line(
+                s._runtime_scene_root() / directory_name
+            )
+            if user_action_signal:
+                lines.append(user_action_signal)
 
     rendered = "\n".join(lines).strip()
     s._remember_runtime_scene_prompt_index_cache(bounded_limit, signature, rendered)
@@ -1028,6 +1034,179 @@ def list_runtime_scene_evidence_for_agent(
         "runId": normalized_run_id,
         "matches": matches,
     }
+
+
+USER_ACTION_EVENT_CODE_PREFIX = "browser.user_action."
+USER_ACTION_PHASES = ("started", "succeeded", "failed", "blocked", "observed")
+USER_ACTION_SIGNAL_PHASES = ("failed", "blocked")
+USER_ACTION_SIGNAL_LEVELS = ("warning", "error")
+
+
+def _split_user_action_event_code(event_code: object) -> tuple[str, str] | None:
+    normalized = str(event_code or "").strip()
+    if not normalized.startswith(USER_ACTION_EVENT_CODE_PREFIX):
+        return None
+    remainder = normalized[len(USER_ACTION_EVENT_CODE_PREFIX) :]
+    for phase in USER_ACTION_PHASES:
+        suffix = f"_{phase}"
+        if remainder.endswith(suffix) and len(remainder) > len(suffix):
+            return (remainder[: -len(suffix)], phase)
+    return None
+
+
+def _normalize_user_action_query_prefix(action_prefix: str) -> str:
+    normalized = str(action_prefix or "").strip()
+    if normalized.startswith(USER_ACTION_EVENT_CODE_PREFIX):
+        normalized = normalized[len(USER_ACTION_EVENT_CODE_PREFIX) :]
+    return normalized
+
+
+def _user_action_event_fields(entry: dict[str, Any]) -> dict[str, Any]:
+    fields = entry.get("fields")
+    return fields if isinstance(fields, dict) else {}
+
+
+def query_browser_user_action_telemetry(
+    action_prefix: str = "",
+    *,
+    scene_limit: int = 12,
+    max_actions: int = 30,
+    recent_signal_limit: int = 20,
+    per_scene_event_cap: int = 5000,
+) -> dict[str, Any]:
+    """Aggregate indexed browser user-action telemetry across recent runtime scenes."""
+    s = _service()
+
+    normalized_prefix = _normalize_user_action_query_prefix(action_prefix)
+    bounded_scene_limit = max(1, min(int(scene_limit or 12), 30))
+    bounded_action_cap = max(1, min(int(max_actions or 30), 60))
+    bounded_signal_cap = max(0, min(int(recent_signal_limit or 20), 50))
+    bounded_event_cap = max(100, min(int(per_scene_event_cap or 5000), 50000))
+
+    action_stats: dict[str, dict[str, Any]] = {}
+    recent_signals: list[dict[str, Any]] = []
+    scenes_scanned = 0
+    scenes_with_user_actions = 0
+
+    for scene_dir in s._scene_dirs()[:bounded_scene_limit]:
+        scenes_scanned += 1
+        manifest = s._load_scene_manifest(scene_dir)
+        scene_id = s._scene_id(scene_dir, manifest)
+        scene_had_actions = False
+        browser_events_path = scene_dir / s.EVENTS_DIR / "browser_page.jsonl"
+        for entry in s._read_jsonl_file(browser_events_path)[-bounded_event_cap:]:
+            split = _split_user_action_event_code(entry.get("event_code"))
+            if split is None:
+                continue
+            action, phase = split
+            if normalized_prefix and not action.startswith(normalized_prefix):
+                continue
+            scene_had_actions = True
+            fields = _user_action_event_fields(entry)
+            ts = str(entry.get("ts") or "")
+            level = str(entry.get("level") or "info")
+
+            stats = action_stats.setdefault(
+                action,
+                {
+                    "counts": {phase_key: 0 for phase_key in USER_ACTION_PHASES},
+                    "duration_sample_count": 0,
+                    "duration_total_ms": 0.0,
+                    "max_duration_ms": 0.0,
+                    "last_seen_at": "",
+                    "last_scene_directory": "",
+                },
+            )
+            stats["counts"][phase] += 1
+            if ts >= stats["last_seen_at"]:
+                stats["last_seen_at"] = ts
+                stats["last_scene_directory"] = scene_dir.name
+            duration_ms = s._coerce_float(fields.get("durationMs"), default=-1.0)
+            if duration_ms >= 0:
+                stats["duration_sample_count"] += 1
+                stats["duration_total_ms"] += duration_ms
+                stats["max_duration_ms"] = max(stats["max_duration_ms"], duration_ms)
+
+            is_signal_phase = phase in USER_ACTION_SIGNAL_PHASES
+            is_signal_observed = phase == "observed" and level in USER_ACTION_SIGNAL_LEVELS
+            if is_signal_phase or is_signal_observed:
+                recent_signals.append(
+                    {
+                        "ts": ts,
+                        "eventCode": str(entry.get("event_code") or ""),
+                        "action": action,
+                        "phase": phase,
+                        "level": level,
+                        "message": str(entry.get("message") or ""),
+                        "errorName": str(fields.get("errorName") or ""),
+                        "teamId": str(fields.get("teamId") or ""),
+                        "durationMs": round(duration_ms, 1) if duration_ms >= 0 else None,
+                        "runtimeSceneId": scene_id,
+                        "sceneDirectory": scene_dir.name,
+                    }
+                )
+        if scene_had_actions:
+            scenes_with_user_actions += 1
+
+    actions: list[dict[str, Any]] = []
+    totals = {phase_key: 0 for phase_key in USER_ACTION_PHASES}
+    for action, stats in action_stats.items():
+        for phase_key in USER_ACTION_PHASES:
+            totals[phase_key] += stats["counts"][phase_key]
+        has_duration = stats["duration_sample_count"] > 0
+        actions.append(
+            {
+                "action": action,
+                "counts": stats["counts"],
+                "avgDurationMs": round(stats["duration_total_ms"] / stats["duration_sample_count"], 1)
+                if has_duration
+                else None,
+                "maxDurationMs": round(stats["max_duration_ms"], 1) if has_duration else None,
+                "lastSeenAt": stats["last_seen_at"],
+                "lastSceneDirectory": stats["last_scene_directory"],
+            }
+        )
+    actions.sort(key=lambda item: (-sum(item["counts"].values()), item["action"]))
+    recent_signals.sort(key=lambda item: item["ts"], reverse=True)
+
+    return {
+        "actionPrefix": normalized_prefix,
+        "scenesScanned": scenes_scanned,
+        "scenesWithUserActions": scenes_with_user_actions,
+        "totals": totals,
+        "actions": actions[:bounded_action_cap],
+        "recentSignals": recent_signals[:bounded_signal_cap],
+        "notes": [
+            "仅聚合已索引的结构化 browser_page 事件；vite dev surface 事件只进 raw 日志，不在此聚合。",
+        ],
+    }
+
+
+def _runtime_scene_user_action_signal_line(scene_dir: Path, *, event_cap: int = 2000) -> str:
+    """Return a compact prompt-facing line for user-action failure/warning signals, or ''."""
+    s = _service()
+
+    failure_counts: dict[str, int] = {}
+    warning_counts: dict[str, int] = {}
+    browser_events_path = scene_dir / s.EVENTS_DIR / "browser_page.jsonl"
+    for entry in s._read_jsonl_file(browser_events_path)[-max(1, min(int(event_cap or 2000), 5000)) :]:
+        split = _split_user_action_event_code(entry.get("event_code"))
+        if split is None:
+            continue
+        action, phase = split
+        if phase in USER_ACTION_SIGNAL_PHASES:
+            failure_counts[action] = failure_counts.get(action, 0) + 1
+        elif phase == "observed" and str(entry.get("level") or "info") in USER_ACTION_SIGNAL_LEVELS:
+            warning_counts[action] = warning_counts.get(action, 0) + 1
+
+    parts: list[str] = []
+    for action, count in sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:5]:
+        parts.append(f"{action} failed/blocked={count}")
+    for action, count in sorted(warning_counts.items(), key=lambda item: (-item[1], item[0]))[:5]:
+        parts.append(f"{action} warned={count}")
+    if not parts:
+        return ""
+    return f"- 用户动作异常: {'; '.join(parts)}（用 user_action_telemetry_query_tool 查跨场景聚合）"
 
 
 def list_runtime_scenes(limit: int = 80) -> list[dict]:

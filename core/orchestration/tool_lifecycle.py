@@ -184,6 +184,7 @@ class ToolLifecycleBridge:
         "get_memory_summary_tool",
         "code_symbol_tool",
         "conversation_log_inspect_tool",
+        "user_action_telemetry_query_tool",
         "history_search_tool",
         "history_fetch_tool",
         "history_timeline_tool",

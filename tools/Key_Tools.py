@@ -117,6 +117,7 @@ from tools.python_intelligence_tools import (
 )
 from tools.plan_tools import plan_update_tool as _plan_update_impl
 from tools.conversation_log_tools import conversation_log_inspect_tool as _conversation_log_inspect_impl
+from tools.user_action_telemetry_tools import user_action_telemetry_query_tool as _user_action_telemetry_query_impl
 from tools.conversation_history_tools import (
     history_checkpoint_tool as _history_checkpoint_impl,
     history_fetch_tool as _history_fetch_impl,
@@ -1115,6 +1116,31 @@ def _build_key_tools() -> List[BaseTool]:
             log_path=log_path,
             limit=limit,
             max_events=max_events,
+        )
+
+    @tool
+    def user_action_telemetry_query_tool(
+        action_prefix: str = "",
+        scene_limit: int = 12,
+    ) -> str:
+        """
+        【用户动作遥测】只读聚合最近 runtime scene 里的浏览器用户动作遥测。
+
+        适合回答“某个链路（如挑战杯）最近的用户动作成功率如何、哪些动作失败/被阻断、
+        平均耗时多少、最近有哪些警告级观测”。事件来自前端埋点
+        （browser.user_action.<动作>_started/succeeded/failed/blocked/_observed），
+        本工具跨最近多个 runtime scene 聚合，不返回日志原文。
+
+        Args:
+            action_prefix: 可选动作前缀过滤，如 "challenge_"；为空时聚合全部用户动作
+            scene_limit: 最多扫描的最近 runtime scene 数量，默认 12，最大 30
+
+        Returns:
+            JSON 格式的只读聚合摘要：每个动作的阶段计数、平均/最大耗时、最近信号列表与所在场景
+        """
+        return _user_action_telemetry_query_impl(
+            action_prefix=action_prefix,
+            scene_limit=scene_limit,
         )
 
     @tool
