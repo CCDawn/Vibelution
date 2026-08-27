@@ -129,6 +129,82 @@ def test_wait_for_non_terminal_turn_raises_not_ready() -> None:
             )
 
 
+def test_wait_for_project_reconcilable_needs_continue_turn() -> None:
+    snapshot = {
+        "terminal": True,
+        "isRunning": False,
+        "terminalStatus": "needs_continue",
+    }
+    with patch(
+        "core.web.services.session.turn_diagnostics.get_session_turn_completion_snapshot",
+        return_value=snapshot,
+    ):
+        with pytest.raises(RuntimeError, match="agent_turn_terminal_failed"):
+            wait_for_agent_turn_terminal("session-x", "turn-x")
+        assert wait_for_agent_turn_terminal(
+            "session-x",
+            "turn-x",
+            reconcilable_terminal_statuses=frozenset({"needs_continue"}),
+        ) == snapshot
+
+
+def test_project_needs_continue_without_canonical_result_stays_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        lambda *_args, **_kwargs: {
+            "terminal": True,
+            "terminalStatus": "needs_continue",
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda *_args, **_kwargs: {
+            "taskId": "task-p0",
+            "status": "incomplete",
+            "resultRefs": [],
+            "failureCode": "task_result_not_recorded",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="project_agent_task_terminal_failed"):
+        complete_agent_turn_outputs(
+            action=PendingAction(
+                action_id="act-p0",
+                run_id="run-p0",
+                node_run_id="nr-p0",
+                node_id="hypothesis_design",
+                attempt=1,
+                actor_kind=ActorKind.AGENT,
+                action_kind="start_agent_task",
+                input_snapshot_hash="a" * 64,
+                input_artifact_refs=(),
+                binding_snapshot_id=None,
+                budget_policy_hash="",
+            ),
+            handle=AgentTaskHandle(
+                session_id="session-p0",
+                session_attempt=1,
+                task_id="task-p0",
+                turn_id="turn-p0",
+            ),
+            input_snapshot={
+                "teamId": "team-p0",
+                "projectId": "project-p0",
+                "sourceCollectionRunId": "source-run-p0",
+            },
+        )
+
+
 def test_complete_turn_does_not_invent_example_local_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -271,9 +347,16 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
     assert completed["status"] == "completed"
 
     calls: list[object] = []
+
+    def wait_for_project_turn(*_args, **kwargs):
+        assert kwargs["reconcilable_terminal_statuses"] == frozenset(
+            {"needs_continue"}
+        )
+        return {"terminal": True, "terminalStatus": "needs_continue"}
+
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
-        lambda *_a, **_k: {"terminal": True, "terminalStatus": "completed"},
+        wait_for_project_turn,
     )
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",

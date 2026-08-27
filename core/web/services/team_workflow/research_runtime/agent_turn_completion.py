@@ -33,6 +33,8 @@ _FAILURE_TERMINAL_STATUSES = frozenset(
     }
 )
 
+_PROJECT_TASK_RECONCILABLE_TURN_STATUSES = frozenset({"needs_continue"})
+
 DEFAULT_AGENT_TURN_TIMEOUT_MS = 120_000
 
 
@@ -125,6 +127,7 @@ def wait_for_agent_turn_terminal(
     *,
     timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
+    reconcilable_terminal_statuses: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Poll canonical turn completion until terminal success, failure, or timeout."""
     from core.web.services.session.turn_diagnostics import (
@@ -158,7 +161,10 @@ def wait_for_agent_turn_terminal(
                 or last_snapshot.get("lastTurnStatus")
                 or ""
             ).strip().lower()
-            if status in _SUCCESS_TERMINAL_STATUSES:
+            if (
+                status in _SUCCESS_TERMINAL_STATUSES
+                or status in reconcilable_terminal_statuses
+            ):
                 return last_snapshot
             detail = {
                 "code": "agent_turn_terminal_failed",
@@ -268,11 +274,18 @@ def complete_agent_turn_outputs(
         or str(action.run_id or "").strip()
     )
 
+    adapter_spec = resolve_agent_task_adapter(action.node_id)
+    reconcilable_terminal_statuses = (
+        _PROJECT_TASK_RECONCILABLE_TURN_STATUSES
+        if adapter_spec is not None and adapter_spec.family == "research_project"
+        else frozenset()
+    )
     snapshot = wait_for_agent_turn_terminal(
         handle.session_id,
         handle.turn_id,
         timeout_ms=timeout_ms,
         poll_ms=poll_ms,
+        reconcilable_terminal_statuses=reconcilable_terminal_statuses,
     )
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
@@ -285,7 +298,6 @@ def complete_agent_turn_outputs(
     )
 
     task_id = str(handle.task_id or "").strip()
-    adapter_spec = resolve_agent_task_adapter(action.node_id)
     if task_id and adapter_spec is not None and adapter_spec.family == "source_collection":
         from core.web.services.team_workflow.source_collection.stage_writeback import (
             reconcile_source_collection_stage_session_task_after_turn,
