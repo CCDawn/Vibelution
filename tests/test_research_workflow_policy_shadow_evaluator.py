@@ -1086,6 +1086,8 @@ _FIRST_SELECT_CLOSURE_SHAPE = {
         "roundIndex",
         "selectionId",
         "status",
+        "supersededCandidateIds",
+        "supersededMeetingRoundIds",
     ],
     "collectionKeys": ["requests", "skipped"],
     "requestCount": 0,

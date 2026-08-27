@@ -1657,6 +1657,9 @@ def _ensure_problem_understanding_source_collection_run(
     return persisted_id
 
 
+_MAX_RETRY_LINEAGE_HOPS = 10
+
+
 def _formal_project_retry_payload(
     action: PendingAction,
     *,
@@ -1666,51 +1669,82 @@ def _formal_project_retry_payload(
     task_kind: str,
     store: WorkflowLedgerStore | None,
 ) -> dict[str, Any]:
-    """Resolve the exact parent project task for one Ledger retry attempt."""
+    """Resolve the nearest ancestor project task for one Ledger retry attempt.
+
+    Intermediate attempts may legitimately own no project task: a retry can be
+    rejected before task creation (for example the ``previous task is still
+    active`` guard) and still leaves a Ledger attempt.  Resolution therefore
+    walks the bounded ``retry_of_node_run_id`` lineage and attaches to the
+    nearest ancestor attempt that owns exactly one matching project task.
+    Every hop re-validates run/node identity and fails closed on mismatch.
+    """
 
     if int(action.attempt or 0) <= 1:
         return {}
     if store is None:
         raise RuntimeError("formal project Agent retry requires the workflow Ledger")
 
-    def load_parent_node_run_id(repository: Any) -> str:
+    def load_ancestor_node_run_ids(repository: Any) -> list[str]:
         current = repository.get_attempt(action.node_run_id)
         if current is None:
             raise RuntimeError("formal project Agent retry attempt is missing")
         parent_node_run_id = str(current.retry_of_node_run_id or "").strip()
         if not parent_node_run_id:
             raise RuntimeError("formal project Agent retry lineage is missing")
-        parent = repository.get_attempt(parent_node_run_id)
-        if (
-            parent is None
-            or parent.run_id != action.run_id
-            or parent.node_id != action.node_id
-        ):
-            raise RuntimeError("formal project Agent retry lineage identity mismatch")
-        return parent_node_run_id
+        lineage: list[str] = []
+        node_run_id = parent_node_run_id
+        for _hop in range(_MAX_RETRY_LINEAGE_HOPS):
+            ancestor = repository.get_attempt(node_run_id)
+            if (
+                ancestor is None
+                or ancestor.run_id != action.run_id
+                or ancestor.node_id != action.node_id
+            ):
+                raise RuntimeError(
+                    "formal project Agent retry lineage identity mismatch"
+                )
+            lineage.append(node_run_id)
+            if int(getattr(ancestor, "attempt", 1) or 0) <= 1:
+                break
+            next_node_run_id = str(ancestor.retry_of_node_run_id or "").strip()
+            if not next_node_run_id:
+                break
+            node_run_id = next_node_run_id
+        return lineage
 
-    parent_node_run_id = str(store.read(load_parent_node_run_id) or "").strip()
+    ancestor_node_run_ids = list(store.read(load_ancestor_node_run_ids) or [])
     from core.web.services.team_workflow.research_project_agent_tasks import (
         get_research_project_agent_task_status,
     )
 
     status = get_research_project_agent_task_status(team_id, project_id)
-    matches = [
-        dict(task)
-        for task in list(status.get("tasks") or [])
-        if str(task.get("workflowRunId") or "") == action.run_id
-        and str(task.get("nodeRunId") or "") == parent_node_run_id
-        and str(task.get("agentId") or "") == agent_id
-        and str(task.get("taskKind") or "") == task_kind
-    ]
-    if len(matches) != 1 or not str(matches[0].get("taskId") or "").strip():
-        raise RuntimeError(
-            "formal project Agent retry source task is missing or ambiguous"
-        )
-    return {
-        "formalRetry": True,
-        "retryTaskId": str(matches[0]["taskId"]),
-    }
+    tasks = list(status.get("tasks") or [])
+    for node_run_id in ancestor_node_run_ids:
+        matches = [
+            dict(task)
+            for task in tasks
+            if str(task.get("workflowRunId") or "") == action.run_id
+            and str(task.get("nodeRunId") or "") == node_run_id
+            and str(task.get("agentId") or "") == agent_id
+            and str(task.get("taskKind") or "") == task_kind
+        ]
+        if len(matches) != 1:
+            if len(matches) > 1:
+                raise RuntimeError(
+                    "formal project Agent retry source task is missing or ambiguous"
+                )
+            continue
+        if not str(matches[0].get("taskId") or "").strip():
+            raise RuntimeError(
+                "formal project Agent retry source task is missing or ambiguous"
+            )
+        return {
+            "formalRetry": True,
+            "retryTaskId": str(matches[0]["taskId"]),
+        }
+    raise RuntimeError(
+        "formal project Agent retry source task is missing or ambiguous"
+    )
 
 
 def _create_real_agent_task(
