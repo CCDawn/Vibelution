@@ -633,5 +633,97 @@ def _seed_formal_full_run_plan(team_id, plan_id="exp_formal_full_run"):
     return plan_id
 
 
+def _seed_claim_belief_gate_fixture(
+    monkeypatch,
+    team_id: str,
+    question_id: str,
+    candidate_ids,
+) -> list[dict]:
+    """Seed review-supported core claims so the R2.2 claim belief gate evaluates.
+
+    Claims are proposed and supported through the real owning claim-ledger
+    service with the server-authoritative question scope, then bound to their
+    candidates through the claim-evidence bridge records the belief service
+    consumes.  The bridge records carry the authoritative accepted/support
+    state and scope hash; the real ``ClaimEvidenceStore`` is not written
+    because its records do not yet carry ``scopeHash`` (belief evaluation
+    would neutralize them), so the chain's evidence-reader seam is stubbed
+    with exactly those records.
+    """
+    from collections.abc import Sequence as _Sequence
+
+    assert isinstance(candidate_ids, _Sequence) and not isinstance(candidate_ids, str)
+    from core.research.workflow.contracts import scope_hash_for
+    from core.web.services.team_workflow import claim_ledger as claim_ledger_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    # Align the claim ledger store with the chain module's (tmp-patched) root
+    # so fixture claims never land in the real developer workspace.
+    monkeypatch.setattr(
+        claim_ledger_service, "PROJECT_ROOT", chain.PROJECT_ROOT, raising=False
+    )
+    scope = chain._question_scope_envelope(team_id, question_id)
+    identity = {
+        field: scope[field]
+        for field in ("program", "theme", "campaign", "question", "branch", "workflow")
+    }
+    scope_hash = scope_hash_for(
+        **identity, agent_id=scope["agentId"], mode=scope["mode"]
+    )
+    evidence_records: list[dict] = []
+    for index, candidate_id in enumerate(candidate_ids, start=1):
+        evidence_id = f"ce-gate-{index:02d}"
+        claim_id = f"claim-gate-{index:02d}"
+        created = claim_ledger_service.propose_claim(
+            team_id,
+            {
+                **identity,
+                "agentId": scope["agentId"],
+                "mode": scope["mode"],
+                "claimId": claim_id,
+                "claim": f"Candidate {candidate_id} carries a review-supported core claim.",
+                "createdBy": "operator",
+                "source": "agent",
+            },
+        )
+        assert created["status"] in {"created", "reused"}, created
+        supported = claim_ledger_service.support_claim(
+            team_id,
+            claim_id,
+            {
+                "evidenceRefs": [
+                    {
+                        "claimEvidenceId": evidence_id,
+                        "scopeHash": scope_hash,
+                        "reviewStatus": "accepted",
+                        "supportLevel": "supports",
+                        "sourceId": "fixture:claim-belief-gate",
+                    }
+                ],
+                "supportedBy": "operator",
+            },
+        )
+        assert supported["claim"]["status"] == "supported", supported
+        evidence_records.append(
+            {
+                "claimEvidenceId": evidence_id,
+                "claimId": claim_id,
+                "candidateId": candidate_id,
+                "sourceId": "fixture:claim-belief-gate",
+                "reviewStatus": "accepted",
+                "supportLevel": "supports",
+                "scopeHash": scope_hash,
+            }
+        )
+    monkeypatch.setattr(
+        chain,
+        "_claim_evidence_records",
+        lambda _team_id: [dict(record) for record in evidence_records],
+    )
+    return evidence_records
+
+
 # Allow case modules to `from ...helpers import *` including private helpers.
 __all__ = [name for name in globals() if not name.startswith("__")]

@@ -60,6 +60,7 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 )
 
 from tests._support.team_workflow.helpers import (
+    _seed_claim_belief_gate_fixture,
     _use_fake_local_research_config,
     _use_tmp_project_root,
 )
@@ -179,6 +180,11 @@ def hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(templates, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    # The R2.2 claim belief gate reads the claim ledger inside chain_state;
+    # pin its store root to the tmp workspace like every other store.
+    from core.web.services.team_workflow import claim_ledger as claim_ledger_service
+
+    monkeypatch.setattr(claim_ledger_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _InlineExecutor())
     monkeypatch.delenv(ev.SHADOW_POLICY_ENV, raising=False)
     ev._POLICY_CACHE.clear()
@@ -832,6 +838,11 @@ def test_review_closure_shadow_records_match_convergence_gates(
     with server_operator_scope("u-1", roles=("operator",)):
         siblings = _open_first_meeting(team_id, agent_ids)
         assert len(siblings) == 2
+        # R2.2 claim belief gate: seed review-supported core claims for the
+        # selected candidates so the otherwise-converged chain can converge.
+        _seed_claim_belief_gate_fixture(
+            monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
+        )
 
         first_id = siblings[0]["meetingRoundId"]
         _drive_to_awaiting_approval(team_id, first_id, agent_ids[0])
@@ -1007,6 +1018,9 @@ def test_closure_without_shadow_policy_is_unchanged_and_records_nothing(
     agent_ids = [agents[role] for role in _ROLES]
     with server_operator_scope("u-1", roles=("operator",)):
         siblings = _open_first_meeting(team_id, agent_ids)
+        _seed_claim_belief_gate_fixture(
+            monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
+        )
         results = []
         for sibling in siblings:
             meeting_id = sibling["meetingRoundId"]

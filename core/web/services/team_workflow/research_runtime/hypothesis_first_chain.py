@@ -253,6 +253,38 @@ class FormalCommandRejectedError(HypothesisFirstChainError):
         self.blockers = [dict(item) for item in blockers or []]
 
 
+class ClaimBeliefGateBlockedError(FormalCommandRejectedError):
+    """A formal selection authority was blocked by the claim belief hard gate.
+
+    R2.2 fail-closed semantics: a hypothesis whose core claims are
+    ``contradicted``/``disputed`` — or whose claim data is missing or
+    unreadable, so the five-state belief table cannot be evaluated — must
+    never be advanced onto the formal path.  The structured ``blockers`` carry
+    ``claimId`` and ``beliefState`` so the operator can repair the claim
+    ledger (supersede/retract, evidence re-review) and retry the same
+    decision; nothing is silently waived.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str,
+        question_id: str,
+        candidate_id: str = "",
+        blockers: list[dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code="claim_belief_gate_blocked",
+            status_code=422,
+            blockers=blockers,
+        )
+        self.stage = stage
+        self.question_id = question_id
+        self.candidate_id = candidate_id
+
+
 def _formal_command_rejection(exc: Exception) -> HypothesisFirstChainError:
     """Convert a formal command-service rejection into a structured error.
 
@@ -1300,6 +1332,283 @@ def retry_review_dispatch(
     )
 
 
+# ---------------------------------------------------------------------------
+# claim belief hard gate (R2.2, fail-closed)
+#
+# The formal selection/convergence authorities of this chain consume the
+# five-state belief table (`ClaimBeliefTable` via
+# `claim_belief_service.evaluate_claim_belief`) as a hard gate: only a
+# candidate whose core claims carry no accepted counter-evidence may advance.
+# Per the claim-belief contract semantics, `supported`/`weakly_supported`/
+# `untested` are allowed (pending evidence never demotes, adjudication stays
+# in the ledger), while `contradicted`/`disputed` block.  Missing or
+# unreadable claim data blocks as well — the gate never defaults to allow.
+
+CLAIM_BELIEF_GATE_BLOCKING_STATES = frozenset({"contradicted", "disputed"})
+
+
+def _claim_evidence_records(team_id: str) -> list[dict[str, Any]]:
+    """Authoritative claim-evidence records for one team (evidence store)."""
+    from core.research.evidence import ClaimEvidenceStore
+
+    return [
+        dict(record)
+        for record in ClaimEvidenceStore(_project_root()).list(team_id)
+        if isinstance(record, Mapping)
+    ]
+
+
+def _question_claim_rows_for_gate(team_id: str, question_id: str) -> list[dict[str, Any]]:
+    """Latest-per-claim ledger rows scoped to one question (read-only)."""
+    from core.web.services.team_workflow import claim_ledger as claim_ledger_service
+
+    listing = claim_ledger_service.list_claims(team_id)
+    normalized_question = str(question_id or "").strip().upper()
+    return [
+        dict(item)
+        for item in list(listing.get("claims") or [])
+        if isinstance(item, Mapping)
+        and str(item.get("question") or "").strip().upper() == normalized_question
+    ]
+
+
+def _blocked_gate_verdict(
+    candidate_id: str, reason: str, *, claims: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    return {
+        "candidateId": candidate_id,
+        "status": "blocked",
+        "reason": reason,
+        "claims": list(claims or []),
+        "blockedClaims": list(claims or []),
+    }
+
+
+def evaluate_claim_belief_gate(
+    team_id: str,
+    question_id: str,
+    candidate_ids: Any,
+) -> dict[str, dict[str, Any]]:
+    """Evaluate the claim belief hard gate for the given candidates.
+
+    Fail-closed by construction: every unreadable store, unparsable ledger
+    entry, missing claim row and `contradicted`/`disputed` belief state
+    becomes a structured ``blocked`` verdict instead of an exception or a
+    silent allow.  The belief states themselves come exclusively from
+    `evaluate_claim_belief` — this gate never re-derives them.
+    """
+    normalized_question = str(question_id or "").strip().upper()
+    if isinstance(candidate_ids, str):
+        requested = [candidate_ids]
+    else:
+        requested = [str(item or "").strip() for item in list(candidate_ids or [])]
+    requested = [item for item in requested if item]
+    verdicts: dict[str, dict[str, Any]] = {}
+    if not requested:
+        return verdicts
+
+    from core.research.workflow.contracts import ClaimLedgerEntry
+
+    from .claim_belief_service import evaluate_claim_belief
+
+    try:
+        claim_rows = _question_claim_rows_for_gate(team_id, normalized_question)
+    except Exception:  # noqa: BLE001 - fail closed on unreadable ledger
+        for candidate_id in requested:
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "claim_ledger_unavailable"
+            )
+        return verdicts
+    try:
+        evidence_records = _claim_evidence_records(team_id)
+    except Exception:  # noqa: BLE001 - fail closed on unreadable evidence store
+        for candidate_id in requested:
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "claim_evidence_store_unavailable"
+            )
+        return verdicts
+
+    entries_by_id: dict[str, Any] = {}
+    invalid_claim_ids: set[str] = set()
+    for row in claim_rows:
+        claim_id = str(row.get("claimId") or "").strip()
+        if not claim_id:
+            continue
+        try:
+            entries_by_id[claim_id] = ClaimLedgerEntry.from_dict(dict(row))
+        except Exception:  # noqa: BLE001 - invalid rows cannot support a gate allow
+            invalid_claim_ids.add(claim_id)
+
+    claims_by_candidate: dict[str, set[str]] = {
+        candidate_id: set() for candidate_id in requested
+    }
+    for record in evidence_records:
+        candidate_id = str(record.get("candidateId") or "").strip()
+        claim_id = str(record.get("claimId") or "").strip()
+        if candidate_id in claims_by_candidate and claim_id:
+            claims_by_candidate[candidate_id].add(claim_id)
+
+    for candidate_id in requested:
+        claim_ids = sorted(claims_by_candidate.get(candidate_id) or set())
+        if not claim_ids:
+            # No claim data at all for this candidate: an unevidenced core
+            # claim must not enter the formal path (fail-closed).
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "claim_data_missing"
+            )
+            continue
+        missing = [
+            item
+            for item in claim_ids
+            if item not in entries_by_id and item not in invalid_claim_ids
+        ]
+        invalid = [item for item in claim_ids if item in invalid_claim_ids]
+        if missing:
+            # Bridged claim ids absent from this question's scoped ledger rows
+            # mean no evaluable claim data for this question (fail-closed).
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "claim_data_missing"
+            )
+            continue
+        if invalid:
+            claims_preview = [
+                {
+                    "claimId": item,
+                    "beliefState": "unknown",
+                    "problem": "ledger_entry_invalid",
+                }
+                for item in sorted(set(invalid))
+            ]
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id,
+                "claim_ledger_entry_unreadable",
+                claims=claims_preview,
+            )
+            continue
+        try:
+            table = evaluate_claim_belief(
+                [entries_by_id[claim_id] for claim_id in claim_ids],
+                evidence_records,
+            )
+        except Exception:  # noqa: BLE001 - fail closed on evaluation failure
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "claim_belief_evaluation_failed"
+            )
+            continue
+        states = {entry.claimId: entry for entry in table.entries}
+        claim_summaries: list[dict[str, Any]] = []
+        blocked_claims: list[dict[str, Any]] = []
+        for claim_id in claim_ids:
+            entry = states.get(claim_id)
+            if entry is None:
+                blocked_claims.append(
+                    {
+                        "claimId": claim_id,
+                        "beliefState": "unknown",
+                        "problem": "belief_entry_missing",
+                    }
+                )
+                continue
+            claim_summaries.append(
+                {
+                    "claimId": claim_id,
+                    "beliefState": entry.beliefState,
+                    "acceptedSupportCount": entry.acceptedSupportCount,
+                    "acceptedCounterCount": entry.acceptedCounterCount,
+                    "supportingEvidenceIds": list(entry.supportingEvidenceIds),
+                    "counterEvidenceIds": list(entry.counterEvidenceIds),
+                }
+            )
+            if entry.beliefState in CLAIM_BELIEF_GATE_BLOCKING_STATES:
+                blocked_claims.append(
+                    {
+                        "claimId": claim_id,
+                        "beliefState": entry.beliefState,
+                        "acceptedSupportCount": entry.acceptedSupportCount,
+                        "acceptedCounterCount": entry.acceptedCounterCount,
+                        "counterEvidenceIds": list(entry.counterEvidenceIds),
+                    }
+                )
+        if blocked_claims:
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "claim_belief_state_blocked", claims=blocked_claims
+            )
+        else:
+            verdicts[candidate_id] = {
+                "candidateId": candidate_id,
+                "status": "allowed",
+                "reason": "",
+                "claims": claim_summaries,
+                "blockedClaims": [],
+            }
+    return verdicts
+
+
+def _gate_blocker_payload(verdict: dict[str, Any]) -> dict[str, Any]:
+    """One route-renderable blocker entry for a blocked gate verdict."""
+    return {
+        "code": "claim_belief_gate_blocked",
+        "candidateId": verdict.get("candidateId") or "",
+        "reason": str(verdict.get("reason") or ""),
+        "claims": list(verdict.get("blockedClaims") or []),
+    }
+
+
+def _assert_claim_belief_gate_allows(
+    team_id: str,
+    question_id: str,
+    candidate_id: str,
+    *,
+    stage: str,
+) -> dict[str, Any]:
+    """Raise `ClaimBeliefGateBlockedError` when the candidate fails the gate."""
+    normalized_candidate = str(candidate_id or "").strip()
+    verdict = evaluate_claim_belief_gate(team_id, question_id, [normalized_candidate]).get(
+        normalized_candidate
+    ) or _blocked_gate_verdict(normalized_candidate, "claim_belief_evaluation_failed")
+    if verdict.get("status") == "allowed":
+        return verdict
+    blocked_claims = [
+        str(item.get("claimId") or "")
+        for item in list(verdict.get("blockedClaims") or [])
+        if isinstance(item, Mapping)
+    ]
+    reason = str(verdict.get("reason") or "")
+    if reason == "claim_belief_state_blocked":
+        message = (
+            f"Claim belief gate blocked this decision: the core claims "
+            f"({', '.join(blocked_claims) or 'unknown'}) of candidate "
+            f"{normalized_candidate or 'unknown'} have been refuted or are disputed, "
+            f"and must not advance to the formal path. Please supersede/retract the claim or repair the "
+            f"evidence review before retrying."
+        )
+    else:
+        message = (
+            f"Claim belief gate blocked this decision: the candidate "
+            f"{normalized_candidate or 'unknown'}'s claim data cannot be evaluated ({reason}), "
+            f"fail-closed and not allowed to advance to the formal path."
+        )
+    _record_scene_event(
+        "claim_belief_gate_blocked",
+        outcome="blocked",
+        level="warning",
+        fields={
+            "stage": stage,
+            "questionId": str(question_id or "").strip().upper(),
+            "candidateId": normalized_candidate,
+            "gateReason": reason,
+            "blockedClaimIds": blocked_claims,
+        },
+    )
+    raise ClaimBeliefGateBlockedError(
+        message,
+        stage=stage,
+        question_id=str(question_id or "").strip().upper(),
+        candidate_id=normalized_candidate,
+        blockers=[_gate_blocker_payload(verdict)],
+    )
+
+
 def record_human_adjudication(
     team_id: str,
     *,
@@ -1357,6 +1666,26 @@ def record_human_adjudication(
                     "human adjudication idempotency key is bound to different input"
                 )
             return {"status": "reused", "adjudication": existing}
+        if normalized_decision == "accepted":
+            # Formal selection hard gate (fail-closed): an accepted human
+            # adjudication is a convergence authority for the formal path, so
+            # the round's recommended candidate must pass the claim belief
+            # gate before the authority is appended.  Replays above are not
+            # re-gated; rejecting (elimination) is never gated.
+            meta_review = (
+                round_record.get("metaReview")
+                if isinstance(round_record.get("metaReview"), Mapping)
+                else {}
+            )
+            recommended_candidate_id = str(
+                meta_review.get("recommendationCandidateId") or ""
+            ).strip()
+            _assert_claim_belief_gate_allows(
+                team_id,
+                normalized_question_id,
+                recommended_candidate_id,
+                stage="human_adjudication",
+            )
         now = _utc_now()
         record = {
             "schemaVersion": SCHEMA_VERSION,
@@ -5936,6 +6265,55 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
     else:
         convergence_detail = "converged"
 
+    # Convergence hard gate (R2.2, fail-closed): an accepted recommendation
+    # may only converge when its candidate's core claims carry an evaluable,
+    # unrefuted five-state belief.  `contradicted`/`disputed` claims, and any
+    # missing/unreadable claim data, block convergence instead of silently
+    # advancing onto the formal path.  The gate runs only once the structural
+    # gates above passed, so the read model pays the claim-ledger I/O only on
+    # the otherwise-converged path.
+    claim_belief_gate: dict[str, Any] | None = None
+    if converged:
+        recommended_candidate_id = str(
+            meta_review.get("recommendationCandidateId") or ""
+        ).strip()
+        verdict = evaluate_claim_belief_gate(
+            normalized_team_id, normalized_question_id, [recommended_candidate_id]
+        ).get(recommended_candidate_id) or _blocked_gate_verdict(
+            recommended_candidate_id, "claim_data_missing"
+        )
+        claim_belief_gate = {
+            "decisionPoint": "converge_question",
+            "roundId": latest_round_id,
+            "candidateId": recommended_candidate_id,
+            "status": str(verdict.get("status") or ""),
+            "reason": str(verdict.get("reason") or ""),
+            "claims": list(verdict.get("claims") or []),
+            "blockedClaims": list(verdict.get("blockedClaims") or []),
+        }
+        if verdict.get("status") != "allowed":
+            converged = False
+            blocked_claim_ids = [
+                str(item.get("claimId") or "")
+                for item in claim_belief_gate["blockedClaims"]
+                if isinstance(item, Mapping)
+            ]
+            candidate_label = recommended_candidate_id or "(未给出入选候选)"
+            if claim_belief_gate["reason"] == "claim_belief_state_blocked":
+                convergence_detail = (
+                    f"最近一轮 {latest_round_id} 的入选假说 {candidate_label} "
+                    f"存在被反证或争议中的核心 claim"
+                    f"（{', '.join(blocked_claim_ids) or '未知'}），"
+                    f"claim belief 硬门阻断收敛；请先修订 claim 或证据再重试"
+                )
+            else:
+                convergence_detail = (
+                    f"最近一轮 {latest_round_id} 的入选假说 {candidate_label} "
+                    f"的 claim 数据无法评估"
+                    f"（{claim_belief_gate['reason']}），"
+                    f"claim belief 硬门 fail-closed 阻断收敛"
+                )
+
     baselines = _question_template_baselines(normalized_team_id, normalized_question_id)
     # Budget authority lives on the current selection's links: raised limits
     # are persisted per round, and exhaustion counts only this selection's
@@ -5991,6 +6369,7 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         "latestHypothesisRoundId": latest_round_id,
         "hypothesisConverged": converged,
         "convergenceDetail": convergence_detail,
+        "claimBeliefGate": claim_belief_gate,
         "roundBudget": budget,
         "budgetExhausted": bool(not converged and selection_round_index >= budget),
         "templateBaselineExists": bool(baselines),

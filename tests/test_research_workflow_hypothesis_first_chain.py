@@ -69,6 +69,7 @@ from core.web.services.team_workflow.source_collection import (
 )
 
 from tests._support.team_workflow.helpers import (
+    _seed_claim_belief_gate_fixture,
     _use_fake_local_research_config,
     _use_tmp_project_root,
 )
@@ -133,6 +134,11 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(templates, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    # The R2.2 claim belief gate reads the claim ledger inside chain_state;
+    # pin its store root to the tmp workspace like every other store.
+    from core.web.services.team_workflow import claim_ledger as claim_ledger_service
+
+    monkeypatch.setattr(claim_ledger_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _InlineExecutor())
     agents: dict[str, str] = {}
     team_roles = (
@@ -2074,6 +2080,11 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             # 1. Selection persists -> first review meeting auto-opens in
             #    background mode with the room round <-> meetingRoundId binding.
             recorded = _open_first_meeting(team_id, agent_ids)
+            # R2.2 claim belief gate: seed review-supported core claims for the
+            # selected candidates so the final convergence can pass the gate.
+            _seed_claim_belief_gate_fixture(
+                monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
+            )
             review = recorded["reviewMeeting"]
             assert review["discussion"]["background"] is True
             first_round_meetings = _review_meetings(recorded)
@@ -3199,6 +3210,9 @@ def test_converged_chain_without_evidence_requests_is_collection_ready(
 
         with server_operator_scope("u-1", roles=("operator",)):
             recorded = _open_first_meeting(team_id, agent_ids)
+            _seed_claim_belief_gate_fixture(
+                monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
+            )
             sibling_meetings = _review_meetings(recorded)
             assert len(sibling_meetings) == 2
             for sibling in sibling_meetings:
