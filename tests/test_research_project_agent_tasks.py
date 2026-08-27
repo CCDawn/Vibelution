@@ -818,6 +818,41 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
     assert status["tasks"][0]["resultRefs"] == ["plan-reconciled"]
 
 
+def test_task_status_reconciles_needs_continue_session_as_stopped(
+    tmp_path, monkeypatch
+):
+    """SCI-003 回归：needs_continue 是暂停态，不能让任务永远停留在 running。"""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-needs-continue-1",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "status": "needs_continue",
+            "currentPhase": "needs_continue",
+            "activeTask": None,
+        },
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert status["activeTasks"] == []
+    assert status["tasks"][0]["taskId"] == started["task"]["taskId"]
+    assert status["tasks"][0]["status"] == "stopped"
+    assert status["tasks"][0]["failureCode"] == "session_needs_continue"
+
+
 def test_task_status_heals_incomplete_result_from_same_agent_alias_plan(
     tmp_path, monkeypatch
 ):

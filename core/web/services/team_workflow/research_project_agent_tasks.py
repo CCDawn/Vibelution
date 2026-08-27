@@ -1786,6 +1786,15 @@ def _reconcile_project_agent_task_from_session(
             "resultRefs": result_refs,
             "failureCode": "",
         }
+    if phase in {"needs_continue"}:
+        # A needs_continue session is parked awaiting a continue message and
+        # may never resume; leaving the task active blocks the Agent scope
+        # forever (SCI-003 zombie tasks after tool-budget pauses).
+        return {
+            "status": "stopped",
+            "resultRefs": [],
+            "failureCode": "session_needs_continue",
+        }
     if phase in {"ready", "completed", "complete", "idle"}:
         return {
             "status": "incomplete",
