@@ -44,6 +44,7 @@ _SUPPORTED_KINDS = frozenset(
         "feedback_iterations",
         "review_independence",
         "review_disagreement",
+        "evolution_lineage",
     }
 )
 

@@ -99,6 +99,21 @@ from .discussion_scope import (
 )
 from .execution import NodeExecutionEnvelope, TaskLease, TaskLeaseStatus
 from .execution_anchor import ExecutionAnchor
+from .evolution_lineage import (
+    EVOLUTION_LINEAGE_ACTORS,
+    EVOLUTION_LINEAGE_EVIDENCE_KINDS,
+    EVOLUTION_LINEAGE_EVENT_KINDS,
+    EVOLUTION_LINEAGE_SCHEMA_VERSION,
+    FINALIST_LIMIT,
+    MAX_REVISION_ROUNDS,
+    REVISION_EXHAUSTED_EXCEPTION,
+    EvolutionLineage,
+    EvolutionLineageEvent,
+    EvolutionLineageEventKind,
+    EvolutionLineageEvidenceRef,
+    evolution_lineage_summary,
+    mandatory_exception_review_required,
+)
 from .experiment_campaign import ExperimentCampaign, ExperimentCampaignStage
 from .hypothesis import HypothesisCandidate, HypothesisPortfolio
 from .hypothesis_fragment import (
@@ -296,6 +311,11 @@ __all__ = [
     "DISCUSSION_SCOPE_VERSION",
     "EVIDENCE_STATUSES",
     "ESCALATION_STATUS_FLAGGED_ONLY",
+    "EVOLUTION_LINEAGE_ACTORS",
+    "EVOLUTION_LINEAGE_EVIDENCE_KINDS",
+    "EVOLUTION_LINEAGE_EVENT_KINDS",
+    "EVOLUTION_LINEAGE_SCHEMA_VERSION",
+    "FINALIST_LIMIT",
     "HYPOTHESIS_FRAGMENT_KIND",
     "HYPOTHESIS_FRAGMENT_SCHEMA_VERSION",
     "HYPOTHESIS_REVIEW_MEETING_TYPE",
@@ -306,6 +326,7 @@ __all__ = [
     "LINEAGE_KINDS",
     "MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO",
     "MAX_AUTO_REVISION_ROUNDS_DEFAULT",
+    "MAX_REVISION_ROUNDS",
     "MAX_SELECTED_CANDIDATES",
     "MEETING_REF_KINDS",
     "MEETING_STATUSES",
@@ -337,6 +358,7 @@ __all__ = [
     "REVIEW_STEP_NAMES",
     "ROUND_STATUSES",
     "SCORE_DIMENSIONS",
+    "REVISION_EXHAUSTED_EXCEPTION",
     "SESSION_SCOPE_KINDS",
     "SESSION_SCOPE_VERSION",
     "SUPPORT_LEVELS",
@@ -410,6 +432,10 @@ __all__ = [
     "ResearchWorkflowNodeDetail",
     "ResearchWorkflowSnapshot",
     "ResultEvaluationOutput",
+    "EvolutionLineage",
+    "EvolutionLineageEvent",
+    "EvolutionLineageEventKind",
+    "EvolutionLineageEvidenceRef",
     "ReviewDisagreementArtifact",
     "ReviewEscalation",
     "ReviewPairDisagreement",
@@ -438,6 +464,7 @@ __all__ = [
     "canonical_discussion_scope_json",
     "canonical_fragment_payload",
     "canonical_hypothesis_score_rubric",
+    "evolution_lineage_summary",
     "canonical_json",
     "canonical_research_task_output_schema_bundle",
     "catalog_hypothesis_flow_report_hash",
@@ -449,6 +476,7 @@ __all__ = [
     "discussion_scope_key_for",
     "hypothesis_score_rubric_sha256",
     "inconsistent_axes_for_pair",
+    "mandatory_exception_review_required",
     "parse_discussion_scope",
     "parse_discussion_scope_envelope",
     "parse_research_task_output",
