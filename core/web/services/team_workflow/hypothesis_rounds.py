@@ -349,6 +349,11 @@ def generate_hypothesis_round_from_meeting(
     digests and decisions are combined only for the review executor. Re-running
     the same ordered group and scope reuses the existing round (append-only
     idempotency).
+
+    The executor's explicit DEV/FORMAL fence is driven by the bound meeting's
+    server-owned scope ``mode``: only ``mode=formal`` runs ``FORMAL`` (real
+    runners + one provider-bound receipt per model call); dev/platform scopes
+    and a missing marker fail closed to ``DEV`` fixtures.
     """
 
     from core.web.services.team_service import assert_team_exists
@@ -614,9 +619,33 @@ def generate_hypothesis_round_from_meeting(
         prior_round=prior_round,
         extra_evidence_refs=_normalized_str_list(request.get("evidenceRefs")),
     )
+    # The closed meeting's server-owned scope mode is the explicit execution
+    # fence authority: only ``mode=formal`` runs the FORMAL review.  Dev and
+    # platform scopes — and any meeting missing the marker — fail closed to
+    # the deterministic DEV path; FORMAL is never inferred from runner
+    # presence or payload hints.
+    review_mode = str(meeting.get("mode") or "").strip().lower()
+    execution_mode = (
+        hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL
+        if review_mode
+        == hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL.value
+        else hypothesis_review_executor.HypothesisReviewExecutionMode.DEV
+    )
+    if execution_mode is hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL:
+        # FORMAL runners bind every model call to the meeting's server-owned
+        # WorkflowRun receipt authority; a formal meeting without one fails
+        # closed inside the receipt-bound runner instead of degrading to
+        # unattributed model output.
+        receipt_authority = meeting.get("modelInvocationReceiptAuthority")
+        context["teamId"] = normalized_team_id
+        context["questionId"] = str(meeting.get("question") or "")
+        context["_modelInvocationReceiptAuthority"] = (
+            dict(receipt_authority) if isinstance(receipt_authority, Mapping) else None
+        )
     review = hypothesis_review_executor.execute_hypothesis_review(
         context,
         round_id=round_id,
+        execution_mode=execution_mode,
         reflection_runner=reflection_runner,
         pairwise_runner=pairwise_runner,
         pareto_runner=pareto_runner,
@@ -662,6 +691,7 @@ def generate_hypothesis_round_from_meeting(
         "contextId": review["reviewContextId"],
         "positionSeed": review["positionSeed"],
         "roles": review["roles"],
+        "executionMode": review["executionMode"],
     }
     return result
 
