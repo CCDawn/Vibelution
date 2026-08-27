@@ -16,7 +16,9 @@ from tests._support.readiness_fakes import (
 
 def test_registry_keys_exactly_match_definition_nodes() -> None:
     assert set(_build_registry()) == DEFINITION_NODE_IDS
-    assert len(_build_registry()) == 16
+    # 17 nodes since the problem_understanding entry node joined the
+    # canonical graph; the set equality above is the real contract.
+    assert len(_build_registry()) == len(DEFINITION_NODE_IDS)
 
 
 def test_registry_integrity_asserted_at_construction() -> None:

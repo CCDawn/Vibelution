@@ -35,7 +35,10 @@ def _hypothesis_action() -> PendingAction:
         run_id="run-sci-096",
         node_run_id="nr-run-sci-096-hypothesis_design-a3",
         node_id="hypothesis_design",
-        attempt=3,
+        # First dispatch: retry attempts (attempt >= 2) require the workflow
+        # Ledger for ancestry resolution and fail closed without it; this
+        # test exercises bootstrap ordering, not retry lineage.
+        attempt=1,
         actor_kind=ActorKind.AGENT,
         action_kind="start_agent_task",
         input_snapshot_hash="a" * 64,
