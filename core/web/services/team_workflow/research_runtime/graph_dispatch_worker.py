@@ -36,6 +36,7 @@ from core.research.workflow.transitions import (
 
 from .block_projection import (
     apply_node_run_block,
+    mark_run_reconciliation_required,
     sync_run_blocked,
     sync_run_succeeded,
     terminal_facts_for_run,
@@ -154,6 +155,7 @@ class GraphDispatchWorker:
         repaired += self._repair_starting_without_progress()
         repaired += self._repair_stranded_iteration_route()
         repaired += self._repair_stranded_terminal_package()
+        repaired += self._repair_terminal_failed_dispatch()
         return len(leased) + repaired
 
     def _repair_created_without_start(self) -> int:
@@ -378,6 +380,13 @@ class GraphDispatchWorker:
             self._mark_blocked(action, dispatch, str(exc))
             return
         except Exception as exc:
+            if "execution receipt identity mismatch" in str(exc):
+                # Deterministic: retrying the same receipt against the same
+                # checkpoint can never succeed (SCI-096 style ledger/checkpoint
+                # drift). Skip the transient budget and surface the diagnosis
+                # immediately instead of live-looping five identical attempts.
+                self._mark_blocked(action, dispatch, str(exc))
+                return
             self._requeue_or_fail(action, dispatch, str(exc))
             return
 
@@ -1764,6 +1773,89 @@ class GraphDispatchWorker:
                 repaired += 1
         return repaired
 
+    def _repair_terminal_failed_dispatch(self) -> int:
+        """Translate stranded runs that a terminal-failed graph dispatch left behind.
+
+        Historical rows (written before the `_mark_blocked` reconciliation
+        translation existed, or swept by the lease-attempt gate while the
+        worker was down) can keep a run in ``running``/``waiting_human`` with
+        no pending or leased graph_dispatch: nothing will ever advance it.
+        This repair surfaces exactly those rows as ``reconciliation_required``
+        so the reconcile_run offer reappears. Rows still being worked on are
+        excluded via the inflight check; BLOCKED runs already have their own
+        operator entry and are not touched.
+        """
+        now_ms = self._now()
+
+        def find_stranded(uow):
+            return uow.repository.execute(
+                """
+                SELECT o.action_id, o.node_run_id, o.last_problem_json, r.run_id
+                FROM workflow_runs r
+                JOIN outbox_actions o
+                  ON o.run_id = r.run_id
+                 AND o.action_kind = 'graph_dispatch'
+                 AND o.status = 'failed'
+                WHERE r.status IN ('running', 'waiting_human')
+                  AND NOT EXISTS (
+                    SELECT 1 FROM outbox_actions live
+                    WHERE live.run_id = r.run_id
+                      AND live.action_kind = 'graph_dispatch'
+                      AND live.status IN ('pending', 'leased')
+                  )
+                ORDER BY o.updated_at_ms DESC, o.action_id DESC
+                """,
+            ).fetchall()
+
+        rows = self._submit(find_stranded, force_flush=True).result(timeout=10)
+        seen_runs: set[str] = set()
+        repaired = 0
+        for row in rows or ():
+            action_id = str(row[0] or "")
+            node_run_id = str(row[1] or "") or None
+            problem_raw = str(row[2] or "")
+            run_id = str(row[3] or "")
+            if not action_id or not run_id or run_id in seen_runs:
+                continue
+            seen_runs.add(run_id)
+            try:
+                problem = json.loads(problem_raw) if problem_raw else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                problem = {"code": "workflow_blocked", "detail": problem_raw}
+            if not isinstance(problem, dict) or not problem:
+                problem = {"code": "graph_dispatch_failed", "detail": ""}
+            elif not problem.get("code"):
+                problem["code"] = "graph_dispatch_failed"
+
+            def mutate(uow, rid=run_id, prob=problem, nid=node_run_id, aid=action_id):
+                return mark_run_reconciliation_required(
+                    uow,
+                    run_id=rid,
+                    problem=prob,
+                    now_ms=now_ms,
+                    actor_id=self._owner,
+                    correlation_id=aid,
+                    node_run_id=nid,
+                    action_id=aid,
+                    extra_payload={"repair": "terminal_failed_dispatch"},
+                )
+
+            # The mark helper is status-guarded, so a run that became live
+            # between the scan and this transaction stays untouched.
+            if self._submit(mutate, force_flush=True).result(timeout=30):
+                _record_scene_event(
+                    "graph_dispatch.terminal_failure_reconciled",
+                    outcome="recovered",
+                    fields={
+                        "runId": run_id,
+                        "actionId": action_id,
+                        "nodeRunId": node_run_id or "",
+                        "problemCode": str(problem.get("code") or ""),
+                    },
+                )
+                repaired += 1
+        return repaired
+
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
         problem = problem_from_graph_error(detail)
@@ -1801,6 +1893,20 @@ class GraphDispatchWorker:
                 ):
                     # Adapter already finished this attempt. Rewinding
                     # succeeded → blocked is illegal and would strand STOP.
+                    # The dispatch itself is still terminal-failed though: an
+                    # outbox failure with no live successor leaves the run
+                    # advancing nowhere, so surface it as reconciliation
+                    # instead of a silent stranded running run.
+                    mark_run_reconciliation_required(
+                        uow,
+                        run_id=dispatch.run_id,
+                        problem=problem,
+                        now_ms=now_ms,
+                        actor_id=self._owner,
+                        correlation_id=str(action.action_id or dispatch.node_run_id),
+                        node_run_id=dispatch.node_run_id,
+                        action_id=str(getattr(action, "action_id", "") or ""),
+                    )
                     return
             apply_node_run_block(
                 uow,

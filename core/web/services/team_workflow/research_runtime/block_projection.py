@@ -40,6 +40,78 @@ def sync_run_blocked(
     )
 
 
+def mark_run_reconciliation_required(
+    uow: Any,
+    *,
+    run_id: str,
+    problem: dict[str, Any],
+    now_ms: int,
+    actor_id: str,
+    correlation_id: str,
+    node_run_id: str | None = None,
+    action_id: str | None = None,
+    extra_payload: dict[str, Any] | None = None,
+) -> bool:
+    """Translate an unrecoverable dispatch failure into operator-visible state.
+
+    A terminal-failed ``graph_dispatch`` whose node attempt is already past the
+    point where blocking it would be legal (typically ``succeeded``) leaves the
+    run stranded as ``running`` with no advancing mechanism behind it. Moving
+    the run to ``reconciliation_required`` surfaces the reconcile_run offer
+    instead of leaving the advancement chain silently dead. Idempotent: only
+    ``running`` / ``waiting_human`` runs transition; every other status keeps
+    its own recovery entry (ordinary BLOCKED runs already offer one).
+
+    Returns True when this call transitioned the run.
+    """
+    run = uow.repository.get_run(run_id)
+    if run is None:
+        return False
+    if run.status not in {
+        RunStatus.RUNNING.value,
+        RunStatus.WAITING_HUMAN.value,
+    }:
+        return False
+    reason = format_blocked_reason(problem)
+    problem_json = json.dumps(problem, ensure_ascii=False)
+    uow.repository.update_run_status(
+        run_id,
+        run.team_id,
+        RunStatus.RECONCILIATION_REQUIRED.value,
+        now_ms,
+        blocked_problem_json=problem_json,
+    )
+    sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
+    if sequence is None:
+        return True
+    payload = {
+        "nodeRunId": node_run_id,
+        "actionId": action_id,
+        "code": problem.get("code"),
+        "reason": reason or None,
+        "reconciliation": "terminal_dispatch_failed",
+        **dict(extra_payload or {}),
+    }
+    uow.repository.insert_event(
+        EventRecord(
+            run_id=run_id,
+            sequence=sequence,
+            event_id=new_id("evt"),
+            run_version=run.run_version,
+            event_type="reconciliation_required",
+            actor_json=json.dumps(
+                {"actorType": "system", "actorId": actor_id},
+                ensure_ascii=False,
+            ),
+            correlation_id=correlation_id,
+            causation_id=None,
+            payload_json=json.dumps(payload, ensure_ascii=False),
+            occurred_at_ms=now_ms,
+        )
+    )
+    return True
+
+
 def apply_node_run_block(
     uow: Any,
     *,
