@@ -270,6 +270,36 @@ const currentRun = {
   runtimeCurrentNodeIds: ["knowledge_handoff"],
 } as WorkflowRunRecord;
 
+/** Minimal canonical V2 state whose formal run owns the question (blocked). */
+function blockedFormalStateV2(): Record<string, unknown> {
+  return {
+    schemaVersion: 2,
+    currentPhase: "formal_runtime",
+    awaitingHumanCount: 0,
+    problems: [],
+    allowedActions: [],
+    generation: { generationMeetingId: null },
+    review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+    collection: { requests: [] },
+    convergence: { roundBudget: 3, accepted: true },
+    formalRuntime: {
+      lifecycle: "running",
+      outcome: "none",
+      actionability: "blocked",
+      problems: [],
+      runId: "run-bcbca1400d71",
+      runVersion: 3,
+      runStatus: "blocked",
+      completionKind: null,
+      lineageDisposition: "current",
+      isCurrentRevision: true,
+      parentRunId: null,
+      childRunIds: [],
+      currentNodeIds: ["source_finding"],
+    },
+  };
+}
+
 async function renderWorkspace() {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -978,6 +1008,156 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.textContent).toContain("生成候选假说");
     expect(rendered.container.textContent).not.toContain("开始实验");
     expect(harness.commands.submitRun).not.toHaveBeenCalled();
+  });
+
+  it("promotes the stateV2 formal run id into the URL for question-only deep links", async () => {
+    harness.location.questionId = "SCI-003";
+    harness.chain.questionId = "SCI-003";
+    harness.chain.stateV2 = blockedFormalStateV2() as never;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({ runId: "run-bcbca1400d71" });
+  });
+
+  it("surfaces the blocked formal run retry action instead of an unknown hypothesis card", async () => {
+    const startOffer = {
+      command: "start_node",
+      nodeId: "source_finding",
+      available: false,
+      label: "开始 资料寻找",
+      reasonCode: "retry_owns_recovery",
+      blockerIds: [],
+      idempotencyKey: "offer:run-bcbca1400d71:source_finding:start_node:v3",
+      expectedRunVersion: 3,
+      payload: {},
+    };
+    harness.location.panel = "node";
+    harness.location.runId = "run-bcbca1400d71";
+    harness.location.questionId = "SCI-003";
+    harness.location.selectedNodeId = "source_finding";
+    harness.chain.questionId = "SCI-003";
+    harness.chain.stateV2 = blockedFormalStateV2() as never;
+    harness.runState.run = {
+      ...currentRun,
+      runId: "run-bcbca1400d71",
+      questionId: "SCI-003",
+      runVersion: 3,
+      status: "blocked",
+      runtimeCurrentNodeIds: ["source_finding"],
+    } as WorkflowRunRecord;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: {
+        runId: "run-bcbca1400d71",
+        teamId: "research-team",
+        runVersion: 3,
+        status: "blocked",
+        runtimeCurrentNodeIds: ["source_finding"],
+        nodeRuns: {},
+      },
+    } as never;
+    harness.runState.snapshot = {
+      run: {
+        runId: "run-bcbca1400d71",
+        teamId: "research-team",
+        workflowId: "challenge-cup-research",
+        workflowVersionId: "v1",
+        runVersion: 3,
+        questionId: "SCI-003",
+        status: "blocked",
+      },
+      currentTask: {
+        key: "node-run-9",
+        nodeId: "source_finding",
+        stageId: "knowledge_collection",
+        nodeRunId: "node-run-9",
+        attempt: 3,
+        actorKind: "agent",
+        taskId: null,
+        state: "blocked_retryable",
+        kind: "node",
+        label: "资料寻找",
+        detail: "节点执行被阻塞，可重试。",
+        responsibility: "system",
+        automaticNextStep: null,
+        blockedReason: {
+          code: "agent_dispatch_failed",
+          detail: "调度失败",
+          retryable: true,
+          failureClass: "transient",
+          message: "节点执行被阻塞",
+          blockerIds: [],
+        },
+        recovery: {
+          status: "retryable",
+          retryable: true,
+          code: "agent_dispatch_failed",
+          detail: null,
+          retryScope: "task",
+          recoveryPoint: "source_finding",
+          nextRetryAt: null,
+          requiresOperator: false,
+          afterSubmit: null,
+        },
+        authority: "formal_runtime",
+      },
+      commandOffers: [startOffer],
+      retry: {
+        available: true,
+        command: "retry_node",
+        nodeId: "source_finding",
+        reasonCode: "retry_available",
+        idempotencyKey: "offer:run-bcbca1400d71:source_finding:retry_node:a3:v3",
+        expectedRunVersion: 3,
+      },
+      progress: {
+        completed: 1,
+        total: 17,
+        percent: 5.88,
+        completedNodes: 1,
+        totalNodes: 17,
+        blockedNodes: 1,
+        currentStageId: "knowledge_collection",
+        stages: [],
+        completedNodeIds: ["problem_understanding"],
+        blockedNodeIds: ["source_finding"],
+        currentNodeId: "source_finding",
+        status: "blocked",
+      },
+      latestEventSequence: 12,
+    } as never;
+    harness.runState.commandOffers = [startOffer];
+    harness.commands.submitOffer.mockResolvedValue(undefined);
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(rendered.container.textContent).not.toContain("未知的假说先行卡片");
+    expect(rendered.container.querySelector('[data-testid="research-process-inspector-pane"]')).not.toBeNull();
+    const formalCard = rendered.container.querySelector('[data-task-status="recoverable_error"]');
+    expect(formalCard).not.toBeNull();
+    const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
+    const retryButton = Array.from(footer?.querySelectorAll("button") ?? []).find((button) => (
+      button.textContent?.includes("重试")
+    ));
+    expect(retryButton).toBeTruthy();
+    await act(async () => retryButton?.click());
+    expect(harness.commands.submitOffer).toHaveBeenCalledTimes(1);
+    const submitted = harness.commands.submitOffer.mock.calls[0][0] as {
+      command: string;
+      nodeId: string | null;
+      idempotencyKey: string;
+      expectedRunVersion: number;
+    };
+    expect(submitted.command).toBe("retry_node");
+    expect(submitted.nodeId).toBe("source_finding");
+    expect(submitted.idempotencyKey).toBe("offer:run-bcbca1400d71:source_finding:retry_node:a3:v3");
+    expect(submitted.expectedRunVersion).toBe(3);
   });
 
   it("keeps collection recovery actionable in the fixed current-task footer", async () => {

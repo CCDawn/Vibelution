@@ -221,6 +221,93 @@ describe("researchWorkflowWorkspaceModel", () => {
     expect(model.currentTask?.source === "formal_runtime" && model.currentTask.primaryAction).toBeNull();
   });
 
+  it("promotes the snapshot retry summary when blocked_retryable owns the recovery", () => {
+    const startOffer = offer({
+      command: "start_node",
+      available: false,
+      reasonCode: "retry_owns_recovery",
+      idempotencyKey: "offer:run-1:source_finding:start_node:v4",
+    });
+    const retry = {
+      available: true,
+      command: "retry_node",
+      nodeId: "source_finding",
+      reasonCode: "retry_available",
+      idempotencyKey: "offer:run-1:source_finding:retry_node:a3:v4",
+      expectedRunVersion: 4,
+    };
+    const model = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: snapshot({
+        currentTask: formalTask({ state: "blocked_retryable" }),
+        commandOffers: [startOffer],
+        retry,
+      }),
+      commandOffers: [startOffer],
+    }));
+    expect(model.primaryAction).not.toBeNull();
+    expect(model.primaryAction?.offer.command).toBe("retry_node");
+    expect(model.primaryAction?.offer.available).toBe(true);
+    expect(model.primaryAction?.offer.idempotencyKey).toBe(retry.idempotencyKey);
+    expect(model.primaryAction?.offer.expectedRunVersion).toBe(4);
+    expect(model.primaryAction?.offer.nodeId).toBe("source_finding");
+    expect(model.currentTask?.source === "formal_runtime" && model.currentTask.primaryAction)
+      .toEqual(model.primaryAction);
+  });
+
+  it("keeps the offer list authoritative over the retry summary", () => {
+    const retryOffer = offer();
+    const startOffer = offer({
+      command: "start_node",
+      available: false,
+      reasonCode: "retry_owns_recovery",
+      idempotencyKey: "offer:run-1:source_finding:start_node:v4",
+    });
+    const model = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: snapshot({
+        currentTask: formalTask({ state: "blocked_retryable" }),
+        commandOffers: [startOffer],
+        retry: {
+          available: true,
+          command: "retry_node",
+          nodeId: "source_finding",
+          reasonCode: "retry_available",
+          idempotencyKey: "offer:run-1:source_finding:retry_node:a3:v4",
+          expectedRunVersion: 4,
+        },
+      }),
+      commandOffers: [startOffer, retryOffer],
+    }));
+    expect(model.primaryAction?.offer.idempotencyKey).toBe(retryOffer.idempotencyKey);
+  });
+
+  it("does not promote an unavailable, mismatched, or non-retry summary", () => {
+    const blockedTask = formalTask({ state: "blocked_retryable" });
+    const startOffer = offer({
+      command: "start_node",
+      available: false,
+      reasonCode: "retry_owns_recovery",
+      idempotencyKey: "offer:run-1:source_finding:start_node:v4",
+    });
+    for (const retry of [
+      null,
+      { available: false, command: "retry_node", nodeId: "source_finding", reasonCode: "retry_not_available", idempotencyKey: "k", expectedRunVersion: 4 },
+      { available: true, command: "cancel_run", nodeId: "source_finding", reasonCode: "retry_available", idempotencyKey: "k", expectedRunVersion: 4 },
+      { available: true, command: "retry_node", nodeId: "protocol_design", reasonCode: "retry_available", idempotencyKey: "k", expectedRunVersion: 4 },
+      { available: true, command: "retry_node", nodeId: "source_finding", reasonCode: "retry_available", idempotencyKey: "k", expectedRunVersion: 3 },
+      { available: true, command: "retry_node", nodeId: "source_finding", reasonCode: "retry_available", idempotencyKey: "", expectedRunVersion: 4 },
+    ]) {
+      const model = buildResearchWorkflowWorkspaceModel(baseInput({
+        snapshot: snapshot({
+          currentTask: blockedTask,
+          commandOffers: [startOffer],
+          retry: retry ?? undefined,
+        }),
+        commandOffers: [startOffer],
+      }));
+      expect(model.primaryAction).toBeNull();
+    }
+  });
+
   it("does not expose a CTA for automatic, completed, or terminal blocked states", () => {
     for (const state of ["auto_running", "completed", "blocked_terminal"] as const) {
       const model = buildResearchWorkflowWorkspaceModel(baseInput({

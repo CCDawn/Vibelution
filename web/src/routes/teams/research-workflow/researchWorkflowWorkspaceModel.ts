@@ -248,6 +248,41 @@ function canExposeFormalAction(state: ResearchWorkflowTaskState): boolean {
   return state === "waiting_user" || state === "blocked_retryable";
 }
 
+/**
+ * Normalize the snapshot's top-level retry summary into a CommandOffer.
+ *
+ * For a `blocked_retryable` node the offer list deliberately stays silent
+ * (its start_node offer carries `retry_owns_recovery`): the server owns the
+ * retry authority and publishes it only through `snapshot.retry`. The
+ * normalized offer reuses that exact idempotency key and expectedRunVersion,
+ * so submitting it goes through the same formal command channel.
+ */
+function retryOfferFromSnapshot(
+  task: ResearchWorkflowCurrentTask,
+  snapshot: ResearchWorkflowSnapshot,
+): CommandOffer | null {
+  const retry = snapshot.retry;
+  if (!retry?.available) return null;
+  if (text(retry.command) !== "retry_node") return null;
+  const runVersion = Number(snapshot.run.runVersion);
+  const idempotencyKey = text(retry.idempotencyKey);
+  if (!idempotencyKey || retry.expectedRunVersion == null) return null;
+  if (Number(retry.expectedRunVersion) !== runVersion) return null;
+  if (text(retry.nodeId) !== text(task.nodeId)) return null;
+  const label = text(task.label);
+  return {
+    command: "retry_node",
+    nodeId: retry.nodeId,
+    available: true,
+    label: label ? `重试${label}` : "重试当前节点",
+    reasonCode: text(retry.reasonCode) || "retry_available",
+    blockerIds: [],
+    idempotencyKey,
+    expectedRunVersion: Number(retry.expectedRunVersion),
+    payload: { retryKind: "same_node" },
+  };
+}
+
 function matchingFormalOffer(
   task: ResearchWorkflowCurrentTask,
   snapshot: ResearchWorkflowSnapshot,
@@ -269,12 +304,24 @@ function matchingFormalOffer(
     : matching.length === 1
       ? matching[0]
       : null;
-  if (!selected) return null;
-  return {
-    source: "formal_runtime",
-    kind: "command_offer",
-    offer: selected,
-  };
+  if (selected) {
+    return {
+      source: "formal_runtime",
+      kind: "command_offer",
+      offer: selected,
+    };
+  }
+  if (task.state === "blocked_retryable") {
+    const retryOffer = retryOfferFromSnapshot(task, snapshot);
+    if (retryOffer) {
+      return {
+        source: "formal_runtime",
+        kind: "command_offer",
+        offer: retryOffer,
+      };
+    }
+  }
+  return null;
 }
 
 function formalTask(
