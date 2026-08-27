@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../../api/queryKeys";
@@ -6,7 +6,7 @@ import {
   fetchChallengeCupCatalogOverview,
   runChallengeCupDevBatch,
 } from "../../../api/teamExperiment";
-import { trackDevBatchRun } from "../challengeCupTelemetry";
+import { observeCatalogActiveWorkChanged, trackDevBatchRun } from "../challengeCupTelemetry";
 import {
   VButton,
   VConfirmDialog,
@@ -281,6 +281,27 @@ export function ChallengeCatalogOverview({
   const [filter, setFilter] = useState<CatalogOverviewFilter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [pendingRetry, setPendingRetry] = useState<{ planId: string; failedIds: string[] } | null>(null);
+
+  // Edge-triggered catalog lifecycle evidence: the overview only polls while
+  // work is active, so the quiet transition rides on the final poll.
+  const activeWorkRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const overview = isCatalogOverview(overviewQuery.data) ? overviewQuery.data : null;
+    if (!overview) return;
+    const active = overview.counts.running > 0 || overview.counts.queued > 0;
+    const previous = activeWorkRef.current;
+    activeWorkRef.current = active;
+    if (previous === null || previous === active) return;
+    observeCatalogActiveWorkChanged({
+      teamId,
+      active,
+      succeeded: overview.counts.succeeded,
+      failed: overview.counts.failed,
+      running: overview.counts.running,
+      queued: overview.counts.queued,
+      awaitingApprovalCount: catalogOverviewAwaitingApprovalCount(overview.questions),
+    });
+  }, [overviewQuery.data, teamId]);
 
   const batchMutation = useMutation({
     onMutate: (input: { planId: string; retryFailed: boolean }) => ({

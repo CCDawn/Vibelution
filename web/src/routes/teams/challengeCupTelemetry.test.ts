@@ -17,8 +17,12 @@ vi.mock("../../app/browserTelemetry", () => ({
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { resetUserActionTelemetryForTests, type UserActionTracker } from "../../app/userActionTelemetry";
 import {
+  observeCatalogActiveWorkChanged,
+  observeChallengeTeamAgentsAutoRepair,
+  observeHypothesisLegacyFallback,
   observeQuestionOutputSchemaRejected,
   observeRealBatchAuthorizeShapeInvalid,
+  observeRealBatchPhaseChanged,
   observeRealBatchPollLoopStopped,
   observeWorkflowReplayFailed,
   observeWorkflowReplayResync,
@@ -39,6 +43,7 @@ import {
   trackRealBatchStart,
   trackResearchRunCreate,
   trackWorkflowHumanGateResolve,
+  trackWorkflowOfferSubmit,
 } from "./challengeCupTelemetry";
 
 const TRACKER_CASES: Array<[string, () => UserActionTracker]> = [
@@ -56,6 +61,7 @@ const TRACKER_CASES: Array<[string, () => UserActionTracker]> = [
   ["challenge_dev_readiness_run", () => trackDevReadinessRun({ teamId: "research-team" })],
   ["challenge_dev_batch_run", () => trackDevBatchRun({ teamId: "research-team" })],
   ["challenge_workflow_human_gate_resolve", () => trackWorkflowHumanGateResolve({ teamId: "research-team" })],
+  ["challenge_workflow_offer_submit", () => trackWorkflowOfferSubmit({ teamId: "research-team" })],
 ];
 
 function postedPayloads(): Array<Record<string, unknown>> {
@@ -204,5 +210,87 @@ describe("challengeCupTelemetry anomaly observations", () => {
     const fields = payloads[0].fields as Record<string, unknown>;
     expect(String(fields.parseError).length).toBeLessThanOrEqual(160);
     expect(fields.outputLength).toBe(1200);
+  });
+});
+
+describe("challengeCupTelemetry round-2 observations", () => {
+  it("reports real-batch phase transitions with alert phases at warning level", () => {
+    observeRealBatchPhaseChanged({
+      teamId: "research-team",
+      planId: "real-125",
+      previousPhase: "running",
+      phase: "circuit_breaker",
+      succeededCount: 30,
+      failedCount: 4,
+      blockedCount: 2,
+      pendingCount: 89,
+      totalAttempts: 36,
+    });
+    observeRealBatchPhaseChanged({
+      teamId: "research-team",
+      planId: "real-125",
+      previousPhase: "resumable",
+      phase: "running",
+      succeededCount: 1,
+      failedCount: 0,
+      blockedCount: 0,
+      pendingCount: 4,
+      totalAttempts: 1,
+    });
+    const payloads = postedPayloads();
+    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_real_batch_phase_changed_observed");
+    expect(payloads[0]).toMatchObject({ level: "warning" });
+    expect(payloads[0].fields).toMatchObject({
+      previousPhase: "running",
+      phase: "circuit_breaker",
+      failedCount: 4,
+      totalAttempts: 36,
+    });
+    expect(payloads[1]).toMatchObject({ level: "info" });
+  });
+
+  it("reports catalog active-work edges, warning when work quiets with failures", () => {
+    observeCatalogActiveWorkChanged({
+      teamId: "research-team",
+      active: true,
+      succeeded: 10,
+      failed: 0,
+      running: 12,
+      queued: 5,
+      awaitingApprovalCount: 0,
+    });
+    observeCatalogActiveWorkChanged({
+      teamId: "research-team",
+      active: false,
+      succeeded: 100,
+      failed: 25,
+      running: 0,
+      queued: 0,
+      awaitingApprovalCount: 8,
+    });
+    const payloads = postedPayloads();
+    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_catalog_active_work_changed_observed");
+    expect(payloads[0]).toMatchObject({ level: "info" });
+    expect(payloads[1]).toMatchObject({ level: "warning" });
+    expect(payloads[1].fields).toMatchObject({ active: false, failed: 25, awaitingApprovalCount: 8 });
+  });
+
+  it("reports hypothesis legacy fallback degradation", () => {
+    observeHypothesisLegacyFallback({ teamId: "research-team", questionId: "Q010" });
+    const payloads = postedPayloads();
+    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_hypothesis_legacy_fallback_observed");
+    expect(payloads[0]).toMatchObject({ level: "warning" });
+    expect(payloads[0].fields).toMatchObject({ questionId: "Q010" });
+  });
+
+  it("reports challenge team agents auto-repair outcomes", () => {
+    observeChallengeTeamAgentsAutoRepair({ teamId: "research-team" });
+    observeChallengeTeamAgentsAutoRepair({ teamId: "research-team", error: new Error("repair rejected") });
+    const payloads = postedPayloads();
+    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_team_agents_auto_repair_observed");
+    expect(payloads[0]).toMatchObject({ level: "info" });
+    expect(payloads[0].fields).toMatchObject({ outcome: "repaired" });
+    expect(payloads[1]).toMatchObject({ level: "warning" });
+    expect(payloads[1].fields).toMatchObject({ outcome: "failed", errorName: "Error" });
   });
 });

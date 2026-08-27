@@ -52,6 +52,7 @@ describe("domain user-action telemetry contract", () => {
     expect(teamShellSource).toContain('startUserAction("team_canvas_save"');
     expect(teamShellSource).toContain('startUserAction("team_message_send"');
     expect(teamShellSource).toContain('startUserAction("team_message_revoke"');
+    expect(teamShellSource).toContain("observeChallengeTeamAgentsAutoRepair(");
   });
 
   it("tracks tier-2 knowledge and research project mutations", () => {
@@ -78,6 +79,7 @@ describe("domain user-action telemetry contract", () => {
       "challenge_dev_readiness_run",
       "challenge_dev_batch_run",
       "challenge_workflow_human_gate_resolve",
+      "challenge_workflow_offer_submit",
     ];
     for (const action of actions) {
       expect(challengeCupTelemetrySource).toContain(`"${action}"`);
@@ -91,6 +93,10 @@ describe("domain user-action telemetry contract", () => {
       "challenge_real_batch_poll_loop_stopped",
       "challenge_real_batch_authorize_shape_invalid",
       "challenge_question_output_schema_rejected",
+      "challenge_real_batch_phase_changed",
+      "challenge_catalog_active_work_changed",
+      "challenge_hypothesis_legacy_fallback",
+      "challenge_team_agents_auto_repair",
     ];
     for (const code of observations) {
       expect(challengeCupTelemetrySource).toContain(`"${code}"`);
@@ -107,8 +113,10 @@ describe("domain user-action telemetry contract", () => {
 
   it("wires challenge-cup hypothesis selection and catalog overview surfaces", () => {
     expect(hypothesisSelectionListSource).toContain("trackHypothesisSelectionRecord(");
+    expect(hypothesisSelectionListSource).toContain("observeHypothesisLegacyFallback(");
     expect(hypothesisSelectionPanelSource).toContain("trackHypothesisCandidateGenerationOpen(");
     expect(challengeCatalogOverviewSource).toContain("trackDevBatchRun(");
+    expect(challengeCatalogOverviewSource).toContain("observeCatalogActiveWorkChanged(");
   });
 
   it("wires challenge-cup run launch, real batch, and dev control surfaces", () => {
@@ -118,12 +126,14 @@ describe("domain user-action telemetry contract", () => {
     expect(challengeRealBatchPanelSource).toContain("trackRealBatchCancel(");
     expect(challengeRealBatchPanelSource).toContain("observeRealBatchAuthorizeShapeInvalid(");
     expect(challengeRealBatchPanelSource).toContain("observeRealBatchPollLoopStopped(");
+    expect(challengeRealBatchPanelSource).toContain("observeRealBatchPhaseChanged(");
     expect(challengeMvpProgressPanelSource).toContain("trackDevReadinessRun(");
     expect(challengeMvpProgressPanelSource).toContain("trackDevBatchRun(");
   });
 
   it("wires challenge-cup workflow run, human gate, and stream anomaly surfaces", () => {
     expect(researchWorkflowCommandsSource).toContain("trackResearchRunCreate(");
+    expect(researchWorkflowCommandsSource).toContain("trackWorkflowOfferSubmit(");
     expect(researchWorkflowRunSource).toContain("trackWorkflowHumanGateResolve(");
     expect(researchWorkflowEventStreamSource).toContain("observeWorkflowStreamInterrupted(");
     expect(researchWorkflowEventStreamSource).toContain("observeWorkflowStreamReconnected(");

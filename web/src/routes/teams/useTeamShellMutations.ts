@@ -20,6 +20,7 @@ import {
   syncTeamChatRoom,
 } from "../../api/teams";
 import type { ChatRoomDetail, Team, TeamOrganizationCanvas } from "../../api/types";
+import { observeChallengeTeamAgentsAutoRepair } from "./challengeCupTelemetry";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 
 export type TeamShellChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -131,12 +132,16 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   const repairChallengeCupTeamAgentsMutation = useMutation({
     mutationFn: (teamId: string) => repairChallengeCupTeamAgents(teamId),
     onSuccess: (payload, teamId) => {
+      observeChallengeTeamAgentsAutoRepair({ teamId });
       if (payload.team) {
         queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
         queryClient.setQueryData(queryKeys.team(payload.team.teamId, "full"), payload.team);
       }
       void chatWorkspaceCache.afterTeamChanged(payload.team?.teamId || teamId);
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error: unknown, teamId) => {
+      observeChallengeTeamAgentsAutoRepair({ teamId, error });
     },
   });
 
