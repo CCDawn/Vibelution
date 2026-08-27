@@ -778,6 +778,17 @@ def team_workflow_hypothesis_first_command(
                 "message": str(exc) or "command_forbidden",
             },
         ) from exc
+    except hypothesis_first_chain.FormalCommandRejectedError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": str(exc)}
+        if exc.blockers:
+            detail["blockers"] = exc.blockers
+        _raise_team_workflow_route_error(
+            "hypothesis_first.command",
+            team_id,
+            exc,
+            status_code=exc.status_code,
+            detail=detail,
+        )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.command", team_id, exc)
 

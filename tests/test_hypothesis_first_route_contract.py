@@ -535,6 +535,74 @@ def test_selection_routes_map_domain_error_to_422(monkeypatch) -> None:
     assert response.status_code == 422
 
 
+def _retry_command_body() -> dict[str, object]:
+    return {
+        "actionId": "retry-formal-node:run-d02722658d8b:source_extraction",
+        "idempotencyKey": "offer:run-d02722658d8b:source_extraction:retry_node:a2:v3",
+        "expectedStateVersion": "hf2-action:before-retry",
+        "payload": {
+            "runId": "run-d02722658d8b",
+            "nodeId": "source_extraction",
+        },
+    }
+
+
+def test_chain_commands_keep_structured_readiness_rejection(monkeypatch) -> None:
+    """A readiness-blocked formal retry must return 412 with blocker details."""
+
+    def fake_execute(team_id, payload, *, question_id=""):
+        raise hypothesis_first_chain.FormalCommandRejectedError(
+            "节点尚未就绪，无法开始新的尝试。",
+            code="node_not_ready",
+            status_code=412,
+            blockers=[{
+                "code": "auto_advance_not_ready",
+                "title": "缺少来源候选",
+                "detail": "auto_advance_not_ready/source_candidates_missing",
+                "category": "dependency",
+            }],
+        )
+
+    monkeypatch.setattr(hypothesis_first_chain, "execute_v2_command", fake_execute)
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-003"},
+        json=_retry_command_body(),
+    )
+    assert response.status_code == 412, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "node_not_ready"
+    assert detail["message"] == "节点尚未就绪，无法开始新的尝试。"
+    assert detail["blockers"][0]["code"] == "auto_advance_not_ready"
+    assert (
+        detail["blockers"][0]["detail"]
+        == "auto_advance_not_ready/source_candidates_missing"
+    )
+
+
+def test_chain_commands_map_runtime_guard_rejection_to_409(monkeypatch) -> None:
+    def fake_execute(team_id, payload, *, question_id=""):
+        raise hypothesis_first_chain.FormalCommandRejectedError(
+            "attempt running 不可重试",
+            code="command_not_allowed",
+            status_code=409,
+        )
+
+    monkeypatch.setattr(hypothesis_first_chain, "execute_v2_command", fake_execute)
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-003"},
+        json=_retry_command_body(),
+    )
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "command_not_allowed"
+    assert detail["message"] == "attempt running 不可重试"
+    assert "blockers" not in detail
+
+
 def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> None:
     monkeypatch.setattr(
         hf_routes,

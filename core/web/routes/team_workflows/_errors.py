@@ -32,7 +32,7 @@ def _raise_team_workflow_route_error(
             "team_workflow.route_error",
             message=f"{action} blocked at the Team Workflow API route.",
             level="warning" if status_code < 500 else "error",
-            outcome="blocked" if status_code in {400, 403, 404, 409, 422} else "failed",
+            outcome="blocked" if status_code in {400, 403, 404, 409, 412, 422} else "failed",
             fields=event_fields,
             lifecycle=True,
         )

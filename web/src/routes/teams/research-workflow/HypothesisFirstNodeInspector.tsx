@@ -1220,17 +1220,63 @@ function errorRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function commandReadinessError(error: unknown): { message: string; blockers: readonly unknown[] } | null {
-  if (!isFetchJsonHttpError(error)) return null;
-  const payload = errorRecord(error.details);
+type CommandRejectionKind =
+  | "not_ready"
+  | "not_allowed"
+  | "version_conflict"
+  | "forbidden"
+  | "generic";
+
+type CommandRejection = {
+  kind: CommandRejectionKind;
+  message: string;
+  blockers: readonly unknown[];
+};
+
+const REJECTION_KIND_BY_CODE: Readonly<Record<string, Exclude<CommandRejectionKind, "generic">>> = {
+  node_not_ready: "not_ready",
+  command_not_allowed: "not_allowed",
+  run_version_conflict: "version_conflict",
+  command_forbidden: "forbidden",
+};
+
+function commandRejection(error: unknown): CommandRejection {
+  const payload = isFetchJsonHttpError(error) ? errorRecord(error.details) : null;
   const detail = errorRecord(payload?.detail) ?? payload;
   const blockers = Array.isArray(detail?.blockers) ? detail.blockers : [];
-  const code = String(detail?.code || error.code || "").trim();
-  if (error.status !== 412 && code !== "node_not_ready") return null;
-  return {
-    message: String(detail?.message || error.message || "node_not_ready").trim(),
-    blockers,
-  };
+  const code = String(
+    detail?.code || (isFetchJsonHttpError(error) ? error.code : "") || "",
+  ).trim();
+  // Server-authored rejection copy is Chinese already; fall back to the wire
+  // message only so infrastructure failures still surface something.
+  const message = String(detail?.message || (isFetchJsonHttpError(error) ? error.message : "") || "").trim();
+  if (!isFetchJsonHttpError(error)) {
+    return { kind: "generic", message, blockers };
+  }
+  // 412 is reserved for the readiness-blocker contract; every other
+  // rejection needs an explicit server code before claiming a reason.
+  const kind = REJECTION_KIND_BY_CODE[code]
+    ?? (error.status === 412 ? "not_ready" as const : "generic" as const);
+  return { kind, message, blockers };
+}
+
+function commandRejectionLabel(kind: CommandRejectionKind, lang: Language): string {
+  if (lang === "en") {
+    switch (kind) {
+      case "not_ready": return "Node is not ready";
+      case "not_allowed": return "The workflow state does not allow this action";
+      case "version_conflict": return "The formal run moved on; refresh and retry";
+      case "forbidden": return "You are not allowed to perform this action";
+      default: return "Action could not finish";
+    }
+  }
+  switch (kind) {
+    case "not_ready": return "节点尚未就绪";
+    case "not_allowed": return "当前状态不允许该操作";
+    case "version_conflict": return "正式运行状态已变化，请刷新后重试";
+    case "forbidden": return "当前身份无权执行该操作";
+    default: return "操作未完成";
+  }
 }
 
 function readinessBlockerLabel(blocker: unknown): string {
@@ -1290,23 +1336,24 @@ function CanonicalCommandButton(props: {
   return (
     <div className={styles.task} data-testid={`canonical-command-${props.action.command}`}>
       {mutation.isError ? (() => {
-        const readiness = commandReadinessError(mutation.error);
+        const isStateConflict = isHypothesisFirstCommandStateConflict(mutation.error);
+        const rejection = commandRejection(mutation.error);
         return (
           <VErrorSummary
-            label={readiness
-              ? (props.lang === "zh" ? "节点尚未就绪" : "Node is not ready")
-              : (props.lang === "zh" ? "操作未完成" : "Action could not finish")}
-            summary={readiness?.message || (isHypothesisFirstCommandStateConflict(mutation.error)
+            label={isStateConflict
+              ? (props.lang === "zh" ? "状态已更新" : "Workflow state changed")
+              : commandRejectionLabel(rejection.kind, props.lang)}
+            summary={isStateConflict
               ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
-              : mutation.error.message)}
-            details={readiness?.blockers.length ? (
+              : rejection.message || (props.lang === "zh" ? "命令未能执行，请稍后重试。" : "The command was not executed. Try again later.")}
+            details={rejection.blockers.length ? (
               <ul className="m-0 grid list-disc gap-1 pl-4" data-testid="canonical-command-readiness-blockers">
-                {readiness.blockers.map((blocker, index) => (
+                {rejection.blockers.map((blocker, index) => (
                   <li key={`${readinessBlockerLabel(blocker)}:${index}`}>{readinessBlockerLabel(blocker)}</li>
                 ))}
               </ul>
             ) : undefined}
-            defaultOpen={Boolean(readiness?.blockers.length)}
+            defaultOpen={Boolean(rejection.blockers.length)}
           />
         );
       })() : null}

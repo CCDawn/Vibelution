@@ -153,6 +153,97 @@ class IdempotencyConflictError(HypothesisFirstChainError):
         self.actual = actual_input_digest
 
 
+class FormalCommandRejectedError(HypothesisFirstChainError):
+    """A formal runtime command was rejected with a stable client-facing reason.
+
+    Preserves the structured error contract already exposed by the formal
+    runtime command route (``code`` plus optional readiness ``blockers``) so
+    UI surfaces can render an actionable rejection instead of a flattened
+    message string.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        status_code: int = 422,
+        blockers: list[dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.blockers = [dict(item) for item in blockers or []]
+
+
+def _formal_command_rejection(exc: Exception) -> HypothesisFirstChainError:
+    """Convert a formal command-service rejection into a structured error.
+
+    The V2 chain envelope must not flatten typed runtime rejections into a
+    bare message: readiness blockers and stable error codes are part of the
+    HTTP error contract shared with the formal runtime command route.
+    """
+    from core.research.workflow.contracts import ReadinessBlocker
+    from core.research.workflow.ledger import (
+        CommandNotAllowedError as LedgerCommandNotAllowedError,
+        IdempotencyConflictError as LedgerIdempotencyConflictError,
+        RunVersionConflictError as LedgerRunVersionConflictError,
+    )
+
+    from .command_service import (
+        CommandForbiddenError,
+        NodeNotReadyError,
+        WorkflowCommandError,
+    )
+
+    if isinstance(exc, NodeNotReadyError):
+        readiness = getattr(exc, "readiness", None)
+        blockers: list[dict[str, Any]] = []
+        for blocker in getattr(readiness, "blockers", ()) or ():
+            if isinstance(blocker, ReadinessBlocker):
+                blockers.append(blocker.to_dict())
+            elif isinstance(blocker, Mapping):
+                blockers.append(dict(blocker))
+            else:
+                blockers.append({"detail": str(blocker)})
+        return FormalCommandRejectedError(
+            str(exc) or "node_not_ready",
+            code="node_not_ready",
+            status_code=412,
+            blockers=blockers,
+        )
+    if isinstance(exc, LedgerIdempotencyConflictError):
+        return FormalCommandRejectedError(
+            str(exc) or "idempotency_conflict",
+            code="idempotency_conflict",
+            status_code=409,
+        )
+    if isinstance(exc, LedgerRunVersionConflictError):
+        return FormalCommandRejectedError(
+            str(exc),
+            code="run_version_conflict",
+            status_code=409,
+        )
+    if isinstance(exc, CommandForbiddenError):
+        return FormalCommandRejectedError(
+            str(exc) or "command_forbidden",
+            code="command_forbidden",
+            status_code=403,
+        )
+    if isinstance(exc, LedgerCommandNotAllowedError):
+        return FormalCommandRejectedError(
+            str(exc) or "command_not_allowed",
+            code="command_not_allowed",
+            status_code=409,
+        )
+    if isinstance(exc, WorkflowCommandError):
+        return FormalCommandRejectedError(
+            str(exc) or "command_rejected",
+            code="command_rejected",
+        )
+    return HypothesisFirstChainError(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # storage primitives (same discipline as hypothesis_selection)
 
@@ -1353,7 +1444,7 @@ def _submit_formal_v2_command(
             )
         )
     except Exception as exc:
-        raise HypothesisFirstChainError(str(exc)) from exc
+        raise _formal_command_rejection(exc) from exc
     return receipt.to_dict()
 
 

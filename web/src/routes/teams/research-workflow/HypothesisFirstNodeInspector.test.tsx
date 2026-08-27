@@ -69,6 +69,7 @@ vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
   },
 }));
 
+import { FetchJsonHttpError } from "../../../api/client";
 import {
   discussionMemberCompletion,
   HypothesisFirstNodeInspector,
@@ -1329,6 +1330,186 @@ describe("HypothesisFirstNodeInspector", () => {
       confirmButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", archive);
+  });
+
+  it("renders the structured readiness rejection next to a refused retry command", async () => {
+    const phase = {
+      lifecycle: "waiting_user" as const,
+      outcome: "none" as const,
+      actionability: "blocked" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    };
+    const retry = {
+      kind: "command" as const,
+      actionId: "retry-formal-node:formal-run-1:source_extraction",
+      label: "重试 资料提炼",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "formal_runtime" as const,
+      targetNodeId: "source_extraction",
+      command: "retry_formal_node" as const,
+      payload: { runId: "formal-run-1", nodeId: "source_extraction" },
+      inputSchemaRef: null,
+      idempotencyKey: "offer:formal-run-1:source_extraction:retry_node:a2:v3",
+      expectedStateVersion: "hf2-action:before-retry",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+    mockedExecuteCommand.mockRejectedValueOnce(new FetchJsonHttpError("node_not_ready", {
+      status: 412,
+      code: null,
+      details: {
+        detail: {
+          code: "node_not_ready",
+          message: "节点尚未就绪，无法开始新的尝试。",
+          blockers: [{
+            code: "auto_advance_not_ready",
+            title: "缺少来源候选",
+            detail: "auto_advance_not_ready/source_candidates_missing",
+            category: "dependency",
+          }],
+        },
+      },
+    }));
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "formal_runtime",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: { ...phase, accepted: true, latestHypothesisRoundId: "round-1", roundIndex: 1, roundBudget: 3 },
+        formalRuntime: {
+          lifecycle: "waiting_user",
+          outcome: "none",
+          actionability: "blocked",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          runId: "formal-run-1",
+          runVersion: 3,
+          runStatus: "running",
+          completionKind: null,
+          lineageDisposition: "current",
+          isCurrentRevision: true,
+          parentRunId: null,
+          childRunIds: [],
+          currentNodeIds: ["source_extraction"],
+        },
+        allowedActions: [retry],
+        problems: [],
+      } as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="source_extraction"
+        runId="formal-run-1"
+        formalRuntime
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const button = Array.from(container.querySelectorAll("button"))
+      .find((item) => item.textContent?.includes("重试 资料提炼"));
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(container.textContent).toContain("节点尚未就绪");
+      });
+    });
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", retry);
+    expect(container.textContent).toContain("缺少来源候选");
+    expect(container.querySelector('[data-testid="canonical-command-readiness-blockers"]')).toBeTruthy();
+  });
+
+  it("labels a runtime command_not_allowed rejection instead of failing silently", async () => {
+    const phase = {
+      lifecycle: "waiting_user" as const,
+      outcome: "none" as const,
+      actionability: "blocked" as const,
+      attempt: null,
+      updatedAt: null,
+      problems: [],
+    };
+    const retry = {
+      kind: "command" as const,
+      actionId: "retry-formal-node:formal-run-1:source_extraction",
+      label: "重试 资料提炼",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "formal_runtime" as const,
+      targetNodeId: "source_extraction",
+      command: "retry_formal_node" as const,
+      payload: { runId: "formal-run-1", nodeId: "source_extraction" },
+      inputSchemaRef: null,
+      idempotencyKey: "offer:formal-run-1:source_extraction:retry_node:a2:v3",
+      expectedStateVersion: "hf2-action:before-retry",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+    mockedExecuteCommand.mockRejectedValueOnce(new FetchJsonHttpError("attempt running 不可重试", {
+      status: 409,
+      code: null,
+      details: {
+        detail: {
+          code: "command_not_allowed",
+          message: "attempt running 不可重试",
+        },
+      },
+    }));
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "formal_runtime",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: { ...phase, accepted: true, latestHypothesisRoundId: "round-1", roundIndex: 1, roundBudget: 3 },
+        formalRuntime: {
+          lifecycle: "waiting_user",
+          outcome: "none",
+          actionability: "blocked",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          runId: "formal-run-1",
+          runVersion: 3,
+          runStatus: "running",
+          completionKind: null,
+          lineageDisposition: "current",
+          isCurrentRevision: true,
+          parentRunId: null,
+          childRunIds: [],
+          currentNodeIds: ["source_extraction"],
+        },
+        allowedActions: [retry],
+        problems: [],
+      } as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="source_extraction"
+        runId="formal-run-1"
+        formalRuntime
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const button = Array.from(container.querySelectorAll("button"))
+      .find((item) => item.textContent?.includes("重试 资料提炼"));
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(container.textContent).toContain("当前状态不允许该操作");
+      });
+    });
+    expect(container.textContent).toContain("attempt running 不可重试");
   });
 
   it("does not relabel hypothesis-stage problems as formal runtime problems", () => {

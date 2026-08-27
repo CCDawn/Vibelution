@@ -1895,6 +1895,90 @@ def test_submit_formal_retry_uses_current_offer_payload_and_node(
     assert request.payload == {"retryKind": "same_node"}
 
 
+def test_submit_formal_retry_keeps_readiness_rejection_structure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A readiness-blocked retry must surface its blockers, not a flat message."""
+    from types import SimpleNamespace
+
+    from core.research.workflow.contracts import ReadinessBlocker
+    from core.web.services.team_workflow.research_runtime import (
+        command_service as runtime_command_service,
+        formal_read_runtime,
+        hypothesis_first_chain,
+        runtime_factory,
+    )
+
+    blocker = ReadinessBlocker(
+        code="auto_advance_not_ready",
+        title="缺少来源候选",
+        detail="auto_advance_not_ready/source_candidates_missing",
+    )
+    rejection = runtime_command_service.NodeNotReadyError(
+        SimpleNamespace(blockers=(blocker,)),
+        run_version=7,
+    )
+
+    run = SimpleNamespace(run_id="run-retry", team_id="team-1", run_version=7)
+    snapshot = {
+        "commandOffers": [{
+            "command": "retry_node",
+            "nodeId": "source_extraction",
+            "available": True,
+            "idempotencyKey": "offer:run-retry:source_extraction:retry_node:a2:v7",
+            "payload": {"retryKind": "same_node"},
+        }],
+    }
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            return snapshot
+
+    class CommandService:
+        def submit(self, _request):
+            raise rejection
+
+    runtime = SimpleNamespace(
+        store=SimpleNamespace(get_run=lambda run_id: run if run_id == run.run_id else None),
+        command_service=CommandService(),
+    )
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: runtime)
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+
+    with pytest.raises(hypothesis_first_chain.FormalCommandRejectedError) as excinfo:
+        hypothesis_first_chain._submit_formal_v2_command(
+            "team-1",
+            run_id="run-retry",
+            node_id="source_extraction",
+            command="retry_node",
+            idempotency_key="hf2:retry-formal-node:run-retry:source-extraction",
+        )
+
+    error = excinfo.value
+    assert error.code == "node_not_ready"
+    assert error.status_code == 412
+    assert error.blockers == [blocker.to_dict()]
+
+
+def test_formal_command_rejection_maps_runtime_guard_errors() -> None:
+    from core.research.workflow.ledger import CommandNotAllowedError
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+    )
+
+    converted = hypothesis_first_chain._formal_command_rejection(
+        CommandNotAllowedError("attempt running 不可重试")
+    )
+    assert isinstance(converted, hypothesis_first_chain.FormalCommandRejectedError)
+    assert converted.code == "command_not_allowed"
+    assert converted.status_code == 409
+    assert converted.blockers == []
+
+    fallback = hypothesis_first_chain._formal_command_rejection(ValueError("boom"))
+    assert type(fallback) is hypothesis_first_chain.HypothesisFirstChainError
+    assert str(fallback) == "boom"
+
+
 def test_v2_retry_formal_node_command_uses_formal_command_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
