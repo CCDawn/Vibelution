@@ -90,6 +90,10 @@ export function trackWorkflowHumanGateResolve(fields: ChallengeCupActionFields):
   return startUserAction("challenge_workflow_human_gate_resolve", fields);
 }
 
+export function trackWorkflowOfferSubmit(fields: ChallengeCupActionFields): UserActionTracker {
+  return startUserAction("challenge_workflow_offer_submit", fields);
+}
+
 // ---- anomaly observations (all bounded: ref-guarded or inherently rare) ----
 
 export function observeWorkflowStreamInterrupted(input: {
@@ -216,5 +220,85 @@ export function observeQuestionOutputSchemaRejected(input: {
       parseError: truncateTelemetryText(input.parseError, 160),
     },
     { level: "warning", forceTimeline: true },
+  );
+}
+
+const REAL_BATCH_ALERT_PHASES = new Set(["cancelled", "circuit_breaker", "degraded"]);
+
+export function observeRealBatchPhaseChanged(input: {
+  teamId: string;
+  planId: string;
+  previousPhase: string;
+  phase: string;
+  succeededCount: number;
+  failedCount: number;
+  blockedCount: number;
+  pendingCount: number;
+  totalAttempts: number;
+}): void {
+  postUserActionObservation(
+    "challenge_real_batch_phase_changed",
+    {
+      teamId: input.teamId,
+      planId: input.planId,
+      previousPhase: input.previousPhase,
+      phase: input.phase,
+      succeededCount: input.succeededCount,
+      failedCount: input.failedCount,
+      blockedCount: input.blockedCount,
+      pendingCount: input.pendingCount,
+      totalAttempts: input.totalAttempts,
+    },
+    { level: REAL_BATCH_ALERT_PHASES.has(input.phase) ? "warning" : "info", forceTimeline: true },
+  );
+}
+
+export function observeCatalogActiveWorkChanged(input: {
+  teamId: string;
+  active: boolean;
+  succeeded: number;
+  failed: number;
+  running: number;
+  queued: number;
+  awaitingApprovalCount: number;
+}): void {
+  postUserActionObservation(
+    "challenge_catalog_active_work_changed",
+    {
+      teamId: input.teamId,
+      active: input.active,
+      succeeded: input.succeeded,
+      failed: input.failed,
+      running: input.running,
+      queued: input.queued,
+      awaitingApprovalCount: input.awaitingApprovalCount,
+    },
+    { level: !input.active && input.failed > 0 ? "warning" : "info", forceTimeline: true },
+  );
+}
+
+export function observeHypothesisLegacyFallback(input: {
+  teamId: string;
+  questionId: string;
+}): void {
+  postUserActionObservation(
+    "challenge_hypothesis_legacy_fallback",
+    { teamId: input.teamId, questionId: input.questionId },
+    { level: "warning", forceTimeline: true },
+  );
+}
+
+export function observeChallengeTeamAgentsAutoRepair(input: {
+  teamId: string;
+  error?: unknown;
+}): void {
+  postUserActionObservation(
+    "challenge_team_agents_auto_repair",
+    {
+      teamId: input.teamId,
+      outcome: input.error ? "failed" : "repaired",
+      ...errorSummaryFields(input.error),
+    },
+    { level: input.error ? "warning" : "info", forceTimeline: true },
   );
 }
