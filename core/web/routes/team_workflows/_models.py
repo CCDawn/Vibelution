@@ -261,6 +261,25 @@ class ResearchProjectAgentTaskStatusResponse(BaseModel):
     updatedAt: str = ""
 
 
+class ResearchProjectAgentTaskReconcileOutcome(BaseModel):
+    taskId: str
+    action: str
+    status: str = ""
+    failureCode: str = ""
+    failures: int = 0
+
+
+class ResearchProjectAgentTaskReconcileResponse(BaseModel):
+    teamId: str
+    researchProjectId: str
+    checked: int = 0
+    reconciled: int = 0
+    failedSessionUnreadable: list[str] = Field(default_factory=list)
+    outcomes: list[ResearchProjectAgentTaskReconcileOutcome] = Field(
+        default_factory=list
+    )
+
+
 class ExperimentPlanCreatePayload(BaseModel):
     stageRoundId: str = Field("", max_length=128)
     title: str = Field("", max_length=240)

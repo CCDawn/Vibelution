@@ -271,3 +271,52 @@ def team_workflow_research_project_agent_task_start(
             status_code=422,
             fields={"projectId": project_id, "taskKind": payload.taskKind},
         )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/agent-tasks/reconcile",
+    response_model=ResearchProjectAgentTaskReconcileResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_research_project_agent_task_reconcile(
+    team_id: str,
+    project_id: str,
+) -> dict:
+    """Operator maintenance: align active Agent tasks with session truth.
+
+    Explicit write path for operators after backend restarts or crashes leave
+    a task stuck in ``running`` while its session already reached a terminal
+    state; read surfaces never reconcile. Idempotent: repeated calls only
+    re-derive the same verdict and never create tasks or sessions.
+    """
+    try:
+        result = reconcile_research_project_agent_task_statuses(team_id, project_id)
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.reconcile",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"projectId": project_id},
+        )
+    except ResearchProjectAgentTaskError as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.reconcile",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "projectId": project_id,
+                "code": getattr(exc, "code", ""),
+            },
+            detail={"code": exc.code, "message": str(exc)},
+        )
+    except ResearchProjectError as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.reconcile",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"projectId": project_id},
+        )
+    return {"teamId": team_id, "researchProjectId": project_id, **result}
