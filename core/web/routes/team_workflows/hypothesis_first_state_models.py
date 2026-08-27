@@ -382,6 +382,21 @@ class HypothesisFirstCommandRequest(StrictWireModel):
 
     @model_validator(mode="before")
     @classmethod
+    def _normalize_empty_input(cls, value: Any) -> Any:
+        # Clients that build requests generically send ``input: {}`` for
+        # actions that take no declaration input.  Every ActionInput variant
+        # has required fields, so an empty object can never validate; treat it
+        # exactly like an omitted field instead of a 422 (SCI-096 UX finding).
+        if (
+            isinstance(value, dict)
+            and isinstance(value.get("input"), dict)
+            and not value["input"]
+        ):
+            return {**value, "input": None}
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
     def _parse_payload_from_action_id(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value

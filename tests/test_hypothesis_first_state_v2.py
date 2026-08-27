@@ -4230,3 +4230,75 @@ def test_program_delivery_needs_context_exposes_only_retry_handoff() -> None:
     }
     assert commands == {"retry_program_handoff"}
     assert "open_generation" not in commands
+
+
+# ---------------------------------------------------------------------------
+# SCI-096 route-layer fixes
+# ---------------------------------------------------------------------------
+
+
+def _command_request_body(**overrides) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "actionId": "open-generation",
+        "idempotencyKey": "hf2:team-1:SCI-001:open-generation",
+        "expectedStateVersion": "hf2-action:origin:action-hash",
+        "payload": {"questionId": "SCI-001"},
+    }
+    body.update(overrides)
+    return body
+
+
+def test_command_request_accepts_omitted_input() -> None:
+    request = HypothesisFirstCommandRequest.model_validate(_command_request_body())
+    assert request.input is None
+
+
+def test_command_request_treats_empty_input_object_as_omitted() -> None:
+    """``input: {}`` must behave like an omitted input, not a 422.
+
+    Generic clients send an empty object for actions that take no
+    declaration input; every ActionInput variant has required fields, so the
+    empty object can never match the strict union and must be normalized to
+    ``None`` (SCI-096 UX finding, 2026-08-28).
+    """
+
+    request = HypothesisFirstCommandRequest.model_validate(
+        _command_request_body(input={})
+    )
+    assert request.input is None
+
+    # A non-empty declaration input keeps validating against its variant.
+    approve = HypothesisFirstCommandRequest.model_validate(
+        _command_request_body(
+            actionId="approve-summary:review-1",
+            idempotencyKey="hf2:team-1:SCI-001:approve-summary",
+            payload={"meetingRoundId": "review-1"},
+            input={"decision": "accepted"},
+        )
+    )
+    assert approve.input is not None
+    assert approve.input.decision == "accepted"
+
+
+def test_route_maps_chat_room_busy_error_to_conflict() -> None:
+    """A busy linked chat room on a V2 retry path is 409, never a 500.
+
+    ``retry_generation`` / ``resume_discussion`` / ``reopen_review`` restart
+    room rounds; when the room already runs one, the service raises
+    ``ChatRoomBusyError`` which previously escaped the route as HTTP 500.
+    """
+
+    from core.web.services import chat_room_service
+
+    assert chat_room_service.ChatRoomBusyError in (
+        hypothesis_first_routes._DOMAIN_ERRORS
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        hypothesis_first_routes._map_domain_error(
+            "hypothesis_first.command",
+            "team-1",
+            chat_room_service.ChatRoomBusyError(
+                "Chat room already has an active round."
+            ),
+        )
+    assert exc_info.value.status_code == 409

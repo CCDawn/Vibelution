@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping, Sequence
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from config import get_config
@@ -30,6 +31,7 @@ from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import config_for_agent_llm_model
 from core.llm.client import model_invocation_receipt_context_scope
 from core.llm.invocation import invoke_llm_outcome
+from core.llm.types import LLMError
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.hypothesis_quality import (
     AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
@@ -52,6 +54,90 @@ DIMENSION_REVIEW_RATINGS = ("insufficient", "weak", "mixed", "adequate", "strong
 
 _MAX_MESSAGE_CHARS = 1200
 _MAX_MESSAGES = 40
+
+# Wall-clock budget for one review-profile LLM call (digest draft and the
+# four hypothesis review runners).  Normal digest calls finish well under a
+# minute on the team relay; the slowest legitimate calls on the same channel
+# are discussion utterances at roughly 2-3.5 minutes, and a digest sees the
+# whole bounded transcript (<= _MAX_MESSAGES), so 180s keeps headroom above
+# the slowest observed utterance.  Without this budget a wedged provider
+# connection pinned the meeting in ``summarizing`` for 33+ minutes while
+# holding the per-meeting summary lock with no in-product recovery path
+# (SCI-096 P0, validated 2026-08-28).
+REVIEW_LLM_CALL_TIMEOUT_SECONDS = 180.0
+_REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
+
+
+def review_llm_call_timeout_seconds() -> float:
+    """Return the review-call timeout, tunable via the environment override."""
+
+    raw = str(os.environ.get(_REVIEW_LLM_CALL_TIMEOUT_ENV) or "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return REVIEW_LLM_CALL_TIMEOUT_SECONDS
+        if value > 0:
+            return value
+    return REVIEW_LLM_CALL_TIMEOUT_SECONDS
+
+
+class ReviewLLMTimeoutError(LLMError):
+    """One review-profile LLM call exceeded the configured wall-clock budget.
+
+    Classified as the canonical ``timeout`` LLM error category (retryable) so
+    existing error consumers can handle it like any other provider timeout;
+    ``purpose`` and ``timeout_seconds`` keep the structured context for the
+    meeting runtime's persisted ``summaryDraftError``.
+    """
+
+    def __init__(self, *, purpose: str, timeout_seconds: float) -> None:
+        super().__init__(
+            "timeout",
+            f"review step `{purpose}` did not return within {timeout_seconds:g}s",
+            retryable=True,
+        )
+        self.purpose = str(purpose)
+        self.timeout_seconds = float(timeout_seconds)
+
+
+def _invoke_llm_with_timeout(
+    invoke: Callable[[], Any],
+    *,
+    purpose: str,
+    timeout_seconds: float,
+) -> Any:
+    """Run one review LLM call, failing structured when the budget elapses.
+
+    The provider call keeps running on its daemon worker after a timeout (the
+    transport has no cooperative cancel); the caller returns immediately so
+    the meeting runtime can persist a recoverable draft error and release the
+    summary lock instead of hanging forever.
+    """
+
+    outcome: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def _run() -> None:
+        try:
+            outcome["value"] = invoke()
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the waiter
+            outcome["error"] = exc
+        finally:
+            finished.set()
+
+    worker = threading.Thread(
+        target=_run,
+        name=f"review-llm-{purpose}",
+        daemon=True,
+    )
+    worker.start()
+    if not finished.wait(timeout_seconds):
+        raise ReviewLLMTimeoutError(purpose=purpose, timeout_seconds=timeout_seconds)
+    error = outcome.get("error")
+    if error is not None:
+        raise error
+    return outcome.get("value")
 
 
 def resolve_review_llm() -> dict[str, Any] | None:
@@ -186,19 +272,33 @@ def _invoke_review_llm(
         },
     )
     if not require_provider_receipt:
-        response = invoke_llm(
-            llm["client"],
-            messages,
-            context=invocation_context,
+        response = _invoke_llm_with_timeout(
+            lambda: invoke_llm(
+                llm["client"],
+                messages,
+                context=invocation_context,
+            ),
+            purpose=purpose,
+            timeout_seconds=review_llm_call_timeout_seconds(),
         )
         content = str(getattr(response, "content", "") or "")
         return _parse_json_object(content, what=f"review step `{purpose}`")
-    with model_invocation_receipt_context_scope(receipt_context):
-        outcome = invoke_llm_outcome(
-            llm["client"],
-            messages,
-            context=invocation_context,
-        )
+
+    def _invoke_bound_outcome() -> Any:
+        # The receipt scope is a ContextVar: it must wrap the invocation
+        # inside the timeout worker so the nested client call still sees it.
+        with model_invocation_receipt_context_scope(receipt_context):
+            return invoke_llm_outcome(
+                llm["client"],
+                messages,
+                context=invocation_context,
+            )
+
+    outcome = _invoke_llm_with_timeout(
+        _invoke_bound_outcome,
+        purpose=purpose,
+        timeout_seconds=review_llm_call_timeout_seconds(),
+    )
     identity = getattr(outcome, "identity", None)
     if (
         str(getattr(outcome, "kind", "") or "") != "final_answer"

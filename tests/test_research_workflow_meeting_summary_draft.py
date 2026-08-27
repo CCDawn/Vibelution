@@ -1047,3 +1047,139 @@ def test_approve_empty_digest_with_completed_speech_raises(
                 closed_by=agent_ids[0],
                 expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
             )
+
+
+# ---------------------------------------------------------------------------
+# SCI-096: a hung review-profile LLM call must fail structured and bounded
+# instead of pinning the meeting in summarizing while holding the summary
+# lock; the retry path regenerates the digest from the bound source messages.
+# ---------------------------------------------------------------------------
+
+
+_FAKE_REVIEW_LLM = {
+    "client": object(),
+    "profileId": "primary",
+    "modelId": "fake-review-model",
+}
+
+
+class _FakeLLMResponse:
+    def __init__(self, content: str):
+        self.content = content
+
+
+def _digest_llm_payload() -> str:
+    return json.dumps(
+        {
+            "summary": "评审完成，倾向候选 A。",
+            "agendaSummary": "评审候选 A/B",
+            "agreements": ["候选 A 更契合赛题"],
+            "disagreements": [],
+            "actionItems": [],
+            "risks": [],
+            "knowledgeCandidates": [],
+            "proposedCandidates": [],
+            "evidenceRequests": [],
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_summary_draft_llm_hang_times_out_and_stays_recoverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time as time_module
+
+    from core.web.services.team_workflow import llm_review_runners
+
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    monkeypatch.setattr(meeting_runtime, "maybe_auto_draft_meeting", lambda *a, **k: None)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    release = threading.Event()
+
+    def hanging_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        # Wedged provider transport: blocks until the test releases it.
+        release.wait(timeout=15)
+        return _FakeLLMResponse("{}")
+
+    monkeypatch.setattr(
+        llm_review_runners, "resolve_review_llm", lambda: dict(_FAKE_REVIEW_LLM)
+    )
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", hanging_invoke_llm)
+    monkeypatch.setattr(
+        llm_review_runners, "review_llm_call_timeout_seconds", lambda: 0.3
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = _open_first_meeting(team_id, agent_ids)
+        meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+        started = time_module.monotonic()
+        failed = meeting_runtime.prepare_meeting_summary_draft(
+            team_id, meeting_id, actor=agent_ids[0], force=False
+        )
+        elapsed = time_module.monotonic() - started
+
+        assert elapsed < 10, "a hung LLM call must not block the summary draft"
+        assert failed["status"] == "summarizing"
+        assert failed["summaryDraftError"]["code"] == "summary_draft_timeout"
+        assert failed["summaryDraftError"]["remediationLabel"] == "重试生成纪要"
+        meeting = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
+        assert meeting["status"] == "summarizing"
+        assert meeting["summaryDraftError"]["code"] == "summary_draft_timeout"
+        # The per-meeting summary lock must not outlive the timed-out attempt.
+        with meeting_runtime._SUMMARY_DRAFT_LOCKS_GUARD:
+            assert (team_id, meeting_id) not in meeting_runtime._SUMMARY_DRAFT_LOCKS
+
+        # Retry path regenerates the digest from the existing source messages
+        # without reopening the discussion.
+        release.set()
+
+        def good_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+            return _FakeLLMResponse(_digest_llm_payload())
+
+        monkeypatch.setattr(llm_review_runners, "invoke_llm", good_invoke_llm)
+        retried = meeting_runtime.prepare_meeting_summary_draft(
+            team_id, meeting_id, actor=agent_ids[0], force=False
+        )
+        assert retried["status"] == "awaiting_approval"
+        assert retried["digestDraft"]["summary"] == "评审完成，倾向候选 A。"
+        assert not retried.get("summaryDraftError")
+        meeting = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
+        assert meeting["status"] == "awaiting_approval"
+        assert not meeting.get("summaryDraftError")
+        # Recovery reused the bound discussion: no new chat room rounds.
+        assert len(meeting.get("chatRoomRoundIds") or []) == len(
+            recorded["reviewMeeting"]["meetingRound"].get("chatRoomRoundIds") or []
+        )
+
+
+def test_summary_draft_timeout_error_maps_through_runtime_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow import llm_review_runners
+
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    monkeypatch.setattr(meeting_runtime, "maybe_auto_draft_meeting", lambda *a, **k: None)
+    agent_ids = [agents[role] for role in _ROLES]
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = _open_first_meeting(team_id, agent_ids)
+        meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+        def timed_out_builder(*_args, **_kwargs):
+            raise llm_review_runners.ReviewLLMTimeoutError(
+                purpose="meeting_digest", timeout_seconds=180.0
+            )
+
+        monkeypatch.setattr(meeting_runtime, "build_meeting_digest_draft", timed_out_builder)
+        failed = meeting_runtime.prepare_meeting_summary_draft(
+            team_id, meeting_id, actor=agent_ids[0], force=False
+        )
+        assert failed["status"] == "summarizing"
+        assert failed["summaryDraftError"]["code"] == "summary_draft_timeout"
+        assert "180" in failed["summaryDraftError"]["message"]
+        with meeting_runtime._SUMMARY_DRAFT_LOCKS_GUARD:
+            assert (team_id, meeting_id) not in meeting_runtime._SUMMARY_DRAFT_LOCKS
