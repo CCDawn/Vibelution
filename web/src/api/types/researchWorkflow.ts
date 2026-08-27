@@ -464,3 +464,28 @@ export type ResearchLedgerProjection = ResearchWorkflowScopedProjection & {
 export type ResearchHandoffsProjection = ResearchWorkflowScopedProjection & {
   handoffs: NodeHandoffRecord[];
 };
+
+/**
+ * R4.5 single-question full-chain lineage projection (read-only).
+ * Each segment independently reports `status: "ready" | "missing"` so the
+ * panel can show partial chain data and label the gap.
+ */
+export type ResearchQuestionLineageSegment =
+  | { status: "missing"; missingReason: string }
+  | { status: "ready"; [key: string]: unknown };
+
+export type ResearchQuestionLineageProjection = {
+  schemaVersion: number;
+  teamId: string;
+  questionId: string;
+  workflowRunId: string;
+  roundId: string;
+  boundaries: { readOnly: true };
+  degradedSegments: string[];
+  segments: {
+    evolution: ResearchQuestionLineageSegment;
+    reviewDisagreement: ResearchQuestionLineageSegment;
+    claimBelief: ResearchQuestionLineageSegment;
+    evidenceGraph: ResearchQuestionLineageSegment;
+  };
+};
