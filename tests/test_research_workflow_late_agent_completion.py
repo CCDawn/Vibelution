@@ -165,6 +165,103 @@ def test_retry_reuses_only_its_exact_completed_parent_node_run(monkeypatch) -> N
     assert lookups[-1] == parent_key
 
 
+def test_explicit_rerun_of_succeeded_parent_never_replays_its_task(monkeypatch) -> None:
+    """A retry attempt after a succeeded parent is an explicit rerun asking for
+    regeneration; replaying the parent's completed task would report instant
+    success without re-executing the stage."""
+    from core.web.services.team_workflow.source_collection import stage_reconcile
+
+    current_node_run_id = "nr-run-retry-source_extraction-a13"
+    parent_node_run_id = "nr-run-retry-source_extraction-a12"
+    store = _AttemptStore(
+        {
+            current_node_run_id: SimpleNamespace(
+                node_run_id=current_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=parent_node_run_id,
+            ),
+            parent_node_run_id: SimpleNamespace(
+                node_run_id=parent_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=None,
+                status="succeeded",
+            ),
+        }
+    )
+
+    def find_task(_team_id: str, _run_id: str, *, idempotency_key: str):
+        if parent_node_run_id in idempotency_key:
+            raise AssertionError("ancestor lookup must not run for a succeeded parent")
+        return None
+
+    monkeypatch.setattr(
+        stage_reconcile,
+        "_find_source_collection_stage_session_task",
+        find_task,
+    )
+
+    replay = find_reusable_source_stage_task(
+        store=store,
+        action=_action(node_run_id=current_node_run_id, attempt=13),
+        team_id="research-team",
+        source_run_id="dprun-source",
+        stage_id="extraction",
+        agent_id="agent-extractor",
+        agent_role="source_extractor",
+    )
+
+    assert replay is None
+
+
+def test_crash_recovery_after_failed_parent_keeps_completed_task_reuse(monkeypatch) -> None:
+    """Crash-after-acceptance still reuses the failed parent's completed task."""
+    from core.web.services.team_workflow.source_collection import stage_reconcile
+
+    current_node_run_id = "nr-run-retry-source_extraction-a13"
+    parent_node_run_id = "nr-run-retry-source_extraction-a12"
+    store = _AttemptStore(
+        {
+            current_node_run_id: SimpleNamespace(
+                node_run_id=current_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=parent_node_run_id,
+            ),
+            parent_node_run_id: SimpleNamespace(
+                node_run_id=parent_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=None,
+                status="failed",
+            ),
+        }
+    )
+
+    def find_task(_team_id: str, _run_id: str, *, idempotency_key: str):
+        return _stage_task(task_id="task-parent", status="completed")
+
+    monkeypatch.setattr(
+        stage_reconcile,
+        "_find_source_collection_stage_session_task",
+        find_task,
+    )
+
+    replay = find_reusable_source_stage_task(
+        store=store,
+        action=_action(node_run_id=current_node_run_id, attempt=13),
+        team_id="research-team",
+        source_run_id="dprun-source",
+        stage_id="extraction",
+        agent_id="agent-extractor",
+        agent_role="source_extractor",
+    )
+
+    assert replay is not None
+    assert replay["taskId"] == "task-parent"
+
+
 def test_source_adapter_reuses_late_parent_before_remediation_context(
     monkeypatch,
 ) -> None:

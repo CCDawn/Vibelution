@@ -32,8 +32,19 @@ def find_reusable_source_stage_task(
         _source_collection_stage_task_idempotency_key,
     )
 
-    node_run_ids = _node_run_lineage(store, action)
+    node_run_ids, ancestor_attempt_statuses = _node_run_lineage(store, action)
     for index, node_run_id in enumerate(node_run_ids):
+        is_current_node_run = index == 0
+        if (
+            not is_current_node_run
+            and ancestor_attempt_statuses.get(node_run_id) == "succeeded"
+        ):
+            # An explicit rerun of a succeeded node (the only path that creates
+            # an attempt after a succeeded parent) asks for regeneration: the
+            # parent's completed task would replay its accepted turn and report
+            # instant success without re-executing the stage. Crash recovery
+            # keeps the reuse: only a succeeded parent is skipped.
+            continue
         idempotency_key = _source_collection_stage_task_idempotency_key(
             team_id=team_id,
             run_id=source_run_id,
@@ -61,7 +72,6 @@ def find_reusable_source_stage_task(
         if not _has_turn_anchor(task):
             continue
         status = str(task.get("status") or "").strip().lower()
-        is_current_node_run = index == 0
         if not is_current_node_run and status not in _REUSABLE_ANCESTOR_STATUSES:
             continue
         return {
@@ -84,10 +94,11 @@ def find_reusable_source_stage_task(
 def _node_run_lineage(
     store: WorkflowLedgerStore | None,
     action: PendingAction,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], dict[str, str]]:
     lineage = [action.node_run_id]
+    attempt_statuses: dict[str, str] = {}
     if store is None:
-        return tuple(lineage)
+        return tuple(lineage), attempt_statuses
 
     def load(repository):
         current = repository.get_attempt(action.node_run_id)
@@ -99,12 +110,13 @@ def _node_run_lineage(
         parent = repository.get_attempt(parent_id)
         if parent is None:
             return []
+        attempt_statuses[parent_id] = str(getattr(parent, "status", "") or "").strip().lower()
         if parent.run_id != action.run_id or parent.node_id != action.node_id:
             raise RuntimeError("retry lineage identity mismatch")
         return [parent_id]
 
     lineage.extend(store.read(load))
-    return tuple(lineage)
+    return tuple(lineage), attempt_statuses
 
 
 def _assert_task_identity(
