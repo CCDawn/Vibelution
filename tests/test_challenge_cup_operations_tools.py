@@ -225,6 +225,88 @@ def test_canonical_bound_experiment_writeback_enforces_role_operation_matrix(
     ]
 
 
+def test_canonical_runtime_ignores_untrusted_actor_label(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import (
+        challenge_cup_maintenance_fence,
+        problem_understanding_artifact_writer,
+    )
+
+    runtime = _canonical_agent_runtime("challenge_cup_search")
+    task = {
+        "taskId": "task-1",
+        "taskKind": "problem_understanding",
+        "agentId": runtime["agentId"],
+        "roleKey": runtime["agent"]["roleKey"],
+        "researchProjectId": "project-1",
+        "sessionId": runtime["sessionId"],
+        "turn": {"turnId": runtime["turnId"]},
+    }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: (
+            runtime["agent"] if agent_id == runtime["agentId"] else None
+        ),
+    )
+    monkeypatch.setattr(
+        challenge_cup_maintenance_fence,
+        "assert_writes_allowed",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *_args, **_kwargs: {"accepted": True},
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_context",
+        lambda *_args, **_kwargs: {
+            "task": task,
+            "researchProjectId": task["researchProjectId"],
+        },
+    )
+    monkeypatch.setattr(
+        problem_understanding_artifact_writer,
+        "write_problem_understanding_artifact",
+        lambda **_kwargs: {
+            "contentHash": "artifact-hash",
+            "artifact": {"recordId": "problem-understanding-1"},
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda _team_id, _project_id, task_id, **kwargs: {
+            "taskId": task_id,
+            "status": kwargs["status"],
+            "resultRefs": kwargs["result_refs"],
+        },
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-1",
+            operation="record_problem_understanding",
+            payload_json="{}",
+            recorded_by_agent=(
+                f"A015 搜索 Agent ({runtime['agentId']})"
+            ),
+        )
+    )
+
+    assert result["status"] == "ok", result
+    assert result["task"]["resultRefs"] == ["artifact-hash"]
+    assert result["task"]["status"] == "running"
+
+
 def test_canonical_bound_iteration_writeback_enforces_role_operation_matrix(
     monkeypatch,
 ):
