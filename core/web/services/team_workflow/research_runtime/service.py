@@ -19,6 +19,13 @@ from core.research.workflow.bindings import (
 )
 from core.research.workflow.checkpoint_store import default_checkpoint_path
 from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts.automation_policy import (
+    MAX_AUTO_REVISION_ROUNDS_DEFAULT,
+)
+from core.research.workflow.contracts.evolution_lineage import (
+    REVISION_EXHAUSTED_EXCEPTION,
+)
+from core.research.workflow.contracts.retry_taxonomy import DEFAULT_RETRY_TAXONOMY
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
@@ -26,6 +33,7 @@ from core.research.workflow.definition import (
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
+from .anomaly_inbox_service import build_anomaly_inbox
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
 from .checkpoint_lifecycle import prepare_initial_checkpoint
 from .durable_index import DurableWorkflowIndex
@@ -33,6 +41,7 @@ from .evidence_remediation_fork import (
     EvidenceRemediationForkError,
     fork_evidence_remediation,
 )
+from .evolution_lineage_writer import write_evolution_lineage_artifact
 from .external_agent_task_reconciliation import (
     has_reconcilable_external_agent_tasks,
     reconcile_external_agent_tasks,
@@ -55,7 +64,7 @@ from .human_task_resolution import (
 from .human_task_resolution import (
     resolve_human_task as resolve_human_task_transition,
 )
-from .iteration_revision_fork import fork_iteration_revision
+from .iteration_revision_fork import _child_run_id, fork_iteration_revision
 from .node_command_adapter import (
     NodeCommandError,
     NodeCommandUnavailable,
@@ -64,7 +73,13 @@ from .node_command_adapter import (
 )
 from .node_completion import complete_node_execution
 from .node_execution import heartbeat_node_execution, start_node_execution
-from .node_execution_support import NodeExecutionError, latest_node_run
+from .node_execution_support import (
+    NodeExecutionError,
+    build_event,
+    iso,
+    latest_node_run,
+    utc_now,
+)
 from .node_operational_projection import project_node_operations
 from .node_recovery import reconcile_expired_execution, retry_node_execution
 from .node_scoped_session_projection import project_node_scoped_sessions
@@ -166,6 +181,270 @@ class ResearchWorkflowError(Exception):
     def __init__(self, message: str, *, code: str = "workflow_error"):
         super().__init__(message)
         self.code = code
+
+
+# Decision #3 of the 13-decision contract: automatic protocol revision is
+# bounded at ``MAX_AUTO_REVISION_ROUNDS_DEFAULT`` rounds per lineage.  The
+# frozen retry taxonomy owns the stop semantics: once the auto-revision budget
+# is exhausted the only way forward is a human action family, so the parked
+# run reuses the taxonomy's ``human_required`` outcome code instead of
+# inventing a new one.
+_AUTO_REVISION_TAXONOMY_CODE = "budget_exceeded"
+_AUTO_REVISION_EVENT_TYPE = "AutoRevisionExhausted"
+
+
+def _lineage_revision_rounds(
+    store: WorkflowRunStore, run_id: str
+) -> tuple[int, str, list[str]]:
+    """Count persisted auto-revision forks along the parentRunId chain.
+
+    The counter is never held in memory: every hop to a forked ancestor
+    (``parentRunId``) is one already-consumed revision round of the same
+    lineage, so the bound survives process restarts by being derived from
+    store data.  Returns the consumed rounds, the lineage root run id and the
+    forked child run ids in round order (fork evidence for the lineage
+    record).
+    """
+    rounds = 0
+    fork_run_ids: list[str] = []
+    seen: set[str] = set()
+    root_run_id = str(run_id or "").strip()
+    current_id = root_run_id
+    while current_id:
+        record = store.get_run(current_id)
+        if record is None:
+            break
+        root_run_id = current_id
+        parent_id = str(record.get("parentRunId") or "").strip()
+        if not parent_id or parent_id in seen:
+            break
+        seen.add(parent_id)
+        fork_run_ids.append(current_id)
+        rounds += 1
+        current_id = parent_id
+    return rounds, root_run_id, list(reversed(fork_run_ids))
+
+
+def _revision_fork_already_applied(
+    store: WorkflowRunStore, parent_run_id: str, decision_id: str
+) -> bool:
+    """True when this exact decision already forked (idempotent replay)."""
+    child_run_id = _child_run_id(parent_run_id, decision_id)
+    parent = store.get_run(parent_run_id)
+    if parent is None:
+        return False
+    return parent.get("supersededByRunId") == child_run_id and child_run_id in (
+        parent.get("childRunIds") or []
+    )
+
+
+def _auto_revision_exhausted(
+    store: WorkflowRunStore, parent: dict[str, Any], decision: dict[str, Any]
+) -> bool:
+    """True when a revise_protocol decision must no longer fork (decision #3)."""
+    parent_run_id = str(parent["runId"])
+    decision_id = str(decision.get("decisionId") or "").strip()
+    if not decision_id:
+        return False
+    rounds, _, _ = _lineage_revision_rounds(store, parent_run_id)
+    if rounds < MAX_AUTO_REVISION_ROUNDS_DEFAULT:
+        return False
+    return not _revision_fork_already_applied(store, parent_run_id, decision_id)
+
+
+def _park_auto_revision_exhausted(
+    store: WorkflowRunStore,
+    completed: dict[str, Any],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """Stop a revise_protocol decision at the bounded-revision ceiling.
+
+    Instead of forking another automatic child run, the parent stays in a
+    structured, recoverable stop state: ``budget_exceeded`` is the frozen
+    retry-taxonomy ``human_required`` outcome code, the mandatory
+    ``auto_revision_exhausted`` exception is recorded through the canonical
+    evolution-lineage projection writer, and an anomaly-inbox escalation item
+    is emitted with the frozen kind/severity mapping (``build_anomaly_inbox``
+    derives both; no new mapping is introduced here).
+    """
+    parent_run_id = str(completed["runId"])
+    decision_id = str(decision.get("decisionId") or "").strip()
+    rounds, root_run_id, fork_run_ids = _lineage_revision_rounds(
+        store, parent_run_id
+    )
+    now = iso(utc_now())
+    team_id = str(completed.get("teamId") or "").strip()
+    question_id = str(completed.get("questionId") or "").strip()
+    taxonomy_entry = DEFAULT_RETRY_TAXONOMY.entry(_AUTO_REVISION_TAXONOMY_CODE)
+    occurred_at = str(decision.get("decidedAt") or "").strip() or now
+    round_scope = f"revision-lineage:{root_run_id}"
+    candidate_id = (
+        str(decision.get("selectedCandidateRef") or "").strip()
+        or str(completed.get("officialCandidateRef") or "").strip()
+        or root_run_id
+    )
+
+    lineage_write: dict[str, Any] = {
+        "status": "skipped",
+        "blockerCodes": [],
+        "mandatoryExceptionReview": "",
+    }
+    if team_id and question_id:
+        try:
+            write_result = write_evolution_lineage_artifact(
+                team_id=team_id,
+                workflow_run_id=parent_run_id,
+                node_run_id=str(decision.get("nodeRunId") or ""),
+                question_id=question_id,
+                round_id=round_scope,
+                source_collection_run_id=root_run_id,
+                events=[
+                    {
+                        "eventId": f"evt-evlineage-introduced-{root_run_id}",
+                        "candidateId": candidate_id,
+                        "kind": "introduced",
+                        "roundId": round_scope,
+                        "reason": "formal_run_started",
+                        "occurredAt": occurred_at,
+                        "actor": "system_policy",
+                        "revisionAttempt": 0,
+                        "evidenceRefs": [],
+                    },
+                    {
+                        "eventId": (
+                            f"evt-evlineage-{REVISION_EXHAUSTED_EXCEPTION}"
+                            f"-{parent_run_id}-{decision_id}"
+                        ),
+                        "candidateId": candidate_id,
+                        "kind": "revision_exhausted",
+                        "roundId": round_scope,
+                        "reason": REVISION_EXHAUSTED_EXCEPTION,
+                        "occurredAt": occurred_at,
+                        "actor": "system_policy",
+                        "revisionAttempt": 0,
+                        "evidenceRefs": [
+                            {"kind": "fork_run", "ref": fork_run_id}
+                            for fork_run_id in fork_run_ids
+                        ],
+                    },
+                ],
+            )
+            lineage_summary = dict(
+                (write_result.get("evolutionLineage") or {}).get("summary")
+                or {}
+            )
+            lineage_write = {
+                "status": str(write_result.get("status") or ""),
+                "blockerCodes": list(write_result.get("blockerCodes") or []),
+                "mandatoryExceptionReview": str(
+                    lineage_summary.get("mandatoryExceptionReview") or ""
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 - parking must not depend on the projection
+            lineage_write = {
+                "status": "failed",
+                "blockerCodes": [
+                    f"evolution_lineage_write_failed:{type(exc).__name__}"
+                ],
+                "mandatoryExceptionReview": "",
+            }
+
+    anomaly_items: list[dict[str, Any]] = []
+    if team_id and question_id:
+        try:
+            inbox = build_anomaly_inbox(
+                {
+                    "teamId": team_id,
+                    "questionId": question_id,
+                    "problems": [
+                        {
+                            "code": _AUTO_REVISION_TAXONOMY_CODE,
+                            "sourceKind": "formal_run",
+                            "sourceId": parent_run_id,
+                            "message": (
+                                "automatic protocol revision reached the frozen "
+                                f"{MAX_AUTO_REVISION_ROUNDS_DEFAULT}-round "
+                                "ceiling; human reconciliation is required"
+                            ),
+                            "detectedAt": now,
+                        }
+                    ],
+                },
+                generated_at=now,
+            )
+            anomaly_items = [item.to_dict() for item in inbox.items]
+        except Exception:  # noqa: BLE001 - parking must not depend on the projector
+            anomaly_items = []
+
+    def mutation(current: dict[str, Any]) -> dict[str, Any]:
+        parked = dict(current.get("autoRevision") or {})
+        if (
+            parked.get("stopReason") == REVISION_EXHAUSTED_EXCEPTION
+            and parked.get("decisionId") == decision_id
+        ):
+            return current
+        event = build_event(
+            current,
+            workflowId=current["workflowId"],
+            workflowVersionId=current["workflowVersionId"],
+            checkpointId=(current.get("langGraph") or {}).get("checkpointId")
+            or "",
+            nodeId="iteration_decision",
+            nodeRunId=str(decision.get("nodeRunId") or ""),
+            attempt=int(decision.get("iterationAttempt") or 1),
+            type=_AUTO_REVISION_EVENT_TYPE,
+            summary={
+                "decisionId": decision_id,
+                "revisionRoundCount": rounds,
+                "maxAutoRevisionRounds": MAX_AUTO_REVISION_ROUNDS_DEFAULT,
+                "stopReason": REVISION_EXHAUSTED_EXCEPTION,
+                "outcomeCode": taxonomy_entry.outcome_code,
+                "outcomeClass": taxonomy_entry.outcome_class.value,
+                "mandatoryException": REVISION_EXHAUSTED_EXCEPTION,
+                "anomalyItemCount": len(anomaly_items),
+            },
+        )
+        return {
+            **current,
+            "status": "blocked",
+            "blockedReason": taxonomy_entry.outcome_code,
+            "autoRevision": {
+                "stopReason": REVISION_EXHAUSTED_EXCEPTION,
+                "decisionId": decision_id,
+                "revisionRoundCount": rounds,
+                "maxAutoRevisionRounds": MAX_AUTO_REVISION_ROUNDS_DEFAULT,
+                "lineageRootRunId": root_run_id,
+                "outcomeCode": taxonomy_entry.outcome_code,
+                "outcomeClass": taxonomy_entry.outcome_class.value,
+                "recommendedAction": (
+                    taxonomy_entry.human_actions[0].value
+                    if taxonomy_entry.human_actions
+                    else ""
+                ),
+                "humanActions": [
+                    action.value for action in taxonomy_entry.human_actions
+                ],
+                "mandatoryException": REVISION_EXHAUSTED_EXCEPTION,
+                "blockedAt": now,
+                "lineageRecord": {
+                    "status": str(lineage_write.get("status") or ""),
+                    "blockerCodes": list(
+                        lineage_write.get("blockerCodes") or []
+                    ),
+                    "mandatoryExceptionReview": str(
+                        lineage_write.get("mandatoryExceptionReview") or ""
+                    ),
+                },
+                "anomalyEscalation": {
+                    "status": "emitted" if anomaly_items else "unavailable",
+                    "items": anomaly_items,
+                },
+            },
+            "events": [*(current.get("events") or []), event],
+        }
+
+    store.mutate_run(parent_run_id, mutation)
+    return store.get_run(parent_run_id) or completed
 
 
 class ResearchWorkflowRuntimeService:
@@ -887,6 +1166,19 @@ class ResearchWorkflowRuntimeService:
                             ),
                             None,
                         )
+                        if (
+                            decision is not None
+                            and decision.get("decisionKind") == "revise_protocol"
+                            and _auto_revision_exhausted(
+                                self._store, completed, decision
+                            )
+                        ):
+                            # Decision #3: the lineage already consumed its
+                            # bounded auto-revision rounds; park the parent
+                            # instead of forking another automatic child run.
+                            return _park_auto_revision_exhausted(
+                                self._store, completed, decision
+                            )
                         if (
                             decision is not None
                             and decision.get("decisionKind") == "revise_protocol"

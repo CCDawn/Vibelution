@@ -179,6 +179,23 @@ def _formal_hypothesis_handoff(
             code="formal_hypothesis_handoff_incomplete",
         )
 
+    # R2.2 direct fail-closed gate: the formal handoff never advances a
+    # hypothesis whose core claims are refuted/disputed (or unevaluable),
+    # even when the convergence authority came from the meta review instead
+    # of a human adjudication (which the chain gates itself).  The chain's
+    # gate helper runs ``evaluate_claim_belief_gate`` and raises
+    # ``ClaimBeliefGateBlockedError`` with structured blockers.
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+    )
+
+    hypothesis_first_chain._assert_claim_belief_gate_allows(
+        team_id,
+        normalized_question_id,
+        recommended_candidate_id,
+        stage="formal_run_handoff",
+    )
+
     refs_by_kind: dict[str, list[str]] = {
         "meeting_round": [],
         "meeting_digest": [],

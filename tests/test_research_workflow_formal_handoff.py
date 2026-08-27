@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,11 +11,25 @@ from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow import hypothesis_rounds, meeting_rounds
 from core.web.services.team_workflow.research_runtime import (
     formal_hypothesis_fanout,
+    hypothesis_first_chain,
     run_creation,
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
 )
+
+
+def _allowed_gate_verdict(candidate_ids: Any) -> dict[str, dict[str, Any]]:
+    return {
+        candidate_id: {
+            "candidateId": candidate_id,
+            "status": "allowed",
+            "reason": "",
+            "claims": [],
+            "blockedClaims": [],
+        }
+        for candidate_id in candidate_ids
+    }
 
 
 def _closed_round(*, accepted: bool = True) -> dict:
@@ -101,7 +116,17 @@ def _install_handoff_authorities(
     *,
     accepted: bool = True,
     decision_resolves: bool = True,
+    gate_blocked: dict[str, dict[str, Any]] | None = None,
 ) -> None:
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "evaluate_claim_belief_gate",
+        lambda _team_id, _question_id, candidate_ids: (
+            gate_blocked
+            if gate_blocked is not None
+            else _allowed_gate_verdict(candidate_ids)
+        ),
+    )
     monkeypatch.setattr(
         hypothesis_rounds,
         "get_hypothesis_round",
