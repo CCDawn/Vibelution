@@ -902,16 +902,18 @@ class WorkflowLedgerRepository:
         *,
         retry_at_ms: int,
         problem_json: str,
+        reset_attempts: bool = False,
     ) -> bool:
         cursor = self.execute(
             """
             UPDATE outbox_actions
             SET status = 'pending', lease_owner = NULL, lease_expires_at_ms = NULL,
-                available_at_ms = ?, last_problem_json = ?, updated_at_ms = ?
+                available_at_ms = ?, last_problem_json = ?, updated_at_ms = ?,
+                attempt_count = CASE WHEN ? THEN 0 ELSE attempt_count END
             WHERE action_id = ? AND status = 'leased' AND lease_owner = ?
               AND lease_expires_at_ms > ?
             """,
-            (retry_at_ms, problem_json, now_ms, action_id, owner, now_ms),
+            (retry_at_ms, problem_json, now_ms, 1 if reset_attempts else 0, action_id, owner, now_ms),
         )
         return self.affected() > 0
 

@@ -258,6 +258,13 @@ class AdapterDispatchWorker:
                 return
             if isinstance(exc, (TurnNotReadyError, HypothesisAuthorityUnavailable)):
                 # Transient turn/authority state — requeue without failing the attempt.
+                if isinstance(exc, TurnNotReadyError) and _turn_alive_progressing(exc):
+                    # A live, progressing turn is not a transient failure: the
+                    # collection stage legitimately runs past one wait window.
+                    # Keep waiting (heartbeat) without consuming the transient
+                    # budget; wall-clock bounds the wait.
+                    self._requeue_live_turn_wait(outbox, action, str(exc))
+                    return
                 prefix = (
                     "turn_not_ready"
                     if isinstance(exc, TurnNotReadyError)
@@ -1020,6 +1027,44 @@ class AdapterDispatchWorker:
 
     _MAX_TRANSIENT_ATTEMPTS = 5
 
+    # Live-turn heartbeats are bounded by wall clock, not by the transient
+    # budget: healthy collection turns run 10+ minutes (one wait window is
+    # 120s), so counting them as transient failures exhausted real work at
+    # attempt 5. Two hours still terminates a wedged "running" session.
+    _MAX_LIVE_TURN_WAIT_MS = 7_200_000
+
+    def _requeue_live_turn_wait(self, outbox: Any, action: PendingAction, detail: str) -> None:
+        now_ms = self._now()
+        created_at_ms = int(getattr(outbox, "created_at_ms", 0) or 0)
+        if created_at_ms and now_ms - created_at_ms > self._MAX_LIVE_TURN_WAIT_MS:
+            self._fail_attempt(
+                outbox,
+                action,
+                {"code": "live_turn_wait_timeout", "detail": str(detail)[:400]},
+            )
+            return
+        _record_scene_event(
+            "adapter_dispatch.live_turn_wait",
+            outcome="requeued",
+            fields={
+                **_action_identity(action),
+                "attemptCount": int(getattr(outbox, "attempt_count", 0) or 0),
+                "waitedMs": now_ms - created_at_ms if created_at_ms else 0,
+                "detail": str(detail)[:160],
+            },
+        )
+        outbox_api.requeue_action(
+            self._store,
+            outbox.action_id,
+            self._owner,
+            now_ms,
+            retry_at_ms=now_ms + 5_000,
+            problem_json=json.dumps(
+                {"code": "live_turn_wait", "detail": str(detail)[:400]}
+            ),
+            reset_attempts=True,
+        )
+
     def _requeue_or_fail(self, outbox: Any, action: PendingAction, detail: str) -> None:
         now_ms = self._now()
         if int(getattr(outbox, "attempt_count", 0) or 0) >= self._MAX_TRANSIENT_ATTEMPTS:
@@ -1048,6 +1093,22 @@ class AdapterDispatchWorker:
             retry_at_ms=now_ms + 5_000,
             problem_json=json.dumps({"code": "transient", "detail": detail}),
         )
+
+
+def _turn_alive_progressing(exc: Exception) -> bool:
+    """True only when the wait timed out while the turn was still running.
+
+    Anything else (missing anchor, unknown session, ambiguous completion
+    source) stays on the transient path so genuinely broken dispatches keep
+    the bounded retry budget.
+    """
+
+    snapshot = dict(getattr(exc, "snapshot", None) or {})
+    if not snapshot:
+        return False
+    if bool(snapshot.get("terminal")):
+        return False
+    return str(snapshot.get("completionSource") or "").strip() == "running"
 
 
 def _heal_pending_action_identity(outbox: Any, action: PendingAction) -> PendingAction:

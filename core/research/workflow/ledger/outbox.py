@@ -85,10 +85,16 @@ def requeue_action(
     *,
     retry_at_ms: int,
     problem_json: str,
+    reset_attempts: bool = False,
 ) -> bool:
     future = store.submit(
         lambda uow: uow.repository.requeue_outbox(
-            action_id, owner, now_ms, retry_at_ms=retry_at_ms, problem_json=problem_json
+            action_id,
+            owner,
+            now_ms,
+            retry_at_ms=retry_at_ms,
+            problem_json=problem_json,
+            reset_attempts=reset_attempts,
         ),
         force_flush=True,
     )

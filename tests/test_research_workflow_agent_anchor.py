@@ -217,3 +217,114 @@ def test_human_gate_anchor_binds_human_task(tmp_path: Path) -> None:
         assert "reserve_budget" not in ports.calls
     finally:
         harness.close()
+
+
+def _worker(harness) -> AdapterDispatchWorker:
+    ports = FakeDomainPorts()
+    registry = ActionRegistry()
+    registry.register(AgentActionAdapter(ports))
+    return AdapterDispatchWorker(
+        store=harness.store,
+        registry=registry,
+        ports=ports,
+        successor_fn=lambda node: ("source_extraction",),
+        now_provider=lambda: FIXED_NOW_MS + 1_000,
+    )
+
+
+def _leased_outbox(harness, action: PendingAction, *, attempt_count: int):
+    """Lease the seeded outbox row and return the live record the worker sees."""
+    from core.research.workflow.ledger.outbox import lease_ready_actions
+
+    leased = lease_ready_actions(
+        harness.store, owner="adapter-worker", now_ms=FIXED_NOW_MS, limit=1
+    )
+    assert leased and leased[0].action_id == f"adapter-outbox-{action.action_id}"
+    record = leased[0]
+    if attempt_count:
+        from dataclasses import replace as _replace
+
+        record = _replace(record, attempt_count=attempt_count)
+    return record
+
+
+def _outbox_row(harness, action_id: str):
+    return harness.store.submit(
+        lambda uow: uow.repository.get_outbox(action_id),
+        force_flush=True,
+    ).result(timeout=10)
+
+
+def test_live_turn_wait_heartbeat_does_not_consume_transient_budget(
+    tmp_path: Path,
+) -> None:
+    """A wait timeout on a still-running turn must requeue without failing,
+    even past the transient attempt cap; attempts reset so the lease cap
+    cannot starve a healthy long turn."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        outbox = _leased_outbox(harness, action, attempt_count=99)
+
+        worker._requeue_live_turn_wait(outbox, action, "turn_not_ready:running")
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "pending"
+        assert row.attempt_count == 0
+        problem = json.loads(row.last_problem_json or "{}")
+        assert problem.get("code") == "live_turn_wait"
+    finally:
+        harness.close()
+
+
+def test_live_turn_wait_wall_clock_cap_fails(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        outbox = _leased_outbox(harness, action, attempt_count=1)
+        from dataclasses import replace as _replace
+
+        stale = _replace(
+            outbox,
+            created_at_ms=FIXED_NOW_MS - worker._MAX_LIVE_TURN_WAIT_MS - 1_000,
+        )
+        worker._requeue_live_turn_wait(stale, action, "turn_not_ready:running")
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "failed"
+        problem = json.loads(row.last_problem_json or "{}")
+        assert problem.get("code") == "live_turn_wait_timeout"
+    finally:
+        harness.close()
+
+
+def test_turn_alive_progressing_requires_running_source() -> None:
+    from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+        _turn_alive_progressing,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        TurnNotReadyError,
+    )
+
+    live = TurnNotReadyError(
+        "wait",
+        snapshot={"terminal": False, "completionSource": "running"},
+    )
+    terminal = TurnNotReadyError(
+        "wait", snapshot={"terminal": True, "completionSource": "last_turn_status"}
+    )
+    ambiguous = TurnNotReadyError("wait", snapshot={"terminal": False})
+    empty = TurnNotReadyError("wait")
+
+    assert _turn_alive_progressing(live) is True
+    assert _turn_alive_progressing(terminal) is False
+    assert _turn_alive_progressing(ambiguous) is False
+    assert _turn_alive_progressing(empty) is False
