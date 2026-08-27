@@ -56,6 +56,11 @@ def test_problem_understanding_contract_is_bound_to_search_seat_and_node() -> No
     assert contract["workflowNodeId"] == "problem_understanding"
     assert contract["requiresWorkflowAuthority"] is True
     assert "record_problem_understanding" in " ".join(contract["checklist"])
+    checklist = " ".join(contract["checklist"])
+    assert "required=true" in checklist
+    assert "revision_requested" in checklist
+    assert "rationale" in checklist
+    assert "不要加入 review_points" in checklist
 
 
 @pytest.mark.parametrize(

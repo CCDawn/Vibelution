@@ -51,7 +51,12 @@ TASK_KIND_CONTRACTS: dict[str, dict[str, Any]] = {
         "requiresWorkflowAuthority": True,
         "checklist": [
             "只使用服务端 workflow run、node run 与 source collection run 绑定的范围",
-            "输出 scope、subquestions、assumptions、known_unknowns 与 human_gate",
+            (
+                "输出 scope、subquestions、assumptions、known_unknowns 与 human_gate；"
+                "human_gate 必须是对象，仅允许 required=true、decision=pending|approved|"
+                "revision_requested|rejected、非空 rationale（可选 reviewer/decided_at），"
+                "不要加入 review_points 等额外字段"
+            ),
             "通过 challenge_cup_experiment_writeback_tool 的 record_problem_understanding 写回",
             "普通文本、摘要、分数或搜索结果投影不能代替 canonical artifact",
         ],

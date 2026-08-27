@@ -818,11 +818,20 @@ def _build_key_tools() -> List[BaseTool]:
         recorded_by_agent: str = "",
     ) -> str:
         """
-        【挑战杯实验账本回写】登记假设集、实验计划、baseline、smoke/full-run 结果或入库申请。
+        【挑战杯实验账本回写】登记问题理解、假设集、实验计划、baseline、smoke/full-run 结果或入库申请。
 
         该工具只写实验账本，不执行训练、smoke runner、Shell、Git、RAG 或 official graph。
-        operation 支持 record_hypothesis_fragment / record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
+        operation 支持 record_problem_understanding / record_hypothesis_fragment / record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
         register_full_run_result / request_knowledge_ingestion。
+
+        当 operation=record_problem_understanding 时，payload_json 须是包含以下五个字段的 JSON 对象：
+        scope（非空字符串）、subquestions（字符串数组）、assumptions（字符串数组）、
+        known_unknowns（字符串数组）和 human_gate（对象）。human_gate 只能包含 required、decision、
+        rationale，以及可选的 reviewer、decided_at；required 必须为 true，decision 必须是
+        pending / approved / revision_requested / rejected 之一，rationale 必须是非空字符串。
+        不要加入 review_points 或其他额外字段。例如：
+        {"scope":"bounded question","subquestions":["testable subquestion"],"assumptions":["explicit assumption"],
+        "known_unknowns":["open unknown"],"human_gate":{"required":true,"decision":"pending","rationale":"Needs review."}}
 
         当 operation=record_hypothesis_fragment 时，只提交当前 Child Session 绑定 candidate 的
         statement、mechanism、predictions、falsificationCriteria、evidenceRefs、counterEvidenceRefs 和五维 scores；
