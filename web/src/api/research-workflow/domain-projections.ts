@@ -5,6 +5,7 @@ import type {
   ResearchHandoffsProjection,
   ResearchHypothesesProjection,
   ResearchLedgerProjection,
+  ResearchQuestionLineageProjection,
 } from "../types/researchWorkflow";
 import { fetchJson, teamQuery } from "./client";
 
@@ -59,5 +60,15 @@ export async function fetchResearchWorkflowEvaluation(
 ): Promise<ResearchEvaluationProjection> {
   return fetchJson(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/evaluation${teamQuery(options.teamId)}`,
+  );
+}
+
+/** R4.5 single-question full-chain lineage projection (read-only). */
+export async function fetchResearchWorkflowQuestionLineage(
+  questionId: string,
+  options: { teamId: string },
+): Promise<ResearchQuestionLineageProjection> {
+  return fetchJson(
+    `/api/research/questions/${encodeURIComponent(questionId)}/lineage${teamQuery(options.teamId)}`,
   );
 }
