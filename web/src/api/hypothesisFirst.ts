@@ -40,6 +40,11 @@ import type {
   QuestionRunResetResponse,
 } from "./types/hypothesisFirst";
 
+// Re-exported so inspector surfaces classify HTTP errors through this domain
+// module — routes must not import `api/client` directly
+// (fullStackApiBoundary.test.ts).
+export { isFetchJsonHttpError };
+
 function teamPrefix(teamId: string): string {
   return `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration`;
 }
