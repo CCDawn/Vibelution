@@ -4,6 +4,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -444,6 +445,7 @@ def test_load_conversations_repair_writes_only_dirty_session_rows(tmp_path, monk
     monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(session_service, "_repair_child_root_agent_direct_session_bindings", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *_args, **_kwargs: None)
+    _patch_stale_running_owner_stubs(monkeypatch)
 
     full_saves: list[str] = []
     original_save_chat_state = session_service.save_chat_state
@@ -478,6 +480,193 @@ def test_load_conversations_repair_writes_only_dirty_session_rows(tmp_path, monk
     assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
     assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+class _StubWorkRunStore:
+    """Minimal WorkRunStore stand-in so tests never read the real machine state."""
+
+    def __init__(self, active=None):
+        self._active = active
+
+    def load_active_snapshot(self, run_kind):
+        return self._active
+
+
+class _StubTurnScheduler:
+    def __init__(self, queued=()):
+        self._queued = set(queued)
+
+    def queued_session_turn_ids(self):
+        return set(self._queued)
+
+    def clear(self):
+        self._queued.clear()
+
+
+def _patch_stale_running_owner_stubs(monkeypatch, *, active=None, queued=()):
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _StubWorkRunStore(active))
+    monkeypatch.setattr(session_service, "_SESSION_TURN_SCHEDULER", _StubTurnScheduler(queued))
+
+
+def _seed_single_runtime_row(tmp_path, *, session_id: str = "session-a", status: str = "running") -> None:
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": session_id, "title": "A", "last_turn_status": status},
+            ],
+        },
+    )
+
+
+def test_stale_running_repair_skipped_when_scheduler_holds_queued_turn(tmp_path, monkeypatch):
+    """A queued turn lives in the scheduler, not the running set; repair must not touch it."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_single_runtime_row(tmp_path, status="queued")
+    _patch_stale_running_owner_stubs(
+        monkeypatch,
+        active=None,
+        queued={("session-a", "turn-1")},
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    conversation = load_session_chat_state(tmp_path, "session-a")
+    repaired = session_service._repair_stale_running_conversation(conversation)
+
+    assert repaired is False
+    assert conversation["last_turn_status"] == "queued"
+    assert "runtime_notices" not in conversation
+    assert full_saves == []
+    assert session_saves == []
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "queued"
+
+
+def test_stale_running_repair_skipped_for_recent_work_run_snapshot(tmp_path, monkeypatch):
+    """Non-owner process: empty in-process sets plus a freshly updated open work-run
+    snapshot must stay hands-off instead of flipping a possibly-live turn to ready."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_single_runtime_row(tmp_path, status="running")
+    active = {
+        "runId": "turn-1",
+        "sessionId": "session-a",
+        "status": "running",
+        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+    }
+    _patch_stale_running_owner_stubs(monkeypatch, active=active)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    conversation = load_session_chat_state(tmp_path, "session-a")
+    repaired = session_service._repair_stale_running_conversation(conversation)
+
+    assert repaired is False
+    assert conversation["last_turn_status"] == "running"
+    assert "runtime_notices" not in conversation
+    assert full_saves == []
+    assert session_saves == []
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
+
+
+def test_stale_running_repair_audited_after_work_run_grace_expiry(tmp_path, monkeypatch):
+    """Once the open snapshot outlives the grace window the turn is judged dead;
+    the write-back must carry an audit event naming who judged and what changed."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_single_runtime_row(tmp_path, status="running")
+    stale_updated_at = (datetime.now() - timedelta(seconds=600)).isoformat(timespec="seconds")
+    active = {
+        "runId": "turn-1",
+        "sessionId": "session-a",
+        "status": "running",
+        "updatedAt": stale_updated_at,
+    }
+    _patch_stale_running_owner_stubs(monkeypatch, active=active)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    monkeypatch.setattr(session_service, "reconcile_stale_chat_turn_work_runs", lambda **_kwargs: [])
+    release_calls: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_release_stale_chat_turn_work_run",
+        lambda **kwargs: release_calls.append(dict(kwargs)),
+    )
+    audit_events: list[dict] = []
+
+    def _spy_scene_event(component, phase, event_code, *, fields=None, **kwargs):
+        audit_events.append({"eventCode": event_code, "fields": dict(fields or {})})
+        return {"eventCode": event_code}
+
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", _spy_scene_event)
+
+    conversation = load_session_chat_state(tmp_path, "session-a")
+    payload = session_service._repair_stale_running_conversations({"conversations": [conversation]})
+
+    assert conversation["last_turn_status"] == "ready"
+    assert payload["conversations"][0]["last_turn_status"] == "ready"
+    notices = conversation.get("runtime_notices") or []
+    assert any(item.get("kind") == "turn_recovered" for item in notices)
+    audit = [item for item in audit_events if item["eventCode"] == "conversation.stale_running_repaired"]
+    assert len(audit) == 1
+    assert audit[0]["fields"]["sessionId"] == "session-a"
+    assert audit[0]["fields"]["previousStatus"] == "running"
+    assert audit[0]["fields"]["newStatus"] == "ready"
+    assert release_calls and release_calls[0]["session_id"] == "session-a"
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+
+
+def test_stale_running_repair_grace_env_zero_disables_freshness_gate(tmp_path, monkeypatch):
+    """The cross-process freshness gate is configurable; 0 is the explicit opt-out."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("VIBELUTION_SESSION_STALE_RUNNING_REPAIR_GRACE_SECONDS", "0")
+    _seed_single_runtime_row(tmp_path, status="running")
+    active = {
+        "runId": "turn-1",
+        "sessionId": "session-a",
+        "status": "running",
+        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+    }
+    _patch_stale_running_owner_stubs(monkeypatch, active=active)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    monkeypatch.setattr(session_service, "_release_stale_chat_turn_work_run", lambda **_kwargs: None)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: {})
+
+    conversation = load_session_chat_state(tmp_path, "session-a")
+    repaired = session_service._repair_stale_running_conversation(conversation)
+
+    assert repaired is True
+    assert conversation["last_turn_status"] == "ready"
+
+
+def test_completion_snapshot_read_path_writes_nothing_for_live_owner(tmp_path, monkeypatch):
+    """GET completion snapshot must present the persisted fact and never write the
+    store while owner evidence (fresh open work-run) says the turn may be alive."""
+
+    from core.web.services.session import turn_diagnostics
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_single_runtime_row(tmp_path, status="running")
+    active = {
+        "runId": "turn-1",
+        "sessionId": "session-a",
+        "status": "running",
+        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+    }
+    _patch_stale_running_owner_stubs(monkeypatch, active=active)
+    monkeypatch.setattr(session_service, "reconcile_stale_chat_turn_work_runs", lambda **_kwargs: [])
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    monkeypatch.setattr(session_service, "_RUNNING_SESSION_IDS", set())
+    monkeypatch.setattr(session_service, "_SESSION_ACTIVE_TURN_IDS", {})
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    snapshot = turn_diagnostics.get_session_turn_completion_snapshot("session-a", "turn-1")
+
+    assert snapshot["lastTurnStatus"] == "running"
+    assert snapshot["terminal"] is False
+    assert full_saves == []
+    assert session_saves == []
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
 
 
 def _seed_two_runtime_rows(tmp_path, *, status_a: str = "running") -> None:
