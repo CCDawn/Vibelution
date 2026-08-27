@@ -706,7 +706,12 @@ def test_formal_run_projects_available_retry_node_offer(
     actions = [
         action for action in state.allowedActions if action.kind == "command"
     ]
-    assert [action.command for action in actions] == ["retry_formal_node"]
+    expected = (
+        ["retry_formal_node", "cancel_run"]
+        if run_status == "blocked"
+        else ["retry_formal_node"]
+    )
+    assert [action.command for action in actions] == expected
     assert actions[0].targetNodeId == "source_extraction"
     assert actions[0].idempotencyKey == "offer:retry"
     assert actions[0].payload.runId == "run-retry"
@@ -761,7 +766,8 @@ def test_ordinary_formal_failure_does_not_project_reconcile_action(
     if run_status == "failed":
         assert commands == ["archive_run"]
     else:
-        assert commands == []
+        # blocked keeps the confirmed retirement offer even without retries
+        assert commands == ["cancel_run"]
 
 
 _RECONCILE_OFFER = {
@@ -835,7 +841,8 @@ def _project_formal_commands(
 def test_blocked_formal_run_without_retry_projects_reconcile_offer() -> None:
     """生产 run-d02722658d8b 形态：blocked 且无可用节点 retry。
 
-    ledger 的 reconcile offer 必须原样透传成 V2 动作，操作员才有恢复入口。
+    ledger 的 reconcile offer 必须原样透传成 V2 动作，操作员才有恢复入口；
+    blocked 运行同时保留确认式 cancel 退役入口（冻结路由永久不可达时用）。
     """
     actions = _project_formal_commands(
         run_id="run-blocked-reconcile",
@@ -843,12 +850,18 @@ def test_blocked_formal_run_without_retry_projects_reconcile_offer() -> None:
         command_offers=[_RECONCILE_OFFER],
     )
 
-    assert [action.command for action in actions] == ["reconcile_formal_run"]
+    assert [action.command for action in actions] == [
+        "reconcile_formal_run",
+        "cancel_run",
+    ]
     reconcile = actions[0]
     assert reconcile.actionId == "reconcile-formal-run:run-blocked-reconcile"
     assert reconcile.idempotencyKey == "offer:reconcile:v7"
     assert reconcile.payload.runId == "run-blocked-reconcile"
     assert reconcile.enabled is True
+    cancel = actions[1]
+    assert cancel.payload.runId == "run-blocked-reconcile"
+    assert cancel.requiresConfirmation is True
 
 
 def test_blocked_formal_run_keeps_reconcile_alongside_retry_actions() -> None:
@@ -862,10 +875,13 @@ def test_blocked_formal_run_keeps_reconcile_alongside_retry_actions() -> None:
     assert [action.command for action in actions] == [
         "retry_formal_node",
         "reconcile_formal_run",
+        "cancel_run",
     ]
-    retry, reconcile = actions
+    retry, reconcile, cancel = actions
     assert retry.idempotencyKey == "offer:retry:source_extraction:v7"
     assert reconcile.idempotencyKey == "offer:reconcile:v7"
+    assert cancel.actionId == "cancel-formal-run:run-blocked-mixed"
+    assert cancel.requiresConfirmation is True
 
 
 def test_reconciliation_required_with_retry_co_projects_both_recovery_paths() -> None:

@@ -1850,6 +1850,23 @@ def _project_formal_and_program(
         actions.extend(retry_actions)
         if reconcile_action is not None:
             actions.append(reconcile_action)
+        if run_status == "blocked":
+            # A blocked run whose frozen model routing (or any prerequisite)
+            # is permanently unreachable must still have a sanctioned
+            # retirement path: the ledger already allows BLOCKED -> CANCELLED,
+            # so surface the confirmed cancel offer beside the retries.
+            actions.append(
+                _command_action(
+                    "cancel_run",
+                    action_id=f"cancel-formal-run:{current_id}",
+                    label="取消当前正式运行",
+                    target_phase="formal_runtime",
+                    target_node_id="formal_runtime",
+                    payload={"runId": current_id},
+                    requires_confirmation=True,
+                    confirmation_text="取消后需归档当前运行，才可重新创建正式研究运行。",
+                )
+            )
         return formal, empty_program, problems, actions, "formal_runtime"
     if run_status == "reconciliation_required":
         if retry_actions:
