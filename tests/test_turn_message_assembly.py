@@ -340,3 +340,78 @@ def _message_preview(item):
     if isinstance(item, dict):
         return ("dict", item.get("role"), item.get("content"))
     return (type(item).__name__, getattr(item, "content", None))
+
+
+def test_splice_dedupes_same_turn_run_in_front_of_continuation_prompt():
+    from core.orchestration.turn_message_assembly import splice_current_turn_conversation
+
+    memory = [
+        {"role": "user", "content": "extract sources"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-1", "name": "web_fetch_tool", "args": {"url": "https://a"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "fetched"},
+        {"role": "user", "content": "continue"},
+    ]
+    ledger_layer = [
+        {"role": "assistant", "tool_calls": [{"id": "call-1", "name": "web_fetch_tool", "args": {"url": "https://a"}}]},
+        {"role": "tool", "tool_call_id": "call-1", "content": "fetched"},
+    ]
+    spliced = splice_current_turn_conversation(memory, ledger_layer)
+    call_ids = [
+        call.get("id")
+        for item in spliced
+        if isinstance(item, dict)
+        for call in (item.get("tool_calls") or [])
+    ]
+    assert call_ids == ["call-1"]
+    assert spliced[-1] == {"role": "user", "content": "continue"}
+    assert spliced[0] == {"role": "user", "content": "extract sources"}
+
+
+def test_splice_keeps_unmatched_history_before_continuation_layer():
+    from core.orchestration.turn_message_assembly import splice_current_turn_conversation
+
+    memory = [
+        {"role": "user", "content": "question 1"},
+        {
+            "role": "assistant",
+            "content": "prior turn answer",
+            "tool_calls": [{"id": "call-0", "name": "read_tool", "args": {}}],
+        },
+        {"role": "user", "content": "question 2"},
+    ]
+    ledger_layer = [
+        {"role": "assistant", "tool_calls": [{"id": "call-1", "name": "web_fetch_tool", "args": {"url": "https://a"}}]},
+    ]
+    spliced = splice_current_turn_conversation(memory, ledger_layer)
+    ids = [
+        call.get("id")
+        for item in spliced
+        if isinstance(item, dict)
+        for call in (item.get("tool_calls") or [])
+    ]
+    assert ids == ["call-0", "call-1"]
+    assert _message_preview(spliced[-2]) == ("dict", "user", "question 2")
+
+
+def test_splice_falls_back_when_memory_run_diverges_from_ledger():
+    from core.orchestration.turn_message_assembly import splice_current_turn_conversation
+
+    memory = [
+        {"role": "user", "content": "extract sources"},
+        {
+            "role": "assistant",
+            "content": "different in-memory content",
+            "tool_calls": [{"id": "call-1", "name": "web_fetch_tool", "args": {"url": "https://a"}}],
+        },
+        {"role": "user", "content": "continue"},
+    ]
+    ledger_layer = [
+        {"role": "assistant", "tool_calls": [{"id": "call-1", "name": "web_fetch_tool", "args": {"url": "https://a"}}]},
+    ]
+    spliced = splice_current_turn_conversation(memory, ledger_layer)
+    assert _message_preview(spliced[1]) == ("dict", "assistant", "different in-memory content")
+    assert len(spliced) == 4

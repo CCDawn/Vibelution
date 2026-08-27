@@ -395,6 +395,27 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
     return restored
 
 
+def _message_continuation_identity(message: Any) -> tuple[str, str, tuple[str, ...]]:
+    """Stable identity for matching an in-memory message against a ledger item."""
+
+    if isinstance(message, Mapping):
+        content = _coerce_text(_mapping_get(message, "content", "")).strip()
+        raw_calls = _mapping_get(message, "tool_calls", "toolCalls") or []
+    else:
+        raw_content = getattr(message, "content", "")
+        content = _coerce_text(raw_content if isinstance(raw_content, str) else "").strip()
+        raw_calls = getattr(message, "tool_calls", None) or []
+    call_ids = tuple(
+        _coerce_text(
+            _mapping_get(call, "id", "tool_call_id", "toolCallId")
+            if isinstance(call, Mapping)
+            else getattr(call, "id", "")
+        ).strip()
+        for call in normalize_seeded_tool_calls(list(raw_calls) or [])
+    )
+    return (_message_role_name(message), content, call_ids)
+
+
 def splice_current_turn_conversation(
     messages: Sequence[Any] | None,
     current_turn_layer: Sequence[Any] | None,
@@ -417,6 +438,21 @@ def splice_current_turn_conversation(
             last_user = index
     if last_user < 0:
         return stripped + continuation
+    # A same-turn continuation (internal auto-continue) still carries this
+    # turn's in-memory assistant/tool run in front of the continuation user
+    # message.  Appending the ledger layer would double-count that run and
+    # fail the projector's duplicate-tool-call invariant, so drop the run
+    # only when it pairwise-matches the ledger continuation prefix; history
+    # from earlier turns never matches and stays untouched.
+    run_start = last_user
+    while run_start > 0 and _message_role_name(stripped[run_start - 1]) in {"assistant", "tool"}:
+        run_start -= 1
+    stale_run = stripped[run_start:last_user]
+    if stale_run and len(stale_run) <= len(continuation) and all(
+        _message_continuation_identity(memory_item) == _message_continuation_identity(ledger_item)
+        for memory_item, ledger_item in zip(stale_run, continuation)
+    ):
+        return stripped[:run_start] + continuation + stripped[last_user:]
     return stripped[: last_user + 1] + continuation
 
 
