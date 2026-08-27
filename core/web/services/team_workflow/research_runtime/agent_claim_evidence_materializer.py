@@ -72,18 +72,43 @@ def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any
             evidence_status = _text(extraction.get("evidenceStatus")).lower()
             if evidence_status in {"missing_evidence_anchor", "missing", "unverified"}:
                 continue
-            # Source Collection's canonical extraction contract names verified
-            # per-source findings ``keyFindings``.  Older formal tasks may use
-            # ``claims``.  Both collections carry the same bounded
-            # finding/quote/source/locator evidence shape; accepting either at
-            # this boundary avoids requiring a parallel write solely for the
-            # formal workflow while preserving the exact anchor checks below.
-            for raw_claim in (
-                list(extraction.get("claims") or [])
-                + list(extraction.get("keyFindings") or [])
-            ):
-                if isinstance(raw_claim, dict):
-                    yield extraction, dict(raw_claim)
+            nested_claims = [
+                dict(item)
+                for item in (
+                    list(extraction.get("claims") or [])
+                    + list(extraction.get("keyFindings") or [])
+                )
+                if isinstance(item, dict)
+            ]
+            if nested_claims:
+                for claim in nested_claims:
+                    yield extraction, claim
+                continue
+            # The extraction writeback contract lists ``evidenceRefs`` beside
+            # ``claims``/``keyFindings`` as a valid evidence anchor, and
+            # ``build_source_extraction_evidence_cards`` already materializes
+            # such flat extractions (``fact`` plus anchored ``evidenceRefs``)
+            # as one card per source.  Bridge the same shape here instead of
+            # dropping the extraction: the first quote-bearing evidenceRef
+            # supplies the verbatim quote and its id the ``evidenceRef``
+            # locator required by the anchor checks below.
+            flat_fact = _text(extraction.get("fact"))
+            if not flat_fact:
+                continue
+            for raw_ref in extraction.get("evidenceRefs") or []:
+                if not isinstance(raw_ref, dict):
+                    continue
+                quote = _text(raw_ref.get("quote"))
+                ref_id = _text(
+                    raw_ref.get("id") or raw_ref.get("evidenceRefId") or raw_ref.get("refId")
+                )
+                if quote and ref_id:
+                    yield extraction, {
+                        "fact": flat_fact,
+                        "quote": quote,
+                        "evidenceRef": ref_id,
+                    }
+                    break
 
 
 def materialize_claim_evidence_from_task(

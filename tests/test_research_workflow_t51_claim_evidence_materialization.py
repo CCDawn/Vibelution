@@ -189,6 +189,67 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
     }
 
 
+def test_materializes_flat_extractions_with_evidence_ref_quotes(
+    tmp_path: Path,
+) -> None:
+    task = {
+        "taskId": "task-extract-flat",
+        "teamId": "team-a",
+        "runId": "sc-run-a",
+        "stageId": "extraction",
+        "agentId": "agent-a",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-flat",
+                    "decision": "keep",
+                    **_v2_source_fields(
+                        source_url="https://example.org/paper-flat",
+                        fact="The fetched abstract reports an elementary equivalence.",
+                    ),
+                    "evidenceRefs": [
+                        {
+                            "id": "dprec-flat-abstract",
+                            "type": "abstract",
+                            "label": "arXiv abstract",
+                            "quote": "A verbatim excerpt from the fetched abstract.",
+                        }
+                    ],
+                },
+                {
+                    "candidateId": "candidate-flat-unanchored",
+                    "decision": "keep",
+                    **_v2_source_fields(
+                        source_url="https://example.org/paper-flat-gap",
+                        fact="A summary without any verbatim anchor.",
+                    ),
+                    "evidenceRefs": [
+                        {
+                            "id": "dprec-flat-gap",
+                            "type": "abstract",
+                            "label": "arXiv abstract",
+                        }
+                    ],
+                },
+            ]
+        },
+    }
+
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id="team-a",
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+    )
+
+    assert len(created) == 1
+    assert created[0]["candidateId"] == "candidate-flat"
+    assert created[0]["quote"] == "A verbatim excerpt from the fetched abstract."
+    assert created[0]["locator"]["anchor"] == "dprec-flat-abstract"
+
+
 def test_verified_materialization_fails_closed_when_v2_fields_are_missing(
     tmp_path: Path,
 ) -> None:
