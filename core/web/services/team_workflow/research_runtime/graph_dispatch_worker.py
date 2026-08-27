@@ -380,11 +380,12 @@ class GraphDispatchWorker:
             self._mark_blocked(action, dispatch, str(exc))
             return
         except Exception as exc:
-            if "execution receipt identity mismatch" in str(exc):
+            if _is_deterministic_resume_error(exc):
                 # Deterministic: retrying the same receipt against the same
                 # checkpoint can never succeed (SCI-096 style ledger/checkpoint
-                # drift). Skip the transient budget and surface the diagnosis
-                # immediately instead of live-looping five identical attempts.
+                # drift, or an ambiguous multi-interrupt checkpoint).  Skip the
+                # transient budget and surface the diagnosis immediately instead
+                # of live-looping five identical attempts.
                 self._mark_blocked(action, dispatch, str(exc))
                 return
             self._requeue_or_fail(action, dispatch, str(exc))
@@ -2011,6 +2012,24 @@ def _receipt_for_interrupt_identity(
         budget_receipt_id=None,
         problem=None,
         completed_at_ms=completed_at_ms,
+    )
+
+
+def _is_deterministic_resume_error(exc: BaseException) -> bool:
+    """True when retrying this graph dispatch can never succeed.
+
+    Covers: receipt/checkpoint identity drift, and multi-interrupt
+    checkpoints where the resume could not be narrowed to one interrupt id
+    (langgraph's "multiple pending interrupts" rejection or the coordinator's
+    AmbiguousInterruptResumeError).  These are deterministic programming /
+    state errors — they must terminate on the first pass instead of burning
+    the transient budget; recovery goes through heal / time-travel
+    (restart_attempt) and reconcile_run.
+    """
+    text = str(exc).lower()
+    return (
+        "execution receipt identity mismatch" in text
+        or "multiple pending interrupts" in text
     )
 
 

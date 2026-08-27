@@ -781,17 +781,25 @@ class ChallengeCupGraphCoordinator:
             persisted_state = self._read_state(graph, config, heal=True)
             _validate_state_scope_binding(dict(persisted_state.values or {}), dispatch)
             receipt_payload = dispatch.receipt.to_dict()
-            resume_value: Any = _resume_value_for_state(
+            # langgraph 1.2.x Command has no ``interrupt_id`` parameter; the
+            # supported way to address one of several pending interrupts is a
+            # single-entry resume map {interrupt_id: value}.  _resume_value_for_state
+            # returns (bare_value, None) for the legacy single-interrupt case.
+            resume_value, _ = _resume_value_for_state(
                 persisted_state,
                 node_id=dispatch.node_id,
+                expected_action_id=action_id_for(
+                    dispatch.run_id, dispatch.node_id, dispatch.attempt
+                ),
                 receipt_payload=receipt_payload,
             )
-            command = Command(resume=resume_value)
             if dispatch.state_update:
                 command = Command(
                     resume=resume_value,
                     update=dict(dispatch.state_update),
                 )
+            else:
+                command = Command(resume=resume_value)
             result = graph.invoke(command, config)
             return self._dispatch_result(dispatch, result, graph)
         finally:
@@ -977,27 +985,118 @@ class ChallengeCupGraphCoordinator:
         )
 
 
+class AmbiguousInterruptResumeError(RuntimeError):
+    """Multiple pending interrupts cannot be narrowed to one dispatch target.
+
+    Raised instead of blindly resuming a possibly-wrong interrupt.  Workers
+    must treat this as deterministic (no transient retry): only the heal /
+    time-travel path can rebuild a single-interrupt checkpoint.
+    """
+
+
+def _interrupt_diagnostic_summary(state: Any) -> str:
+    parts: list[str] = []
+    for item in _pending_interrupt_items(state):
+        value = getattr(item, "value", None)
+        if isinstance(value, Mapping):
+            parts.append(
+                (
+                    f"(id={item.id} nodeId={value.get('nodeId')} "
+                    f"attempt={value.get('attempt')} actionId={value.get('actionId')})"
+                )
+            )
+        else:
+            parts.append(f"(id={getattr(item, 'id', None)} value={type(value).__name__})")
+    return "; ".join(parts)
+
+
+def _pending_interrupt_items(state: Any) -> list[Any]:
+    """Collect pending interrupts from both persisted sources.
+
+    ``state.tasks[].interrupts`` is the per-task authority; a graph recompile
+    or Command.goto leftover can additionally surface entries on
+    ``state.interrupts`` that the task queue no longer shows.  Entries are
+    deduplicated by id so both sources can be merged safely.
+    """
+
+    collected: dict[str, Any] = {}
+    finished_interrupt_ids: set[str] = set()
+    for task in getattr(state, "tasks", None) or ():
+        # A completed task can still surface its historical interrupt on
+        # ``task.interrupts``; only unfinished tasks are actually pending.
+        if getattr(task, "result", None) is not None:
+            for item in getattr(task, "interrupts", None) or ():
+                item_id = getattr(item, "id", None)
+                if item_id:
+                    finished_interrupt_ids.add(str(item_id))
+            continue
+        for item in getattr(task, "interrupts", None) or ():
+            item_id = getattr(item, "id", None)
+            if item_id:
+                collected.setdefault(str(item_id), item)
+    for item in getattr(state, "interrupts", None) or ():
+        item_id = getattr(item, "id", None)
+        # ``state.interrupts`` aggregates across all tasks including ones
+        # that already resumed successfully; those entries are stale.
+        if item_id and str(item_id) not in finished_interrupt_ids:
+            collected.setdefault(str(item_id), item)
+    return list(collected.values())
+
+
 def _resume_value_for_state(
-    state: Any, *, node_id: str, receipt_payload: Mapping[str, Any]
-) -> Any:
-    """Use an interrupt-id map when LangGraph has more than one pending interrupt."""
+    state: Any,
+    *,
+    node_id: str,
+    expected_action_id: str,
+    receipt_payload: Mapping[str, Any],
+) -> tuple[Any, str | None]:
+    """Pick the resume payload (and target interrupt id) for this dispatch.
+
+    Returns ``(resume_value, interrupt_id)``:
+
+    - At most one pending interrupt: resume it bare (legacy behaviour, keeps
+      pre-map checkpoints working).
+    - Multiple pending interrupts: LangGraph rejects a bare resume ("you must
+      specify the interrupt id"), and resuming the wrong one would confirm an
+      unrelated frozen action.  Match interrupts against the dispatch's
+      action identity — the same formula that builds PendingAction /
+      ExecutionReceipt identities (runId/nodeId/attempt -> actionId) — and
+      return a single-entry resume map keyed by that interrupt's id.
+    - No interrupt matches: raise AmbiguousInterruptResumeError with the
+      pending-interrupt inventory; callers must fall back to heal /
+      time-travel (restart_attempt) instead of blind-resuming.
+    """
     interrupts = [
         item
-        for item in (getattr(state, "interrupts", None) or ())
+        for item in _pending_interrupt_items(state)
         if getattr(item, "id", None)
     ]
     if len(interrupts) <= 1:
-        return receipt_payload
-    matched: dict[str, Any] = {}
+        return receipt_payload, None
+    same_node: list[Any] = []
+    exact: list[Any] = []
     for item in interrupts:
         value = item.value if isinstance(getattr(item, "value", None), Mapping) else {}
-        if str(value.get("nodeId") or "") == node_id:
-            matched[str(item.id)] = receipt_payload
-    if len(matched) == 1:
-        return matched
-    raise RuntimeError(
-        f"cannot resume {node_id}: {len(interrupts)} interrupts, matched {len(matched)}"
-    )
+        if str(value.get("nodeId") or "") != node_id:
+            continue
+        same_node.append(item)
+        if expected_action_id and str(value.get("actionId") or "") == expected_action_id:
+            exact.append(item)
+    candidates = exact or same_node
+    if len(candidates) != 1:
+        # exact==0 with several same-node interrupts means we cannot tell
+        # which attempt survived; ambiguous. exact>1 / same_node>1 likewise.
+        raise AmbiguousInterruptResumeError(
+            f"When there are multiple pending interrupts ({len(interrupts)}), you must "
+            f"specify the interrupt id when resuming, but no unique interrupt matches "
+            f"dispatch identity nodeId={node_id} actionId={expected_action_id}; "
+            f"use restart_attempt/time-travel to rebuild a single-interrupt checkpoint. "
+            f"Pending interrupts: {_interrupt_diagnostic_summary(state)}"
+        )
+    target = candidates[0]
+    # Single-entry resume map: langgraph routes this receipt exactly to the
+    # identified interrupt instead of raising "must specify the interrupt id".
+    return {str(target.id): receipt_payload}, str(target.id)
 
 
 def _interrupt_payloads(state: Any) -> list[dict[str, Any]]:
