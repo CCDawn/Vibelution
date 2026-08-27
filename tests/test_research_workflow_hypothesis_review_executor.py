@@ -886,6 +886,94 @@ def test_formal_review_accepts_retried_provider_receipt():
     assert result["modelInvocationReceipts"][0]["status"] == "retried"
 
 
+# ---------------------------------------------------------------------------
+# Round generation wiring: the meeting's server-owned scope mode drives the
+# executor fence (formal meeting -> FORMAL, everything else fails closed to DEV)
+# ---------------------------------------------------------------------------
+
+
+def test_formal_meeting_generation_rejects_dev_fixture_review(tmp_path, monkeypatch):
+    """A formal meeting must never close a round from the DEV fixture path."""
+
+    team_id, _agents, opened, _approved = _closed_meeting(
+        tmp_path, monkeypatch, mode="formal"
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+    assert opened["meetingRound"]["mode"] == "formal"
+
+    with pytest.raises(ContractValidationError, match="FORMAL.*runner"):
+        _generate(team_id, meeting_round_id)
+
+    assert hypothesis_rounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+
+
+def test_formal_meeting_generation_rejects_fixture_runner_outputs_without_receipts(
+    tmp_path, monkeypatch
+):
+    """Fixture-shaped plain-mapping runner outputs are refused in FORMAL."""
+
+    team_id, _agents, opened, _approved = _closed_meeting(
+        tmp_path, monkeypatch, mode="formal"
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    with pytest.raises(ContractValidationError, match="FORMAL.*receipt"):
+        _generate(team_id, meeting_round_id, **_complete_review_runners())
+
+    assert hypothesis_rounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+
+
+def test_formal_meeting_generation_accepts_provider_bound_runners(tmp_path, monkeypatch):
+    team_id, _agents, opened, _approved = _closed_meeting(
+        tmp_path, monkeypatch, mode="formal"
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    result = _generate(
+        team_id, meeting_round_id, **_provider_bound_review_runners()
+    )
+
+    assert result["closed"] is True
+    assert result["review"]["executionMode"] == "formal"
+    parsed = HypothesisRound.from_dict(result["round"])
+    parsed.validate_complete()
+
+
+def test_dev_meeting_generation_keeps_fixture_review_and_marks_mode(
+    tmp_path, monkeypatch
+):
+    team_id, _agents, opened, _approved = _closed_meeting(tmp_path, monkeypatch)
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    result = _generate(team_id, meeting_round_id)
+
+    assert result["closed"] is True
+    assert result["review"]["executionMode"] == "dev"
+
+
+def test_round_generation_fails_closed_to_dev_without_mode_marker(
+    tmp_path, monkeypatch
+):
+    """A meeting record without the formal marker must never escalate."""
+    team_id, _agents, opened, _approved = _closed_meeting(
+        tmp_path, monkeypatch, mode="formal"
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+    real_get_meeting_round = meetings.get_meeting_round
+
+    def strip_mode(team_id_value, round_id_value):
+        detail = real_get_meeting_round(team_id_value, round_id_value)
+        meeting = dict(detail["meetingRound"])
+        meeting.pop("mode", None)
+        return {**detail, "meetingRound": meeting}
+
+    monkeypatch.setattr(meetings, "get_meeting_round", strip_mode)
+
+    result = _generate(team_id, meeting_round_id)
+
+    assert result["review"]["executionMode"] == "dev"
+
+
 def test_review_runner_scores_are_bounded_before_review_artifact_is_built():
     runners = _complete_review_runners()
 

@@ -1,20 +1,38 @@
-"""Retry charging policy for workflow NodeRun lineage."""
+"""Retry charging policy for workflow NodeRun lineage.
+
+Outcome classification is owned by the frozen taxonomy in
+``core.research.workflow.contracts.retry_taxonomy``; this module keeps the
+NodeRun-lineage view (retry-kind strings, ledger-driven charged counting and
+budget gating). Behavior is frozen: ``retry_kind_for`` maps taxonomy-known
+codes through :meth:`RetryTaxonomy.node_lineage_retry_kind`, and codes
+outside the taxonomy keep the charged ``business_retry`` lineage fallback
+instead of failing closed -- the fail-closed contract lives in taxonomy
+lookups, not in this legacy lineage view. The ``countsAgainstRetryBudget``
+ledger flag written at attempt creation is the durable per-attempt
+projection of the taxonomy charge rule, so ``charged_retry_count`` reads the
+ledger and stays stable for historical attempts.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-INFRASTRUCTURE_FAILURE_CODES = {
-    "external_task_interrupted",
-    "lease_expired",
-}
+from core.research.workflow.contracts.retry_taxonomy import (
+    DEFAULT_RETRY_TAXONOMY,
+    NODE_LINEAGE_RETRY_KIND_INFRASTRUCTURE_RECOVERY,
+    RetryOutcomeClass,
+)
+
+INFRASTRUCTURE_FAILURE_CODES = frozenset(
+    DEFAULT_RETRY_TAXONOMY.codes_for_outcome_class(
+        RetryOutcomeClass.RETRYABLE_INFRA
+    )
+)
 
 
 def retry_kind_for(node_run: dict[str, Any]) -> str:
     failure_code = str(node_run.get("failureCode") or "").strip()
-    if failure_code in INFRASTRUCTURE_FAILURE_CODES:
-        return "infrastructure_recovery"
-    return "business_retry"
+    return DEFAULT_RETRY_TAXONOMY.node_lineage_retry_kind(failure_code)
 
 
 def charged_retry_count(record: dict[str, Any], node_id: str) -> int:
@@ -36,7 +54,7 @@ def retry_is_available(
     latest: dict[str, Any],
 ) -> tuple[bool, str]:
     retry_kind = retry_kind_for(latest)
-    if retry_kind == "infrastructure_recovery":
+    if retry_kind == NODE_LINEAGE_RETRY_KIND_INFRASTRUCTURE_RECOVERY:
         return True, retry_kind
     max_retries = int(
         ((record.get("inputSnapshot") or {}).get("budgetPolicy") or {}).get(
