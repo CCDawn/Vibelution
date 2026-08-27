@@ -14,7 +14,11 @@ research_runtime.service`:
   projection writer and escalated through ``build_anomaly_inbox`` with the
   frozen kind/severity mapping;
 - the revision-round counter is derived from persisted store data, so it
-  survives reopening the store (no in-memory counting).
+  survives reopening the store (no in-memory counting), and only hops whose
+  child run carries the revision fork's exclusive ``forkDecisionId`` count
+  as consumed rounds — non-revision continuation children (evidence
+  remediation, checkpoint forks) share ``parentRunId`` but never consume
+  the bounded-revision budget;
 
 It also covers the R2.2 direct claim-belief hard gate on the formal
 hypothesis handoff in ``run_creation``: a blocked handoff hypothesis raises
@@ -55,6 +59,7 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
+    _lineage_revision_rounds,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
@@ -553,6 +558,110 @@ def test_idempotent_replay_of_exhausted_decision_keeps_parked_state(
         if item.get("type") == "AutoRevisionExhausted"
     ]
     assert len(events) == 1
+
+
+def _insert_remediation_continuation(
+    service: ResearchWorkflowRuntimeService, parent_run_id: str
+) -> dict[str, Any]:
+    """Insert a non-revision continuation child (evidence-remediation shape).
+
+    The child carries ``parentRunId``/``sourceNodeId``/``resolutionKind`` —
+    like the child written by the evidence-remediation fork — and never
+    ``forkDecisionId`` (that field is exclusive to the revision fork).  It
+    supersedes the parent run as a continuation of the same lineage.
+    """
+    child = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={
+                "iteration_planner": "agent-iteration",
+                "iteration_versioning": "agent-versioning",
+                "formal_runner": "agent-runner",
+            }
+        ),
+    )
+    child_run_id = child["runId"]
+    service._store.update_run(
+        child_run_id,
+        {
+            "parentRunId": parent_run_id,
+            "supersedesRunId": parent_run_id,
+            "forkedFromRunId": parent_run_id,
+            "forkedFromNodeId": "source_extraction",
+            "sourceNodeId": "source_extraction",
+            "resolutionKind": "add_budget",
+        },
+    )
+    parent = service.get_run(parent_run_id)
+    service._store.update_run(
+        parent_run_id,
+        {
+            "status": "superseded",
+            "supersededByRunId": child_run_id,
+            "childRunIds": [*(parent.get("childRunIds") or []), child_run_id],
+        },
+    )
+    assert "forkDecisionId" not in service.get_run(child_run_id)
+    return service.get_run(child_run_id)
+
+
+def test_non_revision_parent_hop_does_not_consume_revision_rounds(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    root = _create_root_run(service)
+    root_run_id = root["runId"]
+
+    # One non-revision parentRunId hop (remediation continuation), then one
+    # real revision fork on top of it.
+    remediation = _insert_remediation_continuation(service, root_run_id)
+    prepared_remediation = _advance_to_iteration_decision(service, remediation)
+    parent1 = _complete_iteration(
+        service,
+        prepared_remediation,
+        kind="revise_protocol",
+        decision_id="decision-revise-1",
+    )
+    assert parent1["status"] == "superseded"
+    child1 = service.get_run(parent1["childRunIds"][0])
+    assert child1["forkDecisionId"] == "decision-revise-1"
+
+    # The remediation hop is walked through without counting: one real
+    # revision fork means exactly one consumed round.
+    rounds, lineage_root, fork_run_ids = _lineage_revision_rounds(
+        service._store, child1["runId"]
+    )
+    assert rounds == 1
+    assert lineage_root == root_run_id
+    assert fork_run_ids == [child1["runId"]]
+
+    # The second revise_protocol decision still forks normally.
+    prepared1 = _advance_to_iteration_decision(service, child1)
+    parent2 = _complete_iteration(
+        service,
+        prepared1,
+        kind="revise_protocol",
+        decision_id="decision-revise-2",
+    )
+    assert parent2["status"] == "superseded"
+    child2 = service.get_run(parent2["childRunIds"][0])
+    assert child2["forkDecisionId"] == "decision-revise-2"
+
+    # Only after the second real revision accumulated does the next decision
+    # park instead of forking.
+    prepared2 = _advance_to_iteration_decision(service, child2)
+    parked = _complete_iteration(
+        service,
+        prepared2,
+        kind="revise_protocol",
+        decision_id="decision-revise-3",
+    )
+    assert parked["runId"] == child2["runId"]
+    assert parked["status"] == "blocked"
+    assert parked["blockedReason"] == "budget_exceeded"
+    assert parked["autoRevision"]["revisionRoundCount"] == 2
+    assert parked["autoRevision"]["lineageRootRunId"] == root_run_id
 
 
 # -- R2.2: direct claim-belief gate on the formal handoff ---------------------

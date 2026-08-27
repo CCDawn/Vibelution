@@ -198,12 +198,15 @@ def _lineage_revision_rounds(
 ) -> tuple[int, str, list[str]]:
     """Count persisted auto-revision forks along the parentRunId chain.
 
-    The counter is never held in memory: every hop to a forked ancestor
-    (``parentRunId``) is one already-consumed revision round of the same
-    lineage, so the bound survives process restarts by being derived from
-    store data.  Returns the consumed rounds, the lineage root run id and the
-    forked child run ids in round order (fork evidence for the lineage
-    record).
+    The counter is never held in memory: it is derived from store data, so
+    the bound survives process restarts.  ``parentRunId`` is not exclusive
+    to the revision fork — evidence-remediation and checkpoint continuation
+    children carry it too — so a hop only counts as one already-consumed
+    revision round when the child-side run record carries the revision
+    fork's exclusive ``forkDecisionId``; any other hop is walked through
+    without consuming the budget.  Returns the consumed rounds, the lineage
+    root run id and the forked child run ids in round order (fork evidence
+    for the lineage record).
     """
     rounds = 0
     fork_run_ids: list[str] = []
@@ -219,8 +222,9 @@ def _lineage_revision_rounds(
         if not parent_id or parent_id in seen:
             break
         seen.add(parent_id)
-        fork_run_ids.append(current_id)
-        rounds += 1
+        if str(record.get("forkDecisionId") or "").strip():
+            fork_run_ids.append(current_id)
+            rounds += 1
         current_id = parent_id
     return rounds, root_run_id, list(reversed(fork_run_ids))
 
