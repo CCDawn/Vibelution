@@ -172,6 +172,21 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.statusTable).not.toContain("overflow-auto");
   });
 
+  it("keeps branch filters and status tabs in one responsive control row", () => {
+    const filterRowIndex = panelSource.indexOf('<div className={styles.filterRow}>');
+    const toolbarIndex = panelSource.indexOf("<VToolbar", filterRowIndex);
+    const tabsIndex = panelSource.indexOf("<VTabs", filterRowIndex);
+
+    expect(filterRowIndex).toBeGreaterThan(-1);
+    expect(toolbarIndex).toBeGreaterThan(filterRowIndex);
+    expect(tabsIndex).toBeGreaterThan(toolbarIndex);
+    expect(panelStyles.filterRow).toContain("flex-wrap");
+    expect(panelStyles.filterRow).toContain("items-center");
+    expect(panelStyles.filterBar).not.toContain("mt-");
+    expect(panelStyles.tabBar).not.toContain("mt-");
+    expect(panelStyles.tabBar).toContain("flex-none");
+  });
+
   it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {
     expect(panelSource).toContain("<VEmptyState");
     expect(panelSource).toContain("<VStateSurface");

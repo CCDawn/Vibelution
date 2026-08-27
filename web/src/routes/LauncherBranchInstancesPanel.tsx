@@ -740,45 +740,47 @@ export function LauncherBranchInstancesPanel({
         </VEmptyState>
       ) : (
         <div className={styles.panelBody}>
-          <VToolbar ariaLabel={labels.search} className={styles.filterBar}>
-            <VNativeInput
-              aria-label={labels.search}
-              className={styles.searchInput}
-              placeholder={labels.searchPlaceholder}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <VButton
-              type="button"
-              density="compact"
-              variant={filters.dirty ? "secondary" : "ghost"}
-              onPress={() => setFilters((current) => ({ ...current, dirty: !current.dirty }))}
-            >
-              {labels.filterDirty}
-            </VButton>
-            <VButton
-              type="button"
-              density="compact"
-              variant={filters.unmerged ? "secondary" : "ghost"}
-              onPress={() => setFilters((current) => ({ ...current, unmerged: !current.unmerged }))}
-            >
-              {labels.filterUnmerged}
-            </VButton>
-            {notice ? (
-              <span className={noticeTone === "error" ? styles.noticeError : styles.notice} role="status">
-                {notice}
-              </span>
-            ) : null}
-          </VToolbar>
+          <div className={styles.filterRow}>
+            <VToolbar ariaLabel={labels.search} className={styles.filterBar}>
+              <VNativeInput
+                aria-label={labels.search}
+                className={styles.searchInput}
+                placeholder={labels.searchPlaceholder}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <VButton
+                type="button"
+                density="compact"
+                variant={filters.dirty ? "secondary" : "ghost"}
+                onPress={() => setFilters((current) => ({ ...current, dirty: !current.dirty }))}
+              >
+                {labels.filterDirty}
+              </VButton>
+              <VButton
+                type="button"
+                density="compact"
+                variant={filters.unmerged ? "secondary" : "ghost"}
+                onPress={() => setFilters((current) => ({ ...current, unmerged: !current.unmerged }))}
+              >
+                {labels.filterUnmerged}
+              </VButton>
+              {notice ? (
+                <span className={noticeTone === "error" ? styles.noticeError : styles.notice} role="status">
+                  {notice}
+                </span>
+              ) : null}
+            </VToolbar>
 
-          <VTabs
-            density="compact"
-            className={styles.tabBar}
-            aria-label={copy.branchInstances}
-            value={activeTab}
-            onValueChange={(value) => setActiveTab(value as BranchTableTab)}
-            items={tabItems}
-          />
+            <VTabs
+              density="compact"
+              className={styles.tabBar}
+              aria-label={copy.branchInstances}
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as BranchTableTab)}
+              items={tabItems}
+            />
+          </div>
 
           {filteredEmpty ? (
             <VEmptyState
