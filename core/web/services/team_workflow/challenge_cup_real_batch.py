@@ -864,6 +864,15 @@ def _running_count(envelope: dict[str, Any], state: CatalogExecutionState) -> in
     )
 
 
+def _envelope_concurrency_limit(envelope: dict[str, Any]) -> int | None:
+    """Read-only concurrency cap of one envelope for the status projection."""
+    try:
+        value = int(envelope.get("concurrency"))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _idempotency_key(plan_id: str, question_id: str, attempt: int, *, kind: str) -> str:
     return f"real-batch-{plan_id}-{question_id}-{kind}-a{attempt}"
 
@@ -1068,6 +1077,7 @@ def start_real_batch(
             consecutive_failures=envelope["consecutiveFailures"],
             failure_budget=envelope["failureBudget"],
             cancelled=envelope["cancelled"],
+            concurrency_limit=_envelope_concurrency_limit(envelope),
         )
     return {**projection, "launched": launched}
 
@@ -1226,6 +1236,7 @@ def poll_real_batch(
             consecutive_failures=envelope["consecutiveFailures"],
             failure_budget=envelope["failureBudget"],
             cancelled=envelope["cancelled"],
+            concurrency_limit=_envelope_concurrency_limit(envelope),
         )
     return {**projection, "harvested": harvested, "launched": refill}
 
@@ -1272,6 +1283,7 @@ def cancel_real_batch(
             consecutive_failures=envelope["consecutiveFailures"],
             failure_budget=envelope["failureBudget"],
             cancelled=True,
+            concurrency_limit=_envelope_concurrency_limit(envelope),
         )
     return projection
 
@@ -1300,5 +1312,6 @@ def get_real_batch_status(team_id: str, plan_id: str) -> dict[str, Any]:
             consecutive_failures=int(envelope.get("consecutiveFailures") or 0),
             failure_budget=int(envelope.get("failureBudget") or DEFAULT_REAL_FAILURE_BUDGET),
             cancelled=bool(envelope.get("cancelled")),
+            concurrency_limit=_envelope_concurrency_limit(envelope),
         ),
     }
