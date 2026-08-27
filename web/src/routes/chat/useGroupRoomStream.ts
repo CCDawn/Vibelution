@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
-import { isFetchAbortError } from "../../api/client";
+import { isFetchAbortError } from "../../api/chat";
 import type { ChatRoomDetail, ChatRoomStreamEvent } from "../../api/types";
 import { consumeChatRoomEventStream } from "./chatRoomEventStream";
 

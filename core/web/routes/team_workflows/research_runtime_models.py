@@ -186,6 +186,16 @@ class ResearchWorkflowEvaluationResponse(ResearchRuntimeJsonResponse):
     qualityGateEvaluations: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ResearchWorkflowQuestionLineageResponse(ResearchRuntimeJsonResponse):
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    workflowRunId: str = ""
+    roundId: str = ""
+    degradedSegments: list[str] = Field(default_factory=list)
+    segments: dict[str, Any] = Field(default_factory=dict)
+
+
 class ResearchWorkflowHandoffDetailResponse(ResearchRuntimeJsonResponse):
     runId: str = ""
     teamId: str = ""
