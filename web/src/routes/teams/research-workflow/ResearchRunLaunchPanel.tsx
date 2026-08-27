@@ -11,6 +11,7 @@ import {
 } from "../../../api/researchWorkflow";
 import { queryKeys } from "../../../api/queryKeys";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
+import { trackExperimentActivation } from "../challengeCupTelemetry";
 import {
   VButton,
   VConfirmDialog,
@@ -335,13 +336,23 @@ export function ResearchRunLaunchPanel(props: {
     });
   }
   const activationMutation = useMutation({
+    onMutate: (experimentId: string) => ({
+      telemetry: trackExperimentActivation({
+        teamId,
+        experimentId,
+        questionId: selectedExperiment?.questionId ?? questionId,
+        campaignId: selectedExperiment?.campaignId ?? "",
+      }),
+    }),
     mutationFn: activateSelectedExperiment,
-    onSuccess: async () => {
+    onSuccess: async (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
       setActivationDialogOpen(false);
       setError(null);
       await launchOptions.refetch();
     },
-    onError: (reason: unknown) => {
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
       setError(reason instanceof Error ? reason.message : String(reason));
     },
   });

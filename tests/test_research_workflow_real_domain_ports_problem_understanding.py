@@ -13,15 +13,15 @@ from core.web.services.team_workflow.research_runtime.task_adapter_registry impo
 
 
 class _Future:
-    def result(self, timeout: int):  # noqa: ARG002 - mirrors the Ledger Future API
+    def result(self, timeout: int):
         return None
 
 
 class _Repository:
-    def __init__(self, store: "_FakeStore") -> None:
+    def __init__(self, store: _FakeStore) -> None:
         self._store = store
 
-    def get_run(self, run_id: str):  # noqa: ARG002 - the fixture has one run
+    def get_run(self, run_id: str):
         snapshot = self._store.snapshot_json
         return SimpleNamespace(
             input_snapshot_json=snapshot,
@@ -33,11 +33,10 @@ class _Repository:
 
     def execute(self, _sql: str, params: tuple[str, int, str]):
         self._store.snapshot_json = params[0]
-        return None
 
 
 class _UnitOfWork:
-    def __init__(self, store: "_FakeStore") -> None:
+    def __init__(self, store: _FakeStore) -> None:
         self.repository = _Repository(store)
 
 
@@ -55,11 +54,11 @@ class _FakeStore:
         self.workflow_id = workflow_id
         self.attempts = dict(attempts or {})
 
-    def submit(self, callback, *, force_flush: bool = False):  # noqa: ARG002
+    def submit(self, callback, *, force_flush: bool = False):
         callback(_UnitOfWork(self))
         return _Future()
 
-    def get_run(self, run_id: str):  # noqa: ARG002
+    def get_run(self, run_id: str):
         return SimpleNamespace(
             input_snapshot_json=self.snapshot_json,
             workflow_id=self.workflow_id,
@@ -148,12 +147,12 @@ def test_problem_understanding_bootstrap_persists_source_run_before_task(
     calls: list[str] = []
     authority_calls: list[dict[str, object]] = []
 
+    from core.web.services.team_workflow import research_project_agent_tasks
     from core.web.services.team_workflow.research_runtime import (
         experiment_stage_bootstrap,
         task_adapter_registry,
     )
     from core.web.services.team_workflow.source_collection import runs as source_runs
-    from core.web.services.team_workflow import research_project_agent_tasks
 
     monkeypatch.setattr(
         source_runs,
@@ -253,10 +252,10 @@ def test_problem_understanding_retry_uses_exact_parent_project_task(
             ),
         },
     )
+    from core.web.services.team_workflow import research_project_agent_tasks
     from core.web.services.team_workflow.research_runtime import (
         experiment_stage_bootstrap,
     )
-    from core.web.services.team_workflow import research_project_agent_tasks
 
     monkeypatch.setattr(
         real_domain_ports,
@@ -323,6 +322,89 @@ def test_problem_understanding_retry_uses_exact_parent_project_task(
     assert handle.task_id == "task-problem-retry"
     assert payloads[0]["formalRetry"] is True
     assert payloads[0]["retryTaskId"] == "task-problem-parent"
+
+
+def test_problem_understanding_retry_fails_closed_on_ambiguous_parent_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry must never attach to an ambiguous parent project task."""
+    snapshot = _snapshot()
+    snapshot["sourceCollectionRunId"] = "source-run-existing"
+    store = _FakeStore(
+        snapshot,
+        workflow_id="ledger-workflow",
+        attempts={
+            "node-run-problem-1": SimpleNamespace(
+                run_id="workflow-run-1",
+                node_id="problem_understanding",
+                retry_of_node_run_id=None,
+            ),
+            "node-run-problem-2": SimpleNamespace(
+                run_id="workflow-run-1",
+                node_id="problem_understanding",
+                retry_of_node_run_id="node-run-problem-1",
+            ),
+        },
+    )
+    from core.web.services.team_workflow import research_project_agent_tasks
+    from core.web.services.team_workflow.research_runtime import (
+        experiment_stage_bootstrap,
+    )
+
+    monkeypatch.setattr(
+        real_domain_ports,
+        "_formal_task_authorities",
+        lambda **_kwargs: ({"server": "contract"}, {"receipt": "binding"}),
+    )
+    monkeypatch.setattr(
+        experiment_stage_bootstrap,
+        "ensure_experiment_stage_round_for_agent_node",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "get_research_project_agent_task_status",
+        lambda *_args: {
+            "tasks": [
+                {
+                    "taskId": "task-parent-duplicate-a",
+                    "workflowRunId": "workflow-run-1",
+                    "nodeRunId": "node-run-problem-1",
+                    "agentId": "agent-search",
+                    "taskKind": "problem_understanding",
+                },
+                {
+                    "taskId": "task-parent-duplicate-b",
+                    "workflowRunId": "workflow-run-1",
+                    "nodeRunId": "node-run-problem-1",
+                    "agentId": "agent-search",
+                    "taskKind": "problem_understanding",
+                },
+            ]
+        },
+    )
+
+    def start_project_task(*_args, **_kwargs):
+        pytest.fail("ambiguous retry lineage must fail closed before task creation")
+
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "start_research_project_agent_task",
+        start_project_task,
+    )
+
+    with pytest.raises(RuntimeError, match="missing or ambiguous"):
+        real_domain_ports._create_real_agent_task(
+            _action(node_run_id="node-run-problem-2", attempt=2),
+            _binding(),
+            snapshot,
+            adapter_spec=AgentTaskAdapterSpec(
+                node_id="problem_understanding",
+                family="research_project",
+                task_key="problem_understanding",
+            ),
+            store=store,
+        )
 
 
 def test_problem_understanding_fails_closed_when_snapshot_writeback_is_missing(

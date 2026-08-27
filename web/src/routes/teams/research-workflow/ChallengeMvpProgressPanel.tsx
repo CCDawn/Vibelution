@@ -43,6 +43,7 @@ import {
 } from "../../../components/vui";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
+import { trackDevBatchRun, trackDevReadinessRun } from "../challengeCupTelemetry";
 import { ChallengeCatalogOverview } from "../challenge-cup/ChallengeCatalogOverview";
 import { ChallengeTokenUsageStrip } from "../challenge-cup/ChallengeTokenUsageStrip";
 import { isTokenUsageOverview } from "../challenge-cup/challengeTokenUsageModel";
@@ -200,24 +201,93 @@ export function ChallengeMvpProgressPanel({
   }
 
   const readinessMutation = useMutation({
+    onMutate: (vars: { teamId: string }) => ({
+      telemetry: trackDevReadinessRun({ teamId: vars.teamId, mode: "dev" }),
+    }),
     mutationFn: runDevReadiness,
-    onSuccess: () => refreshDevControls(),
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
+      return refreshDevControls();
+    },
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
+    },
   });
   const dev1Mutation = useMutation({
+    onMutate: (vars: { teamId: string }) => ({
+      telemetry: trackDevBatchRun({
+        teamId: vars.teamId,
+        planId: devPlanIds.dev1,
+        retryFailed: false,
+        maxItems: null,
+        source: "progress_panel",
+      }),
+    }),
     mutationFn: runDev1,
-    onSuccess: () => refreshDevControls(),
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
+      return refreshDevControls();
+    },
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
+    },
   });
   const dev5Mutation = useMutation({
+    onMutate: (vars: { teamId: string; maxItems: number | null }) => ({
+      telemetry: trackDevBatchRun({
+        teamId: vars.teamId,
+        planId: devPlanIds.dev5,
+        retryFailed: false,
+        maxItems: vars.maxItems,
+        source: "progress_panel",
+      }),
+    }),
     mutationFn: runDev5,
-    onSuccess: () => refreshDevControls(),
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
+      return refreshDevControls();
+    },
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
+    },
   });
   const repairDev1Mutation = useMutation({
+    onMutate: (vars: { teamId: string }) => ({
+      telemetry: trackDevBatchRun({
+        teamId: vars.teamId,
+        planId: devPlanIds.dev1,
+        retryFailed: true,
+        maxItems: null,
+        source: "progress_panel",
+      }),
+    }),
     mutationFn: repairDev1,
-    onSuccess: () => refreshDevControls(),
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
+      return refreshDevControls();
+    },
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
+    },
   });
   const repairDev5Mutation = useMutation({
+    onMutate: (vars: { teamId: string }) => ({
+      telemetry: trackDevBatchRun({
+        teamId: vars.teamId,
+        planId: devPlanIds.dev5,
+        retryFailed: true,
+        maxItems: null,
+        source: "progress_panel",
+      }),
+    }),
     mutationFn: repairDev5,
-    onSuccess: () => refreshDevControls(),
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
+      return refreshDevControls();
+    },
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
+    },
   });
   const program = experimentStatusQuery.data?.[
     panelContract.programProjection.property as "competitionProgramProjection"

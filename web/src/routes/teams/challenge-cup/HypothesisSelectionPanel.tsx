@@ -5,6 +5,7 @@ import {
   openHypothesisCandidateGeneration,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import { trackHypothesisCandidateGenerationOpen } from "../challengeCupTelemetry";
 import {
   VButton,
   VEmptyState,
@@ -67,9 +68,21 @@ export function HypothesisSelectionPanel({
   });
   const context = contextQuery.data;
   const generationMutation = useMutation({
+    onMutate: () => ({
+      telemetry: trackHypothesisCandidateGenerationOpen({
+        teamId,
+        questionId,
+        regenerate: Boolean(context?.generationMeeting),
+        candidateCount: context?.candidates.length ?? 0,
+      }),
+    }),
     mutationFn: () => openHypothesisCandidateGeneration(teamId, questionId),
-    onSuccess: () => {
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+    },
+    onError: (error, _vars, ctx) => {
+      ctx?.telemetry?.failed(error);
     },
   });
 

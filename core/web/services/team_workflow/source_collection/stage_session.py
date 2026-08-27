@@ -116,6 +116,35 @@ def _service():
     return team_workflow_orchestration_service
 
 
+def _canonical_problem_understanding_record_id(workflow_run_id: str) -> str:
+    """Artifact identity (node run id) of the authoritative attempt, or "".
+
+    Each node attempt writes its own immutable artifact (identity = nodeRunId),
+    so a retried problem_understanding legitimately leaves several records in
+    one scope.  The workflow Ledger is the only authority for which attempt
+    succeeded; the latest succeeded attempt's writeback is canonical, and
+    neither file order nor recency may decide.  When the Ledger is unavailable
+    or no attempt has succeeded yet, return "" so the caller keeps the strict
+    single-record contract.
+    """
+
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+
+    runtime = runtime_factory.production_workflow_runtime()
+    if runtime is None:
+        return ""
+    attempts = runtime.store.read(lambda repo: repo.list_attempts(workflow_run_id))
+    succeeded = [
+        attempt
+        for attempt in attempts
+        if str(getattr(attempt, "node_id", "") or "") == "problem_understanding"
+        and str(getattr(attempt, "status", "") or "") == "succeeded"
+    ]
+    if not succeeded:
+        return ""
+    return max(succeeded, key=lambda attempt: getattr(attempt, "attempt", 0)).node_run_id
+
+
 def _source_collection_problem_understanding_context(
     team_id: str,
     source_run_id: str,
@@ -124,10 +153,10 @@ def _source_collection_problem_understanding_context(
     """Read the one canonical problem-understanding artifact for a finding run.
 
     The source run scope is the only place this stage may obtain the workflow
-    run binding.  A missing binding, more than one matching artifact, or any
-    mismatch in the team/run envelope blocks the stage before a Session/Task
-    is created.  In particular, task result/summary/score/receipt projections
-    are intentionally not consulted here.
+    run binding.  A missing binding, no artifact bound to the Ledger-succeeded
+    attempt, or any mismatch in the team/run envelope blocks the stage before a
+    Session/Task is created.  In particular, task result/summary/score/receipt
+    projections are intentionally not consulted here.
     """
 
     s = _service()
@@ -170,6 +199,13 @@ def _source_collection_problem_understanding_context(
         workflow_run_id=workflow_run_id,
         source_collection_run_id=normalized_source_run_id,
     )
+    canonical_record_id = _canonical_problem_understanding_record_id(workflow_run_id)
+    if canonical_record_id:
+        records = [
+            record
+            for record in records
+            if str(record.get("recordId") or "") == canonical_record_id
+        ]
     if len(records) != 1:
         reason = "missing" if not records else "ambiguous"
         raise s.TeamWorkflowOrchestrationError(
@@ -214,6 +250,7 @@ def _source_collection_problem_understanding_context(
         authority_run_id=normalized_source_run_id,
         workflow_run_id=workflow_run_id,
         content_hash="",
+        record_id=str(record.get("recordId") or ""),
     )
     expected_envelope = {
         "teamId": normalized_team_id,
