@@ -2,12 +2,11 @@
 
 - Status: `draft`
 - Owner: Vibelution product planning
-- Branch: `codex/virtual-human-life-plugin-prd`
-- Worktree: `.worktrees/virtual-human-life-plugin-prd`
 - Scope: 按单个 Agent 启用的独立虚构人物生活插件；包含生活心跳、主动活动、心情、次日规划、日记、长期记忆、工具包、提示词包、主动消息和隔离验收
+- Planning snapshot: Vibelution `main@527819208e191897cd6de68e1140fb407f939f50`；外部参考固定到 `menglimi/astrbot_plugin_private_companion@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`
 - Supersedes: 无
 - Implementation link: 尚未开始；本文件只用于继续商讨和后续实施交接
-- Validation: 用户决策复核、Markdown/链接检查、任务图依赖检查、`git diff --check`
+- Validation: 用户决策复核、本地 owning surface 核查、外部参考代码切片核查、Markdown/链接检查、任务图依赖检查、`git diff --check`
 - Close condition: 用户批准后转为 `user-approved`；实施开始后转为 `active-plan`；实施完成、被替代或放弃时转为 `implemented`、`superseded` 或 `historical` 并按项目规则归档
 
 ## 1. 文档边界
@@ -23,7 +22,9 @@
 5. 第一版交付可信第一方插件包和可扩展插件契约，不开放任意第三方 Python 动态加载、插件市场或不可信代码沙箱。
 6. 旧 `pet_info.json` 不自动绑定给任何 Agent；只能通过带预览和 receipt 的显式导入操作迁移到用户指定 Agent。
 7. 计划与实际经历严格分离。只有实际完成且具有有效 outcome 的活动可以进入日记；长期记忆还需通过重要性晋升。
-8. 应用关闭期间不宣称实时运行。启动后允许有界补算，并标记 `simulatedAfterRestart=true`。
+8. 应用关闭期间不宣称实时运行。启动后只允许合并漏掉的心跳；纯模拟活动仅在规则能产生有效 outcome 时形成 `simulatedAfterRestart=true` 事件，工具型活动不得推定完成。
+9. 主动生活触发使用正式的 `proactive_turn` 内部来源，不通过普通 `submit_session_message()` 伪造用户消息。
+10. 插件启用或后端重启会恢复生活心跳和主动消息能力，但不等于立即发送“启动问候”；任何实际发送仍需通过有效期、额度、间隔、免打扰、会话和权限门。
 
 ## 3. 产品定位
 
@@ -76,7 +77,9 @@
 | Life Event | 带实际起止时间、outcome 和来源引用的已发生事件 |
 | Outcome | 活动产生的可信结果；没有 outcome 不能完成活动 |
 | Prompt Pack | 插件声明的稳定规则和动态生活上下文，以附加段注入而不替换 Agent 原提示词 |
-| Tool Bundle | 插件声明的工具集合；最终可见和可执行范围仍由 Agent ToolPolicy 决定 |
+| Tool Bundle | 插件声明的工具集合；最终可见和可执行范围是 Tool Registry、Agent ToolPolicy、插件绑定和当前活动授权的交集 |
+| Proactive Turn | 由插件内部事实触发、没有用户消息的 Agent Turn；触发记录不投影为 `user_message`，可见结果仍按 assistant 消息进入现有会话 |
+| Delivery Attempt | 一次主动消息发送事务；具有稳定 attempt ID、预留令牌、有效期和最终送达 receipt |
 
 ## 6. 用户故事
 
@@ -133,10 +136,13 @@
 | FR-13 | 长期记忆晋升 | P0 | 只晋升已完成且重要的事件 |
 | FR-14 | 重启补算 | P0 | 补算事件带 `simulatedAfterRestart` |
 | FR-15 | 主动消息 | P0 | 插件启用即开启，并受次数、间隔和免打扰控制 |
-| FR-16 | 关系状态 | P1 | 按对象记录亲密度、信任和最近互动 |
-| FR-17 | 梦境/夜间反思 | P1 | 从近期真实经历派生 |
-| FR-18 | 多 Agent 社交活动 | P2 | 后续复用 ChatRoom，不进入首版 |
-| FR-19 | 酒馆式分支和角色卡导入 | P2 | 后续阶段，不阻塞生活 MVP |
+| FR-16 | Proactive Turn | P0 | 内部触发不写 `user_message`，复用现有 Turn 调度、Journal、SSE 和 assistant 投影 |
+| FR-17 | 主动发送事务 | P0 | 仅送达确认后计入额度和互动；失败、过期、取消不算成功 |
+| FR-18 | 插件运行生命周期 | P0 | 重启恢复、禁用、归档、purge 和宿主关闭时任务可取消、可等待、无残留发送 |
+| FR-19 | 关系状态 | P1 | 按对象记录亲密度、信任和最近互动 |
+| FR-20 | 梦境/夜间反思 | P1 | 从近期真实经历派生 |
+| FR-21 | 多 Agent 社交活动 | P2 | 后续复用 ChatRoom，不进入首版 |
+| FR-22 | 酒馆式分支和角色卡导入 | P2 | 后续阶段，不阻塞生活 MVP |
 
 ## 8. 非功能需求
 
@@ -158,19 +164,21 @@
 - LLM 仅用于次日规划、重要重排、日记叙事和主动消息；
 - 同一 Agent 同时只能存在一个生活心跳执行；
 - 每个 Agent 每天默认最多一次正式次日规划；
-- 单个 Agent 的 LLM 或插件失败不能阻塞其他 Agent。
+- 单个 Agent 的 LLM 或插件失败不能阻塞其他 Agent；
+- 重启时同一 Agent 的漏跑心跳必须 coalesce，不逐分钟回放，不补发过期主动消息。
 
 ### 8.3 安全
 
 - 插件不能绕过 Tool Registry、ToolPolicy 和 ToolExecutor 最终授权；
 - 插件工具默认 fail-closed；
 - 未知、缺失或损坏的 ToolPolicy 视为禁止；
+- 启用插件不得静默修改共享 ToolPolicy；需要独立权限时创建 Agent 专属策略或使用绑定级交集，不影响复用同一 policyId 的其他 Agent；
 - 日记、外部网页和用户内容不得作为系统指令重新注入；
 - 日志不记录完整 Prompt、隐私内容或工具密钥。
 
 ### 8.4 Windows 生命周期
 
-插件使用 Vibelution 现有 lifespan 后台协程，不创建独立 PowerShell、CMD、裸 Python 或 npm 后台进程，不产生可见控制台窗口。
+插件使用 Vibelution 现有 lifespan 后台协程和统一任务监督器，不创建独立 PowerShell、CMD、裸 Python 或 npm 后台进程，不产生可见控制台窗口。所有插件后台任务必须登记 owner、binding revision 和取消句柄；宿主关闭时先撤销新工作，再 bounded cancel/await 已登记任务。
 
 ## 9. 总体架构
 
@@ -184,6 +192,7 @@ flowchart TB
     AgentDirectory[Agent Directory<br/>身份 Persona ToolPolicy MemoryPolicy]
 
     LifePlugin[Virtual Human Life Plugin]
+    Supervisor[Plugin Runtime Supervisor]
     Coordinator[Life Heartbeat Coordinator]
     Engine[Life State Machine]
     Planner[Next-day Planner]
@@ -196,7 +205,10 @@ flowchart TB
     Context[Context Engine]
     Auth[Tool Authorization]
     Executor[Tool Executor]
-    Session[现有 Session Chat SSE]
+    ProactiveTrigger[Proactive Turn Trigger]
+    TurnScheduler[现有 Session Turn Scheduler]
+    Journal[Turn Journal and SSE]
+    Delivery[Proactive Delivery Ledger]
     RuntimeScene[Runtime Scene Evidence]
 
     UI --> API
@@ -207,11 +219,14 @@ flowchart TB
 
     Registry --> LifePlugin
     Binding --> LifePlugin
-    LifePlugin --> Coordinator
+    LifePlugin --> Supervisor
+    Supervisor --> Coordinator
     Coordinator --> Engine
     Engine --> Planner
     Engine --> Mood
     Engine --> EventLedger
+    Coordinator --> ProactiveTrigger
+    ProactiveTrigger --> TurnScheduler
 
     LifePlugin --> ToolBridge
     ToolBridge --> Auth
@@ -221,7 +236,10 @@ flowchart TB
     LifePlugin --> PromptPack
     PromptPack --> Context
     AgentDirectory --> Context
-    Context --> Session
+    Context --> TurnScheduler
+    TurnScheduler --> Journal
+    TurnScheduler --> Delivery
+    Delivery --> Journal
 
     EventLedger --> Diary
     EventLedger --> Episodic
@@ -235,11 +253,13 @@ flowchart TB
 插件已安装
 ∩ Agent 已绑定
 ∩ 插件功能已启用
+∩ Tool Bundle 已声明
 ∩ Agent ToolPolicy 允许
 ∩ 当前运行环境授权
+∩ 当前活动授权
 ```
 
-任何一项不满足，工具都不进入模型可见集合，也不能执行。
+任何一项不满足，工具都不进入模型可见集合，也不能执行。插件启用事务只绑定 Tool Bundle，不直接改写 Agent ToolPolicy；若用户选择创建专属虚拟人工具策略，必须先预览受影响 Agent，并通过现有 policy fingerprint 和共享策略确认门。
 
 ## 10. 插件契约
 
@@ -261,10 +281,14 @@ capabilities:
   - life.proactive_message
 
 hooks:
+  - onHostStart
+  - onHostStop
   - onEnable
   - onDisable
   - onAgentArchive
-  - onAgentPurge
+  - onAgentPurgePrepare
+  - onAgentPurgeCommit
+  - onAgentPurgeRollback
   - onHeartbeat
   - beforeTurnContext
   - afterActivityOutcome
@@ -297,13 +321,20 @@ promptPackId: virtual_human_life_v1
 
 ### 10.3 生命周期
 
-- `onEnable`：创建 Agent 隔离存储，初始化状态，启动心跳并开启主动消息；
-- `onDisable`：停止心跳、主动消息、Prompt 和工具注入，保留数据；
-- `onAgentArchive`：暂停运行，不生成新活动或消息；
-- `onAgentPurge`：进入现有 Agent 清理事务；
+- 插件包加载只注册 manifest、hook、Tool Bundle 和 Prompt Pack provider；不为未绑定 Agent 创建状态、任务或上下文；
+- `onHostStart`：扫描 active Agent 的 enabled binding，按 `agentId` 恢复监督器；漏跑心跳 coalesce，过期主动候选直接失效；
+- `onEnable`：以乐观版本写入 binding，创建 Agent 隔离存储，登记监督任务并开启心跳和主动消息能力；不强制立即发送启动消息；
+- `onDisable`：先递增 binding revision 并撤销 trigger/delivery token，再取消 queued/running 插件任务，最后停止 Prompt 和工具注入，保留数据；
+- `onAgentArchive`：执行与禁用相同的即时失效门，不生成新活动或消息；每次心跳提交和消息发送前仍须复查 Agent active 状态与 binding revision；
+- `onAgentPurgePrepare`：作为既有 Agent purge 补偿事务的一个参与者，阻止新工作、取消并等待插件任务、冻结 delivery ledger，并为 workspace 外的可恢复注册状态返回 restore token；
+- `onAgentPurgeCommit`：在既有 Agent purge 成功后确认 workspace 外注册项已清理；MVP 生活数据全部位于 Agent workspace，只随 `purge_archived_agent_instance()` 的既有安全路径删除；
+- `onAgentPurgeRollback`：既有 purge staging 失败时只按 restore token 恢复 binding 和任务登记等可恢复状态，不重建已物理删除的 workspace，也不恢复已确认送达的消息；
 - `onHeartbeat`：推进生活状态；
 - `beforeTurnContext`：添加生活 Prompt 上下文；
-- `afterActivityOutcome`：写实际事件、更新心情并判断日记/记忆晋升。
+- `afterActivityOutcome`：写实际事件、更新心情并判断日记/记忆晋升；
+- `onHostStop`：先停止接受新 trigger，再 bounded cancel/await 监督器、心跳、规划、主动 Turn 和发送任务。
+
+禁用、归档、purge、宿主停止与正常发送并发时，以最新 `bindingRevision` 和 Agent active 状态为最终栅栏。预检通过但发送前栅栏失效的任务必须进入 `cancelled`，不得继续投递。
 
 ## 11. 数据模型
 
@@ -390,7 +421,45 @@ failureReason
 createdAt
 ```
 
-### 11.6 DiaryEntry 与 MemoryPromotionReceipt
+### 11.6 ProactiveTurnTrigger 与 DeliveryAttempt
+
+`ProactiveTurnTrigger` 是内部事实，不是用户消息：
+
+```text
+triggerId
+agentId
+pluginId
+bindingRevision
+reason
+sourceEventIds
+targetSessionId
+createdAt
+expiresAt
+idempotencyKey
+status              queued / leased / generating / generated / cancelled / expired / failed
+assistantTurnId
+```
+
+`DeliveryAttempt` 记录真正的主动发送事务：
+
+```text
+attemptId
+triggerId
+agentId
+targetSessionId
+deliveryToken
+status              candidate / reserved / delivering / delivered / failed / expired / cancelled
+reservedAt
+expiresAt
+deliveredAt
+deliveryReceipt
+attemptCount
+failureReason
+```
+
+`triggerId`、`attemptId` 和 `deliveryToken` 必须稳定且可幂等恢复。额度、最小间隔、`lastProactiveSentAt`、互动结果和“今日已发”只在 `delivered` receipt 提交后更新。
+
+### 11.7 DiaryEntry 与 MemoryPromotionReceipt
 
 日记是 `LifeEvent` 的叙事投影，必须保留来源事件 ID。长期记忆 receipt 至少包含 `episodeId`、`sourceEventIds`、`promotionReason`、`salienceScore`、`occurredAt` 和 `writtenAt`。
 
@@ -434,12 +503,19 @@ status == completed => outcome 非空且通过验证
 
 1. 查询启用插件的 Agent；
 2. 为每个 Agent 获取 single-flight 锁；
-3. 检查本地时间与当前活动；
+3. 检查 Agent active 状态、binding revision、本地时间与当前活动；
 4. 推进无需 LLM 的确定性状态；
 5. 检查需要执行或重排的活动；
-6. 必要时创建有预算的规划、叙事或主动消息任务；
+6. 必要时创建有预算的规划、叙事或 `ProactiveTurnTrigger`；
 7. 写入 runtime-scene 证据；
 8. 释放锁。
+
+调度器只保存下一次应运行时间和最近成功 checkpoint。宿主恢复时把同一 Agent 的多个漏跑 tick 合并成一次 reconciliation：
+
+- 仍处于有效窗口的纯模拟活动可以按规则补算，但必须产生明确 outcome 并标记 `simulatedAfterRestart=true`；
+- 工具型活动不得推定已执行，只能重排、跳过或标记 `unknown`；
+- 过期的主动消息、问候和短时提醒直接进入 `expired`，不得补发；
+- 长时间离线只生成离线状态摘要，摘要本身不是 Life Event，不进入日记或长期记忆。
 
 ### 13.2 活动分类
 
@@ -458,6 +534,44 @@ status == completed => outcome 非空且通过验证
 
 它不允许 Agent 自动扩权、修改 ToolPolicy、绕过最终授权、对外发布内容或执行未授权的文件/网络/账号操作。
 
+### 13.4 Proactive Turn 与发送事务
+
+现有 `submit_session_message()` 的语义是“持久化用户消息并启动 Turn”，不能作为主动生活入口。推荐新增内部 Turn 请求：
+
+```text
+SessionTurnRequest
+origin = proactive_plugin
+sourceKind = virtual_human_life
+triggerId = <stable id>
+agentId = <bound agent>
+sessionId = <validated direct session>
+userMessage = absent
+```
+
+Turn Journal 记录不可冒充对话内容的 `internal_turn_trigger`，设置 `visibleInModel=false`，并在 turn metadata 中保留 `triggerId`、`pluginId`、`bindingRevision` 和来源事件。模型输入通过 Prompt Pack 的动态段获得触发事实；最终可见内容仍以正常 assistant item/message 写入既有 Journal 和 SSE。这里的 `delivered` 指宿主 Session 服务已将 assistant item 和对应 Journal/outbox 投影持久化并返回可按 `deliveryToken` 查询的 receipt，不代表用户已经在线查看，也不能只以 SSE 客户端连接或前端 ACK 作为送达依据。
+
+发送状态机：
+
+```mermaid
+stateDiagram-v2
+    [*] --> candidate
+    candidate --> reserved: 通过会话 额度 间隔 免打扰 去重检查
+    candidate --> expired: 超过有效窗口
+    candidate --> cancelled: binding 或 Agent 失效
+    reserved --> delivering: 取得 deliveryToken
+    reserved --> expired: 生成或排队超时
+    reserved --> cancelled: 发送前栅栏失效
+    delivering --> delivered: 收到送达 receipt
+    delivering --> failed: 明确发送失败
+    delivering --> reserved: 崩溃恢复且确认未送达
+    delivered --> [*]
+    failed --> [*]
+    expired --> [*]
+    cancelled --> [*]
+```
+
+`delivering` 崩溃恢复必须先按 delivery token 查询或重建 receipt；无法证明未送达时不得盲目重发。用户在生成或发送前刚发来新消息、目标 Session 正忙、binding revision 改变或 Agent 被归档时，本次候选取消或延后，不改变已确认送达历史。
+
 ## 14. 虚拟人工具包
 
 | 工具 | 行为 | 默认权限 |
@@ -471,6 +585,8 @@ status == completed => outcome 非空且通过验证
 | 搜索、文件、图片等现有工具 | 执行真实活动 | 沿用 Agent 原权限 |
 
 工具不直接写长期记忆。长期记忆由可信 outcome 管线统一判断和提交。
+
+插件启用不自动把上述工具写入共享 ToolPolicy。绑定只声明所需 Tool Bundle；Context/Tool Registry 的最终投影按交集计算。用户选择扩展权限时复用现有 `validate → preview impact → confirmed conditional update` 流程；共享 policyId 必须显示全部受影响 Agent，默认推荐为目标 Agent 派生专属策略。
 
 ## 15. 提示词包
 
@@ -488,6 +604,8 @@ status == completed => outcome 非空且通过验证
 ```
 
 每轮只注入稳定规则摘要、当前生活状态、当前活动、今日剩余计划、明日计划摘要、与当前用户相关的关系状态和当前有效工具，不把完整日记或全部计划塞入每轮 Prompt。
+
+Prompt Pack 复用 `ContextEngine` 的 `PromptSegment`/`PromptSectionResolver`：稳定插件规则使用 `cache_prefix + agent_static`，当前生活状态和触发事实使用 `volatile_turn + turn_dynamic`。稳定规则属于可信第一方插件配置；日记、网页、用户内容和工具输出仍标记为 derived/untrusted runtime，不得提升为系统权限。binding 未启用、Agent 非 active 或插件 provider 失败时返回空段，不留下占位 Prompt，也不改写会话的 `promptTemplateId`。
 
 建议上下文顺序：
 
@@ -570,11 +688,14 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 ├── events/
 │   └── YYYY-MM-DD.jsonl
 ├── diary/
+├── proactive/
+│   ├── triggers.jsonl
+│   └── deliveries.jsonl
 ├── runs/
 └── migration_receipts/
 ```
 
-最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。
+最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。MVP 的 binding、运行快照、trigger、delivery ledger 和迁移 receipt 全部位于 Agent workspace 安全边界内；若后续引入 workspace 外 outbox，必须先接入 Agent purge 的 prepare/commit/rollback 注册表。
 
 ### 19.2 旧宠物数据迁移
 
@@ -589,7 +710,7 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 
 ### 19.3 禁用与卸载
 
-禁用插件停止心跳、主动消息、工具和 Prompt 注入，但保留数据。卸载插件包使绑定进入不可运行状态，仍保留数据。清除数据必须是单独的破坏性操作；Agent purge 接入现有 Agent 生命周期统一处理。
+禁用插件先使 binding revision 失效，再停止心跳、主动消息、工具和 Prompt 注入，但保留数据。卸载插件包使绑定进入不可运行状态，仍保留数据；宿主重启不能偷偷恢复未安装包的任务。清除数据必须是单独的破坏性操作；Agent purge 必须接入现有 staging、compensation 和 workspace 删除边界，不新增第二条删除路径。
 
 ## 20. 故障与恢复
 
@@ -600,12 +721,15 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 | LLM 规划失败 | 保留旧计划或进入明确的无计划状态 |
 | 工具执行失败 | 活动进入 `failed`，记录失败原因 |
 | 应用长时间关闭 | 启动后有界补算并标记来源 |
-| 重复心跳 | single-flight + 幂等键 |
-| 插件被禁用 | 停止心跳、主动消息、工具和 Prompt 注入 |
+| 重复或漏跑心跳 | single-flight + 幂等键 + misfire coalescing；不逐 tick 回放 |
+| 插件被禁用或 Agent 被归档 | binding revision 失效，停止心跳、主动消息、工具和 Prompt 注入，queued attempt 取消 |
 | ToolPolicy 缺失 | fail-closed |
-| 主动消息发送失败 | 不把消息记为成功互动 |
+| 主动消息发送失败 | attempt 进入 `failed`，不扣额度、不记成功互动 |
+| 主动发送中崩溃 | 按 delivery token 对账；无法证明未送达时不盲目重发 |
+| 宿主关闭 | 停止接收新 trigger，bounded cancel/await 全部插件任务 |
+| Agent purge 中途失败 | 复用既有补偿事务恢复可恢复绑定状态，不恢复已经送达的消息 |
 
-建议补算最多覆盖最近 24 小时；更长离线时间生成一条离线期间概括事件，避免逐分钟回放。
+建议补算最多覆盖最近 24 小时；更长离线时间只生成离线状态摘要，避免逐分钟回放。任何补算都不能把无证据计划变成已完成经历，也不能追发已经失去语境的主动消息。
 
 ## 21. 预计 owning surface
 
@@ -613,11 +737,12 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 
 - Agent 身份和配置：`core/web/services/agent_directory/`；
 - Agent 工具包和权限：`core/web/services/tool_catalog.py`、`core/authorization/`、`core/infrastructure/tool_executor.py`；
-- Prompt 和动态上下文：`core/web/services/prompt_template_service.py`、`core/orchestration/context_engine.py`；
-- Session/Chat/SSE：现有 session 和 conversation 链路；
+- Prompt 和动态上下文：`core/web/services/prompt_template_service.py`、`core/orchestration/context_engine.py` 的 segment 装配、稳定性和 trust 语义；
+- Session/Chat/SSE：复用现有 Turn scheduler、worker、Turn Journal、assistant projection 和 SSE，不复用“持久化用户消息”的普通提交入口；
 - 长期记忆：`core/web/services/agent_directory/episodic_memory.py`；
-- 后台生命周期：`core/web/lifecycle.py`；
+- 后台生命周期：`core/web/lifecycle.py` 的宿主协程、取消和关闭顺序；
 - 原子快照和恢复：`core/runtime_manager/work_run_store.py`；
+- Agent archive/purge：`core/web/services/agent_directory/lifecycle.py` 和 `core/web/routes/agents.py` 的 staging、compensation 与安全 workspace 删除边界；
 - UI 基础：`web/src/components/vui/`。
 
 ### 21.2 改造复用
@@ -625,6 +750,8 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 - `core/pet_system/` 中心情、体力、日记、梦境等纯状态思路；
 - `core/web/services/pet_service.py` 的兼容投影；
 - `web/src/routes/PetRoute.tsx` 的 VUI 页面入口。
+
+`core/pet_system/` 不是新生活域的 owner。它的全局单例和 `pet_info.json` 只能作为显式导入来源；新状态机、绑定和写入权威不得继续扩展在 pet 全局模型上。
 
 ### 21.3 预计新增
 
@@ -635,6 +762,7 @@ core/agent_plugins/                         插件契约、注册、绑定和生
 core/agent_plugins/virtual_human_life/      第一方虚拟人插件包
 core/web/services/agent_plugin_service.py   插件管理公共 facade
 core/web/services/virtual_human_life_service.py 生活域 HTTP facade
+core/web/services/session/                  内部 proactive Turn admission 与 Journal 投影扩展
 core/web/routes/agent_plugins.py            插件管理薄路由
 core/web/routes/virtual_human_life.py        生活域薄路由
 web/src/api/agentPlugins.ts                 插件管理 API
@@ -649,44 +777,73 @@ web/src/routes/                             Agent 插件设置和生活面板
 
 ### 22.1 主要参考
 
-- `menglimi/astrbot_plugin_private_companion`，研究时默认分支 tip 为 `5bc3c9b47cbfff00c93c5a94558b6261426a3245`；参考插件 manifest、生活状态、日程、主动消息、作用域隔离和配置思路。
-- SillyTavern：参考角色卡、World Info、群聊和分支交互。
-- Generative Agents：参考 observation、planning、reflection 和 memory retrieval。
-- APScheduler：参考 persistent scheduling、misfire、coalescing 和并发语义，不作为 MVP 必选依赖。
-- AI Town：参考共享世界状态和多角色社交，首版不接入其技术栈。
+- [`menglimi/astrbot_plugin_private_companion`](https://github.com/menglimi/astrbot_plugin_private_companion/tree/8c2d982b1148d521e0a4889f4ba1b8309b011d5e)，本次固定参考 `main@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`、metadata `6.4.1`；参考插件 manifest、生活状态、日程、主动消息、作用域隔离和配置思路。此前调研 tip `5bc3c9b47cbfff00c93c5a94558b6261426a3245` 仅保留为历史快照，不再作为实现依据。
+- [SillyTavern](https://github.com/SillyTavern/SillyTavern)：参考角色卡、World Info、群聊和分支交互。
+- [Generative Agents](https://arxiv.org/abs/2304.03442)：参考 observation、planning、reflection 和 memory retrieval。
+- [APScheduler](https://apscheduler.readthedocs.io/)：参考 persistent scheduling、misfire、coalescing 和并发语义，不作为 MVP 必选依赖。
+- [AI Town](https://github.com/a16z-infra/ai-town)：参考共享世界状态和多角色社交，首版不接入其技术栈。
 
-### 22.2 决策
+### 22.2 AstrBot 代码切片裁决
+
+| 参考切片 | 借鉴内容 | Vibelution 落点 | 不借内容 |
+| --- | --- | --- | --- |
+| `main.py`、`plugin_bootstrap.py`、`tests/test_background_task_lifecycle.py` | manifest、初始化/终止、后台任务登记与取消 | Plugin Runtime Supervisor、`onHostStart/onHostStop`、binding revision 栅栏 | AstrBot decorator、事件总线和巨型 Plugin class |
+| `daily_state_tick.py`、`agenda_runtime.py`、`tests/test_agenda_contracts_policy.py`、`tests/test_schedule_reconciler_semantics.py` | 计划不是事实、时区窗口、状态 reconciliation、无证据不得完成 | Life State Machine、Life Event outcome 门、重启补算 | 与 AstrBot 用户/群聊状态耦合的数据模型 |
+| `proactive_engine.py`、`tests/test_proactive_chat_integration.py`、`tests/test_proactive_expiry_lifecycle.py`、`tests/test_outbound_duplicate_guard.py` | 候选有效期、安静时段、额度、冷却、碰撞、预留令牌、最终发送确认和 stale recovery | Proactive Turn Trigger、DeliveryAttempt、发送前 binding 栅栏 | AstrBot 平台 UMO、装饰发送链、陪伴专属启发式 |
+| `identity_namespace.py`、`scoped_domain_contract.py` | 显式 namespace、contract fingerprint、缺失上下文 fail-closed、禁止把权限字段混入内容 | `agentId + pluginId` binding、Agent workspace、Prompt/工具/记忆作用域校验 | 原文件代码和 AstrBot 私聊/群聊身份枚举 |
+| `config_migration.py`、migration/storage tests | 预览、版本、receipt、失败恢复 | 旧 `pet_info.json` 显式导入和 Agent purge saga | 自动迁移、双写或兼容 AstrBot 存储格式 |
+
+该仓库当前仍没有 GitHub 可识别许可证，根目录未见明确 `LICENSE`。同时其 `main.py`、`proactive_engine.py`、`page_api.py` 等文件已形成与 AstrBot 深度耦合的大型实现面，因此裁决是只借可观察行为、状态机和测试命题，不复制源码、Prompt 文本、配置 schema 或文件结构。
+
+### 22.3 决策
 
 主决策为 `ADAPT` Vibelution 本地 Agent、pet_system、Session、Memory、ToolPolicy、lifespan 和 VUI；外部项目均为 `REFERENCE_ONLY`。AstrBot 参考仓库在研究时没有可确认的根许可证，因此不得复制其代码。实施前应按 Vibelution 复用证据流程固定候选 commit、license/readiness 和借鉴切片。
+
+实现优先级为：
+
+```text
+PROJECT_REUSE
+→ 新增最薄的第一方插件契约和 proactive Turn admission
+→ 复用现有授权、上下文、会话、Journal、内存与 VUI
+→ 仅在现有宿主能力无法表达时新增生活域状态机
+```
+
+不引入 AstrBot、APScheduler、SillyTavern 或 AI Town 作为运行时依赖。外部参考变化快，实施时必须继续以本节固定 commit 为证据，不跟随未经审查的默认分支漂移。
 
 ## 23. 实施任务图
 
 ```mermaid
 flowchart LR
-    D0[D0 用户批准本 PRD]
+    T0[T0 用户批准本 PRD]
     T1[T1 插件契约 注册表和 Agent 绑定]
     T2[T2 生活状态 日程 事件存储和迁移]
-    T3[T3 心跳 活动状态机和重启恢复]
+    T3[T3 运行监督 心跳 状态机和生命周期恢复]
     T4[T4 虚拟人工具包与权限闭环]
-    T5[T5 提示词包 聊天上下文和主动消息]
-    T6[T6 日记与 episodic memory 桥接]
-    T7[T7 Agent-scoped API 和前端 DTO]
-    T8[T8 Agent 插件设置与生活面板]
-    T9[T9 集成验收 兼容和运行时证据]
+    T5[T5 Prompt Pack 和条件式上下文]
+    T6[T6 Proactive Turn 和发送事务]
+    T7[T7 日记与 episodic memory 桥接]
+    T8[T8 Agent-scoped API 和前端 DTO]
+    T9[T9 Agent 插件设置与生活面板]
+    T10[T10 集成验收 兼容和运行时证据]
 
-    D0 --> T1
+    T0 --> T1
     T1 --> T2
+    T1 --> T3
     T2 --> T3
     T2 --> T4
     T2 --> T5
     T3 --> T6
+    T4 --> T6
     T5 --> T6
     T3 --> T7
-    T4 --> T7
     T5 --> T7
-    T6 --> T7
+    T3 --> T8
+    T4 --> T8
+    T5 --> T8
+    T6 --> T8
     T7 --> T8
     T8 --> T9
+    T9 --> T10
 ```
 
 Critical Path：
@@ -695,14 +852,14 @@ Critical Path：
 用户批准
 → 插件与 Agent 绑定
 → 生活状态和存储
-→ 心跳与恢复
-→ 日记/记忆
+→ 运行监督与心跳恢复
+→ Proactive Turn 与发送事务
 → API
 → UI
 → 集成验收
 ```
 
-工具权限和提示词包可在生活数据契约稳定后并行设计，但必须在 API 前汇合。
+工具权限和 Prompt Pack 可在生活数据契约稳定后并行设计；Proactive Turn 必须等待监督器、工具权限和 Prompt 段契约汇合，不能先以普通用户消息入口占位。
 
 ## 24. 任务卡
 
@@ -727,54 +884,61 @@ Critical Path：
 - Mode: BDD/TDD。
 - Verification/Stop: 跨 Agent 隔离、并发写入安全、损坏恢复可追踪；禁止以全局 `pet_info.json` 为新事实源。
 
-### Task 3：建立生活心跳和状态机
+### Task 3：建立运行监督、生活心跳和状态机
 
-- Owner/Boundary: lifespan coordinator、single-flight、计划执行、补算、运行证据。
-- Dependency: Task 2。
+- Owner/Boundary: Plugin Runtime Supervisor、lifespan coordinator、任务登记/取消、single-flight、misfire coalescing、计划执行、补算、archive/purge/host-stop 栅栏和运行证据。
+- Dependency: Task 1 的生命周期 hook 与 Task 2 的状态契约。
 - Mode: BDD/TDD。
-- Verification/Stop: 无 outcome 不能完成；重启补算不伪装实时；无可见控制台进程。
+- Verification/Stop: 无 outcome 不能完成；重启不逐 tick 回放、不补发过期消息；禁用/归档后 queued/running 工作失效；purge 补偿闭合；无可见控制台进程。
 
 ### Task 4：建立虚拟人工具包和权限闭环
 
 - Owner/Boundary: 工具描述、ToolPolicy、可见性、最终执行授权。
 - Dependency: Task 2 的状态和活动契约。
 - Mode: BDD/TDD。
-- Verification/Stop: 绑定但未授权、未绑定但工具存在、权限撤回和损坏策略全部拒绝；不得直接 shell/network/file 执行。
+- Verification/Stop: 绑定但未授权、未绑定但工具存在、权限撤回和损坏策略全部拒绝；启用不改共享 ToolPolicy；不得直接 shell/network/file 执行。
 
-### Task 5：建立提示词包与主动消息
+### Task 5：建立 Prompt Pack 与条件式上下文
 
-- Owner/Boundary: 稳定规则、动态生活上下文、Prompt token 预算、上下文顺序、主动消息额度和免打扰。
+- Owner/Boundary: Prompt Segment provider、稳定规则、动态生活上下文、trust/stability、Prompt token 预算和上下文顺序。
 - Dependency: Task 2。
 - Mode: BDD/TDD。
-- Verification/Stop: 只对绑定 Agent 注入；启用即开启主动消息但服从额度；跨 Agent、跨 Session 不泄漏；不得替换原 `promptTemplateId`。
+- Verification/Stop: 只对 enabled/active binding 注入；跨 Agent、跨 Session 不泄漏；provider 失败返回空段；不得替换原 `promptTemplateId`。
 
-### Task 6：建立日记与长期记忆桥
+### Task 6：建立 Proactive Turn 与发送事务
+
+- Owner/Boundary: 内部 Turn admission、`internal_turn_trigger` Journal 事件、assistant projection、候选有效期、delivery token、额度/免打扰/碰撞门、送达 receipt 和 stale recovery。
+- Dependency: Task 3、4、5。
+- Mode: BDD/TDD。
+- Verification/Stop: 不产生 `user_message`；仅 `delivered` 扣额度并记互动；失败、过期、禁用、归档和重启均不重复发送；现有普通 Session 行为不变。
+
+### Task 7：建立日记与长期记忆桥
 
 - Owner/Boundary: 完成事件到日记和 episodic memory 的晋升与 receipt。
 - Dependency: Task 3 和 Task 5。
 - Mode: BDD/TDD。
 - Verification/Stop: 取消、跳过、无 outcome 不写长期记忆；每条记忆可追溯到实际事件。
 
-### Task 7：建立 Agent-scoped API
+### Task 8：建立 Agent-scoped API
 
 - Owner/Boundary: service facade、薄 FastAPI route、Pydantic DTO、TypeScript DTO、query keys。
-- Dependency: Task 3、4、5、6。
+- Dependency: Task 3、4、5、6、7。
 - Mode: BDD/TDD。
 - Verification/Stop: OpenAPI、后端响应和 TypeScript 字段一致；无 route 内业务写入或 route 内 `fetchJson`。
 
-### Task 8：建立插件设置和生活面板
+### Task 9：建立插件设置和生活面板
 
 - Owner/Boundary: Agent 管理页、PetRoute 兼容入口、生活状态和日程交互。
-- Dependency: Task 7。
+- Dependency: Task 8。
 - Mode: SIMPLE，并配套交互和 VUI 合同测试。
 - Verification/Stop: VUI 合同、加载/空/错误/禁用/长文本状态、中英文布局和浏览器行为均闭合。
 
-### Task 9：全链路验收和迁移
+### Task 10：全链路验收和迁移
 
 - Owner/Boundary: Launcher 生命周期、运行时场景、旧数据迁移、禁用、恢复和回滚。
-- Dependency: Task 8。
+- Dependency: Task 9。
 - Mode: BDD/TDD + 浏览器验收。
-- Verification/Stop: 启用 Agent 正常生活和主动发消息；普通 Agent 零变化；禁用后立即停止影响；未获远端授权不得 push/发布。
+- Verification/Stop: 启用 Agent 正常生活并通过 `proactive_turn` 主动发消息；普通 Agent 零变化；禁用/归档后立即停止影响；重启无重复发送；未获远端授权不得 push/发布。
 
 ## 25. 验证矩阵
 
@@ -792,7 +956,8 @@ Critical Path：
 - `cancelled`、`skipped` 不进入日记和长期记忆；
 - `failed` 可重排，但不能伪装成功；
 - 重复命令和重复心跳保持幂等；
-- 夜间规划按 `agentId + localDate` 幂等。
+- 夜间规划按 `agentId + localDate` 幂等；
+- 离线工具型计划不得自动完成；长时间离线摘要不得进入事实事件账本。
 
 ### 25.3 权限
 
@@ -800,7 +965,9 @@ Critical Path：
 - 插件禁用后的拒绝路径；
 - ToolPolicy 损坏后的 fail-closed；
 - 后台工具执行不能绕过最终授权；
-- 主动消息服从消息工具授权、额度和免打扰。
+- 主动消息服从消息工具授权、额度和免打扰；
+- 插件启用不改变共享 ToolPolicy；专属策略更新必须走 fingerprint、影响预览和确认门；
+- 最终工具集合同时受 Tool Bundle、binding revision 和当前活动授权约束。
 
 ### 25.4 Prompt
 
@@ -808,17 +975,32 @@ Critical Path：
 - 当前 Agent 状态注入正确；
 - 其他 Agent 状态不泄漏；
 - 日记或外部文本不能覆盖系统规则；
-- Prompt token 预算有上限。
+- Prompt token 预算有上限；
+- 稳定插件段和动态生活段的 placement/stability/trust 正确；
+- binding 禁用、Agent 归档或 provider 失败时没有残留占位段，也不改变 `promptTemplateId`。
 
 ### 25.5 恢复
 
 - 启动后补算；
-- 长时间离线有界压缩；
+- 长时间离线有界压缩且不补发过期主动消息；
 - 活动执行中崩溃后的恢复；
 - 损坏快照隔离和最后有效状态恢复；
-- 禁用和重新启用后的状态延续。
+- 禁用和重新启用后的状态延续；
+- 宿主关闭会 cancel/await 已登记插件任务；
+- Agent archive/purge 与心跳、生成、发送并发时，最新 binding revision 栅栏生效；
+- purge staging 失败执行补偿，不留下不可解释的半删除状态。
 
-### 25.6 API、UI 和运行时
+### 25.6 Proactive Turn 与发送
+
+- 内部触发写 `internal_turn_trigger`，不写 `user_message`；
+- assistant 最终内容继续进入既有 Turn Journal、SSE 和 Session 投影；
+- 同一 trigger/attempt 重复调度只产生一次已确认发送；
+- `candidate/reserved` 过期、取消和明确失败不扣额度；
+- `delivered` receipt 原子更新额度、间隔和互动记录；
+- `delivering` 崩溃先按 delivery token 对账，不能盲目重发；
+- 用户新消息、Session busy、quiet hours、Agent 归档或 binding 变化能在发送前阻止投递。
+
+### 25.7 API、UI 和运行时
 
 - Pydantic response model 与 TypeScript DTO 对齐；
 - React Query key、失效和回滚策略；
@@ -835,9 +1017,14 @@ Critical Path：
 | 心跳成本过高 | 心跳不调用 LLM；LLM 只在语义节点调用 |
 | 普通 Agent 被污染 | per-Agent binding + Prompt/工具/存储/任务四层隔离 |
 | Autonomous 误执行高风险动作 | ToolPolicy + ToolExecutor 最终授权，禁止自动扩权 |
-| 主动消息造成打扰 | 每日上限、最小间隔、免打扰、失败不计成功互动 |
+| 内部触发伪装成用户消息 | 新增 `proactive_turn` admission 和非对话 `internal_turn_trigger`；禁止调用普通用户消息提交入口 |
+| 主动消息造成打扰 | 每日上限、最小间隔、免打扰、有效期和发送前 binding 栅栏 |
+| 主动消息重复发送 | 稳定 trigger/attempt/delivery token、预留事务、送达 receipt 和 stale 对账 |
+| 共享 ToolPolicy 被意外扩权 | 启用只绑定 Tool Bundle；共享策略修改必须预览影响并确认，默认派生专属策略 |
 | 计划被当成真实经历 | 独立实际事件账本和 outcome 门 |
-| 应用关闭时生活中断 | 有界补算并明确标记 |
+| 应用关闭时生活中断 | misfire coalescing、有界补算、工具活动不推定完成、过期消息不补发 |
+| 禁用/归档后残留任务继续发送 | binding revision 栅栏、统一任务登记、先撤销新工作再 cancel/await |
+| Agent purge 半清理 | 接入既有 prepare/commit/rollback 补偿和安全 workspace 删除边界 |
 | 宠物旧数据污染新模型 | 显式选择目标 Agent 后才导入 |
 | 插件故障拖垮后端 | Agent 级隔离、超时、熔断和 bounded logs |
 | 参考项目许可证不明确 | 只参考设计，不复制实现 |
@@ -848,10 +1035,11 @@ Critical Path：
 - 绑定级回滚：禁用指定 Agent 的插件，立即停止心跳、主动消息、Prompt 和工具注入；
 - 插件级回滚：停止加载插件包，所有绑定进入不可运行但可恢复状态；
 - 数据级回滚：读取最近有效快照，损坏数据进入隔离区；
+- 发送级回滚：只能取消尚未送达的 attempt；已经确认送达的消息和 receipt 不伪造撤回或回滚；
 - 迁移级回滚：旧 `pet_info.json` 始终保留到显式清理授权；
 - API/UI 回滚：保留旧 `/pet` 兼容入口直到新 Agent-scoped 页面验收；
 - 数据删除不属于普通回滚，必须单独确认。
 
 ## 28. 用户批准门
 
-本文件落盘不构成实现授权。后续开始 Task 1 前，必须取得用户对本 PRD 的明确批准；若用户继续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API 或 UI 结果，应更新本文档并重新检查任务图后再实施。
+本文件落盘不构成实现授权。后续开始 Task 1 前，必须取得用户对本 PRD 的明确批准；批准范围必须明确包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。若用户继续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API 或 UI 结果，应更新本文档并重新检查任务图后再实施。
