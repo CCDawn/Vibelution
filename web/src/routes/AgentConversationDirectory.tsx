@@ -66,11 +66,6 @@ export {
   isVisibleFlatDirectoryAgent,
 };
 
-/** @deprecated Prefer isVisibleFlatDirectoryAgent / buildAgentDirectoryPartition. */
-export function isVisibleDirectoryAgent(agent: AgentInstance) {
-  return isVisibleFlatDirectoryAgent(agent);
-}
-
 /**
  * Agents that appear in the flat (non-team) directory list historically.
  * Team members now live under team blocks; experiment-backed team_agent rows

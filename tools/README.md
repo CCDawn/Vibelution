@@ -78,7 +78,7 @@ Model 可见性
 
 | 文件 | 用途 |
 | --- | --- |
-| `compression_quality.py` · `compression_strategy.py` | 上下文压缩策略 |
+| `compression_strategy.py` | 上下文压缩策略 |
 | `research_search_backends.py` · `research_search_quality.py` | 搜索后端/质量 |
 | `key_info_extractor.py` | 键信息抽取 helper |
 | `agent_tools.py` | `spawn_agent` 子进程实现；`spawn_agent_tool` 包装在 `Key_Tools.py` 内，是否进入 `create_key_tools()` 以运行时返回列表为准 |

@@ -5,10 +5,9 @@ import {
   agentDirectorySessionCount,
   agentDirectorySection,
   isSessionMoreRecent,
-  isVisibleDirectoryAgent,
   visibleDirectoryAgents,
 } from "./AgentConversationDirectory";
-import { buildAgentDirectoryPartition } from "./agentConversationDirectoryModel";
+import { buildAgentDirectoryPartition, isVisibleFlatDirectoryAgent } from "./agentConversationDirectoryModel";
 import directorySource from "./AgentConversationDirectory.tsx?raw";
 import styles from "./AgentConversationDirectory.styles";
 
@@ -153,11 +152,11 @@ describe("AgentConversationDirectory", () => {
       metadata: { conversationIndexKind: "team_agent" },
     });
 
-    expect(isVisibleDirectoryAgent(noSessionChatAgent)).toBe(true);
+    expect(isVisibleFlatDirectoryAgent(noSessionChatAgent)).toBe(true);
     expect(agentDirectorySection(noSessionChatAgent)).toBe("conversation");
-    expect(isVisibleDirectoryAgent(specialAgent)).toBe(true);
+    expect(isVisibleFlatDirectoryAgent(specialAgent)).toBe(true);
     expect(agentDirectorySection(specialAgent)).toBe("special");
-    expect(isVisibleDirectoryAgent(teamAgent)).toBe(false);
+    expect(isVisibleFlatDirectoryAgent(teamAgent)).toBe(false);
   });
 
   it("no longer dumps all team members into the flat special section", () => {

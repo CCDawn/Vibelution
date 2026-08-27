@@ -23,11 +23,6 @@ export function vuiButtonDensityClass(density: VuiDensity | undefined): string {
   return vuiControlDensityClass(density);
 }
 
-/** @deprecated Prefer vuiButtonDensityClass; kept for HeroUI size mapping if needed. */
-export function vuiControlHeight(density: VuiDensity | undefined): "sm" | "md" {
-  return density === "normal" ? "md" : "sm";
-}
-
 export function vuiToneClass(tone: VuiTone | undefined): string {
   return `vui-tone-${tone ?? "neutral"}`;
 }

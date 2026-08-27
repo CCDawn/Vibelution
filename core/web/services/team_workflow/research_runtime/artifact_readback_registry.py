@@ -85,13 +85,6 @@ def required_artifact_kinds(node_id: str) -> tuple[str, ...]:
     return tuple(node.producesArtifactKinds)
 
 
-def default_artifact_root() -> Path:
-    """Deprecated parallel store root — production must not write here."""
-    from core.infrastructure.path_containment import PROJECT_ROOT
-
-    return Path(PROJECT_ROOT) / "data" / "domain_artifacts"
-
-
 def build_canonical_ref(
     *,
     kind: str,

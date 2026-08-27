@@ -67,17 +67,6 @@ class HealthSystem(PetSubsystem):
         else:
             metrics.metabolism = 1.0
 
-    def update_from_tokens(self, input_tokens: int, output_tokens: int):
-        """
-        从 Token 更新健康指标
-
-        Args:
-            input_tokens: 输入 token 数
-            output_tokens: 输出 token 数
-        """
-        # 这个方法在 HungerSystem 中已处理
-        pass
-
     def check_health(self) -> Dict[str, Any]:
         """
         执行健康检查
