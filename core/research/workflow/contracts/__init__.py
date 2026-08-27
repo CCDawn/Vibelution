@@ -8,6 +8,20 @@ from ._canonical import canonical_json, sha256_hex
 from ._validation import ContractValidationError
 from .artifact_manifest import ArtifactManifest
 from .artifact_receipt import ArtifactReceipt, BudgetReceipt
+from .automation_policy import (
+    AUTO_ADVANCE_CAPABILITIES,
+    AUTO_ADVANCE_DRAIN_MODES,
+    AUTO_ADVANCE_EXECUTION_MODES,
+    AUTO_ADVANCE_POLICY_STATUSES,
+    AUTO_ADVANCE_UI_PRESET_IDS,
+    MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO,
+    MAX_AUTO_REVISION_ROUNDS_DEFAULT,
+    AutoAdvancePolicyV2,
+    AutomationPolicyValidationError,
+    HumanReviewPolicyV2,
+    POLICY_CONTENT_HASH_RULE,
+    compute_policy_content_hash,
+)
 from .budget import ResearchBudgetLedger
 from .catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS,
@@ -207,6 +221,11 @@ from .workflow_snapshot import (
 __all__ = [
     "ACCEPTED_REVIEW_STATUS",
     "ADDENDUM_STATUSES",
+    "AUTO_ADVANCE_CAPABILITIES",
+    "AUTO_ADVANCE_DRAIN_MODES",
+    "AUTO_ADVANCE_EXECUTION_MODES",
+    "AUTO_ADVANCE_POLICY_STATUSES",
+    "AUTO_ADVANCE_UI_PRESET_IDS",
     "AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS",
     "BASELINE_STATUSES",
     "BLOCKER_CAMPAIGN_THEME_MISMATCH",
@@ -241,12 +260,15 @@ __all__ = [
     "HYPOTHESIS_SCORE_RUBRIC_VERSION",
     "LEGACY_READ_MODE",
     "LINEAGE_KINDS",
+    "MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO",
+    "MAX_AUTO_REVISION_ROUNDS_DEFAULT",
     "MAX_SELECTED_CANDIDATES",
     "MEETING_REF_KINDS",
     "MEETING_STATUSES",
     "MEETING_TYPES",
     "MEMORY_CLASSES",
     "MIN_CANDIDATES",
+    "POLICY_CONTENT_HASH_RULE",
     "PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND",
     "PREFORMAL_DISCUSSION_SCOPE_KINDS",
     "PREFORMAL_DISCUSSION_SCOPE_VERSION",
@@ -275,6 +297,8 @@ __all__ = [
     "AgentBindingSummary",
     "ArtifactManifest",
     "ArtifactReceipt",
+    "AutoAdvancePolicyV2",
+    "AutomationPolicyValidationError",
     "BudgetReadiness",
     "BudgetReceipt",
     "BudgetSummary",
@@ -297,6 +321,7 @@ __all__ = [
     "ExperimentCampaign",
     "ExperimentCampaignStage",
     "HandoffSummary",
+    "HumanReviewPolicyV2",
     "HumanTaskSummary",
     "HypothesisCandidate",
     "HypothesisDesignOutput",
@@ -361,6 +386,7 @@ __all__ = [
     "canonical_json",
     "canonical_research_task_output_schema_bundle",
     "catalog_hypothesis_flow_report_hash",
+    "compute_policy_content_hash",
     "current_research_team_role_contract_snapshot",
     "discussion_scope_hash",
     "discussion_scope_hash_for",
