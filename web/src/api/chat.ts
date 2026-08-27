@@ -19,6 +19,12 @@ import type {
   SessionTurnAcceptedResponse,
 } from "./types";
 
+// The chat-room SSE surface is fetched with the guarded control-token transport
+// and classifies aborts through the shared client helpers. Routes consume them
+// from this domain module — never from `api/client` directly
+// (fullStackApiBoundary.test.ts).
+export { fetchWithControl, isFetchAbortError } from "./client";
+
 export function isSessionNotFoundError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   return /session not found|会话不存在|未找到会话|未找到当前会话/i.test(message);

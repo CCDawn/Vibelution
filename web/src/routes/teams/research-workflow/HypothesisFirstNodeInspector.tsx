@@ -9,9 +9,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
-import { isFetchJsonHttpError } from "../../../api/client";
 import {
   executeHypothesisFirstCommand,
+  isFetchJsonHttpError,
   isHypothesisFirstCommandStateConflict,
   openHypothesisCandidateGeneration,
   openNextHypothesisReviewRound,
