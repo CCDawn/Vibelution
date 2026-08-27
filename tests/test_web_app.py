@@ -501,6 +501,54 @@ def test_history_seed_omits_turn_error_messages():
     ]
 
 
+def test_history_seed_omits_raw_payload_protocol_error_assistant_text():
+    """Raw provider error text must never enter seeded model history, even bare."""
+
+    poisoned = "payload_protocol_error: duplicate tool call id"
+    assert session_service._should_omit_message_from_agent_history(
+        {"role": "assistant", "content": poisoned}
+    ) is True
+    history = session_service._history_messages_for_agent_seed(
+        [
+            {"role": "user", "content": "执行资料搜集任务"},
+            {"role": "assistant", "content": poisoned},
+            {"role": "user", "content": "继续下一步"},
+        ]
+    )
+
+    assert [
+        {"role": item["role"], "content": item["content"]}
+        for item in history
+    ] == [
+        {"role": "user", "content": "执行资料搜集任务"},
+        {"role": "user", "content": "继续下一步"},
+    ]
+
+
+def test_provider_failure_classification_includes_payload_protocol_error():
+    """Local payload protocol failures route through the provider-failure path."""
+
+    error_text = "payload_protocol_error: duplicate tool call id"
+    assert session_service._looks_like_provider_error_text(error_text) is True
+    assert session_service._failure_error_type(error_text) == "provider_protocol_error"
+    assert (
+        session_service._is_provider_failed_result(
+            {
+                "status": "failed",
+                "summary": error_text,
+                "raw_output": error_text,
+                "error": error_text,
+            }
+        )
+        is True
+    )
+    reason = session_service._provider_error_user_reason(error_text, lang="zh")
+    assert reason.get("code") == "provider_protocol_error"
+    summary = session_service._user_visible_failure_summary(error_text, lang="zh")
+    assert error_text not in summary
+    assert "协议" in summary
+
+
 def test_build_followup_prompt_unwraps_nested_continue_goal():
     prompt = session_service._build_followup_prompt(
         original_prompt="审查对话日志并汇报",

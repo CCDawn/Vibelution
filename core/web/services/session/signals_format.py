@@ -382,7 +382,7 @@ def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
             )
         ):
             return "provider_upstream_error"
-        if "provider_protocol_error" in value:
+        if "provider_protocol_error" in value or "payload_protocol_error" in value:
             return "provider_protocol_error"
         return "provider_error"
     return exc_type or "runtime_error"
