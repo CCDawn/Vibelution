@@ -4137,10 +4137,48 @@ def _hypothesis_collection_background_payload() -> dict[str, Any]:
 # closure -> HypothesisRound generation (HF-3 executor entry point)
 
 
+_EMPTY_DISCUSSION_RECOVERY_REASON = "discussion_has_no_completed_messages"
+
+
+def _is_superseded_review_attempt(meeting_round: Mapping[str, Any]) -> bool:
+    """True when a closed meeting is an abandoned empty-discussion attempt.
+
+    ``supersede_empty_discussion_meeting`` closes such attempts append-only
+    with a recovery reason and deliberately no digest/decisions: they are not
+    review authority and must never enter a ready fan-in group.
+    """
+    return (
+        str(meeting_round.get("status") or "").strip().lower() == "closed"
+        and str(meeting_round.get("recoveryReason") or "").strip()
+        == _EMPTY_DISCUSSION_RECOVERY_REASON
+    )
+
+
 def _review_meeting_fan_in_group(
     team_id: str, meeting_round: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Resolve the ordered selection/round group for one candidate meeting."""
+    """Resolve the authoritative selection-level review group for one meeting.
+
+    Authority is per candidate lineage, not per round index.  The group keeps
+    the meeting's own round membership (round 1 spans the whole selection;
+    later rounds are candidate-scoped follow-ups), but every group candidate
+    resolves its authority by walking that candidate's links from the newest
+    round downwards and binding the newest non-superseded closed meeting:
+
+    - a superseded closure (``recoveryReason=discussion_has_no_completed_
+      messages``, no digest/decisions) is skipped and never treated as
+      evidence;
+    - a newer still-active round blocks the candidate (the in-flight attempt
+      outranks any older round, so a superseded round with a live successor is
+      stale rather than authoritative);
+    - a candidate whose newest attempt is superseded with no closed successor
+      stays pending (its review is still waiting, not silently authoritative).
+
+    A ready group therefore can never contain a superseded digest-less
+    meeting, and the group's ``roundIndex`` is the highest authoritative round
+    so close replays resolve to the same idempotent HypothesisRound instead of
+    raising "missing digestId or decisionRefs" on structurally failed closes.
+    """
     from core.web.services.team_workflow import hypothesis_selection as selections
     from core.web.services.team_workflow import meeting_rounds
 
@@ -4174,24 +4212,31 @@ def _review_meeting_fan_in_group(
     if not selected_candidate_ids:
         raise HypothesisFirstChainError("selection has no selected candidates")
 
-    group_links = [
+    selection_links = [
         dict(item)
         for item in links
         if str(item.get("selectionId") or "").strip() == selection_id
-        and int(item.get("roundIndex") or 1) == round_index
         and str(item.get("candidateId") or "").strip()
     ]
-    by_candidate = {
-        str(item.get("candidateId") or "").strip(): item for item in group_links
-    }
-    if len(by_candidate) != len(group_links):
-        raise HypothesisFirstChainError(
-            "candidate review group contains duplicate candidate bindings"
+    seen_bindings: set[tuple[str, int]] = set()
+    for item in selection_links:
+        binding = (
+            str(item.get("candidateId") or "").strip(),
+            int(item.get("roundIndex") or 1),
         )
-    expected_candidate_ids = (
-        selected_candidate_ids
-        if round_index == 1
-        else [
+        if binding in seen_bindings:
+            raise HypothesisFirstChainError(
+                "candidate review group contains duplicate candidate bindings"
+            )
+        seen_bindings.add(binding)
+
+    group_links = [
+        item for item in selection_links if int(item.get("roundIndex") or 1) == round_index
+    ]
+    if round_index == 1:
+        expected_candidate_ids = selected_candidate_ids
+    else:
+        expected_candidate_ids = [
             str(item.get("candidateId") or "").strip()
             for item in sorted(
                 group_links,
@@ -4201,25 +4246,74 @@ def _review_meeting_fan_in_group(
                 ),
             )
         ]
-    )
-    missing_candidate_ids = [
-        item for item in expected_candidate_ids if item not in by_candidate
-    ]
-    ordered_links = [
-        by_candidate[item] for item in expected_candidate_ids if item in by_candidate
-    ]
-    meetings = [
-        meeting_rounds.get_meeting_round(
-            team_id, str(item.get("meetingRoundId") or "").strip()
-        )["meetingRound"]
-        for item in ordered_links
-    ]
-    pending_meeting_ids = [
-        str(item.get("meetingRoundId") or "").strip()
-        for item in meetings
-        if str(item.get("status") or "") != "closed"
-    ]
-    if missing_candidate_ids or pending_meeting_ids:
+
+    meeting_cache: dict[str, dict[str, Any]] = {}
+
+    def _meeting(meeting_id: str) -> dict[str, Any]:
+        cached = meeting_cache.get(meeting_id)
+        if cached is None:
+            cached = meeting_rounds.get_meeting_round(team_id, meeting_id)[
+                "meetingRound"
+            ]
+            meeting_cache[meeting_id] = cached
+        return cached
+
+    authority_by_candidate: dict[str, tuple[int, dict[str, Any]]] = {}
+    missing_candidate_ids: list[str] = []
+    pending_meeting_ids: list[str] = []
+    superseded_candidate_ids: list[str] = []
+    superseded_meeting_ids: list[str] = []
+    for candidate in expected_candidate_ids:
+        candidate_links = [
+            item
+            for item in selection_links
+            if str(item.get("candidateId") or "").strip() == candidate
+        ]
+        if not candidate_links:
+            missing_candidate_ids.append(candidate)
+            continue
+        candidate_links.sort(
+            key=lambda item: int(item.get("roundIndex") or 0), reverse=True
+        )
+        # Classify the candidate's whole lineage first: every superseded
+        # attempt is reported, and the newest non-superseded attempt decides
+        # the outcome (a live newer round always outranks older rounds).
+        resolution: tuple[str, int, dict[str, Any]] | None = None
+        candidate_superseded_ids: list[str] = []
+        for link in candidate_links:
+            linked_meeting = _meeting(str(link.get("meetingRoundId") or "").strip())
+            if _is_superseded_review_attempt(linked_meeting):
+                candidate_superseded_ids.append(
+                    str(linked_meeting.get("meetingRoundId") or "").strip()
+                )
+                continue
+            if resolution is not None:
+                continue
+            if str(linked_meeting.get("status") or "").strip().lower() != "closed":
+                resolution = (
+                    "active",
+                    int(link.get("roundIndex") or 1),
+                    linked_meeting,
+                )
+            else:
+                resolution = (
+                    "authority",
+                    int(link.get("roundIndex") or 1),
+                    linked_meeting,
+                )
+        superseded_meeting_ids.extend(candidate_superseded_ids)
+        if resolution is None:
+            # Newest attempt superseded with no closed successor: the
+            # candidate's review is still pending and must not enter the group.
+            superseded_candidate_ids.append(candidate)
+        elif resolution[0] == "active":
+            pending_meeting_ids.append(
+                str(resolution[2].get("meetingRoundId") or "").strip()
+            )
+        else:
+            authority_by_candidate[candidate] = (resolution[1], resolution[2])
+
+    if missing_candidate_ids or pending_meeting_ids or superseded_candidate_ids:
         return {
             "status": "waiting_for_sibling_reviews",
             "selectionId": selection_id,
@@ -4227,17 +4321,26 @@ def _review_meeting_fan_in_group(
             "closed": False,
             "missingCandidateIds": missing_candidate_ids,
             "pendingMeetingRoundIds": pending_meeting_ids,
+            "supersededCandidateIds": superseded_candidate_ids,
+            "supersededMeetingRoundIds": superseded_meeting_ids,
             "closedMeetingRoundIds": [
-                str(item.get("meetingRoundId") or "").strip()
-                for item in meetings
-                if str(item.get("status") or "") == "closed"
+                str(authority_by_candidate[candidate][1].get("meetingRoundId") or "").strip()
+                for candidate in expected_candidate_ids
+                if candidate in authority_by_candidate
             ],
         }
+    ordered_meetings = [
+        authority_by_candidate[candidate][1]
+        for candidate in expected_candidate_ids
+        if candidate in authority_by_candidate
+    ]
     return {
         "status": "ready",
         "selectionId": selection_id,
-        "roundIndex": round_index,
-        "meetings": meetings,
+        "roundIndex": max(
+            int(item[0]) for item in authority_by_candidate.values()
+        ),
+        "meetings": ordered_meetings,
     }
 
 
@@ -4391,11 +4494,16 @@ def _generate_hypothesis_round(
         round_index = int(fan_in.get("roundIndex") or 1)
         round_payload: dict[str, Any] = {"candidates": candidates}
         if len(meeting_round_ids) > 1:
+            # Content-addressed group identity: the same ordered meeting set
+            # reuses one round on replay, while a different authoritative
+            # fan-in (for example the round-1 group resolving a superseded
+            # candidate to its reopened round-2 meeting) never collides with
+            # a candidate-scoped round generated from a subset.
             round_payload.update(
                 {
                     "meetingRoundIds": meeting_round_ids,
                     "roundId": (
-                        f"hround-{_stable_hash({'selectionId': selection_id, 'roundIndex': round_index, 'scopeHash': selection.get('scopeHash')})[:12]}"
+                        f"hround-{_stable_hash({'selectionId': selection_id, 'roundIndex': round_index, 'meetingRoundIds': meeting_round_ids, 'scopeHash': selection.get('scopeHash')})[:12]}"
                     ),
                 }
             )
