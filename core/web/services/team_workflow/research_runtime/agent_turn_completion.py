@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from typing import Any
 
 from core.research.workflow.contracts import PendingAction
@@ -34,6 +35,24 @@ _FAILURE_TERMINAL_STATUSES = frozenset(
 )
 
 _PROJECT_TASK_RECONCILABLE_TURN_STATUSES = frozenset({"needs_continue"})
+
+# Canonical resumable terminal turn statuses per the session protocol: a turn
+# that stops here is parked awaiting an explicit continue request, not broken
+# (persist.py marks these "resumeAllowed"; runtime_service maps them to the
+# ready/resumable session phase).  "stopped_by_user" is deliberately absent:
+# a workflow node must never silently resume a turn a user stopped on purpose.
+AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES = frozenset(
+    {"needs_continue", "paused_limit"}
+)
+
+# Bounded continuation budget per complete_agent_turn_outputs call (one node
+# attempt).  Every continuation is a first-class protocol step: it submits the
+# canonical continue request to the SAME session and records an auditable
+# runtime-scene event (attempt number, paused status, from/to turn ids).
+# Exhausting the budget fails the node loudly with the
+# agent_turn_continuation_exhausted problem code and the full turn chain --
+# there is no silent downgrade, archive, or success reclassification.
+MAX_AGENT_TURN_CONTINUATIONS = 3
 
 DEFAULT_AGENT_TURN_TIMEOUT_MS = 120_000
 
@@ -255,6 +274,209 @@ def collect_required_artifact_refs(
     return refs
 
 
+def _record_turn_continuation_scene_event(
+    event_code: str,
+    *,
+    outcome: str,
+    fields: dict[str, Any],
+    level: str = "info",
+) -> None:
+    """Best-effort worker observability; never breaks the dispatch path."""
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "agent_turn_completion",
+        event_code,
+        level=level,
+        outcome=outcome,
+        fields=fields,
+    )
+
+
+def _submit_agent_turn_continuation(
+    handle: AgentTaskHandle,
+    *,
+    action: PendingAction,
+    input_snapshot: dict[str, Any],
+    attempt: int,
+    from_turn_id: str,
+    paused_status: str,
+) -> str:
+    """First-class protocol step: continue the parked turn on the same session.
+
+    The canonical continue request reuses the session resume channel
+    (persist.py resumeAllowed).  Source-collection stage sessions inherit
+    their stage-task continuation contract from the previous messages in the
+    submit layer, and the parked model keeps its full history.  The metadata
+    deliberately carries no ``kind`` key: that keeps the stage-task
+    continuation inheritance working and keeps project-task strict output
+    bindings (which pin exactly one stored turn id) from being hijacked by
+    the continuation turn.
+    """
+    from core.web.services.session.submit import submit_session_message
+
+    _record_turn_continuation_scene_event(
+        "agent_turn.continuation_requested",
+        outcome="submitting",
+        fields={
+            "sessionId": handle.session_id,
+            "fromTurnId": from_turn_id,
+            "pausedStatus": paused_status,
+            "continuationAttempt": attempt,
+            "maxContinuations": MAX_AGENT_TURN_CONTINUATIONS,
+            "workflowRunId": str(action.run_id or ""),
+            "workflowNodeId": str(action.node_id or ""),
+            "nodeRunId": str(action.node_run_id or ""),
+            "taskId": str(handle.task_id or ""),
+        },
+    )
+    turn = submit_session_message(
+        handle.session_id,
+        "继续",
+        mental_model_enabled=False,
+        turn_mode="task",
+        write_intent=False,
+        message_source="agent_inbox",
+        message_metadata={
+            "sourceSurface": "team_workflow_agent_turn_continuation",
+            "teamId": str(input_snapshot.get("teamId") or "").strip(),
+            "workflowRunId": str(action.run_id or ""),
+            "workflowNodeId": str(action.node_id or ""),
+            "nodeRunId": str(action.node_run_id or ""),
+            "taskId": str(handle.task_id or ""),
+            "continuationAttempt": attempt,
+            "continuationOfTurnId": from_turn_id,
+            "continuationPausedStatus": paused_status,
+        },
+        include_started_turn_id=True,
+        lightweight_response=True,
+    )
+    new_turn_id = str(
+        (turn or {}).get("turnId") or (turn or {}).get("startedTurnId") or ""
+    ).strip()
+    if not new_turn_id:
+        raise RuntimeError(
+            json.dumps(
+                {
+                    "code": "agent_turn_continuation_not_accepted",
+                    "sessionId": handle.session_id,
+                    "turnId": from_turn_id,
+                    "continuationAttempt": attempt,
+                    "response": turn
+                    if isinstance(turn, dict)
+                    else {"raw": str(turn)[:200]},
+                },
+                ensure_ascii=False,
+            )
+        )
+    _record_turn_continuation_scene_event(
+        "agent_turn.continuation_submitted",
+        outcome="continued",
+        fields={
+            "sessionId": handle.session_id,
+            "fromTurnId": from_turn_id,
+            "toTurnId": new_turn_id,
+            "pausedStatus": paused_status,
+            "continuationAttempt": attempt,
+            "maxContinuations": MAX_AGENT_TURN_CONTINUATIONS,
+            "workflowRunId": str(action.run_id or ""),
+            "workflowNodeId": str(action.node_id or ""),
+            "nodeRunId": str(action.node_run_id or ""),
+            "taskId": str(handle.task_id or ""),
+        },
+    )
+    return new_turn_id
+
+
+def _wait_with_bounded_turn_continuation(
+    handle: AgentTaskHandle,
+    *,
+    action: PendingAction,
+    input_snapshot: dict[str, Any],
+    adapter_spec: Any | None,
+    timeout_ms: int,
+    poll_ms: int,
+) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
+    """Wait for the canonical turn, continuing parked turns within protocol.
+
+    A turn that reaches ``needs_continue``/``paused_limit`` is resumable per
+    the session protocol, so instead of failing the node attempt this loop
+    submits the canonical continue request to the same session and keeps
+    waiting -- at most ``MAX_AGENT_TURN_CONTINUATIONS`` times, each step
+    audited.  Exhausting the budget raises ``agent_turn_continuation_exhausted``
+    with the full turn chain; a failure is never downgraded into success.
+
+    Research-project tasks are excluded: their task authority
+    (``research_project_agent_tasks`` reconcile) deliberately classifies a
+    needs_continue session as ``stopped/session_needs_continue``; reviving
+    those turns requires rebinding the stored task turn, which is that
+    authority's decision, not this adapter's.
+    """
+    if adapter_spec is not None and adapter_spec.family == "research_project":
+        # Project task authority (research_project_agent_tasks reconcile)
+        # owns the needs_continue verdict for project tasks: keep returning
+        # the parked snapshot so its existing classification
+        # (stopped/session_needs_continue) decides, instead of auto-resuming
+        # behind its back.
+        reconcilable = _PROJECT_TASK_RECONCILABLE_TURN_STATUSES
+        continuable: frozenset[str] = frozenset()
+    else:
+        reconcilable = AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
+        continuable = AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
+    turn_chain: list[str] = [handle.turn_id]
+    continuations: list[dict[str, Any]] = []
+    turn_id = handle.turn_id
+    while True:
+        snapshot = wait_for_agent_turn_terminal(
+            handle.session_id,
+            turn_id,
+            timeout_ms=timeout_ms,
+            poll_ms=poll_ms,
+            reconcilable_terminal_statuses=reconcilable,
+        )
+        status = str(
+            snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus") or ""
+        ).strip().lower()
+        if status not in continuable:
+            return snapshot, turn_id, continuations
+        if len(continuations) >= MAX_AGENT_TURN_CONTINUATIONS:
+            raise RuntimeError(
+                json.dumps(
+                    {
+                        "code": "agent_turn_continuation_exhausted",
+                        "sessionId": handle.session_id,
+                        "turnId": turn_id,
+                        "terminalStatus": status,
+                        "continuationsUsed": len(continuations),
+                        "maxContinuations": MAX_AGENT_TURN_CONTINUATIONS,
+                        "turnChain": list(turn_chain),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        next_turn_id = _submit_agent_turn_continuation(
+            handle,
+            action=action,
+            input_snapshot=input_snapshot,
+            attempt=len(continuations) + 1,
+            from_turn_id=turn_id,
+            paused_status=status,
+        )
+        continuations.append(
+            {
+                "attempt": len(continuations) + 1,
+                "fromTurnId": turn_id,
+                "toTurnId": next_turn_id,
+                "pausedStatus": status,
+            }
+        )
+        turn_chain.append(next_turn_id)
+        turn_id = next_turn_id
+
+
 def complete_agent_turn_outputs(
     *,
     action: PendingAction,
@@ -275,18 +497,18 @@ def complete_agent_turn_outputs(
     )
 
     adapter_spec = resolve_agent_task_adapter(action.node_id)
-    reconcilable_terminal_statuses = (
-        _PROJECT_TASK_RECONCILABLE_TURN_STATUSES
-        if adapter_spec is not None and adapter_spec.family == "research_project"
-        else frozenset()
-    )
-    snapshot = wait_for_agent_turn_terminal(
-        handle.session_id,
-        handle.turn_id,
+    snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
+        handle,
+        action=action,
+        input_snapshot=input_snapshot,
+        adapter_spec=adapter_spec,
         timeout_ms=timeout_ms,
         poll_ms=poll_ms,
-        reconcilable_terminal_statuses=reconcilable_terminal_statuses,
     )
+    if continuations:
+        # Downstream reconciliation must reference the final continuation
+        # turn, not the originally parked one.
+        handle = replace(handle, turn_id=final_turn_id)
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
     )
