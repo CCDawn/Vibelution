@@ -1173,6 +1173,137 @@ def test_agent_task_routes_expose_typed_start_and_status_payloads(
     )
 
 
+def test_agent_task_reconcile_route_repairs_stuck_running_task(
+    tmp_path, monkeypatch
+):
+    """后端重启把任务留在 running、session 已 ready 的死锁由维护端点解开。"""
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    client = _client()
+    base = (
+        f"/api/teams/{team['teamId']}/workflow-orchestration/"
+        f"research-projects/{project['projectId']}/agent-tasks"
+    )
+    started = client.post(
+        f"{base}/start",
+        json={
+            "taskKind": "experiment_design",
+            "targetRef": "stage-round-1",
+            "idempotencyKey": "route-reconcile-1",
+        },
+    )
+    assert started.status_code == 201
+    task_id = started.json()["task"]["taskId"]
+    root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        project["projectId"],
+    )
+    team_workflow_orchestration_service._write_json(
+        root / "experiment_plans" / "index.json",
+        {
+            "schemaVersion": 1,
+            "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
+            "teamId": team["teamId"],
+            "activePlanId": "plan-route-reconciled",
+            "plans": [
+                {
+                    "planId": "plan-route-reconciled",
+                    "researchProjectId": project["projectId"],
+                    "createdByAgent": agents["experiment_planner"]["agentId"],
+                    "createdFromTaskId": task_id,
+                    "createdAt": "9999-07-29T00:01:00+00:00",
+                    "updatedAt": "9999-07-29T00:01:00+00:00",
+                    "status": "draft",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "status": "ready",
+            "currentPhase": "ready",
+            "activeTask": None,
+        },
+    )
+
+    repaired = client.post(f"{base}/reconcile")
+    repeat = client.post(f"{base}/reconcile")
+
+    assert repaired.status_code == 200
+    body = repaired.json()
+    assert body["teamId"] == team["teamId"]
+    assert body["researchProjectId"] == project["projectId"]
+    assert body["checked"] == 1
+    assert body["reconciled"] == 1
+    assert body["outcomes"] == [
+        {
+            "taskId": task_id,
+            "action": "reconciled",
+            "status": "completed",
+            "failureCode": "",
+        }
+    ]
+    status_response = client.get(f"{base}/status")
+    assert status_response.json()["activeTasks"] == []
+    assert status_response.json()["tasks"][0]["status"] == "completed"
+    assert status_response.json()["tasks"][0]["resultRefs"] == [
+        "plan-route-reconciled"
+    ]
+    # 幂等：任务已终态且结果已记录，再次 reconcile 是无写 no-op。
+    assert repeat.status_code == 200
+    assert repeat.json() == {
+        "teamId": team["teamId"],
+        "researchProjectId": project["projectId"],
+        "checked": 0,
+        "reconciled": 0,
+        "failedSessionUnreadable": [],
+        "outcomes": [],
+    }
+
+
+def test_agent_task_reconcile_route_returns_404_for_missing_project(
+    tmp_path, monkeypatch
+):
+    _team_project_and_agents(tmp_path, monkeypatch)
+    client = _client()
+
+    response = client.post(
+        f"/api/teams/team-route-404/workflow-orchestration/"
+        f"research-projects/project-missing/agent-tasks/reconcile"
+    )
+
+    assert response.status_code == 404
+
+
+def test_agent_task_reconcile_route_maps_agent_task_error_to_422(
+    tmp_path, monkeypatch
+):
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    client = _client()
+
+    def raise_task_error(team_id: str, project_id: str):
+        raise ResearchProjectAgentTaskError(
+            "Task store inconsistent.",
+            code="task_store_inconsistent",
+        )
+
+    monkeypatch.setattr(
+        "core.web.routes.team_workflows.research_projects"
+        ".reconcile_research_project_agent_task_statuses",
+        raise_task_error,
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/"
+        f"research-projects/{project['projectId']}/agent-tasks/reconcile"
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "task_store_inconsistent"
+
+
 def test_experiment_task_context_is_project_scoped_and_bounded(tmp_path, monkeypatch):
     team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
     _accepted_submitter(monkeypatch)
