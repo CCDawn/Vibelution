@@ -397,11 +397,14 @@ def load_scoped_artifact_payload(
     authority_run_id: str,
     workflow_run_id: str = "",
     content_hash: str = "",
+    record_id: str = "",
 ) -> dict[str, Any] | None:
     """Load a deterministic scoped payload for hashing / read-back.
 
     Returns None when the kind is unknown, unwired to a store authority, or
-    store records violate team/run scope.
+    store records violate team/run scope.  ``record_id`` optionally pins the
+    read to one immutable artifact identity (e.g. the Ledger-authoritative
+    node attempt) instead of the latest record in scope.
     """
     normalized_kind = str(kind or "").strip()
     if resolve_artifact_authority(normalized_kind) is None:
@@ -507,6 +510,7 @@ def load_scoped_artifact_payload(
             authority_run_id=normalized_authority,
             workflow_run_id=normalized_workflow,
             content_hash=content_hash,
+            record_id=record_id,
         )
 
     # Other kinds are not yet wired to a production store authority.

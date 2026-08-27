@@ -6,6 +6,7 @@ import {
   resetQuestionRun,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import { trackQuestionRunReset } from "../challengeCupTelemetry";
 import { VConfirmDialog, VInput } from "../../../components/vui";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
@@ -44,7 +45,15 @@ export function ChallengeQuestionRunResetDialog({
   });
   const resetMutation = useMutation({
     mutationFn: () => resetQuestionRun(teamId, questionId, confirmationQuestionId),
-    onSuccess: async (result) => {
+    onMutate: () => ({
+      telemetry: trackQuestionRunReset({
+        teamId,
+        questionId,
+        ...(preview ? { impact: { ...preview.impact } } : {}),
+      }),
+    }),
+    onSuccess: async (result, _vars, context) => {
+      context?.telemetry?.succeeded({ targetNodeId: result.nextAction.targetNodeId });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["teams", teamId, "hypothesis-first"] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.teamMeetingRounds(teamId) }),
@@ -54,6 +63,9 @@ export function ChallengeQuestionRunResetDialog({
       setConfirmationQuestionId("");
       onOpenChange(false);
       onCompleted(result.nextAction.targetNodeId);
+    },
+    onError: (error, _vars, context) => {
+      context?.telemetry?.failed(error);
     },
   });
   const normalizedQuestionId = questionId.trim().toUpperCase();

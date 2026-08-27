@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { replayResearchWorkflowEvents } from "../../../api/research-workflow/events";
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
+import { observeWorkflowReplayFailed, observeWorkflowReplayResync } from "../challengeCupTelemetry";
 import {
   applyFormalEvent,
   applyFormalEventBatch,
@@ -87,10 +88,18 @@ export function useResearchWorkflowEventReplay(options: {
         modelRef.current = withSnapshotCursor;
         setModel(withSnapshotCursor);
         setError(withSnapshotCursor.resyncRequired ? "工作流事件序列出现缺口，正在重新同步" : null);
+        if (withSnapshotCursor.resyncRequired) {
+          observeWorkflowReplayResync({
+            teamId,
+            runId,
+            lastSequence: withSnapshotCursor.lastSequence,
+          });
+        }
         setReady(true);
       } catch (reason) {
         if (controller.signal.aborted || !mountedRef.current) return;
         if (reason instanceof DOMException && reason.name === "AbortError") return;
+        observeWorkflowReplayFailed({ teamId, runId, error: reason });
         const hydrated = hydrateFormalEventFromSnapshot(emptyFormalEventReadModel(teamId, runId), {
           teamId,
           runId,

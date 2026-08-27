@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { consumeResearchWorkflowEventStream } from "../../../api/research-workflow/events";
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
+import {
+  observeWorkflowStreamFrameInvalid,
+  observeWorkflowStreamReconnected,
+  observeWorkflowStreamInterrupted,
+} from "../challengeCupTelemetry";
 import { RESEARCH_WORKFLOW_SSE_EVENT_TYPES } from "./researchWorkflowSseEventTypes";
 
 export type ResearchWorkflowEventStreamState =
@@ -36,6 +41,8 @@ export function useResearchWorkflowEventStream(options: {
   const [state, setState] = useState<ResearchWorkflowEventStreamState>("idle");
   const [error, setError] = useState<string | null>(null);
   const cursorRef = useRef(0);
+  const interruptedRef = useRef<{ attempts: number; startedAtMs: number } | null>(null);
+  const frameInvalidReportedRef = useRef(false);
   const onEventRef = useRef(onEvent);
 
   onEventRef.current = onEvent;
@@ -57,9 +64,20 @@ export function useResearchWorkflowEventStream(options: {
     let reconnectTimer: number | null = null;
     let stopped = false;
 
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (reason?: string) => {
       if (stopped) return;
       if (reconnectTimer !== null) return;
+      const interrupted = interruptedRef.current;
+      if (interrupted) {
+        interrupted.attempts += 1;
+      } else {
+        interruptedRef.current = { attempts: 1, startedAtMs: Date.now() };
+        observeWorkflowStreamInterrupted({
+          teamId,
+          runId,
+          reason: reason ?? "connection_lost",
+        });
+      }
       setState("reconnecting");
       setError("工作流实时连接中断，正在重连");
       reconnectTimer = window.setTimeout(() => {
@@ -87,6 +105,17 @@ export function useResearchWorkflowEventStream(options: {
           signal: controller.signal,
           onOpen: () => {
             if (stopped) return;
+            const interrupted = interruptedRef.current;
+            if (interrupted) {
+              observeWorkflowStreamReconnected({
+                teamId,
+                runId,
+                reconnectAttempts: interrupted.attempts,
+                downtimeMs: Math.max(0, Math.round(Date.now() - interrupted.startedAtMs)),
+              });
+              interruptedRef.current = null;
+            }
+            frameInvalidReportedRef.current = false;
             setState("connected");
             setError(null);
           },
@@ -112,9 +141,13 @@ export function useResearchWorkflowEventStream(options: {
                 // Keep the last accepted cursor and force a fresh replay;
                 // otherwise the gap event would be silently skipped forever.
                 controller.abort();
-                scheduleReconnect();
+                scheduleReconnect("resync_required");
               }
             } catch {
+              if (!frameInvalidReportedRef.current) {
+                frameInvalidReportedRef.current = true;
+                observeWorkflowStreamFrameInvalid({ teamId, runId, eventType: frame.event });
+              }
               setError("工作流事件格式无效");
             }
           },

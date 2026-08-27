@@ -9,6 +9,13 @@ import {
   startChallengeCupRealBatch,
 } from "../../../api/teamExperiment";
 import { queryKeys } from "../../../api/queryKeys";
+import {
+  observeRealBatchAuthorizeShapeInvalid,
+  observeRealBatchPollLoopStopped,
+  trackRealBatchAuthorize,
+  trackRealBatchCancel,
+  trackRealBatchStart,
+} from "../challengeCupTelemetry";
 import type {
   ChallengeCupRealBatchAuthorization,
   ChallengeCupRealBatchPlanId,
@@ -218,26 +225,39 @@ export function ChallengeRealBatchControlPanel({
   }
 
   const authorizeMutation = useMutation({
+    onMutate: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) => ({
+      telemetry: trackRealBatchAuthorize({ teamId: mutationTeamId, planId }),
+    }),
     mutationFn: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) =>
       authorizeChallengeCupRealBatch(mutationTeamId, planId),
-    onSuccess: (result: unknown) => {
+    onSuccess: (result: unknown, vars, ctx) => {
       if (!isAuthorization(result, selectedPlanId)) {
+        ctx?.telemetry?.failed(new Error("authorize_response_shape_invalid"));
+        observeRealBatchAuthorizeShapeInvalid({ teamId: vars.teamId, planId: vars.planId });
         setAuthorization(null);
         setConfirmAction(null);
         addEvent(zh ? "授权响应异常 · 状态保持关闭" : "Authorization response invalid · state remains closed");
         return;
       }
+      ctx?.telemetry?.succeeded({
+        authorizationId: result.authorizationId,
+        scopeHash: result.scopeHash,
+      });
       setAuthorization(result);
       setConfirmAction(null);
       addEvent(zh ? `已写入 durable 授权 · scope ${shortHash(result.scopeHash)}` : `Durable authorization recorded · scope ${shortHash(result.scopeHash)}`);
     },
-    onError: (reason: unknown) => {
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
       setAuthorization(null);
       addEvent(zh ? `授权失败 · ${errorText(reason, "服务端拒绝")}` : `Authorization failed · ${errorText(reason, "Rejected by server")}`);
     },
   });
 
   const startMutation = useMutation({
+    onMutate: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) => ({
+      telemetry: trackRealBatchStart({ teamId: mutationTeamId, planId }),
+    }),
     mutationFn: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) =>
       startChallengeCupRealBatch(mutationTeamId, planId, {
         confirmed: true,
@@ -245,22 +265,28 @@ export function ChallengeRealBatchControlPanel({
         maxItems: null,
         failureBudget: null,
       }),
-    onSuccess: (result: ChallengeCupRealBatchStartResponse) => {
+    onSuccess: (result: ChallengeCupRealBatchStartResponse, _vars, ctx) => {
       const next = normalizeProjection(result, selectedPlanId);
       if (!next) {
+        ctx?.telemetry?.failed(new Error("start_response_shape_invalid"));
         setAuthorization(null);
         setPollingState(false);
         setConfirmAction(null);
         addEvent(zh ? "启动响应异常 · 状态保持关闭" : "Start response invalid · state remains closed");
         return;
       }
+      ctx?.telemetry?.succeeded({
+        launchedCount: (result.launched ?? []).length,
+        questionCount: next.questionCount,
+      });
       updateProjection(next);
       setConfirmAction(null);
       setPollingState(!next.gateComplete && !next.cancelled && next.canResume);
       const launched = result.launched ?? [];
       addEvent(zh ? `启动完成 · 新派遣 ${launched.length} 个问题` : `Start completed · launched ${launched.length} questions`);
     },
-    onError: (reason: unknown) => {
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
       // A failed start cannot prove the local authorization is still current.
       setAuthorization(null);
       addEvent(zh ? `启动失败 · ${errorText(reason, "服务端拒绝")}` : `Start failed · ${errorText(reason, "Rejected by server")}`);
@@ -287,29 +313,36 @@ export function ChallengeRealBatchControlPanel({
           : `Background poll · harvested ${harvested.length} · launched ${launched.length}`);
       }
     },
-    onError: (reason: unknown) => {
+    onError: (reason: unknown, vars) => {
+      observeRealBatchPollLoopStopped({ teamId: vars.teamId, planId: vars.planId, error: reason });
       setPollingState(false);
       addEvent(zh ? `后台刷新失败 · ${errorText(reason, "状态不可用")}` : `Background poll failed · ${errorText(reason, "Status unavailable")}`);
     },
   });
 
   const cancelMutation = useMutation({
+    onMutate: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) => ({
+      telemetry: trackRealBatchCancel({ teamId: mutationTeamId, planId }),
+    }),
     mutationFn: ({ teamId: mutationTeamId, planId }: { teamId: string; planId: ChallengeCupRealBatchPlanId }) =>
       cancelChallengeCupRealBatch(mutationTeamId, planId, { confirmed: true }),
-    onSuccess: (result: ChallengeCupRealBatchProjection) => {
+    onSuccess: (result: ChallengeCupRealBatchProjection, _vars, ctx) => {
       const next = normalizeProjection(result, selectedPlanId);
       if (!next) {
+        ctx?.telemetry?.failed(new Error("cancel_response_shape_invalid"));
         setPollingState(false);
         setConfirmAction(null);
         addEvent(zh ? "取消响应异常 · 状态保持关闭" : "Cancel response invalid · state remains closed");
         return;
       }
+      ctx?.telemetry?.succeeded();
       updateProjection(next);
       setConfirmAction(null);
       setPollingState(false);
       addEvent(zh ? "批次已取消 · 运行中的问题未被强制终止" : "Batch cancelled · running questions were not force-stopped");
     },
-    onError: (reason: unknown) => {
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
       addEvent(zh ? `取消失败 · ${errorText(reason, "服务端拒绝")}` : `Cancel failed · ${errorText(reason, "Rejected by server")}`);
     },
   });

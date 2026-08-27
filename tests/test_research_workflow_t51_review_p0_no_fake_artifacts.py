@@ -20,7 +20,9 @@ from core.web.services.team_workflow.research_runtime.artifact_readback_registry
     materialize_domain_artifact,
     read_domain_artifact,
 )
-from core.web.services.team_workflow.research_runtime.domain_ports import AgentTaskHandle
+from core.web.services.team_workflow.research_runtime.domain_ports import (
+    AgentTaskHandle,
+)
 from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
     canonical_sha256,
 )
@@ -42,7 +44,7 @@ def test_forged_cross_team_readback_rejected(
     from tests._support.team_workflow.helpers import _use_tmp_project_root
 
     _use_tmp_project_root(tmp_path, monkeypatch)
-    import core.infrastructure.path_containment as path_containment
+    from core.infrastructure import path_containment
 
     monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
 
@@ -115,18 +117,20 @@ def test_forged_cross_team_readback_rejected(
 
 
 def test_wait_for_non_terminal_turn_raises_not_ready() -> None:
-    with patch(
-        "core.web.services.session.turn_diagnostics.get_session_turn_completion_snapshot",
-        return_value={
-            "terminal": False,
-            "isRunning": True,
-            "terminalStatus": "",
-        },
+    with (
+        patch(
+            "core.web.services.session.turn_diagnostics.get_session_turn_completion_snapshot",
+            return_value={
+                "terminal": False,
+                "isRunning": True,
+                "terminalStatus": "",
+            },
+        ),
+        pytest.raises(TurnNotReadyError),
     ):
-        with pytest.raises(TurnNotReadyError):
-            wait_for_agent_turn_terminal(
-                "session-x", "turn-x", timeout_ms=300, poll_ms=50
-            )
+        wait_for_agent_turn_terminal(
+            "session-x", "turn-x", timeout_ms=300, poll_ms=50
+        )
 
 
 def test_wait_for_project_reconcilable_needs_continue_turn() -> None:
@@ -275,6 +279,67 @@ def test_complete_turn_does_not_invent_example_local_candidates(
         __import__(
             "core.web.services.team_workflow.research_runtime.agent_turn_materializer"
         )
+
+
+def test_source_collection_turn_never_receives_reconcilable_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only research_project turns may treat ``needs_continue`` as reconcilable."""
+    captured_kwargs: list[dict[str, object]] = []
+
+    def record_wait(*_args: object, **kwargs: object) -> dict[str, object]:
+        captured_kwargs.append(dict(kwargs))
+        return {"terminal": True, "isRunning": False, "terminalStatus": "ready"}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        record_wait,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_a, **_k: [],
+    )
+    reconciles: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_writeback.reconcile_source_collection_stage_session_task_after_turn",
+        lambda *_a, **_k: reconciles.append({"called": True}),
+    )
+
+    refs = complete_agent_turn_outputs(
+        action=PendingAction(
+            action_id="act-sc-gate",
+            run_id="run-sc-gate",
+            node_run_id="nr-sc-gate",
+            node_id="source_finding",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="",
+        ),
+        handle=AgentTaskHandle(
+            session_id="session-sc-gate",
+            session_attempt=1,
+            task_id="task-sc-gate",
+            turn_id="turn-sc-gate",
+        ),
+        input_snapshot={
+            "teamId": "team-sc-gate",
+            "projectId": "project-sc-gate",
+            "sourceCollectionRunId": "sc-gate",
+        },
+    )
+
+    assert refs == []
+    assert reconciles == [{"called": True}]
+    assert len(captured_kwargs) == 1
+    # A source_collection turn must keep needs_continue fatal: the default
+    # (empty) reconcilable set, never the project-task one.
+    assert (
+        captured_kwargs[0].get("reconcilable_terminal_statuses") == frozenset()
+    )
 
 
 def test_completed_project_agent_task_is_closed_before_successor_dispatch(

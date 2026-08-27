@@ -199,16 +199,20 @@ def load_workflow_artifact_payload(
     authority_run_id: str,
     workflow_run_id: str = "",
     content_hash: str = "",
+    record_id: str = "",
 ) -> dict[str, Any] | None:
     """Return the latest scoped payload envelope for hashing/read-back.
 
     The envelope shape is stable and is what ``collect_required_artifact_refs`` /
     ``read_domain_artifact`` hash — do not embed a precomputed contentHash.
+    ``record_id`` optionally pins the read to one immutable artifact identity
+    instead of the latest record in scope.
     """
     kind_key = str(kind or "").strip()
     team = str(team_id or "").strip()
     authority = str(authority_run_id or "").strip()
     workflow = str(workflow_run_id or "").strip()
+    wanted_record = str(record_id or "").strip()
     if not kind_key or not team or not authority:
         return None
     rows = list_workflow_artifacts(
@@ -217,6 +221,12 @@ def load_workflow_artifact_payload(
         workflow_run_id=workflow,
         source_collection_run_id=authority,
     )
+    if wanted_record:
+        rows = [
+            row
+            for row in rows
+            if str(row.get("recordId") or "") == wanted_record
+        ]
     if not rows:
         return None
     expected_hash = str(content_hash or "").strip()
