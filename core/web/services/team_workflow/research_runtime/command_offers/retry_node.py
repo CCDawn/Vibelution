@@ -17,9 +17,24 @@ _RETRYABLE_ATTEMPT_STATUSES = frozenset({"failed", "blocked", "cancelled"})
 # node had been marked succeeded, leaving the candidate store empty and the
 # successor wedged on source_candidates_missing).  Their stores are
 # append-only and deduplicated, so a re-run is safe; every other node keeps
-# the strict non-retryable contract for succeeded attempts.
-_RERUNNABLE_SUCCEEDED_NODES = frozenset({"source_finding"})
-_RERUN_BLOCKER_DETAILS = frozenset({"source_candidates_missing"})
+# the strict non-retryable contract for succeeded attempts.  This mapping is
+# the single authority for "which upstream node heals this blocker detail";
+# offers, the command handler and the current-task projection all read it.
+_RERUN_BLOCKER_TARGET_NODES = {"source_candidates_missing": "source_finding"}
+
+
+def succeeded_node_rerun_target(run: RunRecord) -> str | None:
+    """Node that owns recovery when the run is blocked by a hollow success."""
+
+    if str(run.status or "").strip() != "blocked":
+        return None
+    try:
+        problem = json.loads(str(run.blocked_problem_json or "") or "{}")
+    except (TypeError, ValueError):
+        return None
+    if str(problem.get("code") or "") != "auto_advance_not_ready":
+        return None
+    return _RERUN_BLOCKER_TARGET_NODES.get(str(problem.get("detail") or "")) or None
 
 
 def succeeded_node_rerun_available(
@@ -34,19 +49,9 @@ def succeeded_node_rerun_available(
     missing artifacts cause, so a healthy succeeded node never offers a retry.
     """
 
-    if latest is None or str(node_id) not in _RERUNNABLE_SUCCEEDED_NODES:
+    if succeeded_node_rerun_target(run) != str(node_id):
         return False
-    if str(latest.status or "").strip() != "succeeded":
-        return False
-    if str(run.status or "").strip() != "blocked":
-        return False
-    try:
-        problem = json.loads(str(run.blocked_problem_json or "") or "{}")
-    except (TypeError, ValueError):
-        return False
-    if str(problem.get("code") or "") != "auto_advance_not_ready":
-        return False
-    return str(problem.get("detail") or "") in _RERUN_BLOCKER_DETAILS
+    return latest is not None and str(latest.status or "").strip() == "succeeded"
 
 
 def build_retry_node_offers(

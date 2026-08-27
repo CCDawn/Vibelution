@@ -24,6 +24,10 @@ from core.research.workflow.models import WorkflowDefinition
 
 from ..active_discussion_anchor import project_active_discussion_anchor
 from .blocked_reason import format_blocked_reason, parse_problem_json
+from .command_offers.retry_node import (
+    succeeded_node_rerun_available,
+    succeeded_node_rerun_target,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +326,25 @@ def _current_task(
         node_id=node_id,
         expected_run_version=run.run_version,
     )
+    rerun_target = succeeded_node_rerun_target(run)
+    if rerun_target and rerun_target != node_id:
+        rerun_latest = latest_by_node.get(rerun_target)
+        if succeeded_node_rerun_available(
+            node_id=rerun_target, latest=rerun_latest, run=run
+        ):
+            # The run is blocked because this idempotent upstream node
+            # "succeeded" without materializing its artifacts; re-running it
+            # owns the recovery, so it — not the wedged successor — is the
+            # user-facing current task.
+            node_id = rerun_target
+            latest = rerun_latest
+            task = None
+            start_offer = _available_offer(
+                command_offers,
+                command="start_node",
+                node_id=node_id,
+                expected_run_version=run.run_version,
+            )
     if (
         run.status in {"created", "running"}
         and start_offer is None
