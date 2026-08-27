@@ -39,7 +39,7 @@ PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 16
 # The extractor template carries the evidence-remediation fetch protocol on
 # top of the shared stage-task baseline; it bumps independently.
-CHALLENGE_CUP_EXTRACTOR_PROMPT_VERSION = CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION + 1
+CHALLENGE_CUP_EXTRACTOR_PROMPT_VERSION = CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION + 2
 SUPERVISED_BASELINE_PROMPT_VERSION = 15
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
 SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 17
@@ -555,7 +555,10 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 用 source_collection_stage_writeback_tool 回写逐来源判断、可定位引文、限制、反证和失败原因。\n"
             "- 不写正式知识，不调用知识提案/摄取，不运行 Shell、Git、测试或代码修改工具。\n\n"
             "## 输出要求\n"
-            "每条提炼必须含 source locator、原文定位、证据或反证、适用限制和 decision；无法定位时写 needs_review，不补造内容；收到 evidenceRemediationContract 时必须先完成全部 scopeCandidateIds 的抓取尝试再回写。"
+            "每条提炼必须含 source locator、原文定位、证据或反证、适用限制和 decision；无法定位时写 needs_review，不补造内容；收到 evidenceRemediationContract 时必须先完成全部 scopeCandidateIds 的抓取尝试再回写。\n"
+            "## 收尾语义\n"
+            "- 完成全部 scopeCandidateIds 的抓取尝试并如实回写后，即视为本阶段任务完成：个别定位符抓取失败只要带 failureCode 如实记录，就被补救契约接受，不是「部分完成」。\n"
+            "- completionGate.passed=true 且 coverageSummary.complete=true 时，最终报告必须以明确结论收尾（说明已完成提炼与回写），锚点缺口等细节只写入 writeback 结果；不要以「部分完成/待补」作为本轮总结论，那会让流程误判为未完成。"
         ),
         "metadata": {
             "builtin": True,
