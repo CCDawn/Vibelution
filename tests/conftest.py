@@ -94,10 +94,18 @@ def pytest_ignore_collect(collection_path=None, path=None, config=None):
     return False
 
 
+# Storage bootstrap modules resolve checkout-owned mutable state (runtime
+# manager events, legacy .runtime trees) from ambient environment variables.
+# Import-time evaluation happens after test fixtures may have monkeypatched
+# those variables, so files importing them must ride the runtime-manager
+# isolation stack or storage_migration step/readiness events can append into
+# the real checkout's `.runtime` tree or the operator projects home.
 _RUNTIME_MODULE_PREFIXES = (
     "core.web",
     "core.runtime_manager",
     "core.ui.chat_state",
+    "core.infrastructure.storage_migration",
+    "vibelution_storage",
 )
 
 _SINGLETON_ONLY_MODULE_PREFIXES = (
@@ -327,7 +335,9 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
 
     from core.runtime_manager import evolution_store
     from core.runtime_manager import work_run_store
+    from core.runtime_manager import scene_logging as scene_logging_module
     from core.infrastructure import developer_sandbox
+    from core.infrastructure import storage_migration as storage_migration_module
     from core.web.services import runtime_scene_service
     from core.web.services import agent_directory_service
     from core.web.services import agent_mode_binding_service
@@ -358,6 +368,21 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    # Runtime-manager file events must never reach the real checkout or the
+    # operator projects home: `EVENTS_PATH` is a module constant evaluated at
+    # (possibly lazy, environment-sensitive) import time, so pin it to tmp_path
+    # together with its directory bootstrap.
+    runtime_manager_events_path = runtime_manager_dir / "events.jsonl"
+    monkeypatch.setattr(scene_logging_module, "EVENTS_PATH", runtime_manager_events_path)
+    monkeypatch.setattr(
+        scene_logging_module,
+        "ensure_runtime_manager_dirs",
+        lambda: runtime_manager_events_path.parent.mkdir(parents=True, exist_ok=True),
+    )
+    # The readiness-blocked flood suppressor keeps per-signature timestamps in
+    # module state; without a reset an earlier test's signature silently drops
+    # later tests' readiness_blocked events within the 300s window.
+    storage_migration_module._readiness_blocked_log_state.clear()
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _reset_agent_directory_caches(agent_directory_service)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
