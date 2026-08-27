@@ -38,6 +38,7 @@ def _source_collection_stage_task_writeback_contract(
     stage_id: str,
     agent_id: str,
     agent_role: str,
+    allowed_relation_endpoint_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     return s._source_collection_stage_task_writeback_contract_payload(
@@ -48,6 +49,7 @@ def _source_collection_stage_task_writeback_contract(
         agent_id=agent_id,
         agent_role=agent_role,
         schema_version=s.SCHEMA_VERSION,
+        allowed_relation_endpoint_ids=allowed_relation_endpoint_ids,
     )
 
 

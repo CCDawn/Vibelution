@@ -927,6 +927,11 @@ def start_source_collection_stage_session_task(
         stage_id=stage_id,
         agent_id=agent_id,
         agent_role=agent_role,
+        allowed_relation_endpoint_ids=(
+            s._source_collection_relations_allowed_endpoint_ids(source_candidates)
+            if s._normalize_source_collection_stage_id(stage_id, default="") == "relations"
+            else None
+        ),
     )
     task_checklist = s._source_collection_stage_task_checklist(
         stage_id,

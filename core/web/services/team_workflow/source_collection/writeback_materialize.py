@@ -18,6 +18,7 @@ import re
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
+from .relation_endpoints import build_relation_endpoint_registry, resolve_relation_endpoint
 
 
 def _service():
@@ -1055,7 +1056,9 @@ def _source_collection_stage_writeback_closure_summary(
             retry_instruction = (
                 f"本轮有 {relation_dangling_edge_count} 条候选关系边因端点不在本轮候选图节点表中被丢弃。"
                 "请调用 source_collection_context_tool 重读本批候选的完整 candidateId（主题枢纽端点用已声明主题的 source-theme ID），"
-                "不要发明 rh_claim 之类的逻辑端点，重新回写这些关系。"
+                "记不住完整 ID 时可写候选标题或主题 label 作语义端点，服务端会确定性解析；"
+                "语义枢纽必须先在同一轮回写的 themeNodes[] 中声明再连边，"
+                "不要发明 rh_claim 之类未声明的逻辑端点，重新回写这些关系。"
             )
     elif stage_id == "ingestion" or agent_role == "source_ingestor":
         target_label = "入库审核包"
@@ -1276,6 +1279,7 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
         "edgeCount": s._source_collection_count(graph_summary.get("edgeCount")),
         "missingLinkCount": s._source_collection_count(graph_summary.get("missingLinkCount")),
         "danglingEdgeCount": s._source_collection_count(graph_summary.get("danglingEdgeCount")),
+        "semanticBindingEdgeCount": s._source_collection_count(graph_summary.get("semanticBindingEdgeCount")),
         "unreviewedNodeCount": s._source_collection_count(graph_summary.get("unreviewedNodeCount")),
         "inputCandidateCount": s._source_collection_count(graph_summary.get("inputCandidateCount")),
         "filteredCandidateCount": s._source_collection_count(graph_summary.get("filteredCandidateCount")),
@@ -1745,6 +1749,7 @@ def _source_collection_stage_writeback_candidate_graph_summary(
         "edgeCount": s._source_collection_count(graph.get("edgeCount")),
         "missingLinkCount": s._source_collection_count(graph.get("missingLinkCount")),
         "danglingEdgeCount": s._source_collection_count(graph.get("danglingEdgeCount")),
+        "semanticBindingEdgeCount": s._source_collection_count(graph.get("semanticBindingEdgeCount")),
         "unreviewedNodeCount": s._source_collection_count(graph.get("unreviewedNodeCount")),
         "inputCandidateCount": s._source_collection_count(graph.get("inputCandidateCount")),
         "filteredCandidateCount": s._source_collection_count(graph.get("filteredCandidateCount")),
@@ -1917,7 +1922,13 @@ def _merge_source_collection_stage_writeback_agent_graph(
     missing_links = [dict(item) for item in list(merged_graph.get("missingLinks") or []) if isinstance(item, dict)]
     unreviewed_nodes = [dict(item) for item in list(merged_graph.get("unreviewedNodes") or []) if isinstance(item, dict)]
     node_ids = {s._trim_text(node.get("candidateId"), max_length=160) for node in nodes if s._trim_text(node.get("candidateId"), max_length=160)}
-    for node in s._source_collection_agent_graph_nodes(agent_graph):
+    agent_relation_nodes = s._source_collection_agent_graph_nodes(agent_graph)
+    # 结构约束两段式绑定：闭集注册表（服务端节点 + 本轮声明节点）之上做
+    # 确定性语义端点解析（标题/主题别名），解析结果在入图前改写回真实
+    # candidateId；解析不了的端点仍走 fail-closed 降级，不放宽门禁。
+    endpoint_registry = build_relation_endpoint_registry([*nodes, *agent_relation_nodes])
+    semantic_binding_edge_count = 0
+    for node in agent_relation_nodes:
         node_id = s._trim_text(node.get("candidateId"), max_length=160)
         if not node_id or node_id in node_ids:
             continue
@@ -1941,14 +1952,23 @@ def _merge_source_collection_stage_writeback_agent_graph(
         relation = s._trim_text(edge.get("relation"), max_length=160)
         if not source_id or not target_id or not relation:
             continue
-        edge_key = (source_id, target_id, relation)
+        effective_source = resolve_relation_endpoint(source_id, endpoint_registry) or source_id
+        effective_target = resolve_relation_endpoint(target_id, endpoint_registry) or target_id
+        edge_key = (effective_source, effective_target, relation)
         if edge_key in seen_edges:
             continue
-        if source_id in node_ids and target_id in node_ids:
+        if effective_source in node_ids and effective_target in node_ids:
+            if (effective_source, effective_target) != (source_id, target_id):
+                edge = {
+                    **edge,
+                    "sourceCandidateId": effective_source,
+                    "targetCandidateId": effective_target,
+                }
+                semantic_binding_edge_count += 1
             edges.append(edge)
         else:
-            # Fail-closed: 端点未命中节点表的边降级为 missingLink，并单独计数，
-            # 供 relations 阶段完整性判定（danglingEdgeCount>0 即图不完整）。
+            # Fail-closed: 端点经语义解析仍未命中节点表的边降级为 missingLink，
+            # 并单独计数，供 relations 阶段完整性判定（danglingEdgeCount>0 即图不完整）。
             missing_links.append(edge)
             dangling_edge_count += 1
         seen_edges.add(edge_key)
@@ -1961,8 +1981,9 @@ def _merge_source_collection_stage_writeback_agent_graph(
             "missingLinkCount": len(missing_links),
             "danglingEdgeCount": dangling_edge_count,
             "unreviewedNodeCount": len(unreviewed_nodes),
-            "agentRelationNodeCount": len(s._source_collection_agent_graph_nodes(agent_graph)),
+            "agentRelationNodeCount": len(agent_relation_nodes),
             "agentRelationEdgeCount": len(s._source_collection_agent_graph_edges(agent_graph)),
+            "semanticBindingEdgeCount": semantic_binding_edge_count,
         }
     )
     coverage = agent_graph.get("relationCoverage") if isinstance(agent_graph.get("relationCoverage"), dict) else {}

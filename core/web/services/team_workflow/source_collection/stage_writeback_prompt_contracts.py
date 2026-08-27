@@ -35,6 +35,8 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 必须显式写 `counterEvidenceRefs[]`：只登记真实限制、反例或否定性证据，每项包含 `evidenceRef`、`claim` 和处置 `disposition`；支持性背景关系不得冒充反证。",
             "- 如果没有真实反证，`counterEvidenceRefs=[]` 并保持 `status=needs_review`；不得为了通过门禁伪造反证引用。",
             "- `candidateRelations[]` 的每条边必须绑定真实 `evidenceRefs[]`，关系图只表达候选事实，不得升级为正式结论。",
-            "- 先用 `source_collection_context_tool` 读到本批候选的完整 `candidateId` 再写边：`candidateRelations[]` 的两端只能来自这些真实节点（主题枢纽端点用本轮回写中已声明主题的主题 ID，物化为 `source-theme:<themeId>`）；禁止发明 `rh_claim` 之类的逻辑端点或展示别名——端点不在节点表中的边会被丢弃并计入 `missingLinks`，阻塞下游 knowledge_ingestion。",
+            "- 先用 `source_collection_context_tool` 读到本批候选与写回契约：边端点优先用契约 `endpointPolicy.allowedEndpointIds` 中的完整 `candidateId`（主题枢纽端点用已声明主题的主题 ID，物化为 `source-theme:<themeId>`）。",
+            "- 端点记不住完整 ID 时可写候选标题或已声明主题的 label/裸主题 ID 作语义端点，服务端会确定性解析回注册表节点；解析不了的边按悬空处理计入 `missingLinks`（danglingEdgeCount），阻塞下游 knowledge_ingestion。",
+            "- 语义枢纽必须先在同一轮回写的 `themeNodes[]` 中声明（themeId+label）再连边；禁止发明 `rh_claim` 之类未声明的逻辑端点或展示别名。",
         ]
     return []

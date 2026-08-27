@@ -25,6 +25,78 @@ SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {
 }
 SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES = {"queued", "running"}
 
+# 闭集枚举上限：契约里允许列出的端点 candidateId 数量，超出时截断并在
+# 契约里显式标注 truncated，让 Agent 用分页上下文补全。
+MAX_RELATION_ENDPOINT_ENUM_IDS = 500
+
+
+def source_collection_relations_allowed_endpoint_ids(
+    source_candidates: Iterable[Any] | None,
+) -> list[str]:
+    """Extract the deduplicated candidateId closed set for relations tasks."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in list(source_candidates or []):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = trim_text(item.get("candidateId"), max_length=160)
+        if not candidate_id or candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        ordered.append(candidate_id)
+    return ordered
+
+
+def _source_collection_relations_result_contract(
+    allowed_endpoint_ids: Iterable[str],
+) -> dict[str, Any]:
+    endpoint_ids: list[str] = []
+    seen: set[str] = set()
+    for value in allowed_endpoint_ids:
+        candidate_id = trim_text(value, max_length=160)
+        if not candidate_id or candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        endpoint_ids.append(candidate_id)
+    truncated = len(endpoint_ids) > MAX_RELATION_ENDPOINT_ENUM_IDS
+    if truncated:
+        endpoint_ids = endpoint_ids[:MAX_RELATION_ENDPOINT_ENUM_IDS]
+    return {
+        "acceptedCollections": [
+            "candidateGraph",
+            "candidateRelations",
+            "themeNodes",
+            "sourceThemeEdges",
+            "topicRelations",
+            "missingLinks",
+        ],
+        "edgeIdentityFields": ["sourceCandidateId", "targetCandidateId", "relation"],
+        "endpointPolicy": {
+            # LlamaIndex SchemaLLMPathExtractor 式闭集：优先只输出注册表中的
+            # 完整 candidateId； Neo4j graphrag Entity Resolution 式兜底：
+            # 语义端点由服务端确定性解析到注册表节点。
+            "mode": "closed_set_ids_plus_declared_themes_with_semantic_fallback",
+            "allowedEndpointIds": endpoint_ids,
+            "allowedEndpointIdCount": len(endpoint_ids),
+            "allowedEndpointIdsTruncated": truncated,
+            "semanticEndpoints": {
+                "allowedInputs": [
+                    "候选标题（服务端规范化后匹配注册表）",
+                    "已声明主题的主题 ID、主题 ID 裸值或主题 label",
+                ],
+                "resolution": "deterministic_exact_or_normalized_match_only",
+                "unresolvedOutcome": (
+                    "edgeDroppedToMissingLinksAndCountedAsDanglingEdge"
+                ),
+            },
+            "hubDeclarationRule": (
+                "主题/主张类枢纽必须先在同一轮回写的 themeNodes[] 中声明"
+                "（带 themeId 和 label），再在边上引用；未声明的逻辑枢纽端点"
+                "（如 rh_claim）会被丢弃并阻塞下游 knowledge_ingestion。"
+            ),
+        },
+    }
+
 
 def source_collection_stage_can_materialize_formal_knowledge(stage_id: str, agent_role: str) -> bool:
     return (
@@ -140,6 +212,7 @@ def source_collection_stage_task_writeback_contract(
     agent_id: str,
     agent_role: str,
     schema_version: int,
+    allowed_relation_endpoint_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     endpoint = f"/api/teams/{urllib.parse.quote(team_id, safe='')}/workflow-orchestration/stage-session-tasks/{urllib.parse.quote(task_id, safe='')}/writeback"
     can_materialize_formal_knowledge = source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
@@ -165,6 +238,10 @@ def source_collection_stage_task_writeback_contract(
     }
     if normalize_source_collection_stage_id(stage_id, default="") == "extraction":
         contract["resultContract"] = _source_collection_extraction_result_contract()
+    if normalize_source_collection_stage_id(stage_id, default="") == "relations":
+        contract["resultContract"] = _source_collection_relations_result_contract(
+            allowed_relation_endpoint_ids or []
+        )
     return contract
 
 
