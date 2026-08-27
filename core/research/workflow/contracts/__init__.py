@@ -23,6 +23,31 @@ from .automation_policy import (
     compute_policy_content_hash,
 )
 from .budget import ResearchBudgetLedger
+from .candidate_diversity import (
+    CANDIDATE_COUNT_RANGE_MAX,
+    CANDIDATE_COUNT_RANGE_MIN,
+    CANDIDATE_SCREENING_CONTRACT_VERSION,
+    DEFAULT_APPROXIMATE_MATCH_AXES,
+    DEFAULT_DRAFT_POOL_SIZE,
+    DEFAULT_FINALIST_LIMIT,
+    DEFAULT_REQUIRED_THRESHOLD_IDS,
+    DIVERSITY_AXES,
+    MAX_FINALIST_LIMIT,
+    CandidateMergeRecord,
+    CandidateRejectionRecord,
+    CandidateScreeningArtifact,
+    CandidateScreeningDraft,
+    DiversityAxis,
+    DiversityMergeKind,
+    HardThresholdCheck,
+    HypothesisAxisProfile,
+    ScreeningRejectionReason,
+    ScreeningThresholds,
+    normalize_axis_text,
+    parse_diversity_axis,
+    parse_merge_kind,
+    parse_rejection_reason,
+)
 from .catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_EVIDENCE_IDS,
     CATALOG_HYPOTHESIS_FLOW_EVIDENCE_STATUSES,
