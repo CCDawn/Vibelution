@@ -32,6 +32,10 @@ def writeback_source_collection_stage_session_task(
         raise s.TeamWorkflowOrchestrationError(f"Stage session task not found: {normalized_task_id}")
     status = s._normalize_source_collection_stage_session_task_status(request_payload.get("status") or request_payload.get("resultStatus"))
     result_payload = s._normalize_source_collection_stage_writeback_result_payload(request_payload.get("result"))
+    result_payload = s._merge_source_collection_stage_writeback_evidence_fetch_attempts(
+        result_payload,
+        request_payload.get("evidenceRefs"),
+    )
     result_payload = s._merge_source_collection_stage_writeback_result_payload(normalized_team_id, run_id, task, result_payload)
     writeback = {
         "status": status,

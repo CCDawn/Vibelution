@@ -2906,6 +2906,59 @@ def _merge_source_collection_stage_writeback_array_items(
     return [merged[key] for key in order[:max_items]]
 
 
+def _merge_source_collection_stage_writeback_evidence_fetch_attempts(
+    result_payload: dict[str, Any],
+    evidence_refs: Any,
+) -> dict[str, Any]:
+    """Fold fetch-attempt-shaped ``evidenceRefs`` into ``evidenceFetchAttempts``.
+
+    The writeback tool documents ``evidence_refs_json`` as the channel for
+    evidence references, and agents legitimately submit remediation locator
+    fetch attempts there (``{candidateId, locator, status, toolName,
+    failureCode}``).  The completion gate only reads
+    ``result.evidenceFetchAttempts``, so the writeback boundary normalizes
+    attempt-shaped reference entries into that record instead of trusting the
+    agent to pick one exact channel.  Later entries win per candidateId.
+    """
+
+    s = _service()
+    payload = dict(result_payload if isinstance(result_payload, dict) else {})
+    attempts: dict[str, dict[str, Any]] = {}
+    for item in list(payload.get("evidenceFetchAttempts") or []):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = s._trim_text(item.get("candidateId"), max_length=160)
+        if candidate_id:
+            attempts[candidate_id] = dict(item)
+    for item in list(evidence_refs or []):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = s._trim_text(item.get("candidateId"), max_length=160)
+        locator = s._trim_text(item.get("locator"), max_length=1000)
+        status = s._trim_text(item.get("status"), max_length=80).lower()
+        tool_name = s._trim_text(item.get("toolName"), max_length=120)
+        if (
+            not candidate_id
+            or not locator
+            or tool_name != "web_fetch_tool"
+            or status not in {"fetched", "failed"}
+        ):
+            continue
+        attempt = {
+            "candidateId": candidate_id,
+            "locator": locator,
+            "status": status,
+            "toolName": tool_name,
+        }
+        failure_code = s._trim_text(item.get("failureCode"), max_length=160)
+        if failure_code:
+            attempt["failureCode"] = failure_code
+        attempts[candidate_id] = attempt
+    if attempts:
+        payload["evidenceFetchAttempts"] = list(attempts.values())
+    return payload
+
+
 def _normalize_source_collection_stage_writeback_result_payload(value: Any) -> dict[str, Any]:
     s = _service()
     if not isinstance(value, dict):

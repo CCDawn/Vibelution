@@ -173,6 +173,7 @@ from core.web.services.team_workflow.source_collection.writeback_materialize imp
     _source_collection_stage_writeback_record_payload,
     _source_collection_stage_writeback_authors,
     _source_collection_stage_writeback_materialization_summary,
+    _merge_source_collection_stage_writeback_evidence_fetch_attempts,
     _merge_source_collection_stage_writeback_result_payload,
     _merge_source_collection_stage_writeback_result_pair,
     _merge_source_collection_stage_writeback_array_group,
