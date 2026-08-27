@@ -436,6 +436,14 @@ def test_graph_error_does_not_rewind_succeeded_iteration_attempt(tmp_path: Path)
 def test_repair_resumes_succeeded_iteration_interrupt_from_artifact(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Stranded iteration route repair is event-triggered, never swept.
+
+    The strand (ledger attempt succeeded, thread parked on
+    iteration_decision, decision only in the artifact store) has no live
+    dispatch of its own, so a plain worker cycle must leave it untouched;
+    the repair fires from the dispatch-failure event path or an explicit
+    call, and every repair emits a structured scene event.
+    """
     import json
 
     from core.web.services.team_workflow.research_runtime import workflow_artifact_store
@@ -492,11 +500,129 @@ def test_repair_resumes_succeeded_iteration_interrupt_from_artifact(
             )
 
         harness.commands.store.submit(drift_snapshot, force_flush=True).result(timeout=10)
+        # Worker cycles no longer rescan runs to rewrite graph state.
         harness.worker.run_once()
+        assert (
+            harness.commands.store.latest_attempt("run-test", "version_governance")
+            is None
+        )
+        # The event-triggered (or explicit) repair still heals the strand.
+        assert harness.worker.repair_stranded_iteration_route_for_run("run-test") is True
         pending = harness.latest_adapter_pending()
         assert pending is not None
         payload = json.loads(pending.payload_json)
         assert payload["nodeId"] == "version_governance"
+    finally:
+        harness.close()
+
+
+def test_iteration_decision_failure_triggers_stranded_route_repair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed iteration_decision dispatch is the event that fires the repair.
+
+    The failing resume leaves the thread at END (the router consumed the
+    interrupt, then raised on the empty decision). The repair hook runs
+    after the run is durably blocked, must not guess while no decision
+    artifact exists, and heals via ``enter_node`` once the decision lands.
+    """
+    import json
+
+    from core.research.workflow.contracts import ExecutionReceipt
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
+        GraphDispatchWorker,
+    )
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        put_workflow_artifact,
+    )
+    from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
+        decision = _walk_to("iteration_decision", harness)
+        node_run_id = f"nr-run-test-iteration_decision-a{decision['attempt']}"
+
+        def mark_succeeded(uow):
+            uow.repository.update_attempt_status(
+                node_run_id,
+                "succeeded",
+                FIXED_NOW_MS,
+                finished_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.execute(
+                "UPDATE workflow_runs SET status = 'running' WHERE run_id = ?",
+                ("run-test",),
+            )
+
+        harness.commands.store.submit(mark_succeeded, force_flush=True).result(timeout=10)
+        harness.consume_adapter(harness.latest_adapter_pending().action_id)
+
+        repair_calls: list[str] = []
+        original_repair = GraphDispatchWorker.repair_stranded_iteration_route_for_run
+
+        def tracking_repair(worker, run_id):
+            repair_calls.append(run_id)
+            return original_repair(worker, run_id)
+
+        monkeypatch.setattr(
+            GraphDispatchWorker,
+            "repair_stranded_iteration_route_for_run",
+            tracking_repair,
+        )
+
+        harness.enqueue_graph_dispatch(
+            "run-test",
+            "iteration_decision",
+            int(decision["attempt"]),
+            dispatch_kind="resume_action",
+            command_id="cmd-retry-iter",
+            idempotency_key="graph:retry-iter",
+            receipt=ExecutionReceipt(
+                action_id=str(decision["actionId"]),
+                node_run_id=node_run_id,
+                outcome="succeeded",
+                artifact_receipt_ids=(),
+                execution_anchor_id=None,
+                budget_receipt_id=None,
+                problem=None,
+                completed_at_ms=FIXED_NOW_MS,
+            ),
+        )
+        harness.worker.run_once()
+
+        # The dispatch failure fired the repair hook exactly once, while no
+        # decision artifact existed yet.
+        assert repair_calls == ["run-test"]
+        assert (
+            harness.commands.store.latest_attempt("run-test", "version_governance")
+            is None
+        )
+        run = harness.commands.store.get_run("run-test")
+        assert run is not None
+        # The attempt is already terminal (succeeded), so the failure cannot
+        # rewind it to blocked; it surfaces as reconciliation_required.
+        assert run.status == "reconciliation_required"
+
+        # The operator-supplied decision lands, but the checkpoint already
+        # carries the failed resume. The repair must not guess its way
+        # through a dirty checkpoint: it refuses (False) and leaves the run
+        # to heal / reconcile_run instead of forging state.
+        put_workflow_artifact(
+            "research-team",
+            kind="iteration_decision",
+            workflow_run_id="run-test",
+            source_collection_run_id="run-test",
+            payload={"decisionKind": "stop"},
+        )
+        assert harness.worker.repair_stranded_iteration_route_for_run("run-test") is False
+        assert (
+            harness.commands.store.latest_attempt("run-test", "version_governance")
+            is None
+        )
     finally:
         harness.close()
 

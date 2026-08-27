@@ -682,6 +682,61 @@ def test_goto_split_finding_interrupt_walks_to_controlled_run(tmp_path: Path) ->
         harness.close()
 
 
+def test_heal_step_failure_aborts_recovery_with_step_name(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A failing heal step aborts the whole recovery and names the step.
+
+    SCI-096 follow-up: the heal chain used to swallow exceptions and fall
+    through to the next fallback layer, so a half-applied heal only showed
+    up later as an aggregated decision error. Now the failing step stops the
+    recovery immediately and the blocked problem carries the structured
+    ``graph_recover_step_failed`` code plus the step name.
+    """
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.start_thread_to("source_finding")
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        _split_empty_run_id_interrupt(harness)
+        path = _linear_successor_path("source_finding", "controlled_run")
+        assert path is not None
+        _seed_succeeded_path(harness, path[:-1], with_handoffs=False)
+
+        def broken_restart_attempt(dispatch):
+            raise RuntimeError("time travel boom")
+
+        monkeypatch.setattr(
+            harness.coordinator, "restart_attempt", broken_restart_attempt
+        )
+
+        harness.enqueue_graph_dispatch("run-test", "controlled_run", 4)
+        harness.worker.run_once()
+
+        rows = harness.commands.store.read(
+            lambda repo: repo.execute(
+                """
+                SELECT status, last_problem_json
+                FROM outbox_actions
+                WHERE run_id = 'run-test' AND action_kind = 'graph_dispatch'
+                  AND status = 'failed'
+                """
+            ).fetchall()
+        )
+        assert rows, "heal failure must terminal-fail the dispatch, not retry it"
+        problem = json.loads(str(rows[0][1]))
+        assert problem["code"] == "graph_recover_step_failed"
+        assert "rebuild_interrupt" in problem["detail"]
+        assert "time travel boom" in problem["detail"]
+        run = harness.commands.store.get_run("run-test")
+        assert run is not None
+        assert run.status == "blocked"
+    finally:
+        harness.close()
+
+
 def test_pump_repairs_starting_attempt_missing_graph_dispatch(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:

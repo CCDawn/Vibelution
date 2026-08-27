@@ -83,14 +83,60 @@ def _is_hypothesis_first_prelude(run: Any) -> bool:
     return isinstance(objective, Mapping) and objective.get("hypothesisFirst") is True
 
 
-def _log_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
+def _record_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
+    """Surface a skipped repair step with a structured signal, never silently.
+
+    A skipped repair is not swallowed: the debug line keeps the old log
+    shape, and the scene event carries run/stage/cause so operators can
+    attribute why a stranded run was left untouched.
+    """
     debug.warning(
-        f"graph repair skipped run={run_id} stage={stage} error={type(exc).__name__}"
+        f"graph repair skipped run={run_id} stage={stage} "
+        f"error={type(exc).__name__}: {exc}"
+    )
+    _record_scene_event(
+        "graph_dispatch.repair_skipped",
+        outcome="repair_skipped",
+        fields={
+            "runId": run_id,
+            "stage": stage,
+            "errorType": type(exc).__name__,
+            "detail": str(exc)[:200],
+        },
     )
 
 
 class GraphDecisionError(RuntimeError):
     """An iteration decision the graph cannot route (run must block)."""
+
+
+class GraphRecoverStepError(RuntimeError):
+    """A named heal step failed; the whole recovery aborts with that name.
+
+    The SCI-096 heal chain used to swallow exceptions (``except Exception:
+    pass``) and fall through to later fallback layers, so a half-applied
+    heal only surfaced later as an aggregated decision error and operators
+    could not tell which layer corrupted the checkpoint.  The rebuild and
+    resume steps now raise this error with the step name and the original
+    exception chain, and no blind fallback layer runs after them.  The only
+    designed handoff left is a failed ``resume_live_interrupt`` degrading to
+    ``rebuild_interrupt`` (goto-split shapes); that handoff emits a
+    structured ``heal_step_degraded`` signal instead of staying silent.
+    """
+
+    def __init__(
+        self, step: str, run_id: str, node_id: str, exc: BaseException
+    ) -> None:
+        self.step = step
+        self.code = "graph_recover_step_failed"
+        self.problem = {
+            "code": self.code,
+            "detail": (
+                f"graph heal step '{step}' failed for run={run_id} "
+                f"node={node_id}: {type(exc).__name__}: {exc}"
+            ),
+        }
+        super().__init__(self.problem["detail"])
 
 
 class GraphDispatchWorker:
@@ -137,6 +183,19 @@ class GraphDispatchWorker:
         return self._store.submit(wrapped, force_flush=force_flush)
 
     def run_once(self, limit: int = 8) -> int:
+        # Retained sweeps, each with the failure it defends against (every
+        # action emits a structured scene event so repairs stay auditable):
+        # - created_without_start / terminal_failed_dispatch: dead-letter
+        #   crash recovery with no other observer (no live dispatch exists).
+        # - dispatching_without_adapter / starting_without_progress: commit
+        #   gaps left by a process crash; a crash emits no failure event, so
+        #   there is nothing to hook a trigger onto.
+        # - stranded_terminal_package: terminal-fact alignment for rows whose
+        #   dispatch chain is already gone; no live signal can fire for them.
+        # The state-rewriting iteration-route repair is deliberately NOT on
+        # this cycle: its only observable signal is a failed
+        # iteration_decision dispatch, which triggers
+        # _repair_stranded_iteration_route_after_failure directly.
         # Terminalize stale created runs before leasing their dispatch actions.
         # Otherwise this worker could lease an action for a run that the same
         # reconciliation pass is supposed to dead-letter.
@@ -153,7 +212,6 @@ class GraphDispatchWorker:
             self._handle(action)
         repaired += self._repair_dispatching_without_adapter()
         repaired += self._repair_starting_without_progress()
-        repaired += self._repair_stranded_iteration_route()
         repaired += self._repair_stranded_terminal_package()
         repaired += self._repair_terminal_failed_dispatch()
         return len(leased) + repaired
@@ -213,7 +271,7 @@ class GraphDispatchWorker:
                 """,
                 (cutoff_ms,),
             ).fetchall()
-            repaired = 0
+            repaired_runs: list[str] = []
             for row in rows:
                 run_id = str(row[0] or "")
                 team_id = str(row[1] or "")
@@ -291,7 +349,7 @@ class GraphDispatchWorker:
                     ):
                         continue
                     cancel_live_dispatch(run_id, event_payload["reason"])
-                    repaired += 1
+                    repaired_runs.append(run_id)
                     continue
                 expected_sequence = run.last_event_sequence + 1
                 if not uow.repository.update_run_status(
@@ -331,10 +389,23 @@ class GraphDispatchWorker:
                         now_ms=now_ms,
                     )
                 )
-                repaired += 1
-            return repaired
+                repaired_runs.append(run_id)
+            return repaired_runs
 
-        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
+        dead_lettered = list(
+            self._submit(mutate, force_flush=True).result(timeout=30) or ()
+        )
+        for dead_run_id in dead_lettered:
+            _record_scene_event(
+                "graph_dispatch.created_run_deadlettered",
+                outcome="recovered",
+                fields={
+                    "runId": dead_run_id,
+                    "terminalReason": "dispatch_never_started",
+                    "sweep": "created_without_start",
+                },
+            )
+        return len(dead_lettered)
 
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)
@@ -378,6 +449,11 @@ class GraphDispatchWorker:
                 result = self._resume(dispatch)
         except GraphDecisionError as exc:
             self._mark_blocked(action, dispatch, str(exc))
+            self._repair_stranded_iteration_route_after_failure(dispatch)
+            return
+        except GraphRecoverStepError as exc:
+            self._mark_blocked(action, dispatch, str(exc), problem=exc.problem)
+            self._repair_stranded_iteration_route_after_failure(dispatch)
             return
         except Exception as exc:
             if _is_deterministic_resume_error(exc):
@@ -387,6 +463,7 @@ class GraphDispatchWorker:
                 # transient budget and surface the diagnosis immediately instead
                 # of live-looping five identical attempts.
                 self._mark_blocked(action, dispatch, str(exc))
+                self._repair_stranded_iteration_route_after_failure(dispatch)
                 return
             self._requeue_or_fail(action, dispatch, str(exc))
             return
@@ -1180,16 +1257,38 @@ class GraphDispatchWorker:
                 after = self._coordinator.snapshot(dispatch.run_id)
                 if not _graph_at_node(after, predecessor_node_id):
                     return True
-            except Exception:
-                pass
+            except Exception as exc:
+                # The live interrupt can carry goto-split pending writes, so
+                # this first resume failing is exactly the shape
+                # ``rebuild_interrupt`` exists for (SCI-096 live shape). The
+                # handoff to rebuild is designed control flow, not a silent
+                # swallow: the degraded step is recorded with its cause, and
+                # rebuild itself must succeed or the whole recovery aborts
+                # with the step name.
+                _record_scene_event(
+                    "graph_dispatch.heal_step_degraded",
+                    outcome="heal_degraded",
+                    fields={
+                        "runId": dispatch.run_id,
+                        "nodeId": predecessor_node_id,
+                        "step": "resume_live_interrupt",
+                        "errorType": type(exc).__name__,
+                        "detail": str(exc)[:200],
+                    },
+                )
         try:
             # Command.goto leaves pending writes that get_state.interrupts
             # does not show. A bare Command(resume=receipt) then raises
             # "multiple pending interrupts". Time-travel rebuilds one
             # interrupt with the real run_id before we resume.
             self._coordinator.restart_attempt(heal_dispatch)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise GraphRecoverStepError(
+                "rebuild_interrupt",
+                dispatch.run_id,
+                predecessor_node_id,
+                exc,
+            ) from exc
         predecessor_dispatch = replace(
             heal_dispatch,
             dispatch_kind="resume_action",
@@ -1199,35 +1298,29 @@ class GraphDispatchWorker:
             ),
             state_update=heal_update,
         )
-        heal_exc: Exception | None = None
         try:
             # Call the coordinator directly: worker._resume() overwrites
             # node_attempts with successor latest+1, which skips the retry
             # attempt already inserted by the command layer.
             self._coordinator.resume_action(predecessor_dispatch)
-            after = self._coordinator.snapshot(dispatch.run_id)
-            if not _graph_at_node(after, predecessor_node_id):
-                return True
-            heal_exc = RuntimeError("resume did not leave predecessor")
         except Exception as exc:
-            heal_exc = exc
-        fallback_dispatch = replace(
-            predecessor_dispatch,
-            action_id=interrupt_receipt.action_id,
-            node_run_id=interrupt_receipt.node_run_id,
-            receipt=interrupt_receipt,
-            state_update={"node_attempts": node_attempts},
-        )
-        try:
-            self._coordinator.resume_action(fallback_dispatch)
-        except Exception as fallback_exc:
-            raise GraphDecisionError(
-                "thread 中断于 "
-                f"{predecessor_node_id}，resume 失败: {fallback_exc} "
-                f"(heal: {heal_exc})"
-            ) from fallback_exc
+            raise GraphRecoverStepError(
+                "resume_predecessor",
+                dispatch.run_id,
+                predecessor_node_id,
+                exc,
+            ) from exc
         after = self._coordinator.snapshot(dispatch.run_id)
-        return not _graph_at_node(after, predecessor_node_id)
+        if not _graph_at_node(after, predecessor_node_id):
+            return True
+        raise GraphRecoverStepError(
+            "resume_predecessor",
+            dispatch.run_id,
+            predecessor_node_id,
+            RuntimeError(
+                "resume returned but the thread still interrupts at the predecessor"
+            ),
+        )
 
     def _resume(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         if dispatch.receipt is None:
@@ -1487,7 +1580,7 @@ class GraphDispatchWorker:
                   AND pending_action_id != ''
                 """
             ).fetchall()
-            repaired = 0
+            repaired_rows: list[tuple[str, str]] = []
             for row in rows:
                 pending = _pending_from_dispatching_row(row)
                 if pending is None:
@@ -1500,10 +1593,21 @@ class GraphDispatchWorker:
                     node_run_id=str(row[0]),
                     now_ms=now_ms,
                 ):
-                    repaired += 1
-            return repaired
+                    repaired_rows.append((str(row[0]), str(row[1])))
+            return repaired_rows
 
-        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
+        revived = list(self._submit(mutate, force_flush=True).result(timeout=30) or ())
+        for node_run_id, run_id in revived:
+            _record_scene_event(
+                "graph_dispatch.adapter_dispatch_revived",
+                outcome="recovered",
+                fields={
+                    "runId": run_id,
+                    "nodeRunId": node_run_id,
+                    "sweep": "dispatching_without_adapter",
+                },
+            )
+        return len(revived)
 
     def _repair_starting_without_progress(self) -> int:
         """Re-enqueue graph_dispatch when start was acked but attempt stayed starting."""
@@ -1519,7 +1623,7 @@ class GraphDispatchWorker:
                 WHERE status = 'starting'
                 """
             ).fetchall()
-            repaired = 0
+            repaired_rows: list[tuple[str, str]] = []
             for row in rows:
                 node_run_id = str(row[0] or "")
                 run_id = str(row[1] or "")
@@ -1564,7 +1668,7 @@ class GraphDispatchWorker:
                         """,
                         (now_ms, now_ms, existing[0]),
                     )
-                    repaired += 1
+                    repaired_rows.append((node_run_id, run_id))
                     continue
                 uow.repository.insert_outbox(
                     build_graph_dispatch_record(
@@ -1576,162 +1680,200 @@ class GraphDispatchWorker:
                         idempotency_key=key,
                     )
                 )
-                repaired += 1
-            return repaired
+                repaired_rows.append((node_run_id, run_id))
+            return repaired_rows
 
-        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
+        requeued = list(self._submit(mutate, force_flush=True).result(timeout=30) or ())
+        for node_run_id, run_id in requeued:
+            _record_scene_event(
+                "graph_dispatch.starting_dispatch_requeued",
+                outcome="recovered",
+                fields={
+                    "runId": run_id,
+                    "nodeRunId": node_run_id,
+                    "sweep": "starting_without_progress",
+                },
+            )
+        return len(requeued)
 
-    def _repair_stranded_iteration_route(self) -> int:
-        """Advance STOP/promote/rollback after iteration_decision already succeeded.
+    def repair_stranded_iteration_route_for_run(self, run_id: str) -> bool:
+        """Repair one run stranded at the iteration gate; event-triggered only.
 
-        Compact restore can leave the LangGraph interrupt on iteration_decision
-        while the Ledger attempt is already succeeded and the decision lives
-        only in the artifact store. Skipping whenever ``pendingAction`` exists
-        stranded those runs: resume then failed with an empty branch_decision
-        and never created version_governance.
+        Stranded shape: ``iteration_decision`` already succeeded in the ledger
+        (the decision lives only in the artifact store after a compact
+        restore) while the LangGraph thread never reached
+        ``version_governance``.  ``run_once`` used to rescan every
+        running/blocked run each cycle; now the dispatch failure path calls
+        this explicitly, because a failed ``iteration_decision`` dispatch is
+        the observable signal of the strand.  Returns True when
+        ``version_governance`` was created.
         """
-        rows = self._submit(
+        if not run_id:
+            return False
+        try:
+            snapshot = self._coordinator.snapshot(run_id)
+        except Exception as exc:
+            _record_repair_skip(run_id, "snapshot", exc)
+            return False
+        pending_payload = (
+            snapshot.get("pendingAction")
+            if isinstance(snapshot.get("pendingAction"), dict)
+            else None
+        )
+        pending_node = str((pending_payload or {}).get("nodeId") or "")
+        next_ids = [str(item) for item in (snapshot.get("nextNodeIds") or [])]
+        if pending_node and pending_node != "iteration_decision":
+            return False
+        if next_ids and pending_node != "iteration_decision":
+            return False
+        latest_iter = self._store.latest_attempt(run_id, "iteration_decision")
+        if (
+            latest_iter is None
+            or latest_iter.status != NodeAttemptStatus.SUCCEEDED.value
+        ):
+            return False
+        if self._store.latest_attempt(run_id, "version_governance") is not None:
+            return False
+        run = self._store.get_run(run_id)
+        branch = branch_decision_from_run(run)
+        if branch not in {
+            "stop",
+            "promote_candidate",
+            "rollback_candidate",
+            "rerun_same_protocol",
+        }:
+            return False
+        inflight = self._submit(
             lambda uow: uow.repository.execute(
-                "SELECT run_id FROM workflow_runs WHERE status IN ('running', 'blocked')"
-            ).fetchall(),
+                """
+                SELECT 1 FROM outbox_actions
+                WHERE run_id = ?
+                  AND action_kind = 'graph_dispatch'
+                  AND status IN ('pending', 'leased')
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone(),
             force_flush=True,
         ).result(timeout=10)
-        repaired = 0
-        for row in rows or ():
-            run_id = str(row[0] or "")
-            if not run_id:
-                continue
-            try:
-                snapshot = self._coordinator.snapshot(run_id)
-            except Exception as exc:
-                _log_repair_skip(run_id, "snapshot", exc)
-                continue
-            pending_payload = (
-                snapshot.get("pendingAction")
-                if isinstance(snapshot.get("pendingAction"), dict)
-                else None
+        if inflight is not None:
+            return False
+        mode: str
+        if pending_node == "iteration_decision":
+            action_id = str((pending_payload or {}).get("actionId") or "")
+            node_run_id = str(
+                (pending_payload or {}).get("nodeRunId") or latest_iter.node_run_id
             )
-            pending_node = str((pending_payload or {}).get("nodeId") or "")
-            next_ids = [str(item) for item in (snapshot.get("nextNodeIds") or [])]
-            if pending_node and pending_node != "iteration_decision":
-                continue
-            if next_ids and pending_node != "iteration_decision":
-                continue
-            latest_iter = self._store.latest_attempt(run_id, "iteration_decision")
-            if (
-                latest_iter is None
-                or latest_iter.status != NodeAttemptStatus.SUCCEEDED.value
-            ):
-                continue
-            if self._store.latest_attempt(run_id, "version_governance") is not None:
-                continue
-            run = self._store.get_run(run_id)
-            branch = branch_decision_from_run(run)
-            if branch not in {
-                "stop",
-                "promote_candidate",
-                "rollback_candidate",
-                "rerun_same_protocol",
-            }:
-                continue
-            inflight = self._submit(
-                lambda uow, rid=run_id: uow.repository.execute(
-                    """
-                    SELECT 1 FROM outbox_actions
-                    WHERE run_id = ?
-                      AND action_kind = 'graph_dispatch'
-                      AND status IN ('pending', 'leased')
-                    LIMIT 1
-                    """,
-                    (rid,),
-                ).fetchone(),
-                force_flush=True,
-            ).result(timeout=10)
-            if inflight is not None:
-                continue
-            if pending_node == "iteration_decision":
-                action_id = str((pending_payload or {}).get("actionId") or "")
-                node_run_id = str(
-                    (pending_payload or {}).get("nodeRunId") or latest_iter.node_run_id
-                )
-                if not action_id:
-                    continue
-                dispatch = GraphDispatch(
+            if not action_id:
+                return False
+            dispatch = GraphDispatch(
+                action_id=action_id,
+                run_id=run_id,
+                node_run_id=node_run_id,
+                node_id="iteration_decision",
+                attempt=int(
+                    (pending_payload or {}).get("attempt") or latest_iter.attempt
+                ),
+                dispatch_kind="resume_action",
+                input_snapshot_hash=str(getattr(run, "input_snapshot_hash", "") or ""),
+                workflow_version_id=str(getattr(run, "workflow_version_id", "") or ""),
+                team_id=str(getattr(run, "team_id", "") or ""),
+                receipt=ExecutionReceipt(
                     action_id=action_id,
-                    run_id=run_id,
                     node_run_id=node_run_id,
-                    node_id="iteration_decision",
-                    attempt=int(
-                        (pending_payload or {}).get("attempt") or latest_iter.attempt
-                    ),
-                    dispatch_kind="resume_action",
-                    input_snapshot_hash=str(getattr(run, "input_snapshot_hash", "") or ""),
-                    workflow_version_id=str(getattr(run, "workflow_version_id", "") or ""),
-                    team_id=str(getattr(run, "team_id", "") or ""),
-                    receipt=ExecutionReceipt(
-                        action_id=action_id,
-                        node_run_id=node_run_id,
-                        outcome="succeeded",
-                        artifact_receipt_ids=(),
-                        execution_anchor_id=latest_iter.execution_anchor_id,
-                        budget_receipt_id=None,
-                        problem=None,
-                        completed_at_ms=int(latest_iter.finished_at_ms or self._now()),
-                    ),
-                    state_update={"branch_decision": branch},
-                )
-                try:
-                    result = self._resume(dispatch)
-                except Exception as exc:
-                    _log_repair_skip(run_id, "resume_iteration", exc)
-                    continue
-            else:
-                dispatch = GraphDispatch(
-                    action_id=new_id("act"),
-                    run_id=run_id,
-                    node_run_id=f"nr-{run_id}-version_governance-a1",
-                    node_id="version_governance",
-                    attempt=1,
-                    dispatch_kind="start",
-                    input_snapshot_hash=str(getattr(run, "input_snapshot_hash", "") or ""),
-                    workflow_version_id=str(getattr(run, "workflow_version_id", "") or ""),
-                    team_id=str(getattr(run, "team_id", "") or ""),
-                    state_update={"branch_decision": branch},
-                )
-                try:
-                    result = self._coordinator.enter_node(dispatch)
-                except Exception as exc:
-                    _log_repair_skip(run_id, "enter_governance", exc)
-                    continue
-            pending = result.pending_action
-            if pending is None or pending.node_id != "version_governance":
-                continue
-            pending = self._pending_with_node_binding(pending)
-            readiness_hint = self._precheck_readiness(dispatch, pending)
-            from .challenge_cup_maintenance_fence import (
-                ChallengeCupMaintenanceError,
-                assert_writes_allowed,
+                    outcome="succeeded",
+                    artifact_receipt_ids=(),
+                    execution_anchor_id=latest_iter.execution_anchor_id,
+                    budget_receipt_id=None,
+                    problem=None,
+                    completed_at_ms=int(latest_iter.finished_at_ms or self._now()),
+                ),
+                state_update={"branch_decision": branch},
             )
-
             try:
-                assert_writes_allowed(
-                    dispatch.team_id,
-                    operation="workflow_dispatch_successor",
-                )
-            except ChallengeCupMaintenanceError:
-                # Keep the pre-fence run visible to the reset drain; do not
-                # synthesize a successor while maintenance is active.
-                continue
-            self._commit_successor_dispatch(
-                dispatch,
-                result,
-                pending,
-                readiness_hint,
-                action=None,
-                fallback_command_id=str(latest_iter.command_id or ""),
+                result = self._resume(dispatch)
+            except Exception as exc:
+                _record_repair_skip(run_id, "resume_iteration", exc)
+                return False
+            mode = "resume_iteration"
+        else:
+            dispatch = GraphDispatch(
+                action_id=new_id("act"),
+                run_id=run_id,
+                node_run_id=f"nr-{run_id}-version_governance-a1",
+                node_id="version_governance",
+                attempt=1,
+                dispatch_kind="start",
+                input_snapshot_hash=str(getattr(run, "input_snapshot_hash", "") or ""),
+                workflow_version_id=str(getattr(run, "workflow_version_id", "") or ""),
+                team_id=str(getattr(run, "team_id", "") or ""),
+                state_update={"branch_decision": branch},
             )
-            repaired += 1
-        return repaired
+            try:
+                result = self._coordinator.enter_node(dispatch)
+            except Exception as exc:
+                _record_repair_skip(run_id, "enter_governance", exc)
+                return False
+            mode = "enter_governance"
+        pending = result.pending_action
+        if pending is None or pending.node_id != "version_governance":
+            return False
+        pending = self._pending_with_node_binding(pending)
+        readiness_hint = self._precheck_readiness(dispatch, pending)
+        from .challenge_cup_maintenance_fence import (
+            ChallengeCupMaintenanceError,
+            assert_writes_allowed,
+        )
+
+        try:
+            assert_writes_allowed(
+                dispatch.team_id,
+                operation="workflow_dispatch_successor",
+            )
+        except ChallengeCupMaintenanceError:
+            # Keep the pre-fence run visible to the reset drain; do not
+            # synthesize a successor while maintenance is active.
+            return False
+        self._commit_successor_dispatch(
+            dispatch,
+            result,
+            pending,
+            readiness_hint,
+            action=None,
+            fallback_command_id=str(latest_iter.command_id or ""),
+        )
+        _record_scene_event(
+            "graph_dispatch.stranded_iteration_route_repaired",
+            outcome="recovered",
+            fields={
+                "runId": run_id,
+                "nodeId": "version_governance",
+                "mode": mode,
+                "branch": branch,
+            },
+        )
+        return True
+
+    def _repair_stranded_iteration_route_after_failure(
+        self, dispatch: GraphDispatch
+    ) -> None:
+        """Event hook: an ``iteration_decision`` dispatch just failed.
+
+        This is the only observable signal of a stranded iteration route, so
+        the repair is attempted here instead of by a periodic full-table
+        sweep.  The primary failure is already durably blocked at this point,
+        so a repair error must not mask it: it surfaces as a structured
+        ``repair_skipped`` signal rather than escaping into ``run_once``.
+        """
+        if str(dispatch.node_id or "") != "iteration_decision":
+            return
+        run_id = str(dispatch.run_id or "")
+        if not run_id:
+            return
+        try:
+            self.repair_stranded_iteration_route_for_run(run_id)
+        except Exception as exc:
+            _record_repair_skip(run_id, "stranded_iteration_route", exc)
 
     def _repair_stranded_terminal_package(self) -> int:
         """Close a run whose result_package already succeeded but the ledger stayed running.
@@ -1745,7 +1887,7 @@ class GraphDispatchWorker:
             ).fetchall(),
             force_flush=True,
         ).result(timeout=10)
-        repaired = 0
+        closed_runs: list[tuple[str, str]] = []
         now_ms = self._now()
         for row in rows or ():
             run_id = str(row[0] or "")
@@ -1771,8 +1913,18 @@ class GraphDispatchWorker:
                 )
 
             if self._submit(mutate, force_flush=True).result(timeout=30):
-                repaired += 1
-        return repaired
+                closed_runs.append((run_id, terminal_reason))
+        for closed_run_id, closed_reason in closed_runs:
+            _record_scene_event(
+                "graph_dispatch.stranded_terminal_package_closed",
+                outcome="recovered",
+                fields={
+                    "runId": closed_run_id,
+                    "terminalReason": closed_reason,
+                    "sweep": "stranded_terminal_package",
+                },
+            )
+        return len(closed_runs)
 
     def _repair_terminal_failed_dispatch(self) -> int:
         """Translate stranded runs that a terminal-failed graph dispatch left behind.
@@ -1857,9 +2009,16 @@ class GraphDispatchWorker:
                 repaired += 1
         return repaired
 
-    def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
+    def _mark_blocked(
+        self,
+        action: Any,
+        dispatch: GraphDispatch,
+        detail: str,
+        *,
+        problem: dict[str, Any] | None = None,
+    ) -> None:
         now_ms = self._now()
-        problem = problem_from_graph_error(detail)
+        problem = problem or problem_from_graph_error(detail)
         _record_scene_event(
             "graph_dispatch.blocked",
             outcome="blocked",
