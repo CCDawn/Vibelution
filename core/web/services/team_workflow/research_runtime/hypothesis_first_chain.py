@@ -54,6 +54,9 @@ SELECTION_COMMAND_OUTCOME_KIND = "selection_command_outcome"
 REQUEST_EVIDENCE_DECISION = "request_new_evidence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
+# Server-owned scope mode that fences formal review: only this marker makes
+# the hypothesis review executor run in FORMAL mode (provider-bound receipts).
+HYPOTHESIS_REVIEW_FORMAL_MODE = "formal"
 HYPOTHESIS_DESIGN_NODE_ID = "hypothesis_design"
 _HYPOTHESIS_FIRST_WORKFLOW = "hypothesis_first"
 _DEFAULT_BRANCH = "main"
@@ -5163,7 +5166,11 @@ def close_review_meeting(
 
     When no review runner is injected the operator-configured LLM is tried
     first; when no model is configured the deterministic DEV fixtures keep
-    the previous behaviour.
+    the previous behaviour.  A ``mode=formal`` review meeting additionally
+    demands provider-bound receipts: without a configured model — or without
+    the meeting's server-owned receipt authority — the HypothesisRound
+    generation fails closed and is reported structurally without rolling the
+    closure back.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_rounds
@@ -5175,6 +5182,13 @@ def close_review_meeting(
     meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
         "meetingRound"
     ]
+    # The meeting's server-owned scope mode is the explicit execution fence:
+    # formal review meetings require provider-bound receipts from the
+    # auto-injected runners; DEV/platform scopes keep the receipt-free path.
+    formal_meeting = (
+        str(meeting_round.get("mode") or "").strip().lower()
+        == HYPOTHESIS_REVIEW_FORMAL_MODE
+    )
     if (
         reflection_runner is None
         and pairwise_runner is None
@@ -5185,7 +5199,9 @@ def close_review_meeting(
             build_hypothesis_review_runners,
         )
 
-        real_runners = build_hypothesis_review_runners()
+        real_runners = build_hypothesis_review_runners(
+            require_provider_receipts=formal_meeting
+        )
         if real_runners:
             reflection_runner = real_runners["reflection_runner"]
             pairwise_runner = real_runners["pairwise_runner"]

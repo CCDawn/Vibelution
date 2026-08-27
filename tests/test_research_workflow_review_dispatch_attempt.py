@@ -9,6 +9,8 @@ explainable in the V2 snapshot instead of collapsing into an opaque
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from core.web.services.team_workflow import hypothesis_selection as selections
@@ -20,6 +22,10 @@ from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 
     project_state_from_records,
 )
 from tests._support.team_workflow.helpers import _use_tmp_project_root
+
+
+def _fresh_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _fanout_env(tmp_path, monkeypatch, *, open_meeting=None):
@@ -204,7 +210,9 @@ def test_failed_candidate_keeps_durable_error_and_projects_retry(
         "selectionId": "selection-dispatch-1",
         "status": "open",
         "linkedChatRoomId": "team-room",
-        "createdAt": "2026-08-26T00:01:00Z",
+        # Fresh on purpose: this fixture models a healthy live discussion,
+        # not a heartbeat-stale one (see test_hypothesis_first_state_v2).
+        "createdAt": _fresh_iso(),
     }
     state = _project(team_id, selection, [succeeded_meeting])
 
@@ -270,7 +278,8 @@ def test_retry_bumps_attempt_number_and_recovers(tmp_path, monkeypatch) -> None:
             "selectionId": "selection-dispatch-1",
             "status": "open",
             "linkedChatRoomId": "team-room",
-            "createdAt": "2026-08-26T00:01:00Z",
+            # Fresh on purpose: healthy live discussion, not heartbeat-stale.
+            "createdAt": _fresh_iso(),
         }
         for candidate_id in ("hyp-a", "hyp-b")
     ]

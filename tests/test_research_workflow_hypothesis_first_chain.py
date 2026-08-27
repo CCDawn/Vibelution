@@ -966,6 +966,7 @@ def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
             "reviewContextId": "context-fan-in",
             "positionSeed": "seed",
             "roles": {},
+            "executionMode": "dev",
         },
     )
     monkeypatch.setattr(hrounds, "_read_jsonl", lambda _path: [])
@@ -3386,3 +3387,77 @@ def test_candidate_evidence_trail_cites_discussion_messages(
 
     empty = chain.candidate_evidence_trail(team_id, "SCI-999")
     assert empty["trails"] == []
+
+
+# ---------------------------------------------------------------------------
+# close_review_meeting: the meeting's server-owned scope mode fences the
+# auto-injected review runners (formal -> provider-bound receipts required,
+# dev -> receipt-free path unchanged)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_receipts"),
+    [("formal", True), ("dev", False)],
+)
+def test_close_review_meeting_fences_auto_injected_runners_by_meeting_mode(
+    monkeypatch: pytest.MonkeyPatch, mode: str, expected_receipts: bool
+) -> None:
+    from core.web.services.team_workflow import llm_review_runners
+
+    team_id = f"team-fence-{mode}"
+    meeting_round_id = f"meeting-fence-{mode}"
+    build_calls: list[dict[str, object]] = []
+
+    def fake_get_meeting_round(_team_id, round_id):
+        assert round_id == meeting_round_id
+        return {
+            "meetingRound": {
+                "meetingRoundId": meeting_round_id,
+                "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+                "question": _QUESTION_ID,
+                "mode": mode,
+            }
+        }
+
+    def fake_approve_meeting_closure(_team_id, _round_id, _request):
+        return {
+            "meetingRound": {
+                "meetingRoundId": meeting_round_id,
+                "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+                "question": _QUESTION_ID,
+                "mode": mode,
+            }
+        }
+
+    def fake_build_runners(llm=None, *, require_provider_receipts=False):
+        build_calls.append({"require_provider_receipts": require_provider_receipts})
+        return None
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(meetings, "get_meeting_round", fake_get_meeting_round)
+    monkeypatch.setattr(
+        meetings, "approve_meeting_closure", fake_approve_meeting_closure
+    )
+    monkeypatch.setattr(
+        llm_review_runners, "build_hypothesis_review_runners", fake_build_runners
+    )
+    monkeypatch.setattr(
+        chain,
+        "_process_collection_decisions",
+        lambda *_args, **_kwargs: {"status": "ignored"},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_generate_hypothesis_round",
+        lambda _team_id, closed_record, **_kwargs: {
+            "status": "created",
+            "roundId": "hround-fence",
+            "round": {"roundId": "hround-fence", "mode": closed_record.get("mode")},
+        },
+    )
+
+    result = chain.close_review_meeting(team_id, meeting_round_id)
+
+    assert build_calls == [{"require_provider_receipts": expected_receipts}]
+    assert result["hypothesisRound"]["status"] == "created"

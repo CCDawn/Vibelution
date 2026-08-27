@@ -42,6 +42,9 @@ _SUPPORTED_KINDS = frozenset(
         "problem_understanding",
         "dimension_reviews",
         "feedback_iterations",
+        "review_independence",
+        "review_disagreement",
+        "evolution_lineage",
     }
 )
 
