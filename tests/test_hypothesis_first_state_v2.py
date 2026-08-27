@@ -6,6 +6,7 @@ import time
 from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import HTTPException, Request, Response
@@ -761,6 +762,160 @@ def test_ordinary_formal_failure_does_not_project_reconcile_action(
         assert commands == ["archive_run"]
     else:
         assert commands == []
+
+
+_RECONCILE_OFFER = {
+    "command": "reconcile_run",
+    "nodeId": None,
+    "available": True,
+    "label": "对账运行",
+    "reasonCode": "ready",
+    "idempotencyKey": "offer:reconcile:v7",
+    "expectedRunVersion": 7,
+    "payload": {},
+}
+
+
+def _retry_offer(node_id: str = "source_extraction") -> dict[str, Any]:
+    return {
+        "command": "retry_node",
+        "nodeId": node_id,
+        "available": True,
+        "label": f"重试 {node_id}",
+        "reasonCode": "retry_available",
+        "idempotencyKey": f"offer:retry:{node_id}:v7",
+        "expectedRunVersion": 7,
+        "payload": {"retryKind": "same_node"},
+    }
+
+
+def _project_formal_commands(
+    *,
+    run_id: str,
+    run_status: str,
+    command_offers: list[dict[str, Any]],
+) -> list[Any]:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
+            }],
+            formal_runs=[{
+                "runId": run_id,
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": run_status,
+                "runVersion": 7,
+            }],
+            formal_snapshots={
+                run_id: {"commandOffers": [dict(offer) for offer in command_offers]}
+            },
+        )
+    )
+    return [
+        action for action in state.allowedActions if action.kind == "command"
+    ]
+
+
+def test_blocked_formal_run_without_retry_projects_reconcile_offer() -> None:
+    """生产 run-d02722658d8b 形态：blocked 且无可用节点 retry。
+
+    ledger 的 reconcile offer 必须原样透传成 V2 动作，操作员才有恢复入口。
+    """
+    actions = _project_formal_commands(
+        run_id="run-blocked-reconcile",
+        run_status="blocked",
+        command_offers=[_RECONCILE_OFFER],
+    )
+
+    assert [action.command for action in actions] == ["reconcile_formal_run"]
+    reconcile = actions[0]
+    assert reconcile.actionId == "reconcile-formal-run:run-blocked-reconcile"
+    assert reconcile.idempotencyKey == "offer:reconcile:v7"
+    assert reconcile.payload.runId == "run-blocked-reconcile"
+    assert reconcile.enabled is True
+
+
+def test_blocked_formal_run_keeps_reconcile_alongside_retry_actions() -> None:
+    """SCI-003 回归：blocked + 有节点 retry 时不得再丢弃 reconcile offer。"""
+    actions = _project_formal_commands(
+        run_id="run-blocked-mixed",
+        run_status="blocked",
+        command_offers=[_retry_offer(), _RECONCILE_OFFER],
+    )
+
+    assert [action.command for action in actions] == [
+        "retry_formal_node",
+        "reconcile_formal_run",
+    ]
+    retry, reconcile = actions
+    assert retry.idempotencyKey == "offer:retry:source_extraction:v7"
+    assert reconcile.idempotencyKey == "offer:reconcile:v7"
+
+
+def test_reconciliation_required_with_retry_co_projects_both_recovery_paths() -> None:
+    """reconciliation_required 且 retry 可用时，两个授权动作并存且 retry 优先。"""
+    actions = _project_formal_commands(
+        run_id="run-recon-mixed",
+        run_status="reconciliation_required",
+        command_offers=[_retry_offer(), _RECONCILE_OFFER],
+    )
+
+    assert [action.command for action in actions] == [
+        "retry_formal_node",
+        "reconcile_formal_run",
+    ]
+
+
+@pytest.mark.parametrize("run_status", ["running", "waiting_human"])
+def test_active_formal_runs_do_not_project_reconcile_action(
+    run_status: str,
+) -> None:
+    """ledger 对非 blocked/reconciliation_required 不授权 reconcile，不误出。"""
+    actions = _project_formal_commands(
+        run_id=f"run-active-{run_status}",
+        run_status=run_status,
+        command_offers=[
+            _retry_offer(),
+            {**_RECONCILE_OFFER, "available": False, "reasonCode": "reconcile_not_needed", "idempotencyKey": ""},
+        ],
+    )
+
+    assert [action.command for action in actions] == ["retry_formal_node"]
+    assert all(action.command != "reconcile_formal_run" for action in actions)
+
+
+@pytest.mark.parametrize("run_status", ["succeeded"])
+def test_succeeded_formal_run_does_not_project_reconcile_action(
+    run_status: str,
+) -> None:
+    commands = [
+        action.command
+        for action in _project_formal_commands(
+            run_id="run-done",
+            run_status=run_status,
+            command_offers=[
+                {**_RECONCILE_OFFER, "available": False, "reasonCode": "reconcile_not_needed"}
+            ],
+        )
+        if action.kind == "command"
+    ]
+    assert "reconcile_formal_run" not in commands
 
 
 def test_reconciliation_required_formal_run_keeps_reconcile_action() -> None:

@@ -728,6 +728,31 @@ class WorkflowCommandService:
             now_ms=now_ms,
         )
         uow.repository.update_run_status(request.run_id, request.team_id, RunStatus.RUNNING.value, now_ms)
+        # Reconciliation re-derives execution from the durable ledger.  A
+        # blocked run usually got there via a terminal-failed graph_dispatch
+        # (e.g. checkpoint_node_mismatch); reviving only the run status would
+        # strand it as running with nothing left to advance, until the sweep
+        # flips it back to reconciliation_required.  Give the worker a fresh
+        # routing decision by re-arming failed dispatch rows in this same
+        # transaction (same repair shape as _repair_starting_without_progress);
+        # live or deliberately cancelled rows stay untouched.
+        uow.repository.execute(
+            """
+            UPDATE outbox_actions
+            SET status = 'pending',
+                lease_owner = NULL,
+                lease_expires_at_ms = NULL,
+                available_at_ms = ?,
+                attempt_count = 0,
+                last_problem_json = NULL,
+                updated_at_ms = ?
+            WHERE run_id = ?
+              AND action_kind = 'graph_dispatch'
+              AND status = 'failed'
+            """,
+            (now_ms, now_ms, request.run_id),
+        )
+        revived = int(uow.repository.affected() or 0)
         uow.repository.insert_event(
             _event_record(
                 run_id=request.run_id,
@@ -738,11 +763,14 @@ class WorkflowCommandService:
                 correlation_id=request.idempotency_key,
                 payload={
                     "reconciled": True,
+                    "revivedDispatchCount": revived,
                     "artifactReceiptIds": list(artifact_receipt_ids),
                 },
                 now_ms=now_ms,
             )
         )
+        if revived > 0:
+            uow.after_commit(self._wake_worker)
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_archive_run(

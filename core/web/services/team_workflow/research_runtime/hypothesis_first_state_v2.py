@@ -529,6 +529,48 @@ def _formal_retry_actions(
     return actions
 
 
+def _formal_reconcile_action(
+    *,
+    run_id: str,
+    snapshot: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Project the ledger-authorized run-level reconcile offer.
+
+    ``build_reconcile_run_offer`` authorizes reconcile for blocked and
+    reconciliation_required runs; the V2 action must stay reachable exactly
+    when that offer is available, coexisting with any node retry actions.
+    The durable offer idempotency key rides along (same shape as
+    ``_formal_retry_actions``) so a stale projection cannot replay an
+    outdated reconcile decision.
+    """
+
+    raw_offers = snapshot.get("commandOffers")
+    if not isinstance(raw_offers, Sequence) or isinstance(raw_offers, (str, bytes)):
+        return None
+    for raw_offer in raw_offers:
+        if not isinstance(raw_offer, Mapping):
+            continue
+        if raw_offer.get("available") is not True:
+            continue
+        if str(raw_offer.get("command") or "").strip() != "reconcile_run":
+            continue
+        offer_idempotency_key = str(raw_offer.get("idempotencyKey") or "").strip()
+        if not offer_idempotency_key:
+            return None
+        label = str(raw_offer.get("label") or "").strip() or "对账运行"
+        action = _command_action(
+            "reconcile_formal_run",
+            action_id=f"reconcile-formal-run:{run_id}",
+            label=label,
+            target_phase="formal_runtime",
+            target_node_id="formal_runtime",
+            payload={"runId": run_id},
+        )
+        action["idempotencyKey"] = offer_idempotency_key
+        return action
+    return None
+
+
 def _navigation_anchor(
     *,
     question_id: str,
@@ -1796,12 +1838,24 @@ def _project_formal_and_program(
         )
         return formal, empty_program, problems, actions, "formal_runtime"
     retry_actions = _formal_retry_actions(run_id=current_id, snapshot=current_snapshot)
-    if run_status in {"running", "blocked", "waiting_human"} and retry_actions:
+    reconcile_action = _formal_reconcile_action(
+        run_id=current_id, snapshot=current_snapshot
+    )
+    if run_status in {"running", "blocked", "waiting_human"}:
+        # Node retries do not own the recovery surface: the ledger also keeps
+        # a run-level reconcile offer authorized for blocked runs, and a
+        # non-empty retry list used to short-circuit it entirely (SCI-003).
+        # Running / waiting_human project no available reconcile offer, so
+        # appending the ledger-authorized action cannot over-offer.
         actions.extend(retry_actions)
+        if reconcile_action is not None:
+            actions.append(reconcile_action)
         return formal, empty_program, problems, actions, "formal_runtime"
     if run_status == "reconciliation_required":
         if retry_actions:
             actions.extend(retry_actions)
+        if reconcile_action is not None:
+            actions.append(reconcile_action)
         else:
             actions.append(
                 _command_action(

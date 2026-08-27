@@ -16,6 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from core.research.workflow.contracts import WorkflowCommandKind
+from core.research.workflow.ledger.outbox import lease_ready_actions
 from core.research.workflow.transitions import RunStatus, require_run_transition
 from core.web.services.team_workflow.research_runtime.command_offers.reconcile_run import (
     build_reconcile_run_offer,
@@ -319,5 +320,85 @@ def test_identity_mismatch_fails_fast_without_transient_loop(tmp_path: Path) -> 
         assert worker._coordinator.resume_calls == 1
         run = commands.store.get_run("run-test")
         assert run.status == "reconciliation_required"
+    finally:
+        commands.close()
+
+
+def test_reconcile_command_accepts_blocked_run_and_revives_failed_dispatch(
+    tmp_path: Path,
+) -> None:
+    """SCI-003: a blocked run with a terminal-failed dispatch is the exact
+    shape reconcile_run exists for.  The command must be accepted (V2 keeps
+    no other recovery entry) and must re-arm the failed graph_dispatch so
+    the worker actually re-derives routing instead of stranding a running
+    run nothing will ever advance."""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_stuck_production_shape(commands, run_status="blocked")
+        run_before = commands.store.get_run("run-test")
+        require_run_transition(RunStatus(run_before.status), RunStatus.RUNNING)
+        assert build_reconcile_run_offer(run=run_before).available is True
+
+        receipt = commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                node_id=None,
+                expected_run_version=run_before.run_version,
+                idempotency_key="ui:reconcile-blocked",
+            )
+        )
+        assert receipt.accepted_run_version is not None
+
+        recovered = commands.store.get_run("run-test")
+        assert recovered.status == "running"
+        revived = commands.store.read(
+            lambda repo: repo.get_outbox(
+                "act-a244894b8c1044d59f31701696b967ff"
+            )
+        )
+        assert revived is not None and revived.status == "pending"
+        assert revived.attempt_count == 0
+        # 复活了可推进的 dispatch，必须叫醒 worker 立即重算路由。
+        assert commands.wake_count >= 1
+
+        # 下一 tick 能真正领到复活后的 dispatch（不是永远停在 pending）。
+        leased = lease_ready_actions(
+            commands.store,
+            owner="graph-worker-test",
+            now_ms=FIXED_NOW_MS + 5000,
+        )
+        assert [action.action_id for action in leased] == [
+            "act-a244894b8c1044d59f31701696b967ff"
+        ]
+    finally:
+        commands.close()
+
+
+def test_reconcile_command_without_failed_dispatch_skips_worker_wake(
+    tmp_path: Path,
+) -> None:
+    """No failed dispatch rows to revive: accepted, no spurious wake."""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_stuck_production_shape(commands, run_status="blocked")
+        commands.store.submit(
+            lambda uow: uow.repository.execute(
+                "DELETE FROM outbox_actions WHERE run_id = 'run-test'"
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        wake_before = commands.wake_count
+
+        receipt = commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                node_id=None,
+                expected_run_version=1,
+                idempotency_key="ui:reconcile-no-dispatch",
+            )
+        )
+        assert receipt.accepted_run_version is not None
+        assert commands.store.get_run("run-test").status == "running"
+        assert commands.wake_count == wake_before
     finally:
         commands.close()
