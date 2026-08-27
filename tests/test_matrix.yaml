@@ -76,6 +76,9 @@ rules:
     executionLayers:
       - "focused"
       - "local-parallel"
+    excludePaths:
+      - "core/orchestration/context_engine.py"
+      - "core/orchestration/tool_lifecycle.py"
     paths:
       - "agent.py"
       - "core/orchestration/**"
@@ -90,6 +93,21 @@ rules:
     notes:
       - "agent.py changes almost always need Launcher/runtime restart before live chat verification."
       - "Prefer focused orchestration tests before full agent regression."
+      - "context_engine and tool_lifecycle are the highest-churn orchestration files; their direct unit batches own them below."
+
+  - id: orchestration-context-tool-lifecycle
+    description: "Context engine and tool lifecycle bridges with their direct unit tests."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/orchestration/context_engine.py"
+      - "core/orchestration/tool_lifecycle.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_context_engine.py tests/test_tool_lifecycle.py -q"
+    notes:
+      - "These two files carry the most orchestration churn; test_context_engine.py and test_tool_lifecycle.py import them directly."
+      - "They are excluded from agent-runtime-core so a single bridge edit no longer pulls the turn status bar and kernel adapter batch, which does not cover these units."
 
   - id: service-structure-ownership
     description: "Web service pack structure guards and Agent services index README."
@@ -174,6 +192,8 @@ rules:
     executionLayers:
       - "focused"
       - "local-serial"
+    excludePaths:
+      - "desktop/electron/src/main.ts"
     paths:
       - "desktop/electron/**"
     commands:
@@ -181,6 +201,20 @@ rules:
     notes:
       - "Product control plane lives in Electron main; legacy Python launcher HTTP is not the packaged path."
       - "Tray/restart/workbench lifecycle changes need Launcher refresh decision after vitest."
+      - "main.ts changes select the focused electron-main-shell batch instead of the full suite."
+
+  - id: electron-main-shell
+    description: "Electron main process source and its direct desktopMain behavior and contract tests."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - "desktop/electron/src/main.ts"
+    commands:
+      - "node desktop/electron/node_modules/vitest/vitest.mjs run tests/desktopMainTrayIntegration.test.ts tests/desktopMainLauncherIpc.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainDeepLinkConsumption.test.ts tests/desktopMainDeepLinkRegistration.test.ts tests/desktopMainSessionHeartbeat.test.ts tests/desktopMainStartupSequence.test.ts tests/desktopMainStartupTelemetry.test.ts tests/desktopWindowIcon.test.ts tests/isolatedStopRecovery.test.ts tests/packagedLauncherControlPlane.contract.test.ts --root desktop/electron"
+    notes:
+      - "src/main.ts is by far the highest-churn Electron file; these eleven test files are the only ones that read src/main directly."
+      - "They are excluded from desktop-electron-shell so a main-process edit runs its contract surface without the other 75 suite files; the full npm test stays available for wider shell edits."
 
   - id: web-evolution
     description: "Supervised/self evolution web routes, harness, and control-plane services."
@@ -208,6 +242,11 @@ rules:
       - "focused"
       - "local-serial"
       - "local-parallel"
+    excludePaths:
+      - "core/llm/client.py"
+      - "config/models.py"
+      - "config/settings.py"
+      - "config/public_config.py"
     paths:
       - "config/**"
       - "core/llm/**"
@@ -232,6 +271,35 @@ rules:
       - "Verify effective config behavior, not only source defaults."
       - "Protocol/wire/cache tests are parallel-safe; config panel and web config routes stay serial."
       - "Turn status bar placement affects DeepSeek automatic prefix cache; keep with LLM hot path."
+      - "client.py and the models/settings/public_config trio are the highest-churn files here; their focused rules below carry them."
+
+  - id: llm-client-core
+    description: "LLM client hot path and its direct client boundary tests."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - "core/llm/client.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_llm_client.py tests/test_llm_client_outbound_wire_bridge.py tests/test_llm_client_outcome_bridge.py tests/test_llm_client_usage_ledger.py -q"
+    notes:
+      - "core/llm/client.py is by far the highest-churn LLM file; these four test files import it directly."
+      - "Excluded from config-models so one client edit no longer pulls the protocol/wire batch or the web config panel batch."
+
+  - id: config-schema-hotspots
+    description: "High-churn operator/public config schema files and their shared schema contract test."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - "config/models.py"
+      - "config/settings.py"
+      - "config/public_config.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_llm_config_schema_v2.py -q"
+    notes:
+      - "models/settings/public_config top the config churn list; tests/test_llm_config_schema_v2.py imports all three directly."
+      - "They are excluded from config-models; schema-wide edits should still widen to the config-models batches when other config files change with them."
 
   - id: agent-directory-config
     description: "Agent directory, mode binding, prompt templates, and model reference repair."
@@ -316,6 +384,11 @@ rules:
       - "core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py"
       - "core/web/services/team_workflow/research_runtime/hypothesis_first_state_v2.py"
       - "core/web/routes/team_workflows/hypothesis_first_state_models.py"
+      - "core/web/routes/team_workflows/research_runtime.py"
+      - "core/web/routes/team_workflows/hypothesis_first.py"
+      - "core/web/routes/team_workflows/experiment.py"
+      - "core/web/routes/team_workflows/experiment_models.py"
+      - "core/web/routes/team_workflows/hypothesis_first_models.py"
     paths:
       - "core/web/services/team_service.py"
       - "core/web/services/team_knowledge_service.py"
@@ -358,6 +431,23 @@ rules:
       - "These hot files are excluded from the broad teams-knowledge subtree; command_service and the maintenance fence stay with teams-knowledge because their direct test frontiers are wider."
       - "Small hypothesis-first runtime edits validate through these six direct boundary test files instead of the full Teams pack."
       - "Use dist load, not loadfile: one chain file holds most of the wall clock and needs test-level distribution."
+
+  - id: team-workflow-route-hotfiles
+    description: "Highest-churn Team workflow route modules and the shared routes domain pack."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/routes/team_workflows/research_runtime.py"
+      - "core/web/routes/team_workflows/hypothesis_first.py"
+      - "core/web/routes/team_workflows/experiment.py"
+      - "core/web/routes/team_workflows/experiment_models.py"
+      - "core/web/routes/team_workflows/hypothesis_first_models.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_routes.py -q"
+    notes:
+      - "These five route modules carry the most routes churn; tests/test_team_workflow_routes.py is their direct domain pack."
+      - "They are excluded from teams-knowledge so one route edit runs the 60s routes pack instead of both full Teams batches; lower-churn route files still select teams-knowledge."
 
   - id: teams-knowledge-ui
     description: "Teams and Challenge Cup route UI focused validation."
