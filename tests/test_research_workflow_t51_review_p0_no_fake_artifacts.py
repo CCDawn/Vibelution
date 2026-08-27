@@ -168,7 +168,7 @@ def test_project_needs_continue_without_canonical_result_stays_failed(
         lambda *_args, **_kwargs: [],
     )
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        "core.web.services.team_workflow.research_project_agent_tasks.reconcile_research_project_agent_task_statuses",
         lambda *_args, **_kwargs: {},
     )
     monkeypatch.setattr(
@@ -736,7 +736,7 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
         }
 
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        "core.web.services.team_workflow.research_project_agent_tasks.reconcile_research_project_agent_task_statuses",
         reconcile_project_tasks,
     )
 

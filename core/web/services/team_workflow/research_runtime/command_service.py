@@ -1154,12 +1154,21 @@ class WorkflowCommandService:
         child_thread_id = child_run_id  # threadId == runId (ADR / spec 7.3)
         if not str(checkpoint_id or "").strip():
             raise WorkflowCommandError("fork_revision 需要 checkpointId")
-        input_snapshot = {}
+        input_snapshot: dict[str, Any] = {}
         if parent.input_snapshot_json:
             try:
-                input_snapshot = json.loads(parent.input_snapshot_json)
-            except (TypeError, ValueError):
-                input_snapshot = {}
+                loaded_snapshot = json.loads(parent.input_snapshot_json)
+            except (TypeError, ValueError) as exc:
+                raise WorkflowCommandError(
+                    "父 run input snapshot 不可解析，已阻断修订分支创建: "
+                    f"parentRunId={parent.run_id} error={exc}"
+                ) from exc
+            if not isinstance(loaded_snapshot, dict):
+                raise WorkflowCommandError(
+                    "父 run input snapshot 不是对象，已阻断修订分支创建: "
+                    f"parentRunId={parent.run_id}"
+                )
+            input_snapshot = loaded_snapshot
         input_snapshot = dict(input_snapshot)
         input_snapshot["parentRunId"] = parent.run_id
         input_snapshot["forkedFromCheckpointId"] = checkpoint_id

@@ -436,6 +436,9 @@ def test_snapshot_projects_formal_runtime_semantics_for_waiting_human() -> None:
         "attempt": 1,
         "actorKind": "human",
         "taskId": "task-v2-human",
+        "sessionId": None,
+        "turnId": None,
+        "executionAnchorId": None,
         "status": "waiting_human",
         "state": "waiting_user",
         "kind": "human_gate",
@@ -736,6 +739,69 @@ def test_snapshot_live_attempt_owns_auto_running_state_over_start_offer() -> Non
     assert payload["currentTask"]["state"] == "auto_running"
     assert payload["currentTask"]["responsibility"] == "system"
     assert payload["currentTask"]["automaticNextStep"] is None
+
+
+def test_snapshot_current_task_surfaces_live_agent_task_identity_from_execution_anchor() -> None:
+    """Dispatch-time anchor: currentTask shows the live Agent task immediately."""
+
+    run = replace(
+        build_run_record(run_id="run-v2-anchor-current-task"),
+        status="running",
+        active_node_id="source_finding",
+    )
+    attempt = replace(
+        build_attempt_record(
+            node_run_id="nr-v2-anchor-current-task",
+            run_id=run.run_id,
+            node_id="source_finding",
+            status="running",
+            actor_kind="agent",
+        ),
+        execution_anchor_id="anchor-provisional-1",
+    )
+    anchor = {
+        "anchorId": "anchor-provisional-1",
+        "nodeRunId": "nr-v2-anchor-current-task",
+        "agentId": "agent-finder",
+        "roleKey": "source_finder",
+        "sessionId": "session-live-finding",
+        "sessionAttempt": 1,
+        "taskId": "stagetask-live-finding",
+        "turnId": "turn-live-finding",
+        "status": "running",
+    }
+
+    def _build(with_anchor: bool):
+        return build_research_workflow_snapshot(
+            ProjectionInputs(
+                run=run,
+                definition=build_challenge_cup_workflow_definition(),
+                attempts=(attempt,),
+                pending_human_tasks=(),
+                handoffs=(),
+                budget_receipts=(),
+                command_offers=(),
+                execution_anchors=(anchor,) if with_anchor else (),
+                latest_event_sequence=1,
+                generated_at=FIXED_GENERATED_AT,
+            )
+        ).to_dict()
+
+    payload = _build(True)
+    assert payload["currentTask"]["state"] == "auto_running"
+    assert payload["currentTask"]["taskId"] == "stagetask-live-finding"
+    assert payload["currentTask"]["sessionId"] == "session-live-finding"
+    assert payload["currentTask"]["turnId"] == "turn-live-finding"
+    assert payload["currentTask"]["executionAnchorId"] == "anchor-provisional-1"
+    assert payload["currentTask"]["key"] == "stagetask-live-finding"
+
+    bare = _build(False)
+    assert bare["currentTask"]["state"] == "auto_running"
+    assert bare["currentTask"]["taskId"] is None
+    assert bare["currentTask"]["sessionId"] is None
+    assert bare["currentTask"]["turnId"] is None
+    # The attempt's own anchor pointer is still surfaced without the row.
+    assert bare["currentTask"]["executionAnchorId"] == "anchor-provisional-1"
 
 
 def test_snapshot_ignores_stale_human_task_when_current_node_run_id_is_known() -> None:
