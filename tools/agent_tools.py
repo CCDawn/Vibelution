@@ -12,7 +12,6 @@ import json
 import os
 import queue
 import re
-import signal
 import subprocess
 import sys
 import threading
@@ -20,6 +19,9 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from core.infrastructure.codex_sandbox.process import (
+    terminate_process_tree as _terminate_process_tree_shared,
+)
 from core.logging import debug as _debug_logger
 from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
 
@@ -61,34 +63,22 @@ def _subagent_process_group_kwargs() -> Dict[str, Any]:
     return {"start_new_session": True}
 
 
-def _subprocess_no_window_kwargs() -> Dict[str, int]:
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
-
-
 def _terminate_process_tree(process: subprocess.Popen) -> None:
-    """Best-effort termination for the subagent and anything it spawned."""
+    """Best-effort termination for the subagent and anything it spawned.
 
-    pid = getattr(process, "pid", None)
-    if _is_windows_platform() and pid:
-        try:
-            result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                **_subprocess_no_window_kwargs(),
-            )
-            if getattr(result, "returncode", 1) == 0:
-                return
-        except Exception:
-            pass
-    elif pid:
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-            return
-        except Exception:
-            pass
+    Delegates to the shared console-free terminator
+    (core.infrastructure.codex_sandbox.process.terminate_process_tree):
+    psutil descendant walk plus terminate/wait/kill escalation, never
+    taskkill.exe or any visible-console utility.
+    """
+
+    try:
+        _terminate_process_tree_shared(process)
+        return
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[子代理] 共享进程树终止异常，回退到直接终止: {type(exc).__name__}: {exc}"
+        )
 
     try:
         process.kill()

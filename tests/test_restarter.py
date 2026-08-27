@@ -19,6 +19,7 @@
 import os
 import sys
 import argparse
+import errno
 import logging
 import time
 from pathlib import Path
@@ -269,59 +270,71 @@ class TestIsProcessAlive:
                     from core.restarter_manager.restarter import is_process_alive
                     assert is_process_alive(12345) is False
 
-    def test_windows_fallback_taskkill_success(self):
-        """Windows fallback taskkill 成功"""
+    def test_windows_fallback_probe_success(self):
+        """Windows fallback os.kill(pid, 0) 成功表示进程存在"""
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
             with patch('core.restarter_manager.restarter.IS_WINDOWS', True):
-                with patch('subprocess.run') as mock_run:
-                    mock_run.return_value.stdout = 'SUCCESS: ...'
-                    mock_run.return_value.returncode = 0
+                with patch('os.kill') as mock_kill:
                     from core.restarter_manager.restarter import is_process_alive
                     assert is_process_alive(12345) is True
+                    mock_kill.assert_called_once_with(12345, 0)
 
-    def test_windows_fallback_taskkill_not_found(self):
-        """Windows fallback taskkill 未找到"""
+    def test_windows_fallback_winerror_87_means_dead(self):
+        """Windows fallback WinError 87（PID 不存在）返回 False"""
+        missing_pid_error = OSError("invalid argument")
+        missing_pid_error.winerror = 87
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
             with patch('core.restarter_manager.restarter.IS_WINDOWS', True):
-                with patch('subprocess.run') as mock_run:
-                    mock_run.return_value.stdout = ''
-                    mock_run.return_value.returncode = 1
+                with patch('os.kill', side_effect=missing_pid_error):
                     from core.restarter_manager.restarter import is_process_alive
                     assert is_process_alive(12345) is False
 
-    def test_windows_fallback_exception(self):
-        """Windows fallback 异常"""
+    def test_fallback_permission_denied_means_present(self):
+        """拒绝访问意味着进程存在但不可检查，按仍存活处理"""
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('core.restarter_manager.restarter.IS_WINDOWS', True):
-                with patch('subprocess.run', side_effect=OSError("fail")):
+            with patch('os.kill', side_effect=PermissionError("access denied")):
+                from core.restarter_manager.restarter import is_process_alive
+                assert is_process_alive(12345) is True
+
+    def test_fallback_unresolved_error_fail_closed_to_present(self):
+        """无法判定的探测失败 fail-closed 按仍存活处理"""
+        unresolved_error = OSError("unexpected")
+        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
+            with patch('os.kill', side_effect=unresolved_error):
+                from core.restarter_manager.restarter import is_process_alive
+                assert is_process_alive(12345) is True
+
+    def test_fallback_esrch_errno_means_dead(self):
+        """ESRCH errno 表示进程不存在"""
+        esrch_error = OSError()
+        esrch_error.errno = errno.ESRCH
+        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
+            with patch('os.kill', side_effect=esrch_error):
+                from core.restarter_manager.restarter import is_process_alive
+                assert is_process_alive(12345) is False
+
+    def test_unix_fallback_process_lookup_error_means_dead(self):
+        """Unix fallback ProcessLookupError 表示进程不存在"""
+        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
+            with patch('core.restarter_manager.restarter.IS_WINDOWS', False):
+                with patch('os.kill', side_effect=ProcessLookupError()):
                     from core.restarter_manager.restarter import is_process_alive
                     assert is_process_alive(12345) is False
 
-    def test_unix_fallback_kill_success(self):
-        """Unix fallback kill -0 成功"""
+    def test_unix_fallback_never_spawns_external_commands(self):
+        """Unix fallback 不再 spawn /bin/kill 外部命令，直接走 os.kill 探测"""
+        kill_calls = []
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
             with patch('core.restarter_manager.restarter.IS_WINDOWS', False):
                 with patch('subprocess.run') as mock_run:
-                    mock_run.return_value.returncode = 0
-                    from core.restarter_manager.restarter import is_process_alive
-                    assert is_process_alive(12345) is True
-
-    def test_unix_fallback_kill_failure(self):
-        """Unix fallback kill -0 非零返回码表示进程不存在"""
-        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('core.restarter_manager.restarter.IS_WINDOWS', False):
-                with patch('subprocess.run') as mock_run:
-                    mock_run.return_value.returncode = 1
-                    from core.restarter_manager.restarter import is_process_alive
-                    assert is_process_alive(12345) is False
-
-    def test_unix_fallback_exception(self):
-        """Unix fallback 异常"""
-        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('core.restarter_manager.restarter.IS_WINDOWS', False):
-                with patch('subprocess.run', side_effect=Exception("fail")):
-                    from core.restarter_manager.restarter import is_process_alive
-                    assert is_process_alive(12345) is False
+                    def fake_kill(pid, sig):
+                        kill_calls.append((pid, sig))
+                        return None
+                    with patch('os.kill', side_effect=fake_kill):
+                        from core.restarter_manager.restarter import is_process_alive
+                        assert is_process_alive(12345) is True
+                        assert kill_calls == [(12345, 0)]
+                        mock_run.assert_not_called()
 
 
 # ============================================================================

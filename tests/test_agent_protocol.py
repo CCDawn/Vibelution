@@ -4810,15 +4810,20 @@ class TestToolMessageFlow:
                 CancellablePopen.killed = True
                 self.returncode = -9
 
-        taskkill_calls = []
+        terminate_calls = []
 
-        def fake_run(args, **kwargs):
-            taskkill_calls.append((list(args), dict(kwargs)))
-            return SimpleNamespace(returncode=0)
+        def fake_terminate_process_tree(process):
+            terminate_calls.append(int(getattr(process, "pid", 0)))
 
         monkeypatch.setattr("tools.agent_tools.subprocess.Popen", CancellablePopen)
         monkeypatch.setattr("tools.agent_tools._is_windows_platform", lambda: True)
-        monkeypatch.setattr("tools.agent_tools.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.agent_tools._terminate_process_tree", fake_terminate_process_tree)
+        monkeypatch.setattr(
+            "tools.agent_tools.subprocess.run",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("taskkill/external commands must never run")
+            ),
+        )
         monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
         monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NO_WINDOW", 0x08000000, raising=False)
         monkeypatch.setattr(
@@ -4839,9 +4844,8 @@ class TestToolMessageFlow:
         assert payload["stop_reason"] == "操作者请求停止当前轮。"
         assert CancellablePopen.killed is False
         assert CancellablePopen.kwargs["creationflags"] == 0x08000200
-        assert taskkill_calls
-        assert taskkill_calls[0][0] == ["taskkill", "/PID", "43210", "/T", "/F"]
-        assert taskkill_calls[0][1]["creationflags"] & 0x08000000
+        # 取消必须走共享无 console 终止器，绝不允许外部命令替代。
+        assert terminate_calls == [43210]
         assert payload["subRunId"].startswith("subagent-diagnose-d1-")
         assert [event[2] for event in scene_events] == ["subagent.run.started", "subagent.run.cancelled"]
         assert scene_events[-1][3]["fields"]["stopReason"] == "操作者请求停止当前轮。"

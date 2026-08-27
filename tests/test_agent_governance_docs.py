@@ -132,6 +132,35 @@ def test_windows_no_console_red_line_is_normative():
     assert "CREATE_NEW_PROCESS_GROUP" in restarter
 
 
+def test_product_runtime_sources_never_invoke_taskkill():
+    """AGENTS.md §2 red line: product runtime source must not shell out to taskkill.exe."""
+
+    taskkill_command = re.compile(r"[\"']taskkill(?:\.exe)?[\"']")
+    scan_roots = (
+        PROJECT_ROOT / "tools",
+        PROJECT_ROOT / "core",
+        PROJECT_ROOT / "scripts",
+    )
+    violations: list[str] = []
+    for root in scan_roots:
+        for py_file in sorted(root.rglob("*.py")):
+            if "__pycache__" in py_file.parts:
+                continue
+            text = py_file.read_text(encoding="utf-8")
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if taskkill_command.search(line):
+                    violations.append(
+                        f"{py_file.relative_to(PROJECT_ROOT)}:{lineno}: {stripped}"
+                    )
+    assert not violations, (
+        "product runtime sources must terminate/probe processes without "
+        f"taskkill:\n" + "\n".join(violations)
+    )
+
+
 def test_research_before_write_scales_external_work_by_risk():
     """Local reuse stays mandatory while located small fixes can skip external scanning."""
 
