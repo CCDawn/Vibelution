@@ -137,7 +137,7 @@ def _auto_advance_v2_payload() -> dict:
         "schemaVersion": "1.0.0",
         "policyId": "cc-auto-advance-policy-002",
         "version": "2.0.0-candidate.1",
-        "status": "candidate",
+        "status": "candidate_pending_approval",
         "executionMode": "shadow",
         "createdAt": "2026-08-28T00:00:00+08:00",
         "capabilities": {
@@ -220,11 +220,9 @@ def _auto_advance_v2_payload() -> dict:
 
 
 def _human_review_v2_payload() -> dict:
-    """A valid HumanReviewPolicyV2 candidate matching the decision-#5 mirror."""
+    """The full decision-#5 reference document, loaded exactly as published."""
 
-    reference = json.loads(HUMAN_REVIEW_POLICY_V2_REFERENCE_JSON)
-    reference["status"] = "candidate"
-    return reference
+    return json.loads(HUMAN_REVIEW_POLICY_V2_REFERENCE_JSON)
 
 
 def _with_hash(payload: dict) -> dict:
@@ -300,7 +298,7 @@ def test_valid_auto_advance_v2_candidate_passes_validation_and_roundtrips() -> N
     policy = AutoAdvancePolicyV2.from_dict(payload)
 
     assert policy.policyId == "cc-auto-advance-policy-002"
-    assert policy.status == "candidate"
+    assert policy.status == "candidate_pending_approval"
     assert policy.executionMode == "shadow"
     assert policy.capabilities == {
         "autoAdvanceBatchGate": False,
@@ -318,6 +316,18 @@ def test_valid_auto_advance_v2_candidate_passes_validation_and_roundtrips() -> N
 
     parsed = AutoAdvancePolicyV2.from_dict(json.loads(json.dumps(payload)))
     assert parsed == policy
+
+
+@pytest.mark.parametrize("status", ["candidate", "candidate_pending_approval"])
+def test_candidate_family_statuses_are_accepted(status: str) -> None:
+    payload = _tampered(
+        _auto_advance_v2_payload(),
+        lambda p: p.__setitem__("status", status),
+    )
+
+    policy = AutoAdvancePolicyV2.from_dict(payload)
+
+    assert policy.status == status
 
 
 @pytest.mark.parametrize(
@@ -472,8 +482,8 @@ def test_calibration_gate_bound_method_is_limited_to_frozen_estimators() -> None
     assert "invalid_calibration_gate_field" in _error_codes(excinfo.value)
 
 
-@pytest.mark.parametrize("status", ["draft", "candidate_pending_approval", ""])
-def test_non_candidate_or_approved_status_is_rejected(status: str) -> None:
+@pytest.mark.parametrize("status", ["draft", ""])
+def test_unapproved_status_is_rejected(status: str) -> None:
     payload = _tampered(
         _auto_advance_v2_payload(),
         lambda p: p.__setitem__("status", status),
@@ -526,11 +536,13 @@ def test_revision_round_bound_is_enforced() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_human_review_v2_reference_validates_after_status_normalization() -> None:
+def test_human_review_v2_reference_document_validates_as_loaded() -> None:
     payload = _with_hash(_human_review_v2_payload())
+    assert payload["status"] == "candidate_pending_approval"
 
     policy = HumanReviewPolicyV2.from_dict(payload)
 
+    assert policy.status == "candidate_pending_approval"
     assert policy.rollingDriftSentinels == 3
     assert policy.finalApproval == "manifest_level"
     assert "risk_triggered" in policy.specialtyReviewRule

@@ -51,7 +51,12 @@ AUTO_ADVANCE_CAPABILITIES: frozenset[str] = frozenset(
 )
 
 AUTO_ADVANCE_EXECUTION_MODES: frozenset[str] = frozenset({"shadow", "active"})
-AUTO_ADVANCE_POLICY_STATUSES: frozenset[str] = frozenset({"candidate", "approved"})
+# Candidate family: plain "candidate" and the "candidate_pending_approval"
+# status carried by the real policy candidate documents; "draft" and anything
+# else stays rejected (fail-closed, code "unsupported_value").
+AUTO_ADVANCE_POLICY_STATUSES: frozenset[str] = frozenset(
+    {"candidate", "candidate_pending_approval", "approved"}
+)
 AUTO_ADVANCE_DRAIN_MODES: frozenset[str] = frozenset(
     {"none", "requested", "draining", "drained"}
 )
