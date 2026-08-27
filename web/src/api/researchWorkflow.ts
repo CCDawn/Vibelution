@@ -21,6 +21,7 @@ export {
   fetchResearchWorkflowHypotheses,
   fetchResearchWorkflowExperimentCampaigns,
   fetchResearchWorkflowEvaluation,
+  fetchResearchWorkflowQuestionLineage,
 } from "./research-workflow";
 
 export type {
