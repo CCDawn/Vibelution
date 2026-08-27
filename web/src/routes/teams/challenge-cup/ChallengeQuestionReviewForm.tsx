@@ -8,6 +8,7 @@ import {
 } from "../../../api/hypothesisFirst";
 import { reviewChallengeQuestionRun } from "../../../api/teamExperiment";
 import type { ChallengeQuestionRunDetailPayload, CommandAction } from "../../../api/types";
+import { trackQuestionReviewSubmit } from "../challengeCupTelemetry";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   VButton,
@@ -168,7 +169,21 @@ export function ChallengeQuestionReviewForm(props: {
       }
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
-    onSuccess: async () => {
+    onMutate: () => ({
+      telemetry: trackQuestionReviewSubmit({
+        teamId: detail.teamId,
+        questionId: detail.questionId,
+        path: props.canonicalAction ? "canonical" : "legacy",
+        selectedRunId: detail.selectedRunId,
+        decisions: Object.fromEntries(GATES.map(({ key }) => [key, decisions[key]])),
+        reviewer: reviewer.trim().slice(0, 120),
+        rationaleLength: rationale.trim().length,
+      }),
+    }),
+    onSuccess: async (_data, _vars, context) => {
+      context?.telemetry?.succeeded({
+        formLocked: Object.values(decisions).some((decision) => decision !== "approved"),
+      });
       try {
         globalThis.localStorage?.setItem(REVIEWER_STORAGE_KEY, reviewer.trim());
       } catch {
@@ -187,7 +202,10 @@ export function ChallengeQuestionReviewForm(props: {
         queryKey: queryKeys.researchWorkflowLaunchOptions(CHALLENGE_CUP_WORKFLOW_ID, detail.teamId),
       });
     },
-    onError: (error) => {
+    onError: (error, _vars, context) => {
+      context?.telemetry?.failed(error, {
+        stateConflict: isHypothesisFirstCommandStateConflict(error),
+      });
       if (isHypothesisFirstCommandStateConflict(error)) {
         void queryClient.invalidateQueries({
           queryKey: queryKeys.hypothesisFirstChainStateV2(detail.teamId, detail.questionId),

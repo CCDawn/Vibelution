@@ -11,6 +11,7 @@ import {
   recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import { trackHypothesisSelectionRecord } from "../challengeCupTelemetry";
 import type {
   CommandAction,
   HypothesisSelectionContext,
@@ -122,7 +123,22 @@ export function HypothesisSelectionList({
     setSelectedIds([...serverBaseline]);
   }, [serverBaseline]);
 
-  const recordMutation = useMutation<unknown, Error, HypothesisSelectionRecordPayload>({
+  const recordMutation = useMutation<
+    unknown,
+    Error,
+    HypothesisSelectionRecordPayload,
+    { telemetry: ReturnType<typeof trackHypothesisSelectionRecord> }
+  >({
+    onMutate: (input) => ({
+      telemetry: trackHypothesisSelectionRecord({
+        teamId,
+        questionId,
+        selectedCount: input.selectedCandidateIds.length,
+        candidateCount: context?.candidates.length ?? 0,
+        path: mutationCanonicalAction ? "canonical" : (useLegacyFallback ? "legacy" : "unavailable"),
+        previousSelectionId: input.previousSelectionId,
+      }),
+    }),
     mutationFn: (input: HypothesisSelectionRecordPayload) => {
       if (mutationCanonicalAction) {
         return executeHypothesisFirstCommand(teamId, questionId, mutationCanonicalAction, {
@@ -132,10 +148,14 @@ export function HypothesisSelectionList({
       if (useLegacyFallback) return recordHypothesisSelection(teamId, input);
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
-    onSuccess: () => {
+    onSuccess: (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
     },
-    onError: (error) => {
+    onError: (error, _vars, ctx) => {
+      ctx?.telemetry?.failed(error, {
+        stateConflict: isHypothesisFirstCommandStateConflict(error),
+      });
       if (isHypothesisFirstCommandStateConflict(error)) {
         invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
       }

@@ -16,6 +16,7 @@ import {
   snapshotToCanvasProjection,
   snapshotToRunRecord,
 } from "./researchWorkflowSnapshotProjection";
+import { trackWorkflowHumanGateResolve } from "../challengeCupTelemetry";
 import { useResearchWorkflowEventReplay } from "./useResearchWorkflowEventReplay";
 import { useResearchWorkflowEventStream } from "./useResearchWorkflowEventStream";
 import { useResearchWorkflowSnapshot } from "./useResearchWorkflowSnapshot";
@@ -162,6 +163,13 @@ export function useResearchWorkflowRun(
     async (taskId: string, decision: "accept" | "reject" | "revise") => {
       const current = runRef.current;
       if (!current) throw new Error("当前没有可操作的工作流运行");
+      const telemetry = trackWorkflowHumanGateResolve({
+        teamId: current.teamId,
+        runId: current.runId,
+        taskId,
+        decision,
+        idempotencyKey: `human:${current.runId}:${taskId}:${decision}:v${current.runVersion}`,
+      });
       setBusy(true);
       try {
         const receipt = await submitResearchWorkflowCommand({
@@ -172,8 +180,12 @@ export function useResearchWorkflowRun(
           idempotencyKey: `human:${current.runId}:${taskId}:${decision}:v${current.runVersion}`,
           payload: { taskId, decision },
         });
+        telemetry.succeeded();
         await snapshotState.refresh();
         return receipt;
+      } catch (reason) {
+        telemetry.failed(reason);
+        throw reason;
       } finally {
         if (mountedRef.current) setBusy(false);
       }

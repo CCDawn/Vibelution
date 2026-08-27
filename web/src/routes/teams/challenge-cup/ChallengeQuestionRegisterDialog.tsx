@@ -10,7 +10,7 @@
  * additionally binds a research-project canonical model evidence and hard-fails
  * unless every validation passes.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../../api/queryKeys";
@@ -19,6 +19,11 @@ import {
   registerChallengeQuestionRun,
 } from "../../../api/teamExperiment";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
+import {
+  observeQuestionOutputSchemaRejected,
+  trackQuestionPublishSubmit,
+  trackQuestionRegisterSubmit,
+} from "../challengeCupTelemetry";
 import {
   VButton,
   VCheckbox,
@@ -187,9 +192,44 @@ export function ChallengeQuestionRegisterDialog({
 
   const parsed = useMemo(() => parseOutput(outputText, lang), [outputText, lang]);
 
+  // Bounded observation: surface one schema-rejection per dialog mount so the
+  // raw log keeps evidence of schema drift / operator paste mistakes.
+  const schemaRejectObservedRef = useRef(false);
+  useEffect(() => {
+    if (schemaRejectObservedRef.current || parsed.ok || !outputText.trim()) return;
+    schemaRejectObservedRef.current = true;
+    observeQuestionOutputSchemaRejected({
+      teamId,
+      outputLength: outputText.trim().length,
+      parseError: parsed.error,
+    });
+  }, [parsed, outputText, teamId]);
+
   const mutation = useMutation({
     mutationFn: submitQuestionWrite,
-    onSuccess: async (data) => {
+    onMutate: (vars) => {
+      const baseFields = {
+        teamId,
+        questionId: parsed.ok ? parsed.questionId : "",
+        outputLength: outputText.trim().length,
+        evidenceCount: parsed.ok ? parsed.evidenceCount : 0,
+        citationsConfirmed,
+        lineageRefCount: parseLineageRefs(lineageRefsText).length,
+        parentRunId: parentRunIdInput.trim(),
+      };
+      return {
+        telemetry: vars.mode === "publish"
+          ? trackQuestionPublishSubmit({ ...baseFields, researchProjectId: researchProjectId.trim() })
+          : trackQuestionRegisterSubmit(baseFields),
+      };
+    },
+    onSuccess: async (data, _vars, context) => {
+      context?.telemetry?.succeeded({
+        questionId: data?.record?.questionId ?? "",
+        runId: data?.record?.runId ?? "",
+        idempotent: data?.idempotent === true,
+        humanGatesApproved: data?.record?.humanGates?.approvedCount ?? 0,
+      });
       try {
         globalThis.localStorage?.setItem(REGISTERED_BY_STORAGE_KEY, registeredBy.trim());
       } catch {
@@ -206,6 +246,9 @@ export function ChallengeQuestionRegisterDialog({
           queryKey: queryKeys.challengeQuestionRunDetail(teamId, affectedQuestionId),
         });
       }
+    },
+    onError: (error, _vars, context) => {
+      context?.telemetry?.failed(error);
     },
   });
 

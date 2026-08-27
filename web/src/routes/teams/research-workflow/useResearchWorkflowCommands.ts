@@ -6,6 +6,7 @@ import type {
   WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
+import { trackResearchRunCreate } from "../challengeCupTelemetry";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
@@ -55,9 +56,16 @@ export function useResearchWorkflowCommands(options: {
 
   const submitRun = useCallback(
     async (input: CreateResearchWorkflowRunInput) => {
+      const telemetry = trackResearchRunCreate({
+        teamId: input.teamId,
+        questionId: input.questionId,
+        idempotencyKey: input.idempotencyKey,
+        safetyLimits: input.safetyLimits,
+      });
       setError(null);
       try {
         const created = await createRun(input);
+        telemetry.succeeded({ runId: created.runId });
         const questionId = created.questionId || input.questionId;
         const node = await fetchHypothesisFirstFocusNode(options.teamId, questionId);
         replaceParams({
@@ -67,6 +75,7 @@ export function useResearchWorkflowCommands(options: {
           panel: "node",
         });
       } catch (reason) {
+        telemetry.failed(reason);
         const message = reason instanceof Error ? reason.message : String(reason);
         setError(message);
         throw reason;
