@@ -36,6 +36,14 @@ from .catalog_hypothesis_flow_readiness import (
     CatalogHypothesisFlowReadinessReport,
     catalog_hypothesis_flow_report_hash,
 )
+from .claim_belief import (
+    CLAIM_BELIEF_RULE_ID,
+    CLAIM_BELIEF_SCHEMA_VERSION,
+    CLAIM_BELIEF_STATES,
+    ClaimBeliefTable,
+    ClaimBeliefTableEntry,
+    belief_state_for_counts,
+)
 from .claim_ledger import (
     ACCEPTED_REVIEW_STATUS,
     CLAIM_SOURCES,
@@ -240,6 +248,9 @@ __all__ = [
     "CATALOG_HYPOTHESIS_FLOW_REPAIR_ACTION",
     "CATALOG_HYPOTHESIS_FLOW_REPORT_KIND",
     "CATALOG_HYPOTHESIS_FLOW_SCHEMA_VERSION",
+    "CLAIM_BELIEF_RULE_ID",
+    "CLAIM_BELIEF_SCHEMA_VERSION",
+    "CLAIM_BELIEF_STATES",
     "CLAIM_SOURCES",
     "CLAIM_STATUSES",
     "COMPARISON_OUTCOMES",
@@ -305,6 +316,8 @@ __all__ = [
     "CampaignActivationStatus",
     "CatalogHypothesisFlowReadinessAuthority",
     "CatalogHypothesisFlowReadinessReport",
+    "ClaimBeliefTable",
+    "ClaimBeliefTableEntry",
     "ClaimEvidenceRef",
     "ClaimLedgerEntry",
     "CommandOffer",
@@ -378,6 +391,7 @@ __all__ = [
     "WorkflowRunSummary",
     "WorkflowSessionScopeV3",
     "activation_scope_hash",
+    "belief_state_for_counts",
     "build_campaign_activation_payload",
     "canonical_discussion_scope",
     "canonical_discussion_scope_json",
