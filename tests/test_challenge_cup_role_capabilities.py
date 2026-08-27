@@ -62,6 +62,7 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "search_summarize_sources_tool",
+            "web_fetch_tool",
         },
         "challenge_cup_knowledge_manager": {
             "source_collection_context_tool",
@@ -100,7 +101,6 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
             "paper_search_tool",
             "project_search_tool",
             "news_search_tool",
-            "web_fetch_tool",
             "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "knowledge_proposal_tool",
@@ -166,7 +166,11 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
         ).issubset(policy_v2.blocked_tools), role_key
 
     assert svc.ROLE_TOOL_PROFILES["challenge_cup_search"]["networkAccess"] == "controlled"
-    for role_key in CANONICAL_CHALLENGE_CUP_ROLES[1:]:
+    # The extractor may fetch existing DOI/URL locators for evidence
+    # remediation contracts (discovery search stays forbidden), so it is the
+    # only other canonical role with controlled network access.
+    assert svc.ROLE_TOOL_PROFILES["challenge_cup_extractor"]["networkAccess"] == "controlled"
+    for role_key in CANONICAL_CHALLENGE_CUP_ROLES[2:]:
         assert svc.ROLE_TOOL_PROFILES[role_key]["networkAccess"] == "none", role_key
     assert {
         "batch_web_search_tool",
@@ -174,7 +178,6 @@ def test_canonical_challenge_cup_role_tool_boundaries_are_separated_and_enforced
         "project_search_tool",
         "news_search_tool",
         "web_search_tool",
-        "web_fetch_tool",
         "unified_memory_search_tool",
         "research_knowledge_query_tool",
     }.isdisjoint(svc.ROLE_TOOL_PROFILES["challenge_cup_extractor"]["allowedTools"])
@@ -360,4 +363,4 @@ def test_role_capability_contract_snapshot_is_stable():
     snapshot = svc.role_capability_contract_snapshot()
     assert [item["roleKey"] for item in snapshot] == sorted(item["roleKey"] for item in snapshot)
     assert {item["roleKey"] for item in snapshot} == set(svc.ROLE_CAPABILITY_CONTRACTS)
-    assert svc.role_capability_contract_fingerprint() == "616aa2c8954ed19d1f2492f5befbbf69bae656adc52bbdbf4572bf789d64193d"
+    assert svc.role_capability_contract_fingerprint() == "14ef8b7226844eb01a8fc0855ce9942f251c86fdf3d9dbfe65ee25e1f18f8eb3"

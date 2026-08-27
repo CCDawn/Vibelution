@@ -580,8 +580,15 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "search_summarize_sources_tool",
+                "web_fetch_tool",
             ),
-            ("搜索 Agent 已登记、下载或缓存", "不得自行补取网页", "不写正式知识"),
+            (
+                "搜索 Agent 已登记、下载或缓存",
+                "不得自行搜索发现新来源",
+                "evidenceRemediationContract",
+                "evidenceFetchAttempts[]",
+                "不写正式知识",
+            ),
         ),
         "prompt-challenge-cup-knowledge-manager": (
             "challenge_cup_knowledge_manager",
@@ -630,7 +637,12 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
         assert detail["category"] == "research"
         assert detail["metadata"]["builtin"] is True
         assert detail["metadata"]["roleKey"] == role_key
-        assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+        expected_version = (
+            prompt_template_service.CHALLENGE_CUP_EXTRACTOR_PROMPT_VERSION
+            if template_id == "prompt-challenge-cup-extractor"
+            else prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+        )
+        assert detail["metadata"]["builtinContentVersion"] == expected_version, template_id
         assert responsibility in detail["content"]
         for tool_name in allowed_tools:
             assert _contains_tool_name(detail["content"], tool_name), (template_id, tool_name)

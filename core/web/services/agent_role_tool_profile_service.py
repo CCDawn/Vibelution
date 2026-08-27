@@ -476,6 +476,11 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "search_summarize_sources_tool",
+            # Evidence remediation contracts require the extractor to attempt
+            # fetching existing DOI/URL locators and record honest fetched/
+            # failed results; discovery search stays forbidden, same contract
+            # as the source_extractor alias this role consolidated from.
+            "web_fetch_tool",
         ),
         preferred_tools=(
             "source_collection_context_tool",
@@ -487,7 +492,6 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             *KNOWLEDGE_STEWARD_TOOLS,
             *CODE_MUTATION_TOOLS,
             *SEARCH_DISCOVERY_TOOLS,
-            *FETCH_TOOLS,
             *SEARCH_DISABLED_TOOLS,
             "unified_memory_search_tool",
             "research_knowledge_query_tool",
@@ -495,7 +499,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             *CHALLENGE_CUP_LEDGER_SURFACE_TOOLS,
         ),
         write_scopes=("private", "team_workflow_ledger"),
-        network_access="none",
+        network_access="controlled",
         mutation_access="restricted",
         max_calls_per_turn=32,
         description="Extract locatable evidence, limitations, and counter-evidence from sources already registered and cached by search.",
@@ -926,10 +930,10 @@ ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
     "challenge_cup_extractor": {
         "roleKey": "challenge_cup_extractor",
         "promptTemplateId": "prompt-challenge-cup-extractor",
-        "promptResponsibility": "提炼：仅从搜索 Agent 已登记、下载或缓存的来源提取可定位证据、限制与反证；不访问网络、不写正式知识、不执行代码。",
+        "promptResponsibility": "提炼：仅从搜索 Agent 已登记、下载或缓存的来源提取可定位证据、限制与反证；仅可为证据补救契约抓取既有 DOI/URL 定位符，不搜索发现、不写正式知识、不执行代码。",
         "allowedTools": tuple(ROLE_TOOL_PROFILES["challenge_cup_extractor"]["allowedTools"]),
         "deniedTools": tuple(ROLE_TOOL_PROFILES["challenge_cup_extractor"]["forbiddenTools"]),
-        "networkAccess": "none",
+        "networkAccess": "controlled",
         "mutationAccess": "restricted",
         "writesFormalKnowledge": False,
         "singleVisibleInterface": False,

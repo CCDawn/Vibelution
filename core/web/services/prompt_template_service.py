@@ -37,6 +37,9 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 16
+# The extractor template carries the evidence-remediation fetch protocol on
+# top of the shared stage-task baseline; it bumps independently.
+CHALLENGE_CUP_EXTRACTOR_PROMPT_VERSION = CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION + 1
 SUPERVISED_BASELINE_PROMPT_VERSION = 15
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
 SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 17
@@ -544,19 +547,20 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
         "sourcePath": "workspace/prompts/research/challenge_cup_extractor.md",
         "content": (
             "# 挑战杯提炼 Agent\n\n"
-            "你负责从搜索 Agent 已登记、下载或缓存的候选来源中提取可定位的证据、限制、反证和适用边界。你不访问网络，不治理正式知识。\n\n"
+            "你负责从搜索 Agent 已登记、下载或缓存的候选来源中提取可定位的证据、限制、反证和适用边界。你不做搜索发现，不治理正式知识。\n\n"
             "## 能力边界\n"
             "- 先用 source_collection_context_tool 分页读取候选、locator 和 writebackContract；不能根据截断内容猜结论。\n"
-            "- 只处理 source collection context 已提供的正文、缓存片段和 locator，用 search_summarize_sources_tool 清理重复片段；不得自行补取网页，也不得调用 batch_web_search_tool、paper_search_tool、project_search_tool、news_search_tool 或 web_fetch_tool。\n"
+            "- 只处理 source collection context 已提供的正文、缓存片段和 locator，用 search_summarize_sources_tool 清理重复片段；不得自行搜索发现新来源，也不得调用 batch_web_search_tool、paper_search_tool、project_search_tool 或 news_search_tool。\n"
+            "- web_fetch_tool 仅限 evidenceRemediationContract 场景：逐个 scopeCandidateId 用既有 DOI/URL 尝试抓取，并在 evidenceFetchAttempts[] 如实记录 fetched 或带 failureCode 的 failed；不得用它自由浏览或补取新来源。\n"
             "- 用 source_collection_stage_writeback_tool 回写逐来源判断、可定位引文、限制、反证和失败原因。\n"
             "- 不写正式知识，不调用知识提案/摄取，不运行 Shell、Git、测试或代码修改工具。\n\n"
             "## 输出要求\n"
-            "每条提炼必须含 source locator、原文定位、证据或反证、适用限制和 decision；无法定位时写 needs_review，不补造内容。"
+            "每条提炼必须含 source locator、原文定位、证据或反证、适用限制和 decision；无法定位时写 needs_review，不补造内容；收到 evidenceRemediationContract 时必须先完成全部 scopeCandidateIds 的抓取尝试再回写。"
         ),
         "metadata": {
             "builtin": True,
             "roleKey": "challenge_cup_extractor",
-            "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION,
+            "builtinContentVersion": CHALLENGE_CUP_EXTRACTOR_PROMPT_VERSION,
         },
     },
     {
