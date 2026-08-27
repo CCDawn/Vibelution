@@ -36,7 +36,7 @@ The repository accumulated large volumes of dated plans, superpowers specs, ops 
 | Collaboration / flow maps | `docs/agents/` |
 | Product purpose & UI register | `docs/product/` |
 | Dated plans, old specs, one-off reports | `docs/archive/` (prefer move over delete) |
-| Mutable work state | `.docs/project-memory/` |
+| Mutable work state | Live external project memory + Git common-dir registry; legacy `.docs/project-memory/` is read-only after migration (`MIGRATED-DO-NOT-WRITE.txt` tombstone) |
 
 ### Lifecycle
 

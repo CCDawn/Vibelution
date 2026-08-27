@@ -1,6 +1,6 @@
 # Vibelution 核心架构深度解耦实施计划
 
-> - **Status**：ACTIVE PLAN / Gate 2 已关闭；Gate 3 Chat Phase F 壳化已在本分支实施，合入后关闭
+> - **Status**：ACTIVE PLAN / Gate 2 已关闭；Gate 3 部分合入 main（fef37d4af、7627303e3 抽取中间产物），剩 G3-2 Shell 壳化收尾与 Gate 4；Workbench 实测仍 3,387 行，未达 G3-2 建议方向窗口（1,000–1,500）
 > - **Plan mode**：TASK_GRAPH（多个 owner、热文件与独立验证契约）
 > - **更新时间**：2026-08-16
 > - **基线快照**：计划重写时的本地 `main@6aee4045e4e893af6208b043492d35b6d8fa3ef4`（当时 `agent.py` **4,680** 行）。Gate 0 必须刷新为**当前** `HEAD`，禁止把本快照当作长期权威。

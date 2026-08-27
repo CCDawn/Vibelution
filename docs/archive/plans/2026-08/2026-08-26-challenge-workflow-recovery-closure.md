@@ -1,6 +1,6 @@
 # Challenge workflow recovery closure plan
 
-Status: implementing
+Status: implemented (closed 2026-08-27). Terminal run archive (89de1a942), collection stop/orphan recovery (a2b160a1b), and recovery action surfaces (38e36950b) are merged to local main; deferred follow-ups remain separate fail-closed work by design.
 
 Owner: challenge recovery coordinator
 

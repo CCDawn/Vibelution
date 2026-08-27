@@ -80,6 +80,7 @@
 | `docs/plans/2026-08-26-test-regression-baseline-recovery.md` | `archive/plans/2026-08/`（Implemented；Pet 测试隔离与完整回归命令恢复） |
 | `docs/plans/2026-08-26-test-selector-import-closure.md` | `archive/plans/2026-08/`（Implemented；未映射 Python 改动按最近测试 import 前沿选择测试） |
 | `docs/plans/2026-08-26-development-loop-throughput.md` | `archive/plans/2026-08/`（Implemented；测试去重、短时集成锁与 gate-definition 并行自测） |
+| `docs/archive/plans/2026-08-26-challenge-workflow-recovery-closure.md` | `archive/plans/2026-08/`（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main） |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
 | `docs/frontend/*` | `archive/frontend/` |
 | `docs/superpowers/*` | `archive/superpowers/` |
