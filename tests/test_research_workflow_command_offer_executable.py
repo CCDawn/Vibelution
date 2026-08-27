@@ -607,3 +607,49 @@ def test_succeeded_node_rerun_available_requires_blocker_gap() -> None:
     assert not succeeded_node_rerun_available(
         node_id="source_finding", latest=None, run=run
     )
+
+
+def test_succeeded_node_rerun_available_heals_evidence_graph_gap() -> None:
+    """A succeeded evidence_relations node re-runs only when the run is
+    blocked on evidence_graph_incomplete (dangling relation edges materialized
+    into missingLinks); the mapping target is exclusive to that detail."""
+    import json as _json
+    from dataclasses import replace
+
+    from core.web.services.team_workflow.research_runtime.command_offers.retry_node import (
+        succeeded_node_rerun_available,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_run_record,
+    )
+
+    run = replace(
+        build_run_record(status="blocked"),
+        blocked_problem_json=_json.dumps(
+            {"code": "auto_advance_not_ready", "detail": "evidence_graph_incomplete"}
+        ),
+    )
+    latest = build_attempt_record(node_id="evidence_relations", status="succeeded")
+    assert succeeded_node_rerun_available(
+        node_id="evidence_relations", latest=latest, run=run
+    )
+
+    assert not succeeded_node_rerun_available(
+        node_id="source_extraction", latest=latest, run=run
+    )
+    assert not succeeded_node_rerun_available(
+        node_id="evidence_relations",
+        latest=build_attempt_record(node_id="evidence_relations", status="failed"),
+        run=run,
+    )
+    assert not succeeded_node_rerun_available(
+        node_id="evidence_relations",
+        latest=latest,
+        run=replace(
+            run,
+            blocked_problem_json=_json.dumps(
+                {"code": "auto_advance_not_ready", "detail": "source_candidates_missing"}
+            ),
+        ),
+    )

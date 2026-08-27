@@ -15,12 +15,17 @@ _RETRYABLE_ATTEMPT_STATUSES = frozenset({"failed", "blocked", "cancelled"})
 # Idempotent collection nodes may be re-run after a "succeeded" attempt whose
 # artifacts never materialized (e.g. a restart killed the agent turn after the
 # node had been marked succeeded, leaving the candidate store empty and the
-# successor wedged on source_candidates_missing).  Their stores are
+# successor wedged on source_candidates_missing; or the relation mapper wrote
+# dangling-endpoint edges that the merger fail-closed into missingLinks and the
+# successor wedged on evidence_graph_incomplete).  Their stores are
 # append-only and deduplicated, so a re-run is safe; every other node keeps
 # the strict non-retryable contract for succeeded attempts.  This mapping is
 # the single authority for "which upstream node heals this blocker detail";
 # offers, the command handler and the current-task projection all read it.
-_RERUN_BLOCKER_TARGET_NODES = {"source_candidates_missing": "source_finding"}
+_RERUN_BLOCKER_TARGET_NODES = {
+    "source_candidates_missing": "source_finding",
+    "evidence_graph_incomplete": "evidence_relations",
+}
 
 
 def succeeded_node_rerun_target(run: RunRecord) -> str | None:
