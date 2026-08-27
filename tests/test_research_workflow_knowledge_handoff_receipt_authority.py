@@ -438,6 +438,10 @@ def test_hypothesis_context_uses_bound_receipt_not_inventory(
             {
                 "workflowRunId": "run-test",
                 "sourceCollectionRunId": "sc-run-1",
+                # Candidate session isolation (584e68de9): the dispatching
+                # task declares the candidate context; the returned
+                # knowledgePackage mirrors the task's candidateId.
+                "candidateId": "accepted-package",
             },
             store=harness.store,
         )

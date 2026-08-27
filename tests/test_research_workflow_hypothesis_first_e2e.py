@@ -83,6 +83,7 @@ from core.web.services.team_workflow.source_collection import (
 )
 
 from tests._support.team_workflow.helpers import (
+    _seed_claim_belief_gate_fixture,
     _use_fake_local_research_config,
     _use_tmp_project_root,
 )
@@ -721,6 +722,11 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(tmp_path, monkeypatch)
+    # R2.2 claim belief gate: the converging candidates need review-supported
+    # core claims so the final convergence passes the fail-closed gate.
+    _seed_claim_belief_gate_fixture(
+        monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
+    )
     created_runs, facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -1406,6 +1412,11 @@ def test_interruption_replay_across_chain_points(
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(tmp_path, monkeypatch)
+    # R2.2 claim belief gate: seed supported claims for the converging
+    # candidates so the round-2 convergence passes the fail-closed gate.
+    _seed_claim_belief_gate_fixture(
+        monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
+    )
     created_runs, _facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
