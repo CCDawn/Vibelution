@@ -708,6 +708,167 @@ def test_review_meeting_fan_in_waits_for_every_selected_candidate(
     ]
 
 
+def test_fan_in_skips_superseded_attempt_and_binds_latest_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A superseded round-1 attempt with a reopened round 2 is not authority.
+
+    The sibling candidate's close must wait on the live successor instead of
+    raising on the digest-less superseded meeting; once round 2 closes the
+    group binds each candidate's newest authoritative attempt across rounds
+    (roundIndex = highest authoritative round for idempotent close replays).
+    """
+    from core.web.services import team_service
+
+    team_id = "team-fan-in-superseded"
+    links = [
+        {
+            "meetingRoundId": "meeting-a-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+        },
+        {
+            "meetingRoundId": "meeting-b-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-b",
+            "candidateOrder": 1,
+        },
+        {
+            "meetingRoundId": "meeting-a-r2",
+            "selectionId": "selection-1",
+            "roundIndex": 2,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+        },
+    ]
+    superseded_meeting = {
+        "meetingRoundId": "meeting-a-r1",
+        "status": "closed",
+        "recoveryReason": "discussion_has_no_completed_messages",
+    }
+    meeting_by_id = {
+        "meeting-a-r1": superseded_meeting,
+        "meeting-b-r1": {"meetingRoundId": "meeting-b-r1", "status": "closed"},
+        "meeting-a-r2": {"meetingRoundId": "meeting-a-r2", "status": "open"},
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        chain,
+        "list_review_round_links",
+        lambda *_args, **_kwargs: {"links": links},
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args: {
+            "selection": {"selectedCandidateIds": ["hyp-a", "hyp-b"]}
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meeting_by_id[meeting_id]},
+    )
+
+    waiting = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-b-r1"]
+    )
+    assert waiting["status"] == "waiting_for_sibling_reviews"
+    assert waiting["pendingMeetingRoundIds"] == ["meeting-a-r2"]
+    assert waiting["supersededMeetingRoundIds"] == ["meeting-a-r1"]
+    assert waiting["supersededCandidateIds"] == []
+
+    meeting_by_id["meeting-a-r2"] = {
+        "meetingRoundId": "meeting-a-r2",
+        "status": "closed",
+    }
+    ready_from_sibling = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-b-r1"]
+    )
+    assert ready_from_sibling["status"] == "ready"
+    assert [item["meetingRoundId"] for item in ready_from_sibling["meetings"]] == [
+        "meeting-a-r2",
+        "meeting-b-r1",
+    ]
+    assert ready_from_sibling["roundIndex"] == 2
+
+    # The round-2 candidate-scoped follow-up keeps its own group membership
+    # (candidate-scoped rounds only fan in that round's scoped meetings).
+    ready_from_latest = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-a-r2"]
+    )
+    assert ready_from_latest["status"] == "ready"
+    assert [item["meetingRoundId"] for item in ready_from_latest["meetings"]] == [
+        "meeting-a-r2"
+    ]
+    assert ready_from_latest["roundIndex"] == 2
+
+
+def test_fan_in_waits_when_superseded_candidate_has_no_successor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A candidate whose newest attempt is superseded with no successor stays
+    pending: the group must not go ready and must not treat the abandoned
+    attempt as review evidence."""
+    from core.web.services import team_service
+
+    team_id = "team-fan-in-superseded-no-successor"
+    links = [
+        {
+            "meetingRoundId": "meeting-a-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+        },
+        {
+            "meetingRoundId": "meeting-b-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-b",
+            "candidateOrder": 1,
+        },
+    ]
+    meeting_by_id = {
+        "meeting-a-r1": {
+            "meetingRoundId": "meeting-a-r1",
+            "status": "closed",
+            "recoveryReason": "discussion_has_no_completed_messages",
+        },
+        "meeting-b-r1": {"meetingRoundId": "meeting-b-r1", "status": "closed"},
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        chain,
+        "list_review_round_links",
+        lambda *_args, **_kwargs: {"links": links},
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args: {
+            "selection": {"selectedCandidateIds": ["hyp-a", "hyp-b"]}
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meeting_by_id[meeting_id]},
+    )
+
+    waiting = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-b-r1"]
+    )
+    assert waiting["status"] == "waiting_for_sibling_reviews"
+    assert waiting["supersededCandidateIds"] == ["hyp-a"]
+    assert waiting["supersededMeetingRoundIds"] == ["meeting-a-r1"]
+    assert waiting["pendingMeetingRoundIds"] == []
+    assert waiting["missingCandidateIds"] == []
+
+
 def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2872,6 +3033,138 @@ def test_failed_review_round_can_be_reopened_with_next_budgeted_round(
 
     first = meetings.get_meeting_round(team_id, first_id)["meetingRound"]
     assert first["status"] == "closed"
+
+
+def _hyp_a_failed_review_runner(participant, prompt, context):
+    """hyp-a's discussion all fails (zero completed messages); hyp-b speaks."""
+    if "candidate hyp-b" in str(prompt):
+        return _marker_runner(participant, prompt, context)
+    return {
+        "status": "failed",
+        "errorType": "protocol_error",
+        "summary": "speaker failed before producing discussion evidence",
+    }
+
+
+def test_sibling_close_after_supersede_reopen_generates_round_and_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: after supersede+reopen the sibling close must not fail.
+
+    Candidate hyp-a's round 1 produced no successful speech and was superseded
+    (append-only, no digest) then reopened as round 2.  Closing the sibling
+    hyp-b round-1 review used to raise "closed meeting ... is missing digestId
+    or decisionRefs" because the fan-in treated any closed meeting as
+    authority.  Now the sibling close reports waiting; once hyp-a's round 2
+    closes, the group binds each candidate's newest authoritative attempt and
+    generates the round, and replaying hyp-b's close reuses the same round
+    idempotently.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = selections.record_hypothesis_selection(
+            team_id,
+            _selection_payload(agent_ids[0]),
+            agent_runner=_hyp_a_failed_review_runner,
+        )
+        assert len(_review_meetings(recorded)) == 2
+        meeting_a1 = next(
+            str(link["meetingRoundId"])
+            for link in chain.list_review_round_links(
+                team_id, question_id=_QUESTION_ID
+            )["links"]
+            if str(link["candidateId"]) == "hyp-a"
+            and int(link["roundIndex"]) == 1
+        )
+
+        reopened = chain.reopen_failed_review_meeting(
+            team_id,
+            meeting_a1,
+            agent_runner=_marker_runner,
+        )
+        assert reopened["status"] == "reopened"
+        superseded = reopened["supersededMeetingRound"]
+        assert superseded["status"] == "closed"
+        assert superseded["recoveryReason"] == "discussion_has_no_completed_messages"
+        meeting_a2 = str(reopened["meetingRound"]["meetingRoundId"])
+        assert meeting_a2.endswith("-r2")
+
+        meeting_b1 = next(
+            str(link["meetingRoundId"])
+            for link in chain.list_review_round_links(
+                team_id, question_id=_QUESTION_ID
+            )["links"]
+            if str(link["candidateId"]) == "hyp-b"
+            and int(link["roundIndex"]) == 1
+        )
+
+        # The sibling close lands while hyp-a's round 2 is still open: the
+        # superseded round-1 attempt must not act as authority, and the close
+        # must not raise on the digest-less meeting.
+        _drive_to_awaiting_approval(team_id, meeting_b1, agent_ids[0])
+        closed_b = chain.close_review_meeting(
+            team_id,
+            meeting_b1,
+            _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+        )
+        assert closed_b["meetingRound"]["status"] == "closed"
+        assert (
+            closed_b["hypothesisRound"]["status"] == "waiting_for_sibling_reviews"
+        )
+        assert closed_b["hypothesisRound"]["pendingMeetingRoundIds"] == [meeting_a2]
+        assert closed_b["hypothesisRound"]["supersededMeetingRoundIds"] == [
+            str(superseded["meetingRoundId"])
+        ]
+
+        _drive_to_awaiting_approval(team_id, meeting_a2, agent_ids[0])
+        closed_a2 = chain.close_review_meeting(
+            team_id,
+            meeting_a2,
+            _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+        )
+        # The candidate-scoped round-2 follow-up generates its own round.
+        assert closed_a2["hypothesisRound"]["status"] == "created"
+        generated_round = closed_a2["hypothesisRound"]["round"]
+        generated_meeting_ids = {
+            str(ref.get("id") or "")
+            for ref in list(generated_round.get("meetingRefs") or [])
+            if str(ref.get("kind") or "") == "meeting_round"
+        }
+        assert generated_meeting_ids == {meeting_a2}
+
+        # Replaying the previously structurally-failed close binds each
+        # candidate's newest authoritative attempt across rounds (hyp-a ->
+        # round 2, hyp-b -> round 1) and generates the merged round without
+        # raising on the digest-less superseded meeting.
+        replayed_b = chain.close_review_meeting(
+            team_id,
+            meeting_b1,
+            _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+        )
+        assert replayed_b["hypothesisRound"]["status"] == "created"
+        merged_round = replayed_b["hypothesisRound"]["round"]
+        merged_meeting_ids = {
+            str(ref.get("id") or "")
+            for ref in list(merged_round.get("meetingRefs") or [])
+            if str(ref.get("kind") or "") == "meeting_round"
+        }
+        assert merged_meeting_ids == {meeting_a2, meeting_b1}
+        assert merged_round["roundId"] != generated_round["roundId"]
+
+        # A further replay of the same close reuses the merged round.
+        replayed_again = chain.close_review_meeting(
+            team_id,
+            meeting_b1,
+            _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+        )
+        assert replayed_again["hypothesisRound"]["status"] == "reused"
+        assert (
+            replayed_again["hypothesisRound"]["round"]["roundId"]
+            == merged_round["roundId"]
+        )
 
 
 def test_reopen_refuses_review_round_with_successful_speech(

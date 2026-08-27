@@ -75,6 +75,7 @@ export const ChallengeMvpProgressPanel = createLazyNamedTeamPanel(loadTeamResear
 export const EvidenceGraphView = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "EvidenceGraphView");
 export const HypothesisFirstNodeInspector = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "HypothesisFirstNodeInspector");
 export const ResearchAgentBindingPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchAgentBindingPanel");
+export const ResearchAnomalyInboxPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchAnomalyInboxPanel");
 export const ResearchProcessDefinitionNodePanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchProcessDefinitionNodePanel");
 export const ResearchProcessNodeInspector = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchProcessNodeInspector");
 export const ResearchRunLaunchPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchRunLaunchPanel");

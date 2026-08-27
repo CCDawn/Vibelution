@@ -10,6 +10,8 @@ import { fetchJson, isFetchJsonHttpError } from "./client";
 import type {
   ActionCommand,
   ActionInputByCommand,
+  AnomalyInboxItem,
+  AnomalyInboxResponse,
   CandidateEvidenceTrailResponse,
   CommandAction,
   CloseReviewMeetingResponse,
@@ -37,6 +39,11 @@ import type {
   QuestionRunResetPreview,
   QuestionRunResetResponse,
 } from "./types/hypothesisFirst";
+
+// Re-exported so inspector surfaces classify HTTP errors through this domain
+// module — routes must not import `api/client` directly
+// (fullStackApiBoundary.test.ts).
+export { isFetchJsonHttpError };
 
 function teamPrefix(teamId: string): string {
   return `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration`;
@@ -446,6 +453,83 @@ export function fetchReviewRoundLinks(
     `${teamPrefix(teamId)}/hypothesis-first/chain/review-round-links${questionQuery(questionId)}`,
     { signal: options?.signal },
   );
+}
+
+/**
+ * R4.3 anomaly inbox: one sorted server-owned projection per question.
+ * Malformed payloads fail closed here so the panel never has to guess.
+ */
+export function fetchHypothesisFirstAnomalyInbox(
+  teamId: string,
+  questionId = "",
+  options?: { signal?: AbortSignal },
+): Promise<AnomalyInboxResponse> {
+  return fetchJson<unknown>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/anomaly-inbox${questionQuery(questionId)}`,
+    { signal: options?.signal },
+  ).then((payload) => parseAnomalyInboxResponse(payload));
+}
+
+const ANOMALY_SEVERITIES = new Set(["critical", "high", "medium"]);
+
+const ANOMALY_KINDS = new Set([
+  "blocked_run",
+  "heartbeat_stale",
+  "needs_human_gate",
+  "claim_disputed",
+  "review_disagreement_escalation",
+  "drift_sentinel_hit",
+  "budget_exhausted",
+  "retry_budget_exhausted",
+]);
+
+function parseAnomalyInboxResponse(payload: unknown): AnomalyInboxResponse {
+  if (!isRecord(payload) || payload.schemaVersion !== 1) {
+    throw new Error("Invalid anomaly inbox response");
+  }
+  const inbox = payload.inbox;
+  if (
+    !isRecord(inbox)
+    || inbox.schemaVersion !== 1
+    || inbox.ruleId !== "anomaly_inbox_rule.v1"
+    || typeof inbox.generatedAt !== "string"
+    || !Array.isArray(inbox.items)
+    || typeof payload.teamId !== "string"
+    || typeof payload.questionId !== "string"
+  ) {
+    throw new Error("Invalid anomaly inbox response");
+  }
+  const items = inbox.items.map((item): AnomalyInboxItem => {
+    if (!isRecord(item) || !isRecord(item.scope)) {
+      throw new Error("Invalid anomaly inbox response");
+    }
+    const scope = item.scope;
+    const validScope = ANOMALY_KINDS.has(String(item.kind))
+      && ANOMALY_SEVERITIES.has(String(item.severity))
+      && typeof item.firstSeenAt === "string"
+      && typeof item.lastSeenAt === "string"
+      && typeof item.summary === "string"
+      && (item.recommendedAction === null || typeof item.recommendedAction === "string")
+      && Array.isArray(item.evidence)
+      && item.evidence.every((ref) => typeof ref === "string")
+      && ["teamId", "questionId", "runId", "nodeId", "meetingRoundId"]
+        .every((field) => typeof scope[field] === "string");
+    if (!validScope) {
+      throw new Error("Invalid anomaly inbox response");
+    }
+    return item as unknown as AnomalyInboxItem;
+  });
+  return {
+    schemaVersion: 1,
+    teamId: payload.teamId,
+    questionId: payload.questionId,
+    inbox: {
+      schemaVersion: 1,
+      ruleId: "anomaly_inbox_rule.v1",
+      generatedAt: inbox.generatedAt,
+      items,
+    },
+  };
 }
 
 export function closeHypothesisReviewMeeting(

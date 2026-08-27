@@ -12,7 +12,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.research.competition.real_control_batch import (
+    AUTO_CLOSE_RATE_TARGET,
     DEFAULT_REAL_FAILURE_BUDGET,
+    ESCALATION_RATE_STOP_LINE,
 )
 
 
@@ -88,6 +90,19 @@ class ChallengeCupRealBatchProjectionResponse(BaseModel):
     gateComplete: bool = False
     lastUpdatedAt: str = ""
     canResume: bool = False
+    # Read-only observability extensions (R4.2). The client-side "requested"
+    # drain state is synthesized while a cancel request is in flight.
+    drainState: str = "none"
+    concurrencyLimit: int | None = None
+    totalCompletedCount: int = 0
+    autoClosedCount: int = 0
+    escalatedCount: int = 0
+    autoCloseRate: float | None = None
+    escalationRate: float | None = None
+    autoCloseTarget: float = AUTO_CLOSE_RATE_TARGET
+    escalationStopLine: float = ESCALATION_RATE_STOP_LINE
+    stopReason: str = ""
+    remainingFailureBudget: int = 0
 
 
 class ChallengeCupRealBatchOutcomeItemResponse(BaseModel):

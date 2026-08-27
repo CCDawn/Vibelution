@@ -1,4 +1,4 @@
-import { fetchWithControl } from "../../api/client";
+import { fetchWithControl } from "../../api/chat";
 
 export type ChatRoomSseFrame = {
   event: string;

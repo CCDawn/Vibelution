@@ -41,4 +41,5 @@ export {
   fetchResearchWorkflowHypotheses,
   fetchResearchWorkflowExperimentCampaigns,
   fetchResearchWorkflowEvaluation,
+  fetchResearchWorkflowQuestionLineage,
 } from "./domain-projections";

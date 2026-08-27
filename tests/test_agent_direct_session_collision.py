@@ -63,6 +63,18 @@ def test_session_list_repairs_duplicate_direct_session_without_losing_history(tm
         ),
     ]
     agent_directory_service.save_state(state)
+    # The canonical ledger owns history. Seed it before the legacy chat_state
+    # blob so the one-shot materializer sees an owned session and drops the
+    # blob instead of appending a duplicate "保留历史" message.
+    append_conversation_event(
+        tmp_path,
+        shared_session_id,
+        "turn-preserved-history",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "保留历史"},
+        timestamp="2026-06-09T10:53:30",
+    )
     save_chat_state(
         tmp_path,
         {
@@ -80,15 +92,6 @@ def test_session_list_repairs_duplicate_direct_session_without_losing_history(tm
                 }
             ],
         },
-    )
-    append_conversation_event(
-        tmp_path,
-        shared_session_id,
-        "turn-preserved-history",
-        EVENT_USER_MESSAGE,
-        status="recorded",
-        payload={"content": "保留历史"},
-        timestamp="2026-06-09T10:53:30",
     )
     recorded_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(

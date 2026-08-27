@@ -28,6 +28,7 @@ const styles = {
   historyRetry: "w-fit rounded-full bg-[var(--vui-surface-inset)] px-2 py-0.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]",
   task: "flex min-h-0 flex-col gap-3",
   fill: "h-full",
+  bulletedList: "m-0 grid list-disc gap-1 pl-4",
 } as const;
 
 export default styles;

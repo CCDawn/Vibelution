@@ -14,7 +14,11 @@ from typing import Any, NoReturn
 
 from fastapi import Header, HTTPException, Query, Request, Response, status
 
-from core.research.workflow.contracts import ContractValidationError, scope_hash_for
+from core.research.workflow.contracts import (
+    AnomalyInbox,
+    ContractValidationError,
+    scope_hash_for,
+)
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow import (
     hypothesis_rounds,
@@ -26,6 +30,7 @@ from core.web.services.team_workflow.challenge_question_runs import (
     get_challenge_question_run_detail,
 )
 from core.web.services.team_workflow.research_runtime import (
+    anomaly_inbox_service,
     hypothesis_first_chain,
     hypothesis_first_state_v2,
 )
@@ -43,6 +48,7 @@ from core.web.services.team_workflow.research_scope import (
 from ._errors import _raise_team_workflow_route_error
 from ._router import router
 from .hypothesis_first_models import (
+    AnomalyInboxResponse,
     CandidateEvidenceTrailResponse,
     ChainStateResponse,
     CloseReviewMeetingResponse,
@@ -720,6 +726,58 @@ def team_workflow_hypothesis_first_chain_state_v2(
     response.headers["ETag"] = etag
     response.headers["Cache-Control"] = "private, must-revalidate"
     return snapshot
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/anomaly-inbox",
+    response_model=AnomalyInboxResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_anomaly_inbox(
+    team_id: str,
+    question_id: str = Query("", alias="questionId", max_length=200),
+) -> dict:
+    """R4.3 anomaly inbox: one read-only projection for the operations console.
+
+    薄路由：把该题目的 canonical state-v2 快照交给纯投影服务
+    ``build_anomaly_inbox``（disputed/escalation 等可选输入本阶段为空，
+    面板先呈现 problems/awaiting/heartbeat 信号），响应原样携带合同
+    ``AnomalyInbox.to_dict()``，排序/合并/完整性全部由合同保证。
+    未给 questionId 时返回合法的空收件箱（无信号的合法状态）。
+    """
+
+    normalized_question_id = question_id.strip().upper()
+    if not normalized_question_id:
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "questionId": "",
+            "inbox": AnomalyInbox.empty().to_dict(),
+        }
+    try:
+        snapshot = hypothesis_first_state_v2.project_hypothesis_first_state_v2(
+            team_id,
+            normalized_question_id,
+        )
+    except hypothesis_first_state_v2.HypothesisFirstStateScopeError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except hypothesis_first_state_v2.HypothesisFirstStateSourceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.anomaly_inbox", team_id, exc)
+    inbox = anomaly_inbox_service.build_anomaly_inbox(snapshot)
+    return {
+        "schemaVersion": 1,
+        "teamId": team_id,
+        "questionId": normalized_question_id,
+        "inbox": inbox.to_dict(),
+    }
 
 
 @router.post(

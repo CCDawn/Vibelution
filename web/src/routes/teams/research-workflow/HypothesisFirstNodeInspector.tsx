@@ -9,9 +9,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
-import { isFetchJsonHttpError } from "../../../api/client";
 import {
   executeHypothesisFirstCommand,
+  isFetchJsonHttpError,
   isHypothesisFirstCommandStateConflict,
   openHypothesisCandidateGeneration,
   openNextHypothesisReviewRound,
@@ -998,7 +998,7 @@ function canonicalActionsFor(nextAction: HypothesisFirstNextAction): readonly Co
 
 function workflowProblemList(problems: readonly WorkflowProblem[]) {
   return (
-    <ul className="m-0 grid list-disc gap-1 pl-4">
+    <ul className={styles.bulletedList}>
       {problems.map((problem, index) => (
         <li key={`${problem.code}:${problem.sourceId || ""}:${index}`}>{problem.message}</li>
       ))}
@@ -1347,7 +1347,7 @@ function CanonicalCommandButton(props: {
               ? (props.lang === "zh" ? "状态已更新，请重新确认。" : "The workflow state changed. Review it and confirm again.")
               : rejection.message || (props.lang === "zh" ? "命令未能执行，请稍后重试。" : "The command was not executed. Try again later.")}
             details={rejection.blockers.length ? (
-              <ul className="m-0 grid list-disc gap-1 pl-4" data-testid="canonical-command-readiness-blockers">
+              <ul className={styles.bulletedList} data-testid="canonical-command-readiness-blockers">
                 {rejection.blockers.map((blocker, index) => (
                   <li key={`${readinessBlockerLabel(blocker)}:${index}`}>{readinessBlockerLabel(blocker)}</li>
                 ))}
@@ -1654,7 +1654,7 @@ function CollectionSourceProgress({ sources, lang }: {
         })}
       </ul>
       {sources.some((source) => source.error) ? (
-        <ul className="m-0 grid list-disc gap-1 pl-4">
+        <ul className={styles.bulletedList}>
           {sources.filter((source) => source.error).map((source, index) => (
             <li key={`${source.sourceId}:${index}`} className={styles.sourceError}>{source.error?.message}</li>
           ))}

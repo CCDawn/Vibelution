@@ -19,7 +19,8 @@ vi.mock("../../../api/chat", () => ({
   fetchChatRoomDetail: vi.fn().mockResolvedValue({ rounds: [] }),
 }));
 
-vi.mock("../../../api/hypothesisFirst", () => ({
+vi.mock("../../../api/hypothesisFirst", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../api/hypothesisFirst")>()),
   recordCollectionHandoff: vi.fn().mockResolvedValue({}),
   openHypothesisCandidateGeneration: vi.fn().mockResolvedValue({}),
   executeHypothesisFirstCommand: vi.fn().mockResolvedValue({ result: {} }),
