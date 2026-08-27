@@ -30,6 +30,7 @@ from .domain_ports import (
     ReadBackVerdict,
     ScopedAgentTaskHandle,
 )
+from .ids import new_id
 from .agent_node_execution import _formal_task_authorities
 from .formal_hypothesis_fanout import (
     HypothesisAuthorityUnavailable as _HypothesisAuthorityUnavailable,
@@ -703,7 +704,7 @@ class RealDomainPorts:
                         ).strip(),
                     )
                 )
-                return self._create_hypothesis_fan_out(
+                fan_out_handle = self._create_hypothesis_fan_out(
                     action=action,
                     binding=binding,
                     snapshot=snapshot,
@@ -711,6 +712,10 @@ class RealDomainPorts:
                     challenge_task_contract=challenge_task_contract,
                     model_invocation_receipt_binding=model_invocation_receipt_binding,
                 )
+                publish_agent_task_started_anchor(
+                    self._store, action=action, binding=binding, handle=fan_out_handle
+                )
+                return fan_out_handle
         if self._agent_task_factory is not None:
             return self._agent_task_factory(action=action, binding=binding)
         # 默认 factory：真实 research-project / source-collection task。
@@ -724,6 +729,9 @@ class RealDomainPorts:
         _require_canonical_session(
             session_id=handle.session_id,
             agent_id=binding.agent_id,
+        )
+        publish_agent_task_started_anchor(
+            self._store, action=action, binding=binding, handle=handle
         )
         return handle
 
@@ -1991,6 +1999,124 @@ def _agent_handle_from_started(started: dict[str, Any]) -> AgentTaskHandle:
         task_id=task_id,
         turn_id=turn_id,
     )
+
+
+def publish_agent_task_started_anchor(
+    store: WorkflowLedgerStore,
+    *,
+    action: PendingAction,
+    binding: BindingResolution,
+    handle: AgentTaskHandle,
+) -> None:
+    """Publish the dispatch-time anchor and move the attempt to running.
+
+    ``create_agent_task`` returning a live turn handle is the real execution
+    signal: the Agent Session/Task/Turn exists and the turn was accepted.
+    Publishing a provisional anchor plus the ``dispatching -> running``
+    transition here makes taskId/sessionId/turnId visible in the node_attempt
+    and currentTask projections for the entire (potentially long) turn
+    instead of only after the final adapter commit.  Best-effort and
+    idempotent: the authoritative anchor is still written exactly once by the
+    adapter commit, and a blocked/terminal attempt is never resurrected.
+    """
+
+    if getattr(handle, "observation_only", False):
+        return
+    from core.research.workflow.transitions import NodeAttemptStatus
+
+    now_ms = int(time.time() * 1000)
+    root_session_id = str(handle.root_session_id or handle.session_id or "").strip()
+    root_session_attempt = handle.root_session_attempt or handle.session_attempt
+    scalar_task_id = str(handle.task_id or "").strip()
+    scalar_turn_id = str(handle.turn_id or "").strip()
+    anchor_payload = {
+        **binding.to_dict(),
+        **handle.to_dict(),
+        "actionId": action.action_id,
+        "status": "running",
+        "provisional": True,
+    }
+
+    def mutate(uow: Any) -> bool:
+        attempt = uow.repository.get_attempt(action.node_run_id)
+        if attempt is None:
+            return True
+        if str(attempt.status) not in {
+            NodeAttemptStatus.DISPATCHING.value,
+            NodeAttemptStatus.RUNNING.value,
+        }:
+            # Only a live dispatch may move to running; the observability
+            # path must never resurrect a blocked/terminal attempt.
+            return True
+        anchor_id = ""
+        existing = uow.repository.get_anchor_by_node_run(action.node_run_id)
+        if handle.scoped_handles:
+            # v3 fan-out anchors are owned by the CAS draft publisher; only
+            # link and transition the attempt here, never rewrite the json.
+            if existing is not None:
+                anchor_id = str(existing[0])
+        elif existing is None:
+            anchor_id = new_id("anchor")
+            uow.repository.insert_anchor(
+                anchor_id=anchor_id,
+                node_run_id=action.node_run_id,
+                actor_kind=action.actor_kind.value,
+                anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
+                created_at_ms=now_ms,
+                agent_id=binding.agent_id,
+                role_key=binding.role_key,
+                session_id=root_session_id or None,
+                session_attempt=root_session_attempt,
+                task_id=scalar_task_id or None,
+                turn_id=scalar_turn_id or None,
+                status="running",
+            )
+        elif existing is not None:
+            anchor_id = str(existing[0])
+            uow.repository.update_anchor_by_node_run(
+                node_run_id=action.node_run_id,
+                anchor_json=json.dumps(anchor_payload, ensure_ascii=False),
+                status="running",
+                agent_id=binding.agent_id,
+                role_key=binding.role_key,
+                session_id=root_session_id or None,
+                session_attempt=root_session_attempt,
+                task_id=scalar_task_id or None,
+                turn_id=scalar_turn_id or None,
+            )
+        uow.repository.update_attempt_status(
+            action.node_run_id,
+            NodeAttemptStatus.RUNNING.value,
+            now_ms,
+            execution_anchor_id=anchor_id or None,
+        )
+        return True
+
+    try:
+        store.submit(mutate, force_flush=True).result(timeout=30)
+    except Exception as exc:
+        # Pure observability: a failed provisional publish must not fail the
+        # adapter execution; the commit path remains the anchor authority.
+        try:
+            from core.web.services.runtime_scene_service import (
+                record_runtime_scene_event_quietly,
+            )
+
+            record_runtime_scene_event_quietly(
+                "team_workflow_orchestration",
+                "real_domain_ports",
+                "agent_task_started_anchor_publish_failed",
+                level="warning",
+                outcome="failed",
+                fields={
+                    "runId": str(action.run_id or ""),
+                    "nodeRunId": str(action.node_run_id or ""),
+                    "nodeId": str(action.node_id or ""),
+                    "detail": str(exc)[:200],
+                },
+            )
+        except Exception:
+            pass
 
 
 def _verify_node_root_session(session_id: str, *, agent_id: str) -> None:

@@ -241,3 +241,185 @@ def test_commit_session_turn_runtime_state_preserves_concurrent_same_session_fie
     assert stored["operatorNote"] == "keep"
     assert stored["last_turn_status"] == "ready"
     assert "last_turn_error" not in stored
+
+
+_PAYLOAD_PROTOCOL_ERROR = "payload_protocol_error: duplicate tool call id"
+
+
+def _seed_running_session(tmp_path, session_id: str, turn_id: str) -> None:
+    save_session_chat_state(
+        tmp_path,
+        session_id,
+        {
+            "conversation_id": session_id,
+            "title": "T",
+            "last_turn_status": "running",
+            "updated_at": "2026-08-27T12:00:00",
+        },
+    )
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+
+
+def test_persist_turn_result_provider_protocol_error_keeps_error_out_of_journal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A payload-protocol failure is turn metadata, never model-visible dialogue."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {
+            "status": "failed",
+            "summary": _PAYLOAD_PROTOCOL_ERROR,
+            "raw_output": _PAYLOAD_PROTOCOL_ERROR,
+            "error": _PAYLOAD_PROTOCOL_ERROR,
+        },
+        turn_id="turn-a",
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    assistant_events = [event for event in events if event.event_type == session_service.EVENT_ASSISTANT_MESSAGE]
+    assert assistant_events == []
+    failed_events = [event for event in events if event.event_type == session_service.EVENT_TURN_FAILED]
+    assert len(failed_events) == 1
+    assert failed_events[0].payload.get("errorType") == "provider_protocol_error"
+    assert "duplicate tool call id" in str(failed_events[0].payload.get("rawError") or "")
+    from core.chat.turn_journal import event_has_model_projection
+
+    model_visible_text = " ".join(
+        str((event.payload or {}).get("content") or (event.payload or {}).get("text") or "")
+        for event in events
+        if event_has_model_projection(event)
+    )
+    assert "payload_protocol_error" not in model_visible_text
+
+    stored = load_session_chat_state(tmp_path, "session-a")
+    assert stored is not None
+    assert stored.get("last_turn_status") == "failed"
+    assert stored.get("last_turn_error")
+
+
+def test_persist_turn_result_provider_failure_allows_next_turn_reconcile(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """After a clean provider-failure persist, the next turn's seed matches the ledger."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    session_service._append_session_conversation_event(
+        "session-a",
+        "turn-a",
+        session_service.EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"role": "user", "content": "执行资料搜集任务", "turnId": "turn-a"},
+        source="submit_session_message",
+    )
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {
+            "status": "failed",
+            "summary": _PAYLOAD_PROTOCOL_ERROR,
+            "raw_output": _PAYLOAD_PROTOCOL_ERROR,
+            "error": _PAYLOAD_PROTOCOL_ERROR,
+        },
+        turn_id="turn-a",
+    )
+
+    from core.chat.conversation_invariant import canonical_conversation_messages_from_events
+    from core.infrastructure.runtime_input import build_chat_user_message
+    from core.orchestration.turn_message_assembly import (
+        reconcile_chat_messages_with_ledger,
+        ledger_seeded_history_fingerprint,
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    historical = canonical_conversation_messages_from_events(events, current_turn_id="turn-b")
+    assert historical, "seed history must survive a failed turn"
+    assert all("payload_protocol_error" not in str(item.get("content") or "") for item in historical)
+
+    seeded = [
+        build_chat_user_message("执行资料搜集任务"),
+        build_chat_user_message("继续下一步"),
+    ]
+    reconciled = reconcile_chat_messages_with_ledger(
+        seeded,
+        events,
+        turn_id="turn-b",
+        strict=True,
+    )
+    assert reconciled == seeded
+    stamped = ledger_seeded_history_fingerprint(events, turn_id="turn-b")
+    assert stamped
+
+
+def test_journal_poisoning_assistant_message_breaks_next_turn_reconcile(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Pin the poisoning mechanism: a raw-error assistant item fails reconciliation."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    session_service._append_session_conversation_event(
+        "session-a",
+        "turn-a",
+        session_service.EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"role": "user", "content": "执行资料搜集任务", "turnId": "turn-a"},
+        source="submit_session_message",
+    )
+    # Simulate the production poisoning frame: raw error text committed as a
+    # model-visible assistant message (journal seq 232 of the incident).
+    session_service._append_session_conversation_event(
+        "session-a",
+        "turn-a",
+        session_service.EVENT_ASSISTANT_MESSAGE,
+        status="needs_continue",
+        payload={"role": "assistant", "content": _PAYLOAD_PROTOCOL_ERROR},
+        source="persist_session_turn_result",
+    )
+
+    from core.chat.conversation_invariant import canonical_conversation_messages_from_events
+    from core.infrastructure.runtime_input import build_chat_user_message
+    from core.orchestration.turn_message_assembly import TurnJournalReplayError, reconcile_chat_messages_with_ledger
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    historical = canonical_conversation_messages_from_events(events, current_turn_id="turn-b")
+    assert any(_PAYLOAD_PROTOCOL_ERROR in str(item.get("content") or "") for item in historical)
+
+    # The seed pipeline omits provider-error assistant text, so the seeded
+    # history lacks the poisoned frame while the ledger reconstruction keeps
+    # it — exactly the drift that produced the production incident.
+    seeded = [
+        build_chat_user_message("执行资料搜集任务"),
+        build_chat_user_message("继续下一步"),
+    ]
+    with pytest.raises(TurnJournalReplayError) as exc_info:
+        reconcile_chat_messages_with_ledger(seeded, events, turn_id="turn-b", strict=True)
+    assert exc_info.value.error_type == "ledger_history_mismatch"
+
+
+def test_persist_turn_result_completed_still_journals_assistant_message(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """The fix only diverts failures; successful replies keep their journal frame."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {"status": "completed", "summary": "已完成资料搜集。", "raw_output": "已完成资料搜集。"},
+        turn_id="turn-a",
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    assistant_events = [event for event in events if event.event_type == session_service.EVENT_ASSISTANT_MESSAGE]
+    assert len(assistant_events) == 1
+    assert "已完成资料搜集。" in str(assistant_events[0].payload.get("content") or "")

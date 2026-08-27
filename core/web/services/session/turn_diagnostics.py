@@ -1892,6 +1892,12 @@ def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> d
         or "service unavailable" in lower
     ):
         return reason("upstream_unavailable", "provider 上游服务不可用或网关失败", "provider upstream service is unavailable or failed at the gateway")
+    if "provider_protocol_error" in lower or "payload_protocol_error" in lower:
+        return reason(
+            "provider_protocol_error",
+            "模型返回了违反协议的响应（例如重复的工具调用 id）",
+            "the model returned a protocol-violating response (for example a duplicated tool call id)",
+        )
     if "timeout" in lower:
         return reason("timeout", "provider 响应超时", "provider response timed out")
     if s._looks_like_provider_error_text(value):
@@ -2127,6 +2133,15 @@ def _user_visible_failure_summary(
             zh=f"具体报错：{visible_reason_detail}。" if visible_reason_detail else "",
             en=f"Provider detail: {visible_reason_detail}." if visible_reason_detail else "",
         )
+        # Headline follows the single authoritative failure classification so a
+        # payload-protocol error that also carries upstream markers still reads
+        # as an upstream failure (classification precedence stays in one place).
+        if s._failure_error_type(text) == "provider_protocol_error":
+            return s.text_for(
+                language,
+                zh=f"模型返回了无法处理的协议级响应，本轮已停止。{reason_line}{detail_line}完整错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+                en=f'The model returned a protocol-invalid response, so this turn was stopped. {reason_line}{detail_line} The full error was written to runtime logs; retry later or send "continue".',
+            )
         return s.text_for(
             language,
             zh=f"模型服务上游暂时失败，本轮没有完成。{reason_line}{detail_line}完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
