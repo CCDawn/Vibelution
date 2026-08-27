@@ -3,14 +3,14 @@ import { ArrowRight, Sparkles } from "lucide-react";
 
 import { listVirtualHumanCompanions } from "../api/agentPlugins";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VPage, VRouteLinkButton, VStateSurface } from "../components/vui";
+import { VButton, VNativeButton, VPage, VRouteLinkButton, VStateSurface } from "../components/vui";
 import { usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { useChatRouteSelection } from "./chat/useChatRouteSelection";
 import { CompanionPortrait } from "./companions/CompanionPortrait";
 import {
   companionAbout,
   companionIdentity,
-  companionSessionRoute,
   currentLifeActivity,
   lifeMoodLabel,
 } from "./companions/companionPresentation";
@@ -56,6 +56,7 @@ const COPY = {
 export function CompanionsRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
+  const { openCompanionSession } = useChatRouteSelection();
   const pageVisible = usePageVisibility();
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
@@ -119,12 +120,20 @@ export function CompanionsRoute() {
             const activity = currentLifeActivity(companion.snapshot);
             const paused = Boolean(companion.snapshot.state?.lifePaused);
             return (
-              <VRouteLinkButton
+              <VNativeButton
                 key={companion.agentId}
-                to={companionSessionRoute(companion, lang)}
+                type="button"
                 className={styles.card}
                 aria-label={`${copy.enter} · ${companion.displayName}`}
                 data-companion-id={companion.agentId}
+                onClick={() => openCompanionSession(
+                  companion.directSessionId,
+                  companion.agentId,
+                  {
+                    returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
+                    telemetrySource: "virtual_human_companion_lobby",
+                  },
+                )}
               >
                 <CompanionPortrait companion={companion} />
                 <span className={styles.cardCopy}>
@@ -142,7 +151,7 @@ export function CompanionsRoute() {
                     <ArrowRight size={16} aria-hidden="true" />
                   </span>
                 </span>
-              </VRouteLinkButton>
+              </VNativeButton>
             );
           })}
         </section>

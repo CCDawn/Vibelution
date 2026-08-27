@@ -33,7 +33,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
 import { archiveAgent, updateAgent } from "../../api/agents";
@@ -534,7 +534,6 @@ export function ChatCodingRoute() {
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const location = useLocation();
-  const { agentId: companionRouteAgentId = "" } = useParams<{ agentId?: string }>();
   // Committed React Router URL is the single authority for the current Chat selection.
   const {
     selection: chatRouteSelection,
@@ -684,7 +683,9 @@ export function ChatCodingRoute() {
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
-  const requestedCompanionId = String(companionRouteAgentId || "").trim();
+  const requestedCompanionId = useMemo(() => {
+    return String(new URLSearchParams(location.search).get("companion") || "").trim();
+  }, [location.search]);
   const workflowSessionAnchor = useMemo(() => {
     // Task 7: exact node session anchors — never invent agent default DM.
     try {
@@ -782,8 +783,8 @@ export function ChatCodingRoute() {
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
     queryFn: listVirtualHumanCompanions,
-    enabled: Boolean(requestedCompanionId),
-    refetchInterval: requestedCompanionId && pageVisible ? 30_000 : false,
+    enabled: companionMode,
+    refetchInterval: companionMode && pageVisible ? 30_000 : false,
   });
   const activeCompanion = useMemo<VirtualHumanCompanion | null>(() => {
     if (!companionMode) return null;
@@ -792,9 +793,9 @@ export function ChatCodingRoute() {
       && companion.directSessionId === requestedSessionId
     )) ?? null;
   }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
-  const companionRailState: CompanionRailState = companionsQuery.isPending
+  const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
-    : companionsQuery.isError
+    : companionsQuery.isError && !companionsQuery.data
       ? "error"
       : activeCompanion
         ? "ready"

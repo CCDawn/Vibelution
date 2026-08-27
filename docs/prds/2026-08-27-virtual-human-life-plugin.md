@@ -5,13 +5,13 @@
 - Scope: 按单个 Agent 启用的独立虚构人物生活插件；包含生活心跳、主动活动、心情、次日规划、日记、长期记忆、工具包、提示词包、主动消息和隔离验收
 - Planning snapshot: Vibelution `main@527819208e191897cd6de68e1140fb407f939f50`；外部参考固定到 `menglimi/astrbot_plugin_private_companion@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`
 - Supersedes: 无
-- Implementation link: `codex/virtual-human-life-plugin`；后端生活域、Agent-scoped API、Prompt Pack、工具包、主动轮次与生命周期已进入集成验收，正式 VUI 前端等待隔离预览 `APPROVED`
+- Implementation link: `codex/virtual-human-life-plugin`；后端生活域、Agent-scoped API、Prompt Pack、工具包、主动轮次与生命周期已完成实现，桌面端人物大厅与原生 Chat 复用方案已获用户批准并进入最终集成验收
 - Validation: 用户决策复核、本地 owning surface 核查、外部参考代码切片核查、插件/API/工具/主动轮次测试、生命周期回归、前端合同与构建、浏览器运行时验收、`git diff --check`
 - Close condition: 用户批准后转为 `user-approved`；实施开始后转为 `active-plan`；实施完成、被替代或放弃时转为 `implemented`、`superseded` 或 `historical` 并按项目规则归档
 
 ## 1. 文档边界
 
-本文件是产品需求、架构和任务图的实施基线，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或现有代码事实。用户已批准按本方案开发；其中生产前端仍遵守隔离预览审批门，收到 `APPROVED` 前只允许只读接入勘察，不修改正式 UI owning surface。
+本文件是产品需求、架构和任务图的实施基线，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或现有代码事实。用户已批准按本方案开发，并于桌面端隔离预览后确认当前人物大厅、人物栏和原生 Chat 复用结果；生产前端可按已批准结构完成收口，不再扩张到移动端或第二套聊天界面。
 
 ## 2. 已冻结的产品决策
 
@@ -665,13 +665,24 @@ POST /api/agents/{agentId}/plugins/virtual-human-life/import-legacy-pet
 
 单个 Agent 设置增加插件区域：已安装插件、启用/禁用、工具包、提示词包、自主等级、规划时间、主动消息、免打扰设置以及存储/迁移状态。
 
-### 18.2 虚拟人生活面板
+### 18.2 桌面端人物大厅与对话工作台
 
-建议使用 VUI 列表—详情页面：左侧为当前状态、今天、明天、日记、关系和设置；右侧为当前活动、心情与体力、活动时间线、日程详情以及取消/跳过/重排操作。
+桌面端新增 `/companions` 人物大厅，只展示已启用 `virtual-human-life` 插件的 active Agent。每张卡片展示人物形象、独立身份、当前活动和心情；大厅不是普通联系人列表。
+
+点击人物卡片必须调用唯一 Chat route writer，进入 `/chat?session=<directSessionId>&companion=<agentId>&returnTo=/companions`。大厅不得自行拼接第二条聊天 URL，不得创建第二个 composer、消息历史或 EventSource。
+
+人物对话工作台沿用原生 Chat 三栏：
+
+- 左侧只展示当前人物的卡片、身份与返回大厅入口，不提供人物选择器；切换人物必须返回大厅；
+- 中间完整复用原生 direct Session、消息历史、composer、Turn Journal 和唯一 SSE，回复不增加伪造延迟；
+- 右侧使用“现在 / 今天 / 记忆”三个页签，展示实时生活状态、日程与实际经历、关系和由实际事件生成的日记；
+- 只有 URL 同时包含匹配的 `session` 与 `companion` 身份时进入人物模式；普通 `/chat?session=...` 不被隐式改造成虚拟人界面。
+
+第一版只交付桌面端布局，不新增移动端导航或响应式产品承诺。
 
 ### 18.3 旧 PetRoute
 
-`/pet` 暂时保留，但必须选择或传入 `agentId`；未启用插件时显示启用入口，不再隐式展示全局宠物单例。旧数据只能显式导入到所选 Agent。
+`/pet` 在第一版保持现有旧宠物入口和行为，不作为虚拟人的第二个页面，也不改造成 Agent 选择器。新插件只借鉴 `pet_system` 的部分状态思想；旧 `pet_info.json` 只能在用户明确选择目标 Agent 后，通过插件导入预览与 receipt 显式迁移。后续若退役 `/pet`，必须作为独立兼容清理任务处理，不能在本插件上线时静默重定向或自动迁移。
 
 产品 UI 必须使用 VUI 与现有 page recipe，不建立第二套组件系统。
 
@@ -1006,7 +1017,7 @@ Critical Path：
 - Pydantic response model 与 TypeScript DTO 对齐；
 - React Query key、失效和回滚策略；
 - `fullStackApiBoundary`、VUI route/design contract 和 TypeScript build；
-- 浏览器中的实时心情、日程、取消、跳过和重排；
+- 浏览器中的人物大厅、显式人物身份参数、当前人物栏、原生实时会话，以及实时心情、日程、生活事件、日记和关系投影；
 - runtime-scene 能重建心跳、计划、执行、失败、恢复和主动消息分支；
 - Launcher 环境下无可见控制台窗口。
 
@@ -1038,9 +1049,9 @@ Critical Path：
 - 数据级回滚：读取最近有效快照，损坏数据进入隔离区；
 - 发送级回滚：只能取消尚未送达的 attempt；已经确认送达的消息和 receipt 不伪造撤回或回滚；
 - 迁移级回滚：旧 `pet_info.json` 始终保留到显式清理授权；
-- API/UI 回滚：保留旧 `/pet` 兼容入口直到新 Agent-scoped 页面验收；
+- API/UI 回滚：人物大厅与人物 Chat 投影可独立撤回；旧 `/pet` 始终保持独立，不承担新插件回滚或兼容路由；
 - 数据删除不属于普通回滚，必须单独确认。
 
 ## 28. 用户批准门
 
-用户已明确批准按本方案实施，并授权在独立 `codex/*` 分支连续开发至完成；批准范围包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。正式前端另受隔离预览门保护：用户回复 `APPROVED` 后才写入生产 UI。若后续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API 或 UI 结果，应更新本文档并重新检查任务图后再实施。
+用户已明确批准按本方案实施，并授权在独立 `codex/*` 分支连续开发至完成；批准范围包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。桌面端隔离预览已获批准，批准对象为 `/companions` 人物大厅、左侧当前人物栏、中间原生 Chat、右侧生活信息栏以及“切换人物必须返回大厅”的交互。若后续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API、移动端范围或上述 UI 结果，应更新本文档并重新检查任务图后再实施。

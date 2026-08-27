@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { VirtualHumanCompanion } from "../../api/types";
 import {
   companionIdentity,
-  companionSessionRoute,
   currentLifeActivity,
   upcomingLifeActivities,
 } from "./companionPresentation";
@@ -58,9 +57,4 @@ describe("companion presentation", () => {
     expect(upcomingLifeActivities(companion.snapshot).map((item) => item.title)).toEqual(["阅读", "散步"]);
   });
 
-  it("opens the Agent direct session through the companion route", () => {
-    expect(companionSessionRoute(companion, "zh")).toContain("/companions/agent%2Fnora?");
-    expect(companionSessionRoute(companion, "zh")).toContain("session=session+1");
-    expect(companionSessionRoute(companion, "zh")).toContain("returnTo=%2Fcompanions");
-  });
 });

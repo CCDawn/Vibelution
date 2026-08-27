@@ -1,6 +1,20 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import type { VirtualHumanActivity, VirtualHumanCompanion } from "../../api/types";
+import {
+  fetchVirtualHumanDiary,
+  fetchVirtualHumanEvents,
+  fetchVirtualHumanRelationships,
+} from "../../api/virtualHumanLife";
+import { queryKeys } from "../../api/queryKeys";
+import type {
+  VirtualHumanActivity,
+  VirtualHumanCompanion,
+  VirtualHumanDiaryEntry,
+  VirtualHumanLifeEvent,
+  VirtualHumanRelationship,
+} from "../../api/types";
+import { usePageVisibility } from "../../app/pollingPolicy";
 import { VStateSurface, VStatusChip, VTabs } from "../../components/vui";
 import {
   currentLifeActivity,
@@ -30,6 +44,65 @@ function ScheduleRows({ activities, lang }: { activities: VirtualHumanActivity[]
   );
 }
 
+function EventRows({ events, lang }: { events: VirtualHumanLifeEvent[]; lang: "zh" | "en" }) {
+  if (!events.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "今天还没有已记录的实际经历。" : "No lived events have been recorded today."}</p>;
+  }
+  return (
+    <div className={styles.eventList}>
+      {events.slice(-4).reverse().map((event) => (
+        <article key={event.eventId} className={styles.eventItem}>
+          <time className={styles.eventTime}>{formatLifeTime(event.occurredAt || "", lang)}</time>
+          <div className={styles.eventCopy}>
+            <strong>{event.title || (lang === "zh" ? "生活经历" : "Life event")}</strong>
+            <span>{event.outcome?.summary || event.failureReason || event.kind}</span>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DiaryRows({ entries, lang }: { entries: VirtualHumanDiaryEntry[]; lang: "zh" | "en" }) {
+  if (!entries.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有从实际经历写下日记。" : "No diary entries have been derived from lived events yet."}</p>;
+  }
+  return (
+    <div className={styles.memoryList}>
+      {entries.slice(-4).reverse().map((entry) => (
+        <article key={entry.diaryEntryId} className={styles.memoryItem}>
+          <div className={styles.memoryItemHeader}>
+            <strong>{entry.title || (lang === "zh" ? "生活记录" : "Life note")}</strong>
+            <time>{entry.localDate || "--"}</time>
+          </div>
+          <p className={styles.cardCopy}>{entry.content || (lang === "zh" ? "这条记录暂时没有正文。" : "This note has no body yet.")}</p>
+          <span className={styles.memoryMeta}>
+            {entry.sourceEventIds.length} {lang === "zh" ? "条实际经历" : "lived event(s)"}
+          </span>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function RelationshipRows({ relationships, lang }: { relationships: VirtualHumanRelationship[]; lang: "zh" | "en" }) {
+  if (!relationships.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "关系投影仍在自然形成中。" : "Relationship projections are still taking shape."}</p>;
+  }
+  return (
+    <div className={styles.relationshipGrid}>
+      {relationships.slice(0, 4).map((relationship) => (
+        <div key={relationship.targetId} className={styles.relationshipItem}>
+          <strong title={relationship.targetId}>{relationship.targetId}</strong>
+          <span>
+            {lang === "zh" ? "亲密" : "Intimacy"} {relationship.intimacy} · {lang === "zh" ? "信任" : "Trust"} {relationship.trust}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CompanionLifeRail({
   className,
   collapsed,
@@ -48,9 +121,33 @@ export function CompanionLifeRail({
   lang: "zh" | "en";
 }) {
   const [activeTab, setActiveTab] = useState("now");
+  const pageVisible = usePageVisibility();
   const activity = companion ? currentLifeActivity(companion.snapshot) : null;
   const upcoming = companion ? upcomingLifeActivities(companion.snapshot, 3) : [];
   const today = companion?.snapshot.todaySchedule?.activities ?? [];
+  const memoryQueriesEnabled = state === "ready" && Boolean(companion) && activeTab === "memory";
+  const todayEventsQuery = useQuery({
+    queryKey: queryKeys.virtualHumanEvents(companion?.agentId || "", companion?.snapshot.state?.localDate || "", 100),
+    queryFn: ({ signal }) => fetchVirtualHumanEvents(companion!.agentId, {
+      localDate: companion!.snapshot.state?.localDate,
+      limit: 100,
+      signal,
+    }),
+    enabled: state === "ready" && Boolean(companion) && activeTab === "today",
+    refetchInterval: pageVisible ? 30_000 : false,
+  });
+  const diaryQuery = useQuery({
+    queryKey: queryKeys.virtualHumanDiary(companion?.agentId || "", "", 100),
+    queryFn: ({ signal }) => fetchVirtualHumanDiary(companion!.agentId, { limit: 100, signal }),
+    enabled: memoryQueriesEnabled,
+    refetchInterval: pageVisible ? 30_000 : false,
+  });
+  const relationshipsQuery = useQuery({
+    queryKey: queryKeys.virtualHumanRelationships(companion?.agentId || ""),
+    queryFn: ({ signal }) => fetchVirtualHumanRelationships(companion!.agentId, { signal }),
+    enabled: memoryQueriesEnabled,
+    refetchInterval: pageVisible ? 30_000 : false,
+  });
   const stateCopy = state === "loading"
     ? (lang === "zh" ? "正在载入生活状态" : "Loading life state")
     : state === "error"
@@ -140,10 +237,24 @@ export function CompanionLifeRail({
           ) : null}
 
           {activeTab === "today" ? (
-            <section className={styles.lifeCard}>
-              <p className={styles.cardLabel}>{companion.snapshot.todaySchedule?.localDate || (lang === "zh" ? "今天" : "Today")}</p>
-              <ScheduleRows activities={today} lang={lang} />
-            </section>
+            <>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{companion.snapshot.todaySchedule?.localDate || (lang === "zh" ? "今天" : "Today")}</p>
+                <ScheduleRows activities={today} lang={lang} />
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "实际经历" : "Lived events"}</p>
+                {todayEventsQuery.isPending ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取经历" : "Loading lived events"} tone="loading" busy skeletonLines={2} />
+                ) : todayEventsQuery.isError ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "经历暂时不可用" : "Lived events unavailable"} tone="error">
+                    {todayEventsQuery.error instanceof Error ? todayEventsQuery.error.message : undefined}
+                  </VStateSurface>
+                ) : (
+                  <EventRows events={todayEventsQuery.data ?? []} lang={lang} />
+                )}
+              </section>
+            </>
           ) : null}
 
           {activeTab === "memory" ? (
@@ -151,6 +262,30 @@ export function CompanionLifeRail({
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "共同记忆" : "Shared memory"}</p>
                 <p className={styles.cardCopy}>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "暂时还没有形成稳定的关系摘要。" : "No stable relationship summary yet.")}</p>
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "关系" : "Relationships"}</p>
+                {relationshipsQuery.isPending ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取关系" : "Loading relationships"} tone="loading" busy skeletonLines={2} />
+                ) : relationshipsQuery.isError ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "关系暂时不可用" : "Relationships unavailable"} tone="error">
+                    {relationshipsQuery.error instanceof Error ? relationshipsQuery.error.message : undefined}
+                  </VStateSurface>
+                ) : (
+                  <RelationshipRows relationships={relationshipsQuery.data ?? []} lang={lang} />
+                )}
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "日记" : "Diary"}</p>
+                {diaryQuery.isPending ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取日记" : "Loading diary"} tone="loading" busy skeletonLines={2} />
+                ) : diaryQuery.isError ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "日记暂时不可用" : "Diary unavailable"} tone="error">
+                    {diaryQuery.error instanceof Error ? diaryQuery.error.message : undefined}
+                  </VStateSurface>
+                ) : (
+                  <DiaryRows entries={diaryQuery.data ?? []} lang={lang} />
+                )}
               </section>
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "事实边界" : "Fact boundary"}</p>

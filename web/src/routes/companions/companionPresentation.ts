@@ -74,12 +74,3 @@ export function formatLifeTime(value: string, lang: "zh" | "en"): string {
     hour12: false,
   });
 }
-
-export function companionSessionRoute(companion: VirtualHumanCompanion, lang: "zh" | "en"): string {
-  const search = new URLSearchParams({
-    session: companion.directSessionId,
-    returnTo: "/companions",
-    returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
-  });
-  return `/companions/${encodeURIComponent(companion.agentId)}?${search.toString()}`;
-}

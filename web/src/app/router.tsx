@@ -141,16 +141,6 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "companions/:agentId",
-        ...guardedLazyElement(
-          <WorkbenchDomainRoute domain="chat">
-            <ChatCodingRoute />
-          </WorkbenchDomainRoute>,
-          "workbench",
-          "chat",
-        ),
-      },
-      {
         path: "supervised-evolution",
         ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">

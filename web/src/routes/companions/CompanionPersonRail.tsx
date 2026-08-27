@@ -2,6 +2,7 @@ import { Settings } from "lucide-react";
 
 import type { VirtualHumanCompanion } from "../../api/types";
 import { VRouteLinkButton, VStateSurface, VStatusChip } from "../../components/vui";
+import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import { CompanionPortrait } from "./CompanionPortrait";
 import {
   companionAbout,
@@ -51,7 +52,12 @@ export function CompanionPersonRail({
         </VRouteLinkButton>
         {companion ? (
           <VRouteLinkButton
-            to={`/agents?agent=${encodeURIComponent(companion.agentId)}&pane=config&returnTo=${encodeURIComponent(`/companions/${companion.agentId}?session=${companion.directSessionId}`)}`}
+            to={agentCenterConfigRoute({
+              agentId: companion.agentId,
+              pane: "config",
+              returnTo: "/companions",
+              returnLabel: "companions",
+            })}
             variant="ghost"
             className={styles.quietLink}
             aria-label={lang === "zh" ? "虚拟人设置" : "Virtual human settings"}

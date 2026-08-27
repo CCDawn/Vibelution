@@ -48,6 +48,9 @@ export function agentCenterReturnLabel(value: string | null | undefined, lang: "
   if (normalized === "chat") {
     return lang === "zh" ? "返回会话" : "Back to chat";
   }
+  if (normalized === "companions") {
+    return lang === "zh" ? "返回人物大厅" : "Back to companion lobby";
+  }
   if (normalized === "memory") {
     return lang === "zh" ? "返回记忆库" : "Back to memory";
   }

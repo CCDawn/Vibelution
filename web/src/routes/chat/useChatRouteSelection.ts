@@ -17,11 +17,22 @@ export type ChatRouteNavigateOptions = {
   telemetrySource?: string;
 };
 
+export type ChatCompanionNavigateOptions = ChatRouteNavigateOptions & {
+  /** Localized label for the return banner shown inside Chat. */
+  returnLabel?: string;
+};
+
 export type UseChatRouteSelectionResult = {
   /** Current committed route selection (single authority for the Chat page). */
   selection: ChatRouteSelection;
   /** Navigate to a direct session; replaces by default (tab-click semantics). */
   openSession: (sessionId: string, options?: ChatRouteNavigateOptions) => void;
+  /** Navigate to a virtual person's direct session with explicit companion identity. */
+  openCompanionSession: (
+    sessionId: string,
+    companionAgentId: string,
+    options?: ChatCompanionNavigateOptions,
+  ) => void;
   /** Navigate to a group room; pushes by default. */
   openRoom: (roomId: string, options?: ChatRouteNavigateOptions) => void;
   /** Navigate to the explicit Project Agent Bus route. */
@@ -65,7 +76,16 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
 
   const navigateToSelection = useCallback(
     (next: ChatRouteSelection, options?: ChatRouteNavigateOptions) => {
-      const search = serializeChatRouteSelection(location.search, next);
+      const serialized = serializeChatRouteSelection(location.search, next);
+      const params = new URLSearchParams(serialized);
+      const companionAgentId = String(params.get("companion") || "").trim();
+      params.delete("companion");
+      if (companionAgentId && params.get("returnTo") === "/companions") {
+        params.delete("returnTo");
+        params.delete("returnLabel");
+      }
+      const encoded = params.toString();
+      const search = encoded ? `?${encoded}` : "";
       navigate({ pathname: "/chat", search }, { replace: options?.replace ?? false });
     },
     [location.search, navigate],
@@ -92,6 +112,43 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       );
     },
     [location.search, navigateToSelection],
+  );
+
+  const openCompanionSession = useCallback(
+    (
+      sessionId: string,
+      companionAgentId: string,
+      options?: ChatCompanionNavigateOptions,
+    ) => {
+      const normalizedSessionId = String(sessionId || "").trim();
+      const normalizedAgentId = String(companionAgentId || "").trim();
+      if (!normalizedSessionId || !normalizedAgentId) {
+        return;
+      }
+      const current = parseChatRouteSelection(location.search);
+      const previousSessionId = current.kind === "session" ? current.sessionId : "";
+      if (previousSessionId !== normalizedSessionId) {
+        postUserActionObservation("session_open", {
+          sessionId: normalizedSessionId,
+          previousSessionId,
+          source: String(options?.telemetrySource || "virtual_human_companion").trim()
+            || "virtual_human_companion",
+        });
+      }
+      const serialized = serializeChatRouteSelection(location.search, {
+        kind: "session",
+        sessionId: normalizedSessionId,
+      });
+      const params = new URLSearchParams(serialized);
+      params.set("companion", normalizedAgentId);
+      params.set("returnTo", "/companions");
+      params.set("returnLabel", String(options?.returnLabel || "").trim() || "Companion lobby");
+      navigate(
+        { pathname: "/chat", search: `?${params.toString()}` },
+        { replace: options?.replace ?? false },
+      );
+    },
+    [location.search, navigate],
   );
 
   const openRoom = useCallback(
@@ -219,6 +276,7 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
   return {
     selection,
     openSession,
+    openCompanionSession,
     openRoom,
     openProjectBus,
     canonicalizeBareRoute,

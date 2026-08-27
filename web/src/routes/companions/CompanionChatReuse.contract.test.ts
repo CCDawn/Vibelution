@@ -7,13 +7,18 @@ import lifeRailSource from "./CompanionLifeRail.tsx?raw";
 import personRailSource from "./CompanionPersonRail.tsx?raw";
 
 describe("virtual-human native Chat reuse", () => {
-  it("uses the companion route only to select a native direct Session", () => {
-    expect(lobbySource).toContain("companionSessionRoute(companion, lang)");
+  it("uses the sole Chat route writer to select a native direct Session with companion identity", () => {
+    expect(lobbySource).toContain("openCompanionSession(");
+    expect(lobbySource).not.toContain("/chat?session=");
     expect(chatSource).toContain("requestedSessionId");
+    expect(chatSource).toContain('get("companion")');
     expect(chatSource).toContain("companion.directSessionId === requestedSessionId");
     expect(chatSource).toContain("<ChatCenterSessionSurface");
     expect(chatSource).toContain("<CompanionPersonRail");
     expect(chatSource).toContain("<CompanionLifeRail");
+    expect(personRailSource).toContain("agentCenterConfigRoute({");
+    expect(personRailSource).toContain('returnTo: "/companions"');
+    expect(personRailSource).not.toContain("/companions/${");
   });
 
   it("keeps one SSE owner and removes person/session pickers in companion mode", () => {
