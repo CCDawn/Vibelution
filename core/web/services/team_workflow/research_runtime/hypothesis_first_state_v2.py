@@ -3000,11 +3000,19 @@ def project_state_from_records(
         (meta_review or {}).get("recommendationCandidateId") or ""
     ).strip()
     if converged and formal_phase is None and confirmed_candidate_id:
+        # The create idempotency key is stable per hypothesis round, and the
+        # ledger derives the run id from it. After a run is retired (archived),
+        # a rebuild with a changed environment (for example a re-pointed team
+        # model) would collide with the retired run's create fingerprint. Give
+        # each rebuild its own ordinal so every creation gets a fresh run id;
+        # the first creation keeps the legacy unsuffixed key.
+        rebuild_ordinal = len(formal_runs)
+        creation_suffix = f":{rebuild_ordinal}" if rebuild_ordinal else ""
         allowed_actions.append(
             _command_action(
                 "create_formal_run",
                 action_id=(
-                    f"create-formal-run-v2:{convergence['latestHypothesisRoundId']}"
+                    f"create-formal-run-v2:{convergence['latestHypothesisRoundId']}{creation_suffix}"
                 ),
                 label="创建正式研究运行",
                 target_phase="formal_runtime",

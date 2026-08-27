@@ -1045,10 +1045,15 @@ def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
     )
 
     assert state.formalRuntime.runId is None
-    assert any(
-        action.kind == "command" and action.command == "create_formal_run"
+    create_actions = [
+        action
         for action in state.allowedActions
-    )
+        if action.kind == "command" and action.command == "create_formal_run"
+    ]
+    assert len(create_actions) == 1
+    # 归档后重建必须换 create 幂等键：同一 round 的旧键已绑定被退役 run 的
+    # create fingerprint，环境变化后的重建会撞 run_id。
+    assert create_actions[0].actionId == "create-formal-run-v2:round-accepted:1"
 
 
 def test_converged_chain_does_not_offer_duplicate_formal_run() -> None:
