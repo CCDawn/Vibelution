@@ -20,6 +20,7 @@ import {
 import { TeamHypothesisRoundTimeline } from "../TeamHypothesisRoundTimeline";
 import { TeamMeetingRoundPanel } from "../TeamMeetingRoundPanel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
+import { QuestionLineagePanel } from "../research-workflow/QuestionLineagePanel";
 import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSection";
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
@@ -65,6 +66,7 @@ export type ChallengeQuestionDetailPanelProps = {
 const DETAIL_ANCHORS_ZH = [
   ["question-agent", "题目与接单"],
   ["sources", "来源与证据"],
+  ["lineage", "全链谱系"],
   ["hypotheses", "候选假设"],
   ["reviews", "七维评价"],
   ["selection", "选择"],
@@ -79,6 +81,7 @@ const DETAIL_ANCHORS_ZH = [
 const DETAIL_ANCHORS_EN = [
   ["question-agent", "Question & agent"],
   ["sources", "Sources & evidence"],
+  ["lineage", "Question lineage"],
   ["hypotheses", "Candidate hypotheses"],
   ["reviews", "Seven-dim review"],
   ["selection", "Selection"],
@@ -296,6 +299,7 @@ export function ChallengeQuestionDetailPanel({
         {(readOnlyArchive
           ? ([
               ["hypotheses", isZh ? "假说摘要" : "Hypothesis summary"],
+              ["lineage", isZh ? "全链谱系" : "Question lineage"],
               ["hypothesis-first-rounds", isZh ? "评审历程" : "Review history"],
             ] as const)
           : detailAnchors).map(([id, label]) => (
@@ -322,11 +326,25 @@ export function ChallengeQuestionDetailPanel({
               lang={lang}
             />
           </div>
+          <section className={css.section} id="lineage" data-testid="question-lineage-section">
+            <ChallengeQuestionSectionHeading
+              index="03"
+              title={isZh ? "全链谱系 · 只读" : "Question lineage · read only"}
+            />
+            <QuestionLineagePanel teamId={resetTargetTeamId} questionId={requestedQuestionId} />
+          </section>
         </>
       ) : (
         <>
           {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} state={tokenUsageState} /> : null}
           <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
+          <section className={css.section} id="lineage" data-testid="question-lineage-section">
+            <ChallengeQuestionSectionHeading
+              index="02"
+              title={isZh ? "全链谱系 · 只读" : "Question lineage · read only"}
+            />
+            <QuestionLineagePanel teamId={detail.teamId || teamId} questionId={detail.questionId || requestedQuestionId} />
+          </section>
           <ChallengeQuestionAnalysisSection output={output} lang={lang} />
           <HypothesisSelectionPanel
             teamId={detail.teamId}

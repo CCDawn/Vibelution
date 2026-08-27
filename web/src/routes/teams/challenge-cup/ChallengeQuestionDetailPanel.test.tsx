@@ -231,7 +231,11 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(markup).toContain("第 3 轮");
     expect(markup).toContain("含 1 次失败重试");
     expect(markup).not.toContain("Pareto 前沿");
-    expect(markup).not.toContain("lineage");
+    // R4.5: the archive hosts the read-only question lineage section; the
+    // heavier acceptance surfaces (full plan/review editing) still must not
+    // leak into the summary-first archive.
+    expect(markup).toContain('data-testid="question-lineage-section"');
+    expect(markup).toContain("全链谱系 · 只读");
     expect(markup.match(/aria-expanded="true"/g)).toHaveLength(1);
     expect(markup).not.toContain("更多操作");
     expect(markup).not.toContain("登记修订产出");

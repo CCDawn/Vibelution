@@ -71,6 +71,9 @@ from core.web.services.team_workflow.research_runtime.query_service import (
     WorkflowLedgerUnavailable,
     WorkflowQueryError,
 )
+from core.web.services.team_workflow.research_runtime.question_lineage_service import (
+    project_question_lineage,
+)
 from core.web.services.team_workflow.research_runtime.run_creation import (
     create_question_run,
 )
@@ -97,6 +100,7 @@ from .research_runtime_models import (
     ResearchWorkflowLaunchOptionsResponse,
     ResearchWorkflowLedgerResponse,
     ResearchWorkflowNodeDetailResponse,
+    ResearchWorkflowQuestionLineageResponse,
     ResearchWorkflowRunListResponse,
     ResearchWorkflowRunSnapshotResponse,
 )
@@ -622,6 +626,30 @@ def research_workflow_handoff_detail(
             status_code=404,
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
+
+
+@router.get(
+    "/research/questions/{question_id}/lineage",
+    response_model=ResearchWorkflowQuestionLineageResponse,
+    response_model_exclude_unset=True,
+)
+def research_workflow_question_lineage(
+    question_id: str,
+    team_id: str = Query(..., alias="teamId", min_length=1),
+    run_id: str = Query("", alias="runId"),
+    round_id: str = Query("", alias="roundId"),
+) -> dict:
+    """Read-only single-question lineage projection (R4.5).
+
+    The aggregator degrades per segment internally, so this thin route never
+    maps data absence to an error — the panel labels the gap instead.
+    """
+    return project_question_lineage(
+        team_id=_canonical_team_id(team_id),
+        question_id=question_id,
+        workflow_run_id=run_id,
+        round_id=round_id,
+    )
 
 
 @router.post(

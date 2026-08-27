@@ -14,6 +14,7 @@
 | `ChallengeCatalogOverview` | [product/challenge-catalog-overview.md](./product/challenge-catalog-overview.md#challengecatalogoverview) |
 | `ChallengeTokenUsageStrip` | [product/challenge-token-usage.md](./product/challenge-token-usage.md#challengetokenusagestrip) |
 | `ChallengeRealBatchControlPanel` | [product/challenge-real-batch.md](./product/challenge-real-batch.md#challengerealbatchcontrolpanel) |
+| `ResearchAnomalyInboxPanel` | [product/research-anomaly-inbox.md](./product/research-anomaly-inbox.md#researchanomalyinboxpanel) |
 | `VCommandPalette` | [product/command-palette.md](./product/command-palette.md#vcommandpalette) |
 
 ## Primitives
