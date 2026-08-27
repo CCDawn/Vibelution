@@ -173,7 +173,6 @@ def test_fanout_records_completed_attempt_per_candidate(tmp_path, monkeypatch) -
 def test_failed_candidate_keeps_durable_error_and_projects_retry(
     tmp_path, monkeypatch
 ) -> None:
-    from core.web.services.team_workflow import meeting_runtime
 
     def flaky_open(_team_id, payload, **_kwargs):
         if payload.get("candidateId") == "hyp-b":
@@ -233,7 +232,6 @@ def test_failed_candidate_keeps_durable_error_and_projects_retry(
 
 
 def test_retry_bumps_attempt_number_and_recovers(tmp_path, monkeypatch) -> None:
-    from core.web.services.team_workflow import meeting_runtime
 
     state = {"fail_hyp_b": True}
 
@@ -377,6 +375,91 @@ def test_legacy_selection_without_attempt_keeps_review_dispatch_missing() -> Non
     assert any(
         action.get("command") == "retry_review_dispatch"
         for action in state["allowedActions"]
+    )
+
+
+def test_round_projection_uses_durable_fanout_candidates() -> None:
+    selection_id = "selection-sci-003"
+    active_candidate = "sci-003-cb1735d8f"
+    selected_candidates = [
+        active_candidate,
+        "sci-003-ignored-1",
+        "sci-003-ignored-2",
+        "sci-003-ignored-3",
+    ]
+    meeting_id = "hf-review-hsel-58303ec029fc13cf-d8b9ebbc38-r3"
+    state = project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-003",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-sci-003-r3",
+                "selectionId": selection_id,
+                "selectionVersion": "selection-version-sci-003",
+                "candidateId": active_candidate,
+                "candidateOrder": 0,
+                "roundIndex": 3,
+                "meetingRoundId": meeting_id,
+                "questionId": "SCI-003",
+                "createdAt": "2026-08-27T00:00:00Z",
+            },
+            {
+                "recordKind": "review_dispatch_attempt",
+                "attemptId": "attempt-sci-003-r3",
+                "attemptNumber": 1,
+                "questionId": "SCI-003",
+                "selectionId": selection_id,
+                "selectionVersion": "selection-version-sci-003",
+                "candidateId": active_candidate,
+                "roundIndex": 3,
+                "lifecycle": "completed",
+                "outcome": "succeeded",
+                "meetingRoundId": meeting_id,
+                "createdAt": "2026-08-27T00:00:00Z",
+                "updatedAt": "2026-08-27T00:00:01Z",
+            },
+        ],
+        selection_records=[
+            {
+                "selectionId": selection_id,
+                "questionId": "SCI-003",
+                "selectedCandidateIds": selected_candidates,
+                "createdAt": "2026-08-26T00:00:00Z",
+            }
+        ],
+        meeting_records=[
+            {
+                "meetingRoundId": meeting_id,
+                "meetingType": "hypothesis_review",
+                "question": "SCI-003",
+                "selectionId": selection_id,
+                "status": "awaiting_approval",
+                "linkedChatRoomId": "room-sci-003",
+                "createdAt": "2026-08-27T00:00:00Z",
+            }
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+    )
+
+    assert state["selection"]["selectedCandidateIds"] == selected_candidates
+    assert [item["candidateId"] for item in state["review"]["candidates"]] == [
+        active_candidate
+    ]
+    assert state["review"]["aggregate"] == {
+        "total": 1,
+        "completed": 0,
+        "pending": 1,
+        "failed": 0,
+        "blocked": 0,
+    }
+    assert state["review"]["lifecycle"] == "waiting_human"
+    assert not any(
+        problem["code"] == "review_dispatch_missing"
+        for problem in state["review"]["problems"]
     )
 
 
