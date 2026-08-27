@@ -598,7 +598,7 @@ internal static class VibelutionLauncher
         return digest.ToString("x8");
     }
 
-    private static string ResolveCanonicalDesktopShellOwnerPath(string projectDir)
+    private static string ResolveCanonicalRuntimeLauncherDir(string projectDir)
     {
         string projectId = ReadProjectId(projectDir);
         if (string.IsNullOrEmpty(projectId))
@@ -611,9 +611,18 @@ internal static class VibelutionLauncher
             "instances",
             InstanceIdForProject(projectDir),
             "runtime",
-            "launcher",
-            "desktop_shell_owner.json"
+            "launcher"
         );
+    }
+
+    private static string ResolveCanonicalDesktopShellOwnerPath(string projectDir)
+    {
+        string launcherDir = ResolveCanonicalRuntimeLauncherDir(projectDir);
+        if (string.IsNullOrEmpty(launcherDir))
+        {
+            return "";
+        }
+        return Path.Combine(launcherDir, "desktop_shell_owner.json");
     }
 
     private static string ResolveDesktopShellOwnerPath(string projectDir)
@@ -1378,7 +1387,15 @@ internal static class VibelutionLauncher
     {
         try
         {
-            string logDir = Path.Combine(projectDir, ".runtime", "launcher");
+            // Governance migration: the native entry log belongs to the
+            // instance runtime home next to desktop_shell_owner.json. A project
+            // without a tracked identity has no governed home, so the
+            // best-effort log is dropped instead of writing into the checkout.
+            string logDir = ResolveCanonicalRuntimeLauncherDir(projectDir);
+            if (string.IsNullOrEmpty(logDir))
+            {
+                return;
+            }
             Directory.CreateDirectory(logDir);
             string logPath = Path.Combine(logDir, "native-launcher-entry.log");
             File.AppendAllText(

@@ -154,6 +154,14 @@ def test_launcher_native_entry_source_and_build_contract():
     assert "vibelution_desktop_entry.vbs" not in source
     assert "--project" in source
     assert "native-launcher-entry.log" in source
+    # Governance migration: the native entry log must live in the instance
+    # runtime home (ResolveCanonicalRuntimeLauncherDir), never back in the
+    # checkout `.runtime/launcher/`.
+    assert "ResolveCanonicalRuntimeLauncherDir" in source
+    entry_log_body = source.split("private static void WriteNativeEntryLog", 1)[1].split(
+        "private static ", 1
+    )[0]
+    assert ".runtime" not in entry_log_body
 
     assert "/target:winexe" in build_script
     assert "/win32icon:" in build_script
