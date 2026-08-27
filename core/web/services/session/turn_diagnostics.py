@@ -242,7 +242,21 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
     terminal_status = ""
     completion_source = "running"
     completion_recovered = False
-    if last_turn_status in terminal_statuses:
+    # "ready" is the session's idle marker and is ALSO written by stop handling
+    # and stale restart repair (`_repair_stale_running_conversation`) when a
+    # turn was killed mid-flight.  A turn-scoped poller must therefore only
+    # accept "ready" as terminal when the conversation anchors its last real
+    # settlement (`last_turn_terminal_turn_id`) to the requested turn.  All
+    # other statuses keep their explicit terminal meaning.
+    terminal_anchor_turn_id = str(
+        conversation.get("last_turn_terminal_turn_id") or ""
+    ).strip()
+    ready_trusted = last_turn_status != "ready" or (
+        normalized_turn_id
+        and terminal_anchor_turn_id
+        and terminal_anchor_turn_id == normalized_turn_id
+    )
+    if last_turn_status in terminal_statuses and ready_trusted:
         terminal = True
         terminal_status = last_turn_status
         completion_source = "last_turn_status"

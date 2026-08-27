@@ -714,6 +714,14 @@ def _persist_session_turn_result(
         if final_status in {"failed_provider", "failed_runtime", "failed"}
         else ("needs_continue" if final_status == "needs_continue" else ("paused_limit" if final_status == "paused_limit" else "ready"))
     )
+    # Terminal anchor: "ready" is also written by stop handling and stale
+    # restart repair, so the completion snapshot can only trust "ready" as a
+    # terminal verdict when it is anchored to THIS turn's real settlement.
+    normalized_turn_id = str(turn_id or "").strip()
+    if normalized_turn_id:
+        conversation["last_turn_terminal_turn_id"] = normalized_turn_id
+    else:
+        conversation.pop("last_turn_terminal_turn_id", None)
     conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
         final_status,
         result=result if isinstance(result, dict) else None,
