@@ -29,8 +29,17 @@ def find_reusable_source_stage_task(
 
     from core.web.services.team_workflow.source_collection.stage_reconcile import (
         _find_source_collection_stage_session_task,
+        _reconcile_source_collection_stage_session_task,
         _source_collection_stage_task_idempotency_key,
     )
+    from core.web.services.team_workflow.source_collection.stage_session import (
+        _AUTO_FORMAL_RETRY_STATUSES,
+    )
+
+    dead_stage_task_statuses = _AUTO_FORMAL_RETRY_STATUSES | {
+        "cancelled",
+        "interrupted",
+    }
 
     node_run_ids, ancestor_attempt_statuses = _node_run_lineage(store, action)
     for index, node_run_id in enumerate(node_run_ids):
@@ -71,8 +80,26 @@ def find_reusable_source_stage_task(
         )
         if not _has_turn_anchor(task):
             continue
+        was_active = str(task.get("status") or "").strip().lower() in {"queued", "running"}
+        if was_active:
+            # Parity with the start path: a queued/running task may be a
+            # zombie whose turn already ended (for example a provider outage
+            # after the last reconcile). Reconcile before reusing so a retry
+            # never replays a dead turn.
+            task = _reconcile_source_collection_stage_session_task(
+                team_id,
+                source_run_id,
+                task,
+            )
         status = str(task.get("status") or "").strip().lower()
-        if not is_current_node_run and status not in _REUSABLE_ANCESTOR_STATUSES:
+        task_is_dead = was_active and status in dead_stage_task_statuses
+        if (
+            task_is_dead
+            or (
+                not is_current_node_run
+                and status not in _REUSABLE_ANCESTOR_STATUSES
+            )
+        ):
             continue
         return {
             "teamId": team_id,

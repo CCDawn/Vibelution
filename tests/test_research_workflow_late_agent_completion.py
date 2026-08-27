@@ -262,6 +262,150 @@ def test_crash_recovery_after_failed_parent_keeps_completed_task_reuse(monkeypat
     assert replay["taskId"] == "task-parent"
 
 
+def test_failed_parent_zombie_running_task_is_reconciled_not_replayed(
+    monkeypatch,
+) -> None:
+    """A lineage task still marked running whose turn already failed terminally
+    (provider outage after the last reconcile) must not be replayed; the retry
+    has to open a fresh formal task instead of inheriting the dead turn."""
+    from core.web.services.team_workflow.source_collection import stage_reconcile
+
+    current_node_run_id = "nr-run-retry-source_extraction-a14"
+    parent_node_run_id = "nr-run-retry-source_extraction-a13"
+    store = _AttemptStore(
+        {
+            current_node_run_id: SimpleNamespace(
+                node_run_id=current_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=parent_node_run_id,
+            ),
+            parent_node_run_id: SimpleNamespace(
+                node_run_id=parent_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=None,
+                status="failed",
+            ),
+        }
+    )
+
+    parent_key = stage_reconcile._source_collection_stage_task_idempotency_key(
+        team_id="research-team",
+        run_id="dprun-source",
+        stage_id="extraction",
+        agent_id="agent-extractor",
+        agent_role="source_extractor",
+        task_id="",
+        requested_key=f"agent-task:{parent_node_run_id}",
+    )
+
+    def find_task(_team_id: str, _run_id: str, *, idempotency_key: str):
+        if idempotency_key == parent_key:
+            return _stage_task(task_id="task-parent", status="running")
+        return None
+
+    reconcile_calls: list[dict] = []
+
+    def reconcile_task(_team_id, _run_id, task):
+        reconcile_calls.append(dict(task))
+        return _stage_task(task_id="task-parent", status="failed")
+
+    monkeypatch.setattr(
+        stage_reconcile,
+        "_find_source_collection_stage_session_task",
+        find_task,
+    )
+    monkeypatch.setattr(
+        stage_reconcile,
+        "_reconcile_source_collection_stage_session_task",
+        reconcile_task,
+    )
+
+    replay = find_reusable_source_stage_task(
+        store=store,
+        action=_action(node_run_id=current_node_run_id, attempt=14),
+        team_id="research-team",
+        source_run_id="dprun-source",
+        stage_id="extraction",
+        agent_id="agent-extractor",
+        agent_role="source_extractor",
+    )
+
+    assert replay is None
+    assert len(reconcile_calls) == 1
+    assert reconcile_calls[0]["status"] == "running"
+
+
+def test_failed_parent_live_running_task_is_still_reused_after_reconcile(
+    monkeypatch,
+) -> None:
+    """Crash recovery keeps reusing a lineage task whose turn is genuinely
+    still running; reconcile must not turn it into a fresh dispatch."""
+    from core.web.services.team_workflow.source_collection import stage_reconcile
+
+    current_node_run_id = "nr-run-retry-source_extraction-a14"
+    parent_node_run_id = "nr-run-retry-source_extraction-a13"
+    store = _AttemptStore(
+        {
+            current_node_run_id: SimpleNamespace(
+                node_run_id=current_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=parent_node_run_id,
+            ),
+            parent_node_run_id: SimpleNamespace(
+                node_run_id=parent_node_run_id,
+                run_id="run-retry",
+                node_id="source_extraction",
+                retry_of_node_run_id=None,
+                status="failed",
+            ),
+        }
+    )
+
+    parent_key = stage_reconcile._source_collection_stage_task_idempotency_key(
+        team_id="research-team",
+        run_id="dprun-source",
+        stage_id="extraction",
+        agent_id="agent-extractor",
+        agent_role="source_extractor",
+        task_id="",
+        requested_key=f"agent-task:{parent_node_run_id}",
+    )
+
+    def find_task(_team_id: str, _run_id: str, *, idempotency_key: str):
+        if idempotency_key == parent_key:
+            return _stage_task(task_id="task-parent", status="running")
+        return None
+
+    monkeypatch.setattr(
+        stage_reconcile,
+        "_find_source_collection_stage_session_task",
+        find_task,
+    )
+    monkeypatch.setattr(
+        stage_reconcile,
+        "_reconcile_source_collection_stage_session_task",
+        lambda _team_id, _run_id, task: _stage_task(
+            task_id="task-parent", status="running"
+        ),
+    )
+
+    replay = find_reusable_source_stage_task(
+        store=store,
+        action=_action(node_run_id=current_node_run_id, attempt=14),
+        team_id="research-team",
+        source_run_id="dprun-source",
+        stage_id="extraction",
+        agent_id="agent-extractor",
+        agent_role="source_extractor",
+    )
+
+    assert replay is not None
+    assert replay["taskId"] == "task-parent"
+
+
 def test_source_adapter_reuses_late_parent_before_remediation_context(
     monkeypatch,
 ) -> None:
