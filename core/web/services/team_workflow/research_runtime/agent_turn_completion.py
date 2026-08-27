@@ -381,6 +381,12 @@ def _require_project_task_terminal(
         raise RuntimeError("completed project Agent task is missing from its authority")
     task_status = str(task.get("status") or "").strip().lower()
     if task_status in {"queued", "running"}:
+        # The canonical turn already completed; only the task store lags its
+        # reconcile. This is live progress, not a broken dispatch: carrying a
+        # proper non-terminal snapshot keeps the dispatcher on the bounded
+        # live-wait path instead of consuming the transient retry budget
+        # (a slow model makes the lag exceed the 5-attempt transient cap and
+        # fail the node as transient_exhausted).
         raise TurnNotReadyError(
             json.dumps(
                 {
@@ -390,7 +396,12 @@ def _require_project_task_terminal(
                 },
                 ensure_ascii=False,
             ),
-            snapshot=task,
+            snapshot={
+                "terminal": False,
+                "completionSource": "running",
+                "taskId": task_id,
+                "taskStatus": task_status,
+            },
         )
     if task_status != "completed":
         raise RuntimeError(

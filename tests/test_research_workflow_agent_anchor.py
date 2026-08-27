@@ -328,3 +328,43 @@ def test_turn_alive_progressing_requires_running_source() -> None:
     assert _turn_alive_progressing(terminal) is False
     assert _turn_alive_progressing(ambiguous) is False
     assert _turn_alive_progressing(empty) is False
+
+
+def test_project_task_reconcile_lag_is_live_progressing(monkeypatch) -> None:
+    """turn 完成但 project task 记录仍在 running：等待必须走 live-wait，
+    不得消耗 transient 预算（慢模型下 5 次重排就误判 transient_exhausted）。"""
+    from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+        _turn_alive_progressing,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        agent_turn_completion,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        TurnNotReadyError,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        lambda _team_id, _project_id: None,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda _team_id, _project_id, _task_id: {
+            "taskId": "research-agent-task-lag",
+            "status": "running",
+        },
+    )
+
+    try:
+        agent_turn_completion._require_project_task_terminal(
+            team_id="research-team",
+            project_id="project-1",
+            task_id="research-agent-task-lag",
+        )
+    except TurnNotReadyError as exc:
+        snapshot = dict(getattr(exc, "snapshot", None) or {})
+        assert snapshot.get("terminal") is False
+        assert snapshot.get("completionSource") == "running"
+        assert _turn_alive_progressing(exc) is True
+    else:
+        raise AssertionError("expected TurnNotReadyError for a lagging task record")
