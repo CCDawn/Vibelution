@@ -19,6 +19,7 @@ import {
 } from "../challengeCupTelemetry";
 import type {
   ChallengeCupRealBatchAuthorization,
+  ChallengeCupRealBatchDrainState,
   ChallengeCupRealBatchPlanId,
   ChallengeCupRealBatchPollResponse,
   ChallengeCupRealBatchProjection,
@@ -27,6 +28,7 @@ import type {
 import {
   VButton,
   VConfirmDialog,
+  VContextualHint,
   VEmbeddedPanel,
   VMetricStrip,
   VStateSurface,
@@ -171,6 +173,98 @@ function formatTime(value: string, zh: boolean): string {
   if (!value) return zh ? "尚无更新时间" : "No update yet";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(zh ? "zh-CN" : "en-US");
+}
+
+type ObservabilityMetric = { text: string; tone: VStatusTone };
+
+type ObservabilityView = {
+  drain: { state: ChallengeCupRealBatchDrainState; label: string; tone: VStatusTone };
+  inFlight: string;
+  autoClose: ObservabilityMetric;
+  escalation: ObservabilityMetric;
+  stopLine: string;
+};
+
+const OBS_TONE_CLASS = {
+  neutral: styles.obsToneNeutral,
+  accent: styles.obsToneNeutral,
+  success: styles.obsToneSuccess,
+  warning: styles.obsToneWarning,
+  danger: styles.obsToneDanger,
+} as const;
+
+function percentText(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
+function drainBadge(
+  status: ChallengeCupRealBatchProjection,
+  cancelPending: boolean,
+  zh: boolean,
+): ObservabilityView["drain"] {
+  // `requested` exists only while a cancel call is in flight; the server never
+  // reports it. Older payloads without `drainState` derive from the cancelled
+  // flag plus the running count.
+  const state: ChallengeCupRealBatchDrainState = cancelPending
+    ? "requested"
+    : status.drainState
+      ?? (status.cancelled
+        ? (status.statusSummary.running > 0 ? "draining" : "drained")
+        : "none");
+  if (state === "requested") return { state, label: zh ? "drain 请求中" : "Drain requested", tone: "warning" };
+  if (state === "draining") return { state, label: zh ? "排空中" : "Draining", tone: "warning" };
+  if (state === "drained") return { state, label: zh ? "已排空" : "Drained", tone: "success" };
+  return { state: "none", label: zh ? "未请求" : "Not requested", tone: "neutral" };
+}
+
+function observabilityView(
+  status: ChallengeCupRealBatchProjection,
+  cancelPending: boolean,
+  zh: boolean,
+): ObservabilityView {
+  const summary = status.statusSummary;
+  const total = status.totalCompletedCount ?? (summary.succeeded + summary.failed + summary.blocked);
+  const autoClosed = status.autoClosedCount ?? summary.succeeded;
+  const escalated = status.escalatedCount ?? (summary.failed + status.awaitingApprovalQuestionIds.length);
+  const target = status.autoCloseTarget ?? 0.85;
+  const stopLine = status.escalationStopLine ?? 0.15;
+  const autoRate = status.autoCloseRate ?? (total > 0 ? autoClosed / total : null);
+  const escRate = status.escalationRate ?? (total > 0 ? escalated / total : null);
+  const noCompletions = zh ? "暂无完成数据" : "No completions yet";
+  const autoClose: ObservabilityMetric = {
+    // Accounting: auto-closed = questions that closed with no human approval
+    // inside the batch loop, over every terminal question (succeeded+failed+blocked).
+    text: autoRate === null
+      ? noCompletions
+      : `${percentText(autoRate)} (${autoClosed}/${total} · ${zh ? "目标" : "target"} ≥${percentText(target)})`,
+    tone: autoRate === null ? "neutral" : autoRate >= target ? "success" : "warning",
+  };
+  const escalation: ObservabilityMetric = {
+    // Escalated = failed plus awaiting-human-approval; operator-cancelled
+    // pending items are deliberately not counted as anomalies.
+    text: escRate === null
+      ? noCompletions
+      : `${percentText(escRate)} (${escalated}/${total} · ${zh ? "停止线" : "stop line"} ≤${percentText(stopLine)})`,
+    tone: escRate === null ? "neutral" : escRate > stopLine ? "danger" : "success",
+  };
+  const budget = status.failureBudget;
+  const remaining = status.remainingFailureBudget ?? Math.max(0, budget - status.consecutiveFailures);
+  const reason = status.stopReason ?? "";
+  const reasonText = reason === "failure_budget_exhausted"
+    ? (zh ? "连续失败达到预算，已停止派遣" : "Failure budget exhausted; launches stopped")
+    : reason === "cancelled_by_operator"
+      ? (zh ? "操作员已取消，停止新派遣" : "Cancelled by operator; launches stopped")
+      : status.gateComplete
+        ? (zh ? "批次已完成，无停止原因" : "Batch complete; no stop reason")
+        : (zh ? "无" : "None");
+  return {
+    drain: drainBadge(status, cancelPending, zh),
+    inFlight: `${summary.running} / ${status.concurrencyLimit ?? "—"}`,
+    autoClose,
+    escalation,
+    stopLine: `${zh ? "停止原因：" : "Stop reason: "}${reasonText} · ${zh ? "剩余失败预算" : "Remaining failure budget"} ${remaining}/${budget}`,
+  };
 }
 
 export type ChallengeRealBatchControlPanelProps = {
@@ -484,8 +578,7 @@ export function ChallengeRealBatchControlPanel({
     ? (zh ? "确认写入科研授权" : "Confirm research authorization")
     : confirmAction === "start"
       ? (zh ? `确认启动真实批次 ${selectedPlan.gateId}` : `Confirm start of ${selectedPlan.gateId} real batch`)
-      : (zh ? `确认取消真实批次 ${selectedPlan.gateId}` : `Confirm cancellation of ${selectedPlan.gateId} real batch`);
-  const confirmationDescription = confirmAction === "authorize"
+      : (zh ? `确认取消真实批次 ${selectedPlan.gateId}` : `Confirm cancellation of ${selectedPlan.gateId} real batch`);  const confirmationDescription = confirmAction === "authorize"
     ? (zh ? "授权会绑定当前服务端就绪报告、模型策略和题目范围；realCampaignAllowed=false 仍不会被伪装成已授权。" : "Authorization binds the server readiness report, model policy and question scope; realCampaignAllowed=false is never presented as authorized.")
     : confirmAction === "start"
       ? (zh ? "这会在服务端校验 durable 授权/hash 后派遣真实科研运行。请确认当前 Gate、题目范围和安全边界。" : "The server will verify the durable authorization/hash before dispatching real research runs. Confirm the gate, question scope and safety boundary.")
@@ -500,6 +593,7 @@ export function ChallengeRealBatchControlPanel({
     : confirmAction === "start"
       ? !canStart
       : !canCancel;
+  const observability = observabilityView(status, cancelMutation.isPending, zh);
 
   return (
     <VEmbeddedPanel
@@ -559,6 +653,42 @@ export function ChallengeRealBatchControlPanel({
           <div className={styles.progressMeta}>
             <span>{zh ? `总尝试 ${status.totalAttempts} 次 · 失败预算 ${status.failureBudget}` : `${status.totalAttempts} attempts · failure budget ${status.failureBudget}`}</span>
             <span>{zh ? `最近更新 ${formatTime(status.lastUpdatedAt, zh)}` : `Updated ${formatTime(status.lastUpdatedAt, zh)}`}</span>
+          </div>
+          <div className={styles.observability} data-testid="real-batch-observability">
+            <div className={styles.observabilityHeader}>
+              <strong>{zh ? "运行观察" : "Run observability"}</strong>
+              <VContextualHint
+                label={zh ? "关于 drain 四态" : "About drain states"}
+                content={zh
+                  ? "Drain 四态：未请求 → drain 请求中（取消请求在途）→ 排空中（仍有在途运行）→ 已排空（无在途运行）。已排空不承诺即时无残留：待人工审核等记录可能仍在。"
+                  : "Drain states: not requested → drain requested (cancel in flight) → draining (runs still in flight) → drained (no in-flight runs). Drained never promises an instantly residue-free batch; awaiting-approval records may remain."}
+              />
+            </div>
+            <div className={styles.observabilityRow}>
+              <span className={styles.obsItem}>
+                <span className={styles.obsLabel}>{zh ? "Drain" : "Drain"}</span>
+                <VStatusChip tone={observability.drain.tone}>{observability.drain.label}</VStatusChip>
+              </span>
+              <span className={styles.obsItem}>
+                <span className={styles.obsLabel}>{zh ? "进行中 / 并发上限" : "In-flight / limit"}</span>
+                <span className={styles.obsValue}>{observability.inFlight}</span>
+              </span>
+              <span className={styles.obsItem}>
+                <span className={styles.obsLabel}>{zh ? "自动闭环率" : "Auto-close rate"}</span>
+                <span className={OBS_TONE_CLASS[observability.autoClose.tone]}>{observability.autoClose.text}</span>
+                <VContextualHint
+                  label={zh ? "自动闭环率口径" : "Auto-close accounting"}
+                  content={zh
+                    ? "自动闭环率 = 无需人工审核即闭环的题数 ÷ 全部完成题数（成功+失败+阻塞）；异常升级率 = 失败 + 待人工审核 ÷ 同一分母。操作员取消而未启动的题不计入异常。"
+                    : "Auto-close rate = questions closed without human approval ÷ all terminal questions (succeeded+failed+blocked); escalation = failed + awaiting approval over the same denominator. Operator-cancelled pending items are not anomalies."}
+                />
+              </span>
+              <span className={styles.obsItem}>
+                <span className={styles.obsLabel}>{zh ? "异常升级率" : "Escalation rate"}</span>
+                <span className={OBS_TONE_CLASS[observability.escalation.tone]}>{observability.escalation.text}</span>
+              </span>
+            </div>
+            <span className={styles.stopReasonLine} data-testid="real-batch-stop-reason">{observability.stopLine}</span>
           </div>
         </>
       )}
