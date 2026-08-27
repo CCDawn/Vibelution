@@ -56,6 +56,21 @@ from .human_acceptance_artifact import (
     prepare_command_human_acceptance_artifact,
 )
 from .ids import new_id
+from .reconcile_authority import plan_ledger_authority
+
+
+def formal_node_order() -> tuple[str, ...]:
+    """Canonical node order of the fixed formal workflow definition.
+
+    Imported lazily through this accessor so the command service module can be
+    imported without pulling the definition builder into every consumer; the
+    order is the only structural fact reconcile_authority needs.
+    """
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+    return tuple(
+        node.nodeId for node in build_challenge_cup_workflow_definition().nodes
+    )
 
 _ARTIFACT_HUMAN_GATES = frozenset(
     {
@@ -708,7 +723,17 @@ class WorkflowCommandService:
     ) -> CommandReceipt:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
-        require_run_transition(RunStatus(run.status), RunStatus.RUNNING)
+        attempts = uow.repository.list_attempts(request.run_id)
+        # Reconciliation resets the run projection to ledger authority BEFORE
+        # any dispatch is revived. Incident blocked attempts covered by an
+        # earlier successful advance (operator-misassigned retries whose
+        # nodeId conflicts with the chain frontier) would otherwise pin
+        # active_node_id and re-derive the same failing dispatch forever.
+        plan = plan_ledger_authority(attempts, node_order=formal_node_order())
+        target_status = (
+            RunStatus.BLOCKED if plan.lands_blocked else RunStatus.RUNNING
+        )
+        require_run_transition(RunStatus(run.status), target_status)
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped
@@ -727,7 +752,46 @@ class WorkflowCommandService:
             prepared=prepared_artifact,
             now_ms=now_ms,
         )
-        uow.repository.update_run_status(request.run_id, request.team_id, RunStatus.RUNNING.value, now_ms)
+        for node_run_id in plan.superseded_node_run_ids:
+            uow.repository.update_attempt_status(
+                node_run_id,
+                NodeAttemptStatus.STALE.value,
+                now_ms,
+                finished_at_ms=now_ms,
+            )
+            uow.repository.execute(
+                """
+                UPDATE outbox_actions
+                SET status = 'cancelled',
+                    lease_owner = NULL,
+                    lease_expires_at_ms = NULL,
+                    updated_at_ms = ?
+                WHERE node_run_id = ?
+                  AND action_kind = 'graph_dispatch'
+                  AND status IN ('failed', 'pending', 'leased')
+                """,
+                (now_ms, node_run_id),
+            )
+        if plan.lands_blocked:
+            # The landing verdict is copied verbatim from the deepest readiness
+            # verdict the pipeline itself wrote beyond every success —
+            # reconcile only re-projects ledger truth onto the run record,
+            # never hand-authors a state. The V2 rerun mapping keys off
+            # exactly this projection (blocked + auto_advance_not_ready).
+            uow.repository.update_run_status(
+                request.run_id,
+                request.team_id,
+                RunStatus.BLOCKED.value,
+                now_ms,
+                active_node_id=str(plan.active_node_id or ""),
+                blocked_problem_json=json.dumps(
+                    dict(plan.landing_problem), ensure_ascii=False
+                ),
+            )
+        else:
+            uow.repository.update_run_status(
+                request.run_id, request.team_id, RunStatus.RUNNING.value, now_ms
+            )
         # Reconciliation re-derives execution from the durable ledger.  A
         # blocked run usually got there via a terminal-failed graph_dispatch
         # (e.g. checkpoint_node_mismatch); reviving only the run status would
@@ -735,7 +799,10 @@ class WorkflowCommandService:
         # flips it back to reconciliation_required.  Give the worker a fresh
         # routing decision by re-arming failed dispatch rows in this same
         # transaction (same repair shape as _repair_starting_without_progress);
-        # live or deliberately cancelled rows stay untouched.
+        # live or deliberately cancelled rows stay untouched. Rows whose node's
+        # latest attempt holds a readiness-pipeline verdict stay dead: replay
+        # them would deterministically re-fail and overwrite that verdict,
+        # which both the landing above and the V2 rerun mapping depend on.
         uow.repository.execute(
             """
             UPDATE outbox_actions
@@ -749,6 +816,12 @@ class WorkflowCommandService:
             WHERE run_id = ?
               AND action_kind = 'graph_dispatch'
               AND status = 'failed'
+              AND NOT EXISTS (
+                SELECT 1 FROM node_attempts na
+                WHERE na.node_run_id = outbox_actions.node_run_id
+                  AND na.status = 'blocked'
+                  AND INSTR(na.problem_json, 'auto_advance_not_ready') > 0
+              )
             """,
             (now_ms, now_ms, request.run_id),
         )
@@ -765,6 +838,18 @@ class WorkflowCommandService:
                     "reconciled": True,
                     "revivedDispatchCount": revived,
                     "artifactReceiptIds": list(artifact_receipt_ids),
+                    "staleAttemptIds": list(plan.superseded_node_run_ids),
+                    "recomputedActiveNodeId": plan.active_node_id,
+                    "landingProblemCode": (
+                        str(plan.landing_problem.get("code") or "")
+                        if plan.landing_problem
+                        else None
+                    ),
+                    "landingProblemDetail": (
+                        str(plan.landing_problem.get("detail") or "")
+                        if plan.landing_problem
+                        else None
+                    ),
                 },
                 now_ms=now_ms,
             )
