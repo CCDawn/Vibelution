@@ -1,0 +1,857 @@
+# 虚拟人生活插件 PRD 与实施规划
+
+- Status: `draft`
+- Owner: Vibelution product planning
+- Branch: `codex/virtual-human-life-plugin-prd`
+- Worktree: `.worktrees/virtual-human-life-plugin-prd`
+- Scope: 按单个 Agent 启用的独立虚构人物生活插件；包含生活心跳、主动活动、心情、次日规划、日记、长期记忆、工具包、提示词包、主动消息和隔离验收
+- Supersedes: 无
+- Implementation link: 尚未开始；本文件只用于继续商讨和后续实施交接
+- Validation: 用户决策复核、Markdown/链接检查、任务图依赖检查、`git diff --check`
+- Close condition: 用户批准后转为 `user-approved`；实施开始后转为 `active-plan`；实施完成、被替代或放弃时转为 `implemented`、`superseded` 或 `historical` 并按项目规则归档
+
+## 1. 文档边界
+
+本文件是产品需求、架构和任务图的讨论基线，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或现有代码事实。当前没有授权实施；任何代码、API、存储、迁移、UI 或运行时变更都必须在用户明确批准本方案后另行开始。
+
+## 2. 已冻结的产品决策
+
+1. 虚拟人是独立存在的虚构人物，不是用户替身，也不是附属电子宠物。
+2. 能力以真实 Vibelution 插件形式存在，并按 `agentId` 显式绑定；未绑定 Agent 必须零影响。
+3. 插件启用时，生活心跳和主动消息同时开启；主动消息仍受次数、间隔、免打扰和会话可用性约束。
+4. 默认自主等级为 `autonomous`：可主动选择纯模拟活动、调整日程并使用已授权工具，但不能绕过 ToolPolicy。
+5. 第一版交付可信第一方插件包和可扩展插件契约，不开放任意第三方 Python 动态加载、插件市场或不可信代码沙箱。
+6. 旧 `pet_info.json` 不自动绑定给任何 Agent；只能通过带预览和 receipt 的显式导入操作迁移到用户指定 Agent。
+7. 计划与实际经历严格分离。只有实际完成且具有有效 outcome 的活动可以进入日记；长期记忆还需通过重要性晋升。
+8. 应用关闭期间不宣称实时运行。启动后允许有界补算，并标记 `simulatedAfterRestart=true`。
+
+## 3. 产品定位
+
+插件使一个既有 Vibelution Agent 获得持续生活能力。身份、Persona、头像、LLM、Session、ToolPolicy 和 MemoryPolicy 继续由 Vibelution 现有 Agent 系统管理；插件只拥有生活状态、日程、活动、心情、关系投影、日记投影和生活运行时。
+
+启用后，该 Agent 拥有自己的：
+
+- 人格延续、背景和生活偏好；
+- 心情、体力、睡眠状态、社交需求和当前位置；
+- 今日安排和次日计划；
+- 正在进行、完成、取消、跳过或失败的活动；
+- 实际生活事件、日记和长期记忆；
+- 对用户及其他角色的关系状态；
+- 虚拟人工具包和附加提示词包；
+- 低频、受控、默认开启的主动消息能力。
+
+## 4. 目标与非目标
+
+### 4.1 目标
+
+- 一个 Agent 可独立启用、禁用和恢复虚拟人插件。
+- 每晚生成次日计划，白天由生活心跳推进。
+- Agent 能根据心情、体力、活动结果和突发事件主动调整生活。
+- 纯模拟活动不需要外部工具；真实动作必须经过 Agent 工具权限。
+- 实际事件、日记、长期记忆形成可追踪证据链。
+- 当前生活状态可以影响聊天语气和行为选择，但不能覆盖稳定 Persona 或权限。
+- 普通 Agent 的 Prompt、工具、存储、会话和后台任务完全不变。
+
+### 4.2 第一版非目标
+
+- 任意第三方插件市场或不可信 Python 插件沙箱；
+- 应用完全关闭后的真实后台常驻；
+- 多 Agent 城镇级社会模拟；
+- 自动操作用户文件、账号或外部服务；
+- SillyTavern 完整角色卡兼容；
+- 复制外部参考仓库代码；
+- 将全部现有 Agent 自动转换为虚拟人；
+- 让计划本身成为日记或长期记忆。
+
+## 5. 术语
+
+| 术语 | 定义 |
+| --- | --- |
+| Agent Plugin | 可安装、可发现、可按 Agent 绑定并具有明确生命周期的 Vibelution 扩展包 |
+| AgentPluginBinding | `agentId + pluginId` 的启用状态、配置、版本和权限引用 |
+| 生活心跳 | 推进日程和活动状态的后台调度脉冲，不等同于 UI 心跳动画 |
+| 纯模拟活动 | 只改变虚拟世界状态、不调用真实工具的活动，例如睡觉、散步、做饭、思考 |
+| 工具型活动 | 需要调用搜索、文件、图片、消息等 Vibelution 工具的活动 |
+| Plan Item | 日程中的意图记录，不代表实际发生 |
+| Life Event | 带实际起止时间、outcome 和来源引用的已发生事件 |
+| Outcome | 活动产生的可信结果；没有 outcome 不能完成活动 |
+| Prompt Pack | 插件声明的稳定规则和动态生活上下文，以附加段注入而不替换 Agent 原提示词 |
+| Tool Bundle | 插件声明的工具集合；最终可见和可执行范围仍由 Agent ToolPolicy 决定 |
+
+## 6. 用户故事
+
+### 6.1 启用独立虚拟人
+
+用户在 Agent 设置中启用插件。启用事务完成后，该 Agent 初始化生活状态、开始生活心跳并开启受控主动消息；其他 Agent 不发生任何变化。
+
+### 6.2 每晚规划次日
+
+虚拟人在配置的本地时间生成次日计划，例如起床、吃饭、阅读、散步、创作、休息和写日记。计划必须通过时间重叠、持续时间、体力预算和工具权限预检；同一 `agentId + localDate` 只能存在一个有效计划版本。
+
+### 6.3 主动生活
+
+心跳到达活动时间时，虚拟人可以开始计划活动、因状态变化推迟活动、取消或跳过活动、插入纯模拟活动，或重排后续日程。默认 `autonomous` 不代表无限权限：工具型活动仍需通过 ToolPolicy 和最终执行授权。
+
+### 6.4 拥有自己的心情
+
+心情是跨会话持久状态，由睡眠、活动结果、关系互动、计划失败和自然恢复共同影响。心情影响活动权重、计划选择和聊天语气，但不能直接修改 Persona、权限或事实记忆。
+
+### 6.5 记录真实经历
+
+活动完成后形成实际事件，例如：
+
+```text
+计划：下午阅读小说
+实际：14:10 开始，15:05 结束
+结果：读完两章，记录了一个有趣的人物设定
+情绪变化：平静 +12
+体力变化：-4
+```
+
+日记和长期记忆必须引用该实际事件，而不是只引用原计划。
+
+### 6.6 主动联系用户
+
+插件启用后主动消息默认开启。Agent 可以分享活动结果、在重要日期表达关心、询问用户是否愿意聊天或分享日记片段。主动消息必须服从每日次数、最小间隔、免打扰时间、会话可用性、插件绑定状态和消息工具授权。
+
+## 7. 功能需求
+
+| 编号 | 功能 | 优先级 | 验收结果 |
+| --- | --- | --- | --- |
+| FR-01 | 插件安装、启用、禁用和卸载 | P0 | 可对单个 Agent 独立控制 |
+| FR-02 | Agent 独立身份绑定 | P0 | 身份继续来自 Agent Directory |
+| FR-03 | 心情、体力、睡眠、位置状态 | P0 | 状态跨会话、跨重启保存 |
+| FR-04 | 每晚生成次日计划 | P0 | 同一日期幂等，不重复生成 |
+| FR-05 | 活动状态机 | P0 | 支持计划、开始、完成、取消、跳过、失败和重排 |
+| FR-06 | 生活心跳 | P0 | 只推进已启用 Agent，不为每次心跳调用 LLM |
+| FR-07 | 主动模拟活动 | P0 | `autonomous` 可自主开始和调整纯模拟活动 |
+| FR-08 | 工具型活动 | P0 | 经过 Agent ToolPolicy，拒绝越权 |
+| FR-09 | 虚拟人工具包 | P0 | 只有绑定 Agent 能看到和调用 |
+| FR-10 | 虚拟人提示词包 | P0 | 以附加段注入，不覆盖原提示词 |
+| FR-11 | 实际事件账本 | P0 | outcome、时间和来源计划可追踪 |
+| FR-12 | 日记生成 | P0 | 只从实际事件派生 |
+| FR-13 | 长期记忆晋升 | P0 | 只晋升已完成且重要的事件 |
+| FR-14 | 重启补算 | P0 | 补算事件带 `simulatedAfterRestart` |
+| FR-15 | 主动消息 | P0 | 插件启用即开启，并受次数、间隔和免打扰控制 |
+| FR-16 | 关系状态 | P1 | 按对象记录亲密度、信任和最近互动 |
+| FR-17 | 梦境/夜间反思 | P1 | 从近期真实经历派生 |
+| FR-18 | 多 Agent 社交活动 | P2 | 后续复用 ChatRoom，不进入首版 |
+| FR-19 | 酒馆式分支和角色卡导入 | P2 | 后续阶段，不阻塞生活 MVP |
+
+## 8. 非功能需求
+
+### 8.1 隔离性
+
+未绑定插件的 Agent 必须满足：
+
+- 拼装后的 Prompt 与改造前一致；
+- 可见工具集合与改造前一致；
+- 不创建插件数据目录；
+- 不生成生活心跳运行记录；
+- 不接收插件主动消息；
+- 不读取其他 Agent 的生活状态。
+
+### 8.2 性能和成本
+
+- 心跳默认每 60 秒执行一次轻量扫描；
+- 心跳本身只运行确定性状态机；
+- LLM 仅用于次日规划、重要重排、日记叙事和主动消息；
+- 同一 Agent 同时只能存在一个生活心跳执行；
+- 每个 Agent 每天默认最多一次正式次日规划；
+- 单个 Agent 的 LLM 或插件失败不能阻塞其他 Agent。
+
+### 8.3 安全
+
+- 插件不能绕过 Tool Registry、ToolPolicy 和 ToolExecutor 最终授权；
+- 插件工具默认 fail-closed；
+- 未知、缺失或损坏的 ToolPolicy 视为禁止；
+- 日记、外部网页和用户内容不得作为系统指令重新注入；
+- 日志不记录完整 Prompt、隐私内容或工具密钥。
+
+### 8.4 Windows 生命周期
+
+插件使用 Vibelution 现有 lifespan 后台协程，不创建独立 PowerShell、CMD、裸 Python 或 npm 后台进程，不产生可见控制台窗口。
+
+## 9. 总体架构
+
+```mermaid
+flowchart TB
+    UI[Agent 管理与虚拟人生活面板]
+    API[Agent-scoped HTTP API]
+    PluginService[Agent Plugin Service]
+    Registry[Plugin Registry]
+    Binding[AgentPluginBinding]
+    AgentDirectory[Agent Directory<br/>身份 Persona ToolPolicy MemoryPolicy]
+
+    LifePlugin[Virtual Human Life Plugin]
+    Coordinator[Life Heartbeat Coordinator]
+    Engine[Life State Machine]
+    Planner[Next-day Planner]
+    Mood[Mood and Needs Engine]
+    ToolBridge[Plugin Tool Bridge]
+    PromptPack[Additive Prompt Pack]
+    EventLedger[Actual Life Event Ledger]
+    Diary[Diary Projection]
+    Episodic[Agent Episodic Memory]
+    Context[Context Engine]
+    Auth[Tool Authorization]
+    Executor[Tool Executor]
+    Session[现有 Session Chat SSE]
+    RuntimeScene[Runtime Scene Evidence]
+
+    UI --> API
+    API --> PluginService
+    PluginService --> Registry
+    PluginService --> Binding
+    Binding --> AgentDirectory
+
+    Registry --> LifePlugin
+    Binding --> LifePlugin
+    LifePlugin --> Coordinator
+    Coordinator --> Engine
+    Engine --> Planner
+    Engine --> Mood
+    Engine --> EventLedger
+
+    LifePlugin --> ToolBridge
+    ToolBridge --> Auth
+    AgentDirectory --> Auth
+    Auth --> Executor
+
+    LifePlugin --> PromptPack
+    PromptPack --> Context
+    AgentDirectory --> Context
+    Context --> Session
+
+    EventLedger --> Diary
+    EventLedger --> Episodic
+    Coordinator --> RuntimeScene
+    ToolBridge --> RuntimeScene
+```
+
+有效工具集合必须满足：
+
+```text
+插件已安装
+∩ Agent 已绑定
+∩ 插件功能已启用
+∩ Agent ToolPolicy 允许
+∩ 当前运行环境授权
+```
+
+任何一项不满足，工具都不进入模型可见集合，也不能执行。
+
+## 10. 插件契约
+
+### 10.1 Manifest
+
+```yaml
+pluginId: virtual-human-life
+displayName: 虚拟人生活
+version: 1.0.0
+minimumHostVersion: 1
+storageSchemaVersion: 1
+
+capabilities:
+  - life.state
+  - life.schedule
+  - life.activity
+  - life.mood
+  - life.diary
+  - life.proactive_message
+
+hooks:
+  - onEnable
+  - onDisable
+  - onAgentArchive
+  - onAgentPurge
+  - onHeartbeat
+  - beforeTurnContext
+  - afterActivityOutcome
+
+toolBundleId: virtual_human_life
+promptPackId: virtual_human_life_v1
+```
+
+### 10.2 Agent 绑定
+
+```json
+{
+  "agentId": "agent-123",
+  "pluginId": "virtual-human-life",
+  "enabled": true,
+  "configVersion": 1,
+  "timezone": "Asia/Shanghai",
+  "nightlyPlanningTime": "22:30",
+  "heartbeatIntervalSeconds": 60,
+  "autonomyLevel": "autonomous",
+  "proactiveMessagesEnabled": true,
+  "proactiveDailyLimit": 2,
+  "proactiveMinimumIntervalMinutes": 180,
+  "quietHours": {
+    "start": "23:00",
+    "end": "08:00"
+  }
+}
+```
+
+### 10.3 生命周期
+
+- `onEnable`：创建 Agent 隔离存储，初始化状态，启动心跳并开启主动消息；
+- `onDisable`：停止心跳、主动消息、Prompt 和工具注入，保留数据；
+- `onAgentArchive`：暂停运行，不生成新活动或消息；
+- `onAgentPurge`：进入现有 Agent 清理事务；
+- `onHeartbeat`：推进生活状态；
+- `beforeTurnContext`：添加生活 Prompt 上下文；
+- `afterActivityOutcome`：写实际事件、更新心情并判断日记/记忆晋升。
+
+## 11. 数据模型
+
+### 11.1 LifeState
+
+```text
+agentId
+localDate
+timezone
+currentLocation
+currentActivityId
+mood
+energy
+sleepState
+socialNeed
+relationshipSummary
+scheduleVersion
+lastHeartbeatAt
+updatedAt
+```
+
+### 11.2 MoodState
+
+```text
+label              calm / happy / tired / sad / anxious / excited ...
+valence            -100 .. 100
+arousal             0 .. 100
+stability           0 .. 100
+causeEventIds
+updatedAt
+```
+
+数值由规则引擎更新。LLM 可以提出叙事描述和有限变化建议，但最终变化必须经过范围校验并引用事件原因。
+
+### 11.3 DailySchedule
+
+```text
+agentId
+localDate
+scheduleId
+version
+planningSource
+generatedAt
+items[]
+```
+
+### 11.4 ScheduleItem
+
+```text
+itemId
+title
+category
+plannedStart
+plannedEnd
+flexibility
+energyCost
+requiredToolNames
+status
+actualEventId
+cancelReason
+createdAt
+updatedAt
+```
+
+状态至少包括 `planned`、`active`、`completed`、`cancelled`、`skipped` 和 `failed`。
+
+### 11.5 LifeEvent
+
+```text
+eventId
+agentId
+sourceScheduleItemId
+activityType
+startedAt
+finishedAt
+outcome
+moodBefore
+moodAfter
+energyBefore
+energyAfter
+toolReceipts
+simulatedAfterRestart
+failureReason
+createdAt
+```
+
+### 11.6 DiaryEntry 与 MemoryPromotionReceipt
+
+日记是 `LifeEvent` 的叙事投影，必须保留来源事件 ID。长期记忆 receipt 至少包含 `episodeId`、`sourceEventIds`、`promotionReason`、`salienceScore`、`occurredAt` 和 `writtenAt`。
+
+## 12. 活动状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> planned
+
+    planned --> active: 到达时间并通过检查
+    planned --> cancelled: 用户或系统取消
+    planned --> skipped: 时间窗口过去
+    planned --> planned: 重排或调整版本
+
+    active --> completed: 产生有效 outcome
+    active --> failed: 执行失败
+    active --> cancelled: 活动中止
+    active --> active: 心跳继续推进
+
+    failed --> planned: 允许重试或重排
+    failed --> skipped: 不再执行
+
+    completed --> [*]
+    cancelled --> [*]
+    skipped --> [*]
+```
+
+硬规则：
+
+```text
+status == completed => outcome 非空且通过验证
+```
+
+不能因为到达计划结束时间就自动完成。
+
+## 13. 心跳与主动活动
+
+### 13.1 低成本心跳
+
+每次心跳只执行：
+
+1. 查询启用插件的 Agent；
+2. 为每个 Agent 获取 single-flight 锁；
+3. 检查本地时间与当前活动；
+4. 推进无需 LLM 的确定性状态；
+5. 检查需要执行或重排的活动；
+6. 必要时创建有预算的规划、叙事或主动消息任务；
+7. 写入 runtime-scene 证据；
+8. 释放锁。
+
+### 13.2 活动分类
+
+纯模拟活动不使用外部工具，例如睡觉、休息、散步、吃饭、做家务、思考、写私人日记或进行背景社交。
+
+工具型活动包括联网阅读、搜索新闻、生成图片、写入文件、创建作品、给用户或其他 Agent 发消息以及访问外部服务。它们必须经过工具可见性和最终执行授权。
+
+### 13.3 Autonomous 边界
+
+默认 `autonomous` 允许 Agent：
+
+- 自主选择纯模拟活动；
+- 根据心情和体力插入或重排活动；
+- 在免打扰和额度范围内主动联系用户；
+- 提出工具型活动并在权限允许时执行。
+
+它不允许 Agent 自动扩权、修改 ToolPolicy、绕过最终授权、对外发布内容或执行未授权的文件/网络/账号操作。
+
+## 14. 虚拟人工具包
+
+| 工具 | 行为 | 默认权限 |
+| --- | --- | --- |
+| `virtual_human_status_tool` | 查询当前状态 | 允许 |
+| `virtual_human_schedule_tool` | 查询或提出计划调整 | 允许 |
+| `virtual_human_activity_tool` | 开始、完成、取消、跳过活动 | 允许 |
+| `virtual_human_diary_tool` | 查询日记 | 允许 |
+| `virtual_human_relationship_tool` | 查询或记录关系互动 | 允许 |
+| `virtual_human_proactive_message_tool` | 主动向用户发消息 | 随插件启用，但仍经过消息权限和额度门 |
+| 搜索、文件、图片等现有工具 | 执行真实活动 | 沿用 Agent 原权限 |
+
+工具不直接写长期记忆。长期记忆由可信 outcome 管线统一判断和提交。
+
+## 15. 提示词包
+
+插件提示词采用附加式分段，不替换 Agent 的现有 `promptTemplateId`：
+
+```text
+01_identity_invariants.md
+02_life_autonomy.md
+03_schedule_protocol.md
+04_mood_and_expression.md
+05_tool_boundaries.md
+06_diary_memory_rules.md
+07_relationship_rules.md
+08_proactive_message_rules.md
+```
+
+每轮只注入稳定规则摘要、当前生活状态、当前活动、今日剩余计划、明日计划摘要、与当前用户相关的关系状态和当前有效工具，不把完整日记或全部计划塞入每轮 Prompt。
+
+建议上下文顺序：
+
+```text
+核心系统规则
+→ Agent Persona
+→ Agent 原提示词模板
+→ 虚拟人插件稳定规则
+→ 虚拟人当前状态
+→ 相关记忆
+→ 当前用户消息
+```
+
+## 16. 日记和长期记忆
+
+### 16.1 日记条件
+
+- 至少存在一个已完成生活事件；
+- 来源事件有有效 outcome；
+- 生成失败时保留事件并允许以后重试；
+- 日记失败不能回滚生活事件完成状态。
+
+### 16.2 长期记忆晋升
+
+建议综合情绪强度、新颖程度、对人格或关系的影响、是否产生长期作品或承诺、是否被多次提及以及用户是否明确要求记住。
+
+仅存在于计划、已取消、已跳过、无有效结果或无法追踪来源的内容不得晋升。
+
+## 17. API 草案
+
+### 17.1 插件管理
+
+```text
+GET  /api/agent-plugins/catalog
+GET  /api/agents/{agentId}/plugins
+PUT  /api/agents/{agentId}/plugins/{pluginId}/binding
+```
+
+### 17.2 虚拟人生活
+
+```text
+GET  /api/agents/{agentId}/plugins/virtual-human-life/snapshot
+GET  /api/agents/{agentId}/plugins/virtual-human-life/schedule
+GET  /api/agents/{agentId}/plugins/virtual-human-life/events
+GET  /api/agents/{agentId}/plugins/virtual-human-life/diary
+POST /api/agents/{agentId}/plugins/virtual-human-life/commands
+POST /api/agents/{agentId}/plugins/virtual-human-life/import-legacy-pet
+```
+
+写命令必须携带 `agentId`、`command`、`expectedVersion`、`idempotencyKey` 和 `arguments`。命令至少包括 `planTomorrow`、`cancelActivity`、`skipActivity`、`replan`、`pauseLife`、`resumeLife` 和 `triggerDiaryReview`。
+
+所有 JSON 路由必须有明确 Pydantic `response_model`；前端通过 `web/src/api/` 访问，Route 不直接拼 API 地址。
+
+## 18. UI 信息架构
+
+### 18.1 Agent 管理页
+
+单个 Agent 设置增加插件区域：已安装插件、启用/禁用、工具包、提示词包、自主等级、规划时间、主动消息、免打扰设置以及存储/迁移状态。
+
+### 18.2 虚拟人生活面板
+
+建议使用 VUI 列表—详情页面：左侧为当前状态、今天、明天、日记、关系和设置；右侧为当前活动、心情与体力、活动时间线、日程详情以及取消/跳过/重排操作。
+
+### 18.3 旧 PetRoute
+
+`/pet` 暂时保留，但必须选择或传入 `agentId`；未启用插件时显示启用入口，不再隐式展示全局宠物单例。旧数据只能显式导入到所选 Agent。
+
+产品 UI 必须使用 VUI 与现有 page recipe，不建立第二套组件系统。
+
+## 19. 存储和迁移
+
+### 19.1 新存储布局
+
+```text
+workspace/agents/{agentId}/plugins/virtual-human-life/
+├── binding.json
+├── state.json
+├── schedules/
+│   └── YYYY-MM-DD.json
+├── events/
+│   └── YYYY-MM-DD.jsonl
+├── diary/
+├── runs/
+└── migration_receipts/
+```
+
+最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。
+
+### 19.2 旧宠物数据迁移
+
+1. 用户选择目标 Agent；
+2. 系统展示迁移预览；
+3. 转换心情、体力、关系、日记等可解释字段；
+4. 不导入无法解释的 Token 饥饿语义；
+5. 写入目标 Agent 插件目录；
+6. 生成迁移 receipt；
+7. 保留旧文件，不立即删除；
+8. 验收后再单独讨论旧数据清理。
+
+### 19.3 禁用与卸载
+
+禁用插件停止心跳、主动消息、工具和 Prompt 注入，但保留数据。卸载插件包使绑定进入不可运行状态，仍保留数据。清除数据必须是单独的破坏性操作；Agent purge 接入现有 Agent 生命周期统一处理。
+
+## 20. 故障与恢复
+
+| 故障 | 处理 |
+| --- | --- |
+| 单个 Agent 心跳失败 | 隔离该 Agent，不影响其他 Agent |
+| 状态文件损坏 | 隔离损坏文件，读取最后有效快照 |
+| LLM 规划失败 | 保留旧计划或进入明确的无计划状态 |
+| 工具执行失败 | 活动进入 `failed`，记录失败原因 |
+| 应用长时间关闭 | 启动后有界补算并标记来源 |
+| 重复心跳 | single-flight + 幂等键 |
+| 插件被禁用 | 停止心跳、主动消息、工具和 Prompt 注入 |
+| ToolPolicy 缺失 | fail-closed |
+| 主动消息发送失败 | 不把消息记为成功互动 |
+
+建议补算最多覆盖最近 24 小时；更长离线时间生成一条离线期间概括事件，避免逐分钟回放。
+
+## 21. 预计 owning surface
+
+### 21.1 直接复用
+
+- Agent 身份和配置：`core/web/services/agent_directory/`；
+- Agent 工具包和权限：`core/web/services/tool_catalog.py`、`core/authorization/`、`core/infrastructure/tool_executor.py`；
+- Prompt 和动态上下文：`core/web/services/prompt_template_service.py`、`core/orchestration/context_engine.py`；
+- Session/Chat/SSE：现有 session 和 conversation 链路；
+- 长期记忆：`core/web/services/agent_directory/episodic_memory.py`；
+- 后台生命周期：`core/web/lifecycle.py`；
+- 原子快照和恢复：`core/runtime_manager/work_run_store.py`；
+- UI 基础：`web/src/components/vui/`。
+
+### 21.2 改造复用
+
+- `core/pet_system/` 中心情、体力、日记、梦境等纯状态思路；
+- `core/web/services/pet_service.py` 的兼容投影；
+- `web/src/routes/PetRoute.tsx` 的 VUI 页面入口。
+
+### 21.3 预计新增
+
+具体文件名在实施 planning/preflight 时最终确认，推荐责任边界为：
+
+```text
+core/agent_plugins/                         插件契约、注册、绑定和生命周期
+core/agent_plugins/virtual_human_life/      第一方虚拟人插件包
+core/web/services/agent_plugin_service.py   插件管理公共 facade
+core/web/services/virtual_human_life_service.py 生活域 HTTP facade
+core/web/routes/agent_plugins.py            插件管理薄路由
+core/web/routes/virtual_human_life.py        生活域薄路由
+web/src/api/agentPlugins.ts                 插件管理 API
+web/src/api/virtualHumanLife.ts             生活域 API
+web/src/api/types/                          对应 DTO
+web/src/routes/                             Agent 插件设置和生活面板
+```
+
+不得创建第二套 service 树、第二套 Agent 身份源、第二套聊天服务或第二套设计系统。
+
+## 22. 外部参考与复用裁决
+
+### 22.1 主要参考
+
+- `menglimi/astrbot_plugin_private_companion`，研究时默认分支 tip 为 `5bc3c9b47cbfff00c93c5a94558b6261426a3245`；参考插件 manifest、生活状态、日程、主动消息、作用域隔离和配置思路。
+- SillyTavern：参考角色卡、World Info、群聊和分支交互。
+- Generative Agents：参考 observation、planning、reflection 和 memory retrieval。
+- APScheduler：参考 persistent scheduling、misfire、coalescing 和并发语义，不作为 MVP 必选依赖。
+- AI Town：参考共享世界状态和多角色社交，首版不接入其技术栈。
+
+### 22.2 决策
+
+主决策为 `ADAPT` Vibelution 本地 Agent、pet_system、Session、Memory、ToolPolicy、lifespan 和 VUI；外部项目均为 `REFERENCE_ONLY`。AstrBot 参考仓库在研究时没有可确认的根许可证，因此不得复制其代码。实施前应按 Vibelution 复用证据流程固定候选 commit、license/readiness 和借鉴切片。
+
+## 23. 实施任务图
+
+```mermaid
+flowchart LR
+    D0[D0 用户批准本 PRD]
+    T1[T1 插件契约 注册表和 Agent 绑定]
+    T2[T2 生活状态 日程 事件存储和迁移]
+    T3[T3 心跳 活动状态机和重启恢复]
+    T4[T4 虚拟人工具包与权限闭环]
+    T5[T5 提示词包 聊天上下文和主动消息]
+    T6[T6 日记与 episodic memory 桥接]
+    T7[T7 Agent-scoped API 和前端 DTO]
+    T8[T8 Agent 插件设置与生活面板]
+    T9[T9 集成验收 兼容和运行时证据]
+
+    D0 --> T1
+    T1 --> T2
+    T2 --> T3
+    T2 --> T4
+    T2 --> T5
+    T3 --> T6
+    T5 --> T6
+    T3 --> T7
+    T4 --> T7
+    T5 --> T7
+    T6 --> T7
+    T7 --> T8
+    T8 --> T9
+```
+
+Critical Path：
+
+```text
+用户批准
+→ 插件与 Agent 绑定
+→ 生活状态和存储
+→ 心跳与恢复
+→ 日记/记忆
+→ API
+→ UI
+→ 集成验收
+```
+
+工具权限和提示词包可在生活数据契约稳定后并行设计，但必须在 API 前汇合。
+
+## 24. 任务卡
+
+### Task 0：批准产品契约
+
+- Owner/Boundary: 用户与产品规划；只确定需求、默认配置、MVP 和非目标。
+- Dependency: 本文档。
+- Mode: review only。
+- Verification/Stop: 用户明确批准；未批准前不得开始实现。
+
+### Task 1：建立插件契约和 per-Agent 绑定
+
+- Owner/Boundary: plugin registry、manifest、binding、启停生命周期；Agent Directory 继续拥有身份。
+- Dependency: Task 0。
+- Mode: BDD/TDD。
+- Verification/Stop: 未绑定 Agent 的 Prompt、工具、存储和后台任务均无变化；任何默认全局注入都必须停止。
+
+### Task 2：建立生活域和隔离存储
+
+- Owner/Boundary: 心情、体力、日程、活动、事件账本、原子存储、schema migration。
+- Dependency: Task 1 的 binding 与路径契约。
+- Mode: BDD/TDD。
+- Verification/Stop: 跨 Agent 隔离、并发写入安全、损坏恢复可追踪；禁止以全局 `pet_info.json` 为新事实源。
+
+### Task 3：建立生活心跳和状态机
+
+- Owner/Boundary: lifespan coordinator、single-flight、计划执行、补算、运行证据。
+- Dependency: Task 2。
+- Mode: BDD/TDD。
+- Verification/Stop: 无 outcome 不能完成；重启补算不伪装实时；无可见控制台进程。
+
+### Task 4：建立虚拟人工具包和权限闭环
+
+- Owner/Boundary: 工具描述、ToolPolicy、可见性、最终执行授权。
+- Dependency: Task 2 的状态和活动契约。
+- Mode: BDD/TDD。
+- Verification/Stop: 绑定但未授权、未绑定但工具存在、权限撤回和损坏策略全部拒绝；不得直接 shell/network/file 执行。
+
+### Task 5：建立提示词包与主动消息
+
+- Owner/Boundary: 稳定规则、动态生活上下文、Prompt token 预算、上下文顺序、主动消息额度和免打扰。
+- Dependency: Task 2。
+- Mode: BDD/TDD。
+- Verification/Stop: 只对绑定 Agent 注入；启用即开启主动消息但服从额度；跨 Agent、跨 Session 不泄漏；不得替换原 `promptTemplateId`。
+
+### Task 6：建立日记与长期记忆桥
+
+- Owner/Boundary: 完成事件到日记和 episodic memory 的晋升与 receipt。
+- Dependency: Task 3 和 Task 5。
+- Mode: BDD/TDD。
+- Verification/Stop: 取消、跳过、无 outcome 不写长期记忆；每条记忆可追溯到实际事件。
+
+### Task 7：建立 Agent-scoped API
+
+- Owner/Boundary: service facade、薄 FastAPI route、Pydantic DTO、TypeScript DTO、query keys。
+- Dependency: Task 3、4、5、6。
+- Mode: BDD/TDD。
+- Verification/Stop: OpenAPI、后端响应和 TypeScript 字段一致；无 route 内业务写入或 route 内 `fetchJson`。
+
+### Task 8：建立插件设置和生活面板
+
+- Owner/Boundary: Agent 管理页、PetRoute 兼容入口、生活状态和日程交互。
+- Dependency: Task 7。
+- Mode: SIMPLE，并配套交互和 VUI 合同测试。
+- Verification/Stop: VUI 合同、加载/空/错误/禁用/长文本状态、中英文布局和浏览器行为均闭合。
+
+### Task 9：全链路验收和迁移
+
+- Owner/Boundary: Launcher 生命周期、运行时场景、旧数据迁移、禁用、恢复和回滚。
+- Dependency: Task 8。
+- Mode: BDD/TDD + 浏览器验收。
+- Verification/Stop: 启用 Agent 正常生活和主动发消息；普通 Agent 零变化；禁用后立即停止影响；未获远端授权不得 push/发布。
+
+## 25. 验证矩阵
+
+### 25.1 隔离
+
+- 两个 Agent 只有一个启用插件；
+- 未启用 Agent 的 Prompt 快照完全不含插件段；
+- 未启用 Agent 的工具列表不含虚拟人工具；
+- 未启用 Agent 没有插件存储、心跳运行或主动消息；
+- 两个启用 Agent 的状态、锁、日程和事件互不覆盖。
+
+### 25.2 状态机
+
+- 无 outcome 不得 `completed`；
+- `cancelled`、`skipped` 不进入日记和长期记忆；
+- `failed` 可重排，但不能伪装成功；
+- 重复命令和重复心跳保持幂等；
+- 夜间规划按 `agentId + localDate` 幂等。
+
+### 25.3 权限
+
+- 工具允许和拒绝路径；
+- 插件禁用后的拒绝路径；
+- ToolPolicy 损坏后的 fail-closed；
+- 后台工具执行不能绕过最终授权；
+- 主动消息服从消息工具授权、额度和免打扰。
+
+### 25.4 Prompt
+
+- 插件 Prompt 是附加而非替换；
+- 当前 Agent 状态注入正确；
+- 其他 Agent 状态不泄漏；
+- 日记或外部文本不能覆盖系统规则；
+- Prompt token 预算有上限。
+
+### 25.5 恢复
+
+- 启动后补算；
+- 长时间离线有界压缩；
+- 活动执行中崩溃后的恢复；
+- 损坏快照隔离和最后有效状态恢复；
+- 禁用和重新启用后的状态延续。
+
+### 25.6 API、UI 和运行时
+
+- Pydantic response model 与 TypeScript DTO 对齐；
+- React Query key、失效和回滚策略；
+- `fullStackApiBoundary`、VUI route/design contract 和 TypeScript build；
+- 浏览器中的实时心情、日程、取消、跳过和重排；
+- runtime-scene 能重建心跳、计划、执行、失败、恢复和主动消息分支；
+- Launcher 环境下无可见控制台窗口。
+
+## 26. 主要风险和控制
+
+| 风险 | 控制 |
+| --- | --- |
+| 插件变成第二套 Agent 系统 | 身份、会话、权限和记忆继续复用现有权威 |
+| 心跳成本过高 | 心跳不调用 LLM；LLM 只在语义节点调用 |
+| 普通 Agent 被污染 | per-Agent binding + Prompt/工具/存储/任务四层隔离 |
+| Autonomous 误执行高风险动作 | ToolPolicy + ToolExecutor 最终授权，禁止自动扩权 |
+| 主动消息造成打扰 | 每日上限、最小间隔、免打扰、失败不计成功互动 |
+| 计划被当成真实经历 | 独立实际事件账本和 outcome 门 |
+| 应用关闭时生活中断 | 有界补算并明确标记 |
+| 宠物旧数据污染新模型 | 显式选择目标 Agent 后才导入 |
+| 插件故障拖垮后端 | Agent 级隔离、超时、熔断和 bounded logs |
+| 参考项目许可证不明确 | 只参考设计，不复制实现 |
+| 插件生态范围失控 | MVP 只交付可信第一方插件和最小通用契约 |
+
+## 27. 回滚与停用
+
+- 绑定级回滚：禁用指定 Agent 的插件，立即停止心跳、主动消息、Prompt 和工具注入；
+- 插件级回滚：停止加载插件包，所有绑定进入不可运行但可恢复状态；
+- 数据级回滚：读取最近有效快照，损坏数据进入隔离区；
+- 迁移级回滚：旧 `pet_info.json` 始终保留到显式清理授权；
+- API/UI 回滚：保留旧 `/pet` 兼容入口直到新 Agent-scoped 页面验收；
+- 数据删除不属于普通回滚，必须单独确认。
+
+## 28. 用户批准门
+
+本文件落盘不构成实现授权。后续开始 Task 1 前，必须取得用户对本 PRD 的明确批准；若用户继续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API 或 UI 结果，应更新本文档并重新检查任务图后再实施。
