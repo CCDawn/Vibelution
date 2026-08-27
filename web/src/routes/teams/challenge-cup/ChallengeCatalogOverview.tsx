@@ -6,6 +6,7 @@ import {
   fetchChallengeCupCatalogOverview,
   runChallengeCupDevBatch,
 } from "../../../api/teamExperiment";
+import { trackDevBatchRun } from "../challengeCupTelemetry";
 import {
   VButton,
   VConfirmDialog,
@@ -282,16 +283,29 @@ export function ChallengeCatalogOverview({
   const [pendingRetry, setPendingRetry] = useState<{ planId: string; failedIds: string[] } | null>(null);
 
   const batchMutation = useMutation({
+    onMutate: (input: { planId: string; retryFailed: boolean }) => ({
+      telemetry: trackDevBatchRun({
+        teamId,
+        planId: input.planId,
+        retryFailed: input.retryFailed,
+        maxItems: null,
+        source: "catalog_overview",
+      }),
+    }),
     mutationFn: (input: { planId: string; retryFailed: boolean }) =>
       runChallengeCupDevBatch(teamId, input.planId, {
         maxItems: null,
         retryFailed: input.retryFailed,
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, _vars, ctx) => {
+      ctx?.telemetry?.succeeded();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: overviewKey }),
         queryClient.invalidateQueries({ queryKey: queryKeys.challengeCupDevControlsSnapshot(teamId) }),
       ]);
+    },
+    onError: (reason: unknown, _vars, ctx) => {
+      ctx?.telemetry?.failed(reason);
     },
   });
   const batchErrorText = batchMutation.error instanceof Error
