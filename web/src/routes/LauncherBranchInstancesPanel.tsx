@@ -52,6 +52,7 @@ type LauncherBranchInstancesCopy = {
 
 type LauncherBranchInstancesPanelProps = {
   copy: LauncherBranchInstancesCopy;
+  headerAction?: ReactNode;
   items: LauncherBranchInstance[];
   selectedId: string;
   onSelect: (id: string) => void;
@@ -133,6 +134,7 @@ function TabLabel({ text, count }: { text: string; count: number }) {
 
 export function LauncherBranchInstancesPanel({
   copy,
+  headerAction,
   items,
   selectedId,
   onSelect,
@@ -704,14 +706,19 @@ export function LauncherBranchInstancesPanel({
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
       <div className={styles.panelHeader}>
         <p className={styles.panelEyebrow}>{copy.branchInstances}</p>
-        {launcherReading || !launcherOnline ? (
-          <p className={styles.controlWindow} role="status">
-            <span>{labels.controlWindow}</span>
-            <strong>{launcherTitle || "-"}</strong>
-            <VStatusChip tone={launcherReading ? "neutral" : "warning"}>
-              {launcherReading ? labels.reading : labels.offline}
-            </VStatusChip>
-          </p>
+        {headerAction || launcherReading || !launcherOnline ? (
+          <div className={styles.panelHeaderActions}>
+            {launcherReading || !launcherOnline ? (
+              <p className={styles.controlWindow} role="status">
+                <span>{labels.controlWindow}</span>
+                <strong>{launcherTitle || "-"}</strong>
+                <VStatusChip tone={launcherReading ? "neutral" : "warning"}>
+                  {launcherReading ? labels.reading : labels.offline}
+                </VStatusChip>
+              </p>
+            ) : null}
+            {headerAction}
+          </div>
         ) : null}
       </div>
 

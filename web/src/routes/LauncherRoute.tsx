@@ -238,13 +238,13 @@ export function LauncherRoute() {
           />
         </aside>
         <div className={styles.primaryColumn} data-vui-region="launcher-primary">
-          <div className={styles.toolsLinkRow}>
-            <VRouteLinkButton to="/launcher/tools" variant="ghost" density="compact">
-              {lang === "zh" ? "工具与诊断" : "Tools and diagnostics"}
-            </VRouteLinkButton>
-          </div>
           <LauncherBranchInstancesPanel
             copy={copy}
+            headerAction={(
+              <VRouteLinkButton to="/launcher/tools" variant="ghost" density="compact">
+                {lang === "zh" ? "工具与诊断" : "Tools and diagnostics"}
+              </VRouteLinkButton>
+            )}
             items={branchItems}
             selectedId={selectedId}
             onSelect={setSelectedInstanceId}

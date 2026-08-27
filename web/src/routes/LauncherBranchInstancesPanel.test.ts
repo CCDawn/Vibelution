@@ -103,6 +103,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VToolbar");
     expect(panelSource).toContain("Launcher 控制窗口");
     expect(panelSource).toContain("读取中");
+    expect(panelSource).toContain("headerAction?: ReactNode");
+    expect(panelSource).toContain("{headerAction}");
     expect(panelSource).toContain("launcherReading || !launcherOnline");
     expect(panelSource).toContain('tone={launcherReading ? "neutral" : "warning"}');
     expect(panelSource).toContain("tone={runtimeTone(state)}");
@@ -152,6 +154,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.panel).toContain("min-w-0");
     expect(panelStyles.panelBody).toContain("min-w-0");
     expect(panelStyles.tabBody).toContain("min-w-0");
+    expect(panelStyles.panelHeaderActions).toContain("ml-auto");
+    expect(panelStyles.panelHeaderActions).toContain("flex-wrap");
     expect(panelStyles.tabHeaderActions).toContain("ml-auto");
     expect(panelSource).toContain("minWidth: 150");
     expect(panelSource).toContain('id: "branch"');
