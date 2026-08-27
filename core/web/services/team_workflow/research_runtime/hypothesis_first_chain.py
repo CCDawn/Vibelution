@@ -5444,10 +5444,21 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         else []
     )
     # Review meetings of superseded selections must not block collection
-    # readiness forever; only the current selection's meetings count (plus
-    # generation meetings, which are per-question and not selection-scoped).
+    # readiness forever.  Within the current selection, only the newest
+    # logical review round remains actionable: a collection handoff can open
+    # the next candidate round while older sibling rooms are still retained as
+    # history.  Treating those historical rooms as active wedges the formal
+    # source_finding node even though a later closed round supplied the scope.
     current_selection_meeting_ids = {
         str(link.get("meetingRoundId") or "") for link in selection_links
+    }
+    latest_selection_round_index = max(
+        (int(link.get("roundIndex") or 0) for link in selection_links), default=0
+    )
+    current_round_meeting_ids = {
+        str(link.get("meetingRoundId") or "")
+        for link in selection_links
+        if int(link.get("roundIndex") or 0) == latest_selection_round_index
     }
     open_meeting_ids = [
         str(meeting.get("meetingRoundId") or "")
@@ -5455,9 +5466,21 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         if str(meeting.get("status") or "") != "closed"
         and (
             str(meeting.get("meetingType") or "") != HYPOTHESIS_REVIEW_MEETING_TYPE
-            or not current_selection_meeting_ids
-            or str(meeting.get("meetingRoundId") or "") in current_selection_meeting_ids
+            or not current_round_meeting_ids
+            or str(meeting.get("meetingRoundId") or "") in current_round_meeting_ids
         )
+    ]
+    current_selection_requests = [
+        request
+        for request in requests
+        if not current_selection_meeting_ids
+        or str(request.get("meetingRoundId") or "")
+        in current_selection_meeting_ids
+    ]
+    current_selection_pending_requests = [
+        request
+        for request in current_selection_requests
+        if str(request.get("status") or "") != "handed_off"
     ]
     active_discussion_anchor: dict[str, Any] | None = None
     active_candidate_links = sorted(
@@ -5566,7 +5589,10 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         # flows whose reviews legitimately concluded the anchors suffice. A
         # round that DID request evidence (even with an invalid envelope)
         # keeps blocking — that request must be repaired, not waived.
-        "collectionReady": bool(first_meeting_closed and requests)
+        "collectionReady": bool(
+            current_selection_requests
+            and (not open_meeting_ids or not current_selection_pending_requests)
+        )
         or bool(
             converged
             and not open_meeting_ids

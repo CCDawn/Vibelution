@@ -52,6 +52,7 @@ type LauncherBranchInstancesCopy = {
 
 type LauncherBranchInstancesPanelProps = {
   copy: LauncherBranchInstancesCopy;
+  headerAction?: ReactNode;
   items: LauncherBranchInstance[];
   selectedId: string;
   onSelect: (id: string) => void;
@@ -133,6 +134,7 @@ function TabLabel({ text, count }: { text: string; count: number }) {
 
 export function LauncherBranchInstancesPanel({
   copy,
+  headerAction,
   items,
   selectedId,
   onSelect,
@@ -704,14 +706,19 @@ export function LauncherBranchInstancesPanel({
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
       <div className={styles.panelHeader}>
         <p className={styles.panelEyebrow}>{copy.branchInstances}</p>
-        {launcherReading || !launcherOnline ? (
-          <p className={styles.controlWindow} role="status">
-            <span>{labels.controlWindow}</span>
-            <strong>{launcherTitle || "-"}</strong>
-            <VStatusChip tone={launcherReading ? "neutral" : "warning"}>
-              {launcherReading ? labels.reading : labels.offline}
-            </VStatusChip>
-          </p>
+        {headerAction || launcherReading || !launcherOnline ? (
+          <div className={styles.panelHeaderActions}>
+            {launcherReading || !launcherOnline ? (
+              <p className={styles.controlWindow} role="status">
+                <span>{labels.controlWindow}</span>
+                <strong>{launcherTitle || "-"}</strong>
+                <VStatusChip tone={launcherReading ? "neutral" : "warning"}>
+                  {launcherReading ? labels.reading : labels.offline}
+                </VStatusChip>
+              </p>
+            ) : null}
+            {headerAction}
+          </div>
         ) : null}
       </div>
 
@@ -733,45 +740,47 @@ export function LauncherBranchInstancesPanel({
         </VEmptyState>
       ) : (
         <div className={styles.panelBody}>
-          <VToolbar ariaLabel={labels.search} className={styles.filterBar}>
-            <VNativeInput
-              aria-label={labels.search}
-              className={styles.searchInput}
-              placeholder={labels.searchPlaceholder}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <VButton
-              type="button"
-              density="compact"
-              variant={filters.dirty ? "secondary" : "ghost"}
-              onPress={() => setFilters((current) => ({ ...current, dirty: !current.dirty }))}
-            >
-              {labels.filterDirty}
-            </VButton>
-            <VButton
-              type="button"
-              density="compact"
-              variant={filters.unmerged ? "secondary" : "ghost"}
-              onPress={() => setFilters((current) => ({ ...current, unmerged: !current.unmerged }))}
-            >
-              {labels.filterUnmerged}
-            </VButton>
-            {notice ? (
-              <span className={noticeTone === "error" ? styles.noticeError : styles.notice} role="status">
-                {notice}
-              </span>
-            ) : null}
-          </VToolbar>
+          <div className={styles.filterRow}>
+            <VToolbar ariaLabel={labels.search} className={styles.filterBar}>
+              <VNativeInput
+                aria-label={labels.search}
+                className={styles.searchInput}
+                placeholder={labels.searchPlaceholder}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <VButton
+                type="button"
+                density="compact"
+                variant={filters.dirty ? "secondary" : "ghost"}
+                onPress={() => setFilters((current) => ({ ...current, dirty: !current.dirty }))}
+              >
+                {labels.filterDirty}
+              </VButton>
+              <VButton
+                type="button"
+                density="compact"
+                variant={filters.unmerged ? "secondary" : "ghost"}
+                onPress={() => setFilters((current) => ({ ...current, unmerged: !current.unmerged }))}
+              >
+                {labels.filterUnmerged}
+              </VButton>
+              {notice ? (
+                <span className={noticeTone === "error" ? styles.noticeError : styles.notice} role="status">
+                  {notice}
+                </span>
+              ) : null}
+            </VToolbar>
 
-          <VTabs
-            density="compact"
-            className={styles.tabBar}
-            aria-label={copy.branchInstances}
-            value={activeTab}
-            onValueChange={(value) => setActiveTab(value as BranchTableTab)}
-            items={tabItems}
-          />
+            <VTabs
+              density="compact"
+              className={styles.tabBar}
+              aria-label={copy.branchInstances}
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as BranchTableTab)}
+              items={tabItems}
+            />
+          </div>
 
           {filteredEmpty ? (
             <VEmptyState

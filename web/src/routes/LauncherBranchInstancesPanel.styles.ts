@@ -8,11 +8,13 @@ const styles = {
   panelHeader:
     "flex min-h-0 min-w-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border-soft)] pb-1.5",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
+  panelHeaderActions: "ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[620px]:ml-0 max-[620px]:w-full",
   controlWindow: "m-0 flex min-w-0 items-center gap-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary",
-  filterBar: "mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5",
+  filterRow: "mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5",
+  filterBar: "flex min-w-0 flex-[1_1_34rem] flex-wrap items-center gap-1.5",
   searchInput: "h-7 min-w-[12rem] flex-auto max-w-sm",
   errorReason: "mt-0.5 block max-w-[18rem] truncate [font-size:var(--vui-font-2xs)] text-vui-fg-tertiary",
-  tabBar: "mt-1.5 min-w-0",
+  tabBar: "min-w-0 flex-none",
   tabLabel: "inline-flex min-w-0 items-center gap-1.5",
   tabCount:
     "inline-flex min-w-5 items-center justify-center rounded-full border border-vui-border-subtle bg-vui-surface-muted px-1.5 py-0.5 [font-size:var(--vui-font-2xs)] text-vui-fg-secondary",

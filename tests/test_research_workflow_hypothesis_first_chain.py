@@ -1957,6 +1957,11 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 "spike train coding",
             ]
 
+            # One closed candidate must not make the logical round ready while
+            # its sibling is still active.
+            finding = _evaluate(runtime, team_id, "source_finding")
+            assert "hypothesis_first_meeting_open" in _blocker_codes(finding)
+
             # The logical round fans out to both selected candidates. Fan-in
             # happens only after the second sibling is confirmed.
             _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
@@ -2919,6 +2924,61 @@ def test_converged_chain_without_evidence_requests_is_collection_ready(
             assert state["collectionRequestCount"] == 0
             assert state["collectionReady"] is True
 
+            finding = _evaluate(runtime, team_id, "source_finding")
+            assert "hypothesis_first_meeting_open" not in _blocker_codes(finding)
+    finally:
+        runtime.close()
+
+
+def test_later_review_round_supersedes_unfinished_historical_sibling_for_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A handed-off evidence branch may advance while an older sibling room
+    remains archived.  Only the newest logical round can block collection."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    _fake_collection_runs(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            first_round_meetings = _review_meetings(recorded)
+            assert len(first_round_meetings) == 2
+            first_meeting_id = first_round_meetings[0]["meetingRoundId"]
+            historical_sibling_id = first_round_meetings[1]["meetingRoundId"]
+            closed_first = _close_first_meeting_with_envelope(
+                team_id, agent_ids, first_meeting_id, runtime
+            )
+            request = closed_first["collection"]["requests"][0]
+
+            handoff = chain.record_collection_handoff(
+                team_id,
+                request["requestId"],
+                runtime=runtime,
+                agent_runner=_marker_runner,
+            )
+            later_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            assert later_meetings
+            for meeting in later_meetings:
+                meeting_id = meeting["meetingRoundId"]
+                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
+                chain.close_review_meeting(
+                    team_id,
+                    meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                )
+
+            historical = meetings.get_meeting_round(
+                team_id, historical_sibling_id
+            )["meetingRound"]
+            assert historical["status"] != "closed"
+            state = chain.chain_state(team_id, _QUESTION_ID)
+            assert historical_sibling_id not in state["openMeetingIds"]
+            assert state["collectionReady"] is True
             finding = _evaluate(runtime, team_id, "source_finding")
             assert "hypothesis_first_meeting_open" not in _blocker_codes(finding)
     finally:
