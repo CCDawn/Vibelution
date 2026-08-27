@@ -1453,3 +1453,63 @@ def test_discussion_query_uses_formal_meeting_read_and_raw_room_read(
     assert meetings == []
     assert rooms == []
     assert meeting_calls == ["research-team"]
+
+
+def test_snapshot_current_task_points_at_rerun_target_for_hollow_success() -> None:
+    """A run blocked because a "succeeded" idempotent node never materialized
+    its artifacts must project the re-run of that node as the current task;
+    the wedged successor cannot recover itself."""
+    definition = build_challenge_cup_workflow_definition()
+    run = replace(
+        build_run_record(run_id="run-hollow-finding"),
+        status="blocked",
+        active_node_id="source_extraction",
+        blocked_problem_json=json.dumps(
+            {"code": "auto_advance_not_ready", "detail": "source_candidates_missing"}
+        ),
+    )
+    finding_attempt = build_attempt_record(
+        node_run_id="nr-run-hollow-finding-source_finding-a3",
+        run_id=run.run_id,
+        node_id="source_finding",
+        status="succeeded",
+        attempt=3,
+    )
+    extraction_attempt = build_attempt_record(
+        node_run_id="nr-run-hollow-finding-source_extraction-a1",
+        run_id=run.run_id,
+        node_id="source_extraction",
+        status="blocked",
+        attempt=1,
+    )
+    rerun_offer = CommandOffer(
+        command=WorkflowCommandKind.RETRY_NODE,
+        node_id="source_finding",
+        available=True,
+        label="重跑 资料寻找",
+        reason_code="retry_available",
+        blocker_ids=(),
+        idempotency_key=(
+            "offer:run-hollow-finding:source_finding:retry_node:a4:v2"
+        ),
+        expected_run_version=run.run_version,
+    )
+    payload = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=definition,
+            attempts=(finding_attempt, extraction_attempt),
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(rerun_offer,),
+            latest_event_sequence=1,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    ).to_dict()
+    task = payload["currentTask"]
+    assert task["nodeId"] == "source_finding"
+    assert task["key"] == finding_attempt.node_run_id
+    assert task["state"] == "blocked_retryable"
+    assert payload["retry"]["nodeId"] == "source_finding"
+    assert payload["retry"]["idempotencyKey"] == rerun_offer.idempotency_key
