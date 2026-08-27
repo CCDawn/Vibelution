@@ -114,7 +114,14 @@ def test_same_seed_reproduces_identical_manifests() -> None:
     assert first == second
     assert first.manifestHash == second.manifestHash
     assert first.manifestHash == audit_sample_manifest_hash(first)
+    assert first.manifestHash == first.manifestHash.upper()
     assert AuditSampleManifest.from_dict(first.to_dict()) == first
+    # Lowercase hash input is normalized to the domain-wide uppercase form.
+    lowercase_roundtrip = AuditSampleManifest.from_dict(
+        {**first.to_dict(), "manifestHash": first.manifestHash.lower()}
+    )
+    assert lowercase_roundtrip == first
+    assert lowercase_roundtrip.manifestHash == first.manifestHash
 
     other_seed = generate_g125_batch_manifest(
         pool=_sequential_pool(),
@@ -217,6 +224,7 @@ def test_drift_sentinels_come_from_second_half_low_risk_exactly_three() -> None:
     assert exclusion_reasons["Q01"] == "outside_second_half"
     assert exclusion_reasons["Q03"] == "outside_second_half"
     assert exclusion_reasons["Q12"] == "not_low_risk"
+    assert selection.selectionHash == selection.selectionHash.upper()
     assert DriftSentinelSelection.from_dict(selection.to_dict()) == selection
 
     other_seed = select_drift_sentinels(
@@ -288,17 +296,21 @@ def test_drift_sentinels_come_from_second_half_low_risk_exactly_three() -> None:
 
 
 def test_policy_reference_binding_is_fail_closed() -> None:
-    policy = _policy()
+    policy = _policy()  # lowercase hex input mirrors third-party citations
     manifest = generate_g12_calibration_manifest(
         pool=_g12_pool(), policy=policy, seed="seed-g12", generated_at=GENERATED_AT
     )
+    # Challenge Cup policy hashes are UPPERCASE (policy JSONs +
+    # automation_policy hash rule); storage normalizes to that form.
+    assert manifest.policyContentHash == "A" * 64
 
     assert_policy_binding(manifest, policy)
+    assert_policy_binding(manifest, _policy("A" * 64))
     with pytest.raises(AuditSamplingError, match="policy binding"):
-        assert_policy_binding(manifest, _policy("b" * 64))
+        assert_policy_binding(manifest, _policy("B" * 64))
     with pytest.raises(AuditSamplingError, match="policyId"):
         assert_policy_binding(
-            manifest, {"policyId": "", "version": "2.0.0-candidate.1", "contentHash": "a" * 64}
+            manifest, {"policyId": "", "version": "2.0.0-candidate.1", "contentHash": "A" * 64}
         )
 
     payload = manifest.to_dict()
@@ -312,7 +324,7 @@ def test_policy_reference_binding_is_fail_closed() -> None:
         AuditSampleManifest.from_dict(payload)
 
     payload = manifest.to_dict()
-    payload["manifestHash"] = "c" * 64
+    payload["manifestHash"] = "D" * 64
     with pytest.raises(ContractValidationError, match="manifestHash"):
         AuditSampleManifest.from_dict(payload)
 

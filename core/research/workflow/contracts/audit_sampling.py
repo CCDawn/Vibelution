@@ -13,6 +13,7 @@ so a malformed sample can never enter the audit chain.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -24,9 +25,15 @@ from ._validation import (
     require_int,
     require_list,
     require_mapping,
-    require_sha256,
     require_text,
 )
+
+# Challenge Cup policy contentHashes are UPPERCASE hex (policy JSONs and
+# automation_policy.compute_policy_content_hash); every hash this contract
+# stores or self-signs follows the same uppercase form. Lowercase input is
+# accepted and normalized to uppercase so cross-system comparisons never see
+# two spellings of the same digest.
+_SHA256_UPPER_RE = re.compile(r"^[0-9A-F]{64}$")
 
 
 class SampleKind(str, Enum):
@@ -77,6 +84,22 @@ def parse_sample_kind(value: Any) -> SampleKind:
             + ", ".join(sorted(SAMPLE_KIND_VALUES))
             + ")"
         ) from exc
+
+
+def require_sha256_upper(payload: Mapping[str, Any], key: str) -> str:
+    """Require a sha256 hex digest stored in the domain-wide UPPERCASE form.
+
+    Lowercase input is accepted and normalized to uppercase, matching the
+    Challenge Cup policy contentHash rule so a manifest reference and the
+    policy it cites always compare equal byte-for-byte.
+    """
+
+    value = str(payload.get(key) or "").strip().upper()
+    if not _SHA256_UPPER_RE.fullmatch(value):
+        raise ContractValidationError(
+            f"{key} must be a sha256 hex digest (stored uppercase)"
+        )
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +162,7 @@ class AuditSampleManifest:
             )
         policy_id = require_text(payload, "policyId")
         policy_version = require_text(payload, "policyVersion")
-        policy_hash = require_sha256(payload, "policyContentHash")
+        policy_hash = require_sha256_upper(payload, "policyContentHash")
         seed = require_text(payload, "seed")
         rule_version = require_text(payload, "samplingRuleVersion")
         generated_at = require_text(payload, "generatedAt")
@@ -194,7 +217,7 @@ class AuditSampleManifest:
             reviewedAt=reviewed_at,
             manifestHash="",
         )
-        declared_hash = str(payload.get("manifestHash") or "").strip().lower()
+        declared_hash = str(payload.get("manifestHash") or "").strip().upper()
         if declared_hash:
             if declared_hash != audit_sample_manifest_hash(manifest):
                 raise ContractValidationError(
@@ -278,11 +301,11 @@ class AuditSampleManifest:
 
 
 def audit_sample_manifest_hash(manifest: AuditSampleManifest) -> str:
-    """Content hash over the canonical manifest payload without the self hash."""
+    """UPPERCASE content hash over the canonical manifest payload (no self hash)."""
 
     payload = manifest.to_dict()
     payload.pop("manifestHash", None)
-    return sha256_hex(payload)
+    return sha256_hex(payload).upper()
 
 
 def _parse_sample_kinds(
@@ -508,7 +531,7 @@ class DriftSentinelSelection:
             selectedAt=selected_at,
             selectionHash="",
         )
-        declared_hash = str(payload.get("selectionHash") or "").strip().lower()
+        declared_hash = str(payload.get("selectionHash") or "").strip().upper()
         if declared_hash:
             if declared_hash != drift_sentinel_selection_hash(selection):
                 raise ContractValidationError(
@@ -537,11 +560,11 @@ class DriftSentinelSelection:
 
 
 def drift_sentinel_selection_hash(selection: DriftSentinelSelection) -> str:
-    """Content hash over the canonical selection payload without the self hash."""
+    """UPPERCASE content hash over the canonical selection payload (no self hash)."""
 
     payload = selection.to_dict()
     payload.pop("selectionHash", None)
-    return sha256_hex(payload)
+    return sha256_hex(payload).upper()
 
 
 __all__ = [
@@ -560,4 +583,5 @@ __all__ = [
     "audit_sample_manifest_hash",
     "drift_sentinel_selection_hash",
     "parse_sample_kind",
+    "require_sha256_upper",
 ]

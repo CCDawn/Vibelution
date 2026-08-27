@@ -59,7 +59,7 @@ LOW_RISK_CLASS = "low_risk_standard"
 
 G125_GATE = "G125"
 
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_RE = re.compile(r"^[0-9A-Fa-f]{64}$")
 
 
 class AuditSamplingError(ValueError):
@@ -113,7 +113,12 @@ def normalize_pool(pool: Sequence[Mapping[str, Any]]) -> tuple[PoolQuestion, ...
 
 
 def policy_reference(policy: Mapping[str, Any]) -> tuple[str, str, str]:
-    """Extract the fail-closed (policyId, version, contentHash) binding."""
+    """Extract the fail-closed (policyId, version, contentHash) binding.
+
+    The contentHash is stored in the domain-wide UPPERCASE hex form used by
+    the Challenge Cup policy JSONs and automation_policy's hash rule;
+    lowercase input is accepted and normalized to uppercase.
+    """
 
     if not isinstance(policy, Mapping):
         raise AuditSamplingError("policy snapshot must be a JSON object")
@@ -124,12 +129,12 @@ def policy_reference(policy: Mapping[str, Any]) -> tuple[str, str, str]:
         raw_hash = policy.get("declaredContentHash")
     if raw_hash is None and isinstance(policy.get("approval"), Mapping):
         raw_hash = policy["approval"].get("contentHash")
-    content_hash = str(raw_hash or "").strip().lower()
+    content_hash = str(raw_hash or "").strip().upper()
     if not policy_id or not version:
         raise AuditSamplingError("policy snapshot requires policyId and version")
     if not _SHA256_RE.fullmatch(content_hash):
         raise AuditSamplingError(
-            "policy contentHash must be a sha256 hex digest (uppercase input is normalized)"
+            "policy contentHash must be a sha256 hex digest (stored uppercase)"
         )
     return policy_id, version, content_hash
 
