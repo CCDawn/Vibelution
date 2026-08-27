@@ -7,6 +7,7 @@ import pytest
 
 from vibelution_storage import (
     PROJECTS_HOME_ENV,
+    PROJECT_MEMORY_TOMBSTONE_NAME,
     ProjectIdentityError,
     ProjectStorageMigrationStateError,
     ensure_project_storage,
@@ -294,3 +295,52 @@ def test_codex_sandbox_temp_is_external_for_identified_checkout(monkeypatch, tmp
 
     assert temp_root.is_relative_to(projects_home)
     assert not temp_root.is_relative_to(project_root)
+
+
+def test_legacy_memory_tombstone_fails_closed_on_every_fallback(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    legacy_memory = project_root / ".docs" / "project-memory"
+    legacy_memory.mkdir(parents=True)
+    (legacy_memory / "INDEX.md").write_text("memory\n", encoding="utf-8")
+    tombstone = legacy_memory / PROJECT_MEMORY_TOMBSTONE_NAME
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(tmp_path / "project-state"))
+
+    # Identity missing entirely: the bootstrap legacy fallback is blocked.
+    tombstone.write_text("retired\n", encoding="utf-8")
+    with pytest.raises(
+        ProjectStorageMigrationStateError, match="project_memory_legacy_retired"
+    ):
+        resolve_project_memory_home(project_root)
+
+    # With identity + a valid matching marker, the tombstone agrees with the
+    # completed migration and must not block the external home fast path.
+    _write_identity(project_root)
+    target = resolve_project_storage_paths(project_root)
+    marker_path = project_memory_migration_state_path(target)
+    marker_path.parent.mkdir(parents=True)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "completed",
+                "projectId": target.project_id,
+                "targetRoot": str(target.memory),
+                "sources": [{"sourceRoot": str(legacy_memory)}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert resolve_project_memory_home(project_root) == target.memory
+
+    # Marker unreachable again (e.g. projects home moved): legacy stays retired.
+    marker_path.unlink()
+    with pytest.raises(
+        ProjectStorageMigrationStateError, match="project_memory_legacy_retired"
+    ):
+        resolve_project_memory_home(project_root)
+
+    # Without the tombstone the pre-existing fallback behavior is unchanged.
+    tombstone.unlink()
+    assert resolve_project_memory_home(project_root) == legacy_memory

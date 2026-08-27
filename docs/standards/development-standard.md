@@ -832,7 +832,7 @@ Before `STANDARD_TASK`, `HIGH_RISK`, continuation work, cross-session decisions,
 
 For `FAST_PATCH`, read project memory only when the patch touches governance, active claims, remembered decisions, hot files, or an existing memory fact. Do not read the full memory bundle for trivial read-only questions, tiny cosmetic edits, or docs wording where memory cannot affect the conclusion.
 
-Session-level Agents must not hand-edit `<active-memory>/**` while working in parallel unless they are the current memory-sync owner with an explicit claim. `.docs/project-memory/**` and `PROJECT_MEMORY.html` are legacy read-only artifacts. Parallel Agents should write append-only proposals or report exact lane/update payloads.
+Session-level Agents must not hand-edit `<active-memory>/**` while working in parallel unless they are the current memory-sync owner with an explicit claim. `.docs/project-memory/**` and `PROJECT_MEMORY.html` are legacy read-only artifacts. A `MIGRATED-DO-NOT-WRITE.txt` tombstone inside the legacy memory dir makes `resolve_project_memory_home` fail closed on every fallback instead of silently resolving back to legacy. Parallel Agents should write append-only proposals or report exact lane/update payloads.
 
 After `STANDARD_TASK` or `HIGH_RISK` meaningful development, update or propose updates for:
 

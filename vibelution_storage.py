@@ -24,6 +24,9 @@ PROJECT_IDENTITY_SCHEMA_VERSION = 1
 STORAGE_MIGRATION_SCHEMA_VERSION = 1
 STORAGE_MIGRATION_STATE_NAME = "storage-migration.json"
 PROJECT_MEMORY_MIGRATION_STATE_NAME = "project-memory-migration.json"
+# 迁移完成后由运维落在 legacy 目录内的墓碑文件：存在即宣告该目录退役，
+# 任何解析分支都不得再把它当作可写的活跃记忆位置。
+PROJECT_MEMORY_TOMBSTONE_NAME = "MIGRATED-DO-NOT-WRITE.txt"
 _PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _FNV32_OFFSET = 2166136261
 _FNV32_PRIME = 16777619
@@ -579,6 +582,7 @@ def resolve_project_memory_home(project_root: str | os.PathLike[str]) -> Path:
     try:
         target = resolve_project_storage_paths(root)
     except ProjectIdentityError:
+        _raise_if_legacy_memory_retired(root / ".docs" / "project-memory")
         return root / ".docs" / "project-memory"
     legacy = _integration_project_root(root) / ".docs" / "project-memory"
     marker_path = project_memory_migration_state_path(target)
@@ -596,6 +600,7 @@ def resolve_project_memory_home(project_root: str | os.PathLike[str]) -> Path:
             return target.memory
     if not _directory_has_entries(legacy):
         return target.memory
+    _raise_if_legacy_memory_retired(legacy)
     return legacy
 
 
@@ -638,6 +643,17 @@ def _directory_has_entries(path: Path) -> bool:
     except (FileNotFoundError, NotADirectoryError, StopIteration, OSError):
         return False
     return True
+
+
+def _raise_if_legacy_memory_retired(legacy: Path) -> None:
+    if (legacy / PROJECT_MEMORY_TOMBSTONE_NAME).is_file():
+        raise ProjectStorageMigrationStateError(
+            "project_memory_legacy_retired: "
+            f"{legacy} carries {PROJECT_MEMORY_TOMBSTONE_NAME}; this legacy memory "
+            "location is retired and must not resolve as the active memory home. "
+            "Restore the projects home / tracked identity, or deliberately remove "
+            "the tombstone."
+        )
 
 
 def _valid_project_memory_migration_marker(
