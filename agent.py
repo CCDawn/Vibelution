@@ -1323,6 +1323,17 @@ class SelfEvolvingAgent:
         self.mode = fallback.mode
         return fallback
 
+    def seed_chat_history_ledger_fingerprint(self, fingerprint: str) -> None:
+        """Stamp the ledger provenance of the history seeded this turn.
+
+        The session worker assembles chat history from the ConversationLedger
+        (windowing and compaction included); the send-time gate accepts that
+        seed when its provenance matches the live ledger instead of demanding
+        the seed reproduce the canonical replay verbatim.
+        """
+
+        self._seeded_history_ledger_fingerprint = str(fingerprint or "").strip()
+
     def seed_chat_history(self, messages: List[Dict[str, Any]]) -> None:
         """为 chat 模式恢复 canonical model history。
 
@@ -1528,6 +1539,25 @@ class SelfEvolvingAgent:
             from core.chat.conversation_ledger import load_conversation_events
 
             events = load_conversation_events(project_root, session_id)
+            seeded_ledger_fingerprint = str(
+                getattr(self, "_seeded_history_ledger_fingerprint", "") or ""
+            ).strip()
+            if seeded_ledger_fingerprint:
+                # One-shot per turn: the seed was ledger-assembled by the
+                # session worker, so verify provenance (same ledger state)
+                # rather than seed == canonical replay, which legal context
+                # windowing/compaction would always break.
+                self._seeded_history_ledger_fingerprint = ""
+                from core.orchestration.turn_message_assembly import (
+                    ledger_seeded_history_fingerprint,
+                )
+
+                live_fingerprint = ledger_seeded_history_fingerprint(
+                    events,
+                    turn_id=turn_id,
+                )
+                if live_fingerprint == seeded_ledger_fingerprint:
+                    return messages, True
             reconciled = reconcile_chat_messages_with_ledger(
                 messages,
                 events,
@@ -1711,6 +1741,7 @@ class SelfEvolvingAgent:
         self._active_turn_messages = None
         self._active_turn_goal = ""
         self._active_turn_terminal = False
+        self._seeded_history_ledger_fingerprint = ""
 
     def prepare_for_session_turn_reuse(self) -> None:
         """Reset turn-local state while retaining the model transport/session anchor."""

@@ -549,28 +549,6 @@ def reconcile_chat_messages_with_ledger(
     )
     layer = conversation_layer_messages(materialized)
     history_layer = layer[:-1] if layer and _message_role_name(layer[-1]) == "user" else layer
-    from core.infrastructure.runtime_input import build_chat_user_message
-
-    def _chat_seeded_history_fingerprint(items: Sequence[Any]) -> str:
-        projected: list[Any] = []
-        for item in items:
-            if isinstance(item, Mapping):
-                role = _coerce_text(item.get("role")).strip().lower()
-                if role == "user":
-                    content = item.get("content")
-                    if isinstance(content, list):
-                        projected.append({"role": "user", "content": content})
-                    else:
-                        projected.append(build_chat_user_message(_coerce_text(content)))
-                    continue
-                projected.append(dict(item))
-                continue
-            role = _message_role_name(item)
-            if role == "user":
-                projected.append(build_chat_user_message(_coerce_text(getattr(item, "content", ""))))
-            else:
-                projected.append(item)
-        return conversation_layer_fingerprint(projected)
 
     expected_fingerprint = _chat_seeded_history_fingerprint(historical)
     actual_fingerprint = conversation_layer_fingerprint(history_layer)
@@ -585,3 +563,56 @@ def reconcile_chat_messages_with_ledger(
             },
         )
     return materialized
+
+
+def ledger_seeded_history_fingerprint(
+    events: Iterable[Any],
+    *,
+    turn_id: str,
+) -> str:
+    """Fingerprint of the canonical seeded history for ``turn_id``.
+
+    This is the provenance stamp of a ledger-assembled chat seed: the producer
+    (session worker) stamps it when assembling history from the ledger, and the
+    send-time gate recomputes it from the live ledger to prove the seed was
+    derived from exactly this ledger state — windowing and compaction applied
+    afterwards by the context assembler are deliberate transforms and are not
+    required to reproduce the canonical replay verbatim.
+    """
+
+    from core.chat.conversation_invariant import (
+        canonical_conversation_messages_from_events,
+    )
+
+    event_list = _coerce_message_list(events)
+    normalized_turn_id = _coerce_text(turn_id).strip()
+    historical = canonical_conversation_messages_from_events(
+        event_list,
+        current_turn_id=normalized_turn_id,
+    )
+    return _chat_seeded_history_fingerprint(historical)
+
+
+def _chat_seeded_history_fingerprint(items: Sequence[Any]) -> str:
+    from core.chat.conversation_invariant import conversation_layer_fingerprint
+    from core.infrastructure.runtime_input import build_chat_user_message
+
+    projected: list[Any] = []
+    for item in items:
+        if isinstance(item, Mapping):
+            role = _coerce_text(item.get("role")).strip().lower()
+            if role == "user":
+                content = item.get("content")
+                if isinstance(content, list):
+                    projected.append({"role": "user", "content": content})
+                else:
+                    projected.append(build_chat_user_message(_coerce_text(content)))
+                continue
+            projected.append(dict(item))
+            continue
+        role = _message_role_name(item)
+        if role == "user":
+            projected.append(build_chat_user_message(_coerce_text(getattr(item, "content", ""))))
+        else:
+            projected.append(item)
+    return conversation_layer_fingerprint(projected)

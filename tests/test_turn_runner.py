@@ -782,3 +782,47 @@ def test_run_existing_agent_single_turn_parses_json_attachments():
     assert result == {"status": "completed"}
     assert captured["attachments"] == [{"name": "note.md"}]
     assert captured["disable_tools"] is False
+
+
+def test_run_existing_agent_single_turn_seeds_history_ledger_fingerprint():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def seed_chat_history_ledger_fingerprint(self, fingerprint):
+            captured["fingerprint"] = fingerprint
+
+        def run_single_turn(self, initial_prompt=None):
+            return {"status": "completed"}
+
+    run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="continue",
+        chat_history=[{"role": "user", "content": "first"}],
+        chat_history_ledger_fingerprint="fp-stamp",
+    )
+
+    assert captured.get("fingerprint") == "fp-stamp"
+    assert captured.get("history") == [{"role": "user", "content": "first"}]
+
+
+def test_run_existing_agent_single_turn_skips_fingerprint_without_history():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history_ledger_fingerprint(self, fingerprint):
+            captured["fingerprint"] = fingerprint
+
+        def run_single_turn(self, initial_prompt=None):
+            return {"status": "completed"}
+
+    run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="continue",
+        chat_history=None,
+        chat_history_ledger_fingerprint="fp-stamp",
+    )
+
+    assert "fingerprint" not in captured

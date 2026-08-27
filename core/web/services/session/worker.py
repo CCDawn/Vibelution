@@ -1668,6 +1668,19 @@ def _run_session_continuation_loop(
             turn_id=canonical_turn_id,
         )
         with model_invocation_receipt_context_scope(receipt_context):
+            chat_history_ledger_fingerprint = ""
+            if turn_index == 1 and history_messages:
+                from core.orchestration.turn_message_assembly import (
+                    ledger_seeded_history_fingerprint,
+                )
+
+                # Provenance stamp for the send-time ledger gate: the seed
+                # below is assembled from this ledger state, and windowing or
+                # compaction may legally rewrite its contents.
+                chat_history_ledger_fingerprint = ledger_seeded_history_fingerprint(
+                    s._load_session_conversation_events_cached(session_id),
+                    turn_id=canonical_turn_id,
+                )
             result = s.run_existing_agent_single_turn(
                 agent,
                 initial_prompt=prompt,
@@ -1676,6 +1689,7 @@ def _run_session_continuation_loop(
                 prompt_cache_partition=prompt_cache_partition,
                 turn_identity=canonical_turn_id,
                 chat_history=history_messages if turn_index == 1 else None,
+                chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
             )
         result = s._attach_session_prompt_cache_metadata(
             result,

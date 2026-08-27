@@ -27,6 +27,7 @@ from core.infrastructure.runtime_input import build_chat_user_message
 from core.orchestration.turn_message_assembly import (
     TurnJournalReplayError,
     ledger_conversation_fingerprint_for_messages,
+    ledger_seeded_history_fingerprint,
     reconcile_chat_messages_with_ledger,
     replay_current_turn_messages,
 )
@@ -517,3 +518,59 @@ def conversation_layer_messages_from_last_assistant(messages):
 def _message_content(message) -> str:
     content = message.get("content") if isinstance(message, dict) else getattr(message, "content", "")
     return str(content or "")
+
+
+def test_ledger_seeded_history_fingerprint_is_turn_scoped_provenance(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-fp",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "历史请求"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-fp",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "历史回复"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-fp",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "当前请求"},
+    )
+    events = load_conversation_events(tmp_path, "session-fp")
+
+    fingerprint = ledger_seeded_history_fingerprint(events, turn_id="turn-2")
+    assert fingerprint
+
+    # Current-turn growth after the stamp must not invalidate it: the gate
+    # recomputes from the live ledger, which now includes in-flight events.
+    append_conversation_event(
+        tmp_path,
+        "session-fp",
+        "turn-2",
+        EVENT_TOOL_RESULT,
+        status="completed",
+        payload={"content": "工具输出", "tool_call_id": "call-1"},
+    )
+    grown = load_conversation_events(tmp_path, "session-fp")
+    assert ledger_seeded_history_fingerprint(grown, turn_id="turn-2") == fingerprint
+
+    # A different prior history must change the stamp.
+    append_conversation_event(
+        tmp_path,
+        "session-fp",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "另一条历史回复"},
+    )
+    changed = load_conversation_events(tmp_path, "session-fp")
+    assert ledger_seeded_history_fingerprint(changed, turn_id="turn-2") != fingerprint

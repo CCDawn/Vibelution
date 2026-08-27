@@ -223,6 +223,7 @@ def prepare_agent_turn(
     dynamic_runtime_context: str = "",
     interrupt_checker: InterruptChecker | None = None,
     chat_history: list[dict[str, Any]] | None = None,
+    chat_history_ledger_fingerprint: str = "",
 ) -> None:
     """Own preparation of history or same-turn recovery before execution."""
 
@@ -246,6 +247,10 @@ def prepare_agent_turn(
         restore_chat_history = getattr(agent, "seed_chat_history", None)
         if callable(restore_chat_history) and history_items:
             restore_chat_history(history_items)
+            ledger_fp = _coerce_text(chat_history_ledger_fingerprint).strip()
+            seed_ledger_fp = getattr(agent, "seed_chat_history_ledger_fingerprint", None)
+            if ledger_fp and callable(seed_ledger_fp):
+                seed_ledger_fp(ledger_fp)
 
     host_seeded_runtime_context = False
     static_context_text = _coerce_text(static_runtime_context).strip()
@@ -339,6 +344,7 @@ def run_existing_agent_single_turn(
     dynamic_runtime_context: str = "",
     interrupt_checker: InterruptChecker | None = None,
     chat_history: list[dict[str, Any]] | None = None,
+    chat_history_ledger_fingerprint: str = "",
 ) -> Any:
     """Prepare and run one Turn on an already-created Agent."""
 
@@ -351,6 +357,7 @@ def run_existing_agent_single_turn(
         dynamic_runtime_context=dynamic_runtime_context,
         interrupt_checker=interrupt_checker,
         chat_history=chat_history,
+        chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
     )
     return _execute_existing_agent_single_turn(
         agent,
