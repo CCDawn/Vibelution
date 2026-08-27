@@ -89,7 +89,7 @@ def virtual_human_activity_tool(
     """开始、完成、取消、跳过或重排虚拟人的生活活动。
 
     action: start | complete | cancel | skip | replan。
-    complete 必须提供真实 outcome_summary；计划本身不能当成完成结果。
+    complete 接收 outcome_summary 记录实际结果；计划文本不会被视为完成结果。
     """
 
     command_by_action = {
