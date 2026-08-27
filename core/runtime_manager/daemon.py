@@ -76,6 +76,7 @@ from .workbench_controller import (
     clear_workbench_launcher_state_after_close,
     close_workbench,
     focus_workbench,
+    forward_lifecycle_command_to_electron,
     observe_workbench,
     open_workbench,
     persist_workbench_launcher_state_after_open,
@@ -2642,6 +2643,40 @@ class RuntimeManagerDaemon:
                 _release_daemon_ownership(self._pid)
             _mark_daemon_not_running_after_exit(manager_pid=self._pid)
 
+    def _hand_off_command_to_electron_control_plane(
+        self,
+        command_id: str,
+        command_type: str,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Forward a product lifecycle command to the Electron main control plane.
+
+        Per ADR 0009 product open/close/restart run in Electron main once it owns
+        the main-line queue. Instead of silently dropping the queued command
+        (which stranded the web restart button on a false 202), hand it to the
+        live desktop shell through the same second-instance channel the native
+        shim uses. Quitting the whole app (stopManager) stays an explicit
+        desktop-shell capability and is reported as a failure here.
+        """
+
+        if command_type == "close_workbench" and bool(args.get("stopManager")):
+            # Stop-manager shutdown cannot be approximated by an Electron stop:
+            # refusing loudly beats leaving the operator waiting for a quit
+            # that never happens.
+            return {
+                "ok": False,
+                "reason": "shutdown requires quitting the app shell from the Launcher; use the tray or Launcher CLI stop",
+                "stopManager": True,
+            }
+        try:
+            return forward_lifecycle_command_to_electron(command_type)
+        except Exception as exc:
+            _append_event(
+                "command.electron_handoff_forward_error",
+                {"commandId": command_id, "type": command_type, "errorType": type(exc).__name__},
+            )
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def _handle_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         command_id = str(payload.get("commandId") or "").strip()
         command_type = str(payload.get("type") or "").strip()
@@ -2662,22 +2697,58 @@ class RuntimeManagerDaemon:
             return result
 
         if not should_execute_workbench_queue_command(command_type):
-            result = self._finish_command(
-                command_id,
-                ok=False,
-                message="Workbench lifecycle is owned by Electron main.",
-                error_scope="command",
-                error_type="ControlPlaneIsElectron",
-                result_data={"code": "control_plane_is_electron", "skipped": True},
-                reconcile=False,
+            handoff = self._hand_off_command_to_electron_control_plane(command_id, command_type, args)
+            if handoff.get("ok"):
+                result = with_timing(
+                    self._finish_command(
+                        command_id,
+                        ok=True,
+                        message="Workbench lifecycle is owned by Electron main; the command was handed off to it.",
+                        result_data={
+                            "code": "handed_off_to_electron",
+                            "electronControlPlaneHandoff": handoff,
+                        },
+                        reconcile=False,
+                    )
+                )
+                _append_event(
+                    "command.handed_off_to_electron",
+                    {
+                        "commandId": command_id,
+                        "type": command_type,
+                        "requestedAt": result.get("requestedAt", ""),
+                        "claimedAt": result.get("claimedAt", ""),
+                        "startedAt": result.get("startedAt", ""),
+                        "queuedMs": result.get("queuedMs"),
+                        "runMs": result.get("runMs"),
+                        "handoff": handoff,
+                    },
+                )
+                return result
+            reason = str(handoff.get("reason") or "unknown hand-off failure")
+            message = f"Workbench lifecycle is owned by Electron main, and the hand-off to it failed: {reason}"
+            result = with_timing(
+                self._finish_command(
+                    command_id,
+                    ok=False,
+                    message=message,
+                    error_scope=command_type or "command",
+                    failure_message=message,
+                    error_type="ElectronControlPlaneHandoffFailed",
+                    result_data={
+                        "code": "control_plane_is_electron_handoff_failed",
+                        "electronControlPlaneHandoff": handoff,
+                    },
+                    reconcile=False,
+                )
             )
-            result = with_timing(result)
             _append_event(
-                "command.skipped",
+                "command.failed",
                 {
                     "commandId": command_id,
                     "type": command_type,
-                    "reason": "control_plane_is_electron",
+                    "reason": "control_plane_is_electron_handoff_failed",
+                    "message": message,
                     "requestedAt": result.get("requestedAt", ""),
                     "claimedAt": result.get("claimedAt", ""),
                     "startedAt": result.get("startedAt", ""),

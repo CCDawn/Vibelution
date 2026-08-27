@@ -1606,6 +1606,101 @@ def _signal_live_electron_open_workbench(*, executable: Path, env: dict[str, str
         )
 
 
+_ELECTRON_LIFECYCLE_FORWARD_TIMEOUT_SECONDS = 15.0
+# Runtime-manager queue command types that map onto the desktop CLI lifecycle
+# commands forwarded through the Electron second-instance channel (see
+# desktop/electron/src/cli/desktopCli.ts LIFECYCLE_COMMANDS). close_workbench
+# with stopManager stays unforwarded: quitting the app shell is an Electron
+# capability the web API must not approximate with a destructive stop.
+_QUEUE_COMMAND_TO_DESKTOP_LIFECYCLE = {
+    "close_workbench": "stop",
+    "force_close_workbench": "force-stop",
+    "restart_workbench": "restart",
+    "toggle_workbench": "toggle",
+}
+
+
+def forward_lifecycle_command_to_electron(
+    command_type: str,
+    *,
+    timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Hand a main-line lifecycle command to the live Electron control plane.
+
+    Per ADR 0009 product lifecycle writes (state machine, command execution,
+    registered-PID reap) run only in Electron main. When Electron owns the
+    main-line queue (main_line_queue_owner.json), this daemon side must not
+    silently drop or locally re-implement workbench lifecycle commands; instead
+    it forwards them through the same second-instance channel the native shim
+    uses. The forward itself never opens a console window.
+    """
+
+    normalized_type = str(command_type or "").strip()
+    mapped = _QUEUE_COMMAND_TO_DESKTOP_LIFECYCLE.get(normalized_type)
+    if not mapped:
+        return {
+            "ok": False,
+            "reason": f"command type {normalized_type or '<empty>'} has no desktop lifecycle counterpart",
+            "forwardable": False,
+        }
+    resolved_timeout = _ELECTRON_LIFECYCLE_FORWARD_TIMEOUT_SECONDS if timeout_seconds is None else max(1.0, float(timeout_seconds))
+    try:
+        from core.launcher.desktop_shell import resolve_desktop_shell_launch
+
+        spec = resolve_desktop_shell_launch(PROJECT_ROOT, then_lifecycle=mapped)
+    except (OSError, RuntimeError, FileNotFoundError, TypeError, ValueError) as exc:
+        return {"ok": False, "reason": f"desktop shell launch spec unavailable: {exc}"}
+    if not isinstance(spec, dict):
+        return {"ok": False, "reason": "desktop shell launch spec unavailable"}
+    args = [str(item) for item in (spec.get("args") or [])]
+    cwd = str(spec.get("cwd") or PROJECT_ROOT)
+    if not args:
+        return {"ok": False, "reason": "desktop shell launch spec has no argv"}
+    desktop_env = os.environ.copy()
+    desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=desktop_env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_creation_flags(detach=False),
+            startupinfo=_hidden_startup_info(),
+            shell=False,
+        )
+    except OSError as exc:
+        return {"ok": False, "reason": f"failed to start forwarding process: {exc}", "argvTail": args[-2:]}
+    forward_pid = int(getattr(process, "pid", 0) or 0)
+    try:
+        return_code = int(process.wait(timeout=resolved_timeout))
+    except subprocess.TimeoutExpired:
+        # A live primary consumes the second-instance argv and the forwarding
+        # process exits; when it lingers the request is still handed off.
+        return {
+            "ok": True,
+            "assumedDelivered": True,
+            "commandType": normalized_type,
+            "desktopLifecycle": mapped,
+            "forwardPid": forward_pid,
+        }
+    if return_code != 0:
+        return {
+            "ok": False,
+            "reason": f"Electron desktop shell rejected {mapped} (exit code {return_code}).",
+            "exitCode": return_code,
+            "forwardPid": forward_pid,
+        }
+    return {
+        "ok": True,
+        "commandType": normalized_type,
+        "desktopLifecycle": mapped,
+        "exitCode": return_code,
+        "forwardPid": forward_pid,
+    }
+
+
 def _electron_bootstrap_python_executable() -> str:
     """Prefer the project interpreter so Electron can bootstrap Launcher consistently."""
 

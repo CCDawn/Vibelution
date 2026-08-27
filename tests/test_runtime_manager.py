@@ -11707,3 +11707,186 @@ def test_maybe_auto_close_on_browser_missing_skips_when_electron_orchestrates(mo
     result = runtime_daemon._maybe_auto_close_on_browser_missing(state)
     assert "browserMissingSince" not in result
     assert submitted == []
+
+
+def _isolate_cancel_queue_dirs(tmp_path, monkeypatch):
+    runtime_dir = tmp_path / "runtime-manager"
+    for name in ("inbox", "processing", "results", "interrupts"):
+        (runtime_dir / name).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(command_queue, "INBOX_DIR", runtime_dir / "inbox")
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", runtime_dir / "processing")
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", runtime_dir / "results")
+    monkeypatch.setattr(command_queue, "INTERRUPTS_DIR", runtime_dir / "interrupts")
+    events_path = runtime_dir / "events.jsonl"
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(
+        command_queue,
+        "record_runtime_manager_scene_event",
+        lambda *_args, **_kwargs: True,
+    )
+    return runtime_dir
+
+
+def test_cancel_reports_completed_command_instead_of_not_found(tmp_path, monkeypatch):
+    _isolate_cancel_queue_dirs(tmp_path, monkeypatch)
+    (command_queue.RESULTS_DIR / "cmd-done.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-done",
+                "accepted": True,
+                "completed": True,
+                "ok": False,
+                "errorType": "ElectronControlPlaneHandoffFailed",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = command_queue.cancel_lifecycle_command(
+        command_id="cmd-done",
+        operation="restart",
+        requested_by="web_ui",
+    )
+
+    assert response["cancelled"] is False
+    assert response["status"] == "already_completed"
+    assert "nothing left to cancel" in response["message"]
+
+
+def test_cancel_active_restart_requests_safe_point_interrupt(tmp_path, monkeypatch):
+    runtime_dir = _isolate_cancel_queue_dirs(tmp_path, monkeypatch)
+    (command_queue.PROCESSING_DIR / "cmd-live.json").write_text(
+        json.dumps({"commandId": "cmd-live", "type": "restart_workbench", "requestedBy": "web_ui", "args": {}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(command_queue, "load_state", lambda: {"stateVersion": 9})
+
+    response = command_queue.cancel_lifecycle_command(
+        command_id="cmd-live",
+        operation="restart",
+        requested_by="web_ui",
+    )
+
+    assert response["cancelled"] is False
+    assert response["status"] == "interrupt_requested"
+    interrupt = json.loads((runtime_dir / "interrupts" / "cmd-live.json").read_text(encoding="utf-8"))
+    assert interrupt["interruptedCommandId"] == "cmd-live"
+    assert interrupt["cancelRequested"] is True
+    # The safe-point check the running handler consults must now fire.
+    assert command_queue.lifecycle_interrupt_requested("cmd-live") == interrupt
+
+
+def test_cancel_active_close_stays_refused(tmp_path, monkeypatch):
+    _isolate_cancel_queue_dirs(tmp_path, monkeypatch)
+    (command_queue.PROCESSING_DIR / "cmd-close.json").write_text(
+        json.dumps({"commandId": "cmd-close", "type": "close_workbench", "requestedBy": "web_ui", "args": {}}),
+        encoding="utf-8",
+    )
+
+    response = command_queue.cancel_lifecycle_command(
+        command_id="cmd-close",
+        operation="stop",
+        requested_by="web_ui",
+    )
+
+    assert response["status"] == "already_active"
+    assert not (tmp_path / "runtime-manager" / "interrupts" / "cmd-close.json").exists()
+
+
+def test_forward_lifecycle_command_rejects_unmapped_type():
+    result = workbench_controller.forward_lifecycle_command_to_electron("open_workbench")
+    assert result["ok"] is False
+    assert result["forwardable"] is False
+
+
+def test_forward_lifecycle_command_runs_hidden_second_instance(monkeypatch):
+    popen_calls: list[dict] = []
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.pid = 4321
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(args, **kwargs):
+        popen_calls.append({"args": [str(item) for item in args], **kwargs})
+        return FakeProcess()
+
+    import core.launcher.desktop_shell as desktop_shell
+
+    monkeypatch.setattr(
+        desktop_shell,
+        "resolve_desktop_shell_launch",
+        lambda project_root, *, then_lifecycle="": {
+            "schemaVersion": 1,
+            "kind": "unpackaged",
+            "args": ["C:/fake/electron.exe", "--workspace", str(project_root), then_lifecycle],
+            "cwd": str(project_root),
+        },
+    )
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", fake_popen)
+
+    result = workbench_controller.forward_lifecycle_command_to_electron("restart_workbench")
+
+    assert result["ok"] is True
+    assert result["desktopLifecycle"] == "restart"
+    assert result["exitCode"] == 0
+    call = popen_calls[-1]
+    assert call["args"][-1] == "restart"
+    creation_flags_value = call["creationflags"]
+    hidden = call["startupinfo"]
+    assert os.name != "nt" or (creation_flags_value and hidden is not None)
+    assert call["stdin"] == subprocess.DEVNULL
+    assert call["stdout"] == subprocess.DEVNULL
+    assert call["stderr"] == subprocess.DEVNULL
+    assert call["shell"] is False
+
+
+def test_forward_lifecycle_command_times_out_as_assumed_delivery(monkeypatch):
+    class SlowProcess:
+        def __init__(self) -> None:
+            self.pid = 99
+
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired(cmd="electron", timeout=timeout)
+
+    import core.launcher.desktop_shell as desktop_shell
+
+    monkeypatch.setattr(
+        desktop_shell,
+        "resolve_desktop_shell_launch",
+        lambda project_root, *, then_lifecycle="": {"args": ["C:/fake/electron.exe", "--project", str(project_root)], "cwd": ""},
+    )
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", lambda args, **kwargs: SlowProcess())
+
+    result = workbench_controller.forward_lifecycle_command_to_electron(
+        "close_workbench",
+        timeout_seconds=2,
+    )
+
+    assert result["ok"] is True
+    assert result.get("assumedDelivered") is True
+
+
+def test_forward_lifecycle_command_surfaces_nonzero_exit(monkeypatch):
+    class FailedProcess:
+        pid = 5
+
+        def wait(self, timeout=None):
+            return 3
+
+    import core.launcher.desktop_shell as desktop_shell
+
+    monkeypatch.setattr(
+        desktop_shell,
+        "resolve_desktop_shell_launch",
+        lambda project_root, *, then_lifecycle="": {"args": ["C:/fake/electron.exe"], "cwd": str(project_root)},
+    )
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", lambda args, **kwargs: FailedProcess())
+
+    result = workbench_controller.forward_lifecycle_command_to_electron("toggle_workbench")
+
+    assert result["ok"] is False
+    assert result["exitCode"] == 3
+    assert "rejected" in result["reason"]

@@ -542,22 +542,90 @@ def cancel_lifecycle_command(
                 operation=normalized_operation,
                 message="Lifecycle command did not match the requested operation.",
             )
+        if command_type not in ACTIVE_LIFECYCLE_INTERRUPT_TYPES:
+            _append_queue_event(
+                "command_queue.lifecycle_command_cancel_active_skipped",
+                {
+                    "commandId": normalized_id,
+                    "type": command_type,
+                    "operation": normalized_operation,
+                    "requestedBy": str(requested_by or "unknown"),
+                    "queuePath": processing_path.name,
+                },
+            )
+            return _lifecycle_cancel_response(
+                cancelled=False,
+                status="already_active",
+                command_id=normalized_id,
+                operation=normalized_operation,
+                message="Lifecycle command is already running and cannot be cancelled safely.",
+            )
+        state = load_state()
+        state_version = int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0
+        interrupt = {
+            "interruptedCommandId": normalized_id,
+            "interruptedType": command_type,
+            "closeCommandId": "",
+            "closeCommandType": "",
+            "cancelRequested": True,
+            "operation": normalized_operation,
+            "requestedBy": str(requested_by or "unknown").strip() or "unknown",
+            "requestedAt": datetime.now(timezone.utc).isoformat(),
+            "stateVersion": state_version,
+        }
+        try:
+            _atomic_write_json(INTERRUPTS_DIR / f"{normalized_id}.json", interrupt)
+        except OSError as exc:
+            _append_queue_event(
+                "command_queue.lifecycle_command_interrupt_failed",
+                {
+                    "commandId": normalized_id,
+                    "type": command_type,
+                    "operation": normalized_operation,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            return _lifecycle_cancel_response(
+                cancelled=False,
+                status="interrupt_request_failed",
+                command_id=normalized_id,
+                operation=normalized_operation,
+                message="Lifecycle command is active, and its interrupt could not be written.",
+            )
         _append_queue_event(
-            "command_queue.lifecycle_command_cancel_active_skipped",
+            "command_queue.lifecycle_command_interrupt_requested",
             {
                 "commandId": normalized_id,
                 "type": command_type,
                 "operation": normalized_operation,
                 "requestedBy": str(requested_by or "unknown"),
                 "queuePath": processing_path.name,
+                "stateVersion": state_version,
             },
         )
         return _lifecycle_cancel_response(
             cancelled=False,
-            status="already_active",
+            status="interrupt_requested",
             command_id=normalized_id,
             operation=normalized_operation,
-            message="Lifecycle command is already running and cannot be cancelled safely.",
+            message="Lifecycle command is active; an interrupt was requested at the next safe point.",
+            state_version=state_version,
+        )
+
+    completed_payload = _load_command_file(RESULTS_DIR / f"{normalized_id}.json")
+    if isinstance(completed_payload, dict) and completed_payload.get("completed") is True:
+        result_ok = bool(completed_payload.get("ok"))
+        error_type = str(completed_payload.get("errorType") or "")
+        detail = "completed successfully" if result_ok else (
+            f"already completed unsuccessfully (errorType={error_type})" if error_type else "already completed unsuccessfully"
+        )
+        return _lifecycle_cancel_response(
+            cancelled=False,
+            status="already_completed",
+            command_id=normalized_id,
+            operation=normalized_operation,
+            message=f"Lifecycle command was {detail}; nothing left to cancel.",
         )
 
     return _lifecycle_cancel_response(
