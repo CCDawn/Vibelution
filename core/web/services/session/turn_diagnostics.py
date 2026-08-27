@@ -892,6 +892,12 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
         with s._RUNNING_SESSIONS_LOCK:
             running_session_ids = set(s._RUNNING_SESSION_IDS)
             active_turn_ids = dict(s._SESSION_ACTIVE_TURN_IDS)
+        try:
+            # Queued turns are held by the scheduler, not the running set; a
+            # queued snapshot still owned by the queue must not be settled.
+            queued_scheduler_turns = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
+        except Exception:
+            queued_scheduler_turns = set()
 
         for payload in candidates:
             run_id = str(payload.get("runId") or payload.get("roundId") or payload.get("id") or "").strip()
@@ -899,15 +905,15 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
             if not run_id or run_id in seen_run_ids:
                 continue
             seen_run_ids.add(run_id)
-            worker_owns = (
+            worker_owns_turn = (
                 bool(session_id)
                 and session_id in running_session_ids
                 and str(active_turn_ids.get(session_id) or "").strip() == run_id
-            )
+            ) or (bool(session_id) and (session_id, run_id) in queued_scheduler_turns)
             reason = _chat_turn_work_run_hang_reason(
                 payload,
                 now=clock,
-                worker_owns_turn=worker_owns,
+                worker_owns_turn=worker_owns_turn,
             )
             if not reason:
                 continue
@@ -1137,11 +1143,22 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         session_ids = sorted(s._RUNNING_SESSION_IDS)
         active_turn_ids = dict(s._SESSION_ACTIVE_TURN_IDS)
         active_leases = {key: list(value) for key, value in s._SESSION_ACTIVE_TURN_LEASES.items()}
+    try:
+        queued_scheduler_turns = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
+    except Exception:
+        queued_scheduler_turns = set()
     active_statuses = s._active_session_work_run_statuses(session_ids)
     items: list[dict[str, Any]] = []
     for session_id in session_ids:
-        status = active_statuses.get(session_id) or "running"
         run_id = active_turn_ids.get(session_id) or f"chat-turn-{session_id}"
+        # Submit marks the session running before the scheduler admits it; a
+        # turn still held in a scheduler queue must stay visibly "queued"
+        # instead of being projected as running.
+        status = (
+            "queued"
+            if (session_id, run_id) in queued_scheduler_turns
+            else active_statuses.get(session_id) or "running"
+        )
         item: dict[str, Any] = {
             "runId": run_id,
             "runKind": "chat_turn",
@@ -1158,6 +1175,46 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         if summary:
             item["summary"] = summary
         last_tool_error = snapshot.get("lastToolError")
+        if isinstance(last_tool_error, dict) and last_tool_error:
+            item["lastToolError"] = last_tool_error
+        items.append(item)
+
+    # Turns may also sit in persisted work-run snapshots without holding a
+    # running-set entry (their submit-time `running` marker was demoted by
+    # `_mark_session_turn_queued`); project those as queued too so runtime
+    # summary consumers never lose a waiting turn.
+    covered_session_ids = {str(item.get("sessionId") or "") for item in items}
+    seen_run_ids = {str(item.get("runId") or "") for item in items}
+    try:
+        recent_snapshots = s._WORK_RUN_STORE.list_snapshots("chat_turn", limit=40)
+    except Exception:
+        recent_snapshots = []
+    for queued_snapshot in recent_snapshots:
+        if not isinstance(queued_snapshot, dict):
+            continue
+        if str(queued_snapshot.get("status") or queued_snapshot.get("currentPhase") or "").strip().lower() != "queued":
+            continue
+        if str(queued_snapshot.get("finishedAt") or queued_snapshot.get("endedAt") or "").strip():
+            continue
+        run_id = str(queued_snapshot.get("runId") or "").strip()
+        session_id = str(queued_snapshot.get("sessionId") or "").strip()
+        if not run_id or not session_id or run_id in seen_run_ids or session_id in covered_session_ids:
+            continue
+        item = {
+            "runId": run_id,
+            "runKind": "chat_turn",
+            "sessionId": session_id,
+            "status": "queued",
+            "currentPhase": "queued",
+            "leases": list(queued_snapshot.get("leases") or ["readonly_chat"]),
+        }
+        user_message = str(queued_snapshot.get("userMessage") or "").strip()
+        summary = str(queued_snapshot.get("summary") or "").strip()
+        if user_message:
+            item["userMessage"] = user_message
+        if summary:
+            item["summary"] = summary
+        last_tool_error = queued_snapshot.get("lastToolError")
         if isinstance(last_tool_error, dict) and last_tool_error:
             item["lastToolError"] = last_tool_error
         items.append(item)

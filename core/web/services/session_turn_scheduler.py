@@ -359,6 +359,24 @@ class SessionTurnScheduler:
             self._queues.clear()
             self._condition.notify_all()
 
+    def queued_session_turn_ids(self) -> set[tuple[str, str]]:
+        """Snapshot the (session_id, turn_id) pairs still waiting in the queues.
+
+        Lets stale-work-run reconciliation tell a legitimately queued turn
+        apart from a dead worker's leftover snapshot: queued turns are held
+        here, not by the running set.
+        """
+
+        with self._condition:
+            return {
+                (
+                    str(queued_context.get("session_id") or "").strip(),
+                    str(queued_context.get("turn_id") or "").strip(),
+                )
+                for queue_bucket in self._queues.values()
+                for queued_context in queue_bucket
+            }
+
     @staticmethod
     def is_external(context: dict[str, Any]) -> bool:
         return bool(context.get("_scheduler_external"))

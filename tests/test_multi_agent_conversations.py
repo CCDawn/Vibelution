@@ -283,7 +283,28 @@ def test_select_chat_session_lightweight_skips_full_detail_projection(tmp_path, 
 
 def test_legacy_session_list_is_read_only_until_detail_repairs_agent_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    _seed_chat_sessions(tmp_path)
+    # Seed summary rows without legacy message blobs: any "messages" payload is
+    # materialized into the conversation ledger at save time, which creates the
+    # session workspace as a durable side effect before list/detail ever runs.
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-alpha",
+            "conversations": [
+                {
+                    "conversation_id": "session-alpha",
+                    "title": "Alpha Agent",
+                    "updated_at": "2026-05-26T10:00:00",
+                },
+                {
+                    "conversation_id": "session-beta",
+                    "title": "Beta Agent",
+                    "updated_at": "2026-05-26T10:01:00",
+                },
+            ],
+        },
+    )
 
     sessions = session_service.list_sessions()
 
