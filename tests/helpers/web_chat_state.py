@@ -108,6 +108,50 @@ def _reset_seeded_session_runtime(conversation_id: str) -> None:
         session_service._SESSION_STREAM_THROTTLED_COUNTS.pop(conversation_id, None)
 
 
+def _resolve_seeded_assistant_tool_calls(turn_id, message):
+    """Normalize seeded assistant tool calls into a resolvable provider chain.
+
+    Seeded calls must carry explicit call ids plus matching ledger tool-result
+    events. Bare id-less calls replay as historical unresolved chains and
+    fail-closed at the conversation-seed invariant before any later turn can
+    run. Returns ``(tool_calls, seeded_tool_results)``.
+    """
+    tool_calls = [
+        dict(call)
+        for call in (message.get("toolCalls") or message.get("tool_calls") or [])
+        if isinstance(call, dict)
+    ]
+    seeded_tool_results = []
+    for index, call in enumerate(tool_calls, start=1):
+        function = call.get("function") if isinstance(call.get("function"), dict) else {}
+        name = str(
+            call.get("name")
+            or call.get("toolName")
+            or call.get("tool_name")
+            or function.get("name")
+            or ""
+        ).strip()
+        if not str(
+            call.get("id")
+            or call.get("toolCallId")
+            or call.get("tool_call_id")
+            or ""
+        ).strip():
+            call["id"] = f"{turn_id}-tool-{index:02d}"
+        result_content = str(
+            call.get("result")
+            or call.get("resultPreview")
+            or call.get("summary")
+            or ("ok" if name else "")
+        )
+        if not str(call.get("status") or "").strip():
+            call["status"] = "done"
+        call["result"] = result_content
+        if name:
+            seeded_tool_results.append((str(call.get("id") or "").strip(), name, result_content))
+    return tool_calls, seeded_tool_results
+
+
 def _append_seed_message_to_ledger(project_root: Path, conversation_id: str, index: int, message: dict) -> None:
     if not conversation_id or not isinstance(message, dict):
         return
@@ -131,6 +175,7 @@ def _append_seed_message_to_ledger(project_root: Path, conversation_id: str, ind
         return
     if role == "assistant":
         mental_snapshot = message.get("mentalSnapshot") or message.get("mental_snapshot")
+        tool_calls, seeded_tool_results = _resolve_seeded_assistant_tool_calls(turn_id, message)
         append_conversation_event(
             project_root,
             conversation_id,
@@ -140,13 +185,24 @@ def _append_seed_message_to_ledger(project_root: Path, conversation_id: str, ind
             payload={
                 "content": message.get("content") or "",
                 "thought": message.get("thought") or "",
-                "toolCalls": list(message.get("toolCalls") or message.get("tool_calls") or []),
+                "toolCalls": tool_calls,
                 "feedbackEvents": list(message.get("feedbackEvents") or message.get("feedback_events") or []),
                 "mentalSnapshot": dict(mental_snapshot) if isinstance(mental_snapshot, dict) else None,
                 "metadata": dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {},
             },
             timestamp=timestamp,
         )
+        for tool_call_id, name, result_content in seeded_tool_results:
+            append_conversation_event(
+                project_root,
+                conversation_id,
+                turn_id,
+                EVENT_TOOL_RESULT,
+                status="done",
+                payload={"toolCall": {"id": tool_call_id, "name": name, "result": result_content}},
+                timestamp=timestamp,
+                tool_call_id=tool_call_id,
+            )
         return
     if role == "tool":
         metadata = dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {}

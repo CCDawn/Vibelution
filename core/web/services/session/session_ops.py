@@ -390,6 +390,17 @@ def _codex_transcript_cell_from_operation_source(
     title = str(source.get("name") or source.get("label") or "").strip()
     summary = s._codex_operation_summary(source, failed=status == "failed")
     cell_kind = s._codex_cell_kind(kind, status)
+    # A reasoning feedback envelope without any text carries nothing to render.
+    # Derived titles ("Reasoning") must not leak into item text as placeholder
+    # content; every committed reasoning segment keeps its own text.
+    if (
+        cell_kind == "reasoning_summary"
+        and not str(source.get("text") or "").strip()
+        and not str(source.get("summary") or "").strip()
+        and not str(source.get("resultPreview") or "").strip()
+        and not str(source.get("content") or "").strip()
+    ):
+        return None, s._empty_codex_tool_lifecycle_projection(), []
     cell = s._compact_codex_record(
         {
             "id": f"{message_id}-{operation_id}",

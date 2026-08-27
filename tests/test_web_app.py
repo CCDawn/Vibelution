@@ -50,6 +50,7 @@ from tests.helpers.web_chat_state import (
     _bind_seeded_session_agent,
     _bind_seeded_submittable_agent,
     _read_next_state_signals,
+    _resolve_seeded_assistant_tool_calls,
     _seed_chat_state,
 )
 
@@ -158,6 +159,10 @@ def _append_test_ledger_messages(project_root: Path, session_id: str, messages: 
             continue
         if role == "assistant":
             mental_snapshot = message.get("mentalSnapshot") or message.get("mental_snapshot")
+            # Seeded calls must form a resolvable provider chain (explicit ids
+            # plus matching tool-result events) or the conversation-seed
+            # invariant fail-closes every later turn in this history.
+            tool_calls, seeded_tool_results = _resolve_seeded_assistant_tool_calls(turn_id, message)
             append_conversation_event(
                 project_root,
                 session_id,
@@ -167,13 +172,24 @@ def _append_test_ledger_messages(project_root: Path, session_id: str, messages: 
                 payload={
                     "content": message.get("content") or "",
                     "thought": message.get("thought") or "",
-                    "toolCalls": list(message.get("toolCalls") or message.get("tool_calls") or []),
+                    "toolCalls": tool_calls,
                     "feedbackEvents": list(message.get("feedbackEvents") or message.get("feedback_events") or []),
                     "mentalSnapshot": dict(mental_snapshot) if isinstance(mental_snapshot, dict) else None,
                     "metadata": metadata,
                 },
                 timestamp=timestamp,
             )
+            for tool_call_id, name, result_content in seeded_tool_results:
+                append_conversation_event(
+                    project_root,
+                    session_id,
+                    turn_id,
+                    EVENT_TOOL_RESULT,
+                    status="done",
+                    payload={"toolCall": {"id": tool_call_id, "name": name, "result": result_content}},
+                    timestamp=timestamp,
+                    tool_call_id=tool_call_id,
+                )
             continue
         if role == "tool":
             tool_call_id = str(
@@ -4335,12 +4351,13 @@ def test_web_session_preflight_stop_reports_history_assembled_not_seeded(tmp_pat
         def run_single_turn(self, initial_prompt=None):
             pytest.fail("preflight stop must happen before the public runner")
 
-    stop_checks = 0
-
+    # The turn must honor a stop request as early as the prepare stage
+    # (9bbc671d0), so drive the stub off the history_assembled event instead
+    # of a call counter: before assembly no stop is pending, after it arrives.
     def stop_after_history_assembly(_turn_control):
-        nonlocal stop_checks
-        stop_checks += 1
-        return "test preflight stop" if stop_checks >= 2 else ""
+        if any(event.get("phase") == "history_assembled" for event in lifecycle_events):
+            return "test preflight stop"
+        return ""
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda: StopBeforeRunnerAgent())
     monkeypatch.setattr(session_service, "_get_turn_control_stop_reason", stop_after_history_assembly)
@@ -6680,6 +6697,7 @@ def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path,
     try:
         result = session_service._run_session_continuation_loop(
             object(),
+            context={},
             session_id="session-server-thinking",
             turn_control=turn_control,
             initial_prompt="你好",
@@ -6738,6 +6756,7 @@ def test_session_same_turn_continuation_passes_durable_history_only_once(tmp_pat
     try:
         result = session_service._run_session_continuation_loop(
             object(),
+            context={},
             session_id="session-history-once",
             turn_control=turn_control,
             initial_prompt="继续",
@@ -6932,6 +6951,7 @@ def test_source_collection_stage_task_ack_only_result_does_not_finish_before_req
     try:
         result = session_service._run_session_continuation_loop(
             object(),
+            context={},
             session_id="session-stage-ack-only",
             turn_control=turn_control,
             initial_prompt="资料搜集阶段任务",
@@ -6989,6 +7009,7 @@ def test_source_collection_stage_task_waits_for_all_required_tools_across_contin
     try:
         result = session_service._run_session_continuation_loop(
             object(),
+            context={},
             session_id="session-stage-partial-tools",
             turn_control=turn_control,
             initial_prompt="继续资料提炼阶段任务",
@@ -7030,6 +7051,7 @@ def test_session_continuation_auto_continue_pauses_at_bounded_limit(tmp_path, mo
     try:
         result = session_service._run_session_continuation_loop(
             object(),
+            context={},
             session_id="session-auto-limit",
             turn_control=turn_control,
             initial_prompt="继续阶段任务",

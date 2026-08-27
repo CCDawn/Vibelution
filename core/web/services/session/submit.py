@@ -911,9 +911,12 @@ def submit_session_message(
             user_message=message,
             summary=f"{type(exc).__name__}: {exc}",
         )
+        # Persist while this turn is still current: both clearing the turn
+        # control and flagging the session not-running drop the active-turn
+        # identity the runtime-state commit gate requires.
+        s._persist_session_turn_failure(conversation_id, context, exc)
         s._set_session_running(conversation_id, False)
         s._clear_session_turn_control(conversation_id)
-        s._persist_session_turn_failure(conversation_id, context, exc)
         s._publish_session_detail_snapshot(conversation_id)
         raise
     # Defer kernel audit after schedule so accept latency is not gated by Kernel I/O.
@@ -1252,9 +1255,12 @@ def edit_and_resubmit_session_message(
             user_message=message,
             summary=f"{type(exc).__name__}: {exc}",
         )
+        # Persist while this turn is still current: both clearing the turn
+        # control and flagging the session not-running drop the active-turn
+        # identity the runtime-state commit gate requires.
+        s._persist_session_turn_failure(conversation_id, context, exc)
         s._set_session_running(conversation_id, False)
         s._clear_session_turn_control(conversation_id)
-        s._persist_session_turn_failure(conversation_id, context, exc)
         s._publish_session_detail_snapshot(conversation_id)
         raise
     return s.get_session_detail(conversation_id) or {}
