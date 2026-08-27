@@ -20,9 +20,11 @@ from core.web.services.team_workflow.experiment_kernel import (
     _select_experiment_stage_round,
 )
 from core.web.services.team_workflow.research_project_agent_tasks import (
+    SESSION_RECONCILE_MAX_UNREADABLE_FAILURES,
     ResearchProjectAgentTaskError,
     get_research_project_agent_task_context,
     get_research_project_agent_task_status,
+    reconcile_research_project_agent_task_statuses,
     research_project_iteration_readiness,
     start_research_project_agent_task,
     update_research_project_agent_task_status,
@@ -761,6 +763,43 @@ def test_experiment_design_task_materializes_candidate_graph_hypotheses_once(
     assert all(item["sourceRefs"] and item["evidenceRefs"] for item in projected)
 
 
+def test_task_status_read_is_side_effect_free(tmp_path, monkeypatch):
+    """GET 状态接口是纯读：session 已终态也不得借查询写回 store。"""
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-readonly-1",
+        },
+    )
+    root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        project["projectId"],
+    )
+    store_path = root / "research_project_agent_tasks.json"
+    before = store_path.read_bytes()
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "status": "ready",
+            "currentPhase": "ready",
+            "activeTask": None,
+        },
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert status["tasks"][0]["status"] == "running"
+    assert store_path.read_bytes() == before
+
+
 def test_task_status_reconciles_ready_session_with_created_experiment_plan(
     tmp_path, monkeypatch
 ):
@@ -774,6 +813,7 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
             "idempotencyKey": "design-reconcile-1",
         },
     )
+    task_id = started["task"]["taskId"]
     root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
         team["teamId"],
         project["projectId"],
@@ -790,6 +830,7 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
                     "planId": "plan-reconciled",
                     "researchProjectId": project["projectId"],
                     "createdByAgent": agents["experiment_planner"]["agentId"],
+                    "createdFromTaskId": task_id,
                     "createdAt": "9999-07-29T00:01:00+00:00",
                     "updatedAt": "9999-07-29T00:01:00+00:00",
                     "status": "draft",
@@ -807,6 +848,56 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
         },
     )
 
+    assert get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )["tasks"][0]["status"] == "running"
+
+    summary = reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert summary["reconciled"] == 1
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert status["activeTasks"] == []
+    assert status["tasks"][0]["taskId"] == task_id
+    assert status["tasks"][0]["status"] == "completed"
+    assert status["tasks"][0]["resultRefs"] == ["plan-reconciled"]
+
+
+def test_task_status_reconciles_needs_continue_session_as_stopped(
+    tmp_path, monkeypatch
+):
+    """SCI-003 回归：needs_continue 是暂停态，不能让任务永远停留在 running。"""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-needs-continue-1",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "status": "needs_continue",
+            "currentPhase": "needs_continue",
+            "activeTask": None,
+        },
+    )
+
+    reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
     status = get_research_project_agent_task_status(
         team["teamId"],
         project["projectId"],
@@ -814,13 +905,14 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
 
     assert status["activeTasks"] == []
     assert status["tasks"][0]["taskId"] == started["task"]["taskId"]
-    assert status["tasks"][0]["status"] == "completed"
-    assert status["tasks"][0]["resultRefs"] == ["plan-reconciled"]
+    assert status["tasks"][0]["status"] == "stopped"
+    assert status["tasks"][0]["failureCode"] == "session_needs_continue"
 
 
-def test_task_status_heals_incomplete_result_from_same_agent_alias_plan(
+def test_reconcile_never_guesses_plan_ownership_without_task_link(
     tmp_path, monkeypatch
 ):
+    """无 createdFromTaskId 的 plan 不能靠 actor/时间窗启发式归属成本任务证据。"""
     team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
     _accepted_submitter(monkeypatch)
     started = start_research_project_agent_task(
@@ -828,7 +920,7 @@ def test_task_status_heals_incomplete_result_from_same_agent_alias_plan(
         project["projectId"],
         {
             "taskKind": "experiment_design",
-            "idempotencyKey": "design-late-alias-reconcile-1",
+            "idempotencyKey": "design-unlinked-plan-1",
         },
     )
     update_research_project_agent_task_status(
@@ -849,10 +941,10 @@ def test_task_status_heals_incomplete_result_from_same_agent_alias_plan(
             "schemaVersion": 1,
             "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
             "teamId": team["teamId"],
-            "activePlanId": "plan-late-alias",
+            "activePlanId": "plan-unlinked",
             "plans": [
                 {
-                    "planId": "plan-late-alias",
+                    "planId": "plan-unlinked",
                     "researchProjectId": project["projectId"],
                     "createdByAgent": (
                         f"{planner['agentCode']} {planner['displayName']}"
@@ -874,15 +966,68 @@ def test_task_status_heals_incomplete_result_from_same_agent_alias_plan(
         },
     )
 
+    reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
     status = get_research_project_agent_task_status(
         team["teamId"],
         project["projectId"],
     )
 
+    assert status["tasks"][0]["status"] == "incomplete"
+    assert status["tasks"][0]["failureCode"] == "plan_task_link_missing"
+    assert status["tasks"][0]["resultRefs"] == []
+
+
+def test_reconcile_fails_task_after_repeated_unreadable_sessions(
+    tmp_path, monkeypatch
+):
+    """session 持续不可读时任务必须进入明确失败态，而不是被无限静默跳过。"""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-unreadable-1",
+        },
+    )
+    task_id = started["task"]["taskId"]
+
+    def _raise_unreadable(_session_id: str, **_kwargs):
+        raise RuntimeError("session store unavailable")
+
+    monkeypatch.setattr(session_service, "get_session_detail", _raise_unreadable)
+
+    for expected_failures in range(1, SESSION_RECONCILE_MAX_UNREADABLE_FAILURES):
+        reconcile_research_project_agent_task_statuses(
+            team["teamId"],
+            project["projectId"],
+        )
+        status = get_research_project_agent_task_status(
+            team["teamId"],
+            project["projectId"],
+        )
+        assert status["tasks"][0]["status"] == "running"
+        assert status["tasks"][0]["sessionReconcileFailures"] == expected_failures
+
+    summary = reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert summary["failedSessionUnreadable"] == [task_id]
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
     assert status["activeTasks"] == []
-    assert status["tasks"][0]["status"] == "completed"
-    assert status["tasks"][0]["failureCode"] == ""
-    assert status["tasks"][0]["resultRefs"] == ["plan-late-alias"]
+    assert status["tasks"][0]["status"] == "failed"
+    assert status["tasks"][0]["failureCode"] == "session_unreadable"
+    assert status["tasks"][0]["turn"]["status"] == "failed"
 
 
 def test_completed_task_projects_and_persists_terminal_turn_status(

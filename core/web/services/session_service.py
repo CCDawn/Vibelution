@@ -1129,7 +1129,7 @@ _WORK_RUN_STORE = WorkRunStore()
 _NO_VISIBLE_REPLY_ZH = "本轮没有产生可见回复。"
 _NO_VISIBLE_REPLY_EN = "This turn did not produce a visible reply."
 _PROVIDER_ERROR_PATTERN = re.compile(
-    r"(?:provider_protocol_error|server_error|litellm\.|badgatewayerror|openai(?:exception|error)|"
+    r"(?:provider_protocol_error|payload_protocol_error|server_error|litellm\.|badgatewayerror|openai(?:exception|error)|"
     r"upstream_error|upstream request failed|api(?:connection|status|timeout|rate)?error)",
     re.IGNORECASE,
 )

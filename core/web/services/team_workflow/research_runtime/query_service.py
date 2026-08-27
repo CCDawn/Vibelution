@@ -7,7 +7,7 @@ fails closed; legacy JSON stores are never consulted.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
@@ -151,6 +151,7 @@ class WorkflowQueryService:
             discussion_meetings,
             discussion_rooms,
             latest_seq,
+            execution_anchors,
         ) = bundle
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
@@ -184,6 +185,7 @@ class WorkflowQueryService:
                 discussion_projection=discussion_projection,
                 discussion_meetings=discussion_meetings,
                 discussion_rooms=discussion_rooms,
+                execution_anchors=tuple(execution_anchors),
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )
@@ -324,6 +326,7 @@ class WorkflowQueryService:
             human_tasks = [
                 _human_task_summary(row, attempt_by_id) for row in human_rows
             ]
+            execution_anchors = _latest_attempt_anchor_rows(repo, attempts)
             refs_by_handoff: dict[str, list[dict[str, Any]]] = {}
             for row in repo.list_handoff_artifact_refs_for_run(run_id):
                 refs_by_handoff.setdefault(str(row[0]), []).append(
@@ -372,12 +375,60 @@ class WorkflowQueryService:
                 discussion_meetings,
                 discussion_rooms,
                 latest_seq,
+                execution_anchors,
             )
 
         if hasattr(self._store, "read"):
             return self._store.read(load)
         # Narrow test doubles may raise WorkflowLedgerUnavailable directly.
         return load(self._store)  # type: ignore[arg-type]
+
+
+def _latest_attempt_anchor_rows(
+    repo: WorkflowLedgerRepository,
+    attempts: Sequence[Any],
+) -> list[dict[str, Any]]:
+    """Load the execution anchor of each node's latest attempt (read-only).
+
+    The snapshot's currentTask uses these to surface the live Agent task
+    identity during dispatch instead of only after the adapter commit.
+    """
+
+    latest_by_node: dict[str, Any] = {}
+    for attempt in attempts:
+        prior = latest_by_node.get(attempt.node_id)
+        if prior is None or int(attempt.attempt) >= int(prior.attempt):
+            latest_by_node[attempt.node_id] = attempt
+    anchors: list[dict[str, Any]] = []
+    for attempt in latest_by_node.values():
+        try:
+            row = repo.get_anchor_by_node_run(attempt.node_run_id)
+        except Exception:  # noqa: BLE001 - anchor reads must not break snapshots
+            row = None
+        projection = _anchor_projection(row)
+        if projection is not None:
+            anchors.append(projection)
+    return anchors
+
+
+def _anchor_projection(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        session_attempt = row[6]
+        return {
+            "anchorId": str(row[0] or ""),
+            "nodeRunId": str(row[1] or ""),
+            "agentId": str(row[3] or ""),
+            "roleKey": str(row[4] or ""),
+            "sessionId": str(row[5] or ""),
+            "sessionAttempt": None if session_attempt is None else int(session_attempt),
+            "taskId": str(row[7] or ""),
+            "turnId": str(row[8] or ""),
+            "status": str(row[12] or ""),
+        }
+    except (IndexError, TypeError, ValueError):
+        return None
 
 
 def _require_team_id(team_id: str) -> str:

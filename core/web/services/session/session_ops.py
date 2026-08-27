@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import re
 import time
+from datetime import datetime
 from typing import Any, Mapping
 
 # Local default for signature evaluation (facade remains SSOT via s.SESSION_LLM_SLOT_DIALOGUE).
@@ -902,6 +904,114 @@ def _repair_child_root_agent_direct_session_bindings(
     return changed
 
 
+_STALE_RUNNING_REPAIR_GRACE_SECONDS_ENV = "VIBELUTION_SESSION_STALE_RUNNING_REPAIR_GRACE_SECONDS"
+_STALE_RUNNING_REPAIR_GRACE_SECONDS_DEFAULT = 120.0
+_STALE_RUNNING_OPEN_WORK_RUN_STATUSES = frozenset({"queued", "running", "stopping", "paused"})
+_STALE_RUNNING_SKIP_SIGNAL_TTL_SECONDS = 600.0
+_STALE_RUNNING_SKIP_SIGNAL_MAX_ENTRIES = 256
+# session_id -> (reason, monotonic) dedupe so skip signals stay visible without spamming.
+_STALE_RUNNING_REPAIR_SKIP_SIGNALS: dict[str, tuple[str, float]] = {}
+
+
+def _stale_running_repair_grace_seconds() -> float:
+    """Fail-safe window before a non-owner may judge an open turn dead.
+
+    The chat_turn work-run store carries no owner process identity, so snapshot
+    recency is the only cross-process signal. Setting the env var to ``0``
+    explicitly disables the freshness gate (single-process opt-out).
+    """
+
+    raw = str(os.environ.get(_STALE_RUNNING_REPAIR_GRACE_SECONDS_ENV) or "").strip()
+    if not raw:
+        return _STALE_RUNNING_REPAIR_GRACE_SECONDS_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        return _STALE_RUNNING_REPAIR_GRACE_SECONDS_DEFAULT
+    return value if value >= 0.0 else _STALE_RUNNING_REPAIR_GRACE_SECONDS_DEFAULT
+
+
+def _stale_running_work_run_age_seconds(payload: dict[str, Any], *, now_ts: float) -> float | None:
+    for key in ("updatedAt", "updated_at", "startedAt", "started_at"):
+        text = str(payload.get(key) or "").strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            continue
+        # Naive timestamps are written by _now_timestamp() in local time; .timestamp()
+        # interprets them back as local. Aware timestamps carry their own offset.
+        return max(0.0, now_ts - parsed.timestamp())
+    return None
+
+
+def _stale_running_live_owner_reason(session_id: str) -> str:
+    """Return a non-empty reason when a credible live owner still holds the turn.
+
+    The caller has already checked the in-process running set. Two remaining
+    owner sources are consulted before any repair write-back:
+
+    - The turn scheduler queue: queued turns are held there, not in the
+      running set, so a persisted ``queued`` row may still be pending work.
+    - The persisted chat_turn work-run snapshot: the only cross-process
+      evidence available. An open snapshot updated within the grace window may
+      belong to another backend process, so repair stays hands-off (fail-safe:
+      prefer not to touch over misjudging a live foreign turn).
+    """
+
+    s = _service()
+    try:
+        queued_pairs = s._SESSION_TURN_SCHEDULER.queued_session_turn_ids()
+    except Exception:
+        queued_pairs = set()
+    for queued_session_id, _queued_turn_id in queued_pairs or ():
+        if str(queued_session_id or "").strip() == session_id:
+            return "scheduler_queued_turn"
+
+    try:
+        active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
+    except Exception:
+        active = None
+    if not isinstance(active, dict):
+        return ""
+    active_session_id = str(active.get("sessionId") or "").strip()
+    if active_session_id and active_session_id != session_id:
+        return ""
+    status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
+    finished_at = str(active.get("finishedAt") or active.get("endedAt") or "").strip()
+    if status not in _STALE_RUNNING_OPEN_WORK_RUN_STATUSES or finished_at:
+        return ""
+    grace = _stale_running_repair_grace_seconds()
+    if grace <= 0.0:
+        return ""
+    age = _stale_running_work_run_age_seconds(active, now_ts=time.time())
+    if age is None or age < grace:
+        return "work_run_snapshot_recently_active"
+    return ""
+
+
+def _signal_skipped_stale_running_repair(
+    session_id: str,
+    *,
+    reason: str,
+    persisted_status: str,
+) -> None:
+    s = _service()
+    now = time.monotonic()
+    previous = _STALE_RUNNING_REPAIR_SKIP_SIGNALS.get(session_id)
+    if previous and previous[0] == reason and (now - previous[1]) < _STALE_RUNNING_SKIP_SIGNAL_TTL_SECONDS:
+        return
+    if len(_STALE_RUNNING_REPAIR_SKIP_SIGNALS) >= _STALE_RUNNING_SKIP_SIGNAL_MAX_ENTRIES:
+        _STALE_RUNNING_REPAIR_SKIP_SIGNALS.clear()
+    _STALE_RUNNING_REPAIR_SKIP_SIGNALS[session_id] = (reason, now)
+    s._debug_logger.warning(
+        f"Skipped stale running repair for session {session_id}: live owner evidence present. "
+        f"reason={reason} persistedStatus={persisted_status}",
+        tag="STALE_RUNNING_REPAIR",
+    )
+
+
 def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
     s = _service()
     conversation_id = str(conversation.get("conversation_id") or "").strip()
@@ -910,12 +1020,43 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
         return False
     if conversation_id and s._is_session_running(conversation_id):
         return False
+    owner_reason = _stale_running_live_owner_reason(conversation_id)
+    if owner_reason:
+        _signal_skipped_stale_running_repair(
+            conversation_id,
+            reason=owner_reason,
+            persisted_status=persisted_status,
+        )
+        return False
     recovered_at = s._now_timestamp()
     summary = s.text_for(
         s.get_web_language(),
         zh="上一轮运行已被中断，当前会话已恢复为可继续状态。",
         en="The previous turn was interrupted. This session is ready to continue.",
     )
+    try:
+        # Audit the repair decision before any write-back: who judged, on what
+        # evidence, and what will change.
+        s.record_runtime_scene_event(
+            "conversation",
+            "turn_recovery",
+            "conversation.stale_running_repaired",
+            level="warning",
+            outcome="recovered",
+            message="Stale running conversation judged ownerless and repaired to ready.",
+            fields={
+                "sessionId": conversation_id,
+                "previousStatus": persisted_status,
+                "newStatus": "ready",
+                "inProcessRunning": False,
+                "schedulerQueued": False,
+                "graceSeconds": _stale_running_repair_grace_seconds(),
+                "pid": os.getpid(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
     conversation["runtime_notices"] = s._append_session_runtime_notice(
         conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
         {

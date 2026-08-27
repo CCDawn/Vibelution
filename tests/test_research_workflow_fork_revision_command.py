@@ -358,3 +358,89 @@ def test_human_revise_decision_forks_child_run(tmp_path: Path) -> None:
         assert row is not None and row[6] == "revised"
     finally:
         harness.close()
+
+
+def _corrupt_parent_input_snapshot(harness: CommandHarness, raw: str) -> None:
+    def mutate(uow):
+        uow.repository.execute(
+            "UPDATE workflow_runs SET input_snapshot_json = ? "
+            "WHERE run_id = 'run-test'",
+            (raw,),
+        )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def test_fork_revision_blocks_on_scalar_parent_input_snapshot(
+    tmp_path: Path,
+) -> None:
+    """父 run snapshot 是合法 JSON 但非对象时 fork 必须大声失败。
+
+    库层 CHECK 只保证 json_valid，list/标量仍能到达 fork 路径；JSON 解析
+    失败分支由同一防线覆盖（历史库可能没有 CHECK）。
+    """
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        harness.service.submit(harness.request(idempotency_key="ui:key-1"))
+        _corrupt_parent_input_snapshot(harness, '"just-a-string"')
+
+        with pytest.raises(WorkflowCommandError, match="run-test"):
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.FORK_REVISION,
+                    node_id="hypothesis_design",
+                    expected_run_version=2,
+                    idempotency_key="ui:fork-corrupt-1",
+                    payload={
+                        "fromNodeId": "hypothesis_design",
+                        "reason": "revise protocol after failed evaluation",
+                        "checkpointId": "ckpt-parent-1",
+                    },
+                )
+            )
+
+        child = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT run_id FROM workflow_runs WHERE parent_run_id = 'run-test'"
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert child == []
+    finally:
+        harness.close()
+
+
+def test_fork_revision_blocks_on_non_object_parent_input_snapshot(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        harness.service.submit(harness.request(idempotency_key="ui:key-1"))
+        _corrupt_parent_input_snapshot(harness, "[1, 2, 3]")
+
+        with pytest.raises(WorkflowCommandError, match="run-test"):
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.FORK_REVISION,
+                    node_id="hypothesis_design",
+                    expected_run_version=2,
+                    idempotency_key="ui:fork-corrupt-2",
+                    payload={
+                        "fromNodeId": "hypothesis_design",
+                        "reason": "revise protocol after failed evaluation",
+                        "checkpointId": "ckpt-parent-1",
+                    },
+                )
+            )
+
+        child = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT run_id FROM workflow_runs WHERE parent_run_id = 'run-test'"
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert child == []
+    finally:
+        harness.close()

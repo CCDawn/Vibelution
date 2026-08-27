@@ -118,6 +118,9 @@ class WorkflowProblem(StrictWireModel):
     sourceKind: str = Field(..., min_length=1)
     sourceId: str | None
     detectedAt: str = Field(..., min_length=1)
+    # Heartbeat-stale problems only: the last observed durable activity that
+    # the staleness verdict was computed from.  Absent for every other code.
+    lastHeartbeatAt: str | None = None
 
 
 class WorkflowAttempt(StrictWireModel):

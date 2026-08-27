@@ -13,6 +13,11 @@ from typing import Any
 SCHEMA_VERSION = 2
 TASK_STORE_FILE_NAME = "research_project_agent_tasks.json"
 MAX_TASKS = 500
+# Consecutive explicit reconciles that may observe an unreadable session
+# before the task fails loudly as session_unreadable. Guards against zombie
+# tasks whose session store is gone: the failure is attributable instead of
+# an infinite silent skip.
+SESSION_RECONCILE_MAX_UNREADABLE_FAILURES = 3
 CANDIDATE_CONTEXT_STATEMENT_MAX_CHARS = 2_000
 CANDIDATE_CONTEXT_MECHANISM_MAX_CHARS = 2_000
 CANDIDATE_CONTEXT_MAX_PREDICTIONS = 8
@@ -314,6 +319,12 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         attempt = 0
     if isinstance(raw_attempt, bool) or attempt < 0:
         attempt = 0
+    try:
+        session_reconcile_failures = int(payload.get("sessionReconcileFailures"))
+    except (TypeError, ValueError):
+        session_reconcile_failures = 0
+    if session_reconcile_failures < 0:
+        session_reconcile_failures = 0
     result_refs = [
         item
         for item in (
@@ -394,6 +405,7 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         "turn": turn,
         "resultRefs": result_refs,
         "failureCode": _text(payload.get("failureCode"), limit=120),
+        "sessionReconcileFailures": session_reconcile_failures,
         "returnTo": _text(payload.get("returnTo"), limit=1000),
         "returnLabel": _text(payload.get("returnLabel"), limit=240),
         "createdAt": _text(payload.get("createdAt"), limit=120),
@@ -1648,7 +1660,13 @@ def get_research_project_agent_task_status(
     team_id: str,
     research_project_id: str,
 ) -> dict[str, Any]:
-    """Return a path/secret/prompt-free task projection for one project."""
+    """Return a path/secret/prompt-free task projection for one project.
+
+    Strictly read-only: this surface never reconciles tasks against session
+    truth and never writes the store. Repair runs through the explicit
+    ``reconcile_research_project_agent_task_statuses`` maintenance entry, so
+    polling a read API cannot amplify hidden writes.
+    """
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_project_id = s._normalize_required_id(
@@ -1656,47 +1674,6 @@ def get_research_project_agent_task_status(
         "Research project id is required.",
     )
     project = s.get_research_project(normalized_team_id, normalized_project_id)
-    with _TASK_LOCK:
-        store = _read_store(normalized_team_id, normalized_project_id)
-        reconcilable_tasks = [
-            dict(item)
-            for item in store["tasks"]
-            if _task_needs_session_reconciliation(item)
-        ]
-    reconciled: dict[str, dict[str, Any]] = {}
-    for task in reconcilable_tasks:
-        terminal = _reconcile_project_agent_task_from_session(
-            normalized_team_id,
-            normalized_project_id,
-            task,
-        )
-        if terminal is not None:
-            reconciled[task["taskId"]] = terminal
-    if reconciled:
-        with _TASK_LOCK:
-            store = _read_store(normalized_team_id, normalized_project_id)
-            changed = False
-            for task in store["tasks"]:
-                terminal = reconciled.get(task.get("taskId"))
-                if terminal is None or not _task_needs_session_reconciliation(task):
-                    continue
-                if (
-                    task.get("status") == terminal["status"]
-                    and list(task.get("resultRefs") or []) == terminal["resultRefs"]
-                    and _text(task.get("failureCode"), limit=120)
-                    == terminal["failureCode"]
-                ):
-                    continue
-                task["status"] = terminal["status"]
-                task["resultRefs"] = terminal["resultRefs"]
-                task["failureCode"] = terminal["failureCode"]
-                turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
-                turn["status"] = terminal["status"]
-                task["turn"] = turn
-                task["updatedAt"] = s.utc_now_iso()
-                changed = True
-            if changed:
-                _write_store(normalized_team_id, normalized_project_id, store)
     with _TASK_LOCK:
         store = _read_store(normalized_team_id, normalized_project_id)
         tasks = [_public_task(item) for item in store["tasks"]]
@@ -1724,21 +1701,171 @@ def get_research_project_agent_task_status(
 
 
 def _task_needs_session_reconciliation(task: dict[str, Any]) -> bool:
-    return task.get("status") in ACTIVE_STATUSES or (
-        task.get("status") == "incomplete"
-        and _text(task.get("failureCode"), limit=120) == "task_result_not_recorded"
+    if task.get("status") in ACTIVE_STATUSES:
+        return True
+    # Both incomplete codes mean "result not yet provably recorded": a later
+    # explicit writeback (plan stamped with createdFromTaskId, or a tool
+    # result ref) can still complete the task, so keep reconciling it.
+    return task.get("status") == "incomplete" and _text(
+        task.get("failureCode"), limit=120
+    ) in {"task_result_not_recorded", "plan_task_link_missing"}
+
+
+def reconcile_research_project_agent_task_statuses(
+    team_id: str,
+    research_project_id: str,
+) -> dict[str, Any]:
+    """Explicit maintenance entry: align active tasks with session truth.
+
+    Read surfaces never reconcile; callers own the write timing (turn
+    terminal hooks in ``agent_turn_completion``, reset guards, manual
+    maintenance). A session that stays unreadable across
+    ``SESSION_RECONCILE_MAX_UNREADABLE_FAILURES`` consecutive reconciles
+    fails the task loudly with ``failureCode=session_unreadable`` instead of
+    being silently skipped forever.
+    """
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
     )
+    s.get_research_project(normalized_team_id, normalized_project_id)
+    with _TASK_LOCK:
+        store = _read_store(normalized_team_id, normalized_project_id)
+        target_ids = [
+            _text(item.get("taskId"))
+            for item in store["tasks"]
+            if _task_needs_session_reconciliation(item)
+        ]
+    outcomes: list[dict[str, Any]] = []
+    changed = False
+    if target_ids:
+        with _TASK_LOCK:
+            store = _read_store(normalized_team_id, normalized_project_id)
+            for target_id in target_ids:
+                task = next(
+                    (
+                        item
+                        for item in store["tasks"]
+                        if item.get("taskId") == target_id
+                    ),
+                    None,
+                )
+                if task is None or not _task_needs_session_reconciliation(task):
+                    continue
+                verdict = _reconcile_project_agent_task_from_session(
+                    normalized_team_id,
+                    normalized_project_id,
+                    task,
+                )
+                if verdict["kind"] == "terminal":
+                    task["status"] = verdict["status"]
+                    task["resultRefs"] = verdict["resultRefs"]
+                    task["failureCode"] = verdict["failureCode"]
+                    task["sessionReconcileFailures"] = 0
+                    turn = (
+                        task.get("turn") if isinstance(task.get("turn"), dict) else {}
+                    )
+                    if turn:
+                        turn["status"] = verdict["status"]
+                        task["turn"] = turn
+                    task["updatedAt"] = s.utc_now_iso()
+                    changed = True
+                    outcomes.append(
+                        {
+                            "taskId": target_id,
+                            "action": "reconciled",
+                            "status": verdict["status"],
+                            "failureCode": verdict["failureCode"],
+                        }
+                    )
+                elif verdict["kind"] == "unreadable":
+                    failures = (
+                        int(task.get("sessionReconcileFailures") or 0) + 1
+                    )
+                    task["sessionReconcileFailures"] = failures
+                    changed = True
+                    if failures >= SESSION_RECONCILE_MAX_UNREADABLE_FAILURES:
+                        task["status"] = "failed"
+                        task["failureCode"] = "session_unreadable"
+                        turn = (
+                            task.get("turn")
+                            if isinstance(task.get("turn"), dict)
+                            else {}
+                        )
+                        if turn:
+                            turn["status"] = "failed"
+                            task["turn"] = turn
+                        task["updatedAt"] = s.utc_now_iso()
+                        outcomes.append(
+                            {
+                                "taskId": target_id,
+                                "action": "failed_session_unreadable",
+                                "failures": failures,
+                            }
+                        )
+                    else:
+                        outcomes.append(
+                            {
+                                "taskId": target_id,
+                                "action": "session_unreadable",
+                                "failures": failures,
+                            }
+                        )
+                else:
+                    outcomes.append({"taskId": target_id, "action": "unchanged"})
+            if changed:
+                _write_store(normalized_team_id, normalized_project_id, store)
+    failed_unreadable = [
+        item["taskId"]
+        for item in outcomes
+        if item.get("action") == "failed_session_unreadable"
+    ]
+    reconciled_count = sum(
+        1 for item in outcomes if item.get("action") == "reconciled"
+    )
+    if outcomes:
+        s._record_workflow_event(
+            "research_project_agent_tasks_reconciled",
+            normalized_team_id,
+            fields={
+                "researchProjectId": normalized_project_id,
+                "checked": len(target_ids),
+                "reconciled": reconciled_count,
+                "failedSessionUnreadable": failed_unreadable,
+                "outcomes": outcomes[:24],
+            },
+            outcome="failed" if failed_unreadable else "accepted",
+            level="warning" if failed_unreadable else "info",
+        )
+    return {
+        "checked": len(target_ids),
+        "reconciled": reconciled_count,
+        "failedSessionUnreadable": failed_unreadable,
+        "outcomes": outcomes,
+    }
 
 
 def _reconcile_project_agent_task_from_session(
     team_id: str,
     research_project_id: str,
     task: dict[str, Any],
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
+    """Classify one task against its session without writing anything.
+
+    Returns one of:
+      {"kind": "unchanged"} — the session still owns the turn or the phase
+        carries no terminal verdict yet;
+      {"kind": "unreadable"} — the session detail could not be read; the
+        caller counts consecutive failures and fails the task loudly;
+      {"kind": "terminal", "status", "resultRefs", "failureCode"} — the
+        session reached a state the task store must reflect.
+    """
     s = _service()
     session_id = _text(task.get("sessionId"))
     if not session_id:
-        return None
+        return {"kind": "unreadable"}
     try:
         detail = s.session_service.get_session_detail(
             session_id,
@@ -1746,9 +1873,9 @@ def _reconcile_project_agent_task_from_session(
             transcript_scope="none",
         )
     except Exception:
-        return None
+        return {"kind": "unreadable"}
     if not isinstance(detail, dict):
-        return None
+        return {"kind": "unreadable"}
     phase = _text(
         detail.get("currentPhase") or detail.get("status"),
         limit=80,
@@ -1762,7 +1889,7 @@ def _reconcile_project_agent_task_from_session(
         "tool_call",
         "thinking",
     }:
-        return None
+        return {"kind": "unchanged"}
     result_refs = _project_agent_task_result_refs(
         team_id,
         research_project_id,
@@ -1770,29 +1897,52 @@ def _reconcile_project_agent_task_from_session(
     )
     if phase in {"error", "failed", "timed_out", "timeout"}:
         return {
+            "kind": "terminal",
             "status": "failed",
             "resultRefs": result_refs,
             "failureCode": f"session_{phase}",
         }
     if phase in {"cancelled", "canceled", "stopped"}:
         return {
+            "kind": "terminal",
             "status": "stopped",
             "resultRefs": result_refs,
             "failureCode": f"session_{phase}",
         }
     if result_refs:
         return {
+            "kind": "terminal",
             "status": "completed",
             "resultRefs": result_refs,
             "failureCode": "",
         }
-    if phase in {"ready", "completed", "complete", "idle"}:
+    if phase in {"needs_continue"}:
+        # A needs_continue session is parked awaiting a continue message and
+        # may never resume; leaving the task active blocks the Agent scope
+        # forever (SCI-003 zombie tasks after tool-budget pauses).
         return {
+            "kind": "terminal",
+            "status": "stopped",
+            "resultRefs": [],
+            "failureCode": "session_needs_continue",
+        }
+    if phase in {"ready", "completed", "complete", "idle"}:
+        failure_code = "task_result_not_recorded"
+        if task.get("taskKind") == "experiment_design" and _plan_task_link_missing(
+            team_id,
+            research_project_id,
+            task,
+        ):
+            # Plans exist for this window but none is linked to this task:
+            # report the missing linkage instead of guessing ownership.
+            failure_code = "plan_task_link_missing"
+        return {
+            "kind": "terminal",
             "status": "incomplete",
             "resultRefs": [],
-            "failureCode": "task_result_not_recorded",
+            "failureCode": failure_code,
         }
-    return None
+    return {"kind": "unchanged"}
 
 
 def _project_agent_task_result_refs(
@@ -1800,6 +1950,13 @@ def _project_agent_task_result_refs(
     research_project_id: str,
     task: dict[str, Any],
 ) -> list[str]:
+    """Resolve completed-plan refs that are explicitly linked to this task.
+
+    Ownership comes only from the server-stamped ``createdFromTaskId``
+    written by the controlled writeback tooling. Time-window or actor-alias
+    guessing was removed deliberately: an unlinked plan is never claimed as
+    this task's completion evidence.
+    """
     s = _service()
     if task.get("taskKind") != "experiment_design":
         return [
@@ -1812,47 +1969,15 @@ def _project_agent_task_result_refs(
         research_project_id,
     )
     store = s._read_json(root / "experiment_plans" / "index.json")
-    created_at = s._workflow_timestamp_sort_key(task.get("createdAt"))
-    agent_id = _text(task.get("agentId"))
     task_id = _text(task.get("taskId"))
-    plans = [
+    matching = [
         item
         for item in list(store.get("plans") or [])
         if isinstance(item, dict)
         and _text(item.get("researchProjectId")) == research_project_id
-        and s._workflow_timestamp_sort_key(item.get("createdAt")) >= created_at
+        and _text(item.get("createdFromTaskId")) == task_id
         and _text(item.get("planId"))
     ]
-    matching = [
-        item for item in plans if _text(item.get("createdFromTaskId")) == task_id
-    ]
-    if not matching:
-        with _TASK_LOCK:
-            task_store = _read_store(team_id, research_project_id)
-        later_same_agent_task_times = [
-            s._workflow_timestamp_sort_key(item.get("createdAt"))
-            for item in task_store["tasks"]
-            if _text(item.get("agentId")) == agent_id
-            and _text(item.get("taskId")) != task_id
-            and s._workflow_timestamp_sort_key(item.get("createdAt")) > created_at
-        ]
-        next_task_created_at = (
-            min(later_same_agent_task_times) if later_same_agent_task_times else None
-        )
-        matching = [
-            item
-            for item in plans
-            if not _text(item.get("createdFromTaskId"))
-            and _recorded_actor_matches_agent(
-                agent_id,
-                item.get("createdByAgent"),
-            )
-            and (
-                next_task_created_at is None
-                or s._workflow_timestamp_sort_key(item.get("createdAt"))
-                < next_task_created_at
-            )
-        ]
     matching.sort(
         key=lambda item: (
             _text(item.get("updatedAt"), limit=120),
@@ -1865,27 +1990,34 @@ def _project_agent_task_result_refs(
     return [plan_id] if _SAFE_REF.fullmatch(plan_id) else []
 
 
-def _recorded_actor_matches_agent(agent_id: str, recorded_actor: Any) -> bool:
-    """Accept canonical IDs and strong Agent code/name aliases from legacy tools."""
+def _plan_task_link_missing(
+    team_id: str,
+    research_project_id: str,
+    task: dict[str, Any],
+) -> bool:
+    """Diagnostic only: unlinked plans exist in this task's window.
 
-    normalized_agent_id = _text(agent_id)
-    normalized_actor = _text(recorded_actor)
-    if not normalized_agent_id or not normalized_actor:
-        return False
-    if normalized_actor == normalized_agent_id:
-        return True
+    The task stays incomplete either way; this only makes the missing
+    ``createdFromTaskId`` linkage visible so legacy data can be identified
+    instead of silently claimed or silently dropped.
+    """
     s = _service()
-    try:
-        agent = s.agent_directory_service.get_agent(normalized_agent_id)
-    except Exception:
-        return False
-    if not isinstance(agent, dict):
-        return False
-    agent_code = _text(agent.get("agentCode"), limit=80)
-    display_name = _text(agent.get("displayName"), limit=160)
-    aliases = {
-        agent_code,
-        f"{agent_code} {display_name}".strip(),
-        f"{agent_code}｜{display_name}".strip("｜"),
-    }
-    return normalized_actor in {item for item in aliases if item}
+    root = s.resolve_research_project_workspace_root(
+        team_id,
+        research_project_id,
+    )
+    store = s._read_json(root / "experiment_plans" / "index.json")
+    created_at = s._workflow_timestamp_sort_key(task.get("createdAt"))
+    task_id = _text(task.get("taskId"))
+    for item in list(store.get("plans") or []):
+        if not isinstance(item, dict):
+            continue
+        if _text(item.get("researchProjectId")) != research_project_id:
+            continue
+        if not _text(item.get("planId")):
+            continue
+        if s._workflow_timestamp_sort_key(item.get("createdAt")) < created_at:
+            continue
+        if _text(item.get("createdFromTaskId")) != task_id:
+            return True
+    return False
