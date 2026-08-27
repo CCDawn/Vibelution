@@ -8,31 +8,31 @@
 
 | 序 | 文件 | 约行数 | 何时读 | 何时跳过 |
 | --- | --- | --- | --- | --- |
-| 0 | `AGENTS.md` | ~120 | 每任务；红线（含 §3.0 默认 Router） | 永不跳过 |
-| **0b** | **`briefbound-router` skill** | ~120 | 每次开发/修复/规划/会改代码或行为；声称最新前重读磁盘 `SKILL.md` | 纯只读问答且不改验证边界 |
-| 1 | **本文件** | ~70 | 选子文档、查 token 预算 | 已明确只需 `route.md` 一行且不需 budget 表 |
-| 2 | `route.md` | ~45 | 任务类型 → READ/EDIT/TEST | 续接同任务且 route 行未变 |
-| 3 | `ownership.md` | ~90 | **写入前**定 owning surface | 只读审查、纯 docs、或 owner 已在 route 行闭合 |
-| 4 | `loop.md` | ~95 | 分级 / 验证 / 完成报告 | 实现阶段中；FAST_PATCH 可只扫 §1+§3 |
-| 5 | `playbook.md` | ~75 | 架构边界/红线速查仍不够时 | route+standards 已答清边界 |
+| 0 | `AGENTS.md` | ~66 | 每任务；红线（含 §3.0 默认 Router） | 永不跳过 |
+| **0b** | **`briefbound-router` skill** | ~115 | 每次开发/修复/规划/会改代码或行为；声称最新前重读磁盘 `SKILL.md` | 纯只读问答且不改验证边界 |
+| 1 | **本文件** | ~74 | 选子文档、查 token 预算 | 已明确只需 `route.md` 一行且不需 budget 表 |
+| 2 | `route.md` | ~78 | 任务类型 → READ/EDIT/TEST | 续接同任务且 route 行未变 |
+| 3 | `ownership.md` | ~122 | **写入前**定 owning surface | 只读审查、纯 docs、或 owner 已在 route 行闭合 |
+| 4 | `loop.md` | ~148 | 分级 / 验证 / 完成报告 | 实现阶段中；FAST_PATCH 可只扫 §1+§3 |
+| 5 | `playbook.md` | ~105 | 架构边界/红线速查仍不够时 | route+standards 已答清边界 |
 | 6 | 下表「权威」列 | 不定 | 细则；**禁止**用 archive 当规则 | 子文档 + 模块 README 已足够 |
 
 **默认规划门：** 未完成 0b 的 Router 意图/分级/owner 选择前，不得广扫全仓、加载无关 process skill、或开始实现写入。`FAST_PATCH` 可 silent/micro。写入前始终评估本地复用；架构、依赖、复杂能力或真实复用分歧才追加仓外对照，并评估排序后只借最符合项目的部分。
 
-**Token 预算（guides 全目录）：** 若按序全读 §0–§5 约 **~600 行**；常态开发最小集 = `AGENTS.md` + `route.md` 一行 + `ownership.md` 命中段 + `loop.md` §1/§3/§6（约 **~250 行**）。
+**Token 预算（guides 全目录）：** 若按序全读 §0–§5 约 **~700 行**；常态开发最小集 = `AGENTS.md` + `route.md` 一行 + `ownership.md` 命中段 + `loop.md` §1/§3/§6（约 **~200 行**）。
 
 ## 子文档
 
 | 文件 | 内容 | 约行数 | 何时跳过 |
 | --- | --- | --- | --- |
-| [route.md](route.md) | 任务类型 → READ / EDIT / TEST / 禁止 | ~45 | 续接且任务类型/触面未变 |
-| [ownership.md](ownership.md) | 路径 ownership | ~90 | 只读；或 owner 已由 route 唯一确定 |
-| [loop.md](loop.md) | 分级、命令、验证与合入；对用户汇报见根 `AGENTS.md` §5 | ~95 | 未到验证/收束；FAST_PATCH 只看 §1+§3 |
-| [agent-log-routing.md](agent-log-routing.md) | **统一日志入口** `agent_log_context` | ~55 | 非 Bug/回归/卡住/运行不一致 |
-| [playbook.md](playbook.md) | 系统边界 + 红线速查 + SSOT | ~75 | standards § 已覆盖当前疑问 |
-| [agent-dev-roi-backlog.md](agent-dev-roi-backlog.md) | **便利度 ROI 改造清单**（P0–P3） | ~100 | 非 ROI/便利度认领任务 |
-| [button-selection.md](button-selection.md) | **按钮选型** V / VNative / 禁止裸 button | ~50 | 不改按钮/表单提交控件 |
-| [install-windows.md](install-windows.md) | Windows 最终用户安装（人类） | ~55 | **Agent 开发一律跳过** |
+| [route.md](route.md) | 任务类型 → READ / EDIT / TEST / 禁止 | ~78 | 续接且任务类型/触面未变 |
+| [ownership.md](ownership.md) | 路径 ownership | ~122 | 只读；或 owner 已由 route 唯一确定 |
+| [loop.md](loop.md) | 分级、命令、验证与合入；对用户汇报见根 `AGENTS.md` §5 | ~148 | 未到验证/收束；FAST_PATCH 只看 §1+§3 |
+| [agent-log-routing.md](agent-log-routing.md) | **统一日志入口** `agent_log_context` | ~84 | 非 Bug/回归/卡住/运行不一致 |
+| [playbook.md](playbook.md) | 系统边界 + 红线速查 + SSOT | ~105 | standards § 已覆盖当前疑问 |
+| [agent-dev-roi-backlog.md](agent-dev-roi-backlog.md) | **便利度 ROI 改造清单**（P0–P3） | ~138 | 非 ROI/便利度认领任务 |
+| [button-selection.md](button-selection.md) | **按钮选型** V / VNative / 禁止裸 button | ~76 | 不改按钮/表单提交控件 |
+| [install-windows.md](install-windows.md) | Windows 最终用户安装（人类） | ~87 | **Agent 开发一律跳过** |
 
 **FE 路由索引：** [`web/src/routes/README.md`](../../web/src/routes/README.md)（非 Chat/Teams 30 秒表；~80 行）
 

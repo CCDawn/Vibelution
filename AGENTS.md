@@ -48,12 +48,12 @@
 ## 4. Execution Baseline
 
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
-- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入和必要同步；验证必须在合入前完成。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 只读兼容，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
+- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入和必要同步；验证必须在合入前完成。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 已不再存在于磁盘，仅保留兼容迁移逻辑（`core/infrastructure/branch_workspace.py`）以防目录重现，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
 - 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。
 - `tsc -b` 是前端交付/重建闸，不是开发前默认闸。凡改 `web/`，宣称完成或建议 Launcher rebuild/restart 前必须主动运行 `npx tsc -b --pretty false`（或 `npm run build`）；类型红时先修，不把 Launcher 重建当验证。细节见 [loop.md](docs/guides/loop.md)。
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
 - 验证去重：同一 HEAD/命令/输入未变则复用结果，不得重复执行；closeout 才跑完整 selector，manifest 传 `--manifest`。用户行为须测试和日志，关键路径须 runtime-scene 证据。
-- 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 config 只作 legacy/template。
+- 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 `config/` 目录是活的 Python 配置代码库，不属于 legacy/template；真正以 legacy/template 对待的是仓库根目录下的 `config.toml` 文件。
 - Launcher 刷新使用 `%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" <start|stop|restart>`；若 active work 阻止刷新，报告：`有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。`
 - 任何新增或修改产品后台子进程 spawn 的路径，默认按 §2 无控制台红线实现与验证；能弹出可见控制台的路径不得合入。
 
