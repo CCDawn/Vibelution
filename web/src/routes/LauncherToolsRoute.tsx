@@ -52,7 +52,7 @@ import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VDenseOpsPage, VRouteLinkButton, VStateSurface, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+import { launcherToolsRouteStyles as styles } from "./LauncherToolsRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
 import { pinLauncherDocumentViewport } from "./pinLauncherDocumentViewport";
