@@ -1317,6 +1317,10 @@ def test_cancel_blocks_pending_and_forbids_restart(harness: _Harness) -> None:
     assert cancelled["cancelled"] is True
     assert cancelled["statusSummary"]["blocked"] == 2
     assert cancelled["statusSummary"]["running"] == 2
+    assert cancelled["drainState"] == "draining"
+    assert cancelled["stopReason"] == "cancelled_by_operator"
+    assert cancelled["remainingFailureBudget"] == cancelled["failureBudget"]
+    assert cancelled["concurrencyLimit"] >= 1
     with pytest.raises(svc.ChallengeCupRealBatchError, match="cancelled"):
         _start(harness, "real-5")
     with pytest.raises(svc.ChallengeCupRealBatchError, match="confirmation"):

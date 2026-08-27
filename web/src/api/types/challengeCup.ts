@@ -334,6 +334,19 @@ export type ChallengeCupRealBatchRunRef = {
   attempt: number;
 };
 
+/**
+ * Server-derived drain state of a cancelled batch. `requested` is synthesized
+ * client-side only while a cancel call is still in flight; the server never
+ * reports it. `drained` does not promise an instantly residue-free batch.
+ */
+export type ChallengeCupRealBatchDrainState = "none" | "requested" | "draining" | "drained";
+
+/** Read-only stop reason codes derived by the batch projection. */
+export type ChallengeCupRealBatchStopReason =
+  | "failure_budget_exhausted"
+  | "cancelled_by_operator"
+  | "";
+
 /** Server-owned projection of one persisted real catalog gate. */
 export type ChallengeCupRealBatchProjection = {
   schemaVersion: number;
@@ -358,6 +371,21 @@ export type ChallengeCupRealBatchProjection = {
   gateComplete: boolean;
   lastUpdatedAt: string;
   canResume: boolean;
+  /**
+   * Read-only observability extensions (R4.2). Optional so an older service
+   * response still validates; the panel falls back to local derivations.
+   */
+  drainState?: Exclude<ChallengeCupRealBatchDrainState, "requested">;
+  concurrencyLimit?: number | null;
+  totalCompletedCount?: number;
+  autoClosedCount?: number;
+  escalatedCount?: number;
+  autoCloseRate?: number | null;
+  escalationRate?: number | null;
+  autoCloseTarget?: number;
+  escalationStopLine?: number;
+  stopReason?: ChallengeCupRealBatchStopReason;
+  remainingFailureBudget?: number;
 };
 
 export type ChallengeCupRealBatchOutcome = {
