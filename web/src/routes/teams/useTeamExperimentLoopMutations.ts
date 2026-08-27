@@ -28,6 +28,25 @@ import {
 } from "../../api/teamExperiment";
 import type { ExperimentPlanMethodRequest } from "../TeamExperimentMethodPanel";
 import {
+  trackEngineeringProxyMaterialize,
+  trackExperimentBaselineRegister,
+  trackExperimentDesignFreeze,
+  trackExperimentFullRunResultRegister,
+  trackExperimentHypothesisResume,
+  trackExperimentHypothesisReview,
+  trackExperimentHypothesisRevisionCreate,
+  trackExperimentKnowledgeIngestionRequest,
+  trackExperimentPlanCreate,
+  trackExperimentSmokeResultRegister,
+  trackExperimentSmokeRun,
+  trackResearchLoopCreate,
+  trackResearchLoopDecisionRecord,
+  trackResearchLoopEvidenceRecord,
+  trackResearchLoopIterationMaterialize,
+  trackScientificHypothesisComplete,
+} from "./challengeCupTelemetry";
+import type { UserActionTracker } from "../../app/userActionTelemetry";
+import {
   experimentPlanningStatusQueryKey,
   researchLoopStatusQueryKey,
   type EngineeringProxyHypothesisDraft,
@@ -92,10 +111,31 @@ export function buildResearchLoopDecisionIdempotencyKey(payload: {
   return `${payload.loopId}:${payload.draft.decision}:${(hash >>> 0).toString(16).padStart(8, "0")}`.slice(0, 240);
 }
 
+// Shared failure plumbing for the experiment-loop telemetry: each mutation starts a
+// tracker in its inline onMutate context; onSuccess closes it with succeeded() and
+// this handler closes it as failed. Inlined per mutation (not a spread helper) so
+// React Query keeps inferring the mutation variables type.
+function experimentTelemetryOnError(
+  reason: unknown,
+  _vars: unknown,
+  ctx: { telemetry?: UserActionTracker } | undefined,
+): void {
+  ctx?.telemetry?.failed(reason);
+}
+
 export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMutationsOptions) {
   const queryClient = useQueryClient();
 
   const createExperimentPlanMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentPlanCreate({
+        teamId: vars.teamId,
+        stageRoundId: vars.stageRoundId ?? "",
+        titleLength: (vars.title ?? "").trim().length,
+        hasMethodRequest: Boolean(vars.methodRequest),
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; stageRoundId?: string; title?: string; methodRequest?: ExperimentPlanMethodRequest }) =>
       createTeamExperimentPlan<ExperimentPlanCreatePayload>(payload.teamId, {
         stageRoundId: payload.stageRoundId || "",
@@ -104,7 +144,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         ...(payload.methodRequest ?? {}),
         notes: "Created from the experiment planning workspace. No training execution was triggered.",
       }),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
       queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -114,6 +155,13 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const materializeEngineeringProxyHypothesisMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackEngineeringProxyMaterialize({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -128,7 +176,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           idempotencyKey: `${payload.plan.planId}:engineering-proxy`,
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       if (payload.experimentStatus) {
         queryClient.setQueryData(
           experimentPlanningStatusQueryKey(variables.teamId),
@@ -151,6 +200,14 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const reviewExperimentHypothesisMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentHypothesisReview({
+        teamId: vars.teamId,
+        candidateId: vars.candidateId,
+        decision: "approve",
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; candidateId: string }) =>
       reviewTeamExperimentHypothesis(
         payload.teamId,
@@ -165,7 +222,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           requiredChanges: [],
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       if (payload.experimentStatus) {
         queryClient.setQueryData(
           experimentPlanningStatusQueryKey(variables.teamId),
@@ -188,6 +246,14 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const completeScientificHypothesisFromDesignMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackScientificHypothesisComplete({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        candidateId: vars.candidateId,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -203,7 +269,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           createdByAgent: options.sourceCollectionOwnerAgentId,
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       if (payload.experimentStatus) {
         queryClient.setQueryData(
           experimentPlanningStatusQueryKey(variables.teamId),
@@ -226,6 +293,14 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const createExperimentHypothesisRevisionMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentHypothesisRevisionCreate({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        candidateId: vars.candidateId,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -242,7 +317,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           ),
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       if (payload.experimentStatus) {
         queryClient.setQueryData(
           experimentPlanningStatusQueryKey(variables.teamId),
@@ -274,11 +350,19 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const freezeExperimentDesignMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentDesignFreeze({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; plan: ExperimentPlanRecord }) =>
       freezeTeamExperimentDesign<ExperimentDesignFreezePayload>(payload.teamId, payload.plan.planId, {
         frozenByAgent: options.sourceCollectionOwnerAgentId,
       }),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       if (payload.experimentStatus) {
         queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.experimentStatus);
       }
@@ -288,11 +372,19 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const resumeExperimentHypothesisMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentHypothesisResume({
+        teamId: vars.teamId,
+        hypothesisCandidateId: vars.hypothesisCandidateId,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; hypothesisCandidateId: string }) =>
       resumeTeamExperimentHypothesis<ExperimentHypothesisResumePayload>(payload.teamId, {
         hypothesisCandidateId: payload.hypothesisCandidateId,
       }),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       if (payload.experimentStatus) {
         queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.experimentStatus);
       }
@@ -302,6 +394,16 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const registerExperimentBaselineArtifactMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentBaselineRegister({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        baselineName: vars.plan.experimentPlan.baseline || vars.plan.baselineSelection.baseline || "",
+        metricName: vars.plan.experimentPlan.metric || "",
+        hasArtifactPath: vars.draft.artifactPath.trim().length > 0,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -322,7 +424,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           notes: "Registered from the experiment planning workspace. No training execution was triggered.",
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
       queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -332,6 +435,15 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const runExperimentSmokeMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentSmokeRun({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        adapter: vars.adapter,
+        seed: vars.seed,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -343,7 +455,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         seed: payload.seed,
         recordedByAgent: options.sourceCollectionOwnerAgentId,
       }),
-    onSuccess: (_payload, variables) => {
+    onSuccess: (_payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflow(variables.teamId) });
@@ -351,6 +464,15 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const registerExperimentSmokeResultMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentSmokeResultRegister({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        status: vars.draft.status,
+        metricName: vars.plan.experimentPlan.metric || "",
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -376,7 +498,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           },
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
       queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -394,6 +517,15 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const registerExperimentFullRunResultMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentFullRunResultRegister({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        status: vars.draft.status,
+        metricName: vars.plan.experimentPlan.metric || "",
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -424,7 +556,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           },
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
       queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -451,6 +584,15 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const requestExperimentKnowledgeIngestionMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackExperimentKnowledgeIngestionRequest({
+        teamId: vars.teamId,
+        planId: vars.plan.planId,
+        wakeStewardAgent: vars.draft.wakeStewardAgent,
+        knowledgeBaseId: vars.draft.knowledgeBaseId.trim() || `${vars.teamId}-challenge-cup-experiments`,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord;
@@ -476,7 +618,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           },
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
       queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -487,6 +630,18 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const createResearchLoopMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackResearchLoopCreate({
+        teamId: vars.teamId,
+        templateId: vars.templateId,
+        planId: vars.plan?.planId ?? "",
+        hypothesisCount: vars.plan?.hypothesisCandidateIds?.length
+          ?? vars.plan?.selectedHypotheses.length
+          ?? 0,
+        datasetRefCount: splitDraftList(vars.draft.datasetRefs, 24).length,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: {
       teamId: string;
       plan: ExperimentPlanRecord | null;
@@ -519,7 +674,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         },
       });
     },
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded({ loopId: payload.loop.loopId });
       queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
       options.setResearchLoopEvidenceDraft((draft) => ({
         ...draft,
@@ -531,6 +687,15 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const recordResearchLoopEvidenceMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackResearchLoopEvidenceRecord({
+        teamId: vars.teamId,
+        loopId: vars.loop.loopId,
+        evidenceType: vars.evidenceType,
+        status: vars.draft.status,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; loop: ResearchLoopRecord; draft: ResearchLoopEvidenceDraft; evidenceType: string }) =>
       recordResearchLoopEvidence<ResearchLoopEvidencePayload>(
         payload.teamId,
@@ -555,7 +720,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           },
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
       const nextMissing = payload.loop.readiness.missingEvidenceTypes.find((item) => item !== variables.evidenceType) || "";
       options.setResearchLoopEvidenceDraft((draft) => ({
@@ -573,6 +739,16 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const recordResearchLoopDecisionMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackResearchLoopDecisionRecord({
+        teamId: vars.teamId,
+        loopId: vars.loop.loopId,
+        decision: vars.draft.decision,
+        nextTemplateId: vars.nextTemplateId,
+        rationaleLength: vars.draft.rationale.trim().length,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; loop: ResearchLoopRecord; draft: ResearchLoopDecisionDraft; nextTemplateId: string }) =>
       recordResearchLoopDecision<ResearchLoopDecisionPayload>(
         payload.teamId,
@@ -600,7 +776,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           },
         },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
       options.setResearchLoopDecisionDraft((draft) => ({
         ...draft,
@@ -617,6 +794,14 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   });
 
   const materializeResearchLoopIterationDesignMutation = useMutation({
+    onMutate: (vars) => ({
+      telemetry: trackResearchLoopIterationMaterialize({
+        teamId: vars.teamId,
+        loopId: vars.loopId,
+        proposalId: vars.proposalId,
+      }),
+    }),
+    onError: experimentTelemetryOnError,
     mutationFn: (payload: { teamId: string; loopId: string; proposalId: string }) =>
       materializeResearchLoopIterationDesign<ResearchLoopDecisionPayload>(
         payload.teamId,
@@ -624,7 +809,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         payload.proposalId,
         { createdByAgent: options.sourceCollectionOwnerAgentId },
       ),
-    onSuccess: (payload, variables) => {
+    onSuccess: (payload, variables, ctx) => {
+      ctx?.telemetry?.succeeded();
       queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
       void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });

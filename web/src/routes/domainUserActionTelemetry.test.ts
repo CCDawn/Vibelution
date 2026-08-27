@@ -28,6 +28,8 @@ const researchWorkflowCommandsSource = readFileSync(join(here, "teams/research-w
 const researchWorkflowRunSource = readFileSync(join(here, "teams/research-workflow/useResearchWorkflowRun.ts"), "utf8");
 const researchWorkflowEventStreamSource = readFileSync(join(here, "teams/research-workflow/useResearchWorkflowEventStream.ts"), "utf8");
 const researchWorkflowEventReplaySource = readFileSync(join(here, "teams/research-workflow/useResearchWorkflowEventReplay.ts"), "utf8");
+const teamExperimentLoopSource = readFileSync(join(here, "teams/useTeamExperimentLoopMutations.ts"), "utf8");
+const submissionReadinessPanelSource = readFileSync(join(here, "teams/research-workflow/ChallengeSubmissionReadinessPanel.tsx"), "utf8");
 
 describe("domain user-action telemetry contract", () => {
   it("tracks agent lifecycle mutations", () => {
@@ -80,6 +82,23 @@ describe("domain user-action telemetry contract", () => {
       "challenge_dev_batch_run",
       "challenge_workflow_human_gate_resolve",
       "challenge_workflow_offer_submit",
+      "challenge_experiment_plan_create",
+      "challenge_experiment_engineering_proxy_materialize",
+      "challenge_experiment_hypothesis_review",
+      "challenge_experiment_scientific_hypothesis_complete",
+      "challenge_experiment_hypothesis_revision_create",
+      "challenge_experiment_design_freeze",
+      "challenge_experiment_hypothesis_resume",
+      "challenge_experiment_baseline_register",
+      "challenge_experiment_smoke_run",
+      "challenge_experiment_smoke_result_register",
+      "challenge_experiment_full_run_result_register",
+      "challenge_experiment_knowledge_ingestion_request",
+      "challenge_research_loop_create",
+      "challenge_research_loop_evidence_record",
+      "challenge_research_loop_decision_record",
+      "challenge_research_loop_iteration_materialize",
+      "challenge_deliverables_export",
     ];
     for (const action of actions) {
       expect(challengeCupTelemetrySource).toContain(`"${action}"`);
@@ -97,10 +116,35 @@ describe("domain user-action telemetry contract", () => {
       "challenge_catalog_active_work_changed",
       "challenge_hypothesis_legacy_fallback",
       "challenge_team_agents_auto_repair",
+      "challenge_submission_readiness_changed",
     ];
     for (const code of observations) {
       expect(challengeCupTelemetrySource).toContain(`"${code}"`);
     }
+  });
+
+  it("wires the deep-experiment track mutations", () => {
+    expect(teamExperimentLoopSource).toContain("trackExperimentPlanCreate(");
+    expect(teamExperimentLoopSource).toContain("trackEngineeringProxyMaterialize(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentHypothesisReview(");
+    expect(teamExperimentLoopSource).toContain("trackScientificHypothesisComplete(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentHypothesisRevisionCreate(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentDesignFreeze(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentHypothesisResume(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentBaselineRegister(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentSmokeRun(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentSmokeResultRegister(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentFullRunResultRegister(");
+    expect(teamExperimentLoopSource).toContain("trackExperimentKnowledgeIngestionRequest(");
+    expect(teamExperimentLoopSource).toContain("trackResearchLoopCreate(");
+    expect(teamExperimentLoopSource).toContain("trackResearchLoopEvidenceRecord(");
+    expect(teamExperimentLoopSource).toContain("trackResearchLoopDecisionRecord(");
+    expect(teamExperimentLoopSource).toContain("trackResearchLoopIterationMaterialize(");
+  });
+
+  it("wires the submission deliverables export and readiness edge", () => {
+    expect(submissionReadinessPanelSource).toContain("trackDeliverablesExport(");
+    expect(submissionReadinessPanelSource).toContain("observeSubmissionReadinessChanged(");
   });
 
   it("wires challenge-cup question review, register, and reset surfaces", () => {
