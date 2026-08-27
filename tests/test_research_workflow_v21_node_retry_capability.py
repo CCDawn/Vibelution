@@ -1,4 +1,9 @@
-"""Blocked workflow Agent nodes expose one durable retry capability."""
+"""Blocked workflow Agent nodes expose one durable retry capability.
+
+The v2.1 graph enters through the ``problem_understanding`` agent node, so
+create_run seeds exactly one NodeRun for it; these tests block that entry
+node to exercise the node-agnostic retry lineage contract.
+"""
 
 from __future__ import annotations
 
@@ -89,7 +94,7 @@ def test_blocked_agent_node_retries_as_a_new_lineage_attempt(tmp_path: Path) -> 
     )
     blocked = _block_latest(store, created["runId"])
 
-    detail = service.get_node_detail(blocked["runId"], "source_finding")
+    detail = service.get_node_detail(blocked["runId"], "problem_understanding")
     retry = next(
         item for item in detail["commands"] if item["command"] == "retry_execution"
     )
@@ -98,19 +103,19 @@ def test_blocked_agent_node_retries_as_a_new_lineage_attempt(tmp_path: Path) -> 
     assert retry["idempotencyKey"].endswith(":a2")
     retried = service.apply_node_command(
         blocked["runId"],
-        "source_finding",
+        "problem_understanding",
         "retry_execution",
         payload={"idempotencyKey": retry["idempotencyKey"]},
     )
     replay = service.apply_node_command(
         blocked["runId"],
-        "source_finding",
+        "problem_understanding",
         "retry_execution",
         payload={"idempotencyKey": retry["idempotencyKey"]},
     )
 
     attempts = [
-        item for item in replay["nodeRuns"] if item["nodeId"] == "source_finding"
+        item for item in replay["nodeRuns"] if item["nodeId"] == "problem_understanding"
     ]
     assert retried["status"] == "queued"
     assert len(attempts) == 2
@@ -119,7 +124,7 @@ def test_blocked_agent_node_retries_as_a_new_lineage_attempt(tmp_path: Path) -> 
     assert attempts[-1]["supersedesNodeRunId"] == attempts[0]["nodeRunId"]
 
     exhausted = _block_latest(store, blocked["runId"])
-    exhausted_detail = service.get_node_detail(exhausted["runId"], "source_finding")
+    exhausted_detail = service.get_node_detail(exhausted["runId"], "problem_understanding")
     exhausted_retry = next(
         item
         for item in exhausted_detail["commands"]
@@ -150,13 +155,13 @@ def test_infrastructure_interruption_recovers_without_reopening_business_retry_b
     first_retry = next(
         item
         for item in service.get_node_detail(
-            first_failure["runId"], "source_finding"
+            first_failure["runId"], "problem_understanding"
         )["commands"]
         if item["command"] == "retry_execution"
     )
     service.apply_node_command(
         first_failure["runId"],
-        "source_finding",
+        "problem_understanding",
         "retry_execution",
         payload={"idempotencyKey": first_retry["idempotencyKey"]},
     )
@@ -183,7 +188,7 @@ def test_infrastructure_interruption_recovers_without_reopening_business_retry_b
     recovery = next(
         item
         for item in service.get_node_detail(
-            interrupted["runId"], "source_finding"
+            interrupted["runId"], "problem_understanding"
         )["commands"]
         if item["command"] == "retry_execution"
     )
@@ -193,7 +198,7 @@ def test_infrastructure_interruption_recovers_without_reopening_business_retry_b
 
     recovered = service.apply_node_command(
         interrupted["runId"],
-        "source_finding",
+        "problem_understanding",
         "retry_execution",
         payload={
             "idempotencyKey": recovery["idempotencyKey"],
@@ -215,7 +220,7 @@ def test_infrastructure_interruption_recovers_without_reopening_business_retry_b
     exhausted = next(
         item
         for item in service.get_node_detail(
-            business_failure_after_recovery["runId"], "source_finding"
+            business_failure_after_recovery["runId"], "problem_understanding"
         )["commands"]
         if item["command"] == "retry_execution"
     )
