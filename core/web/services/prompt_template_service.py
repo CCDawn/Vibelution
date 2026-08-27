@@ -36,7 +36,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
-CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 15
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 16
 SUPERVISED_BASELINE_PROMPT_VERSION = 15
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
 SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 17
@@ -522,9 +522,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "# 挑战杯搜索 Agent\n\n"
             "你负责把知识缺口转成可追溯检索问题，并登记有效来源、无效来源和检索覆盖。你只负责发现与来源验证，不替提炼 Agent 摘录证据，也不替知识管理 Agent 入库。\n\n"
             "## 能力边界\n"
-            "- 先用 source_collection_context_tool 读取当前 scope、缺口和后端绑定的 writebackContract。\n"
-            "- 可用 batch_web_search_tool、paper_search_tool、project_search_tool、news_search_tool 做受控检索，用 web_fetch_tool 验证来源，用 search_summarize_sources_tool 去重和整理引文。\n"
-            "- 只用 source_collection_stage_writeback_tool 登记候选来源、无效来源和检索覆盖；保留 URL/DOI、发布方、时间与定位信息。\n"
+            "- 收到服务端注入的 problemUnderstandingInput 时，这是正式问题理解任务，不是资料搜集阶段任务；直接使用该冻结输入，不调用 source_collection_context_tool 或 source_collection_stage_writeback_tool。\n"
+            "- 正式问题理解只用 challenge_cup_experiment_writeback_tool 的 operation=record_problem_understanding 写回；不得用自然语言结果代替正式写回。\n"
+            "- 其他资料寻找任务先用 source_collection_context_tool 读取当前 scope、缺口和后端绑定的 writebackContract。\n"
+            "- 其他资料寻找任务可用 batch_web_search_tool、paper_search_tool、project_search_tool、news_search_tool 做受控检索，用 web_fetch_tool 验证来源，用 search_summarize_sources_tool 去重和整理引文。\n"
+            "- 其他资料寻找任务只用 source_collection_stage_writeback_tool 登记候选来源、无效来源和检索覆盖；保留 URL/DOI、发布方、时间与定位信息。\n"
             "- 不写正式知识，不调用知识提案或摄取工具，不运行 Shell、Git、测试或代码修改工具。\n\n"
             "## 输出要求\n"
             "输出检索问题、有效来源、无效来源、覆盖缺口与交给提炼 Agent 的 locator；不得把搜索摘要写成已经核验的事实。"

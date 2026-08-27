@@ -342,6 +342,10 @@ describe("LauncherRoute layout contract", () => {
     expect(branchIndex).toBeGreaterThan(0);
     expect(settingsIndex).toBeGreaterThan(0);
     expect(homeRouteSource).toContain('to="/launcher/tools"');
+    expect(homeRouteSource).toContain("headerAction={(");
+    expect(homeRouteSource).not.toContain("toolsLinkRow");
+    expect(branchInstancesPanelSource).toContain("headerAction?: ReactNode");
+    expect(branchInstancesPanelStyles.panelHeaderActions).toContain("flex-wrap");
     expect(homeRouteSource).not.toContain("LauncherProcessMonitorPanel");
     expect(homeRouteSource).not.toContain("LauncherProjectMaintenancePanel");
     expect(homeRouteSource).not.toContain("LauncherDeveloperModePanel");

@@ -163,6 +163,25 @@ def test_hypothesis_writeback_tool_description_exposes_complete_score_contract()
     assert "不得猜测或填写" in description
 
 
+def test_problem_understanding_writeback_tool_description_exposes_human_gate_contract():
+    tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
+    description = str(
+        getattr(
+            tools_by_name["challenge_cup_experiment_writeback_tool"],
+            "description",
+            "",
+        )
+        or ""
+    )
+
+    assert "record_problem_understanding" in description
+    assert "human_gate" in description
+    assert "required 必须为 true" in description
+    assert "pending / approved / revision_requested / rejected" in description
+    assert "rationale 必须是非空字符串" in description
+    assert "不要加入 review_points" in description
+
+
 def test_agent_message_tool_blocks_without_bound_agent_runtime(monkeypatch):
     monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {})
 

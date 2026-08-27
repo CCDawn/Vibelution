@@ -631,7 +631,10 @@ def test_terminal_formal_run_offers_archive_instead_of_reconcile(
                 "question": "SCI-001",
                 "roundIndex": 1,
                 "status": "closed",
-                "metaReview": {"accepted": True},
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
             }],
             formal_runs=[{
                 "runId": "run-terminal",
@@ -647,6 +650,196 @@ def test_terminal_formal_run_offers_archive_instead_of_reconcile(
         action.command for action in state.allowedActions if action.kind == "command"
     ]
     assert commands == ["archive_run"]
+
+
+@pytest.mark.parametrize("run_status", ["blocked", "running"])
+def test_formal_run_projects_available_retry_node_offer(
+    run_status: str,
+) -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
+            }],
+            formal_runs=[{
+                "runId": "run-retry",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": run_status,
+                "runVersion": 7,
+                "activeNodeId": "source_extraction",
+            }],
+            formal_snapshots={
+                "run-retry": {
+                    "activeNodeIds": ["source_extraction"],
+                    "commandOffers": [{
+                        "command": "retry_node",
+                        "nodeId": "source_extraction",
+                        "available": True,
+                        "label": "重试 资料提炼",
+                        "reasonCode": "retry_available",
+                        "idempotencyKey": "offer:retry",
+                        "expectedRunVersion": 7,
+                        "payload": {"retryKind": "same_node"},
+                    }],
+                }
+            },
+        )
+    )
+
+    actions = [
+        action for action in state.allowedActions if action.kind == "command"
+    ]
+    assert [action.command for action in actions] == ["retry_formal_node"]
+    assert actions[0].targetNodeId == "source_extraction"
+    assert actions[0].idempotencyKey == "offer:retry"
+    assert actions[0].payload.runId == "run-retry"
+    assert actions[0].payload.nodeId == "source_extraction"
+    assert actions[0].model_dump(mode="json")["payload"] == {
+        "runId": "run-retry",
+        "nodeId": "source_extraction",
+    }
+
+
+@pytest.mark.parametrize("run_status", ["blocked", "failed"])
+def test_ordinary_formal_failure_does_not_project_reconcile_action(
+    run_status: str,
+) -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
+            }],
+            formal_runs=[{
+                "runId": "run-no-retry",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": run_status,
+                "runVersion": 7,
+            }],
+            formal_snapshots={"run-no-retry": {"commandOffers": []}},
+        )
+    )
+
+    commands = [
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    ]
+    assert "reconcile_formal_run" not in commands
+    if run_status == "failed":
+        assert commands == ["archive_run"]
+    else:
+        assert commands == []
+
+
+def test_reconciliation_required_formal_run_keeps_reconcile_action() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
+            }],
+            formal_runs=[{
+                "runId": "run-reconcile",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": "reconciliation_required",
+                "runVersion": 7,
+            }],
+            formal_snapshots={"run-reconcile": {"commandOffers": []}},
+        )
+    )
+
+    commands = [
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    ]
+    assert commands == ["reconcile_formal_run"]
+
+
+def test_created_formal_run_offers_cancel_before_archive() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[{
+                "roundId": "round-accepted",
+                "question": "SCI-001",
+                "roundIndex": 1,
+                "status": "closed",
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
+            }],
+            formal_runs=[{
+                "runId": "run-created",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": "created",
+                "runVersion": 1,
+            }],
+        )
+    )
+
+    actions = [
+        action for action in state.allowedActions if action.kind == "command"
+    ]
+    assert [action.command for action in actions] == ["cancel_run"]
+    assert actions[0].payload.runId == "run-created"
+    assert actions[0].requiresConfirmation is True
 
 
 def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
@@ -665,7 +858,10 @@ def test_archived_formal_run_no_longer_suppresses_rebuild() -> None:
                 "question": "SCI-001",
                 "roundIndex": 1,
                 "status": "closed",
-                "metaReview": {"accepted": True},
+                "metaReview": {
+                    "accepted": True,
+                    "recommendationCandidateId": "candidate-confirmed",
+                },
             }],
             formal_runs=[{
                 "runId": "run-archived",
@@ -1482,7 +1678,14 @@ def test_v2_archive_run_command_uses_formal_command_service(
     )
     calls: list[tuple[str, str, str, str]] = []
 
-    def submit(team_id: str, *, run_id: str, command: str, idempotency_key: str, **_kwargs):
+    def submit(
+        team_id: str,
+        *,
+        run_id: str,
+        command: str,
+        idempotency_key: str,
+        **_kwargs,
+    ):
         calls.append((team_id, run_id, command, idempotency_key))
         return {"status": "accepted"}
 
@@ -1505,6 +1708,261 @@ def test_v2_archive_run_command_uses_formal_command_service(
         "run-terminal",
         "archive_run",
         "hf2:archive-formal-run:run-terminal",
+    )]
+
+
+def test_v2_cancel_run_command_uses_formal_command_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:created-run",
+        "allowedActions": [{
+            "kind": "command",
+            "actionId": "cancel-formal-run:run-created",
+            "command": "cancel_run",
+            "payload": {"runId": "run-created"},
+            "enabled": True,
+            "idempotencyKey": "hf2:cancel-formal-run:run-created",
+        }],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[tuple[str, str, str, str]] = []
+
+    def submit(team_id: str, *, run_id: str, command: str, idempotency_key: str, **_kwargs):
+        calls.append((team_id, run_id, command, idempotency_key))
+        return {"status": "accepted"}
+
+    monkeypatch.setattr(hypothesis_first_chain, "_submit_formal_v2_command", submit)
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "cancel-formal-run:run-created",
+            "idempotencyKey": "hf2:cancel-formal-run:run-created",
+            "expectedStateVersion": "hf2-action:created-run",
+            "command": "cancel_run",
+            "payload": {"runId": "run-created"},
+        },
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["status"] == "accepted"
+    assert calls == [(
+        "team-1",
+        "run-created",
+        "cancel_run",
+        "hf2:cancel-formal-run:run-created",
+    )]
+
+
+@pytest.mark.parametrize(
+    "offers",
+    [
+        [{
+            "command": "retry_node",
+            "nodeId": "source_extraction",
+            "available": False,
+            "payload": {"retryKind": "same_node"},
+        }],
+        [{
+            "command": "retry_node",
+            "nodeId": "different_node",
+            "available": True,
+            "payload": {"retryKind": "same_node"},
+        }],
+        [{
+            "command": "retry_node",
+            "nodeId": "source_extraction",
+            "available": True,
+            "payload": {"retryKind": "same_node"},
+        }],
+    ],
+    ids=["unavailable", "tampered-node", "missing-idempotency"],
+)
+def test_submit_formal_retry_rejects_unavailable_or_tampered_offer(
+    offers: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        hypothesis_first_chain,
+        runtime_factory,
+    )
+
+    run = SimpleNamespace(run_id="run-retry", team_id="team-1", run_version=7)
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            assert (team_id, run_id) == ("team-1", "run-retry")
+            return {"commandOffers": offers}
+
+    class CommandService:
+        def submit(self, _request):
+            pytest.fail("an unavailable or mismatched retry offer must not submit")
+
+    runtime = SimpleNamespace(
+        store=SimpleNamespace(get_run=lambda run_id: run if run_id == run.run_id else None),
+        command_service=CommandService(),
+    )
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: runtime)
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+
+    with pytest.raises(hypothesis_first_chain.HypothesisFirstChainError):
+        hypothesis_first_chain._submit_formal_v2_command(
+            "team-1",
+            run_id="run-retry",
+            node_id="source_extraction",
+            command="retry_node",
+            idempotency_key="hf2:retry-formal-node:run-retry:source-extraction",
+        )
+
+
+def test_submit_formal_retry_uses_current_offer_payload_and_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.research.workflow.contracts import WorkflowCommandKind
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        hypothesis_first_chain,
+        runtime_factory,
+    )
+
+    run = SimpleNamespace(run_id="run-retry", team_id="team-1", run_version=7)
+    snapshot = {
+        "run": {"runVersion": 7},
+        "commandOffers": [{
+            "command": "retry_node",
+            "nodeId": "source_extraction",
+            "available": True,
+            "idempotencyKey": "offer:run-retry:source_extraction:retry_node:a2:v7",
+            "payload": {"retryKind": "same_node"},
+        }],
+    }
+    calls: list[object] = []
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            assert (team_id, run_id) == ("team-1", "run-retry")
+            return snapshot
+
+    class CommandService:
+        def submit(self, request):
+            calls.append(request)
+            return SimpleNamespace(to_dict=lambda: {"status": "accepted"})
+
+    runtime = SimpleNamespace(
+        store=SimpleNamespace(get_run=lambda run_id: run if run_id == run.run_id else None),
+        command_service=CommandService(),
+    )
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: runtime)
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+
+    result = hypothesis_first_chain._submit_formal_v2_command(
+        "team-1",
+        run_id="run-retry",
+        node_id="source_extraction",
+        command="retry_node",
+        idempotency_key="hf2:retry-formal-node:run-retry:source-extraction",
+    )
+
+    assert result == {"status": "accepted"}
+    assert len(calls) == 1
+    request = calls[0]
+    assert request.command is WorkflowCommandKind.RETRY_NODE
+    assert request.run_id == "run-retry"
+    assert request.team_id == "team-1"
+    assert request.node_id == "source_extraction"
+    assert request.expected_run_version == 7
+    assert request.idempotency_key == (
+        "offer:run-retry:source_extraction:retry_node:a2:v7"
+    )
+    assert request.payload == {"retryKind": "same_node"}
+
+
+def test_v2_retry_formal_node_command_uses_formal_command_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:running-retry",
+        "allowedActions": [{
+            "kind": "command",
+            "actionId": "retry-formal-node:run-retry:source-extraction",
+            "command": "retry_formal_node",
+            "payload": {
+                "runId": "run-retry",
+                "nodeId": "source_extraction",
+            },
+            "enabled": True,
+            "idempotencyKey": "hf2:retry-formal-node:run-retry:source-extraction",
+        }],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[tuple[str, str, str, str, str]] = []
+
+    def submit(
+        team_id: str,
+        *,
+        run_id: str,
+        node_id: str,
+        command: str,
+        idempotency_key: str,
+        **_kwargs,
+    ):
+        calls.append((team_id, run_id, node_id, command, idempotency_key))
+        return {"status": "accepted"}
+
+    monkeypatch.setattr(hypothesis_first_chain, "_submit_formal_v2_command", submit)
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "retry-formal-node:run-retry:source-extraction",
+            "idempotencyKey": "hf2:retry-formal-node:run-retry:source-extraction",
+            "expectedStateVersion": "hf2-action:running-retry",
+            "command": "retry_formal_node",
+            "payload": {
+                "runId": "run-retry",
+                "nodeId": "source_extraction",
+            },
+        },
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["status"] == "accepted"
+    assert calls == [(
+        "team-1",
+        "run-retry",
+        "source_extraction",
+        "retry_node",
+        "hf2:retry-formal-node:run-retry:source-extraction",
     )]
 
 

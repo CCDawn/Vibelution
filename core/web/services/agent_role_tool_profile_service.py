@@ -436,6 +436,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             *RESEARCH_STAGE_TOOLS,
             *SEARCH_TOOLS,
             *FETCH_TOOLS,
+            "challenge_cup_experiment_writeback_tool",
         ),
         preferred_tools=(
             "source_collection_context_tool",
@@ -445,6 +446,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_summarize_sources_tool",
             "web_fetch_tool",
             "source_collection_stage_writeback_tool",
+            "challenge_cup_experiment_writeback_tool",
             "agent_message_tool",
         ),
         forbidden_tools=(
@@ -452,7 +454,11 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             *CODE_MUTATION_TOOLS,
             *SEARCH_DISABLED_TOOLS,
             HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
-            *CHALLENGE_CUP_LEDGER_SURFACE_TOOLS,
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
         ),
         write_scopes=("private", "team_workflow_ledger"),
         network_access="controlled",

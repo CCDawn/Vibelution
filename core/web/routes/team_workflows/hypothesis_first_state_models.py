@@ -65,7 +65,9 @@ ActionCommand = Literal[
     "open_next_review",
     "human_adjudication",
     "create_formal_run",
+    "retry_formal_node",
     "reconcile_formal_run",
+    "cancel_run",
     "archive_run",
     "retry_program_handoff",
     "record_program_review",
@@ -208,6 +210,10 @@ class RunActionPayload(StrictWireModel):
     runId: str = Field(..., min_length=1)
 
 
+class RetryFormalNodePayload(RunActionPayload):
+    nodeId: str = Field(..., min_length=1)
+
+
 class RetryProgramHandoffPayload(RunActionPayload):
     deliveryArtifactRef: str | None
 
@@ -232,6 +238,7 @@ ActionPayload = (
     | HumanAdjudicationPayload
     | CreateFormalRunPayload
     | RunActionPayload
+    | RetryFormalNodePayload
     | RetryProgramHandoffPayload
     | RecordProgramReviewPayload
     | CreateFormalRevisionPayload
@@ -254,7 +261,9 @@ _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
     "open_next_review": OpenNextReviewPayload,
     "human_adjudication": HumanAdjudicationPayload,
     "create_formal_run": CreateFormalRunPayload,
+    "retry_formal_node": RetryFormalNodePayload,
     "reconcile_formal_run": RunActionPayload,
+    "cancel_run": RunActionPayload,
     "archive_run": RunActionPayload,
     "retry_program_handoff": RetryProgramHandoffPayload,
     "record_program_review": RecordProgramReviewPayload,

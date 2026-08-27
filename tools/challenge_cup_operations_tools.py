@@ -1180,14 +1180,21 @@ def _canonical_writeback_authority(
     nested_agent_id = _text((runtime_agent or {}).get("agentId"))
     requested_actor = _text(recorded_by_agent)
     directory_agents = []
-    for lookup_agent_id in dict.fromkeys(
-        (runtime_agent_id, nested_agent_id, requested_actor)
-    ):
+    for lookup_agent_id in dict.fromkeys((runtime_agent_id, nested_agent_id)):
         if not lookup_agent_id:
             continue
         directory_agent = agent_directory_service.get_agent(lookup_agent_id)
         if isinstance(directory_agent, dict):
             directory_agents.append(directory_agent)
+
+    # The model-supplied actor may identify a managed surface, but it is not an
+    # authentication source. Canonical writes derive identity from the active
+    # runtime and its task binding below.
+    requested_actor_record = (
+        agent_directory_service.get_agent(requested_actor)
+        if requested_actor
+        else None
+    )
 
     agent_sources = [
         item
@@ -1196,6 +1203,14 @@ def _canonical_writeback_authority(
     ]
     product_role_ids = set(CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_role_ids)
     runtime_role = _text(runtime.get("roleKey")).lower()
+    managed_signal_sources = [
+        *agent_sources,
+        *(
+            [requested_actor_record]
+            if isinstance(requested_actor_record, dict)
+            else []
+        ),
+    ]
     has_managed_signal = (
         runtime_role in product_role_ids
         or runtime_role.startswith("challenge_cup_")
@@ -1204,7 +1219,7 @@ def _canonical_writeback_authority(
                 item,
                 product_role_ids=product_role_ids,
             )
-            for item in agent_sources
+            for item in managed_signal_sources
         )
     )
     if not has_managed_signal:
@@ -1231,7 +1246,6 @@ def _canonical_writeback_authority(
         for value in (
             runtime_agent_id,
             nested_agent_id,
-            requested_actor,
             *(_text(item.get("agentId")) for item in agent_sources),
         )
         if _text(value)

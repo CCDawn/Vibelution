@@ -136,6 +136,8 @@ class WorkflowRunInputSnapshot:
     workflowSessionScopeV3: dict[str, str]
     researchScopeEnvelope: dict[str, Any]
     catalogScope: dict[str, Any]
+    hypothesisSelection: dict[str, Any]
+    hypothesisConvergenceHandoff: dict[str, Any]
     snapshotHash: str
 
     @classmethod
@@ -193,6 +195,16 @@ class WorkflowRunInputSnapshot:
                 question_id=canonical["questionId"],
             )
             canonical["catalogScope"] = _normalize_catalog_scope(payload)
+        if "hypothesisSelection" in payload:
+            canonical["hypothesisSelection"] = require_mapping(
+                payload,
+                "hypothesisSelection",
+            )
+        if "hypothesisConvergenceHandoff" in payload:
+            canonical["hypothesisConvergenceHandoff"] = require_mapping(
+                payload,
+                "hypothesisConvergenceHandoff",
+            )
         raw_scope_mode = payload.get("workflowSessionScopeV3")
         if raw_scope_mode is None:
             canonical["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
@@ -249,6 +261,12 @@ class WorkflowRunInputSnapshot:
                 canonical.get("researchScopeEnvelope") or {}
             ),
             catalogScope=copy.deepcopy(canonical.get("catalogScope") or {}),
+            hypothesisSelection=copy.deepcopy(
+                canonical.get("hypothesisSelection") or {}
+            ),
+            hypothesisConvergenceHandoff=copy.deepcopy(
+                canonical.get("hypothesisConvergenceHandoff") or {}
+            ),
             snapshotHash=snapshot_hash,
         )
 
@@ -283,6 +301,14 @@ class WorkflowRunInputSnapshot:
                 self.researchScopeEnvelope
             )
             payload["catalogScope"] = copy.deepcopy(self.catalogScope)
+        if self.hypothesisSelection:
+            payload["hypothesisSelection"] = copy.deepcopy(
+                self.hypothesisSelection
+            )
+        if self.hypothesisConvergenceHandoff:
+            payload["hypothesisConvergenceHandoff"] = copy.deepcopy(
+                self.hypothesisConvergenceHandoff
+            )
         if self.evidenceRemediationContract:
             payload["evidenceRemediationContract"] = copy.deepcopy(
                 self.evidenceRemediationContract

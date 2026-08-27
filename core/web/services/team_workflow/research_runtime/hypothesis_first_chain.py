@@ -1211,6 +1211,7 @@ def _submit_formal_v2_command(
     team_id: str,
     *,
     run_id: str,
+    node_id: str = "",
     command: str,
     idempotency_key: str,
     output_record_id: str = "",
@@ -1239,7 +1240,63 @@ def _submit_formal_v2_command(
     except ValueError as exc:
         raise HypothesisFirstChainError(f"unsupported formal command: {command}") from exc
     payload: dict[str, Any] = {}
-    node_id: str | None = None
+    command_node_id: str | None = None
+    command_idempotency_key = idempotency_key
+    if kind is WorkflowCommandKind.RETRY_NODE:
+        requested_node_id = str(node_id or "").strip()
+        if not requested_node_id:
+            raise HypothesisFirstChainError("retry_node requires nodeId")
+        snapshot = get_query_service().get_snapshot(
+            team_id=team_id,
+            run_id=run.run_id,
+        )
+        snapshot_payload = snapshot.to_dict() if hasattr(snapshot, "to_dict") else snapshot
+        offers = (
+            list(snapshot_payload.get("commandOffers") or [])
+            if isinstance(snapshot_payload, Mapping)
+            else []
+        )
+        offer = next(
+            (
+                item
+                for item in offers
+                if isinstance(item, Mapping)
+                and str(item.get("command") or "") == WorkflowCommandKind.RETRY_NODE.value
+                and str(item.get("nodeId") or "").strip() == requested_node_id
+                and item.get("available") is True
+            ),
+            None,
+        )
+        if offer is None:
+            raise HypothesisFirstChainError(
+                "formal node retry offer is unavailable or no longer matches the node"
+            )
+        offered_version = offer.get("expectedRunVersion")
+        if offered_version is not None:
+            try:
+                if int(offered_version) != int(run.run_version):
+                    raise HypothesisFirstChainError(
+                        "formal node retry offer is stale"
+                    )
+            except (TypeError, ValueError) as exc:
+                raise HypothesisFirstChainError(
+                    "formal node retry offer has an invalid run version"
+                ) from exc
+        offered_payload = offer.get("payload")
+        if not isinstance(offered_payload, Mapping):
+            raise HypothesisFirstChainError(
+                "formal node retry offer has an invalid payload"
+            )
+        offered_idempotency_key = str(
+            offer.get("idempotencyKey") or ""
+        ).strip()
+        if not offered_idempotency_key:
+            raise HypothesisFirstChainError(
+                "formal node retry offer has no idempotency key"
+            )
+        command_node_id = requested_node_id
+        payload = dict(offered_payload)
+        command_idempotency_key = offered_idempotency_key
     if kind is WorkflowCommandKind.FORK_REVISION:
         snapshot = get_query_service().get_snapshot(team_id=team_id, run_id=run.run_id)
         snapshot_payload = snapshot.to_dict() if hasattr(snapshot, "to_dict") else snapshot
@@ -1269,10 +1326,10 @@ def _submit_formal_v2_command(
             raise HypothesisFirstChainError(
                 "formal revision checkpoint is unavailable"
             )
-        node_id = "hypothesis_design"
+        command_node_id = "hypothesis_design"
         payload = {
             **offered_payload,
-            "fromNodeId": node_id,
+            "fromNodeId": command_node_id,
             "checkpointId": checkpoint_id,
             "reason": f"Challenge Program review requested revision ({output_record_id})",
             "postApprovalRevision": True,
@@ -1287,9 +1344,9 @@ def _submit_formal_v2_command(
                 run_id=run.run_id,
                 team_id=team_id,
                 command=kind,
-                node_id=node_id,
+                node_id=command_node_id,
                 expected_run_version=int(run.run_version),
-                idempotency_key=idempotency_key,
+                idempotency_key=command_idempotency_key,
                 payload=payload,
                 requested_by=ActorRef("user", actor_id or "operator"),
                 requested_at_ms=int(time.time() * 1000),
@@ -1895,12 +1952,30 @@ def _execute_v2_command_impl(
                     "maxRetries": 2,
                 },
                 idempotency_key=idempotency_key,
+                formal_hypothesis_round_id=str(
+                    payload.get("hypothesisRoundId") or ""
+                ),
+            )
+        elif command == "retry_formal_node":
+            result = _submit_formal_v2_command(
+                normalized_team_id,
+                run_id=str(payload.get("runId") or ""),
+                node_id=str(payload.get("nodeId") or ""),
+                command="retry_node",
+                idempotency_key=idempotency_key,
             )
         elif command == "reconcile_formal_run":
             result = _submit_formal_v2_command(
                 normalized_team_id,
                 run_id=str(payload.get("runId") or ""),
                 command="reconcile_run",
+                idempotency_key=idempotency_key,
+            )
+        elif command == "cancel_run":
+            result = _submit_formal_v2_command(
+                normalized_team_id,
+                run_id=str(payload.get("runId") or ""),
+                command="cancel_run",
                 idempotency_key=idempotency_key,
             )
         elif command == "archive_run":

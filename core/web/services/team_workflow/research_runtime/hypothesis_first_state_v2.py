@@ -483,6 +483,52 @@ def _command_action(
     }
 
 
+def _formal_retry_actions(
+    *,
+    run_id: str,
+    snapshot: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Project only server-authorized formal retry offers.
+
+    The formal query snapshot is the authority for node retryability.  A
+    failed-looking attempt in another read model must not manufacture a retry
+    action, and the V2 action deliberately carries only the stable run/node
+    identity; the chain adapter re-reads the offer before submitting it.
+    """
+
+    raw_offers = snapshot.get("commandOffers")
+    if not isinstance(raw_offers, Sequence) or isinstance(raw_offers, (str, bytes)):
+        return []
+    actions: list[dict[str, Any]] = []
+    seen_node_ids: set[str] = set()
+    for raw_offer in raw_offers:
+        if not isinstance(raw_offer, Mapping):
+            continue
+        if raw_offer.get("available") is not True:
+            continue
+        if str(raw_offer.get("command") or "").strip() != "retry_node":
+            continue
+        node_id = str(raw_offer.get("nodeId") or "").strip()
+        offer_idempotency_key = str(
+            raw_offer.get("idempotencyKey") or ""
+        ).strip()
+        if not node_id or not offer_idempotency_key or node_id in seen_node_ids:
+            continue
+        seen_node_ids.add(node_id)
+        label = str(raw_offer.get("label") or "").strip() or f"重试正式节点 {node_id}"
+        action = _command_action(
+            "retry_formal_node",
+            action_id=f"retry-formal-node:{run_id}:{node_id}",
+            label=label,
+            target_phase="formal_runtime",
+            target_node_id=node_id,
+            payload={"runId": run_id, "nodeId": node_id},
+        )
+        action["idempotencyKey"] = offer_idempotency_key
+        actions.append(action)
+    return actions
+
+
 def _navigation_anchor(
     *,
     question_id: str,
@@ -1721,6 +1767,20 @@ def _project_formal_and_program(
                 )
             )
         return formal, empty_program, problems, actions, "formal_runtime"
+    if run_status == "queued":
+        actions.append(
+            _command_action(
+                "cancel_run",
+                action_id=f"cancel-formal-run:{current_id}",
+                label="取消当前正式运行",
+                target_phase="formal_runtime",
+                target_node_id="formal_runtime",
+                payload={"runId": current_id},
+                requires_confirmation=True,
+                confirmation_text="取消后需归档当前运行，才可重新创建正式研究运行。",
+            )
+        )
+        return formal, empty_program, problems, actions, "formal_runtime"
     if run_status in {"failed", "cancelled"}:
         actions.append(
             _command_action(
@@ -1735,16 +1795,23 @@ def _project_formal_and_program(
             )
         )
         return formal, empty_program, problems, actions, "formal_runtime"
-    if run_status in {"blocked", "reconciliation_required"}:
-        actions.append(
-            _command_action(
-                "reconcile_formal_run",
-                label="修复正式研究运行",
-                target_phase="formal_runtime",
-                target_node_id="formal_runtime",
-                payload={"runId": current_id},
+    retry_actions = _formal_retry_actions(run_id=current_id, snapshot=current_snapshot)
+    if run_status in {"running", "blocked", "waiting_human"} and retry_actions:
+        actions.extend(retry_actions)
+        return formal, empty_program, problems, actions, "formal_runtime"
+    if run_status == "reconciliation_required":
+        if retry_actions:
+            actions.extend(retry_actions)
+        else:
+            actions.append(
+                _command_action(
+                    "reconcile_formal_run",
+                    label="修复正式研究运行",
+                    target_phase="formal_runtime",
+                    target_node_id="formal_runtime",
+                    payload={"runId": current_id},
+                )
             )
-        )
         return formal, empty_program, problems, actions, "formal_runtime"
     if run_status not in {"succeeded", "archived"}:
         return formal, empty_program, problems, actions, "formal_runtime"
@@ -2858,10 +2925,16 @@ def project_state_from_records(
     # imported Challenge Program output already owns the next phase; emitting
     # the creation command there would let a first-enabled-command consumer
     # fork duplicate formal runs.
-    if converged and formal_phase is None:
+    confirmed_candidate_id = str(
+        (meta_review or {}).get("recommendationCandidateId") or ""
+    ).strip()
+    if converged and formal_phase is None and confirmed_candidate_id:
         allowed_actions.append(
             _command_action(
                 "create_formal_run",
+                action_id=(
+                    f"create-formal-run-v2:{convergence['latestHypothesisRoundId']}"
+                ),
                 label="创建正式研究运行",
                 target_phase="formal_runtime",
                 target_node_id="formal_runtime",

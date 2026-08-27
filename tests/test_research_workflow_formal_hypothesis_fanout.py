@@ -472,7 +472,7 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
 ) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
-        harness.seed_run(run_id="run-1")
+        harness.seed_run(run_id="run-1", workflow_id="ledger-workflow")
         harness.service.submit(
             harness.request(run_id="run-1", idempotency_key="start-live-selection")
         )
@@ -485,7 +485,6 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
             "teamId": "team-1",
             "projectId": "project-1",
             "questionId": "SCI-096",
-            "workflowId": "challenge-cup-research",
             "workflowVersionId": "v2.1",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": False},
@@ -540,9 +539,16 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
             lambda **_kwargs: fan_out,
         )
         observed: list[dict[str, Any]] = []
+        authority_ids: list[tuple[str, str]] = []
 
         def create_fan_out(**kwargs):
             observed.append(dict(kwargs["fan_out"]))
+            authority_ids.append(
+                (
+                    kwargs["challenge_task_contract"]["workflowId"],
+                    kwargs["model_invocation_receipt_binding"]["workflowId"],
+                )
+            )
             return AgentTaskHandle(
                 session_id="root-live",
                 session_attempt=1,
@@ -556,6 +562,7 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
 
         assert handle.task_id == "task-live"
         assert observed and observed[0]["selectionId"] == "selection-live"
+        assert authority_ids == [("ledger-workflow", "ledger-workflow")]
         payload = json.loads(
             next(
                 item
