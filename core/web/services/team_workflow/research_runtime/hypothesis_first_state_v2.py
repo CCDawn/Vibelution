@@ -2317,8 +2317,32 @@ def project_state_from_records(
                 str(existing.get("updatedAt") or ""),
             ):
                 dispatch_attempt_by_candidate[candidate] = record
+    # A selection records the candidates chosen for the overall review, while
+    # each round may deliberately fan out to only one candidate.  Once a
+    # round has a durable link, that link (plus any durable dispatch intent
+    # for the same round) is the authority for the round's candidate set.
+    # Without a link, keep the selection-wide set so interrupted/legacy
+    # dispatches still expose untouched siblings for recovery.
+    review_candidate_ids = list(selected_candidate_ids)
+    linked_candidate_ids = _ordered_link_candidate_ids(active_links)
+    if linked_candidate_ids:
+        durable_round_candidate_ids = list(linked_candidate_ids)
+        for candidate_id in dispatch_attempt_by_candidate:
+            if candidate_id not in durable_round_candidate_ids:
+                durable_round_candidate_ids.append(candidate_id)
+        review_candidate_ids = [
+            candidate_id
+            for candidate_id in selected_candidate_ids
+            if candidate_id in durable_round_candidate_ids
+        ]
+        review_candidate_ids.extend(
+            candidate_id
+            for candidate_id in durable_round_candidate_ids
+            if candidate_id not in review_candidate_ids
+        )
+
     review_candidates = []
-    for order, candidate_id in enumerate(selected_candidate_ids):
+    for order, candidate_id in enumerate(review_candidate_ids):
         link = link_by_candidate.get(candidate_id)
         meeting = meeting_by_id.get(str((link or {}).get("meetingRoundId") or ""))
         review_candidates.append(

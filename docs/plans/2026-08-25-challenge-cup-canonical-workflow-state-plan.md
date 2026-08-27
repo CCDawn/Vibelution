@@ -655,9 +655,12 @@ V2 的 per-question scope 以官方目录为边界，而不是以 Challenge Prog
 
 ### 5.4 评审扇出/汇合
 
-后端从 selection 冻结预期候选集合：
+后端按轮次解析预期候选集合（与执行层 `_review_meeting_fan_in_group` 的既有契约一致）：
 
-`expected = selectedCandidateIds sorted by candidateOrder`
+- 第 1 轮（初次扇出）：`expected = selectedCandidateIds sorted by candidateOrder`（selection 冻结全集）；
+- 第 2+ 轮（资料交接后的针对性重审）：`expected = 该轮 durable review_round_links 实际绑定的候选集合`（`open_next_review_meeting` 默认继承上一轮 scope，允许只对部分候选扇出），并集上同轮的 durable dispatch intent。
+
+尚无任何 link 的轮次仍以 selection 全集投影，保证中断/legacy 扇出能暴露未触及兄弟候选以便恢复。
 
 每个候选使用稳定 identity：
 
@@ -669,7 +672,7 @@ V2 的 per-question scope 以官方目录为边界，而不是以 Challenge Prog
 2. `summarization`：纪要生成、草稿校验、失败；
 3. `approval`：等待人工、accepted/rejected/revised。
 
-聚合不以“查到多少会议”为分母，而以 selection 冻结的 expected 集合为分母：
+聚合不以“查到多少会议”为分母，而以按上述轮次规则解析出的 expected 集合为分母：
 
 - `total = expected.length`；
 - `completed`：该候选达到本轮规定的 approval terminal；
