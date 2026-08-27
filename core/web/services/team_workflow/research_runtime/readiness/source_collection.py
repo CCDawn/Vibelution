@@ -107,22 +107,19 @@ def evaluate_source_extraction(
 ) -> DomainVerdict:
     blockers: list[Any] = []
     stats = context.candidate_stats(run.team_id, run.run_id)
-    if stats is None:
+    if stats is None or int(stats.get("record_count") or 0) <= 0:
+        # The finding stage owns the candidate store; an empty store after a
+        # "succeeded" finding attempt means its artifacts never materialized
+        # (e.g. a restart killed the agent turn mid-flight).  Point the user at
+        # re-running that idempotent stage instead of retrying extraction.
         blockers.append(
             blocker(
                 "source_candidates_missing",
                 "没有可提炼的资料",
-                "资料权威存储中没有属于当前运行的候选资料",
-                remediation_kind=None,
-            )
-        )
-    elif int(stats.get("record_count") or 0) <= 0:
-        blockers.append(
-            blocker(
-                "source_candidates_missing",
-                "没有可提炼的资料",
-                "资料权威存储中没有属于当前运行的候选资料",
-                remediation_kind=None,
+                "资料权威存储中没有属于当前运行的候选资料，请重跑资料寻找以重建候选",
+                remediation_kind=RemediationKind.RETRY,
+                remediation_label="重跑资料寻找",
+                target_node_id="source_finding",
             )
         )
     return DomainVerdict(

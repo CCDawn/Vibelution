@@ -409,3 +409,201 @@ def test_start_offer_payload_carries_blocker_wording(tmp_path: Path) -> None:
         assert "资料缺口请求" in str(blocked.payload.get("blocker_detail"))
     finally:
         harness.close()
+
+
+def _seed_finding_rerun_run(
+    harness: CommandHarness,
+    *,
+    run_id: str,
+    run_status: str,
+    blocked_problem_json: str | None,
+    attempt_status: str,
+) -> None:
+    """Seed a run plus one source_finding attempt in one ledger transaction."""
+
+    import json as _json
+    from dataclasses import replace
+
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_command_record,
+        build_event_record,
+        build_run_record,
+    )
+
+    run = replace(
+        build_run_record(
+            run_id=run_id, status=run_status, run_version=2, last_event_sequence=1
+        ),
+        blocked_problem_json=blocked_problem_json,
+    )
+
+    def mutate(uow):
+        uow.repository.insert_run(run)
+        uow.repository.insert_event(
+            build_event_record(
+                sequence=1,
+                run_id=run_id,
+                event_type="run_created",
+                event_id=f"evt-created-{run_id}",
+            )
+        )
+        uow.repository.insert_command(
+            build_command_record(
+                command_id=f"cmd-{run_id}-a1",
+                run_id=run_id,
+                node_id="source_finding",
+                command_kind="start_node",
+                idempotency_key=f"seed-{run_id}",
+            )
+        )
+        uow.repository.insert_attempt(
+            build_attempt_record(
+                node_run_id=f"nr-{run_id}-a1",
+                run_id=run_id,
+                node_id="source_finding",
+                status=attempt_status,
+                command_id=f"cmd-{run_id}-a1",
+                attempt=1,
+            )
+        )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def test_succeeded_finding_rerun_offer_available_and_executable(
+    tmp_path: Path,
+) -> None:
+    """A restart can kill the agent turn after the ledger already marked
+    source_finding succeeded, leaving the candidate store empty and the run
+    blocked on source_candidates_missing.  Re-running the idempotent finding
+    stage is the only recovery, so its retry offer must be available and
+    executable as signed."""
+    import json as _json
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_finding_rerun_run(
+            harness,
+            run_id="run-finding-rerun",
+            run_status="blocked",
+            blocked_problem_json=_json.dumps(
+                {"code": "auto_advance_not_ready", "detail": "source_candidates_missing"}
+            ),
+            attempt_status="succeeded",
+        )
+
+        snap = _query(harness).get_snapshot(
+            team_id="research-team", run_id="run-finding-rerun"
+        )
+        retry = next(
+            offer
+            for offer in snap.command_offers
+            if offer.command == WorkflowCommandKind.RETRY_NODE
+            and offer.node_id == "source_finding"
+        )
+        assert retry.available is True
+        assert retry.label == "重跑 资料寻找"
+
+        receipt = harness.service.submit(
+            harness.request(
+                run_id="run-finding-rerun",
+                command=retry.command,
+                node_id=retry.node_id,
+                expected_run_version=retry.expected_run_version,
+                idempotency_key=retry.idempotency_key,
+                payload=dict(retry.payload),
+            )
+        )
+        assert receipt.status == "accepted"
+        latest = harness.store.latest_attempt("run-finding-rerun", "source_finding")
+        assert latest is not None
+        assert latest.attempt == 2
+        assert latest.status == "starting"
+    finally:
+        harness.close()
+
+
+def test_succeeded_finding_rerun_offer_unavailable_on_healthy_run(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_finding_rerun_run(
+            harness,
+            run_id="run-finding-healthy",
+            run_status="running",
+            blocked_problem_json=None,
+            attempt_status="succeeded",
+        )
+
+        snap = _query(harness).get_snapshot(
+            team_id="research-team", run_id="run-finding-healthy"
+        )
+        retry = next(
+            offer
+            for offer in snap.command_offers
+            if offer.command == WorkflowCommandKind.RETRY_NODE
+            and offer.node_id == "source_finding"
+        )
+        assert retry.available is False
+    finally:
+        harness.close()
+
+
+def test_succeeded_node_rerun_available_requires_blocker_gap() -> None:
+    """Only the whitelisted idempotent node blocked on its own missing
+    artifacts may re-run after success; every other combination stays under
+    the strict non-retryable contract."""
+    import json as _json
+    from dataclasses import replace
+
+    from core.web.services.team_workflow.research_runtime.command_offers.retry_node import (
+        succeeded_node_rerun_available,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_run_record,
+    )
+
+    run = replace(
+        build_run_record(status="blocked"),
+        blocked_problem_json=_json.dumps(
+            {"code": "auto_advance_not_ready", "detail": "source_candidates_missing"}
+        ),
+    )
+    latest = build_attempt_record(node_id="source_finding", status="succeeded")
+    assert succeeded_node_rerun_available(
+        node_id="source_finding", latest=latest, run=run
+    )
+
+    blocked_problem_cases = (
+        None,
+        "",
+        "not-json",
+        _json.dumps({"code": "auto_advance_not_ready", "detail": "other_gap"}),
+        _json.dumps({"code": "other_code", "detail": "source_candidates_missing"}),
+    )
+    for problem_json in blocked_problem_cases:
+        assert not succeeded_node_rerun_available(
+            node_id="source_finding",
+            latest=latest,
+            run=replace(run, blocked_problem_json=problem_json),
+        ), problem_json
+
+    assert not succeeded_node_rerun_available(
+        node_id="source_extraction", latest=latest, run=run
+    )
+    assert not succeeded_node_rerun_available(
+        node_id="source_finding",
+        latest=build_attempt_record(node_id="source_finding", status="running"),
+        run=run,
+    )
+    assert not succeeded_node_rerun_available(
+        node_id="source_finding",
+        latest=latest,
+        run=build_run_record(status="running"),
+    )
+    assert not succeeded_node_rerun_available(
+        node_id="source_finding", latest=None, run=run
+    )

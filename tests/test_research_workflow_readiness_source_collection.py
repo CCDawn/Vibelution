@@ -74,6 +74,25 @@ def test_sci096_missing_candidates_blocks_source_extraction() -> None:
     assert result.blockers[0].detail
 
 
+def test_missing_candidates_blocker_points_to_finding_rerun() -> None:
+    """Empty candidate store after a succeeded finding attempt must remediate
+    by re-running the idempotent finding stage, not by retrying extraction."""
+    from core.research.workflow.contracts.node_readiness import RemediationKind
+
+    for stats in (None, {"record_count": 0}):
+        service = _service()
+        context = FakeDomainContext()
+        context._candidate_stats = stats
+        result = _evaluate(service, context, "source_extraction")
+        blocker = next(
+            b for b in result.blockers if b.code == "source_candidates_missing"
+        )
+        assert blocker.remediation is not None
+        assert blocker.remediation.kind == RemediationKind.RETRY
+        assert blocker.remediation.label == "重跑资料寻找"
+        assert blocker.remediation.target_node_id == "source_finding"
+
+
 def test_source_extraction_ready_with_candidates() -> None:
     service = _service()
     context = FakeDomainContext()
