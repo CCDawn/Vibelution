@@ -1398,6 +1398,270 @@ def _retired_lifecycle_payload(*, operation: str, instance_id: str = "") -> dict
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Lifecycle settlement visibility (CLI visible-success / visible-failure).
+#
+# The native shim forwards start|stop|restart|rebuild-and-start through this
+# bridge (`--action launch-desktop-shell --then-lifecycle <op>`). Electron main
+# owns the command (ADR 0009) and consumes it asynchronously through the
+# main-line queue, which persists `main_line_intent.json` and — since
+# 00b5136b5 — always writes `results/<commandId>.json` when the command
+# settles (success, rejection, error, or timeout). Without waiting for that
+# settlement the shim exited 0 as soon as the Electron process was spawned,
+# so an active-work rejection or a stranded intent looked like silent success.
+# ---------------------------------------------------------------------------
+
+LIFECYCLE_SETTLEMENT_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start"}
+_LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS = {
+    # Electron may reroute a start against a reachable but non-reusable
+    # backend through restart (main.ts main-line preflight), so the settled
+    # intent operation can be a superset of the requested operation.
+    "start": ("start", "restart"),
+    "stop": ("stop", "shutdown", "force-stop"),
+    "force-stop": ("force-stop", "shutdown"),
+    "restart": ("restart",),
+    "rebuild-and-start": ("rebuild-and-start", "restart"),
+}
+DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS = 90.0
+_LIFECYCLE_REUSE_GRACE_SECONDS = 12.0
+_LIFECYCLE_SETTLE_POLL_SECONDS = 0.5
+_LIFECYCLE_SETTLE_EXIT_FAILED = 3
+
+
+def _runtime_manager_dir_for(workspace_root: Path) -> Path:
+    try:
+        runtime_home = resolve_active_project_storage_paths(workspace_root).runtime
+    except Exception:  # storage resolution must never break CLI visibility
+        runtime_home = Path(workspace_root) / ".runtime"
+    return runtime_home / "runtime-manager"
+
+
+def _read_json_object(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _read_main_line_intent_snapshot(runtime_manager_dir: Path) -> dict[str, object]:
+    intent = _read_json_object(runtime_manager_dir / "main_line_intent.json")
+    command_id = str(intent.get("commandId") or "").strip() if intent else ""
+    # The id names a results/<commandId>.json path; only queue-generated ids
+    # (cmd_<timestamp>_<hex>) may ever be turned into a filesystem path here.
+    if not re.fullmatch(r"cmd_[A-Za-z0-9_\-]+", command_id or ""):
+        return {}
+    return intent
+
+
+def _read_main_line_settlement(runtime_manager_dir: Path, command_id: str) -> dict[str, object] | None:
+    result = _read_json_object(runtime_manager_dir / "results" / f"{command_id}.json")
+    return result or None
+
+
+def _workbench_health_ok(workspace_root: Path) -> bool:
+    """Probe the managed workbench backend health (used for start-reuse only)."""
+    state = _read_json_object(
+        resolve_active_project_storage_paths(workspace_root).runtime / "launcher" / "state.json"
+    )
+    port = int(state.get("backendPort") or state.get("port") or 0) or _workbench_port()
+    url = f"http://{DEFAULT_HOST}:{int(port)}/api/health"
+    try:
+        with urllib.request.urlopen(url, timeout=2.0) as response:  # noqa: S310 - loopback probe
+            return int(getattr(response, "status", 0) or 0) == 200
+    except (OSError, ValueError):
+        return False
+
+
+def _settlement_payload(
+    *,
+    operation: str,
+    observed: str,
+    accepted: bool,
+    message: str,
+    command_id: str = "",
+    code: str = "",
+    results_path: Path | None = None,
+) -> dict[str, object]:
+    return {
+        "operation": operation,
+        "observed": observed,
+        "settled": observed in {"queue_settlement", "reuse_backend_healthy"},
+        "accepted": bool(accepted),
+        "ok": bool(accepted),
+        "commandId": str(command_id),
+        "code": str(code),
+        "message": str(message),
+        "resultsPath": str(results_path or ""),
+    }
+
+
+def _intent_updated_at_epoch(intent: dict[str, object]) -> float:
+    raw = str(intent.get("updatedAt") or "").strip()
+    if not raw:
+        return 0.0
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        return datetime.fromisoformat(normalized).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def wait_for_lifecycle_settlement(
+    workspace_root: Path,
+    operation: str,
+    *,
+    baseline_command_id: str = "",
+    not_before_epoch: float = 0.0,
+    timeout_seconds: float = DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,
+    reuse_grace_seconds: float = _LIFECYCLE_REUSE_GRACE_SECONDS,
+    sleep=time.sleep,
+    monotonic=time.monotonic,
+    health_probe=None,
+) -> dict[str, object]:
+    """Wait for the Electron main-line queue to settle one lifecycle command.
+
+    Returns a settlement payload describing whether the command was consumed
+    and whether it was accepted, so the CLI can fail visibly instead of
+    reporting a silent success. Never spawns or signals any process.
+    An intent whose updatedAt predates ``not_before_epoch`` belongs to an
+    earlier command and is ignored, so a stranded historical intent can never
+    be mistaken for this launch's settlement.
+    """
+
+    operation = str(operation or "").strip().lower()
+    variants = _LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS.get(operation, (operation,))
+    runtime_manager_dir = _runtime_manager_dir_for(workspace_root)
+    probe_health = health_probe or (lambda: _workbench_health_ok(workspace_root))
+    started_at = monotonic()
+    deadline = started_at + max(1.0, float(timeout_seconds))
+    reuse_deadline = (
+        started_at + max(0.0, float(reuse_grace_seconds)) if operation == "start" else 0.0
+    )
+    reuse_checked = False
+    while True:
+        intent = _read_main_line_intent_snapshot(runtime_manager_dir)
+        command_id = str(intent.get("commandId") or "").strip()
+        intent_operation = str(intent.get("operation") or "").strip().lower()
+        intent_epoch = _intent_updated_at_epoch(intent)
+        intent_is_fresh = not_before_epoch <= 0.0 or intent_epoch <= 0.0 or intent_epoch >= not_before_epoch - 2.0
+        if command_id and command_id != baseline_command_id and intent_operation in variants and intent_is_fresh:
+            results_path = runtime_manager_dir / "results" / f"{command_id}.json"
+            while True:
+                settlement = _read_main_line_settlement(runtime_manager_dir, command_id)
+                if settlement is not None:
+                    accepted = bool(settlement.get("accepted"))
+                    message = str(settlement.get("message") or "").strip()
+                    code = str(settlement.get("code") or "").strip()
+                    if not accepted and code != "active_work_blocked" and message:
+                        message = f"Launcher 命令被拒绝：{message}"
+                    _append_log(
+                        "desktop_entry_python.lifecycle_settlement.observed",
+                        level="info" if accepted else "warning",
+                        operation=operation,
+                        command_id=command_id,
+                        accepted=accepted,
+                        code=code,
+                    )
+                    return _settlement_payload(
+                        operation=operation,
+                        observed="queue_settlement",
+                        accepted=accepted,
+                        message=message or ("命令已结算。" if accepted else "命令结算为失败。"),
+                        command_id=command_id,
+                        code=code,
+                        results_path=results_path,
+                    )
+                if monotonic() >= deadline:
+                    _append_log(
+                        "desktop_entry_python.lifecycle_settlement.unsettled",
+                        level="warning",
+                        operation=operation,
+                        command_id=command_id,
+                    )
+                    return _settlement_payload(
+                        operation=operation,
+                        observed="intent_unsettled",
+                        accepted=False,
+                        message=(
+                            f"Launcher 生命周期命令 {operation}（{command_id}）在 "
+                            f"{int(timeout_seconds)}s 内未结算。结果将写入 {results_path}，请稍后查看。"
+                        ),
+                        command_id=command_id,
+                        results_path=runtime_manager_dir / "results",
+                    )
+                sleep(_LIFECYCLE_SETTLE_POLL_SECONDS)
+        if reuse_deadline and not reuse_checked and monotonic() >= reuse_deadline:
+            # A start against an already-open, healthy workbench is settled by
+            # the reuse path in Electron main without a queue command, so no
+            # intent or result is written for it. Health then is the only
+            # observable evidence that the requested state holds.
+            reuse_checked = True
+            if probe_health():
+                _append_log(
+                    "desktop_entry_python.lifecycle_settlement.reuse_healthy",
+                    operation=operation,
+                )
+                return _settlement_payload(
+                    operation=operation,
+                    observed="reuse_backend_healthy",
+                    accepted=True,
+                    message="Workbench 已在运行，命令通过复用路径结算。",
+                )
+        if monotonic() >= deadline:
+            _append_log(
+                "desktop_entry_python.lifecycle_settlement.unconsumed",
+                level="warning",
+                operation=operation,
+            )
+            return _settlement_payload(
+                operation=operation,
+                observed="intent_not_consumed",
+                accepted=False,
+                message=(
+                    f"Launcher 生命周期命令 {operation} 未被消费：等待 {int(timeout_seconds)}s "
+                    "内未出现新的 main-line 意图。请确认 Electron 控制面是否存活，"
+                    f"并查看 {runtime_manager_dir / 'results'}。"
+                ),
+                results_path=runtime_manager_dir / "results",
+            )
+        sleep(_LIFECYCLE_SETTLE_POLL_SECONDS)
+
+
+def _await_launch_lifecycle_settlement(
+    args: argparse.Namespace,
+    payload: dict[str, object],
+    *,
+    not_before_epoch: float = 0.0,
+) -> dict[str, object]:
+    lifecycle = str(payload.get("thenLifecycle") or "").strip().lower()
+    if lifecycle not in LIFECYCLE_SETTLEMENT_OPERATIONS:
+        return payload
+    workspace_root = _workspace_root(args)
+    runtime_manager_dir = _runtime_manager_dir_for(workspace_root)
+    baseline = _read_main_line_intent_snapshot(runtime_manager_dir)
+    settlement = wait_for_lifecycle_settlement(
+        workspace_root,
+        lifecycle,
+        baseline_command_id=str(baseline.get("commandId") or ""),
+        not_before_epoch=not_before_epoch,
+        timeout_seconds=float(
+            getattr(args, "lifecycle_settle_timeout", 0.0) or DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+        ),
+    )
+    payload["lifecycleSettlement"] = settlement
+    payload["ok"] = bool(settlement.get("accepted"))
+    _append_log(
+        "desktop_entry_python.desktop_shell.lifecycle_settlement",
+        level="info" if settlement.get("accepted") else "warning",
+        operation=lifecycle,
+        observed=str(settlement.get("observed") or ""),
+        accepted=bool(settlement.get("accepted")),
+        command_id=str(settlement.get("commandId") or ""),
+    )
+    return payload
+
+
 _BRANCH_INSTANCE_OPERATIONS = {
     "start",
     "stop",
@@ -1602,6 +1866,9 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
 def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     from core.launcher.desktop_shell import launch_desktop_shell
 
+    # Capture the freshness floor before spawning Electron so an intent written
+    # by this launch can never be confused with a stranded historical one.
+    not_before_epoch = time.time()
     payload = launch_desktop_shell(
         project_root=_workspace_root(args),
         then_lifecycle=str(args.then_lifecycle or ""),
@@ -1614,6 +1881,7 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
         then_lifecycle=str(payload.get("thenLifecycle") or ""),
         open_workbench=bool(payload.get("openWorkbench")),
     )
+    payload = _await_launch_lifecycle_settlement(args, payload, not_before_epoch=not_before_epoch)
     return payload
 
 
@@ -1689,6 +1957,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--open-workbench",
         action="store_true",
         help="Ask Electron main to open or focus the workbench window after launch.",
+    )
+    parser.add_argument(
+        "--lifecycle-settle-timeout",
+        type=float,
+        default=DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,
+        help=(
+            "Seconds to wait for the Electron main-line queue to settle a "
+            "--then-lifecycle start|stop|force-stop|restart|rebuild-and-start "
+            "command before reporting a visible failure (0 falls back to the "
+            "default budget)."
+        ),
     )
     parser.add_argument(
         "--force-refresh",
@@ -1797,12 +2076,23 @@ def main(argv: list[str] | None = None) -> int:
                 print("Desktop shell refreshed")
         elif action == "launch-desktop-shell":
             payload = _launch_desktop_shell_bridge(args)
+            settlement = payload.get("lifecycleSettlement") or {}
             if args.output == "json":
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(
                     f"Desktop shell launched kind={payload.get('kind')} pid={payload.get('pid')}"
                 )
+                if settlement:
+                    print(
+                        f"Lifecycle {settlement.get('operation')} "
+                        f"observed={settlement.get('observed')} accepted={settlement.get('accepted')}"
+                    )
+                    message = str(settlement.get("message") or "").strip()
+                    if message:
+                        print(message)
+            _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
+            return _LIFECYCLE_SETTLE_EXIT_FAILED if not payload.get("ok", True) else 0
         elif action == "ensure-latest-launcher":
             payload = _ensure_latest_launcher_bridge(args)
             if args.output == "json":

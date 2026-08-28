@@ -138,4 +138,46 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
   it("defaults the command deadline to 15 minutes", () => {
     expect(MAIN_LINE_COMMAND_DEADLINE_MS).toBe(900_000);
   });
+
+  it("spawns the backend exactly once per queued start command and settles evidence", async () => {
+    // Protocol guard against the "double backend spawn" misdiagnosis of the
+    // Windows venv launcher pair: one queued start must issue exactly one
+    // spawn request (the .venv launcher plus its base-interpreter child are a
+    // single spawn, not two competing owners).
+    const { root, runtimeManagerDir } = makeWorkspace();
+    let spawned = false;
+    const spawnImpl = vi.fn((_command: string, args: string[]) => {
+      spawned = true;
+      return {
+        pid: 4242,
+        exitCode: null,
+        killed: false,
+        once: () => undefined,
+        unref: () => undefined
+      } as never;
+    });
+    try {
+      const result = await runWorkbenchLifecycle({
+        ...baseInput(root),
+        operation: "start",
+        queue: createMainLineCommandQueue(),
+        spawnImpl,
+        ensureFrontend: async () => undefined,
+        connect: async () => spawned,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: root })
+        }),
+        captureProcessIdentity: async ({ pid }) => ({ pid, createTime: 1, executable: "C:/Python/pythonw.exe" })
+      });
+      expect(result).toMatchObject({ accepted: true, operation: "start", commandId: expect.stringMatching(/^cmd_/) });
+      expect(spawnImpl).toHaveBeenCalledTimes(1);
+      const resultPath = mainLineCommandResultPath(runtimeManagerDir, result.commandId || "");
+      await vi.waitFor(() => expect(existsSync(resultPath)).toBe(true));
+      const evidence = JSON.parse(readFileSync(resultPath, "utf8"));
+      expect(evidence).toMatchObject({ source: "electron_main", operation: "start", accepted: true });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

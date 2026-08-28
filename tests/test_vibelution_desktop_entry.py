@@ -10,6 +10,7 @@ import sys
 import time
 import types
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -645,7 +646,7 @@ def test_parse_args_accepts_launch_desktop_shell_flags():
     assert args.workspace == r"C:\repo"
 
 
-def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, capsys):
+def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, capsys, tmp_path):
     captured: dict[str, object] = {}
 
     def fake_launch(*, project_root, then_lifecycle, open_workbench):
@@ -654,16 +655,336 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
         captured["open_workbench"] = open_workbench
         return {"schemaVersion": 1, "kind": "unpackaged", "pid": 9, "thenLifecycle": then_lifecycle, "openWorkbench": open_workbench}
 
+    def fake_wait(workspace_root, operation, *, baseline_command_id="", **_kwargs):
+        captured["settle_workspace"] = str(workspace_root)
+        captured["settle_operation"] = operation
+        return {
+            "operation": operation,
+            "observed": "queue_settlement",
+            "settled": True,
+            "accepted": True,
+            "ok": True,
+            "commandId": "cmd_test_settled",
+            "code": "",
+            "message": "Main-line lifecycle command settled successfully.",
+            "resultsPath": "",
+        }
+
     monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
+    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fake_wait)
     result = desktop_entry.main(
-        ["--action", "launch-desktop-shell", "--output", "json", "--then-lifecycle", "start", "--open-workbench"]
+        [
+            "--action",
+            "launch-desktop-shell",
+            "--output",
+            "json",
+            "--then-lifecycle",
+            "start",
+            "--open-workbench",
+            "--workspace",
+            str(tmp_path),
+        ]
     )
     assert result == 0
     assert captured["then_lifecycle"] == "start"
     assert captured["open_workbench"] is True
+    assert captured["settle_operation"] == "start"
+    assert captured["settle_workspace"] == str(tmp_path)
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "unpackaged"
     assert payload["pid"] == 9
+    assert payload["ok"] is True
+    assert payload["lifecycleSettlement"]["observed"] == "queue_settlement"
+
+
+_ACTIVE_WORK_RESTART_BLOCK_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+
+
+def _make_settlement_runtime(monkeypatch, tmp_path):
+    runtime_manager_dir = tmp_path / "runtime-manager"
+    (runtime_manager_dir / "results").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(desktop_entry, "_runtime_manager_dir_for", lambda _root: runtime_manager_dir)
+    return runtime_manager_dir
+
+
+def _write_intent(runtime_manager_dir, *, operation, command_id):
+    payload = {
+        "schemaVersion": 1,
+        "desiredState": "open" if operation in {"start", "restart", "rebuild-and-start"} else "closed",
+        "operation": operation,
+        "commandId": command_id,
+        "updatedAt": "2026-08-28T18:29:31.522Z",
+    }
+    (runtime_manager_dir / "main_line_intent.json").write_text(
+        json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _write_settlement(runtime_manager_dir, command_id, *, accepted, code="", message=""):
+    payload = {
+        "schemaVersion": 1,
+        "source": "electron_main",
+        "commandId": command_id,
+        "type": "open",
+        "operation": "start",
+        "accepted": accepted,
+        "ok": accepted,
+        "completed": accepted,
+        "message": message,
+    }
+    if code:
+        payload["code"] = code
+    (runtime_manager_dir / "results" / f"{command_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _advance_clock(clock):
+    def _sleep(seconds):
+        clock[0] += float(seconds)
+
+    return _sleep
+
+
+def test_wait_for_lifecycle_settlement_reports_accepted_queue_settlement(monkeypatch, tmp_path):
+    runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
+    _write_intent(runtime_manager_dir, operation="start", command_id="cmd_settled_ok")
+    clock = [0.0]
+
+    def sleep_then_write_results(_seconds):
+        clock[0] += 0.5
+        _write_settlement(runtime_manager_dir, "cmd_settled_ok", accepted=True, message="settled successfully")
+
+    settlement = desktop_entry.wait_for_lifecycle_settlement(
+        tmp_path,
+        "start",
+        baseline_command_id="cmd_baseline",
+        timeout_seconds=10.0,
+        sleep=sleep_then_write_results,
+        monotonic=lambda: clock[0],
+    )
+
+    assert settlement["observed"] == "queue_settlement"
+    assert settlement["settled"] is True
+    assert settlement["accepted"] is True
+    assert settlement["commandId"] == "cmd_settled_ok"
+    assert settlement["resultsPath"].endswith("cmd_settled_ok.json")
+
+
+def test_wait_for_lifecycle_settlement_surfaces_active_work_rejection_verbatim(monkeypatch, tmp_path):
+    runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
+    _write_intent(runtime_manager_dir, operation="restart", command_id="cmd_blocked")
+    _write_settlement(
+        runtime_manager_dir,
+        "cmd_blocked",
+        accepted=False,
+        code="active_work_blocked",
+        message=_ACTIVE_WORK_RESTART_BLOCK_MESSAGE,
+    )
+    clock = [0.0]
+
+    settlement = desktop_entry.wait_for_lifecycle_settlement(
+        tmp_path,
+        "restart",
+        baseline_command_id="cmd_baseline",
+        timeout_seconds=10.0,
+        sleep=_advance_clock(clock),
+        monotonic=lambda: clock[0],
+    )
+
+    assert settlement["observed"] == "queue_settlement"
+    assert settlement["accepted"] is False
+    assert settlement["code"] == "active_work_blocked"
+    assert settlement["message"] == _ACTIVE_WORK_RESTART_BLOCK_MESSAGE
+
+
+def test_wait_for_lifecycle_settlement_prefixes_other_rejections(monkeypatch, tmp_path):
+    runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
+    _write_intent(runtime_manager_dir, operation="stop", command_id="cmd_reject")
+    _write_settlement(
+        runtime_manager_dir,
+        "cmd_reject",
+        accepted=False,
+        code="backend_retire_incomplete",
+        message="retirement pending",
+    )
+    clock = [0.0]
+
+    settlement = desktop_entry.wait_for_lifecycle_settlement(
+        tmp_path,
+        "stop",
+        baseline_command_id="cmd_baseline",
+        timeout_seconds=10.0,
+        sleep=_advance_clock(clock),
+        monotonic=lambda: clock[0],
+    )
+
+    assert settlement["accepted"] is False
+    assert settlement["message"] == "Launcher 命令被拒绝：retirement pending"
+
+
+def test_wait_for_lifecycle_settlement_fails_visibly_when_intent_not_consumed(monkeypatch, tmp_path):
+    runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
+    clock = [0.0]
+
+    settlement = desktop_entry.wait_for_lifecycle_settlement(
+        tmp_path,
+        "start",
+        baseline_command_id="cmd_baseline",
+        timeout_seconds=1.0,
+        sleep=_advance_clock(clock),
+        monotonic=lambda: clock[0],
+        health_probe=lambda: False,
+    )
+
+    assert settlement["observed"] == "intent_not_consumed"
+    assert settlement["settled"] is False
+    assert settlement["accepted"] is False
+    assert "未被消费" in settlement["message"]
+    assert str(runtime_manager_dir / "results") in settlement["message"]
+
+
+def test_wait_for_lifecycle_settlement_accepts_healthy_start_reuse(monkeypatch, tmp_path):
+    _make_settlement_runtime(monkeypatch, tmp_path)
+    probes: list[bool] = []
+
+    settlement = desktop_entry.wait_for_lifecycle_settlement(
+        tmp_path,
+        "start",
+        baseline_command_id="cmd_baseline",
+        timeout_seconds=10.0,
+        reuse_grace_seconds=0.0,
+        sleep=lambda _seconds: None,
+        monotonic=time.monotonic,
+        health_probe=lambda: (probes.append(True) or True),
+    )
+
+    assert settlement["observed"] == "reuse_backend_healthy"
+    assert settlement["settled"] is True
+    assert settlement["accepted"] is True
+    assert probes == [True]
+
+
+def test_wait_for_lifecycle_settlement_ignores_stale_intent_and_matches_fresh_one(monkeypatch, tmp_path):
+    runtime_manager_dir = _make_settlement_runtime(monkeypatch, tmp_path)
+    # A stranded intent from an earlier launch (stale updatedAt) must never be
+    # mistaken for this launch's settlement.
+    _write_intent(runtime_manager_dir, operation="start", command_id="cmd_stale")
+    clock = [0.0]
+    replaced = {"done": False}
+
+    def sleep_then_replace(_seconds):
+        clock[0] += 0.5
+        if replaced["done"]:
+            return
+        replaced["done"] = True
+        _write_intent(runtime_manager_dir, operation="start", command_id="cmd_fresh")
+        (runtime_manager_dir / "main_line_intent.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "desiredState": "open",
+                    "operation": "start",
+                    "commandId": "cmd_fresh",
+                    "updatedAt": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        _write_settlement(runtime_manager_dir, "cmd_fresh", accepted=True, message="settled")
+
+    settlement = desktop_entry.wait_for_lifecycle_settlement(
+        tmp_path,
+        "start",
+        baseline_command_id="cmd_baseline",
+        not_before_epoch=time.time(),
+        timeout_seconds=10.0,
+        sleep=sleep_then_replace,
+        monotonic=lambda: clock[0],
+    )
+
+    assert settlement["commandId"] == "cmd_fresh"
+    assert settlement["accepted"] is True
+
+
+def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(
+        "core.launcher.desktop_shell.launch_desktop_shell",
+        lambda *, project_root, then_lifecycle, open_workbench: {
+            "schemaVersion": 1,
+            "kind": "unpackaged",
+            "pid": 9,
+            "thenLifecycle": then_lifecycle,
+            "openWorkbench": open_workbench,
+        },
+    )
+    monkeypatch.setattr(
+        desktop_entry,
+        "wait_for_lifecycle_settlement",
+        lambda workspace_root, operation, **_kwargs: {
+            "operation": operation,
+            "observed": "queue_settlement",
+            "settled": True,
+            "accepted": False,
+            "ok": False,
+            "commandId": "cmd_blocked",
+            "code": "active_work_blocked",
+            "message": _ACTIVE_WORK_RESTART_BLOCK_MESSAGE,
+            "resultsPath": "",
+        },
+    )
+    result = desktop_entry.main(
+        [
+            "--action",
+            "launch-desktop-shell",
+            "--output",
+            "json",
+            "--then-lifecycle",
+            "start",
+            "--open-workbench",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    assert result == desktop_entry._LIFECYCLE_SETTLE_EXIT_FAILED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["lifecycleSettlement"]["message"] == _ACTIVE_WORK_RESTART_BLOCK_MESSAGE
+
+
+def test_launch_desktop_shell_skips_settlement_wait_for_non_lifecycle_ops(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(
+        "core.launcher.desktop_shell.launch_desktop_shell",
+        lambda *, project_root, then_lifecycle, open_workbench: {
+            "schemaVersion": 1,
+            "kind": "unpackaged",
+            "pid": 9,
+            "thenLifecycle": then_lifecycle,
+            "openWorkbench": open_workbench,
+        },
+    )
+
+    def fail_wait(*_args, **_kwargs):
+        raise AssertionError("settlement wait must not run for non-lifecycle operations")
+
+    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", fail_wait)
+    result = desktop_entry.main(
+        [
+            "--action",
+            "launch-desktop-shell",
+            "--output",
+            "json",
+            "--then-lifecycle",
+            "open",
+            "--open-workbench",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "lifecycleSettlement" not in payload
 
 
 def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, capsys):
