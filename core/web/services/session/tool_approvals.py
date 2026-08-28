@@ -1075,10 +1075,12 @@ def _url_host_scope(
     tool_name: str,
     tool_args: Mapping[str, Any],
 ) -> dict[str, Any] | None:
-    """Host-level grant scope for URL tools; None falls back to exact arguments.
+    """Origin-level (scheme+host+port) grant scope for URL tools; None falls back to exact arguments.
 
-    Only explicit ``acceptAlways`` decisions consume this scope: a host grant is
-    created solely as an additional hit path next to the unchanged exact grant.
+    Only explicit ``acceptAlways`` decisions consume this scope: an origin grant
+    is created solely as an additional hit path next to the unchanged exact
+    grant. One approval authorizes the exact origin the user saw — never a
+    bare host across schemes or ports.
     """
 
     if tool_name not in _HOST_SCOPED_URL_TOOLS:
@@ -1087,12 +1089,21 @@ def _url_host_scope(
     if not raw_url:
         return None
     try:
-        host = (urlsplit(raw_url).hostname or "").strip().lower()
+        parts = urlsplit(raw_url)
+        host = (parts.hostname or "").strip().lower()
+        scheme = (parts.scheme or "").strip().lower()
     except ValueError:
         return None
-    if not host:
+    if not host or scheme not in ("http", "https"):
         return None
-    return {"kind": "url_host", "host": host}
+    port = parts.port
+    default_port = 443 if scheme == "https" else 80
+    # Origin-level (scheme+host+port), not bare host: an approval for one page
+    # must not silently authorize other schemes or non-default ports on the
+    # same public host (e.g. open admin panels). Default ports are omitted so
+    # the canonical origin matches what the user saw.
+    origin = f"{scheme}://{host}" if port in (None, default_port) else f"{scheme}://{host}:{port}"
+    return {"kind": "url_origin", "origin": origin}
 
 
 def _session_grant_key(scope: Mapping[str, Any]) -> str:

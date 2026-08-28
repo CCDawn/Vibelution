@@ -22,6 +22,9 @@ MAX_TERMINAL_WAITS_PER_TURN = 16
 # `_writeback_tool` 结尾的同类交付工具，不泛化到一般写工具。
 DELIVERY_EXEMPT_TOOL_NAMES = {"source_collection_stage_writeback_tool"}
 _DELIVERY_EXEMPT_TOOL_SUFFIX = "_writeback_tool"
+# 豁免写回的独立宽松上限：滚动写回契约鼓励多批小写回，64 次/回合足够任何
+# 合理交付节奏，同时封死熔断后无限连发写回的无人值守消耗通道。
+MAX_DELIVERY_EXEMPT_CALLS_PER_TURN = 64
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
@@ -125,6 +128,7 @@ class ToolExecutionAuthorizationContext:
     approval_requirements: tuple[tuple[str, str, str], ...] = ()
     max_calls_per_turn: int = 0
     call_count: int = 0
+    delivery_exempt_call_count: int = 0
     budget_profile: str = ""
     model_family: str = ""
     model: str = ""
@@ -461,7 +465,19 @@ def authorize_tool_execution(
             return terminal_wait_result
         if _is_delivery_exempt_tool(normalized_tool):
             # 交付类工具不占回合额度、也不被额度拒绝：额度耗尽时仍必须放行成果落盘。
-            pass
+            # 但豁免必须有独立上限，否则失控模型可在熔断后无限连发写回。
+            context.delivery_exempt_call_count += 1
+            if (
+                context.delivery_exempt_call_count
+                > MAX_DELIVERY_EXEMPT_CALLS_PER_TURN
+            ):
+                return _execution_denial(
+                    "delivery_writeback_budget_exhausted",
+                    "本回合写回/交付类调用次数已达上限。请停止继续写回，以文本总结当前结果并结束回合。",
+                    runtime_agent_id,
+                    runtime_turn_id,
+                    context,
+                )
         elif context.max_calls_per_turn > 0 and context.call_count >= context.max_calls_per_turn:
             return _execution_denial("call_budget_exhausted", "当前回合工具调用额度已用尽。", runtime_agent_id, runtime_turn_id, context)
         else:

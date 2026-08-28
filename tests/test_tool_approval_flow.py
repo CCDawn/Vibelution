@@ -1083,10 +1083,26 @@ def test_accept_always_persists_through_real_agent_directory_authority(
 
 
 def test_url_host_scope_parses_host_and_falls_back_to_exact_arguments():
+    # Origin 级（scheme+host+port）：批准一个页面只授权用户看到的精确 origin，
+    # 不跨 scheme、不跨端口授权同一公网 host。
     assert tool_approvals._url_host_scope(
         "web_fetch_tool",
         {"url": "https://Docs.Example.com/guide/intro"},
-    ) == {"kind": "url_host", "host": "docs.example.com"}
+    ) == {"kind": "url_origin", "origin": "https://docs.example.com"}
+    assert tool_approvals._url_host_scope(
+        "web_fetch_tool",
+        {"url": "http://docs.example.com:8080/panel"},
+    ) == {"kind": "url_origin", "origin": "http://docs.example.com:8080"}
+    assert (
+        tool_approvals._url_host_scope(
+            "web_fetch_tool",
+            {"url": "https://docs.example.com:8443/other"},
+        )
+        != tool_approvals._url_host_scope(
+            "web_fetch_tool",
+            {"url": "https://docs.example.com/base"},
+        )
+    )
     assert tool_approvals._url_host_scope(
         "web_fetch_tool",
         {"url": "file:///etc/hosts"},
@@ -1143,10 +1159,13 @@ def test_web_fetch_accept_always_grants_host_level_reuse(
 
     grants = tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a")
     host_grants = [
-        item for item in grants if item["scope"].get("kind") == "url_host"
+        item for item in grants if item["scope"].get("kind") == "url_origin"
     ]
     assert len(host_grants) == 1
-    assert host_grants[0]["scope"] == {"kind": "url_host", "host": "docs.example.com"}
+    assert host_grants[0]["scope"] == {
+        "kind": "url_origin",
+        "origin": "https://docs.example.com",
+    }
     # The legacy exact-arguments grant is still recorded alongside the host grant.
     assert len(grants) == 2
 

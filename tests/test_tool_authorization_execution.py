@@ -278,6 +278,30 @@ def test_delivery_writeback_tool_is_authorized_when_call_budget_exhausted(monkey
     assert context.call_count == 32
 
 
+def test_delivery_writeback_calls_have_their_own_turn_cap(monkeypatch):
+    """豁免写回必须有独立上限：封死熔断后无限连发写回的消耗通道。"""
+
+    _runtime(
+        monkeypatch,
+        allowed_tools=("source_collection_stage_writeback_tool",),
+    )
+    _install(tools=("source_collection_stage_writeback_tool",))
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    cap = tool_authorization_service.MAX_DELIVERY_EXEMPT_CALLS_PER_TURN
+    context.delivery_exempt_call_count = cap
+
+    denied = tool_authorization_service.authorize_tool_execution(
+        tool_name="source_collection_stage_writeback_tool",
+        tool_call_id="call-writeback-over-cap",
+    )
+
+    assert denied.allowed is False
+    assert denied.code == "delivery_writeback_budget_exhausted"
+    # 先递增再判超限：第 cap+1 次调用被拒，计数停在 cap+1。
+    assert context.delivery_exempt_call_count == cap + 1
+
+
 def test_regular_research_tool_still_blocked_when_call_budget_exhausted(monkeypatch):
     """额度耗尽后普通探查工具仍被额度闸拒绝（保持原行为）。"""
 
