@@ -58,10 +58,15 @@ def _latest_user_message(payload: dict) -> dict:
     return users[-1]
 
 
-def _assert_sanitized_provider_failure(payload: dict, *, error_type: str = "provider_upstream_error") -> None:
+def _assert_sanitized_provider_failure(
+    payload: dict,
+    *,
+    error_type: str = "provider_upstream_error",
+    expected_phrase: str = "模型服务上游暂时失败",
+) -> None:
     assert payload["lastTurnError"] is not None
     assert payload["lastTurnError"]["errorType"] == error_type
-    assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
+    assert expected_phrase in payload["lastTurnError"]["message"]
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
     assert "provider_protocol_error" not in payload["lastTurnError"]["message"]
 
@@ -624,7 +629,12 @@ def test_session_completed_result_with_provider_error_is_persisted_as_assistant_
     payload = session_service.submit_session_message("session-live", "继续当前对话")
 
     assert _latest_user_message(payload)["content"] == "继续当前对话"
-    _assert_sanitized_provider_failure(payload, error_type="provider_protocol_error")
+    # dfdd6c1af 起 provider_protocol_error 统一走协议级响应文案（不再复用上游失败短语）。
+    _assert_sanitized_provider_failure(
+        payload,
+        error_type="provider_protocol_error",
+        expected_phrase="模型返回了无法处理的协议级响应",
+    )
     assert "reasoning_content" not in payload["lastTurnError"]["message"]
 
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")

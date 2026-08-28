@@ -735,15 +735,18 @@ def test_session_detail_window_returns_latest_messages_and_paging_metadata(tmp_p
         "窗口问题 3",
         "窗口回答 3",
     ]
+    # 索引覆盖完整投影项：seed 里带 <think>/tool_calls 的旧 assistant 消息按
+    # turn-items 契约拆出的隐藏 reasoning/tool 项计入 totalMessages 与索引，
+    # 但不出现在返回的 messages 里（可见序列不变，整体平移 +2）。
     assert payload["messageWindow"] == {
         "mode": "window",
-        "totalMessages": 8,
+        "totalMessages": 10,
         "returnedMessages": 4,
-        "oldestMessageIndex": 5,
-        "newestMessageIndex": 8,
+        "oldestMessageIndex": 7,
+        "newestMessageIndex": 10,
         "hasEarlier": True,
         "hasLater": False,
-        "nextBeforeMessageIndex": 5,
+        "nextBeforeMessageIndex": 7,
         "transcriptScope": "window",
     }
 
@@ -754,7 +757,9 @@ def test_session_detail_window_can_page_earlier_without_reindexing_messages(tmp_
         _append_window_test_turn(tmp_path, "session-live", turn_number)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
-    response = client.get("/api/sessions/session-live?messageLimit=2&beforeMessageIndex=5&transcriptScope=window")
+    # seed assistant 拆分项占 3/4 号索引，第一批对话消息从 5 开始；
+    # before=7 取 5/6 两项（窗口问题 1 / 窗口回答 1）。
+    response = client.get("/api/sessions/session-live?messageLimit=2&beforeMessageIndex=7&transcriptScope=window")
 
     assert response.status_code == 200
     payload = response.json()
@@ -763,14 +768,14 @@ def test_session_detail_window_can_page_earlier_without_reindexing_messages(tmp_
         "窗口回答 1",
     ]
     assert [message["id"] for message in payload["messages"]] == [
-        "session-live-message-3",
-        "session-live-message-4",
+        "session-live-message-5",
+        "session-live-message-6",
     ]
-    assert payload["messageWindow"]["oldestMessageIndex"] == 3
-    assert payload["messageWindow"]["newestMessageIndex"] == 4
+    assert payload["messageWindow"]["oldestMessageIndex"] == 5
+    assert payload["messageWindow"]["newestMessageIndex"] == 6
     assert payload["messageWindow"]["hasEarlier"] is True
     assert payload["messageWindow"]["hasLater"] is True
-    assert payload["messageWindow"]["nextBeforeMessageIndex"] == 3
+    assert payload["messageWindow"]["nextBeforeMessageIndex"] == 5
 
 
 def test_session_detail_window_can_omit_native_transcript_for_light_payloads(tmp_path, monkeypatch):

@@ -1112,6 +1112,9 @@ def test_source_stage_exact_replay_recovers_pre_submit_missing_session_without_d
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )["run"]
+    # 与产品路径一致：阶段会话按 run 的 workflowRunId 定界（42c4a05a8），
+    # 首会话必须用同一 scope 注册，重放恢复才能在同界注册表里升档。
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     first_session = resolve_research_project_agent_session(
         team["teamId"],
         research_project_id=project["projectId"],
@@ -1119,6 +1122,8 @@ def test_source_stage_exact_replay_recovers_pre_submit_missing_session_without_d
         role_key="source_finder",
         role_label="资料寻找",
         created_from_task_id="stagetask-pre-submit",
+        workflow_run_id=str(run_scope.get("workflowRunId") or ""),
+        workflow_node_id="source_collection",
     )
     session_service.delete_chat_session(first_session["sessionId"])
 
@@ -1241,6 +1246,8 @@ def test_source_stage_new_task_records_missing_project_session_recovery(
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )["run"]
+    # 同上：首会话按 run 的 workflowRunId 定界注册，保持与产品恢复路径同界。
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     first_session = resolve_research_project_agent_session(
         team["teamId"],
         research_project_id=project["projectId"],
@@ -1248,6 +1255,8 @@ def test_source_stage_new_task_records_missing_project_session_recovery(
         role_key="source_finder",
         role_label="资料寻找",
         created_from_task_id="old-project-task",
+        workflow_run_id=str(run_scope.get("workflowRunId") or ""),
+        workflow_node_id="source_collection",
     )
     session_service.delete_chat_session(first_session["sessionId"])
     monkeypatch.setattr(
