@@ -4531,6 +4531,17 @@ def _process_collection_decisions(
             str(locator.get("runId") or ""),
             hypothesis_candidate_ids=hypothesis_candidate_ids,
         )
+        _record_shadow_knowledge_invocation_for_chain(
+            team_id,
+            question_id=str(meeting_round.get("question") or ""),
+            scope_envelope=scope_envelope,
+            search_envelope=envelope,
+            requirements=requirements,
+            collection_run_id=str(record.get("collectionRunId") or ""),
+            collection_request_id=str(record.get("requestId") or ""),
+            meeting_round_id=str(meeting_round.get("meetingRoundId") or ""),
+            decision_id=decision_id,
+        )
         requests_out.append(record)
         collection_run_id = str(record.get("collectionRunId") or "").strip()
         if not collection_run_id:
@@ -4591,6 +4602,44 @@ def _hypothesis_collection_background_payload() -> dict[str, Any]:
         "backgroundExecution": True,
         "maxQueries": service.SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES,
     }
+
+
+def _record_shadow_knowledge_invocation_for_chain(
+    team_id: str,
+    *,
+    question_id: str,
+    scope_envelope: Mapping[str, Any],
+    search_envelope: Mapping[str, Any],
+    requirements: Mapping[str, Any],
+    collection_run_id: str = "",
+    collection_request_id: str = "",
+    meeting_round_id: str = "",
+    decision_id: str = "",
+    legacy_scope_hash: str = "",
+) -> None:
+    """Shadow-rollout hook (Task 7): mirror one legacy collection request.
+
+    Only writes in ``[research.knowledge_sideflow] mode = "shadow"``; a no-op
+    in every other mode and never raises.  The legacy chain's return values,
+    records and behavior stay byte-for-byte identical.
+    """
+    from .knowledge_rollout import record_shadow_knowledge_invocation
+
+    resolved_scope_hash = str(legacy_scope_hash or "").strip()
+    if not resolved_scope_hash and isinstance(scope_envelope, Mapping):
+        resolved_scope_hash = str(scope_envelope.get("scopeHash") or "")
+    record_shadow_knowledge_invocation(
+        team_id=team_id,
+        question_id=str(question_id or ""),
+        scope=dict(scope_envelope or {}),
+        search_envelope=dict(search_envelope or {}),
+        requirements=dict(requirements or {}),
+        collection_run_id=collection_run_id,
+        collection_request_id=collection_request_id,
+        meeting_round_id=meeting_round_id,
+        decision_id=decision_id,
+        legacy_scope_hash=resolved_scope_hash,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -5218,6 +5267,18 @@ def _recover_collection_request_locked(
         }
 
     previous_run_id = str(request.get("collectionRunId") or "").strip()
+    _record_shadow_knowledge_invocation_for_chain(
+        normalized_team_id,
+        question_id=str(request.get("questionId") or ""),
+        scope_envelope=scope,
+        search_envelope=search_envelope,
+        requirements=requirements,
+        collection_run_id=run_id,
+        collection_request_id=normalized_request_id,
+        meeting_round_id=str(request.get("meetingRoundId") or ""),
+        decision_id=str(request.get("decisionId") or ""),
+        legacy_scope_hash=str(request.get("scopeHash") or ""),
+    )
     _update_collection_request(
         normalized_team_id,
         normalized_request_id,

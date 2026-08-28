@@ -1726,6 +1726,35 @@ class WorkflowSessionScopeV3Config(BaseModel):
     )
 
 
+class ResearchKnowledgeSideflowConfig(BaseModel):
+    """知识侧流程 rollout 模式，由可信操作员配置控制（默认 off，安全）。
+
+    - ``off``：现状行为——新建正式 Run 仍按 2.1.0 默认定义创建，知识命令
+      offer 在快照层隐藏。
+    - ``shadow``：新建 Run 仍走 2.1.0，但旧链每次创建搜集 run /
+      collection_request 时同步生成 shadow 知识 invocation 对照记录（不驱动
+      父流程、不建 child Run、不写知识包）。
+    - ``on``：新建正式 Run 使用注册的主流程 3.0.0 定义（知识搜集已移出主
+      链）；历史 2.1.0 Run 永远按注册表钉住的旧定义解释。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    mode: Literal["off", "shadow", "on"] = Field(
+        default="off",
+        description="知识侧流程 rollout 模式：off / shadow / on",
+    )
+
+
+class ResearchConfig(BaseModel):
+    """研究工作流（research workflow）配置。"""
+
+    model_config = ConfigDict(extra="ignore")
+    knowledge_sideflow: ResearchKnowledgeSideflowConfig = Field(
+        default_factory=ResearchKnowledgeSideflowConfig,
+        description="知识侧流程 rollout 配置",
+    )
+
+
 class SupervisedEvolutionFeatureConfig(BaseModel):
     """可信操作员配置控制的监督进化功能族。"""
 
@@ -2203,6 +2232,7 @@ class AppConfig(BaseModel):
     workflow_session_scope_v3: WorkflowSessionScopeV3Config = Field(
         default_factory=WorkflowSessionScopeV3Config
     )
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
     supervised_evolution: SupervisedEvolutionFeatureConfig = Field(
         default_factory=SupervisedEvolutionFeatureConfig
     )

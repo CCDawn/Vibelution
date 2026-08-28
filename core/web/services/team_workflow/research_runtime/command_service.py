@@ -407,6 +407,7 @@ class WorkflowCommandService:
                 parent_node_run_id=str(payload.get("parentNodeRunId") or ""),
                 parent_attempt=parent_attempt,
                 source_manifest_ref=str(payload.get("sourceManifestRef") or ""),
+                managed_source_root_ids=managed_root_ids,
                 wake_worker=self._wake_worker,
             )
         except KnowledgeSideflowError as exc:
@@ -443,6 +444,7 @@ class WorkflowCommandService:
         from core.research.workflow.knowledge_sideflow_definition import (
             KNOWLEDGE_SIDEFLOW_NODE_IDS,
         )
+        from .knowledge_rollout import knowledge_sideflow_mode
 
         run = self._store.get_run(request.run_id)
         if run is None:
@@ -489,6 +491,7 @@ class WorkflowCommandService:
                 "invocations": invocation_views,
                 "childRun": child_view,
                 "recoveryActions": recovery_actions,
+                "knowledgeSideflowMode": knowledge_sideflow_mode(),
             },
         )
 

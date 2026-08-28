@@ -426,21 +426,23 @@ def _ensure_source_collection_run(
 
         input_snapshot = record.get("inputSnapshot") or {}
         objective = input_snapshot.get("researchObjectiveContract") or {}
+        payload = {
+            "researchProjectId": str(record.get("projectId") or ""),
+            "title": "Challenge Cup workflow source collection",
+            "goal": str(objective.get("question") or ""),
+            "topic": str(objective.get("question") or ""),
+            "inputRefs": list(input_snapshot.get("datasetRefs") or []),
+            "agentRoles": list(_source_agent_ids(record)),
+            "agentIds": _source_agent_ids(record),
+            "scope": {
+                "workflowRunId": str(record.get("runId") or ""),
+                "researchProjectId": str(record.get("projectId") or ""),
+            },
+        }
+        _apply_managed_root_selection(payload, input_snapshot)
         started = start_source_collection_run(
             str(record.get("teamId") or ""),
-            {
-                "researchProjectId": str(record.get("projectId") or ""),
-                "title": "Challenge Cup workflow source collection",
-                "goal": str(objective.get("question") or ""),
-                "topic": str(objective.get("question") or ""),
-                "inputRefs": list(input_snapshot.get("datasetRefs") or []),
-                "agentRoles": list(_source_agent_ids(record)),
-                "agentIds": _source_agent_ids(record),
-                "scope": {
-                    "workflowRunId": str(record.get("runId") or ""),
-                    "researchProjectId": str(record.get("projectId") or ""),
-                },
-            },
+            payload,
         )
         source_run_id = str((started.get("run") or {}).get("runId") or "").strip()
     if not source_run_id:
@@ -454,6 +456,33 @@ def _ensure_source_collection_run(
             {"sourceCollectionRunId": source_run_id},
         )
     return record, source_run_id
+
+
+def _apply_managed_root_selection(
+    payload: dict[str, Any],
+    input_snapshot: Mapping[str, Any],
+) -> None:
+    """Carry a sideflow child's managed-root selection into its collection run.
+
+    Knowledge-sideflow child runs freeze the operator's ``managedSourceRootIds``
+    in their input snapshot.  When present, the child's collection run receives
+    the same selection (plus ``collectionMode=mixed`` so the managed-root
+    import bypass actually runs alongside the regular web search).  Runs whose
+    input snapshot has no root selection keep a byte-identical payload.
+    """
+    raw_ids = input_snapshot.get("managedSourceRootIds")
+    if not isinstance(raw_ids, (list, tuple)):
+        return
+    root_ids: list[str] = []
+    for item in list(raw_ids)[:32]:
+        root_id = str(item or "").strip().lower()[:64]
+        if root_id and root_id not in root_ids:
+            root_ids.append(root_id)
+    if not root_ids:
+        return
+    payload["managedSourceRootIds"] = root_ids
+    if not str(payload.get("collectionMode") or "").strip():
+        payload["collectionMode"] = "mixed"
 
 
 def _task_anchor(started: dict[str, Any]) -> dict[str, str | int]:

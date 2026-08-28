@@ -32,6 +32,7 @@ from .command_offers.retry_node import (
     succeeded_node_rerun_target,
 )
 from .knowledge_invocation_projection import project_knowledge_invocation_badges
+from .knowledge_rollout import knowledge_sideflow_mode
 from .offer_authorization import build_offer_authorizations
 
 
@@ -213,6 +214,7 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         invocation_badges=invocation_badges,
         command_authorizations=command_authorizations,
         definition_resolution=str(inputs.definition_resolution or "pinned"),
+        knowledge_sideflow_mode=knowledge_sideflow_mode(),
     )
 
 

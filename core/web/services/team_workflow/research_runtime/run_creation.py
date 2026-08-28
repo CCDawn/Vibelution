@@ -13,11 +13,7 @@ from core.research.workflow.bindings import (
     build_run_binding_snapshots,
 )
 from core.research.workflow.contracts import ContractValidationError
-from core.research.workflow.definition import (
-    CHALLENGE_CUP_WORKFLOW_ID,
-    build_challenge_cup_workflow_definition,
-)
-from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.research.workflow.ledger import EventRecord, RunRecord
 from core.research.workflow.models import ActorKind
 
@@ -561,9 +557,15 @@ def create_run(
     store = get_write_store()
     # Register-or-resolve: the definition driving this run is pinned by its
     # (workflowId, workflowVersionId, structureHash) identity in the registry
-    # before any checkpoint or ledger write happens.
-    definition = build_challenge_cup_workflow_definition()
-    identity = register_or_resolve(definition)
+    # before any checkpoint or ledger write happens.  The rollout mode decides
+    # WHICH pinned definition new runs get: off/shadow keep the frozen 2.1.0
+    # default, on moves new runs to the registered main-flow 3.0.0 definition
+    # (knowledge collection has left the in-graph chain).  Historical runs are
+    # always read through their own pinned version identity, so this choice
+    # never re-shapes an in-flight run.
+    from .knowledge_rollout import creation_workflow_definition
+
+    definition, identity = creation_workflow_definition()
     workflow_version_id = identity.workflowVersionId
     fingerprints = _create_request_fingerprints(run_input)
     fingerprint = fingerprints[0]

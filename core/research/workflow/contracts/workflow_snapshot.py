@@ -429,6 +429,11 @@ class ResearchWorkflowSnapshot:
     # version identity could not be honored and a fallback definition is in
     # use — the snapshot is diagnostic-visible, never a silent substitution.
     definition_resolution: str = "pinned"
+    # Current knowledge-sideflow rollout mode ("off" | "shadow" | "on") as
+    # read from trusted operator config at projection time.  Additive and
+    # diagnostic-visible so operators can see which surface is live without
+    # reading the config file.
+    knowledge_sideflow_mode: str = "off"
 
     def _serialized_command_offers(self) -> list[dict[str, Any]]:
         auth_by_key = {
@@ -477,4 +482,7 @@ class ResearchWorkflowSnapshot:
                 for node_id, badge in self.invocation_badges.items()
             },
             "definitionResolution": str(self.definition_resolution or "pinned"),
+            "knowledgeSideflowMode": str(
+                self.knowledge_sideflow_mode or "off"
+            ),
         }

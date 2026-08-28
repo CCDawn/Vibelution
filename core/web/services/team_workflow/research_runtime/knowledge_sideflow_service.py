@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from core.research.workflow.contracts._canonical import canonical_json, sha256_hex
@@ -186,6 +186,7 @@ def ensure_knowledge_invocation(
     parent_node_run_id: str = "",
     parent_attempt: int = 1,
     source_manifest_ref: str = "",
+    managed_source_root_ids: Sequence[str] | None = None,
     wake_worker: Callable[[], None] | None = None,
     now_provider: Callable[[], int] | None = None,
 ) -> dict[str, Any]:
@@ -194,6 +195,11 @@ def ensure_knowledge_invocation(
     Returns ``{"invocation": record, "replayed": bool, "reused": bool,
     "childRunId": str | None}``.  A replay never creates a second child run;
     a reuse never creates any child run.
+
+    ``managed_source_root_ids`` is the operator's managed-root selection: it
+    is fingerprinted through the scope hash and carried verbatim onto the
+    child run's input snapshot so the child's source_finding collection run
+    imports exactly those registered roots.
     """
     now = now_provider or _default_now
     parent = store.get_run(parent_run_id)
@@ -209,6 +215,11 @@ def ensure_knowledge_invocation(
             "questionId does not match the parent run",
             code="question_mismatch",
         )
+    normalized_root_ids = _normalize_root_id_sequence(
+        managed_source_root_ids
+        if managed_source_root_ids is not None
+        else (scope or {}).get("managedSourceRootIds")
+    )
     fingerprints = compute_invocation_fingerprints(
         question_id=normalized_question,
         scope=scope,
@@ -225,6 +236,10 @@ def ensure_knowledge_invocation(
         )
         if existing is not None:
             # Call idempotency: same requestHash replays the SAME invocation.
+            # A request that gains root ids after its first submission keeps
+            # replaying the original invocation (the requestHash did not move
+            # because root ids ride in the scope, which callers must include
+            # in the command payload to change the fingerprint at all).
             outcome.update(
                 {"invocation": existing, "replayed": True, "reused": False}
             )
@@ -329,6 +344,7 @@ def ensure_knowledge_invocation(
                 store,
                 invocation,
                 source_manifest_ref=source_manifest_ref,
+                managed_source_root_ids=normalized_root_ids,
                 wake_worker=wake_worker,
                 now_provider=now_provider,
             )
@@ -338,6 +354,16 @@ def ensure_knowledge_invocation(
         "reused": bool(outcome["reused"]),
         "childRunId": child_run_id,
     }
+
+
+def _normalize_root_id_sequence(raw: Sequence[str] | None) -> list[str]:
+    """Lower-cased, trimmed, de-duplicated root ids for the child snapshot."""
+    normalized: list[str] = []
+    for item in list(raw or [])[:32]:
+        root_id = str(item or "").strip().lower()[:64]
+        if root_id and root_id not in normalized:
+            normalized.append(root_id)
+    return normalized
 
 
 def _run_version_of(uow, run_id: str) -> int:
@@ -363,6 +389,7 @@ def ensure_knowledge_child_run(
     invocation: KnowledgeInvocationRecord,
     *,
     source_manifest_ref: str = "",
+    managed_source_root_ids: Sequence[str] | None = None,
     wake_worker: Callable[[], None] | None = None,
     now_provider: Callable[[], int] | None = None,
 ) -> str:
@@ -375,6 +402,11 @@ def ensure_knowledge_child_run(
     transaction.  No checkpoint I/O happens here at all: the graph worker's
     start dispatch compiles the pinned sideflow graph and creates the child
     thread on its empty-thread start path.
+
+    ``managed_source_root_ids`` lands verbatim in the child input snapshot so
+    the source_finding stage creates its collection run with the operator's
+    root selection (the managed-root import bypass reads it from the run
+    payload).
     """
     from .graph_dispatch_factory import build_graph_dispatch_record
 
@@ -414,6 +446,9 @@ def ensure_knowledge_child_run(
         "requirementsHash": invocation.requirements_hash,
         "sourcePolicyVersion": invocation.source_policy_version,
         "sourceManifestRef": str(source_manifest_ref or ""),
+        "managedSourceRootIds": _normalize_root_id_sequence(
+            managed_source_root_ids
+        ),
     }
     snapshot_hash = hashlib.sha256(
         canonical_json(input_snapshot).encode("utf-8")

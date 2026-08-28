@@ -9,6 +9,10 @@ collections.  Both commands are team-authorized (never operator-only):
   node lineage (the invocation idempotency would replay it anyway, so the
   offer points at inspection instead).
 - ``inspect_knowledge_collection``: available on any non-archived run.
+
+Rollout gating: with ``[research.knowledge_sideflow] mode = "off"`` both
+offers are hidden from the snapshot entirely — the disabled semantics stay
+unambiguous at the offer layer instead of surfacing blocked placeholders.
 """
 
 from __future__ import annotations
@@ -35,6 +39,13 @@ def build_knowledge_collection_offers(
 ) -> list[CommandOffer]:
     """One ensure offer anchored at the run's active node plus one inspect
     offer for the whole run."""
+    from ..knowledge_rollout import knowledge_commands_enabled
+
+    if not knowledge_commands_enabled():
+        # mode="off": the sideflow surface stays invisible; no offer rows at
+        # all so clients cannot even render a disabled placeholder.
+        return []
+
     offers: list[CommandOffer] = []
 
     if str(run.status) in _TERMINAL_RUN_STATUSES:

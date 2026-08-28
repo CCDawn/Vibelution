@@ -30,7 +30,6 @@ from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
-from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
@@ -476,8 +475,11 @@ class ResearchWorkflowRuntimeService:
     def get_definition(self, workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID) -> dict[str, Any]:
         if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
             raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
-        definition = build_challenge_cup_workflow_definition()
-        identity = register_or_resolve(definition)
+        # Rollout-mode aware: off/shadow pin the 2.1.0 default, on pins the
+        # registered main-flow 3.0.0 definition (see knowledge_rollout).
+        from .knowledge_rollout import creation_workflow_definition
+
+        definition, identity = creation_workflow_definition()
         return {
             "workflowId": definition.workflowId,
             "workflowVersionId": identity.workflowVersionId,
@@ -783,8 +785,12 @@ class ResearchWorkflowRuntimeService:
                 raise ResearchWorkflowError(str(exc), code="invalid_run_input") from exc
 
             # The pinned definition must be the same object identity used for
-            # the initial checkpoint and the frozen run record.
-            definition = build_challenge_cup_workflow_definition()
+            # the initial checkpoint and the frozen run record.  Rollout-mode
+            # aware: off/shadow keep 2.1.0, on pins main-flow 3.0.0 — matching
+            # the version identity returned by ``get_definition`` above.
+            from .knowledge_rollout import creation_workflow_definition
+
+            definition, _creation_identity = creation_workflow_definition()
             checkpoint_id = prepare_initial_checkpoint(
                 self._checkpoint_path,
                 thread_id,
