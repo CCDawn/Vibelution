@@ -724,8 +724,8 @@ export function ConversationView({
     [displayMessages, visibleMessageCount],
   );
   const activeAgentMessageTimelineProjection = useMemo(
-    () => projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage }),
-    [activeTurnMessage, timelineMessages],
+    () => projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage, companionMode }),
+    [activeTurnMessage, companionMode, timelineMessages],
   );
   const activeTimelineMessages = activeAgentMessageTimelineProjection.messages;
   /**

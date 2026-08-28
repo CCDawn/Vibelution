@@ -308,7 +308,8 @@ describe("chat active turn layer", () => {
           version: 3,
           sessionId: "session-1",
           turnId: "turn-1",
-          type: "final_answer",
+          type: "agent_message",
+          phase: "final_answer",
           status: "completed",
           revision: 1,
           sequence: 10,
@@ -463,6 +464,83 @@ describe("chat active turn layer", () => {
           metadata: { turnId: "turn-1" },
         } satisfies ConversationMessage,
       ],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
+  });
+
+  it("settles an older live layer when a newer different turn has committed", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        turnId: "turn-old",
+        updatedAt: "2026-08-28T13:18:00Z",
+        stage: "model_thinking",
+      }),
+    );
+    const detail = {
+      id: "session-1",
+      messages: [{
+        id: "assistant-new-final",
+        role: "assistant",
+        status: "completed",
+        turnId: "turn-new",
+        timestamp: "2026-08-28T14:34:00Z",
+        turnItems: [{
+          id: "new-answer:1",
+          itemId: "new-answer",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-new",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "completed",
+          revision: 1,
+          sequence: 20,
+          terminal: true,
+          text: "新的最终回复",
+          createdAt: "2026-08-28T14:34:00Z",
+          updatedAt: "2026-08-28T14:34:00Z",
+        }],
+      }],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(true);
+  });
+
+  it("does not let an older historical terminal turn settle the current live layer", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        turnId: "turn-current",
+        updatedAt: "2026-08-28T14:35:00Z",
+      }),
+    );
+    const detail = {
+      id: "session-1",
+      messages: [{
+        id: "assistant-old-final",
+        role: "assistant",
+        status: "completed",
+        turnId: "turn-old",
+        timestamp: "2026-08-28T14:34:00Z",
+        turnItems: [{
+          id: "old-answer:1",
+          itemId: "old-answer",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-old",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "completed",
+          revision: 1,
+          sequence: 19,
+          terminal: true,
+          text: "历史回复",
+          createdAt: "2026-08-28T14:34:00Z",
+          updatedAt: "2026-08-28T14:34:00Z",
+        }],
+      }],
     } as SessionDetail;
 
     expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);

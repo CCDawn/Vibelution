@@ -103,4 +103,58 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages[0]?.status).toBe("pending");
     expect(projection.messages[0]?.turnItems).toEqual([]);
   });
+
+  it("drops an older process-only turn after a newer companion answer commits", () => {
+    const staleReasoning: SessionTurnItem = {
+      id: "reasoning-old:1", itemId: "reasoning-old", version: 3,
+      sessionId: "session-1", turnId: "turn-old", type: "reasoning",
+      status: "running", revision: 1, sequence: 1, terminal: false,
+      text: "旧的内部思考不应继续显示",
+      createdAt: "2026-08-28T13:18:00Z", updatedAt: "2026-08-28T13:18:00Z",
+    };
+    const finalAnswer: SessionTurnItem = {
+      id: "answer-new:1", itemId: "answer-new", version: 3,
+      sessionId: "session-1", turnId: "turn-new", type: "agent_message", phase: "final_answer",
+      status: "completed", revision: 1, sequence: 2, terminal: true,
+      text: "新的最终回复",
+      createdAt: "2026-08-28T14:34:00Z", updatedAt: "2026-08-28T14:34:00Z",
+    };
+    const stale = assistantMessage("stale-running", {
+      content: "", turnId: "turn-old", status: "running",
+      turnItems: [staleReasoning], timestamp: "2026-08-28T13:18:00Z",
+    });
+    const committed = assistantMessage("new-final", {
+      content: "", turnId: "turn-new", status: "completed",
+      turnItems: [finalAnswer], timestamp: "2026-08-28T14:34:00Z",
+    });
+
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [committed, stale], companionMode: true,
+    }).messages.map((message) => message.id)).toEqual(["new-final"]);
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [committed, stale], companionMode: false,
+    }).messages.map((message) => message.id)).toEqual(["new-final", "stale-running"]);
+  });
+
+  it("keeps a genuinely newer companion turn after historical terminal messages", () => {
+    const historicalFinal: SessionTurnItem = {
+      id: "answer-old:1", itemId: "answer-old", version: 3,
+      sessionId: "session-1", turnId: "turn-old", type: "agent_message", phase: "final_answer",
+      status: "completed", revision: 1, sequence: 1, terminal: true,
+      text: "历史回复",
+      createdAt: "2026-08-28T14:34:00Z", updatedAt: "2026-08-28T14:34:00Z",
+    };
+    const historical = assistantMessage("historical-final", {
+      content: "", turnId: "turn-old", status: "completed",
+      turnItems: [historicalFinal], timestamp: "2026-08-28T14:34:00Z",
+    });
+    const current = assistantMessage("current-running", {
+      content: "", turnId: "turn-current", status: "running",
+      turnItems: [], timestamp: "2026-08-28T14:35:00Z",
+    });
+
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [historical], activeTurnMessage: current, companionMode: true,
+    }).messages.map((message) => message.id)).toEqual(["historical-final", "current-running"]);
+  });
 });

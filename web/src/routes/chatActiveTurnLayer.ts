@@ -284,12 +284,27 @@ export function isActiveTurnSettledByDetail(
   detail: SessionDetail | undefined,
 ) {
   if (!layer || !detail || !layer.turnId) return false;
-  return (detail.messages ?? []).some((message) => (
-    message.role === "assistant"
-    && message.turnId === layer.turnId
-    && message.metadata?.kind !== "session_active_turn_layer"
-    && (hasTerminalCanonicalTurnOutcome(message) || hasCommittedAssistantProtocolAnswer(message))
-  ));
+  const layerUpdatedAt = Date.parse(layer.updatedAt);
+  return (detail.messages ?? []).some((message) => {
+    if (
+      message.role !== "assistant"
+      || message.metadata?.kind === "session_active_turn_layer"
+      || (!hasTerminalCanonicalTurnOutcome(message) && !hasCommittedAssistantProtocolAnswer(message))
+    ) {
+      return false;
+    }
+    if (message.turnId === layer.turnId) {
+      return true;
+    }
+    const messageTimestamp = Date.parse(message.timestamp);
+    // A session has only one executing turn at a time. Once a different,
+    // newer assistant turn has committed, an older live layer cannot still be
+    // the active turn; keeping it would append stale process UI after the new
+    // answer. Invalid or equal timestamps fail closed to the exact-turn rule.
+    return Number.isFinite(layerUpdatedAt)
+      && Number.isFinite(messageTimestamp)
+      && messageTimestamp > layerUpdatedAt;
+  });
 }
 
 export function settleActiveTurnLayerFromDetail(

@@ -849,7 +849,7 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
-    expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage })");
+    expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage, companionMode })");
     expect(conversationViewSource).toContain("const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {");
     expect(conversationViewSource).toContain("includeMentalSignals: showMentalSnapshots");
