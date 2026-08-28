@@ -77,12 +77,19 @@ class GraphHarness:
         dispatch_kind: str = "start",
         command_id: str = "cmd-driver",
         input_snapshot_hash: str = "a" * 64,
-        workflow_version_id: str = "challenge-cup-research-v2.1.0",
+        workflow_version_id: str | None = None,
         team_id: str = "research-team",
         receipt: ExecutionReceipt | None = None,
         idempotency_key: str | None = None,
         state_update: dict | None = None,
     ) -> None:
+        if not workflow_version_id:
+            # Dispatches must carry the run's pinned definition identity; the
+            # coordinator compiles the graph from this version id.
+            record = self.commands.store.get_run(run_id)
+            workflow_version_id = (
+                str(record.workflow_version_id) if record is not None else ""
+            )
         dispatch = GraphDispatch(
             action_id="act-driver",
             run_id=run_id,

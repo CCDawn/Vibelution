@@ -260,8 +260,8 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
 
         original_snapshot = harness.coordinator.snapshot
 
-        def persisted_interrupt_snapshot(run_id: str):
-            snapshot = dict(original_snapshot(run_id))
+        def persisted_interrupt_snapshot(run_id: str, workflow_version_id: str = ""):
+            snapshot = dict(original_snapshot(run_id, workflow_version_id))
             values = dict(snapshot.get("values") or {})
             attempts = dict(values.get("node_attempts") or {})
             if attempts.get("source_extraction"):
