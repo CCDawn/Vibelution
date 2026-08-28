@@ -46,7 +46,11 @@ _ALLOW_FULLMATCH = re.compile(
 def _is_corrupt_path_literal(value: str) -> bool:
     if not value or len(value) > 240:
         return False
-    if ".jsonl" in value or value.endswith(".json"):
+    # Real dotted extensions are never the lost-dot corruption class:
+    # ".ndjson" (newline-delimited JSON) legitimately ends in "json" without
+    # being a mangled json/jsonl filename; a mangled name has the dot dropped,
+    # so it can never end with the dotted extension.
+    if ".jsonl" in value or value.endswith((".json", ".ndjson")):
         return False
     leaf = value.replace("\\", "/").split("/")[-1]
     if not leaf or _ALLOW_FULLMATCH.match(leaf):
@@ -133,3 +137,17 @@ def test_known_correct_filenames_still_present() -> None:
     ).read_text(encoding="utf-8")
     assert "transfer_records.jsonl" in knowledge_kernel
     assert "transfer_recordjsonl" not in knowledge_kernel
+
+
+def test_detector_still_catches_glued_filenames_and_allows_real_extensions() -> None:
+    """Direct anchors: the .ndjson allowance must not weaken lost-dot detection."""
+    # Mangled (dot dropped) — must stay caught.
+    assert _is_corrupt_path_literal("stage_session_taskjson")
+    assert _is_corrupt_path_literal("agent_turn_resultjsonl")
+    assert _is_corrupt_path_literal("eventsndjson")  # events.ndjson → dot dropped
+    assert _is_corrupt_path_literal("ndjson")  # bare .ndjson → dot dropped
+    # Real extension tokens — must stay allowed.
+    assert not _is_corrupt_path_literal(".ndjson")
+    assert not _is_corrupt_path_literal("transfer_records.ndjson")
+    assert not _is_corrupt_path_literal("stage_session_tasks.json")
+    assert not _is_corrupt_path_literal("agent_turn_results.jsonl")
