@@ -37,7 +37,13 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
     minimal_mode = context_mode == "minimal"
     steward_mode = isinstance(context.get("stewardActionPacket"), dict)
     evidence_mode = context_mode in {"evidence", "retry_missing", "retry_evidence"} or steward_mode
+    finding_stage = trim_text(context.get("stageId"), max_length=80) == "finding"
     candidate_page = context.get("candidatePage") if isinstance(context.get("candidatePage"), dict) else {}
+    if finding_stage:
+        # finding 闭合化第一步（O3）：不下发续读邀请。candidatePage.hasMore 恒为
+        # false（nextOffset 仍可保留，但不再构成续读信号），continuationHint 随之
+        # 置空；存量覆盖由系统在写回后评估。
+        candidate_page = {**candidate_page, "hasMore": False}
     record_page = context.get("recordPage") if isinstance(context.get("recordPage"), dict) else {}
     usage = context.get("usage") if isinstance(context.get("usage"), dict) else {}
     record_continuation_hint = source_collection_context_record_continuation_hint(record_page, context_mode=context_mode)

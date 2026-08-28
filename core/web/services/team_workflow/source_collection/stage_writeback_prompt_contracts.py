@@ -3,6 +3,23 @@
 from __future__ import annotations
 
 
+def _finding_writeback_budget_line() -> str:
+    try:
+        from .writeback_materialize import (
+            finding_max_leads_per_writeback_batch,
+            finding_max_writeback_batches_per_task,
+        )
+
+        max_batches = finding_max_writeback_batches_per_task()
+        max_leads = finding_max_leads_per_writeback_batch()
+    except Exception:  # pragma: no cover - contract lines must never break prompts
+        max_batches, max_leads = 1, 5
+    return (
+        f"- 写回预算：每个任务最多接受 {max_batches} 个检索写回批次，每批 `candidateLeads[]` 最多 {max_leads} 条；"
+        "达到批次上限后再写新批会被拒绝，届时请立即以现有 `searchTrace[]` 与 `candidateLeads[]` 写回收口并结束任务。"
+    )
+
+
 def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
     if stage_id == "finding":
         return [
@@ -14,6 +31,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- `locator` 必须是本条资料的 DOI 或 https URL；不要只写自然语言来源名，也不要把搜索结果的概述当作资料定位符。",
             "- 检索到的可用资料写入 `result.candidateLeads[]`，明确无效、跑题或不可获取的来源写入 `result.invalidSources[]`；自然语言总结不能替代这些结构化写回。",
             "- 滚动写回：每检索到一批可用资料就立即调用一次 `source_collection_stage_writeback_tool` 把这批 `candidateLeads[]`/`invalidSources[]` 写回并累计；禁止等全部候选或 locator 验证完成后再一次性写回。写回随检索持续进行，不是收尾动作；宁可多次小批写回，也不许长时间验证后集中写。",
+            _finding_writeback_budget_line(),
             "- 单条来源的 locator 定位验证最多 1 次工具调用；失败即把该条写入 `result.invalidSources[]` 并附原因，立刻继续下一批检索，不得反复重试同一 URL/DOI 或其大小写、编码、URL 形状变体。",
             "- 绝不自行构造或猜测 DOI；需要 DOI 时只允许一次 `GET https://api.crossref.org/works?query.bibliographic=<标题+第一作者>`，返回 404/429 即放弃该条并写 `result.invalidSources[]`，禁止改用变体查询反复重试。",
         ]

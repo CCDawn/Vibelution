@@ -265,7 +265,7 @@ def source_collection_stage_task_checklist(
     raw_items_by_stage: dict[str, tuple[tuple[str, str, str], ...]] = {
         "finding": (
             ("read_context", "读取本轮 compact 上下文", "source_collection_context_tool"),
-            ("page_existing_sources", "分页检查已有资料和候选", "source_collection_context_tool"),
+            ("page_existing_sources", "一次读取当前上下文（单次调用即满足，无需翻页）", "source_collection_context_tool"),
             ("search_and_dedupe_sources", "搜索并去重新资料", "batch_web_search_tool"),
             ("write_candidate_leads", "用 candidateLeads[] 回写新资料", "source_collection_stage_writeback_tool"),
             ("write_invalid_sources", "写入 invalidSources[] 或说明无无效来源", "source_collection_stage_writeback_tool"),

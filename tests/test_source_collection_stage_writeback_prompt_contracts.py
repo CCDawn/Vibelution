@@ -48,6 +48,37 @@ def test_finding_prompt_requires_rolling_writeback_bounded_verification_and_no_f
     assert "404/429" in prompt
 
 
+def test_finding_prompt_states_writeback_budget_with_hard_limits() -> None:
+    # finding 闭合化第一步：滚动写回保留，但每批 candidateLeads[] 有界、
+    # 每任务总批次有上限，超限由服务端硬拒绝；契约必须把预算值和收口
+    # 动作写清楚，且预算行只能追加在滚动写回行之后。
+    lines = stage_writeback_prompt_lines("finding")
+    prompt = "\n".join(lines)
+
+    assert "写回预算" in prompt
+    assert "最多接受 1 个检索写回批次" in prompt
+    assert "每批 `candidateLeads[]` 最多 5 条" in prompt
+    assert "写回收口并结束任务" in prompt
+    rolling_index = next(index for index, line in enumerate(lines) if "滚动写回" in line)
+    budget_index = next(index for index, line in enumerate(lines) if "写回预算" in line)
+    assert budget_index == rolling_index + 1
+
+
+def test_finding_writeback_limits_are_env_overridable(monkeypatch) -> None:
+    from core.web.services.team_workflow.source_collection import writeback_materialize
+
+    assert writeback_materialize.finding_max_writeback_batches_per_task() == 1
+    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 5
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK", "3")
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH", "8")
+    assert writeback_materialize.finding_max_writeback_batches_per_task() == 3
+    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 8
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK", "not-a-number")
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH", "-2")
+    assert writeback_materialize.finding_max_writeback_batches_per_task() == 1
+    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 5
+
+
 def test_extraction_contract_states_nested_findings_carry_fact_themselves() -> None:
     # 运行时物化只认每条嵌套 finding 自身的 fact（claim 键不能替代），
     # 契约必须把这一点讲清楚，避免模型把 fact 只写在 extraction 父项。

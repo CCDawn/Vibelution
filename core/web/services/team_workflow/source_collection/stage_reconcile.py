@@ -2131,7 +2131,14 @@ def _source_collection_stage_task_tool_progress_from_trace(
                 ):
                     item_complete = True
                 if item_complete and "page" in item_id:
-                    item_complete = bool(artifact_complete)
+                    # finding 的 page_existing_sources 已改为单读语义：一次成功的
+                    # source_collection_context_tool 调用即勾，不再要求翻页读完或等
+                    # 产物完成；extraction 的 page_candidate_inputs 保持原门禁。
+                    item_complete = (
+                        True
+                        if item_id == "page_existing_sources"
+                        else bool(artifact_complete)
+                    )
             else:
                 item_complete = bool(writeback_observed and artifact_complete)
             if item_complete:
@@ -2790,6 +2797,12 @@ def _source_collection_stage_session_task_message(
             "- 本轮是写回恢复：如果当前会话上下文中已有完整结论和真实 ID，优先直接调用 `source_collection_stage_writeback_tool` 回写，不要先重读全部资料。",
             "- 只有缺少真实 recordId/candidateId 或证据时，才调用上面的 `source_collection_context_tool` 做一次性 ID 核对；不要因为 `candidatePage.hasMore=true` 自动翻完整批次。",
             "- 写回恢复阶段禁止调用 `web_fetch_tool` 或搜索工具；既有链接抓取失败应保留原决定并标记 `needs_more_info`，随后立即结构化写回。",
+        ]
+    elif stage_id == "finding":
+        # finding 闭合化第一步（O4）：单读指令，不再邀请按 nextOffset 补读。
+        pagination_lines = [
+            "- 本阶段一次性读取当前批上下文即可开始检索：单次 `source_collection_context_tool` 调用即满足检查清单，不需要按 `candidatePage.nextOffset` / `recordPage.nextOffset` 翻页补读存量候选。",
+            "- 存量覆盖由系统在写回后评估；把检索精力放在新资料、`searchTrace[]` 和按批写回上。",
         ]
     else:
         pagination_lines = [

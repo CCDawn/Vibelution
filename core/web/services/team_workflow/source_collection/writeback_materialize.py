@@ -14,11 +14,117 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
 from .relation_endpoints import build_relation_endpoint_registry, resolve_relation_endpoint
+
+
+# finding 阶段写回批次硬上限（finding 闭合化第一步，O5）：滚动写回仍然成立，
+# 但每批 candidateLeads[] 有界、每任务总批次有上限；超过即拒绝该批并返回结构化
+# 错误，闭合 finding 阶段的开放式检索循环。默认值可用环境变量覆盖。
+FINDING_MAX_WRITEBACK_BATCHES_PER_TASK = 1
+FINDING_MAX_LEADS_PER_WRITEBACK_BATCH = 5
+_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK_ENV = "VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK"
+_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH_ENV = "VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH"
+
+
+def _finding_writeback_limit_from_env(env_key: str, default: int) -> int:
+    raw = str(os.environ.get(env_key) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        if value > 0:
+            return value
+    return default
+
+
+def finding_max_writeback_batches_per_task() -> int:
+    """Per-task cap on accepted finding writeback batches (env-overridable)."""
+    return _finding_writeback_limit_from_env(
+        _FINDING_MAX_WRITEBACK_BATCHES_PER_TASK_ENV,
+        FINDING_MAX_WRITEBACK_BATCHES_PER_TASK,
+    )
+
+
+def finding_max_leads_per_writeback_batch() -> int:
+    """Per-batch cap on candidateLeads[] entries in one finding writeback."""
+    return _finding_writeback_limit_from_env(
+        _FINDING_MAX_LEADS_PER_WRITEBACK_BATCH_ENV,
+        FINDING_MAX_LEADS_PER_WRITEBACK_BATCH,
+    )
+
+
+def _finding_writeback_batch_fingerprints(leads: list[dict[str, Any]]) -> list[str]:
+    s = _service()
+    return sorted(
+        {
+            s._source_collection_stage_writeback_lead_fingerprint(lead)
+            for lead in leads
+            if isinstance(lead, dict)
+        }
+    )
+
+
+def _finding_writeback_batch_digest(lead_fingerprints: list[str]) -> str:
+    digest_source = json.dumps(lead_fingerprints, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(digest_source.encode("utf-8", errors="replace")).hexdigest()[:24]
+
+
+def _enforce_source_collection_finding_writeback_batch_limits(
+    task: dict[str, Any],
+    leads: list[dict[str, Any]],
+) -> None:
+    """Reject finding writeback batches beyond the per-task / per-batch budget.
+
+    Idempotent by construction: replaying an already-accepted batch (same lead
+    fingerprint set) never counts as a new batch, so retried writebacks of the
+    same batch stay accepted. The accepted-batch ledger lives on the stage
+    session task record and persists with the next task upsert.
+    """
+    s = _service()
+    if not leads:
+        return
+    stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
+    if stage_id != "finding" and agent_role != "source_finder":
+        return
+    max_leads = finding_max_leads_per_writeback_batch()
+    if len(leads) > max_leads:
+        raise s.TeamWorkflowOrchestrationError(
+            f"单批写回 candidateLeads[] 超过上限（{len(leads)} 条 > 每批最多 {max_leads} 条）；"
+            "请把本批压缩到上限内写回；检索批次已达上限时，"
+            "请立即以现有 searchTrace[] 与 candidateLeads[] 写回收口并结束任务。"
+        )
+    max_batches = finding_max_writeback_batches_per_task()
+    lead_fingerprints = _finding_writeback_batch_fingerprints(leads)
+    batch_fingerprint = _finding_writeback_batch_digest(lead_fingerprints)
+    ledger = [
+        item
+        for item in list(task.get("sourceCollectionWritebackBatches") or [])
+        if isinstance(item, dict) and s._trim_text(item.get("batchFingerprint"), max_length=64)
+    ]
+    if any(s._trim_text(item.get("batchFingerprint"), max_length=64) == batch_fingerprint for item in ledger):
+        # 幂等重放：同一批已接受过，不计新批次、不拒绝。
+        return
+    if len(ledger) >= max_batches:
+        raise s.TeamWorkflowOrchestrationError(
+            f"检索批次已达上限（本任务最多 {max_batches} 批）；"
+            "请立即以现有 searchTrace[] 与 candidateLeads[] 写回收口并结束任务。"
+        )
+    task["sourceCollectionWritebackBatches"] = [
+        *ledger,
+        {
+            "batchFingerprint": batch_fingerprint,
+            "leadCount": len(leads),
+            "leadFingerprints": lead_fingerprints[:80],
+            "recordedAt": s.utc_now_iso(),
+        },
+    ]
 
 
 def _service():
@@ -689,6 +795,8 @@ def _materialize_source_collection_stage_writeback_sources(
         return record_materialized
 
     leads = s._source_collection_stage_writeback_source_leads(result)
+    # finding 写回批次硬上限（O5）：在物化任何来源前强制，超限即拒绝整批。
+    _enforce_source_collection_finding_writeback_batch_limits(task, leads)
     invalid_sources = s._source_collection_stage_writeback_invalid_sources(result)
     excluded_sources, invalid_skipped = s._materialize_source_collection_stage_invalid_sources(
         team_id,

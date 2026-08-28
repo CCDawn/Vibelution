@@ -8508,3 +8508,320 @@ def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, 
         (project_root / "official_model_evidence" / "index.json").read_text(encoding="utf-8")
     )
     assert [item["evidenceId"] for item in stored["evidence"]] == [evidence["evidenceId"]]
+
+
+def _finding_close_first_step_task(
+    tmp_path,
+    monkeypatch,
+    *,
+    stage_id="finding",
+    role="source_finder",
+    role_label="资料寻找",
+):
+    """Start a stage session task for the finding close-first-step cases."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name=role_label)
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title=role_label)
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": role, "agentName": role_label}],
+    )
+    stage_response = _start_research_stage_round_with_problem_understanding(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "goal": "搜集可追踪资料",
+            "agentRoles": [role],
+            "agentIds": {role: agent["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    submitted: list[dict] = []
+
+    def _capture_submit(session_id, content, **kwargs):
+        submitted.append({"sessionId": session_id, "content": content})
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": f"turn-{stage_id}-close-first-step",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", _capture_submit)
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": stage_id, "agentId": agent["agentId"], "agentRole": role},
+    )
+    return {"team": team, "runId": run_id, "task": task, "submitted": submitted}
+
+
+def _append_single_context_tool_event(tmp_path, task) -> None:
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        task["turn"]["turnId"],
+        "tool_result",
+        status="done",
+        payload={
+            "toolCall": {
+                "name": "source_collection_context_tool",
+                "status": "done",
+                "args": {"task_id": task["taskId"]},
+                "result": "stage tool completed",
+            }
+        },
+    )
+
+
+def test_finding_close_first_step_checklist_single_read_and_gate(tmp_path, monkeypatch):
+    """finding checklist 奖励单次读取；门禁一次成功读取即勾，不再等翻页或产物。"""
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+
+    checklist = {item["id"]: item for item in task["task"]["taskChecklist"]}
+    assert "一次读取当前上下文" in checklist["page_existing_sources"]["description"]
+    assert "无需翻页" in checklist["page_existing_sources"]["description"]
+
+    extraction_by_id = {
+        item["id"]: item
+        for item in team_workflow_orchestration_service._source_collection_stage_task_checklist("extraction")
+    }
+    assert extraction_by_id["page_candidate_inputs"]["description"] == "分页覆盖本阶段输入"
+
+    _append_single_context_tool_event(tmp_path, task["task"])
+    # blocked 写回不带任何产物：artifactComplete=False 时单次成功读取也应勾选该项。
+    blocked = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {"status": "blocked", "summary": "读取后暂无可写回线索，先阻塞。"},
+    )
+    progress = blocked["task"]["taskToolProgress"]
+    assert blocked["writeback"]["closureSummary"]["artifactComplete"] is False
+    assert "page_existing_sources" in progress["completedIds"]
+    assert "page_existing_sources" not in progress["pendingIds"]
+
+    assert "一次性读取当前批上下文" in env["submitted"][0]["content"]
+    assert "补读必要页" not in env["submitted"][0]["content"]
+    assert "写回预算" in env["submitted"][0]["content"]
+    assert "每批 `candidateLeads[]` 最多 5 条" in env["submitted"][0]["content"]
+
+
+def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, monkeypatch):
+    """finding 上下文不再下发续读邀请：hasMore 恒为 false、continuationHint 置空。"""
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+    for index in range(7):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding finding candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/finding-close-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence for finding close-first-step context. " * 3,
+                "allowedForAnalysis": True,
+                "metadata": {
+                    "sourceCollectionRunId": run_id,
+                    "doi": f"10.0000/finding-close-{index}",
+                },
+                "createdByAgent": "source-finder",
+            },
+        )
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        max_records=1,
+        candidate_offset=0,
+        candidate_limit=5,
+        context_mode="compact",
+    )
+    assert context["stageId"] == "finding"
+    assert context["candidatePage"]["total"] == 7
+    assert context["candidatePage"]["returned"] == 5
+    assert context["candidatePage"]["hasMore"] is False
+    assert context["candidatePage"]["nextOffset"] == 5
+    assert context["usage"]["continuationHint"] == ""
+    assert "candidate_offset" not in json.dumps(context["usage"], ensure_ascii=False)
+
+
+def test_finding_close_first_step_writeback_batch_limit_and_replay(tmp_path, monkeypatch):
+    """第二个不同批次写回被拒并带收口错误；同批重放幂等不计新批次。"""
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+
+    lead_a = {
+        "leadId": "lead-close-a",
+        "title": "Predictive coding in the visual cortex",
+        "locator": "https://doi.org/10.1038/4580",
+        "sourceType": "paper",
+        "query": "predictive coding mechanism",
+        "perspective": "mechanism",
+    }
+
+    def _payload(lead):
+        return {
+            "status": "needs_review",
+            "summary": "写回一批候选线索。",
+            "result": {"candidateLeads": [lead]},
+        }
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        _payload(lead_a),
+    )
+    assert first["writeback"]["materializedSources"]["sourceLeadCount"] == 1
+
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(
+        team["teamId"], run_id
+    )
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
+    assert len(stored_task["sourceCollectionWritebackBatches"]) == 1
+    assert stored_task["sourceCollectionWritebackBatches"][0]["leadCount"] == 1
+
+    replay = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        _payload(lead_a),
+    )
+    assert replay["writeback"]["materializedSources"]["createdRecordCount"] == 0
+    assert replay["writeback"]["materializedSources"]["skippedDuplicateCount"] == 1
+
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(
+        team["teamId"], run_id
+    )
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
+    assert len(stored_task["sourceCollectionWritebackBatches"]) == 1
+
+    lead_b = dict(
+        lead_a,
+        leadId="lead-close-b",
+        title="A free energy principle for the brain",
+        locator="https://doi.org/10.1038/nrn2787",
+    )
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="检索批次已达上限",
+    ) as exc_info:
+        team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+            team["teamId"],
+            task["taskId"],
+            _payload(lead_b),
+        )
+    assert "请立即以现有 searchTrace[] 与 candidateLeads[] 写回收口并结束任务" in str(exc_info.value)
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 1
+
+
+def test_finding_close_first_step_writeback_rejects_oversized_lead_batch(tmp_path, monkeypatch):
+    """单批 candidateLeads[] 超过每批上限即拒绝整批，不物化任何来源。"""
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+    leads = [
+        {
+            "leadId": f"lead-over-{index}",
+            "title": f"Predictive coding oversized lead {index}",
+            "locator": f"https://doi.org/10.2000/over-{index}",
+            "sourceType": "paper",
+            "query": "predictive coding",
+            "perspective": "mechanism",
+        }
+        for index in range(6)
+    ]
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="每批最多 5 条",
+    ):
+        team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+            team["teamId"],
+            task["taskId"],
+            {"status": "needs_review", "summary": "单批超限。", "result": {"candidateLeads": leads}},
+        )
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 0
+
+
+def test_extraction_stage_pagination_and_invite_regression_unchanged(tmp_path, monkeypatch):
+    """extraction 翻页、续读邀请与分页 checklist 保持现状，finding 收紧不外溢。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码皮层层级",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
+    for index in range(7):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding extraction candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/extraction-regression-{index}",
+                "sourceKind": "paper",
+                "summary": "Neural predictive coding evidence for extraction regression. " * 4,
+                "allowedForAnalysis": True,
+                "metadata": {
+                    "sourceCollectionRunId": run_id,
+                    "doi": f"10.0000/extraction-regression-{index}",
+                },
+                "createdByAgent": "content-extraction-agent",
+            },
+        )
+    submitted: list[dict] = []
+
+    def _capture_submit(session_id, content, **kwargs):
+        submitted.append({"content": content})
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-extraction-regression",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", _capture_submit)
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    first_page = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        max_records=1,
+        candidate_offset=0,
+        candidate_limit=5,
+        context_mode="compact",
+    )
+    assert first_page["stageId"] == "extraction"
+    assert first_page["candidatePage"]["hasMore"] is True
+    assert first_page["candidatePage"]["nextOffset"] == 5
+    assert "candidate_offset=5" in first_page["usage"]["continuationHint"]
+
+    assert "补读必要页" in submitted[0]["content"]
+    assert "分页覆盖本阶段输入" in submitted[0]["content"]
+    assert "写回预算" not in submitted[0]["content"]
