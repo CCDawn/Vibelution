@@ -71,6 +71,34 @@ rotate_log_file = _LOG_ROTATION.rotate_log_file
 append_rotating_text = _LOG_ROTATION.append_rotating_text
 write_log_tail_copy = _LOG_ROTATION.write_log_tail_copy
 
+
+def _load_process_liveness_stdlib():
+    """Load process_liveness.py without importing core.infrastructure.
+
+    ``core/infrastructure/__init__`` imports the pydantic-backed stack, so the
+    launcher loads this stdlib-only probe straight from its file (same pattern
+    as ``_load_log_rotation_stdlib``). The shared module stays the single
+    source of truth for liveness semantics; nothing is copied into this script.
+    """
+
+    import importlib.util
+
+    path = PROJECT_ROOT / "core" / "infrastructure" / "process_liveness.py"
+    spec = importlib.util.spec_from_file_location("_vibelution_launcher_process_liveness", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Tolerant load: a damaged checkout degrades to the legacy os.kill fallback
+# below instead of refusing to start the launcher.
+try:
+    _PROCESS_LIVENESS = _load_process_liveness_stdlib()
+except Exception:  # pragma: no cover - only a broken checkout reaches this
+    _PROCESS_LIVENESS = None
+
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
 RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
@@ -256,10 +284,13 @@ def _pid_probe(pid: int) -> str:
 
     psutil.pid_exists checks the Windows exit status (STILL_ACTIVE), so it
     correctly reports "dead" for processes that are exiting but still hold
-    a queryable handle. os.kill(pid, 0) is the fallback when psutil is
-    unavailable: ProcessLookupError (POSIX) / WinError 87 (Windows) mean
-    dead, access denial (WinError 5) means the process exists but cannot
-    be inspected -> unknown.
+    a queryable handle. Without psutil, the shared
+    core.infrastructure.process_liveness probe answers via kernel32
+    OpenProcess on Windows and os.kill(pid, 0) on POSIX. os.kill is NOT a
+    Windows liveness probe: signal 0 maps to GenerateConsoleCtrlEvent, which
+    raises WinError 87 for dead and live pids alike in console-less
+    processes, so it remains only a last-resort fallback and WinError 87
+    maps to "unknown" instead of "dead".
     """
     if pid <= 0:
         return "dead"
@@ -274,14 +305,17 @@ def _pid_probe(pid: int) -> str:
             return "dead"
         except psutil.Error:
             return "unknown"
+    if _PROCESS_LIVENESS is not None:
+        try:
+            return "alive" if _PROCESS_LIVENESS.is_pid_alive(int(pid)) else "dead"
+        except Exception:
+            return "unknown"
     try:
         os.kill(pid, 0)
         return "alive"
     except ProcessLookupError:
         return "dead"
     except OSError as exc:
-        if getattr(exc, "winerror", None) == 87:
-            return "dead"
         if getattr(exc, "errno", None) == errno.ESRCH:
             return "dead"
     return "unknown"

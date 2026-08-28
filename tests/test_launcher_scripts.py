@@ -76,6 +76,26 @@ def test_python_launcher_visible_start_refuses_edge_fallback(monkeypatch, tmp_pa
         launcher._start_backend(8000, "127.0.0.1", no_browser=False)
 
 
+def test_python_launcher_pid_probe_without_psutil_uses_shared_liveness(monkeypatch):
+    launcher = _load_python_launcher()
+
+    # The shared stdlib-only probe must load from core/infrastructure without
+    # importing the heavy core.infrastructure package.
+    assert launcher._PROCESS_LIVENESS is not None
+
+    monkeypatch.setitem(sys.modules, "psutil", None)  # import psutil -> ImportError
+    assert launcher._pid_probe(0) == "dead"
+    assert launcher._pid_probe(os.getpid()) == "alive"
+
+    # The kernel32-backed shared probe decides; a stale os.kill heuristic must
+    # never map a live pid to "dead" (WinError 87 is not a liveness answer).
+    fake_probe = types.SimpleNamespace(is_pid_alive=lambda pid: pid == os.getpid())
+    monkeypatch.setattr(launcher, "_PROCESS_LIVENESS", fake_probe)
+    assert launcher._pid_probe(os.getpid()) == "alive"
+    assert launcher._pid_probe(os.getpid() + 424242) == "dead"
+    assert launcher._pid_alive(os.getpid()) is True
+
+
 def test_python_launcher_workbench_identity_finds_the_profile_owned_window(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
 
