@@ -104,6 +104,10 @@ def build_challenge_cup_graph(
     ``definition=None`` keeps the historical behavior of compiling the current
     ``build_challenge_cup_workflow_definition()`` output; run-driven callers
     must pass the definition resolved from the run's version identity instead.
+    Decision-node conditional edges and terminal END edges are installed only
+    when the pinned definition actually contains those nodes, so reduced
+    definitions (knowledge sideflow, main-flow 3.0.0) compile without the
+    iteration/governance machinery.
     """
     resolved = definition or build_challenge_cup_workflow_definition()
     order = _node_order(resolved)
@@ -113,20 +117,29 @@ def build_challenge_cup_graph(
     builder.add_edge(START, order[0])
     for source, target in graph_static_edge_pairs(resolved):
         builder.add_edge(source, target)
-    iteration_targets = graph_conditional_targets("iteration_decision", resolved)
-    builder.add_conditional_edges(
-        "iteration_decision",
-        route_after_iteration_decision,
-        {target: target for target in iteration_targets} | {END: END},
-    )
-    governance_targets = graph_conditional_targets("version_governance", resolved)
-    builder.add_conditional_edges(
-        "version_governance",
-        route_after_version_governance,
-        {target: target for target in governance_targets} | {END: END},
-    )
-    builder.add_edge("result_package", END)
+    if "iteration_decision" in order:
+        iteration_targets = graph_conditional_targets("iteration_decision", resolved)
+        builder.add_conditional_edges(
+            "iteration_decision",
+            route_after_iteration_decision,
+            {target: target for target in iteration_targets} | {END: END},
+        )
+    if "version_governance" in order:
+        governance_targets = graph_conditional_targets("version_governance", resolved)
+        builder.add_conditional_edges(
+            "version_governance",
+            route_after_version_governance,
+            {target: target for target in governance_targets} | {END: END},
+        )
+    for terminal_node in _terminal_node_ids(resolved):
+        builder.add_edge(terminal_node, END)
     return builder
+
+
+def _terminal_node_ids(definition: WorkflowDefinition) -> list[str]:
+    """Definition nodes without outgoing edges, in canonical order."""
+    sources = {edge.fromNodeId for edge in definition.edges}
+    return [node.nodeId for node in definition.nodes if node.nodeId not in sources]
 
 
 def compile_challenge_cup_graph(checkpointer: Any, definition: WorkflowDefinition | None = None):

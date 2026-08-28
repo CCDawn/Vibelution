@@ -1,0 +1,149 @@
+{
+  "contentHash": "2de8b1c703f0ed688b65e7609f17a05237942c810d2494372cb80097896011f3",
+  "definition": {
+    "edges": [
+      {
+        "edgeId": "e_find_extract",
+        "fromNodeId": "source_finding",
+        "gateKind": "auto",
+        "label": "候选资料",
+        "requiredArtifactKinds": [
+          "source_candidate_batch"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "source_extraction"
+      },
+      {
+        "edgeId": "e_extract_rel",
+        "fromNodeId": "source_extraction",
+        "gateKind": "auto",
+        "label": "证据卡",
+        "requiredArtifactKinds": [
+          "evidence_card_batch"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "evidence_relations"
+      },
+      {
+        "edgeId": "e_rel_ingest",
+        "fromNodeId": "evidence_relations",
+        "gateKind": "auto",
+        "label": "关系图",
+        "requiredArtifactKinds": [
+          "evidence_relation_graph"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "knowledge_ingestion"
+      },
+      {
+        "edgeId": "e_ingest_handoff",
+        "fromNodeId": "knowledge_ingestion",
+        "gateKind": "human",
+        "label": "入库草稿",
+        "requiredArtifactKinds": [
+          "knowledge_package_draft"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "knowledge_handoff"
+      }
+    ],
+    "label": "挑战杯知识搜集子流程",
+    "nodes": [
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "资料寻找",
+        "nodeId": "source_finding",
+        "primaryRoleKey": "source_finder",
+        "producesArtifactKinds": [
+          "source_candidate_batch"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "资料提炼",
+        "nodeId": "source_extraction",
+        "primaryRoleKey": "source_extractor",
+        "producesArtifactKinds": [
+          "evidence_card_batch"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "证据关系",
+        "nodeId": "evidence_relations",
+        "primaryRoleKey": "source_relation_mapper",
+        "producesArtifactKinds": [
+          "evidence_relation_graph"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "知识入库",
+        "nodeId": "knowledge_ingestion",
+        "primaryRoleKey": "source_ingestor",
+        "producesArtifactKinds": [
+          "knowledge_package_draft"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [
+          "knowledge_package",
+          "human"
+        ],
+        "actorKind": "human",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "知识包交接",
+        "nodeId": "knowledge_handoff",
+        "primaryRoleKey": "research_owner",
+        "producesArtifactKinds": [
+          "knowledge_package"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      }
+    ],
+    "schemaVersion": "1.0.0",
+    "stages": [
+      {
+        "index": 1,
+        "label": "知识搜集",
+        "nodeIds": [
+          "source_finding",
+          "source_extraction",
+          "evidence_relations",
+          "knowledge_ingestion",
+          "knowledge_handoff"
+        ],
+        "stageId": "knowledge_collection"
+      }
+    ],
+    "structureHash": "2de8b1c703f0ed688b65e7609f17a05237942c810d2494372cb80097896011f3",
+    "workflowId": "challenge-cup-knowledge-sideflow"
+  },
+  "schemaVersion": "1.0.0",
+  "snapshotKind": "workflow_definition_snapshot",
+  "snapshotVersion": 1,
+  "workflowId": "challenge-cup-knowledge-sideflow",
+  "workflowVersionId": "wv-2de8b1c703f0"
+}

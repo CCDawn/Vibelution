@@ -254,6 +254,43 @@ def reset_registry_for_tests() -> None:
 # --------------------------------------------------------------------------
 
 
+def resolve_definition_by_version_id(
+    workflow_version_id: str,
+    *,
+    fallback_definition: WorkflowDefinition | None = None,
+) -> WorkflowDefinition:
+    """Resolve one registered definition by its workflowVersionId alone.
+
+    Runtime graph helpers (coordinator/worker) often only know the version id
+    carried by a dispatch; the workflowId is implied by the registry because
+    version ids embed the structure hash.  An empty version id keeps the
+    legacy behavior (compile the current main definition or the provided
+    fallback).  Zero matches or an ambiguous match fail closed.
+    """
+    normalized = str(workflow_version_id or "").strip()
+    if not normalized:
+        return fallback_definition
+    _ensure_bootstrapped()
+    with _LOCK:
+        matches = [
+            entry.definition
+            for (wf_id, version), entry in _REGISTRY.items()
+            if version == normalized
+        ]
+    if not matches:
+        raise UnknownWorkflowDefinitionVersion(
+            "workflow definition version is not registered: "
+            f"workflowVersionId={normalized}"
+        )
+    if len(matches) > 1:
+        raise WorkflowDefinitionHashMismatch(
+            "workflowVersionId resolves to multiple registered definitions: "
+            f"workflowVersionId={normalized} "
+            f"workflowIds={sorted(entry.workflowId for entry in matches)}"
+        )
+    return matches[0]
+
+
 def resolve_definition(
     *,
     workflow_id: str,

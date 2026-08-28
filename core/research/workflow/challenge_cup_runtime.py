@@ -366,7 +366,7 @@ def build_pending_action(state: ChallengeCupGraphState, node_id: str) -> Pending
             if str(state.get("active_node_id") or "") == node_id
             else 1
         )
-    actor_kind = _actor_kind_for(node_id)
+    actor_kind = _actor_kind_for(node_id, str(state.get("workflow_version_id") or ""))
     selection_id = str(state.get("selection_id") or "").strip() or None
     candidate_id = str(state.get("candidate_id") or "").strip() or None
     if bool(selection_id) != bool(candidate_id):
@@ -406,11 +406,43 @@ def build_pending_action(state: ChallengeCupGraphState, node_id: str) -> Pending
     )
 
 
-def _actor_kind_for(node_id: str) -> ActorKind:
-    for node in build_challenge_cup_workflow_definition().nodes:
+def _actor_kind_for(node_id: str, workflow_version_id: str = "") -> ActorKind:
+    definition = resolve_definition_for_version(workflow_version_id)
+    for node in definition.nodes:
         if node.nodeId == node_id:
             return node.actorKind
     raise ValueError(f"unknown node {node_id}")
+
+
+def resolve_definition_for_version(
+    workflow_version_id: str = "",
+    *,
+    definition: Any = None,
+) -> Any:
+    """Resolve the pinned definition for a run-facing version id.
+
+    Empty version ids keep the legacy behavior: compile the current main
+    definition (or the explicitly provided one).  Registered version ids
+    (sideflow, main-flow 3.0.0, snapshot-pinned versions) resolve through
+    the definition registry; an ambiguous id still fails closed.  A version
+    id unknown to the registry can only come from runs created before the
+    registry existed (or synthetic test ids) — those keep the historical
+    behavior of being driven by the current graph; checkpoint-pinning
+    callers remain fail-closed through ``resolve_definition_for_run_record``.
+    """
+    if definition is not None:
+        return definition
+    if not str(workflow_version_id or "").strip():
+        return build_challenge_cup_workflow_definition()
+    from core.research.workflow.definition_registry import (
+        UnknownWorkflowDefinitionVersion,
+        resolve_definition_by_version_id,
+    )
+
+    try:
+        return resolve_definition_by_version_id(workflow_version_id)
+    except UnknownWorkflowDefinitionVersion:
+        return build_challenge_cup_workflow_definition()
 
 
 def _action_kind_for(actor_kind: ActorKind, node_id: str) -> str:
@@ -421,11 +453,12 @@ def _action_kind_for(actor_kind: ActorKind, node_id: str) -> str:
     return f"human_task:{node_id}"
 
 
-def _node_order() -> list[str]:
-    return [node.nodeId for node in build_challenge_cup_workflow_definition().nodes]
+def _node_order(workflow_version_id: str = "") -> list[str]:
+    definition = resolve_definition_for_version(workflow_version_id)
+    return [node.nodeId for node in definition.nodes]
 
 
-def _fork_predecessor_for(node_id: str) -> str | None:
+def _fork_predecessor_for(node_id: str, workflow_version_id: str = "") -> str | None:
     """Unique static predecessor used as ``as_node`` when forking a checkpoint.
 
     A fresh thread's bare ``update_state`` only schedules the graph entry
@@ -435,10 +468,12 @@ def _fork_predecessor_for(node_id: str) -> str | None:
     itself and for conditional-sourced nodes, where static scheduling is not
     determinable.
     """
-    if node_id == _node_order()[0]:
+    order = _node_order(workflow_version_id)
+    if node_id == order[0]:
         return None
+    definition = resolve_definition_for_version(workflow_version_id)
     predecessors = [
-        source for source, target in graph_static_edge_pairs() if target == node_id
+        source for source, target in graph_static_edge_pairs(definition) if target == node_id
     ]
     if len(predecessors) == 1:
         return predecessors[0]
@@ -523,23 +558,34 @@ def _route_after_linear(source: str, target: str):
     return route
 
 
-def successor_map() -> dict[str, tuple[str, ...]]:
+def successor_map(workflow_version_id: str = "") -> dict[str, tuple[str, ...]]:
     """Deterministic successor set per node (drives worker attempt injection)."""
-    collected: dict[str, list[str]] = {node_id: [] for node_id in _node_order()}
-    for source, target in graph_static_edge_pairs():
+    definition = resolve_definition_for_version(workflow_version_id)
+    collected: dict[str, list[str]] = {node_id: [] for node_id in _node_order(workflow_version_id)}
+    for source, target in graph_static_edge_pairs(definition):
         collected.setdefault(source, []).append(target)
     for source in ("iteration_decision", "version_governance"):
-        collected[source] = list(graph_conditional_targets(source))
+        if source in collected:
+            collected[source] = list(graph_conditional_targets(source, definition))
     return {
         node_id: tuple(dict.fromkeys(collected.get(node_id, [])))
-        for node_id in _node_order()
+        for node_id in _node_order(workflow_version_id)
     }
-def build_formal_graph() -> StateGraph:
+def build_formal_graph(definition: Any = None) -> StateGraph:
+    """Build the formal runtime graph for one pinned workflow definition.
+
+    ``definition=None`` keeps the historical main-definition behavior; the
+    coordinator passes the definition resolved from the dispatch's
+    workflowVersionId so sideflow / 3.0.0 threads compile their own topology.
+    """
+    resolved = resolve_definition_for_version("", definition=definition)
+    order = [node.nodeId for node in resolved.nodes]
+    successors = successor_map_for_definition(resolved)
     builder: StateGraph = StateGraph(ChallengeCupGraphState)
-    for node_id in _node_order():
+    for node_id in order:
         builder.add_node(node_id, _make_node_fn(node_id))
-    builder.add_edge(START, _node_order()[0])
-    for source, target in graph_static_edge_pairs():
+    builder.add_edge(START, order[0])
+    for source, target in graph_static_edge_pairs(resolved):
         if source == "candidate_promotion":
             # Preserve the existing post-promotion terminal packaging step;
             # only the edge identity comes from the definition.
@@ -550,26 +596,46 @@ def build_formal_graph() -> StateGraph:
             _route_after_linear(source, target),
             {target: target, END: END},
         )
-    builder.add_conditional_edges(
-        "iteration_decision",
-        route_after_iteration_decision,
-        {
-            "controlled_run": "controlled_run",
-            "version_governance": "version_governance",
-            END: END,
-        },
-    )
-    builder.add_conditional_edges(
-        "version_governance",
-        route_after_version_governance,
-        {
-            "candidate_promotion": "candidate_promotion",
-            "result_package": "result_package",
-            END: END,
-        },
-    )
-    builder.add_edge("result_package", END)
+    if "iteration_decision" in order:
+        builder.add_conditional_edges(
+            "iteration_decision",
+            route_after_iteration_decision,
+            {
+                "controlled_run": "controlled_run",
+                "version_governance": "version_governance",
+                END: END,
+            },
+        )
+    if "version_governance" in order:
+        builder.add_conditional_edges(
+            "version_governance",
+            route_after_version_governance,
+            {
+                "candidate_promotion": "candidate_promotion",
+                "result_package": "result_package",
+                END: END,
+            },
+        )
+    for node_id in order:
+        if not successors.get(node_id):
+            builder.add_edge(node_id, END)
     return builder
+
+
+def successor_map_for_definition(definition: Any) -> dict[str, tuple[str, ...]]:
+    """Successor map computed from an explicit definition (no registry lookup)."""
+    collected: dict[str, list[str]] = {
+        node.nodeId: [] for node in definition.nodes
+    }
+    for source, target in graph_static_edge_pairs(definition):
+        collected.setdefault(source, []).append(target)
+    for source in ("iteration_decision", "version_governance"):
+        if source in collected:
+            collected[source] = list(graph_conditional_targets(source, definition))
+    return {
+        node_id: tuple(dict.fromkeys(collected.get(node_id, [])))
+        for node_id in collected
+    }
 
 
 def _is_concurrent_update_error(exc: BaseException) -> bool:
@@ -634,7 +700,7 @@ class ChallengeCupGraphCoordinator:
         self._checkpoint_path = Path(checkpoint_path)
         self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _compile(self):
+    def _compile(self, workflow_version_id: str = ""):
         from contextlib import ExitStack
 
         from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
@@ -643,14 +709,15 @@ class ChallengeCupGraphCoordinator:
         checkpointer = stack.enter_context(
             open_sqlite_checkpointer(str(self._checkpoint_path))
         )
-        graph = build_formal_graph().compile(checkpointer=checkpointer)
+        definition = resolve_definition_for_version(workflow_version_id)
+        graph = build_formal_graph(definition).compile(checkpointer=checkpointer)
         return graph, stack
 
     def _config(self, run_id: str) -> dict[str, dict[str, str]]:
         return {"configurable": {"thread_id": run_id}}
 
     def start_attempt(self, dispatch: GraphDispatch) -> GraphDispatchResult:
-        graph, stack = self._compile()
+        graph, stack = self._compile(dispatch.workflow_version_id)
         try:
             return self._start_attempt_inner(graph, dispatch)
         finally:
@@ -747,7 +814,7 @@ class ChallengeCupGraphCoordinator:
     def retry_attempt(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         """Retry: re-enter the target node via input Command(goto=...) with a
         new frozen attempt (never update_state(as_node))."""
-        graph, stack = self._compile()
+        graph, stack = self._compile(dispatch.workflow_version_id)
         try:
             _validate_state_scope_binding(
                 dict(self._read_state(graph, self._config(dispatch.run_id), heal=True).values or {}),
@@ -766,7 +833,7 @@ class ChallengeCupGraphCoordinator:
 
     def enter_node(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         """Re-enter a node after the thread has no interrupt (routed to END)."""
-        graph, stack = self._compile()
+        graph, stack = self._compile(dispatch.workflow_version_id)
         try:
             return self._goto_node(graph, dispatch)
         finally:
@@ -775,7 +842,7 @@ class ChallengeCupGraphCoordinator:
     def resume_action(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         if dispatch.receipt is None:
             raise ValueError("resume_action requires an ExecutionReceipt")
-        graph, stack = self._compile()
+        graph, stack = self._compile(dispatch.workflow_version_id)
         try:
             config = self._config(dispatch.run_id)
             persisted_state = self._read_state(graph, config, heal=True)
@@ -823,7 +890,7 @@ class ChallengeCupGraphCoordinator:
         discards cached task resumes/errors and rebuilds exactly one interrupt
         from the Ledger attempt authority.
         """
-        graph, stack = self._compile()
+        graph, stack = self._compile(dispatch.workflow_version_id)
         try:
             config = self._config(dispatch.run_id)
             state = self._read_state(graph, config, heal=True)
@@ -868,8 +935,10 @@ class ChallengeCupGraphCoordinator:
         finally:
             stack.close()
 
-    def snapshot(self, run_id: str) -> Mapping[str, Any]:
-        graph, stack = self._compile()
+    def snapshot(
+        self, run_id: str, workflow_version_id: str = ""
+    ) -> Mapping[str, Any]:
+        graph, stack = self._compile(workflow_version_id)
         try:
             state = self._read_state(graph, self._config(run_id), heal=True)
             _validate_state_scope_binding(dict(state.values or {}))
@@ -900,6 +969,8 @@ class ChallengeCupGraphCoordinator:
 
         Checkpoint forking is not business advancement; the child becomes
         runnable only after the Ledger transaction commits (spec 8.4).
+        Forks exist only on the main flow today, so the graph compiles from
+        the current main definition.
         """
         graph, stack = self._compile()
         try:
