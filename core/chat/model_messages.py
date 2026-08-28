@@ -95,7 +95,9 @@ def _normalize_provider_turn_messages_impl(messages: Iterable[Any]) -> list[Any]
         if role == "user" and not message.get("content") and not message.get("attachments") and not message.get("references"):
             continue
         normalized.append(message)
-    return _repair_provider_tool_chain(_dedupe_adjacent_tool_results(normalized))
+    return _dedupe_chain_tool_call_ids(
+        _repair_provider_tool_chain(_dedupe_adjacent_tool_results(normalized))
+    )
 
 
 def _assistant_history_messages(
@@ -774,6 +776,165 @@ def _message_turn_identity(message: dict[str, Any]) -> str:
         return f"turn:{turn_id}"
     event_id = str(metadata.get("eventId") or metadata.get("event_id") or "").strip()
     return f"event:{event_id}" if event_id else ""
+
+
+def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
+    """Deterministically rename duplicate tool call ids in the provider projection.
+
+    Some providers replay an earlier tool call id when nudged to continue a
+    turn ("继续" / pagination nudges). The projector and payload validator
+    treat the whole request chain as one id space, so any repeated id is
+    rejected as ``duplicate_tool_call_id`` before provider send. This pass
+    runs after chain repair, on a fully paired projection, and renames later
+    duplicates to ``<orig>-dedup-<n>`` together with their paired ``tool``
+    result messages so call/result pairing stays intact. The projector and
+    validator remain the strict terminal gates — nothing is relaxed here.
+
+    Idempotent: once ids are unique the pass is a no-op, and ``-dedup-``
+    suffixes are never stacked because renamed ids are registered as known.
+
+    Persisted journal/session ids are untouched: every mutated dict here is a
+    fresh copy created by this normalization pass (copy-on-write projection).
+    """
+
+    known_ids = _collect_chain_tool_call_ids(messages)
+    used_ids: set[str] = set()
+    turn_final_ids: dict[str, list[str]] = {}
+    turn_result_seen: dict[str, int] = {}
+    deduped: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            turn_final_ids = {}
+            turn_result_seen = {}
+            deduped.append(message)
+            continue
+        role = _provider_message_role(message)
+        if role == "assistant":
+            turn_final_ids = {}
+            turn_result_seen = {}
+            tool_calls = _provider_message_tool_calls(message)
+            if not tool_calls:
+                deduped.append(message)
+                continue
+            message = dict(message)
+            message["tool_calls"] = []
+            finals_by_id: dict[str, list[str]] = {}
+            for call in tool_calls:
+                call = dict(call)
+                call_id = str(call.get("id") or "").strip()
+                if call_id:
+                    finals = finals_by_id.setdefault(call_id, [])
+                    if not finals and call_id not in used_ids:
+                        finals.append(call_id)
+                        used_ids.add(call_id)
+                    else:
+                        new_id = _next_deduped_tool_call_id(call_id, known_ids, used_ids)
+                        known_ids.add(new_id)
+                        used_ids.add(new_id)
+                        finals.append(new_id)
+                        call["id"] = new_id
+                message["tool_calls"].append(call)
+            if any(final_id != call_id for call_id, finals in finals_by_id.items() for final_id in finals):
+                _rewrite_assistant_tool_call_id_metadata(message, finals_by_id)
+            turn_final_ids = finals_by_id
+            deduped.append(message)
+            continue
+        if role == "tool":
+            tool_call_id = _provider_message_tool_call_id(message)
+            finals = turn_final_ids.get(tool_call_id) if tool_call_id else None
+            if finals:
+                position = turn_result_seen.get(tool_call_id, 0)
+                turn_result_seen[tool_call_id] = position + 1
+                if position < len(finals):
+                    new_id = finals[position]
+                    if new_id != tool_call_id:
+                        message = dict(message)
+                        message["tool_call_id"] = new_id
+                        _rewrite_tool_message_call_id_metadata(message, tool_call_id, new_id)
+            deduped.append(message)
+            continue
+        turn_final_ids = {}
+        turn_result_seen = {}
+        deduped.append(message)
+    return deduped
+
+
+def _collect_chain_tool_call_ids(messages: list[Any]) -> set[str]:
+    """Return every assistant tool call id and tool result id in the chain."""
+
+    ids: set[str] = set()
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = _provider_message_role(message)
+        if role == "assistant":
+            ids.update(_message_tool_call_ids(message))
+            continue
+        if role == "tool":
+            tool_call_id = _provider_message_tool_call_id(message)
+            if tool_call_id:
+                ids.add(tool_call_id)
+    return ids
+
+
+def _next_deduped_tool_call_id(original_id: str, known_ids: set[str], used_ids: set[str]) -> str:
+    counter = 1
+    while True:
+        candidate = f"{original_id}-dedup-{counter}"
+        if candidate not in known_ids and candidate not in used_ids:
+            return candidate
+        counter += 1
+
+
+def _rewrite_assistant_tool_call_id_metadata(
+    message: dict[str, Any],
+    finals_by_id: dict[str, list[str]],
+) -> None:
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    updated = dict(metadata)
+    counters: dict[str, int] = {}
+    changed = False
+    for key in ("interruptedToolCallIds", "interrupted_tool_call_ids"):
+        values = updated.get(key)
+        if not isinstance(values, list):
+            continue
+        rewritten: list[Any] = []
+        for item in values:
+            item_id = str(item or "").strip()
+            finals = finals_by_id.get(item_id)
+            if finals:
+                position = counters.get(item_id, 0)
+                counters[item_id] = position + 1
+                rewritten.append(finals[position] if position < len(finals) else item)
+            else:
+                rewritten.append(item)
+        if rewritten != list(values):
+            changed = True
+        updated[key] = rewritten
+    for key in ("toolCallId", "tool_call_id"):
+        value = str(updated.get(key) or "").strip()
+        finals = finals_by_id.get(value)
+        if finals and finals[0] != value:
+            updated[key] = finals[0]
+            changed = True
+    if changed:
+        message["metadata"] = updated
+
+
+def _rewrite_tool_message_call_id_metadata(message: dict[str, Any], old_id: str, new_id: str) -> None:
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    updated = dict(metadata)
+    changed = False
+    for key in ("toolCallId", "tool_call_id"):
+        if str(updated.get(key) or "").strip() == old_id:
+            updated[key] = new_id
+            changed = True
+    if changed:
+        message["metadata"] = updated
 
 
 def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:

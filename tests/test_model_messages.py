@@ -295,3 +295,128 @@ def test_history_tool_result_bodies_are_not_prose_truncated():
     assert messages[1]["content"] == bulky
     assert "历史工具结果已截断" not in messages[1]["content"]
     assert validate_tool_result_pairing(messages).ok
+
+
+def _duplicate_id_chain():
+    return [
+        {"role": "user", "content": "go"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_same",
+                    "type": "function",
+                    "function": {"name": "cli_tool", "arguments": "{\"command\":\"first\"}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_same", "content": "first result"},
+        {"role": "user", "content": "继续"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_same",
+                    "type": "function",
+                    "function": {"name": "cli_tool", "arguments": "{\"command\":\"again\"}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_same", "content": "second result"},
+    ]
+
+
+def test_duplicate_tool_call_ids_are_renumbered_with_paired_results():
+    import copy
+
+    raw_chain = _duplicate_id_chain()
+    snapshot = copy.deepcopy(raw_chain)
+    messages = normalize_provider_turn_messages(raw_chain)
+
+    # Copy-on-write: the persisted/journal-shaped input keeps its original ids.
+    assert raw_chain == snapshot
+    assert [message["role"] for message in messages] == ["user", "assistant", "tool", "user", "assistant", "tool"]
+    first_call_id = messages[1]["tool_calls"][0]["id"]
+    second_call_id = messages[4]["tool_calls"][0]["id"]
+    assert first_call_id == "call_same"
+    assert second_call_id == "call_same-dedup-1"
+    assert messages[2]["tool_call_id"] == first_call_id
+    assert messages[5]["tool_call_id"] == second_call_id
+    assert messages[2]["content"] == "first result"
+    assert messages[5]["content"] == "second result"
+    # Deterministic: the same input always renames to the same ids.
+    assert normalize_provider_turn_messages(_duplicate_id_chain()) == messages
+    # The strict pairing gate now passes on the repaired projection.
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_duplicate_tool_call_id_renormalization_is_idempotent():
+    once = normalize_provider_turn_messages(_duplicate_id_chain())
+    twice = normalize_provider_turn_messages(once)
+
+    assert twice == once
+    ids = [
+        call["id"]
+        for message in twice
+        for call in message.get("tool_calls") or []
+    ]
+    assert ids == ["call_same", "call_same-dedup-1"]
+    assert validate_tool_result_pairing(twice).ok
+
+
+def test_duplicate_tool_call_id_renumbering_keeps_parallel_pairing_and_interrupted_metadata():
+    messages = normalize_provider_turn_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_a",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_a", "content": "one"},
+            {
+                "role": "assistant",
+                "content": "",
+                "metadata": {"interruptedToolCallIds": ["call_a"]},
+                "tool_calls": [
+                    {
+                        "id": "call_a",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_b",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_a", "content": "two"},
+            {"role": "tool", "tool_call_id": "call_b", "content": "three"},
+        ]
+    )
+
+    renamed_call = messages[2]["tool_calls"][0]["id"]
+    assert renamed_call == "call_a-dedup-1"
+    assert messages[2]["tool_calls"][1]["id"] == "call_b"
+    assert messages[3]["tool_call_id"] == renamed_call
+    assert messages[4]["tool_call_id"] == "call_b"
+    assert messages[2]["metadata"]["interruptedToolCallIds"] == [renamed_call]
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_payload_validator_terminal_gate_still_rejects_unnormalized_duplicates():
+    raw_chain = _duplicate_id_chain()[1:]  # drop the leading user message
+
+    result = validate_tool_result_pairing(raw_chain)
+
+    assert not result.ok
+    assert result.error_type == "duplicate_tool_call_id"
+    assert result.details["toolCallId"] == "call_same"

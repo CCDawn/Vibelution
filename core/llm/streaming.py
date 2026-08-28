@@ -44,15 +44,20 @@ def parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
 
 def extract_message_tool_calls(message: Dict[str, Any]) -> List[ToolCall]:
     items: List[ToolCall] = []
+    seen_ids: set[str] = set()
     for index, raw_tool in enumerate(message.get("tool_calls") or []):
         tool = _as_dict(raw_tool)
         if not isinstance(tool, dict):
             continue
         function = _as_dict(tool.get("function") or {})
         raw_args = function.get("arguments") or {}
+        raw_id = str(tool.get("id") or "").strip()
+        call_id = _unique_response_call_id(raw_id, f"tool_{index}", seen_ids)
+        if raw_id and call_id != raw_id:
+            tool = {**tool, "id": call_id}
         items.append(
             ToolCall(
-                id=str(tool.get("id") or f"tool_{index}"),
+                id=call_id,
                 name=str(function.get("name") or ""),
                 arguments=parse_tool_arguments(raw_args),
                 raw_arguments=raw_args,
@@ -60,6 +65,27 @@ def extract_message_tool_calls(message: Dict[str, Any]) -> List[ToolCall]:
             )
         )
     return items
+
+
+def _unique_response_call_id(raw_id: Any, fallback_id: str, seen_ids: set[str]) -> str:
+    """Return a deterministic per-response unique tool call id.
+
+    Some providers replay an id already used earlier in the same response
+    when a continuation nudge repeats a tool call. Later duplicates are
+    renamed ``<id>-dup-<n>`` so downstream pairing (tool results, journal,
+    next-request projection) never sees two calls claiming the same id.
+    """
+
+    base = str(raw_id or "").strip() or fallback_id
+    if base not in seen_ids:
+        seen_ids.add(base)
+        return base
+    counter = 1
+    while f"{base}-dup-{counter}" in seen_ids:
+        counter += 1
+    unique = f"{base}-dup-{counter}"
+    seen_ids.add(unique)
+    return unique
 
 
 class ToolCallAccumulator:
@@ -90,7 +116,20 @@ class ToolCallAccumulator:
             self._to_tool_call(index, self._by_index[index])
             for index in sorted(self._by_index)
         ]
-        return [call for call in calls if call.name]
+        seen_ids: set[str] = set()
+        deduped: List[ToolCall] = []
+        for call in calls:
+            if not call.name:
+                continue
+            # ids already carry the per-index `tool_{index}` fallback from
+            # _to_tool_call, so the base id here is never empty.
+            call_id = _unique_response_call_id(call.id, f"tool_{len(deduped)}", seen_ids)
+            if call_id != call.id:
+                call.id = call_id
+                if isinstance(call.provider_payload, dict):
+                    call.provider_payload = {**call.provider_payload, "id": call_id}
+            deduped.append(call)
+        return deduped
 
     @staticmethod
     def _append_arguments(state: Dict[str, Any], part: Any) -> None:
