@@ -560,7 +560,7 @@ class GraphDispatchWorker:
         ).result(timeout=10)
         if handoff is None or str(handoff[8]) != "accepted":
             return False
-        successors = successor_map().get(dispatch.node_id, ())
+        successors = successor_map(dispatch.workflow_version_id).get(dispatch.node_id, ())
         run = self._store.get_run(dispatch.run_id)
         branch = branch_decision_from_run(run)
         routed = routed_successors(dispatch.node_id, branch)
@@ -569,28 +569,33 @@ class GraphDispatchWorker:
         elif dispatch.node_id in {"iteration_decision", "version_governance"}:
             successors = ()
         if not successors:
-            # Terminal node (result_package): ack and close the run.
+            # Terminal node (result_package / sideflow knowledge_handoff):
+            # ack and close the run.
             now_ms = self._now()
             run = self._store.get_run(dispatch.run_id)
 
             def ack_only(uow):
                 uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
-                if run is not None and dispatch.node_id == "result_package":
-                    completion_kind, terminal_reason = terminal_facts_for_run(run)
-                    sync_run_succeeded(
-                        uow,
-                        run_id=dispatch.run_id,
-                        now_ms=now_ms,
-                        completion_kind=completion_kind,
-                        terminal_reason=terminal_reason,
-                        node_id=dispatch.node_id,
-                        actor_id=self._owner,
-                    )
+                if run is None:
+                    return
+                if not _run_terminal_close_applies(run, dispatch.node_id):
+                    return
+                completion_kind, terminal_reason = _terminal_facts_for_close(run)
+                sync_run_succeeded(
+                    uow,
+                    run_id=dispatch.run_id,
+                    now_ms=now_ms,
+                    completion_kind=completion_kind,
+                    terminal_reason=terminal_reason,
+                    node_id=dispatch.node_id,
+                    actor_id=self._owner,
+                )
+                _sideflow_child_succeeded(uow, run_id=dispatch.run_id, now_ms=now_ms)
 
             self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
         successor_id = successors[0]
-        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
         if not _graph_at_node(snapshot, successor_id):
             # Ledger advanced (handoff accepted) but LangGraph is still at the
             # predecessor interrupt — resume instead of forging a successor.
@@ -955,11 +960,17 @@ class GraphDispatchWorker:
             # attempt 已终态：其待执行的 adapter_dispatch 不得再运行
             # （retry 会以新 attempt 重新发起，旧的 adapter 任务必须取消）。
             uow.repository.cancel_outbox_by_node_run(dispatch.node_run_id, now_ms)
+            _sideflow_child_failed(
+                uow,
+                run_id=dispatch.run_id,
+                outcome=outcome,
+                now_ms=now_ms,
+            )
 
         self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _start_or_recover(self, dispatch: GraphDispatch) -> GraphDispatchResult:
-        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
         values = snapshot.get("values") or {}
         persisted_pending = snapshot.get("pendingAction") or {}
         node_id = str(
@@ -1104,11 +1115,13 @@ class GraphDispatchWorker:
         still at ``source_finding`` while retrying ``controlled_run``). Walk
         the unique linear path, resuming each succeeded + accepted hop.
         """
-        path = _linear_successor_path(interrupt_node_id, dispatch.node_id)
+        path = _linear_successor_path(
+            interrupt_node_id, dispatch.node_id, dispatch.workflow_version_id
+        )
         if path is None or len(path) < 2:
             return None
         for predecessor_id, successor_id in zip(path[:-1], path[1:]):
-            snapshot = self._coordinator.snapshot(dispatch.run_id)
+            snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
             if _graph_at_node(snapshot, dispatch.node_id):
                 break
             if not _graph_at_node(snapshot, predecessor_id):
@@ -1117,13 +1130,13 @@ class GraphDispatchWorker:
                 dispatch, predecessor_node_id=predecessor_id
             ):
                 return None
-            snapshot = self._coordinator.snapshot(dispatch.run_id)
+            snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
             if not (
                 _graph_at_node(snapshot, successor_id)
                 or _graph_at_node(snapshot, dispatch.node_id)
             ):
                 return None
-        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
         if not _graph_at_node(snapshot, dispatch.node_id):
             return None
         # Re-enter the target interrupt with the ledger attempt. Never
@@ -1148,7 +1161,7 @@ class GraphDispatchWorker:
         """
         from dataclasses import replace
 
-        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
         if not _graph_at_node(snapshot, predecessor_node_id):
             return False
         predecessor = self._store.latest_attempt(dispatch.run_id, predecessor_node_id)
@@ -1254,7 +1267,7 @@ class GraphDispatchWorker:
                         state_update=heal_update,
                     )
                 )
-                after = self._coordinator.snapshot(dispatch.run_id)
+                after = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
                 if not _graph_at_node(after, predecessor_node_id):
                     return True
             except Exception as exc:
@@ -1310,7 +1323,7 @@ class GraphDispatchWorker:
                 predecessor_node_id,
                 exc,
             ) from exc
-        after = self._coordinator.snapshot(dispatch.run_id)
+        after = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
         if not _graph_at_node(after, predecessor_node_id):
             return True
         raise GraphRecoverStepError(
@@ -1343,7 +1356,7 @@ class GraphDispatchWorker:
         elif dispatch.node_id in {"iteration_decision", "version_governance"}:
             successors = ()
         else:
-            successors = successor_map().get(dispatch.node_id, ())
+            successors = successor_map(dispatch.workflow_version_id).get(dispatch.node_id, ())
         node_attempts: dict[str, int] = {}
         for successor in successors:
             latest = self._store.latest_attempt(dispatch.run_id, successor)
@@ -1544,23 +1557,35 @@ class GraphDispatchWorker:
                     now_ms,
                     finished_at_ms=now_ms,
                 )
+                closed_run = uow.repository.get_run(dispatch.run_id)
                 if (
                     outcome == "succeeded"
                     and result.pending_action is None
-                    and dispatch.node_id == "result_package"
+                    and closed_run is not None
+                    and _run_terminal_close_applies(closed_run, dispatch.node_id)
                 ):
-                    closed = uow.repository.get_run(dispatch.run_id)
-                    if closed is not None:
-                        completion_kind, terminal_reason = terminal_facts_for_run(closed)
-                        sync_run_succeeded(
-                            uow,
-                            run_id=dispatch.run_id,
-                            now_ms=now_ms,
-                            completion_kind=completion_kind,
-                            terminal_reason=terminal_reason,
-                            node_id=dispatch.node_id,
-                            actor_id=self._owner,
-                        )
+                    completion_kind, terminal_reason = _terminal_facts_for_close(
+                        closed_run
+                    )
+                    sync_run_succeeded(
+                        uow,
+                        run_id=dispatch.run_id,
+                        now_ms=now_ms,
+                        completion_kind=completion_kind,
+                        terminal_reason=terminal_reason,
+                        node_id=dispatch.node_id,
+                        actor_id=self._owner,
+                    )
+                    _sideflow_child_succeeded(
+                        uow, run_id=dispatch.run_id, now_ms=now_ms
+                    )
+                elif outcome != "succeeded":
+                    _sideflow_child_failed(
+                        uow,
+                        run_id=dispatch.run_id,
+                        outcome=outcome,
+                        now_ms=now_ms,
+                    )
 
         self._submit(mutate, force_flush=True).result(timeout=30)
 
@@ -2116,7 +2141,75 @@ class GraphDispatchWorker:
         )
 
 
-def _linear_successor_path(start_node_id: str, target_node_id: str) -> list[str] | None:
+def _terminal_facts_for_close(run: Any) -> tuple[str, str]:
+    """Terminal facts for a closing run.
+
+    Main-flow runs keep the package/governance-derived facts; knowledge
+    sideflow children close with their own acceptance semantics.
+    """
+    if _is_sideflow_run(run):
+        return "knowledge_sideflow", "knowledge_package_accepted"
+    return terminal_facts_for_run(run)
+
+
+def _run_terminal_close_applies(run: Any, node_id: str) -> bool:
+    """Whether a completed dispatch on this run closes it as succeeded.
+
+    Main-flow runs close only on ``result_package`` (historical behavior).
+    Knowledge sideflow child runs close on their terminal
+    ``knowledge_handoff`` node, which has no outgoing edge in the pinned
+    sideflow definition.
+    """
+    if _is_sideflow_run(run):
+        return True
+    return str(node_id or "") == "result_package"
+
+
+def _is_sideflow_run(run: Any) -> bool:
+    from core.research.workflow.knowledge_sideflow_definition import (
+        KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+    )
+
+    return (
+        str(getattr(run, "workflow_id", "") or "") == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    )
+
+
+def _sideflow_child_succeeded(uow: Any, *, run_id: str, now_ms: int) -> None:
+    """Producer hook: sideflow child reached its accepted handoff terminal.
+
+    Runs inside the SAME ledger transaction that committed the child run's
+    terminal facts: the knowledge_invocations row is closed with package
+    evidence and the ``event_publish`` outbox row is inserted atomically.
+    A child without package evidence never fakes a handoff.
+    """
+    from .knowledge_sideflow_service import (
+        record_knowledge_sideflow_child_success,
+    )
+
+    record_knowledge_sideflow_child_success(uow, run_id=run_id, now_ms=now_ms)
+
+
+def _sideflow_child_failed(
+    uow: Any,
+    *,
+    run_id: str,
+    outcome: str,
+    now_ms: int,
+) -> None:
+    """Producer hook: sideflow child failed/blocked/cancelled — no handoff."""
+    from .knowledge_sideflow_service import record_knowledge_sideflow_child_failure
+
+    record_knowledge_sideflow_child_failure(
+        uow, run_id=run_id, outcome=outcome, now_ms=now_ms
+    )
+
+
+def _linear_successor_path(
+    start_node_id: str,
+    target_node_id: str,
+    workflow_version_id: str = "",
+) -> list[str] | None:
     """Unique linear path from an interrupt node to a downstream retry target."""
     start = str(start_node_id or "").strip()
     target = str(target_node_id or "").strip()
@@ -2128,7 +2221,7 @@ def _linear_successor_path(start_node_id: str, target_node_id: str) -> list[str]
     current = start
     seen = {start}
     while current != target:
-        successors = successor_map().get(current, ())
+        successors = successor_map(workflow_version_id).get(current, ())
         if target in successors:
             path.append(target)
             return path
