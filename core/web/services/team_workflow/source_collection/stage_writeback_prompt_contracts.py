@@ -12,7 +12,10 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- `result.searchTrace[]` 必须逐条登记四类视角的实际检索轨迹；每项包含 `perspective`、`query`、`status=found/no_credible_source`、真实 `resultRefs[]`，未找到可信来源时再写 `failureReason`。",
             "- 至少一条候选资料必须属于 `limitation_or_null` 或 `falsification`，并能作为后续反证候选；如果真实检索后仍未找到，保留完整 `searchTrace[]`、写 `status=needs_review`，不得伪造负面资料或把支持性背景冒充反证。",
             "- `locator` 必须是本条资料的 DOI 或 https URL；不要只写自然语言来源名，也不要把搜索结果的概述当作资料定位符。",
-            "- 先在同一批 `result.candidateLeads[]` 写入检索到的可用资料，再用 `result.invalidSources[]` 登记明确无效、跑题或不可获取的来源；自然语言总结不能替代这些结构化写回。",
+            "- 检索到的可用资料写入 `result.candidateLeads[]`，明确无效、跑题或不可获取的来源写入 `result.invalidSources[]`；自然语言总结不能替代这些结构化写回。",
+            "- 滚动写回：每检索到一批可用资料就立即调用一次 `source_collection_stage_writeback_tool` 把这批 `candidateLeads[]`/`invalidSources[]` 写回并累计；禁止等全部候选或 locator 验证完成后再一次性写回。写回随检索持续进行，不是收尾动作；宁可多次小批写回，也不许长时间验证后集中写。",
+            "- 单条来源的 locator 定位验证最多 1 次工具调用；失败即把该条写入 `result.invalidSources[]` 并附原因，立刻继续下一批检索，不得反复重试同一 URL/DOI 或其大小写、编码、URL 形状变体。",
+            "- 绝不自行构造或猜测 DOI；需要 DOI 时只允许一次 `GET https://api.crossref.org/works?query.bibliographic=<标题+第一作者>`，返回 404/429 即放弃该条并写 `result.invalidSources[]`，禁止改用变体查询反复重试。",
         ]
     if stage_id == "extraction":
         return [

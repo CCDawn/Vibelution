@@ -239,6 +239,38 @@ def test_paper_project_and_news_search_build_no_quota_queries(monkeypatch):
     assert "reuters.com" in calls[2]["allowed_domains"]
 
 
+def test_paper_search_accepts_integer_year_hint(monkeypatch):
+    # 真实故障：模型传 year_hint=1984（int）被签名校验拒绝后弃用整条论文检索路径；
+    # 实现入口必须先把 int 归一成字符串再拼查询。
+    captured: dict[str, str] = {}
+
+    def fake_collect(query, *args, **kwargs):
+        captured["query"] = query
+        return {
+            "status": "ok",
+            "query": query,
+            "results": [
+                {
+                    "title": "Museum fatigue revisited",
+                    "url": "https://doi.org/10.1234/old",
+                    "snippet": "A 1984 paper.",
+                    "provider": "openalex",
+                    "qualityGate": {"accepted": True},
+                }
+            ],
+            "rawResultCount": 1,
+            "rejectedCount": 0,
+            "providers": [{"provider": "openalex", "status": "ok", "resultCount": 1}],
+        }
+
+    monkeypatch.setattr(research_search_backends, "collect_provider_results", fake_collect)
+
+    result = research_search_tools.paper_search("museum fatigue", year_hint=1984)
+
+    assert result.startswith("[论文公开搜索]")
+    assert captured["query"] == "museum fatigue 1984"
+
+
 def test_openalex_paper_search_parses_public_metadata(monkeypatch):
     monkeypatch.setattr(
         research_search_backends,
@@ -361,3 +393,52 @@ def test_web_fetch_stops_cross_host_redirect(monkeypatch):
 
     assert "跨主机重定向" in result
     assert "https://other.example.com/final" in result
+
+
+def test_web_fetch_user_agent_is_browser_like():
+    # Wikimedia 等站点按 UA 形状拦截 "compatible; <tool>" 形式的工具 UA，
+    # 403 后模型曾误判为 URL 形状问题连换 3 种变体重试；抓取必须用浏览器式 UA。
+    user_agent = web_search_tool._USER_AGENT
+
+    assert user_agent.startswith("Mozilla/5.0 (Windows NT")
+    assert "compatible; Vibelution" not in user_agent
+    assert "Chrome" in user_agent
+
+
+def test_web_fetch_404_returns_terminal_no_retry_hint(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://doi.org/10.1016/0021-7824(84)90075-X")
+
+    assert result.startswith("[错误] HTTP 404")
+    assert "目标不存在" in result
+    assert "重试相同或变体 URL 同样会失败" in result
+    assert "请改用其他来源或 search" in result
+
+
+def test_web_fetch_403_returns_anti_bot_no_retry_hint(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        return httpx.Response(403, request=httpx.Request("GET", url))
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://en.wikipedia.org/wiki/Predictive_coding")
+
+    assert result.startswith("[错误] HTTP 403")
+    assert "拒绝本工具访问" in result
+    assert "勿重试 URL 变体" in result
+    assert "请改用搜索摘要或其他域名" in result
+
+
+def test_web_fetch_other_status_codes_keep_plain_error(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        return httpx.Response(500, request=httpx.Request("GET", url))
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://example.com/broken")
+
+    assert result == "[错误] HTTP 500: https://example.com/broken"

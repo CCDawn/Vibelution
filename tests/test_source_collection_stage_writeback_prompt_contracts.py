@@ -31,6 +31,23 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
     assert "不得伪造负面资料" in prompt
 
 
+def test_finding_prompt_requires_rolling_writeback_bounded_verification_and_no_fabricated_doi() -> None:
+    # 真实故障：模型把契约读成"攒齐并验证完再一次性写回"，61 分钟零写回；
+    # 又自行构造错误 DOI 后在 crossref/doi.org 上试 17 次变体。契约必须
+    # 同时压住这三个行为面：滚动写回、定位验证最多一次、禁止构造 DOI。
+    prompt = "\n".join(stage_writeback_prompt_lines("finding"))
+
+    assert "滚动写回" in prompt
+    assert "source_collection_stage_writeback_tool" in prompt
+    assert "禁止等全部候选或 locator 验证完成后再一次性写回" in prompt
+    assert "最多 1 次" in prompt
+    assert "`result.invalidSources[]`" in prompt
+    assert "不得反复重试同一 URL/DOI" in prompt
+    assert "绝不自行构造或猜测 DOI" in prompt
+    assert "https://api.crossref.org/works?query.bibliographic=" in prompt
+    assert "404/429" in prompt
+
+
 def test_extraction_contract_states_nested_findings_carry_fact_themselves() -> None:
     # 运行时物化只认每条嵌套 finding 自身的 fact（claim 键不能替代），
     # 契约必须把这一点讲清楚，避免模型把 fact 只写在 extraction 父项。

@@ -235,13 +235,16 @@ def batch_web_search(
     return _render_batch_result("批量公开搜索", rows)
 
 
-def paper_search(topic: str, max_results: int = 8, year_hint: str = "", include_domains: str = "") -> str:
+def paper_search(topic: str, max_results: int = 8, year_hint: str | int = "", include_domains: str = "") -> str:
     """Search public paper pages without paid scholarly APIs."""
     topic_text = str(topic or "").strip()
     if not topic_text:
         return "[错误] 论文搜索主题不能为空"
+    # 模型常把 year_hint 传成 int（如 1984）；入口先归一成字符串再做拼接，
+    # 避免类型差异让这条免额度的论文检索入口被弃用。
+    year_text = str(year_hint or "").strip()
     domains = _merge_domains(_PAPER_DOMAINS, include_domains)
-    year = f" {str(year_hint).strip()}" if str(year_hint or "").strip() else ""
+    year = f" {year_text}" if year_text else ""
     provider_query = f"{topic_text}{year}".strip()
     provider_payload = research_search_backends.collect_provider_results(
         provider_query,

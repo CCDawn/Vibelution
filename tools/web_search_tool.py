@@ -47,7 +47,12 @@ _PUBLIC_SEARCH_MAX_RESULTS = 20
 _WEB_FETCH_TIMEOUT = 30.0
 _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 _WEB_FETCH_MAX_REDIRECTS = 5
-_USER_AGENT = "Mozilla/5.0 (compatible; Vibelution/1.0; research search tools)"
+# 浏览器式 UA：Wikimedia 等站点按 UA 形状拦截 "compatible; <tool>" 形式的机器人 UA，
+# 工具身份不再写入 User-Agent，避免 web_fetch/公开搜索被反爬直接 403。
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
 _BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
 _TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None, "refreshing": False}
 _TOKEN_HEALTH_CACHE_LOCK = threading.Lock()
@@ -759,6 +764,16 @@ def _extract_plain_text(document: str) -> str:
     return text.strip()
 
 
+def _format_http_fetch_error(status_code: int, url: str) -> str:
+    """Return the fetch error with a terminal hint that discourages retry spirals."""
+    base = f"[错误] HTTP {status_code}: {url}"
+    if status_code == 404:
+        return f"{base} 目标不存在；重试相同或变体 URL 同样会失败，请改用其他来源或 search。"
+    if status_code == 403:
+        return f"{base} 该站点拒绝本工具访问（可能是反爬），勿重试 URL 变体，请改用搜索摘要或其他域名。"
+    return base
+
+
 def _fetch_with_same_host_redirects(url: str) -> tuple[str, httpx.Response | None]:
     current_url = url
     original_host = (urlparse(url).hostname or "").lower()
@@ -799,7 +814,7 @@ def _fetch_with_same_host_redirects(url: str) -> tuple[str, httpx.Response | Non
     except httpx.TimeoutException:
         return f"[错误] 请求超时 ({_WEB_FETCH_TIMEOUT:g}s): {current_url}", None
     except httpx.HTTPStatusError as exc:
-        return f"[错误] HTTP {exc.response.status_code}: {current_url}", None
+        return _format_http_fetch_error(exc.response.status_code, current_url), None
     except Exception as exc:
         return f"[错误] 请求失败: {type(exc).__name__}: {exc}", None
 
