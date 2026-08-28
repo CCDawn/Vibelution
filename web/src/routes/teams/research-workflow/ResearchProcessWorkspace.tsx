@@ -14,6 +14,8 @@ import {
   buildKnowledgeSideflowCanvasRegion,
   composeKnowledgeSideflowGraph,
   definitionNeedsSideflowRegion,
+  isKnowledgeSideflowCanvasNode,
+  knowledgeSideflowRelationEdge,
 } from "./knowledgeSideflowCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
@@ -169,6 +171,11 @@ export function ResearchProcessWorkspace({
     location.selectedNodeId,
     runState.run?.runVersion ?? null,
   );
+  // Scalar selection input for the sideflow relation edge: identity-stable
+  // for main-chain selections (null), so ordinary clicks never recompose.
+  const selectedKsfNodeId = isKnowledgeSideflowCanvasNode(location.selectedNodeId)
+    ? location.selectedNodeId
+    : null;
   const detail = nodeDetail.state.kind === "ready" ? nodeDetail.state.detail : null;
   const insights = useResearchWorkflowInsights(teamId, location.runId);
   const formalCommand = useResearchWorkflowCommand(
@@ -226,10 +233,18 @@ export function ResearchProcessWorkspace({
     )
       ? buildKnowledgeSideflowCanvasRegion(invocationBadges ?? null)
       : null;
-    return composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion);
+    // The only main↔sideflow relation is a temporary line drawn while a
+    // ksf_ card is selected; the relation anchors on the invocation's own
+    // parentNodeId, never a fixed downstream node. Endpoint validation
+    // happens inside the composer (base + region node set).
+    const relationEdge = sideflowRegion
+      ? knowledgeSideflowRelationEdge(invocationBadges ?? null, selectedKsfNodeId)
+      : null;
+    return composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion, relationEdge);
   }, [
     catalog.effectiveBindings,
     location.runId,
+    selectedKsfNodeId,
     runState.projection,
     runState.snapshot,
     hypothesisFirstChain.chainState,
@@ -729,6 +744,7 @@ export function ResearchProcessWorkspace({
         busy: commandBusy,
         invocationBadges: runState.snapshot?.invocationBadges ?? null,
         snapshotOffers: runState.snapshot?.commandOffers ?? [],
+        definitionResolution: runState.snapshot?.definitionResolution,
       }}
       actions={{
         replaceParams: replaceParamsForInspector,

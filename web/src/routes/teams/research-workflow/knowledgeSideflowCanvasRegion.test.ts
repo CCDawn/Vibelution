@@ -7,8 +7,10 @@ import {
   definitionNeedsSideflowRegion,
   isKnowledgeSideflowCanvasNode,
   knowledgeSideflowCanvasNodeId,
+  knowledgeSideflowRelationEdge,
   knowledgeSideflowSemanticNodeId,
   KNOWLEDGE_SIDEFLOW_NODE_PREFIX,
+  KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID,
   sideflowNodeStatesFromBadges,
 } from "./knowledgeSideflowCanvasRegion";
 import type { WorkflowLayoutInput } from "../../../components/vui";
@@ -144,6 +146,60 @@ describe("sideflowNodeStatesFromBadges", () => {
     });
     expect(states.every((state) => state.status === "pending")).toBe(true);
   });
+
+  it("uses the child run's REAL per-node states when present", () => {
+    const states = sideflowNodeStatesFromBadges({
+      problem_understanding: badge({
+        latest: {
+          invocationId: "inv-3",
+          parentNodeId: "problem_understanding",
+          status: "running",
+          handoffState: null,
+          // Legacy summaries only knew the chain head; the child run's node
+          // attempts prove work has reached the third node.
+          currentKnowledgeNodeId: "source_finding",
+          childNodeStates: {
+            source_finding: "succeeded",
+            source_extraction: "succeeded",
+            evidence_relations: "running",
+            knowledge_ingestion: "failed",
+          },
+          updatedAtMs: 40,
+        },
+      }),
+    });
+    expect(states.map((state) => state.status)).toEqual([
+      "succeeded",
+      "succeeded",
+      "running",
+      "failed",
+      "pending",
+    ]);
+  });
+
+  it("shows waiting_human at the gate only while the handoff is awaiting", () => {
+    const states = sideflowNodeStatesFromBadges({
+      problem_understanding: badge({
+        awaitingHandoffCount: 1,
+        latest: {
+          invocationId: "inv-4",
+          parentNodeId: "problem_understanding",
+          status: "awaiting_handoff",
+          handoffState: "awaiting_human",
+          currentKnowledgeNodeId: "knowledge_handoff",
+          childNodeStates: {
+            source_finding: "succeeded",
+            source_extraction: "succeeded",
+            evidence_relations: "succeeded",
+            knowledge_ingestion: "succeeded",
+            knowledge_handoff: "succeeded",
+          },
+          updatedAtMs: 50,
+        },
+      }),
+    });
+    expect(states[4].status).toBe("waiting_human");
+  });
 });
 
 describe("buildKnowledgeSideflowCanvasRegion", () => {
@@ -154,7 +210,7 @@ describe("buildKnowledgeSideflowCanvasRegion", () => {
     ).toBeNull();
   });
 
-  it("draws four chain edges plus two boundary edges for active runs", () => {
+  it("draws only the four intra-chain edges — no permanent boundary edges", () => {
     const region = buildKnowledgeSideflowCanvasRegion({
       problem_understanding: badge({
         latest: {
@@ -177,10 +233,99 @@ describe("buildKnowledgeSideflowCanvasRegion", () => {
       "ksf_knowledge_handoff",
     ]);
     expect(region?.nodes[4].visualKind).toBe("human_gate");
-    expect(region?.edges).toHaveLength(6);
-    const labels = region?.edges.map((edge) => edge.label);
-    expect(labels).toContain("知识请求");
-    expect(labels).toContain("知识包交接");
+    // Exactly the 4 chain edges; the main↔sideflow relation is the
+    // selection-driven temporary line, never a permanent edge.
+    expect(region?.edges).toHaveLength(4);
+    expect(region?.edges.map((edge) => edge.edgeId)).toEqual([
+      "ksf_e_source_finding_source_extraction",
+      "ksf_e_source_extraction_evidence_relations",
+      "ksf_e_evidence_relations_knowledge_ingestion",
+      "ksf_e_knowledge_ingestion_knowledge_handoff",
+    ]);
+  });
+});
+
+describe("knowledgeSideflowRelationEdge", () => {
+  const badges = {
+    problem_understanding: badge({
+      latest: {
+        invocationId: "inv-1",
+        parentNodeId: "problem_understanding",
+        status: "completed",
+        handoffState: "accepted",
+        currentKnowledgeNodeId: "knowledge_handoff",
+        updatedAtMs: 1,
+      },
+    }),
+  };
+
+  it("is absent without a ksf_ selection or an invocation", () => {
+    expect(knowledgeSideflowRelationEdge(badges, "problem_understanding")).toBeNull();
+    expect(knowledgeSideflowRelationEdge(null, "ksf_source_finding")).toBeNull();
+    expect(
+      knowledgeSideflowRelationEdge(
+        { problem_understanding: badge({ latest: null }) },
+        "ksf_source_finding",
+      ),
+    ).toBeNull();
+  });
+
+  it("draws the request line from the invocation's parentNodeId", () => {
+    const edge = knowledgeSideflowRelationEdge(badges, "ksf_source_finding");
+    expect(edge).not.toBeNull();
+    expect(edge?.edgeId).toBe(KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID);
+    expect(edge?.fromNodeId).toBe("problem_understanding");
+    expect(edge?.toNodeId).toBe("ksf_source_finding");
+    expect(edge?.label).toBe("知识请求");
+  });
+
+  it("draws the write-back line into the invocation's parentNodeId at the gate", () => {
+    const edge = knowledgeSideflowRelationEdge(badges, "ksf_knowledge_handoff");
+    expect(edge).not.toBeNull();
+    expect(edge?.fromNodeId).toBe("ksf_knowledge_handoff");
+    // Write-back target is the invocation's own parentNodeId — never a
+    // fixed downstream node.
+    expect(edge?.toNodeId).toBe("problem_understanding");
+    expect(edge?.label).toBe("写回节点");
+  });
+
+  it("composer drops the line when the parent node is missing from the graph", () => {
+    const base = baseGraph();
+    const region = buildKnowledgeSideflowCanvasRegion({
+      result_evaluation: badge({
+        nodeId: "result_evaluation",
+        latest: {
+          invocationId: "inv-2",
+          parentNodeId: "result_evaluation",
+          status: "running",
+          handoffState: null,
+          currentKnowledgeNodeId: "source_finding",
+          updatedAtMs: 2,
+        },
+      }),
+    });
+    const composed = composeKnowledgeSideflowGraph(
+      base,
+      region,
+      knowledgeSideflowRelationEdge(
+        {
+          result_evaluation: badge({
+            nodeId: "result_evaluation",
+            latest: {
+              invocationId: "inv-2",
+              parentNodeId: "result_evaluation",
+              status: "running",
+              handoffState: null,
+              currentKnowledgeNodeId: "source_finding",
+              updatedAtMs: 2,
+            },
+          }),
+        },
+        "ksf_source_finding",
+      ),
+    );
+    const composedIds = new Set(composed.edges.map((edge) => edge.edgeId));
+    expect(composedIds.has(KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID)).toBe(false);
   });
 });
 
@@ -190,7 +335,7 @@ describe("composeKnowledgeSideflowGraph", () => {
     expect(composeKnowledgeSideflowGraph(base, null)).toBe(base);
   });
 
-  it("appends the sideflow stage and drops boundary edges with missing endpoints", () => {
+  it("appends the sideflow stage and drops relation edges with missing endpoints", () => {
     const base = baseGraph();
     const region = buildKnowledgeSideflowCanvasRegion({
       problem_understanding: badge({
@@ -205,10 +350,25 @@ describe("composeKnowledgeSideflowGraph", () => {
       }),
     });
     expect(region).not.toBeNull();
-    // Remove hypothesis_design so the handoff boundary edge loses its endpoint.
+    // Remove hypothesis_design; the relation edge targets only existing nodes.
     const composed = composeKnowledgeSideflowGraph(
       { ...base, nodes: base.nodes.filter((node) => node.nodeId !== "hypothesis_design") },
       region,
+      knowledgeSideflowRelationEdge(
+        {
+          problem_understanding: badge({
+            latest: {
+              invocationId: "inv-1",
+              parentNodeId: "problem_understanding",
+              status: "running",
+              handoffState: null,
+              currentKnowledgeNodeId: "source_finding",
+              updatedAtMs: 1,
+            },
+          }),
+        },
+        "ksf_source_finding",
+      ),
     );
     expect(composed.stages.map((stage) => stage.stageId)).toEqual([
       "stage_a",
@@ -216,8 +376,7 @@ describe("composeKnowledgeSideflowGraph", () => {
     ]);
     expect(composed.nodes).toHaveLength(6); // 1 base + 5 ksf
     const composedIds = new Set(composed.edges.map((edge) => edge.edgeId));
-    expect(composedIds.has("ksf_e_entry")).toBe(true);
-    expect(composedIds.has("ksf_e_handoff")).toBe(false); // endpoint missing
-    expect(composed.edges).toHaveLength(6); // 1 base + 4 chain + 1 boundary
+    expect(composedIds.has(KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID)).toBe(true);
+    expect(composed.edges).toHaveLength(6); // 1 base + 4 chain + 1 relation
   });
 });

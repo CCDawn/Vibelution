@@ -5,9 +5,10 @@
  * carries no in-graph knowledge nodes (main 3.0.0), synthesizes the fixed
  * five-node knowledge sideflow as an extra stage band driven only by the
  * snapshot's invocationBadges aggregates. The region never edits execution
- * topology: it draws the four intra-chain edges plus two boundary edges
- * (problem_understanding → entry, handoff gate → hypothesis_design) and no
- * N×5 permanent fan-out.
+ * topology and draws NO permanent main-chain↔sideflow edges: the only
+ * relation shown is the single selection-driven temporary line from
+ * `knowledgeSideflowRelationEdge` (request out, or write-back into the
+ * invocation's own parentNodeId).
  *
  * Precedent: hypothesisFirstCanvasRegion (hf_ prefix → ksf_ prefix).
  */
@@ -76,10 +77,37 @@ export type KnowledgeSideflowCanvasRegion = {
   edges: WorkflowCanvasEdgeInput[];
 };
 
+/** Maps a raw child-run node attempt status to a canvas card status. */
+export function sideflowStatusFromChildNodeState(
+  raw: string | undefined,
+): WorkflowNodeRunStatus | null {
+  const status = String(raw ?? "").trim().toLowerCase();
+  if (!status) return null;
+  if (status === "succeeded" || status === "completed") return "succeeded";
+  if (status === "running" || status === "in_flight") return "running";
+  if (status === "failed") return "failed";
+  if (status === "blocked") return "blocked";
+  return null;
+}
+
 function sideflowStatusFor(
   position: number,
   current: KnowledgeInvocationRecentSummary | null,
 ): WorkflowNodeRunStatus {
+  const nodeId = KNOWLEDGE_SIDEFLOW_NODE_IDS[position];
+  // Real per-node fact from the child run's latest attempt wins; the
+  // invocation-level derivation is only the legacy fallback.
+  const fromChild = sideflowStatusFromChildNodeState(current?.childNodeStates?.[nodeId]);
+  if (fromChild !== null) {
+    if (
+      nodeId === "knowledge_handoff"
+      && fromChild === "succeeded"
+      && String(current?.status ?? "") === "awaiting_handoff"
+    ) {
+      return "waiting_human";
+    }
+    return fromChild;
+  }
   if (!current?.currentKnowledgeNodeId) return "pending";
   const currentIndex = KNOWLEDGE_SIDEFLOW_NODE_IDS.indexOf(
     current.currentKnowledgeNodeId as (typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number],
@@ -136,6 +164,19 @@ export function sideflowNodeStatesFromBadges(
   }));
 }
 
+/** The five card statuses for ONE parent node's badge (inspector progress). */
+export function sideflowCardStatesForBadge(
+  badge: KnowledgeInvocationBadge | null | undefined,
+): Array<{
+  sideflowNodeId: (typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number];
+  status: WorkflowNodeRunStatus;
+}> {
+  return KNOWLEDGE_SIDEFLOW_NODE_IDS.map((sideflowNodeId, position) => ({
+    sideflowNodeId,
+    status: sideflowStatusFor(position, badge?.latest ?? null),
+  }));
+}
+
 export function buildKnowledgeSideflowCanvasRegion(
   badges: Record<string, KnowledgeInvocationBadge> | null | undefined,
 ): KnowledgeSideflowCanvasRegion | null {
@@ -155,8 +196,10 @@ export function buildKnowledgeSideflowCanvasRegion(
     description: state.description,
   }));
 
+  // Only the four intra-chain edges.  No permanent main-chain↔sideflow
+  // edges: the relation to the main chain is the selection-driven temporary
+  // line from `knowledgeSideflowRelationEdge`.
   const edges: Array<WorkflowCanvasEdgeInput> = [];
-  // Intra-chain edges mirror the sideflow definition's four edges.
   for (let index = 0; index < KNOWLEDGE_SIDEFLOW_NODE_IDS.length - 1; index += 1) {
     const from = KNOWLEDGE_SIDEFLOW_NODE_IDS[index];
     const to = KNOWLEDGE_SIDEFLOW_NODE_IDS[index + 1];
@@ -171,27 +214,6 @@ export function buildKnowledgeSideflowCanvasRegion(
       labelAlwaysVisible: false,
     });
   }
-  // Boundary edges (dropped by the composer when the endpoints are absent).
-  edges.push({
-    edgeId: "ksf_e_entry",
-    fromNodeId: "problem_understanding",
-    toNodeId: knowledgeSideflowCanvasNodeId("source_finding"),
-    label: "知识请求",
-    gateKind: "auto",
-    semanticKind: "main",
-    pathState: "idle",
-    labelAlwaysVisible: true,
-  });
-  edges.push({
-    edgeId: "ksf_e_handoff",
-    fromNodeId: knowledgeSideflowCanvasNodeId("knowledge_handoff"),
-    toNodeId: "hypothesis_design",
-    label: "知识包交接",
-    gateKind: "knowledge_package",
-    semanticKind: "main",
-    pathState: "idle",
-    labelAlwaysVisible: true,
-  });
 
   const stage: WorkflowCanvasStageInput = {
     stageId: KNOWLEDGE_SIDEFLOW_STAGE_ID,
@@ -203,15 +225,72 @@ export function buildKnowledgeSideflowCanvasRegion(
   return { stage, nodes, edges };
 }
 
+/** Stable edge id of the selection-driven temporary relation line. */
+export const KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID = "ksf_rel_temp";
+
+/**
+ * The single temporary relation between the sideflow and the main chain,
+ * shown only while a `ksf_` card is selected:
+ *
+ * - selecting the handoff gate draws the write-back line
+ *   `ksf_knowledge_handoff → <parentNodeId>` (label 写回节点) — the
+ *   write-back target is the invocation's own parentNodeId, never a fixed
+ *   downstream node;
+ * - selecting any other sideflow card draws the request line
+ *   `<parentNodeId> → <selected ksf node>` (label 知识请求).
+ *
+ * Endpoint validation is the composer's job (it knows the base+region node
+ * set); this helper only derives the edge from the invocation facts.
+ */
+export function knowledgeSideflowRelationEdge(
+  badges: Record<string, KnowledgeInvocationBadge> | null | undefined,
+  selectedNodeId: string | null | undefined,
+): WorkflowCanvasEdgeInput | null {
+  if (!isKnowledgeSideflowCanvasNode(selectedNodeId)) return null;
+  const latest = sideflowNodeStatesFromBadges(badges)
+    .map((state) => state.latest)
+    .filter((item): item is KnowledgeInvocationRecentSummary => Boolean(item))
+    .sort((left, right) => (right.updatedAtMs ?? 0) - (left.updatedAtMs ?? 0))[0];
+  if (!latest?.parentNodeId) return null;
+  const selected = String(selectedNodeId);
+  const parentNodeId = latest.parentNodeId;
+  if (knowledgeSideflowSemanticNodeId(selected) === "knowledge_handoff") {
+    return {
+      edgeId: KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID,
+      fromNodeId: knowledgeSideflowCanvasNodeId("knowledge_handoff"),
+      toNodeId: parentNodeId,
+      label: "写回节点",
+      gateKind: "knowledge_package",
+      semanticKind: "main",
+      pathState: "idle",
+      labelAlwaysVisible: true,
+    };
+  }
+  return {
+    edgeId: KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID,
+    fromNodeId: parentNodeId,
+    toNodeId: selected,
+    label: "知识请求",
+    gateKind: "auto",
+    semanticKind: "main",
+    pathState: "idle",
+    labelAlwaysVisible: true,
+  };
+}
+
 /**
  * Appends the sideflow region after the base graph's own stages. Boundary
  * edges only survive when both endpoints exist (e.g. the hypothesis-first
  * compose may have hidden the downstream pipeline). Null region is a no-op
- * that returns the base graph field-for-field identical.
+ * that returns the base graph field-for-field identical. When
+ * `relationEdge` is given (the selection-driven temporary line), it joins
+ * the region edges for path-state resolution and is dropped when either
+ * endpoint is missing.
  */
 export function composeKnowledgeSideflowGraph(
   base: import("../../../components/vui").WorkflowLayoutInput,
   region: KnowledgeSideflowCanvasRegion | null,
+  relationEdge?: WorkflowCanvasEdgeInput | null,
 ): import("../../../components/vui").WorkflowLayoutInput {
   if (!region) {
     return base;
@@ -221,7 +300,7 @@ export function composeKnowledgeSideflowGraph(
   );
   const runtimeCurrent = new Set(base.run?.runtimeCurrentNodeIds ?? []);
   const regionEdges = buildEdgePathStates(
-    region.edges
+    [...(relationEdge ? [relationEdge] : []), ...region.edges]
       .filter((edge) => nodeById.has(edge.fromNodeId) && nodeById.has(edge.toNodeId))
       .map((edge) => ({ ...edge, pathState: undefined })),
     nodeById,

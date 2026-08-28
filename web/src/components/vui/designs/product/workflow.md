@@ -210,7 +210,7 @@ const graph = composeHypothesisFirstGraph(base, region, {
 
 ### 功能
 
-科研流程画布的**显示层第二类区域**：把固定五节点知识搜集侧流程（资料寻找 → 资料提炼 → 证据关系 → 知识入库 → 知识包交接）合成为追加在主图末尾的「知识搜集 · 子流程」阶段带，由快照 `invocationBadges` 聚合驱动，不改动任何执行拓扑。区域由路由层纯函数 `buildKnowledgeSideflowCanvasRegion`（`routes/teams/research-workflow/knowledgeSideflowCanvasRegion.ts`）产出 `{ stage, nodes, edges }`，再经 `composeKnowledgeSideflowGraph` 拼进主图；无任何知识调用活动时区域不合成，画布保持原拓扑形态。边界只画两条：`problem_understanding → ksf_source_finding`（「知识请求」）与 `ksf_knowledge_handoff → hypothesis_design`（「知识包交接」，gateKind `knowledge_package`）；不画 N×5 永久长连线。
+科研流程画布的**显示层第二类区域**：把固定五节点知识搜集侧流程（资料寻找 → 资料提炼 → 证据关系 → 知识入库 → 知识包交接）合成为追加在主图末尾的「知识搜集 · 子流程」阶段带，由快照 `invocationBadges` 聚合驱动，不改动任何执行拓扑。区域由路由层纯函数 `buildKnowledgeSideflowCanvasRegion`（`routes/teams/research-workflow/knowledgeSideflowCanvasRegion.ts`）产出 `{ stage, nodes, edges }`，再经 `composeKnowledgeSideflowGraph` 拼进主图；无任何知识调用活动时区域不合成，画布保持原拓扑形态。**默认不画任何主链↔侧流程连线**：区域内部只有四条链内边；唯一的主链关系是选中 `ksf_` 卡片时才出现的**一条临时关系线**（`knowledgeSideflowRelationEdge`，edgeId `ksf_rel_temp`）——选中交接门画 `ksf_knowledge_handoff → 父节点`（「写回节点」），选中其余卡片画 `父节点 → 选中卡`（「知识请求」）；写回目标永远是 invocation 自己的 `parentNodeId`，绝不固定接 `hypothesis_design`，也不画 N×5 永久扇出。
 
 卡片映射（nodeId 均以 `ksf_` 前缀；`knowledge_handoff` 是 `human_gate`，其余为 `agent_task`）：五卡状态取**全部父节点中最近一次 invocation**（按 `updatedAtMs` 排序），沿链序把 `currentKnowledgeNodeId` 之前的卡标 `succeeded`、当前卡按 invocation status 映射（`awaiting_handoff→waiting_human`、`failed/cancelled→failed`、`completed→succeeded`、否则 `running`）、之后的卡标 `pending`。不猜测中间节点，没有服务端事实就写 pending。
 

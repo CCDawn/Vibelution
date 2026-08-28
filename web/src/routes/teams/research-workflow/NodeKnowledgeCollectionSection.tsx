@@ -5,17 +5,21 @@
  * the canonical knowledge command offers — operator-gated offers render as a
  * disabled button with its authorization reason instead of a 403.
  */
+import { useState } from "react";
+
 import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
 import {
   isOperatorGatedOffer,
   type CommandOffer,
 } from "../../../api/types/research-workflow/commands";
-import { KNOWLEDGE_SIDEFLOW_NODE_IDS } from "../../../api/types/researchWorkflow";
 import { VButton, VChip } from "../../../components/vui";
 import {
   buildKnowledgeCollectionInspectorModel,
-  type KnowledgeCollectionInspectorModel,
 } from "./knowledgeCollectionInspectorModel";
+import { commandOfferUnavailableReason } from "./nodeInspectorOpsModel";
+import {
+  sideflowCardStatesForBadge,
+} from "./knowledgeSideflowCanvasRegion";
 import styles from "./NodeKnowledgeCollectionSection.styles";
 
 const KNOWLEDGE_COMMANDS = new Set<CommandOffer["command"]>([
@@ -25,40 +29,16 @@ const KNOWLEDGE_COMMANDS = new Set<CommandOffer["command"]>([
 
 const SIDEFLOW_STATUS_LABELS: Record<string, string> = {
   pending: "待开始",
+  ready: "待开始",
   running: "进行中",
   waiting_human: "等待交接",
   succeeded: "已完成",
   failed: "失败",
+  blocked: "阻塞",
+  cancelled: "已取消",
+  stale: "已过期",
+  skipped: "已跳过",
 };
-
-type SideflowCard = { nodeId: string; status: keyof typeof SIDEFLOW_STATUS_LABELS };
-
-/** Five-card progress along the fixed sideflow chain, anchored at the
- * server-reported current knowledge node — never a guessed middle node. */
-export function sideflowProgressCards(
-  currentKnowledgeNodeId: string | null | undefined,
-  phase: KnowledgeCollectionInspectorModel["phase"],
-): SideflowCard[] {
-  const currentIndex = currentKnowledgeNodeId
-    ? KNOWLEDGE_SIDEFLOW_NODE_IDS.indexOf(
-        currentKnowledgeNodeId as (typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number],
-      )
-    : -1;
-  return KNOWLEDGE_SIDEFLOW_NODE_IDS.map((nodeId, position) => {
-    let status: SideflowCard["status"] = "pending";
-    if (phase === "handed_off" || (currentIndex >= 0 && position < currentIndex)) {
-      status = "succeeded";
-    } else if (currentIndex >= 0 && position === currentIndex) {
-      status =
-        phase === "awaiting_handoff"
-          ? "waiting_human"
-          : phase === "failed"
-            ? "failed"
-            : "running";
-    }
-    return { nodeId, status };
-  });
-}
 
 function offerRequirementLines(payload: Record<string, unknown> | undefined): {
   keywords: string;
@@ -91,6 +71,7 @@ export type NodeKnowledgeCollectionSectionProps = {
 
 export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSectionProps) {
   const isZh = props.lang !== "en";
+  const [lineageOpen, setLineageOpen] = useState(false);
   const model = buildKnowledgeCollectionInspectorModel({ badge: props.badge });
   const knowledgeOffers = props.offers.filter(
     (offer) => KNOWLEDGE_COMMANDS.has(offer.command)
@@ -131,9 +112,13 @@ export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSec
 
       {model.progress ? (
         <ol className={styles.cards} data-testid="knowledge-sideflow-progress">
-          {sideflowProgressCards(model.lineage.currentKnowledgeNodeId, model.phase).map((card) => (
-            <li key={card.nodeId} className={styles.card} data-sideflow-status={card.status}>
-              {card.nodeId} · {SIDEFLOW_STATUS_LABELS[card.status]}
+          {sideflowCardStatesForBadge(props.badge).map((card) => (
+            <li
+              key={card.sideflowNodeId}
+              className={styles.card}
+              data-sideflow-status={card.status}
+            >
+              {card.sideflowNodeId} · {SIDEFLOW_STATUS_LABELS[card.status] ?? card.status}
             </li>
           ))}
         </ol>
@@ -146,21 +131,50 @@ export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSec
         </p>
       ) : null}
 
+      {model.phase !== "not_started" ? (
+        <>
+          <VButton
+            type="button"
+            variant="ghost"
+            density="compact"
+            className={styles.lineageToggle}
+            aria-expanded={lineageOpen}
+            data-testid="knowledge-collection-lineage-toggle"
+            onPress={() => setLineageOpen((open) => !open)}
+          >
+            {lineageOpen
+              ? (isZh ? "收起来源链路" : "Hide lineage")
+              : (isZh ? "展开来源链路" : "Show lineage")}
+          </VButton>
+          {lineageOpen ? (
+            <dl className={styles.preview} data-testid="knowledge-collection-lineage">
+              <dt className={styles.label}>{isZh ? "写回节点" : "Write-back"}</dt>
+              <dd className={styles.value}>{model.lineage.sourceNodeId ?? "—"}</dd>
+              <dt className={styles.label}>{isZh ? "子运行" : "Child run"}</dt>
+              <dd className={styles.value}>{model.lineage.childRunId ?? "—"}</dd>
+              <dt className={styles.label}>{isZh ? "当前知识节点" : "Current"}</dt>
+              <dd className={styles.value}>{model.lineage.currentKnowledgeNodeId ?? "—"}</dd>
+              <dt className={styles.label}>{isZh ? "调用" : "Invocation"}</dt>
+              <dd className={styles.value}>{model.lineage.invocationId ?? "—"}</dd>
+            </dl>
+          ) : null}
+        </>
+      ) : null}
+
       {knowledgeOffers.length > 0 ? (
         <div className={styles.actions}>
           {knowledgeOffers.map((offer) => {
-            const gated = isOperatorGatedOffer(offer);
-            const disabled = !offer.available || gated || props.busy;
-            const gateReason = offer.authorizationReason
-              ?? (offer.available ? "operator_permission_required" : offer.reasonCode);
+            // Shared gate helper: availability + operator permission in one
+            // reason string, identical to NodeCommandSection / OpsCard.
+            const reason = commandOfferUnavailableReason(offer, isZh);
             return (
               <VButton
                 key={offer.idempotencyKey}
                 type="button"
                 variant="secondary"
                 density="compact"
-                isDisabled={disabled}
-                disabledReason={isZh ? `需要 operator 权限：${gateReason}` : `Operator permission required: ${gateReason}`}
+                isDisabled={Boolean(reason) || props.busy}
+                disabledReason={reason || undefined}
                 onPress={() => {
                   void props.onOffer(offer).catch(() => undefined);
                 }}

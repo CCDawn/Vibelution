@@ -57,6 +57,34 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
     });
   });
 
+  it("counts progress from the child run's real per-node states", () => {
+    const model = buildKnowledgeCollectionInspectorModel({
+      badge: badge({
+        runningCount: 1,
+        latest: {
+          invocationId: "inv-1b",
+          parentNodeId: "problem_understanding",
+          status: "running",
+          handoffState: null,
+          currentKnowledgeNodeId: "source_finding",
+          knowledgeChildRunId: "child-1b",
+          childNodeStates: {
+            source_finding: "succeeded",
+            source_extraction: "succeeded",
+            evidence_relations: "running",
+            knowledge_ingestion: "failed",
+          },
+          updatedAtMs: 55,
+        },
+      }),
+    });
+    expect(model.progress).toEqual({
+      completedNodes: 2,
+      totalNodes: 5,
+      currentNodeId: "evidence_relations",
+    });
+  });
+
   it("derives awaiting_handoff with the handoff gate as current node", () => {
     const model = buildKnowledgeCollectionInspectorModel({
       badge: badge({

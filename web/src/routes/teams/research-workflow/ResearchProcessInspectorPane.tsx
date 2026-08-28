@@ -96,6 +96,8 @@ export function ResearchProcessInspectorPane(props: {
     /** Snapshot-level command offers (knowledge commands live here, not in
      * per-node detail offers). */
     snapshotOffers?: CommandOffer[];
+    /** Pinned-definition resolution diagnostic from the snapshot. */
+    definitionResolution?: string;
   };
   actions: {
     replaceParams: ReplaceParams;
@@ -416,9 +418,13 @@ export function ResearchProcessInspectorPane(props: {
       onOffer={actions.submitOffer}
       hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
       statusBanner={
-        nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding"
-          ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? (isZh ? "资料搜集中" : "Collecting sources") : ""))
-          : null
+        state.definitionResolution === "degraded"
+          ? (isZh
+              ? "未能按本运行的钉住定义解析流程拓扑，当前展示为降级视图。"
+              : "This run's pinned definition could not be resolved; showing a degraded view.")
+          : (nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding"
+              ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? (isZh ? "资料搜集中" : "Collecting sources") : ""))
+              : null)
       }
       hypothesisNavLabel={
         nextAction && nextAction.stage !== "collecting" && nextAction.targetNodeId?.startsWith("hf_")

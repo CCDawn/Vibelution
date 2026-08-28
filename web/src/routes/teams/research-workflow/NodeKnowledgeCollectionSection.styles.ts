@@ -11,4 +11,5 @@ export default {
   packageLine: "m-0 mt-2 break-all text-[var(--fg-secondary)]",
   actions: "mt-2 flex flex-wrap items-center gap-2",
   gateNote: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]",
+  lineageToggle: "mt-2 self-start",
 } as const;

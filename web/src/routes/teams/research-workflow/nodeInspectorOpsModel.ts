@@ -1,5 +1,5 @@
 import type { EffectiveAgentBinding, ResearchBudgetLedgerSnapshot } from "../../../api/types/researchWorkflow";
-import type { CommandOffer } from "../../../api/types/research-workflow/commands";
+import { isOperatorGatedOffer, type CommandOffer } from "../../../api/types/research-workflow/commands";
 import type { VStatusTone } from "../../../components/vui";
 
 export const NODE_INSPECTOR_BUDGET_WARN_PERCENT = 80;
@@ -180,6 +180,16 @@ function payloadRemediationLabel(payload: Record<string, unknown> | null | undef
 }
 
 export function commandOfferUnavailableReason(offer: CommandOffer, isZh: boolean): string {
+  // The operator gate outranks availability: a server-signed operator-only
+  // offer is not actionable from this surface regardless of `available`, so
+  // every button rendering this reason disables with the cause instead of
+  // letting the user hit the 403.
+  if (isOperatorGatedOffer(offer)) {
+    const reason = offer.authorizationReason || "operator_permission_required";
+    return isZh
+      ? `需要 operator 权限：${reason}`
+      : `Operator permission required: ${reason}`;
+  }
   if (offer.available) return "";
   const remediation = payloadRemediationLabel(offer.payload);
   if (remediation) return remediation;

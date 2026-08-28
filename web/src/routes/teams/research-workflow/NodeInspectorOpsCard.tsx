@@ -271,16 +271,14 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
           <VButton
             type="button"
             variant="primary"
-            isDisabled={props.busy || !props.primaryOffer.available}
+            isDisabled={props.busy || Boolean(commandOfferUnavailableReason(props.primaryOffer, isZh))}
             disabledReason={
-              props.primaryOffer.available
-                ? undefined
-                : commandOfferUnavailableReason(props.primaryOffer, isZh)
+              commandOfferUnavailableReason(props.primaryOffer, isZh) || undefined
             }
             aria-label={
-              props.primaryOffer.available
-                ? undefined
-                : `${props.primaryOffer.label}：${commandOfferUnavailableReason(props.primaryOffer, isZh)}`
+              commandOfferUnavailableReason(props.primaryOffer, isZh)
+                ? `${props.primaryOffer.label}：${commandOfferUnavailableReason(props.primaryOffer, isZh)}`
+                : undefined
             }
             onClick={() => {
               if (!props.primaryOffer || !props.onOffer) return;

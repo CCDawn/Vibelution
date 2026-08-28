@@ -312,6 +312,9 @@ export type KnowledgeInvocationRecentSummary = {
   errorSummary?: string | null;
   createdAtMs?: number;
   updatedAtMs?: number;
+  /** Real per-sideflow-node status of the child run's latest attempt
+   * (sideflow nodeId → raw status). Empty on legacy snapshots. */
+  childNodeStates?: Record<string, string>;
 };
 
 /** Per-main-node knowledge invocation aggregate (canvas badge facts). */
@@ -348,4 +351,7 @@ export type ResearchWorkflowSnapshot = {
   launchContext?: ResearchWorkflowLaunchContext;
   /** Knowledge-sideflow badge aggregates keyed by parent node id (additive). */
   invocationBadges?: Record<string, KnowledgeInvocationBadge>;
+  /** How the read layer resolved this run's pinned definition:
+   * "pinned" | "legacy_default" | "degraded". */
+  definitionResolution?: "pinned" | "legacy_default" | "degraded" | string;
 };

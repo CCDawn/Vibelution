@@ -6,7 +6,9 @@
  * or guessed intermediate nodes. Pure functions, no React.
  */
 import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
-import { KNOWLEDGE_SIDEFLOW_NODE_IDS } from "../../../api/types/researchWorkflow";
+import {
+  sideflowCardStatesForBadge,
+} from "./knowledgeSideflowCanvasRegion";
 
 export type KnowledgeCollectionPhase =
   | "not_started"
@@ -51,23 +53,28 @@ function progressOf(
   badge: KnowledgeInvocationBadge,
   phase: KnowledgeCollectionPhase,
 ): KnowledgeCollectionProgress | null {
-  const currentKnowledgeNodeId = badge.latest?.currentKnowledgeNodeId ?? null;
   if (phase === "not_started") return null;
-  const currentIndex = currentKnowledgeNodeId
-    ? KNOWLEDGE_SIDEFLOW_NODE_IDS.indexOf(
-        currentKnowledgeNodeId as (typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number],
-      )
-    : -1;
   if (phase === "handed_off") {
-    return { completedNodes: KNOWLEDGE_SIDEFLOW_NODE_IDS.length, totalNodes: KNOWLEDGE_SIDEFLOW_NODE_IDS.length, currentNodeId: null };
+    return { completedNodes: 5, totalNodes: 5, currentNodeId: null };
   }
-  if (currentIndex < 0) {
-    return { completedNodes: 0, totalNodes: KNOWLEDGE_SIDEFLOW_NODE_IDS.length, currentNodeId: null };
+  // Progress comes from the child run's REAL per-node states (via the
+  // shared card derivation); when the child run's attempts are unavailable
+  // the derivation falls back to the invocation-level current node — it
+  // never invents middle-node facts.
+  const cards = sideflowCardStatesForBadge(badge);
+  let completedNodes = 0;
+  let currentNodeId: string | null = null;
+  for (const card of cards) {
+    if (card.status === "succeeded") {
+      completedNodes += 1;
+      continue;
+    }
+    if (currentNodeId === null) currentNodeId = card.sideflowNodeId;
   }
   return {
-    completedNodes: currentIndex,
-    totalNodes: KNOWLEDGE_SIDEFLOW_NODE_IDS.length,
-    currentNodeId: currentKnowledgeNodeId,
+    completedNodes,
+    totalNodes: cards.length,
+    currentNodeId,
   };
 }
 
