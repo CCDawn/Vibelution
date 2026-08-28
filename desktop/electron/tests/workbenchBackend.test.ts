@@ -1621,6 +1621,68 @@ describe("runWorkbenchLifecycle", () => {
     });
   });
 
+  it("clears a stale failureMessage when a start settles steady", async () => {
+    const { input, written } = harness();
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_clear_failure_start", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({
+        backendPort: 8000,
+        phase: "failed",
+        failureMessage: "RuntimeError: Unsupported launcher action: status"
+      })
+    });
+    expect(result.accepted).toBe(true);
+    expect(written.at(-1)).toMatchObject({
+      phase: "steady",
+      failureMessage: "",
+      backendPid: 4242
+    });
+  });
+
+  it("clears a stale failureMessage when a verified stop settles closed", async () => {
+    const { input, written } = harness();
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "stop",
+      command: { commandId: "cmd_clear_failure_stop", type: "close", operation: "stop", noBrowser: true },
+      readState: () => ({
+        backendPort: 8000,
+        phase: "failed",
+        failureMessage: "backend retirement remains unverified: graceful shutdown timed out"
+      }),
+      connect: async () => false,
+      pidAlive: () => false
+    });
+    expect(result.accepted).toBe(true);
+    expect(written.at(-1)).toMatchObject({
+      desiredState: "closed",
+      observedState: "closed",
+      phase: "steady",
+      failureMessage: ""
+    });
+  });
+
+  it("does not persist a preflight failure when a newer intent supersedes the command", async () => {
+    const { spawnImpl, input, written } = harness();
+    const controller = new AbortController();
+    await expect(executeMainLineWorkbench({
+      ...input,
+      operation: "restart",
+      command: { commandId: "cmd_superseded_restart", type: "restart", operation: "restart", noBrowser: true },
+      signal: controller.signal,
+      ensureFrontend: async () => {
+        // A newer intent aborts this lease mid-flight, exactly like
+        // launcherLifecycleSupervisor.beginIntent does.
+        controller.abort(new Error("launcher lifecycle intent superseded for main"));
+        controller.signal.throwIfAborted();
+      }
+    })).rejects.toThrow("launcher lifecycle intent superseded for main");
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written).toEqual([]);
+  });
+
   it("coalesces a 1s restart storm into one backend spawn", async () => {
     const { spawnImpl, input } = harness();
     const queue = createMainLineCommandQueue();

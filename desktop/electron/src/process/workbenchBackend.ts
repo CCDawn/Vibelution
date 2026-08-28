@@ -1418,6 +1418,23 @@ export function spawnWorkbenchBackend(input: {
   }
 }
 
+// launcherLifecycleSupervisor.beginIntent aborts a superseded lease with an
+// Error carrying this marker, and the lease signal is aborted for no other
+// reason. Matching the marker (in the caught error or the abort reason) is the
+// contract for "this operation was replaced by a newer lifecycle intent".
+const SUPERSEDED_LIFECYCLE_INTENT_MARKER = "launcher lifecycle intent superseded for";
+
+// A superseded intent is an intentional hand-off to a newer command, not a
+// lifecycle failure; persisting it used to strand a sticky failed state
+// (e.g. a preflight-failed phase) after the newer command settled successfully.
+function isSupersededLifecycleIntent(error: unknown, signal?: AbortSignal): boolean {
+  const messageOf = (value: unknown): string =>
+    value instanceof Error ? value.message : String(value ?? "");
+  return messageOf(error).includes(SUPERSEDED_LIFECYCLE_INTENT_MARKER)
+    || (signal?.aborted === true
+      && messageOf(signal.reason).includes(SUPERSEDED_LIFECYCLE_INTENT_MARKER));
+}
+
 export async function executeMainLineWorkbench(
   input: ExecuteMainLineWorkbenchInput
 ): Promise<WorkbenchLifecycleResult> {
@@ -1621,6 +1638,9 @@ export async function executeMainLineWorkbench(
       desiredState: "closed",
       observedState: "closed",
       phase: "steady",
+      // A settled lifecycle command must not carry a previous failure's
+      // message; a stale failureMessage keeps the branch page in runtime.error.
+      failureMessage: "",
       backendPid: 0,
       backendLaunchPid: 0,
       spawnPid: 0,
@@ -1662,6 +1682,11 @@ export async function executeMainLineWorkbench(
   const previous = readState();
   let reconciledDeadPids: ReadonlySet<number> = new Set();
   const persistStartPreflightFailure = (error: unknown): void => {
+    // The error is rethrown by every caller; a superseded intent settles
+    // through the supervisor's superseded/ignored outcome instead of a state.
+    if (isSupersededLifecycleIntent(error, input.signal)) {
+      return;
+    }
     const detail = error instanceof Error ? error.message : String(error);
     writeState({
       ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
@@ -1912,6 +1937,9 @@ export async function executeMainLineWorkbench(
     desiredState: "open",
     observedState: "open",
     phase: "steady",
+    // A settled lifecycle command must not carry a previous failure's
+    // message; a stale failureMessage keeps the branch page in runtime.error.
+    failureMessage: "",
     host,
     backendPort: resolved.port,
     port: resolved.port,
