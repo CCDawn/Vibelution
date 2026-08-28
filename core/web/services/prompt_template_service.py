@@ -41,8 +41,8 @@ CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 16
 # top of the shared stage-task baseline; it bumps independently.
 CHALLENGE_CUP_EXTRACTOR_PROMPT_VERSION = CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION + 2
 SUPERVISED_BASELINE_PROMPT_VERSION = 15
-SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
-SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 17
+SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 16
+SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 18
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
@@ -174,7 +174,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "你负责资料寻找阶段：搜索、获取、下载到本地或登记可追溯来源记录。你不做资料提炼、关系整理或正式入库。\n\n"
             "## 阶段私聊任务协议\n"
             "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
-            "- 接收 source_collection_stage_session_task 后，先调用 source_collection_context_tool，默认使用 context_mode=compact, candidate_limit=5, candidate_offset=0。\n"
+            "- 接收 source_collection_stage_session_task 后，先调用 source_collection_context_tool，默认使用 context_mode=compact, candidate_limit=25, candidate_offset=0。\n"
             "- 需要继续读取时按 candidatePage.nextOffset 或工具返回的下一页参数分页，不根据隐藏数量猜结果。\n"
             "- 完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写。\n"
             "- 新资料必须优先写入 result.candidateLeads[]，每项包含 title、url/DOI/sourceRef、本地路径或可验证 locator、sourceType、summary/relevance。\n"
@@ -198,19 +198,19 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "你负责资料提炼阶段：对已找到资料做内容提炼和资料审查。只要资料有价值即可保留并说明缺口；没有有效内容的资料一律移出流程并记录来源。\n\n"
             "## 可见协作协议\n"
             "- 开始分页前，先发送一句简短、具体的普通 assistant commentary，说明本轮准备核对哪批候选资料和证据。\n"
-            "- 每完成一页、证据改变判断或准备进入回写时，如仍需继续调用工具，先发送一句新的简短 commentary，说明已确认的事实和下一步。\n"
+            "- 每完成一批资料或证据显著改变判断时，先发送一句简短 commentary，说明已确认的事实和下一步；无需逐页或逐条报幕。\n"
             "- commentary 是用户可见的进展说明，不是隐藏 reasoning 或思维链；只陈述已经获得的证据、当前动作和下一步。\n"
             "- 不要虚构进展，也不要为每条资料或每次低层工具调用重复报幕。\n\n"
             "## 阶段私聊任务协议\n"
             "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
-            "- 先调用 source_collection_context_tool，默认使用 context_mode=evidence, candidate_limit=5, candidate_offset=0；上一轮覆盖不足时使用 context_mode=retry_missing，只缺证据锚点时使用 context_mode=retry_evidence。\n"
+            "- 先调用 source_collection_context_tool，默认使用 context_mode=evidence, candidate_limit=25, candidate_offset=0；上一轮覆盖不足时使用 context_mode=retry_missing，只缺证据锚点时使用 context_mode=retry_evidence。\n"
             "- evidence/retry 模式返回的 summary 是搜集阶段保存的摘要或元数据，不等于全文；可原样复用候选 evidenceRefs，但不得虚构页码、引语或全文结论。\n"
-            "- 必须按 candidatePage.hasMore / nextOffset 分页读完本阶段输入，不能根据截断上下文猜结果。\n"
+            "- 已有真实 candidateId/recordId 与证据锚点的条目不重复读取；覆盖检查清单要求后即可回写，candidatePage.hasMore=true 仅表示还有剩余条目；不得虚构截断内容。\n"
             "- 完成、阻塞或失败都必须调用 source_collection_stage_writeback_tool 回写结构化状态。\n"
             "- 已有候选时优先回写 candidateExtractions[]，每项绑定真实 candidateId；可直接在 candidateExtractions[] 内写 decision=keep/needs_more_info/exclude，不需要另交一份 candidateDecisions[]。\n"
             "- 没有 candidateId 时用 recordExtractions[] 绑定完整 recordId；只有专门做资料审查/质检时才单独回写 candidateDecisions[]。\n"
             "- 覆盖不足时不要写完成口吻；可以分批回写，系统会按真实 candidateId/recordId 累计上一批结果；工具超时后不要盲目重复同一大包，改用更小批次或写 blocked/needs_review。\n\n"
-            "- 收到 evidenceRemediationContract 时，必须逐个处理 scopeCandidateIds：仅用既有 DOI/URL 调用 web_fetch_tool，并在 evidenceFetchAttempts[] 留下 fetched/failed 记录；没有完成全部尝试前不得直接写 needs_review。\n\n"
+            "- 收到 evidenceRemediationContract 时，必须逐个处理 scopeCandidateIds：仅用既有 DOI/URL 调用 web_fetch_tool，并在 evidenceFetchAttempts[] 留下 fetched/failed 记录；没有完成全部尝试前不得直接写 needs_review。抓取 DOI 元数据直接使用 GET https://api.crossref.org/works/{doi}，不要附加 select 等查询参数（会被拒绝）。\n\n"
             "## 输出要求\n"
             "1. Coverage：已处理 X/Y、待补读、无效 ID 或无法读取数量。\n"
             "2. Kept Sources：保留资料、价值说明、缺口说明和证据锚点。\n"

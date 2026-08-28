@@ -2736,9 +2736,9 @@ def _source_collection_stage_session_task_message(
         "max_records": 5,
         "include_candidates": True,
         "record_offset": 0,
-        "record_limit": 5,
+        "record_limit": 25,
         "candidate_offset": 0,
-        "candidate_limit": 5,
+        "candidate_limit": 25,
         "context_mode": context_mode,
     }
     if can_materialize_formal_knowledge:
@@ -2793,8 +2793,9 @@ def _source_collection_stage_session_task_message(
         ]
     else:
         pagination_lines = [
-            "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
-            "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
+            "- 已有真实 recordId 与证据锚点的原始资料不要重复读取；覆盖检查清单要求后即可回写，`recordPage.hasMore=true` 仅表示还有剩余条目。",
+            "- 已有真实 candidateId 与证据锚点的候选不要重复读取；覆盖检查清单要求后即可回写，`candidatePage.hasMore=true` 仅表示还有剩余条目。",
+            "- 确实缺少 ID 或证据时，才按 `recordPage.nextOffset` / `candidatePage.nextOffset` 补读必要页；不得虚构截断内容。",
         ]
     stage_writeback_lines = stage_writeback_prompt_lines(stage_id)
     return "\n".join(
@@ -2826,7 +2827,7 @@ def _source_collection_stage_session_task_message(
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"
-                "不要扩展检索方向、生成新候选或调用搜索工具。每页先补证并分批回写，再读取下一页；抓取失败后再标记 `needs_more_info`。"
+                "不要扩展检索方向、生成新候选或调用搜索工具。当前批读取完毕后一次性补证（可连续调用 `web_fetch_tool`），随后以 1-2 次回写完成本批结果；抓取失败后再标记 `needs_more_info`。"
                 if stage_id == "extraction" and context_mode in {"evidence", "retry_evidence"} and not writeback_resume
                 else ""
             ),

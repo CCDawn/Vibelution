@@ -104,13 +104,14 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "不等于全文" in source_extractor["content"]
     assert "candidateExtractions" in source_extractor["content"]
     assert "candidateDecisions" in source_extractor["content"]
-    assert "不能根据截断上下文猜结果" in source_extractor["content"]
+    assert "不得虚构截断内容" in source_extractor["content"]
     assert "普通 assistant commentary" in source_extractor["content"]
     assert "不是隐藏 reasoning 或思维链" in source_extractor["content"]
     assert "evidenceRemediationContract" in source_extractor["content"]
     assert "evidenceFetchAttempts[]" in source_extractor["content"]
     assert "web_fetch_tool" in source_extractor["content"]
     assert "没有完成全部尝试前不得直接写 needs_review" in source_extractor["content"]
+    assert "api.crossref.org/works" in source_extractor["content"]
     source_relation_mapper = prompt_template_service.get_prompt_template("prompt-source-relation-mapper")
     assert source_relation_mapper is not None
     assert source_relation_mapper["metadata"]["roleKey"] == "source_relation_mapper"
@@ -454,7 +455,8 @@ def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisi
     assert "系统会按真实 candidateId/recordId 累计上一批结果" in detail["content"]
     assert "资料入库/知识库管理员" not in detail["content"]
     assert "无有效内容" in detail["content"]
-    assert "每完成一页" in detail["content"]
+    assert "每完成一批资料" in detail["content"]
+    assert "无需逐页或逐条报幕" in detail["content"]
     assert "不要虚构进展" in detail["content"]
 
 
