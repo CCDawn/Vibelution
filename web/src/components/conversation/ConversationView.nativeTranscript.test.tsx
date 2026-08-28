@@ -9,7 +9,11 @@ import conversationViewSource from "./ConversationView.tsx?raw";
 import toolActivityStyles from "./ConversationToolActivity.styles";
 import styles from "./ConversationView.styles";
 
-function renderConversation(messages: ConversationMessage[], processDisplayMode: "answer" | "trace" = "trace") {
+function renderConversation(
+  messages: ConversationMessage[],
+  processDisplayMode: "answer" | "trace" = "trace",
+  companionMode = false,
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -26,6 +30,7 @@ function renderConversation(messages: ConversationMessage[], processDisplayMode:
         showSessionOverview={false}
         showComposer={false}
         processDisplayMode={processDisplayMode}
+        companionMode={companionMode}
         composerValue=""
         composerPlaceholder="Type"
         composerDisabled={false}
@@ -43,6 +48,144 @@ function renderConversation(messages: ConversationMessage[], processDisplayMode:
 }
 
 describe("ConversationView native Codex transcript surface", () => {
+  it("collapses an in-flight companion turn to one 微信式 typing status", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-companion-thinking",
+        role: "assistant",
+        timestamp: "2026-08-09T17:14:00Z",
+        turnId: "turn-companion-thinking",
+        status: "running",
+        turnItems: [
+          {
+            id: "companion-reasoning-r1",
+            itemId: "companion-reasoning",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-companion-thinking",
+            type: "reasoning",
+            status: "running",
+            revision: 1,
+            sequence: 1,
+            terminal: false,
+            text: "这段内部推理不能出现在虚拟人的聊天里。",
+          },
+          {
+            id: "companion-tool-r1",
+            itemId: "companion-tool",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-companion-thinking",
+            type: "tool_call",
+            callId: "call-companion",
+            toolName: "private_tool",
+            status: "running",
+            revision: 1,
+            sequence: 2,
+            terminal: false,
+          },
+        ],
+      },
+    ], "trace", true);
+
+    expect(html).toContain('data-companion-typing-status="true"');
+    expect(html).toContain("正在输入…");
+    expect(html.match(/正在输入…/g)).toHaveLength(1);
+    expect(html).not.toContain('data-agent-message-id="assistant-companion-thinking"');
+    expect(html).not.toContain("这段内部推理不能出现在虚拟人的聊天里");
+    expect(html).not.toContain("private_tool");
+    expect(html).not.toContain("状态");
+    expect(html).not.toContain("思考中");
+    expect(html).not.toContain("处理中");
+  });
+
+  it("removes the companion typing status as soon as a final answer starts streaming", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-companion-answering",
+        role: "assistant",
+        timestamp: "2026-08-09T17:14:00Z",
+        turnId: "turn-companion-answering",
+        status: "running",
+        turnItems: [{
+          id: "companion-answer-r1",
+          itemId: "companion-answer",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-companion-answering",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "running",
+          revision: 1,
+          sequence: 1,
+          terminal: false,
+          text: "我已经开始回复你了。",
+        }],
+      },
+    ], "trace", true);
+
+    expect(html).toContain("我已经开始回复你了。");
+    expect(html).not.toContain('data-companion-typing-status="true"');
+    expect(html).not.toContain('data-codex-transcript-cell-kind="reasoning_summary"');
+  });
+
+  it("keeps terminal companion errors visible without leaving a typing status", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-companion-error",
+        role: "assistant",
+        timestamp: "2026-08-09T17:14:00Z",
+        turnId: "turn-companion-error",
+        status: "failed",
+        turnItems: [{
+          id: "companion-error-r1",
+          itemId: "companion-error",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-companion-error",
+          type: "error",
+          code: "provider_error",
+          status: "failed",
+          revision: 1,
+          sequence: 1,
+          terminal: true,
+          text: "这次没有连上模型。",
+        }],
+      },
+    ], "trace", true);
+
+    expect(html).toContain("这次没有连上模型。");
+    expect(html).not.toContain('data-companion-typing-status="true"');
+  });
+
+  it("leaves the native process transcript unchanged for ordinary Agent sessions", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-agent-thinking",
+        role: "assistant",
+        timestamp: "2026-08-09T17:14:00Z",
+        turnId: "turn-agent-thinking",
+        status: "running",
+        turnItems: [{
+          id: "agent-reasoning-r1",
+          itemId: "agent-reasoning",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-agent-thinking",
+          type: "reasoning",
+          status: "running",
+          revision: 1,
+          sequence: 1,
+          terminal: false,
+          text: "普通 Agent 的原生思考轨迹仍然可见。",
+        }],
+      },
+    ]);
+
+    expect(html).toContain("普通 Agent 的原生思考轨迹仍然可见。");
+    expect(html).not.toContain('data-companion-typing-status="true"');
+  });
+
   it("does not render internal pipeline text when native transcripts carry it as assistant markdown", () => {
     const statusText = "context_prepare\n正在准备对话上下文...\n\nagent_prepare\n正在唤起对话 agent...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
     const html = renderConversation([

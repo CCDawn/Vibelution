@@ -3098,6 +3098,7 @@ export function ChatCodingRoute() {
                 defaultFileContext: detail.defaultFileContext,
                 showHeader: false,
                 showSessionOverview: false,
+                companionMode,
                 // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
                 showMentalSnapshots: true,
                 composerFocusSignal:

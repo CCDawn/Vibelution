@@ -15,6 +15,8 @@ export type ConversationActiveTurnStatusNoteProps = {
   };
   lang: "zh" | "en" | string;
   statusLabel?: string;
+  /** Companion sessions intentionally collapse all in-flight detail to one chat affordance. */
+  companionMode?: boolean;
 };
 
 /**
@@ -24,19 +26,25 @@ export function ConversationActiveTurnStatusNote({
   message,
   lang,
   statusLabel,
+  companionMode = false,
 }: ConversationActiveTurnStatusNoteProps) {
   const stage = resolveActiveTurnProgressStage(message);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
+    if (companionMode) {
+      return undefined;
+    }
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [companionMode]);
 
   const elapsedSeconds = activeTurnElapsedSeconds(message.timestamp, nowMs);
-  const heartbeatText = formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang);
+  const heartbeatText = companionMode
+    ? (lang === "en" ? "Typing…" : "正在输入…")
+    : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang);
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 
@@ -45,11 +53,12 @@ export function ConversationActiveTurnStatusNote({
       className={styles.note}
       role="status"
       aria-live="polite"
-      aria-label={[resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
+      aria-label={companionMode ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
       data-active-turn-stage={stage}
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
+      data-companion-typing-status={companionMode ? "true" : undefined}
     >
-      <span className={styles.label}>{resolvedStatusLabel}</span>
+      {!companionMode ? <span className={styles.label}>{resolvedStatusLabel}</span> : null}
       <div className={styles.body}>
         <span className={styles.textRow}>
           <LoaderCircle className={styles.spinner} size={14} aria-hidden="true" />

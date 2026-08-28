@@ -389,6 +389,7 @@ export function ConversationView({
   showMentalSnapshots = true,
   showComposer = true,
   processDisplayMode = "answer",
+  companionMode = false,
   autoScrollToLatest = true,
   hasEarlierMessages = false,
   earlierMessagesLoading = false,
@@ -727,6 +728,28 @@ export function ConversationView({
     [activeTurnMessage, timelineMessages],
   );
   const activeTimelineMessages = activeAgentMessageTimelineProjection.messages;
+  /**
+   * Companion turns intentionally expose one chat-like affordance instead of
+   * the native process transcript. Keep the latest assistant turn as the
+   * source of truth so a historical running row cannot resurrect the status
+   * after a newer terminal answer has committed.
+   */
+  const companionTypingMessage = useMemo<Extract<ConversationMessage, { role: "assistant" }> | undefined>(() => {
+    if (!companionMode) {
+      return undefined;
+    }
+    for (let index = activeTimelineMessages.length - 1; index >= 0; index -= 1) {
+      const message = activeTimelineMessages[index];
+      if (message.role !== "assistant") {
+        continue;
+      }
+      if (!assistantTurnIsInFlight(message) || assistantFinalAnswerText(message).trim()) {
+        return undefined;
+      }
+      return message;
+    }
+    return undefined;
+  }, [activeTimelineMessages, companionMode]);
   const activeTimelineMessageOrder = useMemo(
     () => new Map(activeTimelineMessages.map((message, index) => [message.id, index])),
     [activeTimelineMessages],
@@ -1960,6 +1983,7 @@ export function ConversationView({
     message: ConversationMessage,
     cells: CodexTranscriptCell[],
     rowIdentity: AgentMessageTimelineRowIdentity,
+    isCompanionMode = false,
   ) {
     const visibleCells = dedupeCodexTranscriptCellsForDisplay(
       settleCodexTranscriptActiveStatuses(
@@ -1973,8 +1997,12 @@ export function ConversationView({
     const isFinalResponseCell = (cell: CodexTranscriptCell) => (
       cell.kind === "assistant_markdown" && cell.phase !== "commentary"
     );
-    const processCells = visibleCells.filter((cell) => !isFinalResponseCell(cell));
-    const finalCells = visibleCells.filter(isFinalResponseCell);
+    const processCells = isCompanionMode
+      ? []
+      : visibleCells.filter((cell) => !isFinalResponseCell(cell));
+    const finalCells = isCompanionMode
+      ? visibleCells.filter((cell) => isFinalResponseCell(cell) || cell.kind === "error_notice")
+      : visibleCells.filter(isFinalResponseCell);
     const renderTimelineNodes = (
       timelineCells: CodexTranscriptCell[],
       options?: { attachToolApproval?: boolean },
@@ -2042,7 +2070,7 @@ export function ConversationView({
             {renderTimelineNodes(finalCells, { attachToolApproval: false })}
           </div>
         ) : null}
-        {changedFiles.length > 0 ? (
+        {!isCompanionMode && changedFiles.length > 0 ? (
           <div
             className={styles.codexTurnChangeBadge}
             data-codex-turn-change-badge="true"
@@ -3873,6 +3901,11 @@ export function ConversationView({
                 imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
                 renderTurn={() => {
             const rowIdentity = activeTimelineRowIdentities[index];
+            // The global companion typing affordance is the entire in-flight
+            // shell; do not leave an empty speaker/avatar row beside it.
+            if (companionTypingMessage?.id === message.id) {
+              return null;
+            }
             if (isCliAgentLifecycleMessage(message)) {
               const detail = cliAgentLifecycleDetail(message);
               return (
@@ -3978,7 +4011,7 @@ export function ConversationView({
               && !agentInboxMessage
               && !groupTranscriptMessage
             )
-              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity)
+              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
               : null;
             // Only force the answer body open while tokens are still streaming.
             // Tying this to defaultResponseExpanded made the last few answers
@@ -3988,7 +4021,7 @@ export function ConversationView({
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = (agentRenderState.contextSections?.length ?? 0) > 0 ? (
+            const contextNode = !companionMode && (agentRenderState.contextSections?.length ?? 0) > 0 ? (
               <React.Suspense fallback={null}>
                 <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
               </React.Suspense>
@@ -4050,7 +4083,7 @@ export function ConversationView({
             const responseSectionNode = null;
             // The fallback process rail is only useful while a future producer has
             // not emitted a canonical cell yet. It never receives assistant text.
-            const processNode = displayPlan.suppressProjectedProcess
+            const processNode = companionMode || displayPlan.suppressProjectedProcess
               ? null
               : displayPlan.renderMode === "turn_items"
                 ? null
@@ -4073,7 +4106,7 @@ export function ConversationView({
               hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
             });
             // Prefer compact active-turn note over projected turnStatus for in-flight shells.
-            const turnStatusNode = !showCompactActiveTurnPlaceholder
+            const turnStatusNode = !companionMode && !showCompactActiveTurnPlaceholder
               && !displayPlan.suppressProjectedTurnStatus
               && noFinalAnswerStatusText ? (
               <div className={styles.turnStatusNote} role="status" aria-live="polite">
@@ -4081,7 +4114,7 @@ export function ConversationView({
                 <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
               </div>
             ) : null;
-            const compactActiveTurnPlaceholderNode = showCompactActiveTurnPlaceholder ? (
+            const compactActiveTurnPlaceholderNode = !companionMode && showCompactActiveTurnPlaceholder ? (
               <ConversationActiveTurnStatusNote
                 message={message}
                 lang={lang}
@@ -4247,6 +4280,14 @@ export function ConversationView({
               </div>
               );
             })}
+            {companionTypingMessage ? (
+              <ConversationActiveTurnStatusNote
+                message={companionTypingMessage}
+                lang={lang}
+                statusLabel={lang === "zh" ? "状态" : "Status"}
+                companionMode
+              />
+            ) : null}
             {timelineVirtualRange.bottomSpacerPx > 0 ? (
               <div
                 aria-hidden="true"

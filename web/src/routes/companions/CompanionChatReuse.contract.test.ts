@@ -15,6 +15,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("requestedSessionId");
     expect(chatSource).toContain('get("companion")');
     expect(chatSource).toContain("companion.directSessionId === requestedSessionId");
+    expect(chatSource).toContain("companionMode,");
     expect(chatSource).toContain("<ChatCenterSessionSurface");
     expect(chatSource).toContain("<CompanionPersonRail");
     expect(chatSource).toContain("<CompanionLifeRail");

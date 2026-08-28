@@ -90,6 +90,12 @@ export type ConversationViewProps = {
   showMentalSnapshots?: boolean;
   showComposer?: boolean;
   processDisplayMode?: ConversationProcessDisplayMode;
+  /**
+   * Companion sessions use a private, chat-like transcript surface: process
+   * events stay internal and the active turn gets one "typing" affordance.
+   * Ordinary Agent sessions keep the native process transcript unchanged.
+   */
+  companionMode?: boolean;
   autoScrollToLatest?: boolean;
   hasEarlierMessages?: boolean;
   earlierMessagesLoading?: boolean;

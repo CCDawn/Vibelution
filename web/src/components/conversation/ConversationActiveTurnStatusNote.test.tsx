@@ -5,6 +5,26 @@ import { describe, expect, it } from "vitest";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
 
 describe("ConversationActiveTurnStatusNote canonical turn items", () => {
+  it("uses one unlabeled typing affordance for companion mode", () => {
+    const html = renderToStaticMarkup(
+      <ConversationActiveTurnStatusNote
+        lang="zh"
+        companionMode
+        statusLabel="状态"
+        message={{
+          timestamp: new Date().toISOString(),
+          status: "running",
+          turnItems: [],
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-companion-typing-status="true"');
+    expect(html.match(/正在输入…/g)).toHaveLength(1);
+    expect(html).not.toContain("状态");
+    expect(html).not.toContain("aria-label=");
+  });
+
   it("derives the visible retry heartbeat from a retry item", () => {
     const html = renderToStaticMarkup(
       <ConversationActiveTurnStatusNote
