@@ -380,7 +380,7 @@ def update_virtual_human_binding(
             persona_result = {"initialized": False, "reason": "initializer_failed"}
         # Enable creates life state and activates the supervisor capability, but this
         # coalesced pass never backfills an old proactive message or startup greeting.
-        service.heartbeat_agent(agent_id, coalesced=True)
+        service.heartbeat_agent(agent_id, coalesced=True, allow_planner=False)
     else:
         _cancel_agent_proactive_session_turns(agent_id, reason="plugin_disabled")
     _record_scene(

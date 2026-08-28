@@ -468,6 +468,7 @@ class VirtualHumanLifeService:
         *,
         now: datetime | None = None,
         coalesced: bool = False,
+        allow_planner: bool = True,
     ) -> dict[str, Any]:
         with self._lock_for(agent_id):
             binding = self._require_enabled_binding(agent_id)
@@ -566,7 +567,7 @@ class VirtualHumanLifeService:
                     )
             tomorrow = local_now.date() + timedelta(days=1)
             planning_time = self._clock(binding.get("nightlyPlanningTime"), default=time(22, 30))
-            if local_now.time().replace(tzinfo=None) >= planning_time:
+            if allow_planner and local_now.time().replace(tzinfo=None) >= planning_time:
                 tomorrow_path = f"schedules/{tomorrow.isoformat()}.json"
                 existing_tomorrow = self.store.read_json(agent_id, tomorrow_path)
                 needs_agent_planning = bool(

@@ -105,6 +105,61 @@ def test_agent_plugin_and_virtual_human_routes_are_typed_and_agent_scoped(tmp_pa
         set_virtual_human_life_service_for_tests(None)
 
 
+def test_enabling_at_nightly_time_keeps_provisional_schedule_without_planner(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from core.web.services import virtual_human_life_service as facade
+
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "directSessionId": "session-a",
+    }
+    planner_calls: list[dict] = []
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        schedule_planner=lambda context: planner_calls.append(context) or {
+            "activities": [
+                {
+                    "title": "被错误调用的规划",
+                    "startAt": "09:00",
+                    "endAt": "10:00",
+                }
+            ]
+        },
+        now_provider=lambda: datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_default_agent_persona_initializer",
+        lambda _agent_id: {"initialized": False, "reason": "test"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        binding = facade.update_virtual_human_binding(
+            "agent-a",
+            enabled=True,
+            expected_version=0,
+            config={"timezone": "Asia/Shanghai"},
+        )
+
+        assert binding["enabled"] is True
+        assert planner_calls == []
+        tomorrow = service.schedule_for("agent-a", "2026-08-28")
+        assert tomorrow["planningMode"] == "deterministic_mvp"
+        assert tomorrow.get("plannerStatus") is None
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
 def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path) -> None:
     agents = [
         {
