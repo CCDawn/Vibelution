@@ -60,10 +60,54 @@ def virtual_human_status_tool() -> str:
     return _invoke(lambda agent_id: {"status": "ready", "snapshot": _service().snapshot(agent_id)})
 
 
-def virtual_human_schedule_tool(local_date: str = "") -> str:
-    """查询当前虚拟人的某日日程；local_date 为空时返回今天和明天。"""
+def virtual_human_schedule_tool(
+    local_date: str = "",
+    action: str = "view",
+    expected_version: int = 0,
+    title: str = "",
+    start_at: str = "",
+    end_at: str = "",
+    required_tool_names: list[str] | None = None,
+    idempotency_key: str = "",
+) -> str:
+    """查询日程，或提出一个受当前 Agent ToolPolicy 约束的工具型活动。
+
+    action: view | propose_tool_activity。提出活动只登记计划；到达时间后仍通过
+    原生 proactive turn 和实际工具授权执行，不能因为计划存在就宣称完成。
+    """
 
     def operation(agent_id: str) -> dict[str, Any]:
+        normalized_action = str(action or "view").strip().lower()
+        if normalized_action == "propose_tool_activity":
+            key = str(idempotency_key or "").strip()
+            if not key:
+                return {
+                    "status": "blocked",
+                    "error": "idempotency_key_required",
+                    "message": "提出工具型活动需要 idempotency_key。",
+                }
+            return {
+                "status": "applied",
+                "commandResult": _service().execute_command(
+                    agent_id,
+                    command="proposeToolActivity",
+                    expected_version=expected_version,
+                    idempotency_key=key,
+                    arguments={
+                        "localDate": str(local_date or "").strip(),
+                        "title": str(title or "").strip(),
+                        "startAt": str(start_at or "").strip(),
+                        "endAt": str(end_at or "").strip(),
+                        "requiredToolNames": list(required_tool_names or []),
+                    },
+                ),
+            }
+        if normalized_action != "view":
+            return {
+                "status": "blocked",
+                "error": "invalid_action",
+                "message": "action 必须是 view 或 propose_tool_activity。",
+            }
         if local_date:
             return {"status": "ready", "schedule": _service().schedule_for(agent_id, local_date)}
         snapshot = _service().snapshot(agent_id)
@@ -86,22 +130,23 @@ def virtual_human_activity_tool(
     salience_score: int = 0,
     idempotency_key: str = "",
 ) -> str:
-    """开始、完成、取消、跳过或重排虚拟人的生活活动。
+    """开始、完成、失败、取消、跳过或重排虚拟人的生活活动。
 
-    action: start | complete | cancel | skip | replan。
+    action: start | complete | fail | cancel | skip | replan。
     complete 接收 outcome_summary 记录实际结果；计划文本不会被视为完成结果。
     """
 
     command_by_action = {
         "start": "startActivity",
         "complete": "completeActivity",
+        "fail": "failActivity",
         "cancel": "cancelActivity",
         "skip": "skipActivity",
         "replan": "replan",
     }
     command = command_by_action.get(str(action or "").strip().lower(), "")
     if not command:
-        return _blocked("action 必须是 start/complete/cancel/skip/replan。", error="invalid_action")
+        return _blocked("action 必须是 start/complete/fail/cancel/skip/replan。", error="invalid_action")
     key = str(idempotency_key or "").strip()
     if not key:
         return _blocked("修改生活活动需要 idempotency_key。", error="idempotency_key_required")

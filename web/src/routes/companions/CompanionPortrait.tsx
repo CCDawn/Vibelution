@@ -1,4 +1,7 @@
 import type { VirtualHumanCompanion } from "../../api/types";
+// Chat and the lobby share this portrait; importing the route entry here keeps
+// companion rail utilities in the native Chat CSS graph as well.
+import "../../design/route-css/companions.tailwind.css";
 import { companionInitials } from "./companionPresentation";
 import styles from "./companions.styles";
 

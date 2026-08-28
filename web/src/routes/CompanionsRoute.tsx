@@ -1,3 +1,5 @@
+import "../design/route-css/companions.tailwind.css";
+
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Clock3, Sparkles } from "lucide-react";
 

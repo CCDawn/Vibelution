@@ -1,0 +1,31 @@
+/* Loaded by the companion lobby and native Chat companion rails. */
+@import "tailwindcss" source(none);
+
+/* Shared recipe class literals (imports are not followed by Tailwind). */
+@source "../vuiSurfaceRecipes.ts";
+@source "../vuiChromeRecipes.ts";
+
+@source "../../routes/CompanionsRoute.tsx";
+@source "../../routes/companions/**/*.{ts,tsx}";
+@source not "../../routes/companions/**/*.test.{ts,tsx}";
+
+/*
+ * Companion mode keeps both rails readable on desktop. Chat owns the pane
+ * variables, so this route-local rule only floors the tracks while both
+ * companion rails are actually docked and visible. Collapsed/overlay modes
+ * continue to use Chat's regular responsive geometry and persisted widths.
+ */
+@media (min-width: 1280px) {
+  :where([data-vui="chat-session-workbench-shell"][data-chat-responsive-mode="wide"]):has(
+    [data-companion-person-rail="true"]:not(.paneCollapsed)
+  ):has(
+    [data-companion-life-rail="true"]:not(.paneCollapsed)
+  ) {
+    grid-template-columns:
+      minmax(280px, max(280px, var(--chat-left-pane-width, 300px)))
+      var(--chat-pane-gutter, 0px)
+      minmax(0, 1fr)
+      var(--chat-pane-gutter, 0px)
+      minmax(280px, max(280px, var(--chat-right-pane-width, 280px)));
+  }
+}

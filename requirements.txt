@@ -28,6 +28,7 @@ apsw==3.53.4.0            # Canonical conversation WAL runtime; bundles fixed SQ
 pydantic>=2.0.0
 fastapi>=0.111.0
 uvicorn>=0.30.0
+tzdata>=2025.2            # Windows/精简 Python 运行时的 IANA 时区数据库
 pypdf>=5.0.0              # 本地 PDF 文本抽取（Challenge Cup source-extraction 页码锚点）
 pywinpty>=3.0.5; platform_system == "Windows"  # Windows ConPTY backend for embedded CLI Agent terminals
 ddgs>=9.0.0               # No-key public metasearch fallback for research search tools

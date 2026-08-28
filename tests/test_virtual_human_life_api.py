@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
 from core.web.routes import agent_plugins, virtual_human_life
 from core.web.services.virtual_human_life_service import (
+    _default_agent_persona_initializer,
     set_virtual_human_life_service_for_tests,
     stop_virtual_human_life_runtime,
 )
@@ -258,3 +259,72 @@ def test_host_stop_fences_open_delivery_and_requests_session_cancellation(
         assert cancelled == [("agent-a", "host_stop")]
     finally:
         set_virtual_human_life_service_for_tests(None)
+
+
+def test_enabling_virtual_human_initializes_only_an_unconfigured_persona(
+    monkeypatch,
+) -> None:
+    from core.web.services import agent_directory_service
+
+    agent = {
+        "agentId": "agent-a",
+        "displayName": "洛天依",
+        "personaProfile": {},
+        "metadata": {},
+    }
+    updates: list[dict] = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agent if agent_id == "agent-a" else None,
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "update_agent_instance",
+        lambda agent_id, **payload: updates.append({"agentId": agent_id, **payload})
+        or {**agent, "personaProfile": payload["persona_profile"]},
+    )
+
+    result = _default_agent_persona_initializer("agent-a")
+
+    assert result["initialized"] is True
+    assert updates[0]["agentId"] == "agent-a"
+    assert "洛天依" in updates[0]["persona_profile"]["background"]
+    assert "独立" in updates[0]["persona_profile"]["identityNotes"]
+    assert "第一人称" in updates[0]["persona_profile"]["communicationStyle"]
+
+
+def test_virtual_human_persona_initializer_preserves_user_authored_or_cleared_profile(
+    monkeypatch,
+) -> None:
+    from core.web.services import agent_directory_service
+
+    updates: list[dict] = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "update_agent_instance",
+        lambda agent_id, **payload: updates.append({"agentId": agent_id, **payload}),
+    )
+    agents = {
+        "custom": {
+            "agentId": "custom",
+            "displayName": "自定义人物",
+            "personaProfile": {"personality": "用户已经写好的性格"},
+            "metadata": {},
+        },
+        "cleared": {
+            "agentId": "cleared",
+            "displayName": "清空人物",
+            "personaProfile": {},
+            "metadata": {"personaProfileDefaultsDisabled": True},
+        },
+    }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agents.get(agent_id),
+    )
+
+    assert _default_agent_persona_initializer("custom")["reason"] == "already_configured"
+    assert _default_agent_persona_initializer("cleared")["reason"] == "defaults_disabled"
+    assert updates == []

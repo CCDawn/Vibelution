@@ -1,6 +1,6 @@
 const railBase = "!rounded-none !border-0 !shadow-none min-h-0 min-w-0 overflow-hidden bg-vui-surface-rail";
-const personRail = `${railBase} flex flex-col overflow-y-auto border-r border-r-vui-border-subtle p-3`;
-const lifeRail = `${railBase} flex flex-col border-l border-l-vui-border-subtle`;
+const personRail = `${railBase} !flex flex-col overflow-x-hidden overflow-y-auto border-r border-r-vui-border-subtle p-3`;
+const lifeRail = `${railBase} !flex flex-col border-l border-l-vui-border-subtle`;
 const railActions = "flex items-center justify-between gap-2";
 const quietLink = "!h-7 !min-h-7 !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary hover:!bg-vui-surface-row-hover hover:text-vui-fg-primary";
 const profile = "grid gap-3 pt-2";

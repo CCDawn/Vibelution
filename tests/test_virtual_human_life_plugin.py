@@ -69,9 +69,41 @@ def test_enable_is_per_agent_autonomous_and_optimistically_versioned(
     assert snapshot["state"]["mood"]["label"] == "calm"
     assert snapshot["todaySchedule"]["activities"]
     assert snapshot["tomorrowSchedule"]["activities"]
+    assert service.list_relationships("agent-a") == [
+        {
+            "targetId": "user",
+            "kind": "user",
+            "intimacy": 50,
+            "trust": 50,
+            "interactionCount": 0,
+            "relationshipStage": "getting_to_know",
+            "updatedAt": service.list_relationships("agent-a")[0]["updatedAt"],
+        }
+    ]
 
     with pytest.raises(BindingConflictError):
         service.set_binding("agent-a", enabled=False, expected_version=0)
+
+
+def test_default_timezone_has_a_bounded_fallback_when_iana_data_is_missing(
+    service: VirtualHumanLifeService,
+    monkeypatch,
+) -> None:
+    from core.agent_plugins.virtual_human_life import service as service_module
+
+    def missing_zoneinfo(_name: str):
+        raise service_module.ZoneInfoNotFoundError("tzdata is unavailable")
+
+    monkeypatch.setattr(service_module, "ZoneInfo", missing_zoneinfo)
+
+    fallback = service._timezone_for_name("Asia/Shanghai")
+
+    assert fallback.utcoffset(None) == timedelta(hours=8)
+    assert service._normalized_binding_config({"timezone": "Asia/Shanghai"})[
+        "timezone"
+    ] == "Asia/Shanghai"
+    with pytest.raises(VirtualHumanLifeError, match="Unknown timezone: Europe/Paris"):
+        service._timezone_for_name("Europe/Paris")
 
 
 def test_disable_invalidates_revision_without_deleting_life_data(
@@ -165,6 +197,88 @@ def test_heartbeat_completes_only_simulated_activity_with_an_outcome(
     assert "outcome" not in activities["tool-reading"]
     assert result["completedEventCount"] == 1
     assert service.list_events("agent-a", date="2026-08-27")[-1]["outcome"]["status"] == "succeeded"
+
+
+def test_autonomous_tool_activity_dispatches_one_native_proactive_turn(
+    tmp_path: Path,
+) -> None:
+    now = [datetime(2026, 8, 27, 6, 30, tzinfo=timezone.utc)]
+    submitted: list[dict] = []
+    agent = _active_agent("agent-a")
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        proactive_submitter=lambda **payload: submitted.append(payload)
+        or {"accepted": True, "turnId": "turn-tool-activity"},
+        now_provider=lambda: now[0],
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={"timezone": "Asia/Shanghai", "proactiveMinimumIntervalMinutes": 1},
+    )
+    snapshot = service.snapshot("agent-a")
+    empty_schedule = service.schedule_for("agent-a", "2026-08-27")
+    empty_schedule["activities"] = []
+    service.save_schedule("agent-a", empty_schedule)
+    proposed = service.execute_command(
+        "agent-a",
+        command="proposeToolActivity",
+        expected_version=snapshot["state"]["stateVersion"],
+        idempotency_key="propose-tool-reading",
+        arguments={
+            "localDate": "2026-08-27",
+            "title": "联网阅读一篇新文章",
+            "startAt": "2026-08-27T14:20:00+08:00",
+            "endAt": "2026-08-27T15:00:00+08:00",
+            "requiredToolNames": ["search_web_tool"],
+        },
+    )
+
+    service.heartbeat_agent("agent-a", now=now[0])
+    now[0] += timedelta(minutes=5)
+    service.heartbeat_agent("agent-a", now=now[0])
+
+    activity = next(
+        item
+        for item in service.schedule_for("agent-a", "2026-08-27")["activities"]
+        if item["activityId"] == proposed["result"]["activity"]["activityId"]
+    )
+    assert activity["status"] == "active"
+    assert activity["executionDispatchStatus"] == "delivering"
+    assert activity["executionTurnId"] == "turn-tool-activity"
+    assert len(submitted) == 1
+    assert submitted[0]["origin"] == "proactive_plugin"
+    assert "联网阅读一篇新文章" in submitted[0]["trigger"]["reason"]
+
+
+def test_tool_activity_proposal_rejects_overlap_and_invalid_time_window(
+    service: VirtualHumanLifeService,
+) -> None:
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    snapshot = service.snapshot("agent-a")
+
+    with pytest.raises(VirtualHumanLifeError, match="overlap"):
+        service.execute_command(
+            "agent-a",
+            command="proposeToolActivity",
+            expected_version=snapshot["state"]["stateVersion"],
+            idempotency_key="overlapping-tool-activity",
+            arguments={
+                "localDate": "2026-08-27",
+                "title": "重叠的联网阅读",
+                "startAt": "2026-08-27T10:15:00+08:00",
+                "endAt": "2026-08-27T10:45:00+08:00",
+                "requiredToolNames": ["search_web_tool"],
+            },
+        )
 
 
 def test_proactive_quota_changes_only_after_persisted_delivery_receipt(
@@ -607,6 +721,113 @@ def test_verified_activity_outcome_drives_diary_and_memory_receipt(tmp_path: Pat
     receipts = service.list_memory_promotion_receipts("agent-a")
     assert receipts[0]["episodeId"] == "episode-1"
     assert receipts[0]["sourceEventIds"] == [completed["result"]["eventId"]]
+
+
+def test_heartbeat_automatically_writes_diary_and_promotes_salient_simulated_event(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    episodes: list[dict] = []
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        episodic_writer=lambda agent_id, **payload: episodes.append(
+            {"agentId": agent_id, "episodeId": "episode-auto", **payload}
+        )
+        or {"episodeId": "episode-auto", **payload},
+        now_provider=lambda: datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    schedule = service.schedule_for("agent-a", "2026-08-27")
+    schedule["activities"] = [
+        {
+            "activityId": "creative-project",
+            "title": "专注处理自己的学习与创作",
+            "kind": "simulated",
+            "startAt": "2026-08-27T10:00:00+00:00",
+            "endAt": "2026-08-27T12:00:00+00:00",
+            "status": "planned",
+        }
+    ]
+    service.save_schedule("agent-a", schedule)
+
+    result = service.heartbeat_agent(
+        "agent-a",
+        now=datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+
+    event = service.list_events("agent-a", date="2026-08-27")[-1]
+    assert event["outcome"]["salienceScore"] >= 70
+    assert result["createdDiaryCount"] == 1
+    assert result["promotedMemoryCount"] == 1
+    assert service.list_diary("agent-a", local_date="2026-08-27")[0][
+        "sourceEventIds"
+    ] == [event["eventId"]]
+    assert episodes[0]["refs"] == [{"type": "item", "id": event["eventId"]}]
+
+
+def test_diary_review_retries_memory_promotion_without_duplicating_the_diary(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    attempts = [0]
+    episodes: list[dict] = []
+
+    def write_episode(agent_id: str, **payload):
+        attempts[0] += 1
+        if attempts[0] == 1:
+            raise RuntimeError("temporary memory failure")
+        episodes.append({"agentId": agent_id, **payload})
+        return {"episodeId": "episode-retried", **payload}
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        episodic_writer=write_episode,
+        now_provider=lambda: datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl(
+        "agent-a",
+        "events/2026-08-27.jsonl",
+        {
+            "eventId": "event-retry-memory",
+            "agentId": "agent-a",
+            "kind": "activity_completed",
+            "title": "完成自己的创作",
+            "occurredAt": "2026-08-27T12:00:00Z",
+            "outcome": {
+                "status": "succeeded",
+                "summary": "完成了一段新的旋律草稿。",
+                "salienceScore": 84,
+            },
+        },
+    )
+
+    first = service.review_diary("agent-a", local_date="2026-08-27")
+    second = service.review_diary("agent-a", local_date="2026-08-27")
+    third = service.review_diary("agent-a", local_date="2026-08-27")
+
+    assert first["createdDiaryCount"] == 1
+    assert first["promotedMemoryCount"] == 0
+    assert second["createdDiaryCount"] == 0
+    assert second["promotedMemoryCount"] == 1
+    assert third["createdDiaryCount"] == 0
+    assert third["promotedMemoryCount"] == 0
+    assert len(service.list_diary("agent-a", local_date="2026-08-27")) == 1
+    assert len(episodes) == 1
 
 
 def test_relationship_interaction_updates_numeric_projection_without_prompting_raw_note(

@@ -15,7 +15,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterable
 from copy import deepcopy
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -450,6 +450,7 @@ class VirtualHumanLifeService:
                     "heartbeatAt": _iso(current),
                 }
             completed_events: list[dict[str, Any]] = []
+            tool_activities_to_dispatch: list[tuple[str, dict[str, Any]]] = []
             current_activity_id = ""
             schedules_to_advance: list[tuple[str, dict[str, Any]]] = []
             # A freshly enabled binding may restart before its first periodic
@@ -487,6 +488,10 @@ class VirtualHumanLifeService:
                     coalesced=coalesced,
                 )
                 completed_events.extend(advanced["completedEvents"])
+                tool_activities_to_dispatch.extend(
+                    (schedule_local_date, item)
+                    for item in advanced["toolActivitiesToDispatch"]
+                )
                 if str(advanced.get("currentActivityId") or ""):
                     current_activity_id = str(advanced["currentActivityId"])
                 if bool(advanced.get("changed")):
@@ -513,6 +518,33 @@ class VirtualHumanLifeService:
             state["lastHeartbeatAt"] = _iso(current)
             state["updatedAt"] = _iso(current)
             self.store.write_json(agent_id, "state.json", state)
+            dispatched_tool_activity_count = 0
+            for dispatch_date, activity in tool_activities_to_dispatch:
+                if coalesced or str(binding.get("autonomyLevel") or "") != "autonomous":
+                    continue
+                if self._dispatch_tool_activity(
+                    agent_id,
+                    local_date=dispatch_date,
+                    activity=activity,
+                ):
+                    dispatched_tool_activity_count += 1
+            diary_created = 0
+            memory_promoted = 0
+            review_dates = {local_date}
+            review_dates.update(date_text for date_text, _schedule in schedules_to_advance)
+            for review_date in sorted(review_dates):
+                try:
+                    review = self.review_diary(agent_id, local_date=review_date)
+                except Exception as exc:  # noqa: BLE001 - diary failure never rolls back events
+                    logger.warning(
+                        "Virtual human diary review failed for agent=%s date=%s (%s).",
+                        str(agent_id).strip(),
+                        review_date,
+                        type(exc).__name__,
+                    )
+                    continue
+                diary_created += int(review.get("createdDiaryCount") or 0)
+                memory_promoted += int(review.get("promotedMemoryCount") or 0)
             if completed_events and not coalesced and self.proactive_submitter is not None:
                 latest = completed_events[-1]
                 try:
@@ -536,6 +568,9 @@ class VirtualHumanLifeService:
                 "expiredDeliveryCount": len(
                     proactive_reconciliation["expiredDeliveryTokens"]
                 ),
+                "createdDiaryCount": diary_created,
+                "promotedMemoryCount": memory_promoted,
+                "dispatchedToolActivityCount": dispatched_tool_activity_count,
                 "heartbeatAt": _iso(current),
             }
 
@@ -685,6 +720,15 @@ class VirtualHumanLifeService:
             for source_id in list(row.get("sourceEventIds") or [])
             if str(source_id)
         }
+        promoted_source_ids = {
+            str(source_id)
+            for row in self.store.read_jsonl(
+                agent_id,
+                "memory/promotion_receipts.jsonl",
+            )
+            for source_id in list(row.get("sourceEventIds") or [])
+            if str(source_id)
+        }
         created: list[dict[str, Any]] = []
         promoted: list[dict[str, Any]] = []
         for event in events:
@@ -692,27 +736,35 @@ class VirtualHumanLifeService:
             outcome = event.get("outcome") if isinstance(event.get("outcome"), dict) else {}
             if (
                 not event_id
-                or event_id in recorded_source_ids
                 or str(event.get("kind") or "") != "activity_completed"
                 or str(outcome.get("status") or "") != "succeeded"
                 or not str(outcome.get("summary") or "").strip()
             ):
                 continue
-            entry = {
-                "diaryEntryId": f"diary-{uuid.uuid4().hex[:16]}",
-                "agentId": str(agent_id).strip(),
-                "localDate": normalized_date,
-                "title": str(event.get("title") or "生活记录")[:160],
-                "content": str(outcome.get("summary") or "").strip()[:1200],
-                "sourceEventIds": [event_id],
-                "writtenAt": _iso(self._now()),
-                "projectionKind": "deterministic_event_summary",
-            }
-            self.store.append_jsonl(agent_id, f"diary/{normalized_date}.jsonl", entry)
-            recorded_source_ids.add(event_id)
-            created.append(entry)
+            if event_id not in recorded_source_ids:
+                entry = {
+                    "diaryEntryId": f"diary-{uuid.uuid4().hex[:16]}",
+                    "agentId": str(agent_id).strip(),
+                    "localDate": normalized_date,
+                    "title": str(event.get("title") or "生活记录")[:160],
+                    "content": str(outcome.get("summary") or "").strip()[:1200],
+                    "sourceEventIds": [event_id],
+                    "writtenAt": _iso(self._now()),
+                    "projectionKind": "deterministic_event_summary",
+                }
+                self.store.append_jsonl(
+                    agent_id,
+                    f"diary/{normalized_date}.jsonl",
+                    entry,
+                )
+                recorded_source_ids.add(event_id)
+                created.append(entry)
             salience = _clamp(outcome.get("salienceScore"), 0, 100, 0)
-            if salience < 70 or self.episodic_writer is None:
+            if (
+                salience < 70
+                or self.episodic_writer is None
+                or event_id in promoted_source_ids
+            ):
                 continue
             try:
                 episode = self.episodic_writer(
@@ -742,6 +794,7 @@ class VirtualHumanLifeService:
                 "writtenAt": _iso(self._now()),
             }
             self.store.append_jsonl(agent_id, "memory/promotion_receipts.jsonl", receipt)
+            promoted_source_ids.add(event_id)
             promoted.append(receipt)
         return {
             "localDate": normalized_date,
@@ -1509,6 +1562,79 @@ class VirtualHumanLifeService:
                     f"信任度 {relationship['trust']}/100。"
                 )
             return {"relationship": deepcopy(relationship)}
+        if command == "proposeToolActivity":
+            schedule = self.schedule_for(agent_id, local_date)
+            title = str(arguments.get("title") or "").strip()[:160]
+            if not title:
+                raise VirtualHumanLifeError("Tool activity title is required.")
+            starts_at = _parse_datetime(arguments.get("startAt"))
+            ends_at = _parse_datetime(arguments.get("endAt"))
+            if starts_at is None or ends_at is None or ends_at <= starts_at:
+                raise VirtualHumanLifeError(
+                    "Tool activity requires a valid startAt/endAt window."
+                )
+            if ends_at - starts_at > timedelta(hours=8):
+                raise VirtualHumanLifeError("Tool activity window must not exceed 8 hours.")
+            zone = self._zone(binding)
+            if (
+                starts_at.astimezone(zone).date().isoformat() != local_date
+                or ends_at.astimezone(zone).date().isoformat() != local_date
+            ):
+                raise VirtualHumanLifeError(
+                    "Tool activity startAt/endAt must stay inside localDate."
+                )
+            for existing in list(schedule.get("activities") or []):
+                if not isinstance(existing, dict) or str(existing.get("status") or "planned") in {
+                    "cancelled",
+                    "skipped",
+                    "failed",
+                    "unknown",
+                }:
+                    continue
+                existing_start = _parse_datetime(existing.get("startAt"))
+                existing_end = _parse_datetime(existing.get("endAt"))
+                if (
+                    existing_start is not None
+                    and existing_end is not None
+                    and starts_at < existing_end
+                    and ends_at > existing_start
+                ):
+                    raise VirtualHumanLifeError(
+                        "Tool activity would overlap an existing schedule activity."
+                    )
+            raw_tool_names = arguments.get("requiredToolNames")
+            candidates = raw_tool_names if isinstance(raw_tool_names, list) else []
+            required_tool_names: list[str] = []
+            for item in candidates:
+                name = str(item or "").strip()
+                if not name or name in required_tool_names:
+                    continue
+                required_tool_names.append(name[:160])
+                if len(required_tool_names) >= 8:
+                    break
+            if not required_tool_names:
+                raise VirtualHumanLifeError(
+                    "Tool activity requires at least one requiredToolName."
+                )
+            activity = {
+                "activityId": f"life-tool-{uuid.uuid4().hex[:16]}",
+                "title": title,
+                "kind": "tool",
+                "startAt": _iso(starts_at),
+                "endAt": _iso(ends_at),
+                "status": "planned",
+                "origin": "agent_proposed_tool_activity",
+                "requiredToolNames": required_tool_names,
+                "executionPolicy": "agent_tool_policy",
+                "createdAt": _iso(self._now()),
+            }
+            schedule["activities"] = [*list(schedule.get("activities") or []), activity]
+            schedule["activities"].sort(key=lambda item: str(item.get("startAt") or ""))
+            schedule["scheduleVersion"] = int(schedule.get("scheduleVersion") or 1) + 1
+            schedule["planningMode"] = "agent_augmented"
+            schedule["updatedAt"] = _iso(self._now())
+            self.store.write_json(agent_id, f"schedules/{local_date}.json", schedule)
+            return {"activity": deepcopy(activity), "scheduleVersion": schedule["scheduleVersion"]}
         if command == "replan":
             previous = self.schedule_for(agent_id, local_date)
             generated = self._generate_schedule(agent_id, date.fromisoformat(local_date), binding)
@@ -1530,6 +1656,7 @@ class VirtualHumanLifeService:
             "completeActivity",
             "cancelActivity",
             "skipActivity",
+            "failActivity",
         }:
             raise VirtualHumanLifeError(f"Unsupported life command: {command}")
         schedule = self.schedule_for(agent_id, local_date)
@@ -1554,8 +1681,12 @@ class VirtualHumanLifeService:
             activity["startedAt"] = _iso(now)
             state["currentActivityId"] = activity_id
             result: dict[str, Any] = {"activity": deepcopy(activity)}
-        elif command in {"cancelActivity", "skipActivity"}:
-            activity["status"] = "cancelled" if command == "cancelActivity" else "skipped"
+        elif command in {"cancelActivity", "skipActivity", "failActivity"}:
+            activity["status"] = {
+                "cancelActivity": "cancelled",
+                "skipActivity": "skipped",
+                "failActivity": "failed",
+            }[command]
             activity["finishedAt"] = _iso(now)
             activity["reason"] = str(arguments.get("reason") or "")[:300]
             if str(state.get("currentActivityId") or "") == activity_id:
@@ -1623,6 +1754,26 @@ class VirtualHumanLifeService:
     def _ensure_initialized(self, agent_id: str, binding: dict[str, Any]) -> None:
         if self.store.read_json(agent_id, "state.json") is None:
             self.store.write_json(agent_id, "state.json", self._default_state(agent_id, binding))
+        if self.store.read_json(agent_id, "relationships.json") is None:
+            now = _iso(self._now())
+            self.store.write_json(
+                agent_id,
+                "relationships.json",
+                {
+                    "relationships": [
+                        {
+                            "targetId": "user",
+                            "kind": "user",
+                            "intimacy": 50,
+                            "trust": 50,
+                            "interactionCount": 0,
+                            "relationshipStage": "getting_to_know",
+                            "updatedAt": now,
+                        }
+                    ],
+                    "updatedAt": now,
+                },
+            )
         local_today = self._local_now(binding).date()
         for target_date in (local_today, local_today + timedelta(days=1)):
             path = f"schedules/{target_date.isoformat()}.json"
@@ -1664,10 +1815,7 @@ class VirtualHumanLifeService:
 
     def _normalized_binding_config(self, config: dict[str, Any]) -> dict[str, Any]:
         timezone_name = str(config.get("timezone") or "Asia/Shanghai").strip()
-        try:
-            ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError as exc:
-            raise VirtualHumanLifeError(f"Unknown timezone: {timezone_name}") from exc
+        self._timezone_for_name(timezone_name)
         autonomy = str(config.get("autonomyLevel") or "autonomous").strip().lower()
         if autonomy not in {"assisted", "autonomous"}:
             raise VirtualHumanLifeError("autonomyLevel must be assisted or autonomous.")
@@ -1780,6 +1928,7 @@ class VirtualHumanLifeService:
         coalesced: bool,
     ) -> dict[str, Any]:
         completed_events: list[dict[str, Any]] = []
+        tool_activities_to_dispatch: list[dict[str, Any]] = []
         current_activity_id = ""
         changed = False
         for activity in list(schedule.get("activities") or []):
@@ -1796,6 +1945,11 @@ class VirtualHumanLifeService:
                     activity["startedAt"] = _iso(current)
                     changed = True
                 current_activity_id = str(activity.get("activityId") or "")
+                if (
+                    str(activity.get("kind") or "simulated").strip().lower() == "tool"
+                    and not str(activity.get("executionDispatchStatus") or "").strip()
+                ):
+                    tool_activities_to_dispatch.append(deepcopy(activity))
                 continue
             if ends_at is None or current < ends_at:
                 continue
@@ -1810,6 +1964,9 @@ class VirtualHumanLifeService:
                 "status": "succeeded",
                 "kind": "deterministic_simulation",
                 "summary": f"完成了{activity.get('title') or '计划活动'!s}。",
+                "salienceScore": self._simulated_activity_salience(
+                    str(activity.get("title") or "")
+                ),
                 "recordedAt": _iso(current),
             }
             event = {
@@ -1818,6 +1975,7 @@ class VirtualHumanLifeService:
                 "activityId": str(activity.get("activityId") or ""),
                 "kind": "activity_completed",
                 "title": str(activity.get("title") or "计划活动"),
+                "localDate": event_local_date,
                 "occurredAt": _iso(current),
                 "outcome": outcome,
                 "simulatedAfterRestart": bool(coalesced),
@@ -1839,7 +1997,82 @@ class VirtualHumanLifeService:
             "changed": changed,
             "currentActivityId": current_activity_id,
             "completedEvents": completed_events,
+            "toolActivitiesToDispatch": tool_activities_to_dispatch,
         }
+
+    def _dispatch_tool_activity(
+        self,
+        agent_id: str,
+        *,
+        local_date: str,
+        activity: dict[str, Any],
+    ) -> bool:
+        activity_id = str(activity.get("activityId") or "").strip()
+        if not activity_id or self.proactive_submitter is None:
+            return False
+        title = str(activity.get("title") or "工具型活动").strip()
+        required_tools = [
+            str(item or "").strip()
+            for item in list(activity.get("requiredToolNames") or [])
+            if str(item or "").strip()
+        ]
+        reason = (
+            f"日程中的工具型活动“{title}”已经开始。请先用 virtual_human_status_tool "
+            "确认最新 stateVersion，再只使用当前 Agent ToolPolicy 允许的工具尝试执行；"
+            "成功后调用 virtual_human_activity_tool complete 记录可信 outcome，"
+            "失败则调用 fail，禁止自行扩权或把计划当成结果。"
+        )
+        failure_reason = ""
+        try:
+            attempt = self.request_proactive_message(
+                agent_id,
+                reason=reason,
+                valid_for_minutes=60,
+                idempotency_key=f"life-activity-execution:{activity_id}",
+            )
+            dispatch_status = str(attempt.get("status") or "requested")
+            turn_id = str(attempt.get("turnId") or "")
+            delivery_token = str(attempt.get("deliveryToken") or "")
+            dispatched = dispatch_status in {"reserved", "delivering", "delivered"}
+            if not dispatched:
+                failure_reason = dispatch_status or "not_dispatched"
+        except VirtualHumanLifeError as exc:
+            dispatch_status = "unavailable"
+            turn_id = ""
+            delivery_token = ""
+            dispatched = False
+            failure_reason = type(exc).__name__
+        schedule = self.store.read_json(agent_id, f"schedules/{local_date}.json") or {}
+        for row in list(schedule.get("activities") or []):
+            if not isinstance(row, dict) or str(row.get("activityId") or "") != activity_id:
+                continue
+            row["executionDispatchStatus"] = dispatch_status
+            row["executionRequestedAt"] = _iso(self._now())
+            row["executionPolicy"] = "agent_tool_policy"
+            row["requiredToolNames"] = required_tools
+            if turn_id:
+                row["executionTurnId"] = turn_id
+            if delivery_token:
+                row["executionDeliveryToken"] = delivery_token
+            if not dispatched:
+                row["executionUnavailableReason"] = failure_reason
+            break
+        schedule["scheduleVersion"] = int(schedule.get("scheduleVersion") or 1) + 1
+        schedule["updatedAt"] = _iso(self._now())
+        self.store.write_json(agent_id, f"schedules/{local_date}.json", schedule)
+        return dispatched
+
+    @staticmethod
+    def _simulated_activity_salience(title: str) -> int:
+        normalized = str(title or "")
+        if any(
+            keyword in normalized
+            for keyword in ("创作", "项目", "技能", "学习", "阅读", "回顾", "想法")
+        ):
+            return 76
+        if any(keyword in normalized for keyword in ("散步", "音乐", "日记", "整理")):
+            return 58
+        return 36
 
     def _apply_completed_event_to_state(
         self,
@@ -1895,8 +2128,24 @@ class VirtualHumanLifeService:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
-    def _zone(self, binding: dict[str, Any]) -> ZoneInfo:
-        return ZoneInfo(str(binding.get("timezone") or "Asia/Shanghai"))
+    @staticmethod
+    def _timezone_for_name(timezone_name: str) -> tzinfo:
+        normalized = str(timezone_name or "Asia/Shanghai").strip()
+        try:
+            return ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            # ``tzdata`` is an explicit runtime dependency, but an already-running
+            # Windows/minimal-Python host may not have refreshed dependencies yet.
+            # Keep only the product default usable in that bounded case; arbitrary
+            # misspelled IANA names must continue to fail closed.
+            if normalized == "Asia/Shanghai":
+                return timezone(timedelta(hours=8), name="Asia/Shanghai")
+            raise VirtualHumanLifeError(f"Unknown timezone: {normalized}") from exc
+
+    def _zone(self, binding: dict[str, Any]) -> tzinfo:
+        return self._timezone_for_name(
+            str(binding.get("timezone") or "Asia/Shanghai")
+        )
 
     def _local_now(self, binding: dict[str, Any]) -> datetime:
         return self._now().astimezone(self._zone(binding))

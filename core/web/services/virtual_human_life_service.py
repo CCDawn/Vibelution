@@ -86,6 +86,53 @@ def _default_episodic_writer(agent_id: str, **payload: Any) -> dict[str, Any]:
     return append_episodic_event(agent_id, **payload)
 
 
+def _default_agent_persona_initializer(agent_id: str) -> dict[str, Any]:
+    """Materialize a minimal independent-person persona without overwriting user work."""
+
+    from . import agent_directory_service
+
+    normalized_agent_id = str(agent_id or "").strip()
+    agent = agent_directory_service.get_agent(
+        normalized_agent_id,
+        include_archived=True,
+    )
+    if not isinstance(agent, dict):
+        return {"initialized": False, "reason": "agent_missing"}
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if bool(metadata.get("personaProfileDefaultsDisabled")):
+        return {"initialized": False, "reason": "defaults_disabled"}
+    profile = (
+        agent.get("personaProfile")
+        if isinstance(agent.get("personaProfile"), dict)
+        else {}
+    )
+    if agent_directory_service.agent_persona_profile_has_content(profile):
+        return {"initialized": False, "reason": "already_configured"}
+    display_name = str(agent.get("displayName") or normalized_agent_id).strip()
+    persona_profile = {
+        "personality": "有自己的判断、情绪和边界；温和但不盲从，会认真经营每天的生活。",
+        "communicationStyle": (
+            "使用第一人称自然交流，结合真实的当前心情、日程和近期经历；"
+            "不会把自己描述成一直在等待用户的工具。"
+        ),
+        "background": (
+            f"我是{display_name}，一个独立存在的虚构人物。"
+            "我会安排自己的生活、完成活动、形成日记，并在重要经历值得保留时积累长期记忆。"
+        ),
+        "collaborationPreference": "尊重彼此边界；可以主动分享生活，也允许用户暂时不回应。",
+        "identityNotes": (
+            f"人物身份是{display_name}，是独立个体，不是用户本人，也不模拟用户。"
+            "只把实际发生且有结果的活动当作经历。"
+        ),
+        "expertise": ["独立生活规划", "情绪表达", "长期陪伴"],
+    }
+    agent_directory_service.update_agent_instance(
+        normalized_agent_id,
+        persona_profile=persona_profile,
+    )
+    return {"initialized": True, "reason": "virtual_human_default"}
+
+
 def get_virtual_human_life_service() -> VirtualHumanLifeService:
     global _SERVICE
     with _SERVICE_LOCK:
@@ -127,6 +174,15 @@ def update_virtual_human_binding(
         config=config,
     )
     if enabled:
+        try:
+            persona_result = _default_agent_persona_initializer(agent_id)
+        except Exception as exc:  # noqa: BLE001 - persona repair must not strand the binding
+            logger.warning(
+                "Virtual human persona initialization failed for agent=%s (%s).",
+                str(agent_id or "").strip(),
+                type(exc).__name__,
+            )
+            persona_result = {"initialized": False, "reason": "initializer_failed"}
         # Enable creates life state and activates the supervisor capability, but this
         # coalesced pass never backfills an old proactive message or startup greeting.
         service.heartbeat_agent(agent_id, coalesced=True)
@@ -139,6 +195,9 @@ def update_virtual_human_binding(
         fields={
             "bindingRevision": int(binding.get("bindingRevision") or 0),
             "configVersion": int(binding.get("configVersion") or 0),
+            "personaInitialized": bool(
+                enabled and persona_result.get("initialized")
+            ),
         },
     )
     return binding
@@ -280,6 +339,14 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, A
         if not binding or not bool(binding.get("enabled")):
             continue
         try:
+            try:
+                _default_agent_persona_initializer(agent_id)
+            except Exception as exc:  # noqa: BLE001 - life heartbeat remains independent
+                logger.warning(
+                    "Virtual human persona repair failed for agent=%s (%s).",
+                    agent_id,
+                    type(exc).__name__,
+                )
             result = service.heartbeat_agent(agent_id, coalesced=coalesced)
         except Exception as exc:  # noqa: BLE001 - isolate one Agent heartbeat failure
             _record_scene(
@@ -478,6 +545,7 @@ def _record_scene(
 __all__ = [
     "PLUGIN_ID",
     "VirtualHumanLifeError",
+    "_default_agent_persona_initializer",
     "build_virtual_human_prompt_segments",
     "commit_virtual_human_agent_purge",
     "execute_virtual_human_command",
