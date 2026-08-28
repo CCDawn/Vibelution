@@ -530,6 +530,82 @@ def get_source_collection_stage_task_context(
         return context
     return s._compact_source_collection_stage_task_context(context)
 
+def _materialize_extraction_claim_evidence_after_reconcile(
+    team_id: str,
+    run_id: str,
+    reconciled_task: dict[str, Any],
+) -> dict[str, Any]:
+    """Bridge a canonical completed extraction stage task into the claim ledger.
+
+    Graph-dispatch turn finalization materializes extraction claims in
+    ``agent_turn_completion``; stage tasks opened through the session-message
+    path (POST /source-collection-runs/{run}/stage-session-tasks) finalize in
+    ``reconcile_source_collection_stage_session_task_after_turn``, which
+    previously never crossed the Evidence Store boundary, leaving completed
+    extraction tasks without claim-ledger rows.  The materializer is
+    idempotent (content-hash claim ids), so both paths may call it for the
+    same task.  A failure is recorded as a workflow event and returned for
+    diagnosis but never flips the completed task status or blocks the
+    reconcile result.
+    """
+    s = _service()
+    normalized_task_id = s._trim_text(reconciled_task.get("taskId"), max_length=160)
+    stage_id = s._trim_text(reconciled_task.get("stageId"), max_length=80)
+    task_status = s._trim_text(reconciled_task.get("status"), max_length=80)
+    if stage_id.lower() != "extraction" or task_status != "completed":
+        return {"status": "skipped", "reason": "not_completed_extraction_task"}
+    workflow_run_id = s._trim_text(reconciled_task.get("workflowRunId"), max_length=160)
+    if not workflow_run_id:
+        # Extraction tasks opened by hand carry no workflowRunId field; the
+        # canonical source run scope is the one authoritative fallback for
+        # their workflow binding.  An absent binding stays empty and the
+        # materializer fails closed with a clear scope error below.
+        try:
+            from core.web.services import data_processing_service
+
+            run = data_processing_service.get_processing_run(run_id)
+        except Exception:  # noqa: BLE001 - absent run keeps the empty scope and fails closed downstream
+            run = {}
+        run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+        workflow_run_id = s._trim_text(run_scope.get("workflowRunId"), max_length=160)
+    try:
+        from ..research_runtime.agent_claim_evidence_materializer import (
+            materialize_completed_extraction_task,
+        )
+
+        materialized = materialize_completed_extraction_task(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=run_id,
+            task_id=normalized_task_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostic event, never a task-status change
+        s._record_workflow_event(
+            "source_collection.stage_session_task_claim_materialization_failed",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": normalized_task_id,
+                "stageId": stage_id,
+                "taskStatus": task_status,
+                "workflowRunId": workflow_run_id,
+                "errorType": type(exc).__name__,
+                "error": s._trim_text(str(exc), max_length=400),
+            },
+            level="warning",
+            outcome="failed",
+        )
+        return {
+            "status": "failed",
+            "workflowRunId": workflow_run_id,
+            "errorType": type(exc).__name__,
+        }
+    return {
+        "status": "materialized",
+        "workflowRunId": workflow_run_id,
+        "claimEvidenceCount": len(materialized) if isinstance(materialized, list) else 0,
+    }
+
 def reconcile_source_collection_stage_session_task_after_turn(
     team_id: str,
     task_id: str,
@@ -637,6 +713,11 @@ def reconcile_source_collection_stage_session_task_after_turn(
     after_gate = reconciled.get("completionGate") if isinstance(reconciled.get("completionGate"), dict) else {}
     task_tool_progress = reconciled.get("taskToolProgress") if isinstance(reconciled.get("taskToolProgress"), dict) else {}
     reconciled_turn = reconciled.get("turn") if isinstance(reconciled.get("turn"), dict) else {}
+    claim_materialization = _materialize_extraction_claim_evidence_after_reconcile(
+        normalized_team_id,
+        found_run_id,
+        reconciled,
+    )
     return {
         "schemaVersion": s.SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -655,4 +736,5 @@ def reconcile_source_collection_stage_session_task_after_turn(
         "artifactComplete": bool(after_gate.get("artifactComplete")),
         "taskToolProgress": task_tool_progress,
         "officialModelEvidence": official_model_evidence or {},
+        "claimMaterialization": claim_materialization,
     }
