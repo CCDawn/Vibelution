@@ -1350,17 +1350,24 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
 
 
 def _filter_recoverable_status_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep retry/error status UI out of the semantic model history."""
+    """Keep retry/error status UI out of the semantic model history.
+
+    Provider failure recovery collapses only the trailing unresolved failure
+    region (see ``_scoped_provider_failure_recovery_history``); healthy
+    multi-turn/tool history before that region is preserved.
+    """
 
     first_pass: list[dict[str, Any]] = []
     meaningful_non_user_turn_ids: set[str] = set()
-    skipped_recoverable_status = False
+    provider_failure_turn_ids: set[str] = set()
     for raw in list(messages or []):
         if not isinstance(raw, dict):
             continue
         message = dict(raw)
         if _is_recoverable_status_message(message):
-            skipped_recoverable_status = True
+            turn_id = _message_turn_id(message)
+            if turn_id:
+                provider_failure_turn_ids.add(turn_id)
             continue
         first_pass.append(message)
         if _is_meaningful_non_user_message(message):
@@ -1387,9 +1394,54 @@ def _filter_recoverable_status_messages(messages: Iterable[dict[str, Any]]) -> l
             and _message_turn_id(message) not in retained_non_user_turn_ids
         )
     ]
-    if skipped_recoverable_status:
-        return _minimal_provider_failure_recovery_history(filtered)
-    return filtered
+    return _scoped_provider_failure_recovery_history(
+        filtered,
+        retained_turn_ids=retained_non_user_turn_ids,
+        provider_failure_turn_ids=provider_failure_turn_ids,
+    )
+
+
+def _scoped_provider_failure_recovery_history(
+    messages: list[dict[str, Any]],
+    *,
+    retained_turn_ids: set[str],
+    provider_failure_turn_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Collapse only the trailing unresolved provider-failure region.
+
+    Legacy behavior collapsed the entire history to the last user message
+    whenever any recoverable status message existed anywhere, which erased all
+    tool/multi-turn context after an unrelated or old failure (full amnesia on
+    "继续" after a restart). The original problem only requires the failed,
+    still-unresolved tail to collapse: earlier resolved turns stay intact.
+
+    The tail is the maximal suffix of messages whose turn produced no retained
+    meaningful non-user content. It collapses to the original minimal recovery
+    seed only when one of its turns actually carried a provider failure; an
+    unattributed message (no ``turnId``) stops the walk conservatively.
+    """
+
+    if not provider_failure_turn_ids:
+        return messages
+
+    tail_start = len(messages)
+    tail_turn_ids: set[str] = set()
+    while tail_start > 0:
+        message = messages[tail_start - 1]
+        turn_id = _message_turn_id(message)
+        if not turn_id or turn_id in retained_turn_ids:
+            break
+        tail_turn_ids.add(turn_id)
+        tail_start -= 1
+
+    if tail_start >= len(messages):
+        return messages
+    if not tail_turn_ids.intersection(provider_failure_turn_ids):
+        return messages
+
+    recovered = list(messages[:tail_start])
+    recovered.extend(_minimal_provider_failure_recovery_history(messages[tail_start:]))
+    return _trim_leading_unanchored_assistant_messages(recovered)
 
 
 def _minimal_provider_failure_recovery_history(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1401,6 +1453,44 @@ def _minimal_provider_failure_recovery_history(messages: Iterable[dict[str, Any]
         if str(message.get("content") or "").strip():
             return [message]
     return []
+
+
+# Context-seed assistant messages carry checkpoint/history context rather than
+# dialogue turns; a recovery seed may open with them (the assembler promotes
+# them to system role). Mirrors ``context_assembler._is_context_seed_assistant_message``.
+_CONTEXT_SEED_ASSISTANT_KINDS = frozenset(
+    {
+        "compaction_checkpoint",
+        "context_compression_attempt",
+        "historical_orphan_tool_result",
+        "historical_tool_context",
+        "history_checkpoint_seed",
+        "retrieved_history_seed",
+        "context_compression_marker",
+    }
+)
+
+
+def _trim_leading_unanchored_assistant_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the recovery seed anchored at a user/system turn boundary.
+
+    Mirrors the original minimal-recovery intent that the provider payload must
+    not open with a dangling plain assistant/tool message: drop only the
+    leading run of plain assistant/tool messages before the first user/system
+    or context-seed message.
+    """
+
+    start = 0
+    while start < len(messages):
+        message = messages[start]
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"assistant", "tool"}:
+            break
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() in _CONTEXT_SEED_ASSISTANT_KINDS:
+            break
+        start += 1
+    return messages[start:]
 
 
 def _message_turn_id(message: dict[str, Any]) -> str:

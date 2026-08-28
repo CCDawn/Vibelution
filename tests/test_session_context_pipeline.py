@@ -790,6 +790,254 @@ def test_context_assembler_drops_failed_status_loop_from_model_history(tmp_path)
     assert all(TURN_INTERRUPTED_MARKER not in item["content"] for item in assembled.history_messages)
 
 
+def test_context_assembler_keeps_history_after_early_provider_failure(tmp_path):
+    """Regression: an early provider failure must not collapse later healthy history.
+
+    Legacy behavior collapsed the whole history to the last user message when
+    any recoverable status message existed anywhere, so a restart-time "继续"
+    lost every tool/multi-turn context. Only the failure region collapses;
+    history around it stays.
+    """
+
+    session_id = "session-early-failure"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-early",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "帮我检索 X 并总结"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-early",
+        EVENT_ASSISTANT_MESSAGE,
+        status="failed_provider",
+        payload={"content": "模型连接正在重试...\n第 3/5 次；原因：server_error。"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-early",
+        EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "process_restarted", "marker": TURN_INTERRUPTED_MARKER},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-recovered",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-recovered",
+        EVENT_TOOL_CALL_STARTED,
+        status="running",
+        payload={
+            "toolCall": {
+                "id": "call-search-1",
+                "name": "search_tool",
+                "arguments": {"query": "X"},
+            }
+        },
+        tool_call_id="call-search-1",
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-recovered",
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "id": "call-search-1",
+                "name": "search_tool",
+                "arguments": {"query": "X"},
+                "result": "X 的检索结果：结构健康",
+            }
+        },
+        tool_call_id="call-search-1",
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-recovered",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "已完成检索：X 的结构健康。"},
+        source="test",
+    )
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        current_turn_id="turn-current",
+        ledger_events=load_conversation_events(tmp_path, session_id),
+        recent_message_limit=12,
+    )
+
+    history = assembled.history_messages
+    contents = [str(item.get("content") or "") for item in history]
+    assert any("已完成检索：X 的结构健康。" in content for content in contents)
+    assert any("X 的检索结果" in content for content in contents)
+    assert any(str(item.get("role") or "") == "tool" for item in history)
+    assert all("模型连接正在重试" not in content for content in contents)
+    assert all("server_error:" not in content for content in contents)
+    assert all(TURN_INTERRUPTED_MARKER not in content for content in contents)
+    assert len(history) > 2
+
+
+def test_model_replay_collapses_recent_provider_failure_tail_to_last_user_request(tmp_path):
+    """Regression: a fully failed recent tail keeps the original minimal seed."""
+
+    session_id = "session-recent-failure"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-failed",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "你能做什么"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-failed",
+        EVENT_ASSISTANT_MESSAGE,
+        status="failed_provider",
+        payload={
+            "content": "模型服务上游暂时失败，本轮没有完成。",
+            "metadata": {"kind": "turn_error", "providerFailure": True},
+        },
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-failed",
+        EVENT_TURN_FAILED,
+        status="failed_provider",
+        payload={"errorType": "provider_upstream_error"},
+        source="test",
+    )
+
+    messages = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+
+    assert [(item["role"], item["content"]) for item in messages] == [
+        ("user", "你能做什么"),
+    ]
+
+
+def test_model_replay_drops_failed_continuation_tail_but_keeps_resolved_history(tmp_path):
+    """Regression: a failed "继续" tail must not erase the resolved tool history."""
+
+    session_id = "session-failed-continue-tail"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-resolved",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "检索 X 并总结"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-resolved",
+        EVENT_TOOL_CALL_STARTED,
+        status="running",
+        payload={
+            "toolCall": {
+                "id": "call-search-1",
+                "name": "search_tool",
+                "arguments": {"query": "X"},
+            }
+        },
+        tool_call_id="call-search-1",
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-resolved",
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "id": "call-search-1",
+                "name": "search_tool",
+                "arguments": {"query": "X"},
+                "result": "X 的检索结果：结构健康",
+            }
+        },
+        tool_call_id="call-search-1",
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-resolved",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "已完成检索：X 的结构健康。"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-continue-failed",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-continue-failed",
+        EVENT_ASSISTANT_MESSAGE,
+        status="failed_provider",
+        payload={
+            "content": "模型服务上游暂时失败，本轮没有完成。",
+            "metadata": {"kind": "turn_error", "providerFailure": True},
+        },
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-continue-failed",
+        EVENT_TURN_FAILED,
+        status="failed_provider",
+        payload={"errorType": "provider_upstream_error"},
+        source="test",
+    )
+
+    messages = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+    contents = [str(item.get("content") or "") for item in messages]
+
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "检索 X 并总结"
+    assert messages[-1]["role"] == "assistant"
+    assert messages[-1]["content"] == "已完成检索：X 的结构健康。"
+    assert any("X 的检索结果" in content for content in contents)
+    assert all("继续" != content for content in contents)
+    assert all("模型服务上游暂时失败" not in content for content in contents)
+
+
 def test_context_assembler_replays_ledger_compression_checkpoint_without_current_turn_loss(tmp_path):
     append_conversation_event(
         tmp_path,
