@@ -11,6 +11,7 @@ fixture 全部在测试内构造（手拼 OOXML zip / 最小 PDF），不依赖�
 """
 from __future__ import annotations
 
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -206,6 +207,73 @@ def test_managed_zip_entry_locator_resolution(tmp_path, monkeypatch):
         resolved["cleanup"]()
     with pytest.raises(managed_roots.ManagedSourceRootError, match="escapes the archive"):
         managed_roots.resolve_managed_locator("managed://msroot-zip/bundle.zip!/../../evil.txt")
+
+
+def _force_central_dir_encrypted_flag(zip_path: Path, entry_name: bytes) -> None:
+    """writestr 会清掉加密标志位；直接改中央目录头里该条目的 general purpose bit flag。"""
+
+    data = bytearray(zip_path.read_bytes())
+    idx = data.find(b"PK\x01\x02")
+    while idx != -1:
+        name_len = int.from_bytes(data[idx + 28 : idx + 30], "little")
+        name = bytes(data[idx + 46 : idx + 46 + name_len])
+        if name == entry_name:
+            flags = int.from_bytes(data[idx + 8 : idx + 10], "little") | 0x1
+            data[idx + 8 : idx + 10] = flags.to_bytes(2, "little")
+            break
+        idx = data.find(b"PK\x01\x02", idx + 4)
+    zip_path.write_bytes(bytes(data))
+
+
+def test_managed_zip_entry_resolution_blocks_encrypted_and_oversized(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    desktop = tmp_path / "desktop-zipguard"
+    desktop.mkdir()
+    archive_path = desktop / "guard.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("enc.txt", "secret-ish")
+        archive.writestr("huge.txt", "x" * 4096)
+    _force_central_dir_encrypted_flag(archive_path, b"enc.txt")
+    managed_roots.register_managed_source_root(
+        {
+            "localPath": str(desktop),
+            "rootId": "msroot-zipguard",
+            "scanBudget": {"maxFileBytes": 1024},  # 声明 4096 字节条目超预算
+        }
+    )
+
+    temp_root = Path(tempfile.gettempdir())
+
+    def _zip_temp_dirs() -> set[str]:
+        return {str(item) for item in temp_root.glob("msr-zip-*")}
+
+    before = _zip_temp_dirs()
+    with pytest.raises(managed_roots.ManagedSourceRootError, match="encrypted"):
+        managed_roots.resolve_managed_locator("managed://msroot-zipguard/guard.zip!/enc.txt")
+    with pytest.raises(managed_roots.ManagedSourceRootError, match="zip entry exceeds size budget"):
+        managed_roots.resolve_managed_locator("managed://msroot-zipguard/guard.zip!/huge.txt")
+    assert _zip_temp_dirs() == before  # 阻断路径不残留临时展开目录
+
+
+def test_corrupt_registry_is_quarantined_not_overwritten(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    registry_path = managed_roots.default_registry_path()
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    corrupted_body = '{"roots": [ broken json'
+    registry_path.write_text(corrupted_body, encoding="utf-8")
+
+    desktop = tmp_path / "desktop"
+    desktop.mkdir()
+    entry = managed_roots.register_managed_source_root({"localPath": str(desktop), "rootId": "msroot-after-fix"})
+
+    # 原 registry 被隔离保留，而不是被静默覆盖
+    quarantined = list(registry_path.parent.glob("index.corrupt-*.json"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_text(encoding="utf-8") == corrupted_body
+    # 新 registry 从空起步且登记成功
+    listed = managed_roots.list_managed_source_roots()
+    assert [item["rootId"] for item in listed["roots"]] == ["msroot-after-fix"]
+    assert entry["localPath"] == str(desktop.resolve())
 
 
 # ---------------------------------------------------------------------------

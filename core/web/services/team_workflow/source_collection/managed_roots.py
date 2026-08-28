@@ -111,12 +111,39 @@ class ManagedSourceRootError(Exception):
     """Raised when a managed source root registration or resolution fails."""
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json(path: Path) -> tuple[dict[str, Any], str]:
+    """读取 registry JSON；返回 (payload, failure)。
+
+    failure 为空表示正常（存在且为 dict）；否则取值：
+    "missing"（文件不存在）、"not_dict"（存在但顶层非对象）、"parse_failed"。
+    """
+
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}, "missing"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}, "parse_failed"
+    if not isinstance(payload, dict):
+        return {}, "not_dict"
+    return payload, ""
+
+
+def _quarantine_corrupt_registry(path: Path) -> None:
+    """损坏 registry 只隔离不重写：改名保留现场，隔离失败绝不覆盖。"""
+
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    quarantine_path = path.parent / f"index.corrupt-{stamp}.json"
+    try:
+        os.replace(path, quarantine_path)
+    except OSError as exc:
+        raise ManagedSourceRootError(
+            f"Managed source root registry is corrupt and cannot be quarantined: {exc}"
+        ) from exc
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -153,7 +180,11 @@ def default_registry_path() -> Path:
 
 def _load_registry(registry_path: Path | None = None) -> dict[str, Any]:
     path = registry_path or default_registry_path()
-    store = _read_json(path)
+    store, failure = _read_json(path)
+    if failure in {"parse_failed", "not_dict"}:
+        # 损坏 registry 先隔离保留现场（jsonl_quarantine 先例），再从空 registry 起步。
+        _quarantine_corrupt_registry(path)
+        store = {}
     roots = [item for item in list(store.get("roots") or []) if isinstance(item, dict)]
     if not store:
         now = _utc_now_iso()
@@ -191,6 +222,18 @@ def _coerce_budget(raw: Any) -> dict[str, int]:
             value = default
         budget[key] = max(minimum, min(maximum, value))
     return budget
+
+
+def _managed_root_file_budget(entry: dict[str, Any]) -> int:
+    """该受管根的单文件预算（zip 条目反解上限），缺省回退默认预算。"""
+
+    budget = entry.get("scanBudget") if isinstance(entry.get("scanBudget"), dict) else {}
+    minimum, maximum = MANAGED_SCAN_BUDGET_LIMITS["maxFileBytes"]
+    try:
+        value = int(budget.get("maxFileBytes"))
+    except (TypeError, ValueError):
+        return MANAGED_SCAN_BUDGET_DEFAULTS["maxFileBytes"]
+    return max(minimum, min(maximum, value))
 
 
 def _coerce_category_policy(raw: Any) -> dict[str, Any]:
@@ -482,17 +525,36 @@ def resolve_managed_locator(locator: str, *, allow_disabled: bool = False, regis
     if parsed["zipEntry"]:
         if not target.exists() or not target.is_file():
             raise ManagedSourceRootError(f"Managed archive is missing: {parsed['relativePath']}")
+        max_entry_bytes = _managed_root_file_budget(entry)
         extracted_dir = Path(tempfile.mkdtemp(prefix="msr-zip-")).resolve()
         try:
             with zipfile.ZipFile(target) as archive:
                 info = archive.getinfo(parsed["zipEntry"])
                 if info.is_dir():
                     raise ManagedSourceRootError("managed:// zip entry is a directory.")
+                if info.flag_bits & 0x1:
+                    raise ManagedSourceRootError("managed:// zip entry is encrypted; blocked.")
+                if info.file_size > max_entry_bytes:
+                    raise ManagedSourceRootError(
+                        f"zip entry exceeds size budget: {parsed['zipEntry']} "
+                        f"declared {info.file_size} > {max_entry_bytes}"
+                    )
                 dest = _contained_resolve(extracted_dir, "_entry_")
                 dest.parent.mkdir(parents=True, exist_ok=True)
+                # remaining 递减读取（同 local_parsing._safe_extract_entry）：
+                # 声明超限已在上面拦截，这里兜底「声明与实际不符」的读取超限。
+                remaining = info.file_size
+                written = 0
                 with archive.open(info) as source_handle, open(dest, "wb") as target_handle:
-                    while chunk := source_handle.read(1024 * 1024):
+                    while chunk := source_handle.read(min(1024 * 1024, remaining or 1024 * 1024)):
                         target_handle.write(chunk)
+                        written += len(chunk)
+                        remaining -= len(chunk)
+                        if written > max_entry_bytes:
+                            raise ManagedSourceRootError(
+                                f"zip entry exceeds size budget: {parsed['zipEntry']} "
+                                f"read {written} > {max_entry_bytes}"
+                            )
         except ManagedSourceRootError:
             import shutil
 
