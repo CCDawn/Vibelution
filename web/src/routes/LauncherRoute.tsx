@@ -14,6 +14,7 @@ import {
 import { queryKeys } from "../api/queryKeys";
 import type { LauncherOperation } from "../api/types";
 import { useWorkbenchLifecycleActions } from "../app/useWorkbenchLifecycleActions";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VDenseOpsPage, VRouteLinkButton, VStateSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
@@ -26,6 +27,8 @@ import {
 } from "./LauncherBranchInstancesPanel.model";
 import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+
+const LAUNCHER_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
 
 type BranchLifecycleRequest = {
   instanceId: string;
@@ -245,6 +248,8 @@ export function LauncherRoute() {
       fill
       hideHeader
       data-vui-domain-recipe="launcher-workbench"
+      data-vui-recipe="launcher-workbench"
+      data-vui-layout-id={LAUNCHER_LAYOUT_ID}
       ariaLabel={lang === "zh" ? "项目启动器" : "Project launcher"}
     >
       <div className={styles.primaryRail} data-vui-region="launcher-primary-rail">

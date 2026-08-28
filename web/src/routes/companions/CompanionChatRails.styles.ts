@@ -26,20 +26,20 @@ const tabList = "w-full !grid grid-cols-3";
 const tabTrigger = "w-full";
 const lifeContent = "grid min-h-0 content-start gap-2 overflow-y-auto p-3";
 const scheduleList = "grid gap-1.5";
-const scheduleItem = "grid min-w-0 grid-cols-[44px_minmax(0,1fr)] gap-2 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_64%,transparent)] px-2 py-1.5 [&>time]:font-mono [&>time]:text-[0.62rem] [&>time]:text-vui-fg-tertiary [&>div]:min-w-0 [&>div]:grid [&>div]:gap-0.5 [&>div>strong]:truncate [&>div>strong]:[font-size:var(--vui-font-xs)] [&>div>span]:[font-size:0.62rem] [&>div>span]:leading-[1.45] [&>div>span]:text-vui-fg-tertiary";
+const scheduleItem = "grid min-w-0 grid-cols-[44px_minmax(0,1fr)] gap-2 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>time]:font-mono [&>time]:text-[0.62rem] [&>time]:text-vui-fg-tertiary [&>div]:min-w-0 [&>div]:grid [&>div]:gap-0.5 [&>div>strong]:truncate [&>div>strong]:[font-size:var(--vui-font-xs)] [&>div>span]:[font-size:0.62rem] [&>div>span]:leading-[1.45] [&>div>span]:text-vui-fg-tertiary";
 const eventList = "grid gap-1.5";
-const eventItem = "grid min-w-0 grid-cols-[44px_minmax(0,1fr)] gap-2 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_64%,transparent)] px-2 py-1.5";
+const eventItem = "grid min-w-0 grid-cols-[44px_minmax(0,1fr)] gap-2 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5";
 const eventTime = "font-mono text-[0.62rem] text-vui-fg-tertiary";
-const eventCopy = "grid min-w-0 gap-0.5 [&>strong]:truncate [&>strong]:text-[var(--vui-font-xs)] [&>span]:line-clamp-2 [&>span]:text-[0.62rem] [&>span]:leading-[1.45] [&>span]:text-vui-fg-tertiary";
+const eventCopy = "grid min-w-0 gap-0.5 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:line-clamp-2 [&>span]:text-[0.62rem] [&>span]:leading-[1.45] [&>span]:text-vui-fg-tertiary";
 const memoryList = "grid gap-1.5";
-const memoryItem = "grid gap-1.5 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_64%,transparent)] px-2 py-2";
-const memoryItemHeader = "flex min-w-0 items-baseline justify-between gap-2 [&>strong]:truncate [&>strong]:text-[var(--vui-font-xs)] [&>time]:shrink-0 [&>time]:font-mono [&>time]:text-[0.6rem] [&>time]:text-vui-fg-tertiary";
+const memoryItem = "grid gap-1.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-2";
+const memoryItemHeader = "flex min-w-0 items-baseline justify-between gap-2 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>time]:shrink-0 [&>time]:font-mono [&>time]:text-[0.6rem] [&>time]:text-vui-fg-tertiary";
 const memoryMeta = "font-mono text-[0.6rem] text-[var(--accent-cool)]";
 const relationshipGrid = "grid grid-cols-2 gap-1.5";
-const relationshipItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_64%,transparent)] px-2 py-1.5 [&>strong]:truncate [&>strong]:text-[var(--vui-font-xs)] [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary";
+const relationshipItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary";
 const moodRow = "flex items-center justify-between gap-2 [&>strong]:text-[0.82rem] [&>span]:font-mono [&>span]:text-[0.62rem] [&>span]:text-vui-fg-tertiary";
 const facts = "grid grid-cols-2 gap-1.5";
-const fact = "grid gap-0.5 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_64%,transparent)] px-2 py-1.5 [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary [&>strong]:font-mono [&>strong]:text-[0.72rem] [&>strong]:text-vui-fg-primary";
+const fact = "grid gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary [&>strong]:font-mono [&>strong]:text-[0.72rem] [&>strong]:text-vui-fg-primary";
 const state = "m-3";
 
 export default {

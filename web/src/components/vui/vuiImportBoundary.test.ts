@@ -47,6 +47,13 @@ const productSharedParentStyleConsumers = [
   "routes/teams/challenge-cup/ChallengeQuestionRegisterDialog.tsx",
   "routes/teams/challenge-cup/ChallengeQuestionRunResetDialog.tsx",
   "routes/teams/challenge-cup/ChallengeQuestionReviewForm.tsx",
+  // Companions (virtual human life) surface: the route and its rail/portrait
+  // subcomponents share the route-owned companions/CompanionChatRails style
+  // modules instead of each owning one.
+  "routes/CompanionsRoute.tsx",
+  "routes/companions/CompanionLifeRail.tsx",
+  "routes/companions/CompanionPersonRail.tsx",
+  "routes/companions/CompanionPortrait.tsx",
   "routes/teams/workflowTone.ts",
   "routes/TeamsRoute.tsx",
 ] as const;

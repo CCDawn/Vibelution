@@ -16,5 +16,5 @@ export default {
   techDetails:
     "grid max-w-full gap-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&>summary]:w-fit [&>summary]:cursor-pointer [&_code]:wrap-anywhere [&_code]:text-[10px]",
   actions:
-    "sticky bottom-0 z-10 -mx-3 -mb-3 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)] px-3 py-3 shadow-[0_-10px_24px_-20px_rgba(15,23,42,0.6)] backdrop-blur",
+    "sticky bottom-0 z-10 -mx-3 -mb-3 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-[var(--vui-border-subtle)] bg-vui-surface-panel px-3 py-3 shadow-[0_-10px_24px_-20px_rgba(15,23,42,0.6)]",
 } as const;

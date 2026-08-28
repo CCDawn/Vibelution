@@ -10,6 +10,7 @@ import memoryTypesSource from "./types/memory.ts?raw";
 import runtimeTypesSource from "./types/runtime.ts?raw";
 import sharedTypesSource from "./types/shared.ts?raw";
 import teamsTypesSource from "./types/teams.ts?raw";
+import virtualHumanLifeTypesSource from "./types/virtualHumanLife.ts?raw";
 
 const expectedBarrel = [
   'export * from "./types/shared";',
@@ -22,6 +23,7 @@ const expectedBarrel = [
   'export * from "./types/evolution";',
   'export * from "./types/config";',
   'export * from "./types/hypothesisFirst";',
+  'export * from "./types/virtualHumanLife";',
 ].join("\n");
 
 const domainSources = [
@@ -34,6 +36,7 @@ const domainSources = [
   runtimeTypesSource,
   sharedTypesSource,
   teamsTypesSource,
+  virtualHumanLifeTypesSource,
 ];
 
 describe("api type domain modules", () => {

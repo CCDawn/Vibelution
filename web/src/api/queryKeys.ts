@@ -26,7 +26,6 @@ export const queryKeys = {
   agentPlugins: (id: string) => ["agents", id, "plugins"] as const,
   virtualHumanCompanions: () => ["agent-plugins", "virtual-human-life", "companions"] as const,
   virtualHumanSnapshot: (id: string) => ["agents", id, "plugins", "virtual-human-life", "snapshot"] as const,
-  virtualHumanSchedule: (id: string, localDate = "") => ["agents", id, "plugins", "virtual-human-life", "schedule", localDate] as const,
   virtualHumanEvents: (id: string, localDate = "", limit = 100) => ["agents", id, "plugins", "virtual-human-life", "events", localDate, limit] as const,
   virtualHumanDiary: (id: string, localDate = "", limit = 100) => ["agents", id, "plugins", "virtual-human-life", "diary", localDate, limit] as const,
   virtualHumanRelationships: (id: string) => ["agents", id, "plugins", "virtual-human-life", "relationships"] as const,

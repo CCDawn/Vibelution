@@ -148,7 +148,12 @@ describe("ToolsRoute layout contract", () => {
   it("lives inside Agent management navigation with the shared module bar", () => {
     expect(routerSource).toContain('path: "agents/tools"');
     expect(routerSource).toContain("<ToolsRoute />");
-    expect(routerSource).not.toContain('path: "tools"');
+    // The top-level `path: "tools"` now belongs to the launcher tools surface
+    // (LauncherToolsRoute); the agents ToolsRoute must never mount there.
+    const topLevelToolsEntry = routerSource
+      .split("\n")
+      .find((line) => line.includes('path: "tools"'));
+    expect(topLevelToolsEntry).toContain("<LauncherToolsRoute />");
     expect(routerSource).not.toContain('to="/agents/tools" replace');
     expect(routeSource).toContain("<ToolsRouteAgentScopePanel");
     expect(agentScopePanelSource).toContain('from "./ToolsRouteAgentScopePanel.styles"');

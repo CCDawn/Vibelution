@@ -1,13 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { queryKeys } from "../../../api/queryKeys";
+import type { AnomalyInboxResponse } from "../../../api/types/hypothesisFirst";
+import type { ChallengeCupRealBatchProjection } from "../../../api/types/challengeCup";
 import type { ChallengeSubmissionReadiness } from "../../../api/types/challengeCup";
 import { VWorkflowCanvas } from "../../../components/vui";
 import type { WorkflowLayoutInput } from "../../../components/vui/product/workflow/workflowCanvasTypes";
 import { ChallengeCatalogOverview } from "../../../routes/teams/challenge-cup/ChallengeCatalogOverview";
 import type { CatalogOverview } from "../../../routes/teams/challenge-cup/challengeCatalogOverviewModel";
 import { ChallengeTokenUsageStrip } from "../../../routes/teams/challenge-cup/ChallengeTokenUsageStrip";
+import { ChallengeRealBatchControlPanel } from "../../../routes/teams/research-workflow/ChallengeRealBatchControlPanel";
 import { ChallengeSubmissionReadinessPanel } from "../../../routes/teams/research-workflow/ChallengeSubmissionReadinessPanel";
+import { ResearchAnomalyInboxPanel } from "../../../routes/teams/research-workflow/ResearchAnomalyInboxPanel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 import { workflowCatalogClasses } from "./WorkflowCatalog.styles";
@@ -203,6 +207,83 @@ challengeReadinessQueryClient.setQueryData(
   queryKeys.challengeCupCatalogOverview(previewTeamId),
   challengeCatalogOverviewPreview,
 );
+const realBatchPreview: ChallengeCupRealBatchProjection = {
+  schemaVersion: 1,
+  planId: "real-125",
+  gateId: "gate-real-125",
+  exists: true,
+  questionCount: 125,
+  statusSummary: { pending: 8, running: 3, succeeded: 112, failed: 2, blocked: 0 },
+  pendingCount: 8,
+  succeededCount: 112,
+  failedCount: 2,
+  blockedCount: 0,
+  totalAttempts: 131,
+  completedQuestionIds: ["SCI-001", "SCI-002"],
+  pendingQuestionIds: ["SCI-123", "SCI-124"],
+  runRefs: { "SCI-001": { runId: "run-sci-001", attempt: 2 } },
+  awaitingApprovalQuestionIds: [],
+  consecutiveFailures: 1,
+  failureBudget: 5,
+  circuitBreakerOpen: false,
+  cancelled: false,
+  gateComplete: false,
+  lastUpdatedAt: "2026-08-28T00:00:00Z",
+  canResume: true,
+  drainState: "draining",
+  concurrencyLimit: 4,
+  autoCloseTarget: 95,
+};
+challengeReadinessQueryClient.setQueryData(
+  queryKeys.challengeCupRealBatchStatus(previewTeamId, "real-125"),
+  realBatchPreview,
+);
+const anomalyInboxPreview: AnomalyInboxResponse = {
+  schemaVersion: 1,
+  teamId: previewTeamId,
+  questionId: "",
+  inbox: {
+    schemaVersion: 1,
+    ruleId: "anomaly-inbox",
+    generatedAt: "2026-08-28T00:00:00Z",
+    items: [
+      {
+        kind: "blocked_run",
+        scope: { teamId: previewTeamId, questionId: "SCI-124", runId: "run-sci-124", nodeId: "human_gate", meetingRoundId: "" },
+        severity: "critical",
+        firstSeenAt: "2026-08-27T09:00:00Z",
+        lastSeenAt: "2026-08-28T00:00:00Z",
+        summary: "运行在人工门禁处阻塞超过 2 小时",
+        recommendedAction: "reconcile_run",
+        evidence: ["gate=human_approval", "waiting_minutes=128"],
+      },
+      {
+        kind: "retry_budget_exhausted",
+        scope: { teamId: previewTeamId, questionId: "SCI-002", runId: "run-sci-002", nodeId: "formal_run", meetingRoundId: "" },
+        severity: "high",
+        firstSeenAt: "2026-08-27T18:30:00Z",
+        lastSeenAt: "2026-08-28T00:00:00Z",
+        summary: "formal_run 节点重试预算耗尽",
+        recommendedAction: "retry_node",
+        evidence: ["attempts=3", "budget=3"],
+      },
+      {
+        kind: "drift_sentinel_hit",
+        scope: { teamId: previewTeamId, questionId: "SCI-121", runId: "run-sci-121", nodeId: "evidence_sample", meetingRoundId: "" },
+        severity: "medium",
+        firstSeenAt: "2026-08-28T06:12:00Z",
+        lastSeenAt: "2026-08-28T06:12:00Z",
+        summary: "抽样漂移哨兵命中一次，证据一致性待复核",
+        recommendedAction: null,
+        evidence: ["sample_ratio=0.18"],
+      },
+    ],
+  },
+};
+challengeReadinessQueryClient.setQueryData(
+  queryKeys.hypothesisFirstChainAnomalyInbox(previewTeamId, ""),
+  anomalyInboxPreview,
+);
 
 const serpentineStatusGraph: WorkflowLayoutInput = {
   stages: [
@@ -285,6 +366,16 @@ export function WorkflowCatalog() {
       <VuiPreviewCard name="ChallengeCatalogOverview" className={workflowCatalogClasses.card}>
         <QueryClientProvider client={challengeReadinessQueryClient}>
           <ChallengeCatalogOverview teamId={previewTeamId} onOpenQuestion={() => undefined} />
+        </QueryClientProvider>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ChallengeRealBatchControlPanel" className={workflowCatalogClasses.card}>
+        <QueryClientProvider client={challengeReadinessQueryClient}>
+          <ChallengeRealBatchControlPanel teamId={previewTeamId} lang="zh" />
+        </QueryClientProvider>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ResearchAnomalyInboxPanel" className={workflowCatalogClasses.card}>
+        <QueryClientProvider client={challengeReadinessQueryClient}>
+          <ResearchAnomalyInboxPanel teamId={previewTeamId} lang="zh" />
         </QueryClientProvider>
       </VuiPreviewCard>
       <VuiPreviewCard name="VWorkflowCanvas" className={workflowCatalogClasses.card}>
