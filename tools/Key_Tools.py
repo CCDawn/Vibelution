@@ -630,7 +630,7 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
-    def paper_search_tool(topic: str, max_results: int = 8, year_hint: str = "", include_domains: str = "") -> str:
+    def paper_search_tool(topic: str, max_results: int = 8, year_hint: str | int = "", include_domains: str = "") -> str:
         """
         【论文公开搜索】搜索论文、预印本、会议页、综述和 benchmark 线索。
 
