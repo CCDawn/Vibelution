@@ -31,6 +31,18 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
     assert "不得伪造负面资料" in prompt
 
 
+def test_extraction_contract_states_nested_findings_carry_fact_themselves() -> None:
+    # 运行时物化只认每条嵌套 finding 自身的 fact（claim 键不能替代），
+    # 契约必须把这一点讲清楚，避免模型把 fact 只写在 extraction 父项。
+    prompt = "\n".join(stage_writeback_prompt_lines("extraction"))
+
+    assert "都要自带显式事实字段 `fact`" in prompt
+    assert "不能用 `claim` 替代" in prompt
+    assert "不能只写在 extraction 父项" in prompt
+    assert "扁平 extraction" in prompt
+    assert "`limitations`（字符串数组" in prompt
+
+
 def test_unknown_stage_has_no_extra_writeback_contract() -> None:
     assert stage_writeback_prompt_lines("unknown") == []
 
