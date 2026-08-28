@@ -257,7 +257,7 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
         runtime = production_workflow_runtime()
         assert runtime is not None
 
-        def fake_snapshot(_run_id: str) -> dict:
+        def fake_snapshot(_run_id: str, _workflow_version_id: str = "") -> dict:
             return {"values": {}, "nextNodeIds": [], "checkpointId": ""}
 
         def fake_start(dispatch):

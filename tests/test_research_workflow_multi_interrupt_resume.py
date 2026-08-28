@@ -107,7 +107,7 @@ class _RecordingCoordinator(ChallengeCupGraphCoordinator):
         self._builder = builder
         self.commands: list[Any] = []
 
-    def _compile(self):
+    def _compile(self, workflow_version_id: str = ""):
         from contextlib import ExitStack
 
         from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
