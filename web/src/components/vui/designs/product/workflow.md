@@ -205,3 +205,33 @@ const graph = composeHypothesisFirstGraph(base, region, {
 - 画布节点仍是投影，不是新的 backend node；不改 16 节点执行拓扑
 - 不把整份单题验收（审核工件、修订登记）塞进 Inspector
 - 不引入第二套设计系统 / HeroUI；路由不直连 `renderers/shadcn`
+
+## 知识侧流程区域
+
+### 功能
+
+科研流程画布的**显示层第二类区域**：把固定五节点知识搜集侧流程（资料寻找 → 资料提炼 → 证据关系 → 知识入库 → 知识包交接）合成为追加在主图末尾的「知识搜集 · 子流程」阶段带，由快照 `invocationBadges` 聚合驱动，不改动任何执行拓扑。区域由路由层纯函数 `buildKnowledgeSideflowCanvasRegion`（`routes/teams/research-workflow/knowledgeSideflowCanvasRegion.ts`）产出 `{ stage, nodes, edges }`，再经 `composeKnowledgeSideflowGraph` 拼进主图；无任何知识调用活动时区域不合成，画布保持原拓扑形态。边界只画两条：`problem_understanding → ksf_source_finding`（「知识请求」）与 `ksf_knowledge_handoff → hypothesis_design`（「知识包交接」，gateKind `knowledge_package`）；不画 N×5 永久长连线。
+
+卡片映射（nodeId 均以 `ksf_` 前缀；`knowledge_handoff` 是 `human_gate`，其余为 `agent_task`）：五卡状态取**全部父节点中最近一次 invocation**（按 `updatedAtMs` 排序），沿链序把 `currentKnowledgeNodeId` 之前的卡标 `succeeded`、当前卡按 invocation status 映射（`awaiting_handoff→waiting_human`、`failed/cancelled→failed`、`completed→succeeded`、否则 `running`）、之后的卡标 `pending`。不猜测中间节点，没有服务端事实就写 pending。
+
+**节点知识徽标**：渲染层 `renderers/shadcn/workflow/WorkflowKnowledgeBadge.tsx` 在主链节点卡（`agent_task` / `system_task` / `human_gate`，经 `WorkflowNodeChrome` 的既有 `badge` 插槽）渲染紧凑胶囊，段位为 知识 N / 运行 M / 交接 K / 回写 A / 失败 F（零值段省略；`awaitingHandoff` 或 `failed > 0` 时整枚走 warning 色）。数据流单向：snapshot `invocationBadges` → `researchProcessGraphModel.knowledgeBadgeInput` → `WorkflowCanvasNodeInput.knowledgeBadge` → ELK/layout composer/`useWorkflowAutoLayout` 三处构造点透传 → React Flow node data → 节点组件 badge 插槽。徽标不新增布局引擎节点，不影响结构 hash。
+
+### 适用范围
+
+- 钉住定义不含图内知识链的运行（main 3.0.0 十二节点）；`definitionNeedsSideflowRegion` 以「definition 无 `knowledge_handoff` 节点」判定。2.1.0 十七节点运行知识节点已在图内，不合成区域，徽标仍由快照聚合驱动。
+- 画布点击 `ksf_` 卡片 → Inspector 渲染 `NodeKnowledgeCollectionSection`（四态：未发起/搜集中/等待交接/已交接 + 失败恢复），与画布共用同一次最近 invocation 推导，保证两侧一致。
+- 主链节点 Inspector 在侧流程启用时挂载同一 section：`knowledgeBadge === undefined` 隐藏整节（定义无侧流程），`null` 表示未发起态（预览关键词/证据类型/时间窗/来源策略，来自命令 offer payload）。
+- 命令动作只来自 canonical knowledge command offers（`ensure_knowledge_collection` / `inspect_knowledge_collection`）；operator-only offer 渲染禁用态 + `authorizationReason`（`isOperatorGatedOffer`），不让用户撞 403。签名/过期由服务端提交时再校验，前端展示不做 fail-open。
+
+### 使用方式
+
+```tsx
+import { buildKnowledgeSideflowCanvasRegion, composeKnowledgeSideflowGraph } from "./knowledgeSideflowCanvasRegion";
+
+const region = definitionNeedsSideflowRegion(projection.definition)
+  ? buildKnowledgeSideflowCanvasRegion(snapshot.invocationBadges ?? null)
+  : null;
+const graph = composeKnowledgeSideflowGraph(withHypothesisFirst, region); // region 为 null 时原样返回 base
+```
+
+数据由快照 `invocationBadges` 提供（后端 knowledge_invocations 域投影）；SSE 快照刷新即失效重取，无独立轮询。

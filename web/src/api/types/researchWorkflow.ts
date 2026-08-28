@@ -277,6 +277,27 @@ export const CHALLENGE_CUP_NODE_IDS = [
 
 export type ChallengeCupNodeId = (typeof CHALLENGE_CUP_NODE_IDS)[number];
 
+/**
+ * The five knowledge-sideflow node ids in canonical order. Mirrors
+ * core/research/workflow/knowledge_sideflow_definition.py
+ * KNOWLEDGE_SIDEFLOW_NODE_IDS; the definition-sync contract test pins both
+ * lists to the server definition snapshots so hand-copied drift fails CI.
+ */
+export const KNOWLEDGE_SIDEFLOW_NODE_IDS = [
+  "source_finding",
+  "source_extraction",
+  "evidence_relations",
+  "knowledge_ingestion",
+  "knowledge_handoff",
+] as const;
+
+export type KnowledgeSideflowNodeId = (typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number];
+
+export const KNOWLEDGE_SIDEFLOW_WORKFLOW_ID = "challenge-cup-knowledge-sideflow";
+
+/** Main-flow schema version that carries no in-graph knowledge nodes. */
+export const CHALLENGE_CUP_RESEARCH_SCHEMA_V3 = "3.0.0";
+
 export const CHALLENGE_CUP_WORKFLOW_ID = "challenge-cup-research";
 
 /** Effective (current-configuration) agent binding for one node. */

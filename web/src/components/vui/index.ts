@@ -84,6 +84,7 @@ export {
   type WorkflowCanvasStageInput,
   type WorkflowEdgePathState,
   type WorkflowEdgeSemanticKind,
+  type WorkflowKnowledgeBadgeInput,
   type WorkflowLayoutEdge,
   type WorkflowLayoutInput,
   type WorkflowLayoutNode,

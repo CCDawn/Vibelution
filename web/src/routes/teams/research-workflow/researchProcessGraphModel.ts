@@ -4,6 +4,9 @@
  */
 
 import type {
+  KnowledgeInvocationBadge,
+} from "../../../api/types/research-workflow/core";
+import type {
   ActorKind,
   NodeRunStatus,
   WorkflowCanvasProjection,
@@ -12,6 +15,7 @@ import type {
 import type {
   WorkflowCanvasEdgeInput,
   WorkflowCanvasNodeInput,
+  WorkflowKnowledgeBadgeInput,
   WorkflowLayoutInput,
   WorkflowNodeRunStatus,
   WorkflowNodeVisualKind,
@@ -48,6 +52,22 @@ function asStatus(value: string | undefined | null): WorkflowNodeRunStatus {
   return "pending";
 }
 
+/** Snapshot badge aggregate → the renderer's compact badge input. */
+function knowledgeBadgeInput(
+  badge: KnowledgeInvocationBadge | undefined,
+): WorkflowKnowledgeBadgeInput | undefined {
+  if (!badge || (badge.totalCount ?? 0) <= 0) return undefined;
+  return {
+    total: badge.totalCount,
+    running: badge.runningCount ?? 0,
+    awaitingHandoff: badge.awaitingHandoffCount ?? 0,
+    absorbed: badge.absorbedCount ?? 0,
+    failed: badge.failedCount ?? 0,
+    currentKnowledgeNodeId: badge.latest?.currentKnowledgeNodeId ?? null,
+    knowledgeChildRunId: badge.latest?.knowledgeChildRunId ?? null,
+  };
+}
+
 function mapNodes(
   definition: WorkflowDefinition,
   options: {
@@ -56,6 +76,7 @@ function mapNodes(
     runtimeCurrentNodeIds?: string[];
     pendingHumanNodeIds?: Set<string>;
     blockedReason?: string | null;
+    invocationBadges?: Record<string, KnowledgeInvocationBadge>;
   } = {},
 ): WorkflowCanvasNodeInput[] {
   const current = new Set(options.runtimeCurrentNodeIds ?? []);
@@ -99,6 +120,7 @@ function mapNodes(
       primaryAgentId: run?.primaryAgentId || options.primaryAgentIdByNode?.get(node.nodeId),
       isRuntimeCurrent,
       hasPendingHumanTask,
+      knowledgeBadge: knowledgeBadgeInput(options.invocationBadges?.[node.nodeId]),
       blockedReason:
         effectiveStatus === "blocked" || effectiveStatus === "failed"
           ? options.blockedReason ?? null
@@ -173,7 +195,10 @@ export function definitionToCanvasGraph(
 
 export function projectionToCanvasGraph(
   projection: WorkflowCanvasProjection,
-  options: { primaryAgentIdByNode?: ReadonlyMap<string, string> } = {},
+  options: {
+    primaryAgentIdByNode?: ReadonlyMap<string, string>;
+    invocationBadges?: Record<string, KnowledgeInvocationBadge>;
+  } = {},
 ): WorkflowLayoutInput {
   const run = projection.run;
   const pendingHumanNodeIds = new Set(
@@ -185,6 +210,7 @@ export function projectionToCanvasGraph(
     runtimeCurrentNodeIds: run.runtimeCurrentNodeIds || [],
     pendingHumanNodeIds,
     blockedReason: run.blockedReason,
+    invocationBadges: options.invocationBadges,
   });
   const edges = mapEdges(projection.definition, nodes, run.runtimeCurrentNodeIds || []);
   const stages = projection.definition.stages.map((stage) => {

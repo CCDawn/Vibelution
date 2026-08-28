@@ -160,6 +160,7 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
         isRuntimeCurrent: metaNode.isRuntimeCurrent,
         hasPendingHumanTask: metaNode.hasPendingHumanTask,
         blockedReason: metaNode.blockedReason,
+        knowledgeBadge: metaNode.knowledgeBadge,
         description: metaNode.description,
         primaryRoleKey: metaNode.primaryRoleKey,
         sourceHandleIds: uniqueHandles.length > 0 ? uniqueHandles : undefined,

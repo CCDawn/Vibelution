@@ -299,6 +299,32 @@ export type ResearchWorkflowNodeDetail = {
   nodeAttempt?: number;
 };
 
+/** One recent knowledge-collection invocation (canvas lineage row). */
+export type KnowledgeInvocationRecentSummary = {
+  invocationId: string;
+  parentNodeId: string;
+  status: string | null;
+  handoffState: string | null;
+  currentKnowledgeNodeId: string | null;
+  knowledgeChildRunId?: string | null;
+  knowledgePackageRef?: string | null;
+  packageContentHash?: string | null;
+  errorSummary?: string | null;
+  createdAtMs?: number;
+  updatedAtMs?: number;
+};
+
+/** Per-main-node knowledge invocation aggregate (canvas badge facts). */
+export type KnowledgeInvocationBadge = {
+  nodeId: string;
+  totalCount: number;
+  runningCount: number;
+  awaitingHandoffCount: number;
+  absorbedCount: number;
+  failedCount?: number;
+  latest?: KnowledgeInvocationRecentSummary | null;
+};
+
 export type ResearchWorkflowSnapshot = {
   run: WorkflowRunSummary;
   definition: Record<string, unknown>;
@@ -320,4 +346,6 @@ export type ResearchWorkflowSnapshot = {
   artifactSummary?: ResearchWorkflowArtifactSummary;
   deliveryStatus?: string | null;
   launchContext?: ResearchWorkflowLaunchContext;
+  /** Knowledge-sideflow badge aggregates keyed by parent node id (additive). */
+  invocationBadges?: Record<string, KnowledgeInvocationBadge>;
 };

@@ -38,6 +38,22 @@ export type WorkflowEdgeSemanticKind =
 
 export type WorkflowEdgePathState = "idle" | "traversed" | "active" | "attention" | "danger";
 
+/**
+ * Knowledge-sideflow invocation counters for one main-chain node (from the
+ * snapshot's invocationBadges). The canvas badge renders them via the node
+ * chrome's existing badge slot; absent when the run has no knowledge activity.
+ */
+export type WorkflowKnowledgeBadgeInput = {
+  total: number;
+  running: number;
+  awaitingHandoff: number;
+  absorbed: number;
+  failed?: number;
+  /** Current sideflow node of the latest invocation (lineage tooltip). */
+  currentKnowledgeNodeId?: string | null;
+  knowledgeChildRunId?: string | null;
+};
+
 export type WorkflowCanvasNodeInput = {
   nodeId: string;
   stageId: string;
@@ -56,6 +72,7 @@ export type WorkflowCanvasNodeInput = {
   isRuntimeCurrent?: boolean;
   hasPendingHumanTask?: boolean;
   blockedReason?: string | null;
+  knowledgeBadge?: WorkflowKnowledgeBadgeInput;
 };
 
 export type WorkflowCanvasEdgeInput = {
@@ -130,6 +147,7 @@ export type WorkflowLayoutNode = {
   isRuntimeCurrent?: boolean;
   hasPendingHumanTask?: boolean;
   blockedReason?: string | null;
+  knowledgeBadge?: WorkflowKnowledgeBadgeInput;
   description?: string;
   primaryRoleKey?: string;
   stageTone?: WorkflowCanvasStageInput["stageTone"];

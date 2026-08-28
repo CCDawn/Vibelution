@@ -10,6 +10,7 @@
 | --- | --- |
 | `VWorkflowCanvas` | [product/workflow.md](./product/workflow.md#vworkflowcanvas) |
 | 假说先行区域 | [product/workflow.md](./product/workflow.md#假说先行区域) |
+| 知识侧流程区域 | [product/workflow.md](./product/workflow.md#知识侧流程区域) |
 | `ChallengeSubmissionReadiness` | [product/challenge-submission-readiness.md](./product/challenge-submission-readiness.md#challengesubmissionreadiness) |
 | `ChallengeCatalogOverview` | [product/challenge-catalog-overview.md](./product/challenge-catalog-overview.md#challengecatalogoverview) |
 | `ChallengeTokenUsageStrip` | [product/challenge-token-usage.md](./product/challenge-token-usage.md#challengetokenusagestrip) |

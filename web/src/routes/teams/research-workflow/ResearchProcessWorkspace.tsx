@@ -10,6 +10,11 @@ import {
   isHypothesisReviewRetryAttempt,
   summarizeHypothesisReviewMeetings,
 } from "./hypothesisFirstCanvasRegion";
+import {
+  buildKnowledgeSideflowCanvasRegion,
+  composeKnowledgeSideflowGraph,
+  definitionNeedsSideflowRegion,
+} from "./knowledgeSideflowCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
@@ -191,8 +196,12 @@ export function ResearchProcessWorkspace({
         .filter((binding) => Boolean(binding.agentId))
         .map((binding) => [binding.nodeId, binding.agentId]),
     );
+    const invocationBadges = runState.snapshot?.invocationBadges;
     const base = location.runId
-      ? projectionToCanvasGraph(runState.projection, { primaryAgentIdByNode })
+      ? projectionToCanvasGraph(runState.projection, {
+          primaryAgentIdByNode,
+          invocationBadges,
+        })
       : definitionToCanvasGraph(runState.projection.definition, {
           primaryAgentIdByNode,
         });
@@ -203,15 +212,26 @@ export function ResearchProcessWorkspace({
       reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
       selection: hypothesisFirstChain.selection,
     });
-    return composeHypothesisFirstGraph(base, region, {
+    const withHypothesisFirst = composeHypothesisFirstGraph(base, region, {
       demotePipelineStages: isHypothesisFirstDiscussionActive(
         meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId),
       ),
     });
+    // The fixed five-node knowledge sideflow only composes for runs whose
+    // pinned definition has no in-graph knowledge chain (main 3.0.0); 2.1.0
+    // runs already draw those nodes in-graph and their badges come from the
+    // snapshot aggregates instead.
+    const sideflowRegion = definitionNeedsSideflowRegion(
+      runState.projection.definition as { nodes: Array<{ nodeId: string }> },
+    )
+      ? buildKnowledgeSideflowCanvasRegion(invocationBadges ?? null)
+      : null;
+    return composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion);
   }, [
     catalog.effectiveBindings,
     location.runId,
     runState.projection,
+    runState.snapshot,
     hypothesisFirstChain.chainState,
     hypothesisFirstChain.meetings,
     hypothesisFirstChain.collectionRequests,
@@ -707,6 +727,8 @@ export function ResearchProcessWorkspace({
         nodeDetail: nodeDetail.state,
         insights,
         busy: commandBusy,
+        invocationBadges: runState.snapshot?.invocationBadges ?? null,
+        snapshotOffers: runState.snapshot?.commandOffers ?? [],
       }}
       actions={{
         replaceParams: replaceParamsForInspector,

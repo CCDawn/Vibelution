@@ -733,6 +733,7 @@ function WorkflowCanvasInner({
             isRuntimeCurrent: Boolean(node.isRuntimeCurrent || currentSet.has(node.id)),
             hasPendingHumanTask: node.hasPendingHumanTask,
             blockedReason: node.blockedReason,
+            knowledgeBadge: node.knowledgeBadge,
             description: node.description,
             primaryRoleKey: node.primaryRoleKey,
             portSides: applyWorkflowEdgeAnchorsToPortSides(

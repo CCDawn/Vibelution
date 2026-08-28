@@ -6,6 +6,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
 import { readWorkflowReconnectMagnets } from "./workflowEdgeAnchors";
+import { WorkflowKnowledgeBadge } from "./WorkflowKnowledgeBadge";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
 export function WorkflowSystemTaskNode(props: NodeProps) {
@@ -17,6 +18,9 @@ export function WorkflowSystemTaskNode(props: NodeProps) {
     | undefined;
   const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
   const description = props.data.description ? String(props.data.description) : "";
+  const knowledgeBadge = (props.data.knowledgeBadge ?? null) as
+    | import("../../../product/workflow/workflowCanvasTypes").WorkflowKnowledgeBadgeInput
+    | null;
   return (
     <WorkflowNodeChrome
       label={label}
@@ -32,6 +36,7 @@ export function WorkflowSystemTaskNode(props: NodeProps) {
       className="bg-[var(--vui-surface-row)]"
       layoutMode={layoutMode}
       reconnectMagnets={readWorkflowReconnectMagnets(props.data)}
+      badge={knowledgeBadge ? <WorkflowKnowledgeBadge badge={knowledgeBadge} /> : undefined}
     />
   );
 }

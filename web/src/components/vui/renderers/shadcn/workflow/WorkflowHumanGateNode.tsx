@@ -6,6 +6,7 @@ import type {
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
+import { WorkflowKnowledgeBadge } from "./WorkflowKnowledgeBadge";
 import { readWorkflowReconnectMagnets } from "./workflowEdgeAnchors";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
@@ -20,6 +21,9 @@ export function WorkflowHumanGateNode(props: NodeProps) {
     | undefined;
   const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
   const description = props.data.description ? String(props.data.description) : "";
+  const knowledgeBadge = (props.data.knowledgeBadge ?? null) as
+    | import("../../../product/workflow/workflowCanvasTypes").WorkflowKnowledgeBadgeInput
+    | null;
   return (
     <WorkflowNodeChrome
       label={label}
@@ -38,10 +42,13 @@ export function WorkflowHumanGateNode(props: NodeProps) {
         blockedReason: props.data.blockedReason ? String(props.data.blockedReason) : null,
       })}
       badge={
-        <span className="inline-flex items-center gap-0.5 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--state-warning)]">
-          <UserCheck className="h-3 w-3" aria-hidden />
-          人工
-        </span>
+        <>
+          <span className="inline-flex items-center gap-0.5 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--state-warning)]">
+            <UserCheck className="h-3 w-3" aria-hidden />
+            人工
+          </span>
+          <WorkflowKnowledgeBadge badge={knowledgeBadge} />
+        </>
       }
       layoutMode={layoutMode}
       reconnectMagnets={readWorkflowReconnectMagnets(props.data)}

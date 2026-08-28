@@ -111,6 +111,7 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
         isRuntimeCurrent: metaNode.isRuntimeCurrent,
         hasPendingHumanTask: metaNode.hasPendingHumanTask,
         blockedReason: metaNode.blockedReason,
+        knowledgeBadge: metaNode.knowledgeBadge,
         description: metaNode.description,
         primaryRoleKey: metaNode.primaryRoleKey,
         sourceHandleIds: uniqueHandles.length > 0 ? uniqueHandles : undefined,

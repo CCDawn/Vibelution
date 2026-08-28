@@ -1,11 +1,12 @@
 import type { NodeHandoffRecord, ResearchBudgetProjection, EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
-import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
+import type { KnowledgeInvocationBadge, ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { VButton, VEmptyState, VSurface } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
 import { NodeCommandSection } from "./NodeCommandSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
+import { NodeKnowledgeCollectionSection } from "./NodeKnowledgeCollectionSection";
 import { NodeSessionSection } from "./NodeSessionSection";
 import {
   isHypothesisFirstMeetingBlocker,
@@ -41,6 +42,12 @@ export type ResearchProcessNodeInspectorProps = {
   onRecoverCollection?: (requestId: string) => Promise<void>;
   collectionRecoveryBusy?: boolean;
   collectionRecoveryError?: string | null;
+  /** Knowledge sideflow aggregate for this node; `undefined` hides the whole
+   * section (definitions without a sideflow region), `null` means the
+   * not-yet-started state with its request preview. */
+  knowledgeBadge?: KnowledgeInvocationBadge | null;
+  /** Snapshot-level offers carry the knowledge commands (ensure/inspect). */
+  knowledgeOffers?: CommandOffer[];
 };
 
 export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspectorProps) {
@@ -161,6 +168,15 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         blockedReason={detail.blockedReason || ""}
         lang={lang}
       />
+      {props.knowledgeBadge !== undefined ? (
+        <NodeKnowledgeCollectionSection
+          badge={props.knowledgeBadge}
+          offers={props.knowledgeOffers ?? []}
+          busy={props.busy}
+          onOffer={props.onOffer}
+          lang={lang}
+        />
+      ) : null}
       {/* When the primary action itself is blocked, secondary run commands
           (retry/rebind) are noise that buries the blocker reason — hide them
           until the primary becomes actionable (GitHub Actions shows one

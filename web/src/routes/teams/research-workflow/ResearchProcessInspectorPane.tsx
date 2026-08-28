@@ -11,6 +11,7 @@ import type {
   EffectiveAgentBinding,
   WorkflowCanvasProjection,
 } from "../../../api/types/researchWorkflow";
+import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
 import { VButton, VStateSurface, VSurface } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import {
@@ -31,6 +32,13 @@ import {
   hypothesisFirstSemanticNodeId,
   isHypothesisFirstCanvasNode,
 } from "./hypothesisFirstCanvasRegion";
+import {
+  definitionNeedsSideflowRegion,
+  isKnowledgeSideflowCanvasNode,
+  knowledgeSideflowSemanticNodeId,
+  sideflowNodeStatesFromBadges,
+} from "./knowledgeSideflowCanvasRegion";
+import { NodeKnowledgeCollectionSection } from "./NodeKnowledgeCollectionSection";
 import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
@@ -83,6 +91,11 @@ export function ResearchProcessInspectorPane(props: {
     nodeDetail: NodeDetailState;
     insights: ResearchWorkflowInsights;
     busy: boolean;
+    /** Snapshot invocationBadges (absent on legacy snapshots). */
+    invocationBadges?: Record<string, KnowledgeInvocationBadge> | null;
+    /** Snapshot-level command offers (knowledge commands live here, not in
+     * per-node detail offers). */
+    snapshotOffers?: CommandOffer[];
   };
   actions: {
     replaceParams: ReplaceParams;
@@ -164,6 +177,13 @@ export function ResearchProcessInspectorPane(props: {
       )
     ),
   );
+  // Only definitions without an in-graph knowledge chain (main 3.0.0) expose
+  // the sideflow section; legacy 17-node runs keep their knowledge_handoff node.
+  const sideflowRegionEnabled = state.projection
+    ? definitionNeedsSideflowRegion(
+        state.projection.definition as { nodes: Array<{ nodeId: string }> },
+      )
+    : false;
 
   if (scope.panel === "progress") {
     // R4.3: the anomaly inbox sits directly below the batch console so the
@@ -311,6 +331,27 @@ export function ResearchProcessInspectorPane(props: {
       />
     );
   }
+  // Knowledge-sideflow cards: the run-level latest invocation drives the same
+  // aggregate the canvas region used, so inspector and canvas never disagree.
+  if (scope.selectedNodeId && isKnowledgeSideflowCanvasNode(scope.selectedNodeId)) {
+    const states = sideflowNodeStatesFromBadges(state.invocationBadges);
+    const semanticId = knowledgeSideflowSemanticNodeId(scope.selectedNodeId);
+    const nodeState = states.find((item) => item.sideflowNodeId === semanticId) ?? null;
+    const parentBadge = nodeState?.latest?.invocationId
+      ? Object.values(state.invocationBadges ?? {}).find(
+          (badge) => badge.latest?.invocationId === nodeState.latest?.invocationId,
+        ) ?? null
+      : null;
+    return (
+      <NodeKnowledgeCollectionSection
+        badge={parentBadge}
+        offers={state.snapshotOffers ?? []}
+        busy={state.busy}
+        onOffer={actions.submitOffer}
+        lang={lang}
+      />
+    );
+  }
   // Hypothesis-first region cards: summary + deep link, in definition and run views alike.
   if (scope.selectedNodeId && isHypothesisFirstCanvasNode(scope.selectedNodeId)) {
     return (
@@ -403,6 +444,14 @@ export function ResearchProcessInspectorPane(props: {
       onRecoverCollection={onRecoverCollection}
       collectionRecoveryBusy={collectionRecoveryBusy}
       collectionRecoveryError={collectionRecoveryError}
+      knowledgeBadge={
+        sideflowRegionEnabled
+          ? (scope.selectedNodeId
+              ? (state.invocationBadges?.[scope.selectedNodeId] ?? null)
+              : undefined)
+          : undefined
+      }
+      knowledgeOffers={sideflowRegionEnabled ? (state.snapshotOffers ?? []) : undefined}
     />
   );
 }

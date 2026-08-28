@@ -56,6 +56,12 @@ const productSharedParentStyleConsumers = [
   "routes/companions/CompanionPortrait.tsx",
   "routes/teams/workflowTone.ts",
   "routes/TeamsRoute.tsx",
+  // Companions surface subcomponents share the owning route's style modules
+  // (companions.styles / CompanionChatRails.styles) instead of owning one.
+  "routes/CompanionsRoute.tsx",
+  "routes/companions/CompanionLifeRail.tsx",
+  "routes/companions/CompanionPersonRail.tsx",
+  "routes/companions/CompanionPortrait.tsx",
 ] as const;
 const isolatedDesignReferenceArtifacts = new Set([
   "design/challenge-cup-platform-home-preview-tooltips.tsx",

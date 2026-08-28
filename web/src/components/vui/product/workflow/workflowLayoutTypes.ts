@@ -10,6 +10,7 @@ export type {
   WorkflowCanvasEdgeInput,
   WorkflowCanvasStageInput,
   WorkflowCanvasRunMeta,
+  WorkflowKnowledgeBadgeInput,
   WorkflowNodeRunStatus,
   WorkflowNodeVisualKind,
   WorkflowEdgeSemanticKind,
