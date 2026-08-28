@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # v5 was first deployed with a checksum that is already present in user
 # ledgers.  It is accepted only together with an independent schema-shape
@@ -497,6 +497,59 @@ MIGRATIONS: tuple[Migration, ...] = (
         version=6,
         statements=(
             "ALTER TABLE workflow_runs ADD COLUMN structure_hash TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
+    # Additive: knowledge_invocations records one knowledge-collection request
+    # of a parent run and the knowledge_sideflow child run serving it.
+    # Call idempotency is the (parent_run_id, parent_node_id, request_hash)
+    # unique key; knowledge reuse matches on the full envelope fingerprint
+    # tuple among completed invocations that still own their package.
+    # ``handoff_state`` deliberately does NOT reuse the historical
+    # handoff-status spelling (a dead branch key in hypothesis_first_state_v2).
+    Migration(
+        version=7,
+        statements=(
+            """
+            CREATE TABLE knowledge_invocations (
+              invocation_id TEXT PRIMARY KEY,
+              parent_run_id TEXT NOT NULL,
+              parent_node_id TEXT NOT NULL,
+              parent_node_run_id TEXT NOT NULL,
+              parent_attempt INTEGER NOT NULL CHECK (parent_attempt >= 1),
+              question_id TEXT NOT NULL,
+              scope_hash TEXT NOT NULL,
+              request_hash TEXT NOT NULL,
+              search_envelope_hash TEXT NOT NULL,
+              requirements_hash TEXT NOT NULL,
+              source_policy_version TEXT NOT NULL,
+              knowledge_child_run_id TEXT,
+              status TEXT NOT NULL CHECK (status IN (
+                'pending','child_created','running','awaiting_handoff',
+                'completed','failed','cancelled'
+              )),
+              knowledge_package_ref TEXT,
+              package_content_hash TEXT,
+              handoff_state TEXT NOT NULL DEFAULT 'pending' CHECK (handoff_state IN (
+                'pending','accepted','rejected','superseded'
+              )),
+              error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+              created_at_ms INTEGER NOT NULL CHECK (created_at_ms > 0),
+              updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0),
+              UNIQUE (parent_run_id, parent_node_id, request_hash),
+              FOREIGN KEY (parent_run_id) REFERENCES workflow_runs(run_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE INDEX idx_knowledge_invocations_reuse
+            ON knowledge_invocations(
+              scope_hash, search_envelope_hash, requirements_hash,
+              source_policy_version, status, updated_at_ms DESC, invocation_id DESC
+            )
+            """,
+            """
+            CREATE INDEX idx_knowledge_invocations_parent
+            ON knowledge_invocations(parent_run_id, created_at_ms, invocation_id)
+            """,
         ),
     ),
 )

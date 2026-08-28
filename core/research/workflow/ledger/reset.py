@@ -43,6 +43,7 @@ _DELETE_TABLES = (
     "handoffs",
     "node_attempts",
     "workflow_commands",
+    "knowledge_invocations",
     "workflow_runs",
     "catalog_run_authorizations",
 )
@@ -106,7 +107,21 @@ def _snapshot(connection: Any, team_id: str) -> dict[str, list[dict[str, Any]]]:
     handoff_ids = [str(row["handoff_id"]) for row in handoffs]
     handoff_in, handoff_params = _in_clause(handoff_ids)
 
+    invocation_in, invocation_params = _in_clause(run_ids)
+    invocations = _rows(
+        connection,
+        "knowledge_invocations",
+        (
+            "SELECT * FROM knowledge_invocations "
+            f"WHERE parent_run_id IN {invocation_in} "
+            f"OR knowledge_child_run_id IN {invocation_in} "
+            "ORDER BY invocation_id"
+        ),
+        invocation_params + invocation_params,
+    )
+
     return {
+        "knowledge_invocations": invocations,
         "catalog_run_authorizations": _rows(
             connection,
             "catalog_run_authorizations",
@@ -208,6 +223,7 @@ def _delete_snapshot(connection: Any, rows: Mapping[str, list[dict[str, Any]]]) 
             "human_tasks": ("task_id",),
             "recovery_records": ("recovery_id",),
             "projection_cursors": ("projection_name", "run_id"),
+            "knowledge_invocations": ("invocation_id",),
         }[table]
         if any(key not in columns for key in primary):
             raise WorkflowLedgerResetError(f"ledger table {table} schema is unsupported")

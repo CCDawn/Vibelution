@@ -107,6 +107,39 @@ class OutboxRecord:
 
 
 @dataclass(frozen=True)
+class KnowledgeInvocationRecord:
+    """One knowledge-collection invocation of a parent workflow run.
+
+    ``request_hash`` carries call idempotency: the same
+    (parentRunId, parentNodeId, requestHash) triple always replays the same
+    invocation row instead of creating a second child run.  Knowledge reuse
+    is a separate decision keyed on
+    (scopeHash, searchEnvelopeHash, requirementsHash, sourcePolicyVersion)
+    among completed invocations whose package is still consumable.
+    """
+
+    invocation_id: str
+    parent_run_id: str
+    parent_node_id: str
+    parent_node_run_id: str
+    parent_attempt: int
+    question_id: str
+    scope_hash: str
+    request_hash: str
+    search_envelope_hash: str
+    requirements_hash: str
+    source_policy_version: str
+    knowledge_child_run_id: str | None
+    status: str
+    knowledge_package_ref: str | None
+    package_content_hash: str | None
+    handoff_state: str
+    error_json: str | None
+    created_at_ms: int
+    updated_at_ms: int
+
+
+@dataclass(frozen=True)
 class CatalogRunAuthorization:
     """Immutable approval evidence for a real catalog batch.
 

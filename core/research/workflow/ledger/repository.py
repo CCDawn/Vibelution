@@ -27,6 +27,60 @@ from .records import (
 # only covers errors raised inside the worker loop.
 MAX_OUTBOX_LEASE_ATTEMPTS = 12
 
+# Sentinel for "leave this nullable column unchanged" in partial updates.
+_UNSET = object()
+
+_KNOWLEDGE_INVOCATION_COLUMNS = (
+    "invocation_id",
+    "parent_run_id",
+    "parent_node_id",
+    "parent_node_run_id",
+    "parent_attempt",
+    "question_id",
+    "scope_hash",
+    "request_hash",
+    "search_envelope_hash",
+    "requirements_hash",
+    "source_policy_version",
+    "knowledge_child_run_id",
+    "status",
+    "knowledge_package_ref",
+    "package_content_hash",
+    "handoff_state",
+    "error_json",
+    "created_at_ms",
+    "updated_at_ms",
+)
+
+
+def _row_knowledge_invocation(row: Any) -> Any | None:
+    if row is None:
+        return None
+    from .records import KnowledgeInvocationRecord
+
+    data = dict(zip(_KNOWLEDGE_INVOCATION_COLUMNS, row, strict=True))
+    return KnowledgeInvocationRecord(
+        invocation_id=str(data["invocation_id"]),
+        parent_run_id=str(data["parent_run_id"]),
+        parent_node_id=str(data["parent_node_id"]),
+        parent_node_run_id=str(data["parent_node_run_id"]),
+        parent_attempt=int(data["parent_attempt"]),
+        question_id=str(data["question_id"]),
+        scope_hash=str(data["scope_hash"]),
+        request_hash=str(data["request_hash"]),
+        search_envelope_hash=str(data["search_envelope_hash"]),
+        requirements_hash=str(data["requirements_hash"]),
+        source_policy_version=str(data["source_policy_version"]),
+        knowledge_child_run_id=data["knowledge_child_run_id"],
+        status=str(data["status"]),
+        knowledge_package_ref=data["knowledge_package_ref"],
+        package_content_hash=data["package_content_hash"],
+        handoff_state=str(data["handoff_state"]),
+        error_json=data["error_json"],
+        created_at_ms=int(data["created_at_ms"]),
+        updated_at_ms=int(data["updated_at_ms"]),
+    )
+
 
 def _row_run(row: Any) -> RunRecord | None:
     if row is None:
@@ -1511,7 +1565,170 @@ class WorkflowLedgerRepository:
         ).fetchall()
         return [str(row[0]) for row in rows]
 
+
+    # ------------------------------------------------- knowledge_invocations
+
+    def insert_knowledge_invocation(self, invocation: Any) -> None:
+        columns = ",".join(_KNOWLEDGE_INVOCATION_COLUMNS)
+        placeholders = ",".join("?" for _ in _KNOWLEDGE_INVOCATION_COLUMNS)
+        self.execute(
+            f"INSERT INTO knowledge_invocations ({columns}) VALUES ({placeholders})",
+            (
+                invocation.invocation_id,
+                invocation.parent_run_id,
+                invocation.parent_node_id,
+                invocation.parent_node_run_id,
+                invocation.parent_attempt,
+                invocation.question_id,
+                invocation.scope_hash,
+                invocation.request_hash,
+                invocation.search_envelope_hash,
+                invocation.requirements_hash,
+                invocation.source_policy_version,
+                invocation.knowledge_child_run_id,
+                invocation.status,
+                invocation.knowledge_package_ref,
+                invocation.package_content_hash,
+                invocation.handoff_state,
+                invocation.error_json,
+                invocation.created_at_ms,
+                invocation.updated_at_ms,
+            ),
+        )
+
+    def get_knowledge_invocation(self, invocation_id: str) -> Any | None:
+        row = self.execute(
+            "SELECT * FROM knowledge_invocations WHERE invocation_id = ?",
+            (invocation_id,),
+        ).fetchone()
+        return _row_knowledge_invocation(row)
+
+    def find_knowledge_invocation_by_request(
+        self, parent_run_id: str, parent_node_id: str, request_hash: str
+    ) -> Any | None:
+        row = self.execute(
+            """
+            SELECT * FROM knowledge_invocations
+            WHERE parent_run_id = ? AND parent_node_id = ? AND request_hash = ?
+            """,
+            (parent_run_id, parent_node_id, request_hash),
+        ).fetchone()
+        return _row_knowledge_invocation(row)
+
+    def find_knowledge_invocation_by_child_run(self, child_run_id: str) -> Any | None:
+        row = self.execute(
+            """
+            SELECT * FROM knowledge_invocations
+            WHERE knowledge_child_run_id = ?
+            ORDER BY created_at_ms DESC, invocation_id DESC
+            LIMIT 1
+            """,
+            (child_run_id,),
+        ).fetchone()
+        return _row_knowledge_invocation(row)
+
+    def find_reusable_knowledge_invocation(
+        self,
+        *,
+        scope_hash: str,
+        search_envelope_hash: str,
+        requirements_hash: str,
+        source_policy_version: str,
+    ) -> Any | None:
+        """Latest completed invocation whose package is still consumable.
+
+        Reuse requires the full envelope fingerprint tuple to match AND the
+        source invocation to be ``completed`` with an accepted, non-revoked
+        package reference.  failed/cancelled invocations never satisfy reuse.
+        """
+        row = self.execute(
+            """
+            SELECT * FROM knowledge_invocations
+            WHERE scope_hash = ?
+              AND search_envelope_hash = ?
+              AND requirements_hash = ?
+              AND source_policy_version = ?
+              AND status = 'completed'
+              AND handoff_state = 'accepted'
+              AND knowledge_package_ref IS NOT NULL
+              AND knowledge_package_ref != ''
+              AND package_content_hash IS NOT NULL
+              AND package_content_hash != ''
+            ORDER BY updated_at_ms DESC, invocation_id DESC
+            LIMIT 1
+            """,
+            (
+                scope_hash,
+                search_envelope_hash,
+                requirements_hash,
+                source_policy_version,
+            ),
+        ).fetchone()
+        return _row_knowledge_invocation(row)
+
+    def list_knowledge_invocations_for_parent(self, parent_run_id: str) -> list[Any]:
+        rows = self.execute(
+            """
+            SELECT * FROM knowledge_invocations
+            WHERE parent_run_id = ?
+            ORDER BY created_at_ms ASC, invocation_id ASC
+            """,
+            (parent_run_id,),
+        ).fetchall()
+        records = [_row_knowledge_invocation(row) for row in rows]
+        return [record for record in records if record is not None]
+
+    def update_knowledge_invocation(
+        self,
+        invocation_id: str,
+        now_ms: int,
+        *,
+        status: str | None = None,
+        knowledge_child_run_id: Any = _UNSET,
+        knowledge_package_ref: Any = _UNSET,
+        package_content_hash: Any = _UNSET,
+        handoff_state: str | None = None,
+        error_json: Any = _UNSET,
+    ) -> bool:
+        """Guarded partial update; ``_UNSET`` leaves a nullable column alone."""
+        assignments: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            assignments.append("status = ?")
+            params.append(status)
+        if knowledge_child_run_id is not _UNSET:
+            assignments.append("knowledge_child_run_id = ?")
+            params.append(knowledge_child_run_id)
+        if knowledge_package_ref is not _UNSET:
+            assignments.append("knowledge_package_ref = ?")
+            params.append(knowledge_package_ref)
+        if package_content_hash is not _UNSET:
+            assignments.append("package_content_hash = ?")
+            params.append(package_content_hash)
+        if handoff_state is not None:
+            assignments.append("handoff_state = ?")
+            params.append(handoff_state)
+        if error_json is not _UNSET:
+            assignments.append("error_json = ?")
+            params.append(error_json)
+        if not assignments:
+            return False
+        assignments.append("updated_at_ms = ?")
+        params.append(now_ms)
+        params.append(invocation_id)
+        cursor = self.execute(
+            "UPDATE knowledge_invocations SET "
+            + ", ".join(assignments)
+            + " WHERE invocation_id = ?",
+            tuple(params),
+        )
+        rowcount = getattr(cursor, "rowcount", None)
+        if rowcount in (None, -1):
+            rowcount = 0
+        return int(rowcount or 0) > 0
+
     # ------------------------------------------------- transition guards
+
 
     def _require_run_transition(self, run_id: str, target_status: str) -> None:
         """Enforce the frozen run transition graph (P1-5b); SQL never accepts
