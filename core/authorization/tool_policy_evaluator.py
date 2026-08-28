@@ -34,6 +34,13 @@ _NETWORK_ALIASES = {"inherit": "restricted", "controlled": "restricted", "restri
 _MUTATION_ALIASES = {"inherit": "controlled", "restricted": "controlled", "controlled": "controlled"}
 _APPROVAL_RANK = {"never": 0, "on_request": 1, "always": 2}
 
+# 交付类写回工具（source_collection_stage_writeback_tool）是任务自身产物在
+# workspace 内部落盘，不产生 workspace 之外的副作用；且写回参数由模型每回合
+# 现生成，按精确参数哈希的预授权永远无法命中。因此在聚合处不为其产生审批
+# 需求；安全边界仍由 registry 可见性、policy/grant 的可执行判定和回合额度
+# 豁免白名单（DELIVERY_EXEMPT_TOOL_NAMES）共同约束，只限该精确工具名。
+APPROVAL_EXEMPT_TOOL_NAMES = frozenset({"source_collection_stage_writeback_tool"})
+
 
 class ToolDescriptorLike(Protocol):
     name: str
@@ -194,13 +201,14 @@ def evaluate_tool_policy(
             denied[name] = visibility_reason
             continue
         visible.append(name)
-        approval_requirements.append(
-            (
-                name,
-                policy.approval_override_for(name) or str(descriptor.approval or "never"),
-                str(descriptor.risk or "read"),
+        if name not in APPROVAL_EXEMPT_TOOL_NAMES:
+            approval_requirements.append(
+                (
+                    name,
+                    policy.approval_override_for(name) or str(descriptor.approval or "never"),
+                    str(descriptor.risk or "read"),
+                )
             )
-        )
         execution_reason = _execution_deny_reason(descriptor, policy=policy, grant=grant)
         if execution_reason is not None:
             denied[name] = execution_reason

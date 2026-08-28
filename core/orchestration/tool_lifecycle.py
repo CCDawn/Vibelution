@@ -626,6 +626,7 @@ class ToolLifecycleBridge:
         budget_stop_message = (
             "当前回合工具调用额度已用尽，本轮停止。"
             "下一用户消息将重新统计额度；不要继续调用工具或额外探查。"
+            "若本回合已有可交付的阶段结果，请立即调用写回/交付工具落盘现有结果后结束，不要再发起探查类调用。"
         )
         remaining_batches = self._partition_tool_calls(calls)
         for batch_index, batch in enumerate(remaining_batches):

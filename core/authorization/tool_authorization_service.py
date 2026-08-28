@@ -17,6 +17,12 @@ from .tool_policy_models import AuthorizationDecision, TurnToolGrant
 MAX_TERMINAL_WAITS_PER_SESSION = 8
 MAX_TERMINAL_WAITS_PER_TURN = 16
 
+# 交付类工具豁免回合调用额度：研究链路等 stage 会话在额度耗尽后仍必须能把已有
+# 成果写回落盘，否则整个回合的检索成果零交付。只豁免白名单命中或以
+# `_writeback_tool` 结尾的同类交付工具，不泛化到一般写工具。
+DELIVERY_EXEMPT_TOOL_NAMES = {"source_collection_stage_writeback_tool"}
+_DELIVERY_EXEMPT_TOOL_SUFFIX = "_writeback_tool"
+
 
 def _as_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
@@ -46,6 +52,11 @@ def _coerce_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _is_delivery_exempt_tool(tool_name: Any) -> bool:
+    normalized = _coerce_text(tool_name).strip()
+    return normalized in DELIVERY_EXEMPT_TOOL_NAMES or normalized.endswith(_DELIVERY_EXEMPT_TOOL_SUFFIX)
 
 
 def _coerce_str_list(value: Any) -> list[str]:
@@ -448,9 +459,13 @@ def authorize_tool_execution(
                 decision_fingerprint=context.decision_fingerprint,
             )
             return terminal_wait_result
-        if context.max_calls_per_turn > 0 and context.call_count >= context.max_calls_per_turn:
+        if _is_delivery_exempt_tool(normalized_tool):
+            # 交付类工具不占回合额度、也不被额度拒绝：额度耗尽时仍必须放行成果落盘。
+            pass
+        elif context.max_calls_per_turn > 0 and context.call_count >= context.max_calls_per_turn:
             return _execution_denial("call_budget_exhausted", "当前回合工具调用额度已用尽。", runtime_agent_id, runtime_turn_id, context)
-        context.call_count += 1
+        else:
+            context.call_count += 1
     approval_requirement = next(
         (
             (approval, risk)

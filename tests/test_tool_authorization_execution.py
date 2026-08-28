@@ -249,6 +249,54 @@ def test_empty_terminal_wait_does_not_consume_general_call_budget(monkeypatch):
     assert blocked.code == "call_budget_exhausted"
 
 
+def test_delivery_writeback_tool_is_authorized_when_call_budget_exhausted(monkeypatch):
+    """额度耗尽后交付类写回工具仍须放行且不占额度：否则整回合成果零交付。"""
+
+    _runtime(
+        monkeypatch,
+        allowed_tools=("grep_search_tool", "source_collection_stage_writeback_tool", "research_stage_writeback_tool"),
+        max_calls_per_turn=32,
+    )
+    _install(tools=("grep_search_tool", "source_collection_stage_writeback_tool", "research_stage_writeback_tool"))
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    context.max_calls_per_turn = 32
+    context.call_count = 32
+
+    writeback = tool_authorization_service.authorize_tool_execution(
+        tool_name="source_collection_stage_writeback_tool",
+        tool_call_id="call-writeback",
+    )
+    suffix_tool = tool_authorization_service.authorize_tool_execution(
+        tool_name="research_stage_writeback_tool",
+        tool_call_id="call-suffix-writeback",
+    )
+
+    assert writeback.allowed is True
+    assert writeback.code == "allowed"
+    assert suffix_tool.allowed is True
+    assert context.call_count == 32
+
+
+def test_regular_research_tool_still_blocked_when_call_budget_exhausted(monkeypatch):
+    """额度耗尽后普通探查工具仍被额度闸拒绝（保持原行为）。"""
+
+    _runtime(monkeypatch, max_calls_per_turn=1)
+    _install()
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    context.max_calls_per_turn = 1
+    context.call_count = 1
+
+    blocked = tool_authorization_service.authorize_tool_execution(
+        tool_name="allowed_tool",
+        tool_call_id="call-over-budget",
+    )
+
+    assert blocked.allowed is False
+    assert blocked.code == "call_budget_exhausted"
+
+
 def test_empty_terminal_wait_has_a_bounded_per_session_limit(monkeypatch):
     _runtime(monkeypatch, allowed_tools=("write_stdin",), max_calls_per_turn=1)
     _install(tools=("write_stdin",))

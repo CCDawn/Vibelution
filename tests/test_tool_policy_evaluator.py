@@ -213,6 +213,50 @@ def test_always_approval_tool_remains_requestable_in_on_request_mode():
     )
 
 
+def test_stage_writeback_tool_is_exempt_from_approval_requirements():
+    """交付类写回工具属任务自身产物落盘，不产生审批需求；普通工具不受影响。"""
+
+    descriptors = (
+        tool_catalog.build_tool_descriptor("grep_search_tool", args_schema={"type": "object"}),
+        tool_catalog.build_tool_descriptor(
+            "source_collection_stage_writeback_tool",
+            args_schema={"type": "object"},
+            source="generated",
+        ),
+    )
+    policy = normalize_legacy_tool_policy(
+        {
+            "policyId": "policy-writeback",
+            "allowedTools": ["grep_search_tool", "source_collection_stage_writeback_tool"],
+            "preferredTools": [],
+            "networkAccess": "restricted",
+            "mutationAccess": "workspace",
+        },
+        registered_tool_names=[descriptor.name for descriptor in descriptors],
+    )
+    grant = TurnToolGrant(
+        turn_id="turn-writeback",
+        source="research",
+        allowed_capabilities=tuple(sorted({capability for descriptor in descriptors for capability in descriptor.capabilities})),
+        denied_tools=(),
+        approval_mode="on_request",
+    )
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-1",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-writeback",
+        generated_at="2026-08-28T00:00:00Z",
+    )
+
+    assert decision.visible_tools == ("grep_search_tool", "source_collection_stage_writeback_tool")
+    assert decision.executable_tools == ("grep_search_tool", "source_collection_stage_writeback_tool")
+    assert [name for name, _approval, _risk in decision.approval_requirements] == ["grep_search_tool"]
+
+
 def test_decision_and_cache_key_are_deterministic():
     policy = _policy(
         {
