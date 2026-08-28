@@ -37,6 +37,33 @@ export type MainLineSubmitResult = MainLineLifecycleResult & {
   joined?: boolean;
 };
 
+export const CLOSE_BACKOFF_BASE_MS = 2_000;
+export const CLOSE_BACKOFF_MAX_MS = 60_000;
+
+export const CLOSE_BACKOFF_COALESCED_CODE = "close_backoff_coalesced";
+
+export type CloseBackoffCoalescedInfo = {
+  operation: MainLineLifecycleOperation;
+  /** Consecutive close executions observed before this coalesced request. */
+  runs: number;
+  /** The backoff window that absorbed this request, in milliseconds. */
+  backoffMs: number;
+  /** Milliseconds elapsed since the previous close settled. */
+  ageMs: number;
+};
+
+/**
+ * Exponential backoff window after the n-th consecutive close execution:
+ * 2s, 4s, 8s, ... capped at CLOSE_BACKOFF_MAX_MS. During the window new close
+ * requests are coalesced into the previous close's result instead of re-running
+ * the retire sequence, which is what turned a web-side close retry loop into a
+ * 1.5s-per-command, 40-minute storm on 2026-08-28.
+ */
+export function closeBackoffWindowMs(runs: number): number {
+  const exponent = Math.max(0, Math.trunc(runs) - 1);
+  return Math.min(CLOSE_BACKOFF_BASE_MS * 2 ** exponent, CLOSE_BACKOFF_MAX_MS);
+}
+
 export type MainLineIntentSnapshot = {
   schemaVersion: 1;
   desiredState: "open" | "closed";
@@ -124,6 +151,7 @@ export function createMainLineCommandQueue(options: {
   now?: () => number;
   persistIntent?: (intent: MainLineIntentSnapshot) => void | Promise<void>;
   writeOwnerMarker?: () => void | Promise<void>;
+  onCloseBackoffCoalesced?: (info: CloseBackoffCoalescedInfo) => void;
 } = {}): MainLineCommandQueue {
   type Slot = MainLineQueuedCommand & {
     execute: MainLineSubmitInput["execute"];
@@ -136,6 +164,15 @@ export function createMainLineCommandQueue(options: {
   let active: Slot | null = null;
   const pending: Slot[] = [];
   let draining = false;
+  let lastClose: {
+    settledAtMs: number;
+    runs: number;
+    result: MainLineLifecycleResult;
+  } | null = null;
+  // The slot whose settlement produced lastClose. It stays addressable through
+  // the queue's active/pending structures until its drain finally clears it, so
+  // the join branch can tell a live in-flight close from the just-settled one.
+  let settledCloseSlot: Slot | null = null;
 
   const persist = (command: MainLineQueuedCommand): void => {
     const snapshot: MainLineIntentSnapshot = {
@@ -164,6 +201,25 @@ export function createMainLineCommandQueue(options: {
     return pending.find((item) => isJoinable(item, type, noBrowser)) ?? null;
   };
 
+  // Close-domain retry accounting. A close that settles — successfully,
+  // rejected, or failed — starts (or extends) a backoff chain so retry loops
+  // cannot re-run the retire sequence at wire speed. Any open/restart or an
+  // explicit force_close settlement breaks the chain: the next close is then a
+  // fresh intent and must execute immediately.
+  const noteCloseSettlement = (slot: Slot, result: MainLineLifecycleResult): void => {
+    if (slot.type === "close") {
+      lastClose = {
+        settledAtMs: now(),
+        runs: (lastClose?.runs ?? 0) + 1,
+        result: { ...result }
+      };
+      settledCloseSlot = slot;
+      return;
+    }
+    lastClose = null;
+    settledCloseSlot = null;
+  };
+
   const drain = (): void => {
     if (draining || active !== null) {
       return;
@@ -177,9 +233,17 @@ export function createMainLineCommandQueue(options: {
     persist(next);
     void next.execute(next).then(
       (result) => {
+        noteCloseSettlement(next, result);
         next.resolve(result);
       },
       (error: unknown) => {
+        noteCloseSettlement(next, {
+          schemaVersion: 1,
+          accepted: false,
+          operation: next.operation,
+          code: "execute_failed",
+          message: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300)
+        });
         next.reject(error instanceof Error ? error : new Error(String(error)));
       },
     ).finally(() => {
@@ -205,7 +269,14 @@ export function createMainLineCommandQueue(options: {
       }
 
       const joined = findJoinable(mapped, noBrowser);
-      if (joined) {
+      // A close that only "joins" the just-settled close slot (its drain
+      // finally has not run yet) is actually a retry backoff case and is
+      // handled by the coalescing branch below; a genuinely in-flight close
+      // still joins normally.
+      const joinedSettledClose = (mapped === "close" || mapped === "force_close")
+        && joined !== null
+        && joined === settledCloseSlot;
+      if (joined && !joinedSettledClose) {
         return joined.result.then((result) => ({
           ...result,
           joined: true,
@@ -218,6 +289,39 @@ export function createMainLineCommandQueue(options: {
         if (item && supersedesPending(mapped, item.type)) {
           pending.splice(index, 1);
           item.resolve(supersededResult(item.operation));
+        }
+      }
+
+      // Close-domain backoff coalescing: when the queue is idle (or only the
+      // just-settled close slot is still draining) and a close settled moments
+      // ago, absorb the re-request into the previous close's result instead of
+      // executing it again. Explicit force-close requests and supersede-
+      // carrying closes (handled above) never hit this path.
+      if (
+        mapped === "close"
+        && lastClose !== null
+        && (!active || active.type === "close")
+        && pending.length === 0
+      ) {
+        const backoffMs = closeBackoffWindowMs(lastClose.runs);
+        const ageMs = now() - lastClose.settledAtMs;
+        if (ageMs < backoffMs) {
+          try {
+            options.onCloseBackoffCoalesced?.({
+              operation: input.operation,
+              runs: lastClose.runs,
+              backoffMs,
+              ageMs
+            });
+          } catch {
+            // Observability must not change queue semantics.
+          }
+          return Promise.resolve({
+            ...lastClose.result,
+            joined: true,
+            code: CLOSE_BACKOFF_COALESCED_CODE,
+            message: `Close re-request coalesced into the previous close result; close retry backoff window is ${Math.round(backoffMs / 1000)}s.`
+          });
         }
       }
 
