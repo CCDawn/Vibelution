@@ -73,7 +73,7 @@ export function AppShellStatusGuidePanel({
 }: AppShellStatusGuidePanelProps) {
   const detailsById: Record<AppShellStatusSummaryCard["id"], Omit<StatusGuideCard, keyof AppShellStatusSummaryCard>> = {
     frontend: {
-      note: `${t("systemFrontendHint")} · ${t("frontendBuild")} ${buildId}`,
+      note: t("systemFrontendHint"),
       states: [
         {
           label: t("systemFrontend_connected"),
@@ -167,24 +167,14 @@ export function AppShellStatusGuidePanel({
       || codeFreshness.verdict === "frontend_behind"
       || codeFreshness.verdict === "backend_and_frontend_behind"
     ) {
-      const runningHead = codeFreshnessShortHead(codeFreshness.backend.running?.head);
-      const diskHead = codeFreshnessShortHead(codeFreshness.backend.disk?.head);
       const behindCount = codeFreshness.backend.behindCount;
       const behindText = behindCount != null
         ? `${behindCount} ${t("codeFreshnessBehindSuffix")}`
         : "";
-      const versionLine = [
-        runningHead !== "-" && diskHead !== "-"
-          ? `${t("codeFreshnessRunningAt")} @${runningHead} · ${t("codeFreshnessDiskAt")} @${diskHead}${behindText ? ` · ${behindText}` : ""}`
-          : "",
-        codeFreshness.frontend.stale
-          ? `frontend @${codeFreshness.frontend.builtFromCommit || "-"}`
-          : "",
-      ].filter(Boolean).join(" · ");
       return {
         tone: "warning" as VStatusTone,
         label: t("codeFreshnessBehind"),
-        note: [t("codeFreshnessRestartHint"), versionLine].filter(Boolean).join(" "),
+        note: [t("codeFreshnessRestartHint"), behindText].filter(Boolean).join(" "),
       };
     }
     return { tone: "neutral" as VStatusTone, label: t("codeFreshnessUnknown"), note: t("codeFreshnessHint") };
@@ -204,7 +194,7 @@ export function AppShellStatusGuidePanel({
         headingLevel={3}
         className={styles.statusGuideHeader}
         title={t("systemStatusGuide")}
-        tooltip={t("systemStatusGuideHint")}
+        tooltip={`${t("systemStatusGuideHint")} · ${t("frontendBuild")} ${buildId}`}
         tooltipLabel={t("systemStatusGuide")}
       />
       <div className={styles.statusGuideGrid}>
@@ -321,15 +311,9 @@ export function AppShellStatusGuidePanel({
           <div className={styles.codeFreshnessMeta}>
             <span className={styles.codeFreshnessCommit}>
               {t("codeFreshnessRunningAt")} @{codeFreshnessShortHead(codeFreshness.backend.running.head)}
-            </span>
-            <span className={styles.codeFreshnessCommit}>
+              {" · "}
               {t("codeFreshnessDiskAt")} @{codeFreshnessShortHead(codeFreshness.backend.disk?.head)}
             </span>
-            {codeFreshness.frontend.builtFromCommit ? (
-              <span className={styles.codeFreshnessCommit}>
-                frontend @{codeFreshness.frontend.builtFromCommit}
-              </span>
-            ) : null}
           </div>
         ) : null}
       </VSurface>

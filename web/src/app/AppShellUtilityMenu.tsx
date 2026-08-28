@@ -74,6 +74,25 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   const gitTitle = gitAvailable
     ? `${t("gitStatus")}: ${gitStatus?.summary ?? ""}`
     : gitStatus?.error || t("gitUnavailable");
+  // The chip text already carries the state; only surface an extra hint when
+  // Git is unavailable or the working tree needs attention.
+  const gitTooltip = !gitAvailable
+    ? gitStatus?.error || t("gitUnavailable")
+    : gitAttention
+      ? gitStatus?.summary || ""
+      : "";
+  const gitRow = (
+    <VRouteLinkButton
+      to="/git"
+      className={styles.gitSummaryRow}
+      onClick={onClose}
+      aria-label={gitTitle}
+    >
+      <GitBranch size={12} aria-hidden="true" />
+      <VStatusChip tone={gitToneToStatus(gitTone)}>{gitHeroLabel}</VStatusChip>
+      <span className={styles.gitSummaryBranch}>{gitBranch}</span>
+    </VRouteLinkButton>
+  );
 
   return (
     <div
@@ -123,18 +142,13 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           {t("navGit")}
         </VRouteLinkButton>
       </div>
-      <VTooltip content={gitTitle} width="wide">
-        <VRouteLinkButton
-          to="/git"
-          className={styles.gitSummaryRow}
-          onClick={onClose}
-          aria-label={gitTitle}
-        >
-          <GitBranch size={12} aria-hidden="true" />
-          <VStatusChip tone={gitToneToStatus(gitTone)}>{gitHeroLabel}</VStatusChip>
-          <span className={styles.gitSummaryBranch}>{gitBranch}</span>
-        </VRouteLinkButton>
-      </VTooltip>
+      {gitTooltip ? (
+        <VTooltip content={gitTooltip} width="wide">
+          {gitRow}
+        </VTooltip>
+      ) : (
+        gitRow
+      )}
     </div>
   );
 }
