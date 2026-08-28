@@ -365,3 +365,208 @@ def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
     assert "stop_observed" in calls
     assert "worker_finished" in calls
     assert "running_cleared" in calls
+
+
+def test_turn_llm_usage_tokens_extracts_provider_usage() -> None:
+    assert worker._turn_llm_usage_tokens(
+        {"llm_usage": {"input_tokens": 80, "output_tokens": 40}}
+    ) == 120
+    assert worker._turn_llm_usage_tokens(
+        {"llm_usage": {"inputTokens": 80, "outputTokens": 40}}
+    ) == 120
+    assert worker._turn_llm_usage_tokens({"llm_usage": {"total_tokens": 70}}) == 70
+    assert worker._turn_llm_usage_tokens({"llm_usage": {"source": "missing"}}) == 0
+    assert worker._turn_llm_usage_tokens({"status": "completed"}) == 0
+    assert worker._turn_llm_usage_tokens(None) == 0
+    # Booleans are not token counts and must not poison the accumulator.
+    assert worker._turn_llm_usage_tokens(
+        {"llm_usage": {"input_tokens": True, "output_tokens": 3}}
+    ) == 3
+
+
+def test_session_turn_token_budget_line_prefers_task_budget_request(monkeypatch) -> None:
+    class _FakeStore:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def get_run(self, run_id: str):
+            assert run_id == "run-1"
+            return {
+                "nodeRuns": [
+                    {
+                        "nodeRunId": "node-run-1",
+                        "budgetLedgerRef": "reservation-node-run-1",
+                    }
+                ],
+                "budgetReservations": [
+                    {
+                        "reservationId": "reservation-node-run-1",
+                        "requested": {"tokens": 123456, "toolCalls": 4},
+                    },
+                ],
+            }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.store.WorkflowRunStore",
+        _FakeStore,
+    )
+
+    assert worker._session_turn_token_budget_line(
+        {
+            "message_metadata": {
+                "workflowRunId": "run-1",
+                "nodeRunId": "node-run-1",
+            }
+        }
+    ) == (123456, "task_budget_request")
+
+
+def test_session_turn_token_budget_line_falls_back_to_session_default(monkeypatch) -> None:
+    assert worker.DEFAULT_SESSION_TOKEN_BUDGET == 2_000_000
+    assert worker._session_turn_token_budget_line({}) == (
+        worker.DEFAULT_SESSION_TOKEN_BUDGET,
+        "session_default",
+    )
+    assert worker._session_turn_token_budget_line(
+        {"message_metadata": {"workflowRunId": "run-1"}}
+    ) == (worker.DEFAULT_SESSION_TOKEN_BUDGET, "session_default")
+
+    class _BrokenStore:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def get_run(self, run_id: str):
+            raise OSError("missing workflow run record")
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.store.WorkflowRunStore",
+        _BrokenStore,
+    )
+    assert worker._session_turn_token_budget_line(
+        {
+            "message_metadata": {
+                "workflowRunId": "run-1",
+                "nodeRunId": "node-run-1",
+            }
+        }
+    ) == (worker.DEFAULT_SESSION_TOKEN_BUDGET, "session_default")
+
+
+def test_continuation_loop_stops_when_token_budget_exhausted(tmp_path, monkeypatch) -> None:
+    """Cumulative usage crossing the fuse line must stop the turn gracefully."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    monkeypatch.setattr(
+        worker, "_session_turn_token_budget_line", lambda _context: (100, "session_default")
+    )
+    lifecycle_events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append((str(phase), dict(kwargs))),
+    )
+    calls: list[int] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        calls.append(1)
+        return {
+            "status": "completed",
+            "summary": "仍在推进，尚未收口。",
+            "raw_output": "仍在推进，尚未收口。",
+            "outcome": "progress",
+            "tool_call_count": 1,
+            "tool_trace": [{"name": "task_update_tool", "status": "done", "summary": "progress"}],
+            "llm_usage": {"input_tokens": 80, "output_tokens": 40},
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+
+    turn_control = session_service._create_session_turn_control("session-token-fuse")
+    try:
+        result = worker._run_session_continuation_loop(
+            object(),
+            context={},
+            session_id="session-token-fuse",
+            turn_control=turn_control,
+            initial_prompt="开始长任务",
+            history_messages=[],
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=5,
+        )
+    finally:
+        session_service._clear_session_turn_control("session-token-fuse", turn_id=turn_control.turn_id)
+
+    assert len(calls) == 1
+    assert isinstance(result, dict)
+    assert result["status"] == "paused_limit"
+    assert result["metadata"]["continuation_pause_reason"] == "token_budget_exhausted"
+    assert result["metadata"]["continuation_limit_reached"] is True
+    fused_events = [
+        fields
+        for phase, kwargs in lifecycle_events
+        if phase == "followup_prompt_blocked"
+        for fields in [kwargs.get("fields") or {}]
+    ]
+    assert any(
+        fields.get("reason") == "token_budget_exhausted"
+        and fields.get("cumulativeSessionTokens") == 120
+        and fields.get("tokenBudgetLine") == 100
+        and fields.get("tokenBudgetSource") == "session_default"
+        for fields in fused_events
+    )
+
+
+def test_continuation_loop_unaffected_below_token_budget(tmp_path, monkeypatch) -> None:
+    """Usage below the default line must not alter the loop's normal flow."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    calls: list[int] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            return {
+                "status": "completed",
+                "summary": "仍在推进，尚未收口。",
+                "raw_output": "仍在推进，尚未收口。",
+                "outcome": "progress",
+                "tool_call_count": 1,
+                "tool_trace": [{"name": "task_update_tool", "status": "done", "summary": "progress"}],
+                "llm_usage": {"input_tokens": 30, "output_tokens": 20},
+            }
+        return {
+            "status": "completed",
+            "summary": "结论：任务已完成。",
+            "raw_output": "结论：任务已完成。",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+            "llm_usage": {"input_tokens": 40, "output_tokens": 10},
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+
+    turn_control = session_service._create_session_turn_control("session-token-under")
+    try:
+        # No budgetRequest metadata in the context: the conservative default
+        # line must apply and stay far above this loop's small usage.
+        result = worker._run_session_continuation_loop(
+            object(),
+            context={},
+            session_id="session-token-under",
+            turn_control=turn_control,
+            initial_prompt="开始任务",
+            history_messages=[],
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=5,
+        )
+    finally:
+        session_service._clear_session_turn_control("session-token-under", turn_id=turn_control.turn_id)
+
+    assert len(calls) == 2
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+    assert result["metadata"].get("continuation_pause_reason") is None
+    assert result["metadata"].get("continuation_limit_reached") is None

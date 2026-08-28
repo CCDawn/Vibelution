@@ -25,6 +25,14 @@ _STRICT_RESEARCH_TASK_KINDS = frozenset(
     {"hypothesis_design", "protocol_review", "result_evaluation"}
 )
 
+# Conservative real-time circuit-breaker line for a session turn when no
+# task-owned budget request is resolvable. It bounds input+output tokens
+# accumulated across the turn's continuation loop: generous enough for normal
+# tasks, far smaller than an unbounded runaway loop. Budget settlement at task
+# terminal state remains the authoritative accounting; this constant only
+# stops live overspend early.
+DEFAULT_SESSION_TOKEN_BUDGET = 2_000_000
+
 
 def _research_task_structured_output_contract(
     context: dict[str, Any],
@@ -1616,6 +1624,90 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             release_proactive_turn_context(context)
         _finish_session_turn_worker(session_id, turn_id, turn_control)
 
+
+def _turn_llm_usage_tokens(result: Any) -> int:
+    """Total input+output tokens reported by one LLM invocation receipt.
+
+    Mirrors ``_normalize_turn_llm_usage`` key tolerance (snake/camel case) and
+    falls back to the receipt's ``total_tokens`` when the split is missing.
+    Non-dict or usage-less results simply contribute zero.
+    """
+
+    if not isinstance(result, dict):
+        return 0
+    usage = result.get("llm_usage") if isinstance(result.get("llm_usage"), dict) else {}
+
+    def _usage_int(*keys: str) -> int:
+        for key in keys:
+            value = usage.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        return 0
+
+    input_tokens = _usage_int("input_tokens", "inputTokens")
+    output_tokens = _usage_int("output_tokens", "outputTokens")
+    if input_tokens or output_tokens:
+        return input_tokens + output_tokens
+    return _usage_int("total_tokens", "totalTokens")
+
+
+def _session_turn_token_budget_line(context: dict[str, Any]) -> tuple[int, str]:
+    """Resolve the real-time token circuit-breaker line for one session turn.
+
+    Availability order: the formal task's ``budgetRequest.requested.tokens``
+    when the turn metadata can locate the workflow-run budget reservation;
+    otherwise the conservative session default. The line bounds input+output
+    tokens accumulated across the session turn's continuation loop.
+    """
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    workflow_run_id = str(metadata.get("workflowRunId") or "").strip()
+    node_run_id = str(metadata.get("nodeRunId") or "").strip()
+    if workflow_run_id and node_run_id:
+        try:
+            from core.web.services.team_workflow.research_runtime.store import (
+                WorkflowRunStore,
+            )
+
+            record = WorkflowRunStore().get_run(workflow_run_id)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            record = None
+        if isinstance(record, dict):
+            reservation_ids = {f"reservation-{node_run_id}"}
+            for node_run in record.get("nodeRuns") or []:
+                if (
+                    isinstance(node_run, dict)
+                    and str(node_run.get("nodeRunId") or "").strip() == node_run_id
+                ):
+                    ledger_ref = str(node_run.get("budgetLedgerRef") or "").strip()
+                    if ledger_ref:
+                        reservation_ids.add(ledger_ref)
+            for reservation in record.get("budgetReservations") or []:
+                if not isinstance(reservation, dict):
+                    continue
+                if str(reservation.get("reservationId") or "").strip() not in reservation_ids:
+                    continue
+                requested = (
+                    reservation.get("requested")
+                    if isinstance(reservation.get("requested"), dict)
+                    else {}
+                )
+                requested_tokens = requested.get("tokens")
+                # A zero/negative or malformed token request must not arm an
+                # instant fuse; fall through to the conservative default.
+                if (
+                    isinstance(requested_tokens, int)
+                    and not isinstance(requested_tokens, bool)
+                    and requested_tokens > 0
+                ):
+                    return requested_tokens, "task_budget_request"
+    return DEFAULT_SESSION_TOKEN_BUDGET, "session_default"
+
+
 def _run_session_continuation_loop(
     agent: Any,
     *,
@@ -1642,6 +1734,11 @@ def _run_session_continuation_loop(
     has_initial_attachments = bool(list(attachments or []))
     normalized_user_message_source = str(user_message_source or "").strip()
     auto_continue_turn_limit = max(1, s._coerce_nonnegative_int(max_internal_auto_continue_turns) or s.INTERNAL_AUTO_CONTINUE_MAX_TURNS)
+    # Real-time token fuse state: session-scoped counters for this turn's
+    # continuation loop only (no cross-session or cross-turn shared state), so
+    # concurrent sessions stay isolated and replays stay idempotent.
+    token_budget_line, token_budget_source = _session_turn_token_budget_line(context)
+    cumulative_session_tokens = 0
     normalized_required_tool_names = [
         str(item or "").strip()
         for item in list(required_tool_names or [])
@@ -1732,6 +1829,9 @@ def _run_session_continuation_loop(
                 "disableTools": bool(disable_tools),
                 "internalAutoContinueAllowed": bool(allow_internal_auto_continue),
                 "internalAutoContinueMaxTurns": auto_continue_turn_limit,
+                "tokenBudgetLine": token_budget_line,
+                "tokenBudgetSource": token_budget_source,
+                "cumulativeSessionTokens": cumulative_session_tokens,
             },
         )
         s._record_session_execution_registry_event(
@@ -1819,6 +1919,10 @@ def _run_session_continuation_loop(
             )
             return s._build_stopped_turn_result(return_stop_reason)
 
+        # LLM receipt is in hand: fold this invocation's usage into the
+        # session-turn token counter checked by the real-time fuse below.
+        cumulative_session_tokens += _turn_llm_usage_tokens(result)
+
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else type(result).__name__
         result_visible_reply = s._visible_reply_candidate(result) if isinstance(result, dict) else ""
         result_contract = s.build_chat_coding_result_contract(result) if isinstance(result, dict) else {}
@@ -1898,6 +2002,34 @@ def _run_session_continuation_loop(
                 },
             )
             return s._annotate_continuation_result(result, turn_index, reached_limit=False)
+        if cumulative_session_tokens >= token_budget_line:
+            # Real-time token fuse: stop the turn through the same graceful
+            # paused_limit path as the auto-continue ceiling so the model's
+            # current text wraps the turn up instead of a hard kill mid-flight.
+            paused_result = s._build_auto_continue_paused_result(
+                result,
+                last_visible_result,
+                turn_index,
+                pause_reason="token_budget_exhausted",
+                status="paused_limit",
+                fallback_visible="本轮 token 预算已达到熔断线，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+                internal_auto_continue_blocked=False,
+                reached_limit=True,
+            )
+            s._record_session_turn_lifecycle_event(
+                session_id,
+                "followup_prompt_blocked",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="paused_limit",
+                fields={
+                    "turnIndex": turn_index,
+                    "reason": "token_budget_exhausted",
+                    "cumulativeSessionTokens": cumulative_session_tokens,
+                    "tokenBudgetLine": token_budget_line,
+                    "tokenBudgetSource": token_budget_source,
+                },
+            )
+            return paused_result
         if required_tool_progress_missing:
             s._record_session_turn_lifecycle_event(
                 session_id,
