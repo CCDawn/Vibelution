@@ -13,10 +13,16 @@ describe("virtual human life frontend API", () => {
     expect(apiSource).toContain('method: "PUT"');
   });
 
-  it("owns Agent-scoped life snapshot transport and typed schedule state", () => {
+  it("owns Agent-scoped life snapshot, memory transport, and typed health state", () => {
     expect(lifeApiSource).toContain("fetchVirtualHumanSnapshot");
+    expect(lifeApiSource).toContain("fetchVirtualHumanMemories");
+    expect(lifeApiSource).toContain("/plugins/virtual-human-life/memories");
+    expect(lifeApiSource).toContain("limit");
     expect(lifeApiSource).toContain("encodeURIComponent(agentId)");
     expect(typeSource).toContain("export type VirtualHumanSnapshot");
+    expect(typeSource).toContain("export type VirtualHumanSnapshotHealth");
+    expect(typeSource).toContain("export type VirtualHumanEpisodicMemory");
+    expect(typeSource).toContain("health?: VirtualHumanSnapshotHealth");
     expect(typeSource).toContain("export type VirtualHumanActivity");
     expect(typeSource).toContain("directSessionId: string");
   });

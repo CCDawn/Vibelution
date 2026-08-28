@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { listAgentPlugins, updateAgentPluginBinding } from "../../api/agentPlugins";
 import { queryKeys } from "../../api/queryKeys";
-import type { AgentPluginBinding } from "../../api/types";
+import { fetchVirtualHumanSnapshot } from "../../api/virtualHumanLife";
+import type { AgentPluginBinding, VirtualHumanSnapshotHealth } from "../../api/types";
 import {
   VButton,
   VCheckbox,
@@ -60,6 +61,170 @@ function bindingConfig(draft: BindingDraft): Record<string, unknown> {
   };
 }
 
+type HealthTone = "neutral" | "success" | "warning" | "danger";
+
+function healthTone(value: boolean | undefined): HealthTone {
+  if (value === true) return "success";
+  if (value === false) return "warning";
+  return "neutral";
+}
+
+function formatHealthTime(value: string | null | undefined, lang: "zh" | "en"): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(parsed);
+  } catch {
+    return "";
+  }
+}
+
+function proactiveTone(status: string): HealthTone {
+  const normalized = status.trim().toLowerCase();
+  if (["delivered", "sent", "success", "completed"].includes(normalized)) return "success";
+  if (["failed", "error", "expired", "cancelled", "canceled"].includes(normalized)) return "danger";
+  if (normalized) return "warning";
+  return "neutral";
+}
+
+function HealthRow({
+  label,
+  value,
+  tone = "neutral",
+  meta,
+}: {
+  label: string;
+  value: string;
+  tone?: HealthTone;
+  meta?: string;
+}) {
+  return (
+    <div className={styles.healthRow}>
+      <dt>{label}</dt>
+      <dd>
+        <VStatusChip tone={tone}>{value}</VStatusChip>
+        {meta ? <span className={styles.healthMeta}>{meta}</span> : null}
+      </dd>
+    </div>
+  );
+}
+
+function VirtualHumanHealthSection({
+  enabled,
+  pluginPromptPackId,
+  health,
+  loading,
+  failed,
+  lang,
+}: {
+  enabled: boolean;
+  pluginPromptPackId: string;
+  health?: VirtualHumanSnapshotHealth;
+  loading: boolean;
+  failed: boolean;
+  lang: "zh" | "en";
+}) {
+  const personaReady = health?.personaInitialized;
+  const promptReady = health?.promptPackReady;
+  const heartbeatEnabled = health?.heartbeatEnabled ?? enabled;
+  const promptSegmentCount = typeof health?.promptSegmentCount === "number"
+    ? `${health.promptSegmentCount} ${lang === "zh" ? "个注入段" : "injected segment(s)"}`
+    : undefined;
+  const memoryCount = !enabled
+    ? (lang === "zh" ? "插件未启用" : "Plugin disabled")
+    : typeof health?.memoryPromotionCount === "number"
+      ? `${health.memoryPromotionCount} ${lang === "zh" ? "条" : "item(s)"}`
+      : lang === "zh" ? "等待首次晋升" : "Awaiting first promotion";
+  const latestPromotionAt = formatHealthTime(health?.latestPromotionAt, lang);
+  const lastProactiveStatus = String(health?.lastProactiveStatus || "").trim();
+  const proactiveLabel = !enabled
+    ? (lang === "zh" ? "插件未启用" : "Plugin disabled")
+    : lastProactiveStatus
+      || (loading ? (lang === "zh" ? "读取中" : "Loading") : (lang === "zh" ? "尚无记录" : "No record yet"));
+  const proactiveAt = formatHealthTime(health?.lastProactiveAt, lang);
+  const healthHasIssue = Boolean(
+    health
+    && (
+      health.personaInitialized === false
+      || health.promptPackReady === false
+      || health.heartbeatEnabled === false
+      || Boolean(health.lastProactiveError)
+    ),
+  );
+  const healthSummary = !enabled
+    ? (lang === "zh" ? "插件未启用" : "Plugin disabled")
+    : failed
+      ? (lang === "zh" ? "运行态暂不可用" : "Runtime unavailable")
+      : healthHasIssue
+        ? (lang === "zh" ? "需要关注" : "Needs attention")
+        : health
+          ? (lang === "zh" ? "运行态正常" : "Runtime connected")
+          : (lang === "zh" ? "等待运行态" : "Waiting for runtime");
+  const healthSummaryTone: HealthTone = failed || healthHasIssue ? "danger" : !enabled ? "warning" : health ? "success" : "neutral";
+
+  return (
+    <section className={styles.healthSection} aria-label={lang === "zh" ? "虚拟人运行健康" : "Virtual-human runtime health"}>
+      <div className={styles.healthHeader}>
+        <div>
+          <p className={styles.healthKicker}>{lang === "zh" ? "运行健康" : "Runtime health"}</p>
+          <p className={styles.healthHint}>
+            {lang === "zh" ? "只显示状态摘要，不展开完整 Prompt 或工具记录。" : "Status summary only; full prompts and tool traces stay hidden."}
+          </p>
+        </div>
+        <VStatusChip tone={healthSummaryTone}>{healthSummary}</VStatusChip>
+      </div>
+      <dl className={styles.healthGrid}>
+        <HealthRow
+          label={lang === "zh" ? "人格资料" : "Persona profile"}
+          value={personaReady === true ? (lang === "zh" ? "已初始化" : "Initialized") : personaReady === false ? (lang === "zh" ? "待补全" : "Needs setup") : (lang === "zh" ? "由 Agent 档案维护" : "Managed by Agent profile")}
+          tone={healthTone(personaReady)}
+          meta={lang === "zh" ? "独立身份资料" : "Independent identity"}
+        />
+        <HealthRow
+          label="Prompt pack"
+          value={promptReady === true ? (lang === "zh" ? "已注入" : "Injected") : promptReady === false ? (lang === "zh" ? "未就绪" : "Not ready") : pluginPromptPackId ? (lang === "zh" ? "已声明" : "Declared") : (lang === "zh" ? "未配置" : "Not configured")}
+          tone={healthTone(promptReady)}
+          meta={promptSegmentCount || (lang === "zh" ? "附加段状态" : "Additive segment status")}
+        />
+        <HealthRow
+          label={lang === "zh" ? "长期记忆" : "Long-term memory"}
+          value={memoryCount}
+          tone={typeof health?.memoryPromotionCount === "number" ? "success" : "neutral"}
+          meta={latestPromotionAt ? `${lang === "zh" ? "最近晋升" : "Latest"} ${latestPromotionAt}` : undefined}
+        />
+        <HealthRow
+          label={lang === "zh" ? "生活心跳" : "Life heartbeat"}
+          value={heartbeatEnabled ? (lang === "zh" ? "运行中" : "Running") : (lang === "zh" ? "已停用" : "Disabled")}
+          tone={heartbeatEnabled ? "success" : "warning"}
+          meta={health?.heartbeatEnabled === undefined ? (lang === "zh" ? "按绑定状态推断" : "Inferred from binding") : undefined}
+        />
+        <HealthRow
+          label={lang === "zh" ? "最近主动消息" : "Last proactive message"}
+          value={proactiveLabel}
+          tone={proactiveTone(lastProactiveStatus)}
+          meta={proactiveAt || undefined}
+        />
+      </dl>
+      {health?.lastProactiveError ? (
+        <p className={styles.healthError} role="status">
+          {lang === "zh" ? "最近主动消息失败：" : "Last proactive message failed: "}{health.lastProactiveError}
+        </p>
+      ) : failed ? (
+        <p className={styles.healthMeta} role="status">
+          {lang === "zh" ? "运行态接口暂时不可用，配置仍可保存；恢复后会自动补充健康信息。" : "Runtime health is temporarily unavailable. Settings remain usable and health facts will return when the runtime recovers."}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: string; lang: "zh" | "en" }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<BindingDraft>(DEFAULT_DRAFT);
@@ -75,6 +240,12 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
   );
   const binding = plugin?.binding ?? null;
   const bindingSignature = JSON.stringify(binding ?? {});
+  const snapshotQuery = useQuery({
+    queryKey: queryKeys.virtualHumanSnapshot(agentId),
+    queryFn: ({ signal }) => fetchVirtualHumanSnapshot(agentId, { signal }),
+    enabled: Boolean(agentId && binding?.enabled),
+    retry: false,
+  });
 
   useEffect(() => {
     setDraft(draftFromBinding(binding));
@@ -149,6 +320,15 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
         <span className={styles.badge}>Prompt pack · {plugin.promptPackId}</span>
         <span className={styles.badge}>{plugin.toolNames.length} {lang === "zh" ? "个专属工具" : "plugin tools"}</span>
       </div>
+
+      <VirtualHumanHealthSection
+        enabled={enabled}
+        pluginPromptPackId={plugin.promptPackId}
+        health={snapshotQuery.data?.health}
+        loading={snapshotQuery.isPending}
+        failed={snapshotQuery.isError}
+        lang={lang}
+      />
 
       {enabled ? (
         <div className={styles.grid}>

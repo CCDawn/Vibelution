@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  VirtualHumanEpisodicMemory,
   VirtualHumanDiaryEntry,
   VirtualHumanLifeEvent,
   VirtualHumanRelationship,
@@ -76,4 +77,19 @@ export function fetchVirtualHumanRelationships(
     `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/relationships`,
     { signal: options?.signal },
   );
+}
+
+export function fetchVirtualHumanMemories(
+  agentId: string,
+  options?: { limit?: number; signal?: AbortSignal },
+): Promise<VirtualHumanEpisodicMemory[]> {
+  const search = new URLSearchParams();
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/memories`;
+  return fetchJson<VirtualHumanEpisodicMemory[]>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
 }

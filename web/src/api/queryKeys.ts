@@ -29,6 +29,7 @@ export const queryKeys = {
   virtualHumanEvents: (id: string, localDate = "", limit = 100) => ["agents", id, "plugins", "virtual-human-life", "events", localDate, limit] as const,
   virtualHumanDiary: (id: string, localDate = "", limit = 100) => ["agents", id, "plugins", "virtual-human-life", "diary", localDate, limit] as const,
   virtualHumanRelationships: (id: string) => ["agents", id, "plugins", "virtual-human-life", "relationships"] as const,
+  virtualHumanMemories: (id: string, limit = 100) => ["agents", id, "plugins", "virtual-human-life", "memories", limit] as const,
   agentRuns: (id: string) => ["agents", id, "runs"] as const,
   agentMessages: (id: string, status = "pending") => ["agents", id, "messages", status] as const,
   agentRuntimeEvidence: (id: string) => ["agents", id, "runtime-evidence"] as const,

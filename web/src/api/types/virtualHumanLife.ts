@@ -131,6 +131,35 @@ export type VirtualHumanRelationship = {
   [key: string]: unknown;
 };
 
+/**
+ * Runtime-only health facts for the virtual-human binding.
+ *
+ * Every field is optional so an older backend snapshot can still render the
+ * life rail and plugin settings without pretending that a missing fact is a
+ * successful initialization or delivery.
+ */
+export type VirtualHumanSnapshotHealth = {
+  personaInitialized?: boolean;
+  promptPackReady?: boolean;
+  promptSegmentCount?: number;
+  memoryPromotionCount?: number;
+  latestPromotionAt?: string | null;
+  heartbeatEnabled?: boolean;
+  lastProactiveStatus?: string | null;
+  lastProactiveAt?: string | null;
+  lastProactiveError?: string | null;
+};
+
+/** A promoted episodic memory projected for the current Agent only. */
+export type VirtualHumanEpisodicMemory = {
+  episodeId: string;
+  text: string;
+  occurredAt?: string | null;
+  salienceScore?: number | null;
+  sourceEventIds?: string[];
+  promotedAt?: string | null;
+};
+
 export type VirtualHumanSnapshot = {
   pluginId: string;
   agentId: string;
@@ -145,6 +174,7 @@ export type VirtualHumanSnapshot = {
     limit: number;
     remaining: number;
   };
+  health?: VirtualHumanSnapshotHealth;
 };
 
 export type VirtualHumanCompanion = {

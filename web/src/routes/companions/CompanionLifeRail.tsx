@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchVirtualHumanDiary,
   fetchVirtualHumanEvents,
+  fetchVirtualHumanMemories,
   fetchVirtualHumanRelationships,
 } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
@@ -11,6 +12,7 @@ import type {
   VirtualHumanActivity,
   VirtualHumanCompanion,
   VirtualHumanDiaryEntry,
+  VirtualHumanEpisodicMemory,
   VirtualHumanLifeEvent,
   VirtualHumanRelationship,
 } from "../../api/types";
@@ -85,6 +87,74 @@ function DiaryRows({ entries, lang }: { entries: VirtualHumanDiaryEntry[]; lang:
   );
 }
 
+function formatMemoryTimestamp(value: string | null | undefined, lang: "zh" | "en"): string {
+  if (!value) return "--";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "--";
+  try {
+    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(parsed);
+  } catch {
+    return "--";
+  }
+}
+
+function memoryTimestamp(memory: VirtualHumanEpisodicMemory): number {
+  const value = memory.promotedAt || memory.occurredAt;
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function MemoryRows({ memories, lang }: { memories: VirtualHumanEpisodicMemory[]; lang: "zh" | "en" }) {
+  if (!memories.length) {
+    return (
+      <p className={styles.cardCopy}>
+        {lang === "zh"
+          ? "还没有达到长期记忆重要性门槛的生活片段。"
+          : "No lived moments have crossed the long-term memory threshold yet."}
+      </p>
+    );
+  }
+  return (
+    <div className={styles.memoryList}>
+      {[...memories].sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left)).slice(0, 6).map((memory) => {
+        const salience = typeof memory.salienceScore === "number"
+          ? Math.round(memory.salienceScore)
+          : null;
+        const sourceCount = Array.isArray(memory.sourceEventIds) ? memory.sourceEventIds.length : 0;
+        return (
+          <article key={memory.episodeId} className={styles.memoryItem}>
+            <div className={styles.memoryItemHeader}>
+              <strong>{lang === "zh" ? "生活片段" : "Lived moment"}</strong>
+              <time>{formatMemoryTimestamp(memory.occurredAt, lang)}</time>
+            </div>
+            <p className={styles.memoryText}>
+              {memory.text || (lang === "zh" ? "这条记忆暂时没有正文。" : "This memory has no text yet.")}
+            </p>
+            <div className={styles.memoryMetaRow}>
+              {salience !== null ? (
+                <span>{lang === "zh" ? `重要性 ${salience}%` : `Salience ${salience}%`}</span>
+              ) : null}
+              {sourceCount > 0 ? (
+                <span>{lang === "zh" ? `来自 ${sourceCount} 条经历` : `From ${sourceCount} event(s)`}</span>
+              ) : null}
+              {memory.promotedAt ? (
+                <span>{lang === "zh" ? `晋升于 ${formatMemoryTimestamp(memory.promotedAt, lang)}` : `Promoted ${formatMemoryTimestamp(memory.promotedAt, lang)}`}</span>
+              ) : null}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function RelationshipRows({ relationships, lang }: { relationships: VirtualHumanRelationship[]; lang: "zh" | "en" }) {
   if (!relationships.length) {
     return <p className={styles.cardCopy}>{lang === "zh" ? "关系投影仍在自然形成中。" : "Relationship projections are still taking shape."}</p>;
@@ -148,6 +218,19 @@ export function CompanionLifeRail({
     enabled: memoryQueriesEnabled,
     refetchInterval: pageVisible ? 30_000 : false,
   });
+  const memoriesQuery = useQuery({
+    queryKey: queryKeys.virtualHumanMemories(companion?.agentId || "", 100),
+    queryFn: ({ signal }) => fetchVirtualHumanMemories(companion!.agentId, { limit: 100, signal }),
+    enabled: memoryQueriesEnabled,
+    refetchInterval: pageVisible ? 30_000 : false,
+    retry: false,
+  });
+  const memoryCount = companion?.snapshot.health?.memoryPromotionCount;
+  const memoryCountLabel = typeof memoryCount === "number"
+    ? `${memoryCount}`
+    : memoriesQuery.data
+      ? `${memoriesQuery.data.length}`
+      : "--";
   const stateCopy = state === "loading"
     ? (lang === "zh" ? "正在载入生活状态" : "Loading life state")
     : state === "error"
@@ -259,6 +342,30 @@ export function CompanionLifeRail({
 
           {activeTab === "memory" ? (
             <>
+              <section className={styles.lifeCardAccent}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "长期记忆" : "Long-term memory"}</p>
+                <div className={styles.memoryOverview}>
+                  <strong>{memoryCountLabel}</strong>
+                  <span className={styles.cardMeta}>{lang === "zh" ? "条已晋升片段" : "promoted moment(s)"}</span>
+                </div>
+                <p className={styles.cardCopy}>
+                  {lang === "zh"
+                    ? "只展示从真实生活经历晋升的记忆；计划和未完成的活动不会直接出现在这里。"
+                    : "Only memories promoted from lived events appear here; plans and unfinished activities stay out."}
+                </p>
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "记忆片段" : "Memory moments"}</p>
+                {memoriesQuery.isPending ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取长期记忆" : "Loading long-term memories"} tone="loading" busy skeletonLines={2} />
+                ) : memoriesQuery.isError ? (
+                  <VStateSurface density="compact" title={lang === "zh" ? "长期记忆暂不可用" : "Long-term memories unavailable"} tone="unavailable">
+                    {lang === "zh" ? "记忆服务暂未提供，下面的日记和关系仍可查看。" : "The memory service is not available yet; diary and relationship projections remain available."}
+                  </VStateSurface>
+                ) : (
+                  <MemoryRows memories={memoriesQuery.data ?? []} lang={lang} />
+                )}
+              </section>
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "共同记忆" : "Shared memory"}</p>
                 <p className={styles.cardCopy}>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "暂时还没有形成稳定的关系摘要。" : "No stable relationship summary yet.")}</p>
@@ -289,7 +396,7 @@ export function CompanionLifeRail({
               </section>
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "事实边界" : "Fact boundary"}</p>
-                <p className={styles.cardCopy}>{lang === "zh" ? "这里只显示生活与关系摘要；原始对话历史仍由当前 Session 拥有。" : "Only life and relationship summaries appear here. The current Session still owns conversation history."}</p>
+                <p className={styles.cardCopy}>{lang === "zh" ? "这里只显示生活经历、晋升记忆和关系摘要；原始对话历史仍由当前 Session 拥有。" : "Only lived events, promoted memories, and relationship summaries appear here. The current Session still owns conversation history."}</p>
               </section>
             </>
           ) : null}
