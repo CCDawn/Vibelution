@@ -1080,3 +1080,197 @@ def test_accept_always_persists_through_real_agent_directory_authority(
     assert [item["grantKey"] for item in rule["approvalGrants"]] == [
         "grant-real-directory"
     ]
+
+
+def test_url_host_scope_parses_host_and_falls_back_to_exact_arguments():
+    assert tool_approvals._url_host_scope(
+        "web_fetch_tool",
+        {"url": "https://Docs.Example.com/guide/intro"},
+    ) == {"kind": "url_host", "host": "docs.example.com"}
+    assert tool_approvals._url_host_scope(
+        "web_fetch_tool",
+        {"url": "file:///etc/hosts"},
+    ) is None
+    assert tool_approvals._url_host_scope("web_fetch_tool", {"query": "no url"}) is None
+    assert tool_approvals._url_host_scope(
+        "web_search_tool",
+        {"url": "https://docs.example.com/guide/intro"},
+    ) is None
+
+
+def _wait_for_web_fetch_always_grant(monkeypatch, *, call_id: str, url: str):
+    """Approve one web_fetch URL with acceptAlways and return the resolved request."""
+
+    _install(("web_fetch_tool", "on_request", "network"))
+    box = {}
+    worker = threading.Thread(
+        target=lambda: (
+            _install(("web_fetch_tool", "on_request", "network")),
+            box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_fetch_tool",
+                    tool_call_id=call_id,
+                    tool_args={"url": url},
+                ),
+            ),
+        )
+    )
+    worker.start()
+    request = _wait_for_pending()
+    resolved = tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="acceptAlways",
+    )
+    worker.join(timeout=2)
+    assert resolved["status"] == "accepted_always"
+    assert box["value"].allowed is True
+    return request
+
+
+def test_web_fetch_accept_always_grants_host_level_reuse(
+    monkeypatch,
+    _agent_directory_state,
+):
+    """One acceptAlways on a web_fetch URL authorizes later paths on the same host."""
+    _runtime(monkeypatch, session_id="session-a")
+    _wait_for_web_fetch_always_grant(
+        monkeypatch,
+        call_id="call-fetch-first",
+        url="https://docs.example.com/guide/intro",
+    )
+
+    grants = tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a")
+    host_grants = [
+        item for item in grants if item["scope"].get("kind") == "url_host"
+    ]
+    assert len(host_grants) == 1
+    assert host_grants[0]["scope"] == {"kind": "url_host", "host": "docs.example.com"}
+    # The legacy exact-arguments grant is still recorded alongside the host grant.
+    assert len(grants) == 2
+
+    # Same host, different path: no approval request, no wait.
+    same_host = tool_authorization_service.authorize_tool_execution(
+        tool_name="web_fetch_tool",
+        tool_call_id="call-fetch-same-host",
+        tool_args={"url": "https://docs.example.com/api/reference#auth"},
+    )
+    assert same_host.allowed is True
+    assert same_host.code == "approved_for_session"
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
+
+    # The durable host grant also survives an ephemeral-state reset (new session).
+    tool_approvals.reset_tool_approval_state(clear_durable=False)
+    persisted_agent = _agent_directory_state["agents"]["agent-a"]
+    _runtime(
+        monkeypatch,
+        session_id="session-b",
+        config_revision=persisted_agent["configRevision"],
+        config_hash=persisted_agent["configHash"],
+    )
+    _install(("web_fetch_tool", "on_request", "network"))
+    across = tool_authorization_service.authorize_tool_execution(
+        tool_name="web_fetch_tool",
+        tool_call_id="call-fetch-across-session",
+        tool_args={"url": "https://docs.example.com/another/page"},
+    )
+    assert across.allowed is True
+    assert across.code == "approved_for_agent"
+    assert tool_approvals.list_tool_approval_requests("session-b", status="pending") == []
+
+
+def test_web_fetch_host_grant_does_not_cross_hosts_or_agents(
+    monkeypatch,
+    _agent_directory_state,
+):
+    _runtime(monkeypatch, session_id="session-a")
+    _wait_for_web_fetch_always_grant(
+        monkeypatch,
+        call_id="call-fetch-first",
+        url="https://docs.example.com/guide/intro",
+    )
+
+    # A different host still requires fresh approval.
+    other_box = {}
+    other = threading.Thread(
+        target=lambda: (
+            _install(("web_fetch_tool", "on_request", "network")),
+            other_box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_fetch_tool",
+                    tool_call_id="call-fetch-other-host",
+                    tool_args={"url": "https://other-site.example.net/page"},
+                ),
+            ),
+        )
+    )
+    other.start()
+    other_request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        other_request["requestId"],
+        decision="cancel",
+    )
+    other.join(timeout=2)
+    assert other_box["value"].allowed is False
+    assert other_box["value"].code == "approval_cancelled"
+
+    # A different agent gains nothing from agent-a's host grant.
+    tool_approvals.reset_tool_approval_state(clear_durable=False)
+    foreign_box = {}
+    foreign = threading.Thread(
+        target=lambda: foreign_box.setdefault(
+            "value",
+            tool_approvals.authorize_or_wait(
+                session_id="session-a",
+                turn_id="turn-a",
+                agent_id="agent-b",
+                call_id="call-fetch-foreign-agent",
+                tool_name="web_fetch_tool",
+                tool_args={"url": "https://docs.example.com/guide/intro"},
+                approval="on_request",
+                risk="network",
+                decision_fingerprint="decision-b",
+                config_revision=3,
+                config_hash="config-hash-a",
+                permission_preset="request_approval",
+            ),
+        )
+    )
+    foreign.start()
+    foreign_request = _wait_for_pending()
+    assert foreign_request["agentId"] == "agent-b"
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        foreign_request["requestId"],
+        decision="cancel",
+    )
+    foreign.join(timeout=2)
+    assert foreign_box["value"].allowed is False
+
+
+def test_approval_timeout_message_declares_terminal_rejection(monkeypatch):
+    """Timeout is a terminal fail-closed denial; the model must not retry blind."""
+    outcome = tool_approvals.authorize_or_wait(
+        session_id="session-a",
+        turn_id="turn-a",
+        agent_id="agent-a",
+        call_id="call-timeout",
+        tool_name="web_fetch_tool",
+        tool_args={"url": "https://docs.example.com/slow"},
+        approval="on_request",
+        risk="network",
+        decision_fingerprint="decision-a",
+        config_revision=3,
+        config_hash="config-hash-a",
+        permission_preset="request_approval",
+        timeout_seconds=0.2,
+    )
+
+    assert outcome.allowed is False
+    assert outcome.code == "approval_timeout"
+    assert "终态拒绝" in outcome.message
+    assert "禁止以相同参数重试" in outcome.message
+    assert "结束回合" in outcome.message

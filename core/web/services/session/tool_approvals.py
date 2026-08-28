@@ -17,6 +17,7 @@ import re
 from threading import Event, RLock
 import time
 from typing import Any, Callable, Literal, Mapping
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 
@@ -45,6 +46,10 @@ _PATCH_TARGET_PATTERN = re.compile(
 )
 _SANDBOX_CONTAINED_TOOLS = {"cli_tool", "exec_command", "write_stdin"}
 _WORKSPACE_PATH_TOOLS = {"apply_diff_edit_tool", "apply_patch_tool", "write_file_tool"}
+# URL tools where one explicit acceptAlways may authorize the whole host: a
+# research-stage fetch of many pages on one site must not re-prompt (and then
+# fail-closed after the approval timeout) for every new URL path.
+_HOST_SCOPED_URL_TOOLS = {"web_fetch_tool"}
 
 
 class ToolApprovalError(ValueError):
@@ -73,6 +78,7 @@ class _ApprovalRequest:
     argument_summary: dict[str, Any]
     session_grant_scope: dict[str, Any]
     session_grant_key: str
+    host_grant_scope: dict[str, Any]
     decision_fingerprint: str
     config_revision: int
     config_hash: str
@@ -218,6 +224,8 @@ def authorize_or_wait(
 
     args_hash = _arguments_hash(tool_args)
     session_grant_scope = _session_grant_scope(normalized_tool, tool_args, args_hash)
+    host_grant_scope = _url_host_scope(normalized_tool, tool_args)
+    host_grant_key = _session_grant_key(host_grant_scope) if host_grant_scope else ""
     grant_key = (
         normalized_session,
         normalized_agent,
@@ -227,14 +235,34 @@ def authorize_or_wait(
         _session_grant_key(session_grant_scope),
     )
     with _LOCK:
-        if grant_key in _SESSION_GRANTS and normalized_approval != "always":
-            return ToolApprovalOutcome(True, "approved_for_session")
-        if normalized_approval != "always" and _has_durable_grant(
-            agent_id=normalized_agent,
-            tool_name=normalized_tool,
-            grant_key=_session_grant_key(session_grant_scope),
-        ):
-            return ToolApprovalOutcome(True, "approved_for_agent")
+        if normalized_approval != "always":
+            if grant_key in _SESSION_GRANTS:
+                return ToolApprovalOutcome(True, "approved_for_session")
+            if (
+                host_grant_key
+                and (
+                    normalized_session,
+                    normalized_agent,
+                    normalized_config_revision,
+                    normalized_config_hash,
+                    normalized_tool,
+                    host_grant_key,
+                )
+                in _SESSION_GRANTS
+            ):
+                return ToolApprovalOutcome(True, "approved_for_session")
+            if _has_durable_grant(
+                agent_id=normalized_agent,
+                tool_name=normalized_tool,
+                grant_key=_session_grant_key(session_grant_scope),
+            ):
+                return ToolApprovalOutcome(True, "approved_for_agent")
+            if host_grant_key and _has_durable_grant(
+                agent_id=normalized_agent,
+                tool_name=normalized_tool,
+                grant_key=host_grant_key,
+            ):
+                return ToolApprovalOutcome(True, "approved_for_agent")
 
     if _can_auto_approve(
         permission_preset=normalized_permission_preset,
@@ -256,6 +284,7 @@ def authorize_or_wait(
         argument_summary=_argument_summary(normalized_tool, tool_args),
         session_grant_scope=session_grant_scope,
         session_grant_key=_session_grant_key(session_grant_scope),
+        host_grant_scope=host_grant_scope or {},
         decision_fingerprint=str(decision_fingerprint or "").strip(),
         config_revision=normalized_config_revision,
         config_hash=normalized_config_hash,
@@ -288,7 +317,11 @@ def authorize_or_wait(
             return ToolApprovalOutcome(
                 False,
                 "approval_timeout",
-                "[工具审批] 等待用户授权超时，已按 fail-closed 拒绝执行。",
+                (
+                    "[工具审批] 等待用户授权超时，已按 fail-closed 拒绝执行。"
+                    "该调用已被终态拒绝（审批等待超时）。禁止以相同参数重试；"
+                    "如需继续，改用其他来源或以文本说明阻塞原因并结束回合。"
+                ),
                 request.request_id,
             )
 
@@ -383,6 +416,7 @@ def _get_or_create_request(
     argument_summary: dict[str, Any],
     session_grant_scope: dict[str, Any],
     session_grant_key: str,
+    host_grant_scope: dict[str, Any],
     decision_fingerprint: str,
     config_revision: int,
     config_hash: str,
@@ -420,6 +454,7 @@ def _get_or_create_request(
             argument_summary=argument_summary,
             session_grant_scope=session_grant_scope,
             session_grant_key=session_grant_key,
+            host_grant_scope=host_grant_scope or {},
             decision_fingerprint=decision_fingerprint,
             config_revision=config_revision,
             config_hash=config_hash,
@@ -455,6 +490,17 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
             source_request_id=request.request_id,
             expected_config_revision=request.config_revision,
         )
+        if request.host_grant_scope:
+            # One explicit always-approval on a URL tool authorizes its host.
+            _add_durable_grant(
+                agent_id=request.agent_id,
+                tool_name=request.tool_name,
+                grant_key=_session_grant_key(request.host_grant_scope),
+                scope=dict(request.host_grant_scope),
+                source_session_id=request.session_id,
+                source_request_id=request.request_id,
+                expected_config_revision=request.config_revision,
+            )
     request.decision = decision
     request.resolved_at = _utc_now()
     if decision == "accept":
@@ -484,6 +530,17 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
                 request.session_grant_key,
             )
         )
+        if request.host_grant_scope:
+            _SESSION_GRANTS.add(
+                (
+                    request.session_id,
+                    request.agent_id,
+                    request.config_revision,
+                    request.config_hash,
+                    request.tool_name,
+                    _session_grant_key(request.host_grant_scope),
+                )
+            )
     elif decision == "decline":
         request.status = "declined"
     else:
@@ -1012,6 +1069,30 @@ def _session_grant_scope(
         "kind": "exact_arguments",
         "argumentsHash": arguments_hash,
     }
+
+
+def _url_host_scope(
+    tool_name: str,
+    tool_args: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Host-level grant scope for URL tools; None falls back to exact arguments.
+
+    Only explicit ``acceptAlways`` decisions consume this scope: a host grant is
+    created solely as an additional hit path next to the unchanged exact grant.
+    """
+
+    if tool_name not in _HOST_SCOPED_URL_TOOLS:
+        return None
+    raw_url = str(tool_args.get("url") or "").strip()
+    if not raw_url:
+        return None
+    try:
+        host = (urlsplit(raw_url).hostname or "").strip().lower()
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return {"kind": "url_host", "host": host}
 
 
 def _session_grant_key(scope: Mapping[str, Any]) -> str:
