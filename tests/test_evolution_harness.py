@@ -290,6 +290,9 @@ def test_create_harness_config_uses_external_config_not_worktree_legacy(
         monkeypatch,
         tmp_path,
         """
+        [llm]
+        schema_version = 2
+
         [llm.providers.external]
         kind = "minimax"
         """,
@@ -1193,6 +1196,9 @@ def test_create_harness_config_overrides_runtime_section(
         profile = "safe_local"
         preflight_doctor = true
         require_venv = true
+
+        [llm]
+        schema_version = 2
 
         [llm.providers.default]
         kind = "minimax"
