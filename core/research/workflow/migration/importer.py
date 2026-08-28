@@ -266,6 +266,7 @@ def _run_record(record: Mapping[str, Any]) -> RunRecord:
         created_at_ms=created_ms,
         updated_at_ms=updated_ms,
         completed_at_ms=updated_ms if status in {"succeeded", "failed", "cancelled", "archived"} else None,
+        structure_hash=str(record.get("structureHash") or ""),
     )
 
 

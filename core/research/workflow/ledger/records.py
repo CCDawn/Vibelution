@@ -30,6 +30,7 @@ class RunRecord:
     created_at_ms: int
     updated_at_ms: int
     completed_at_ms: int | None
+    structure_hash: str = ""
 
 
 @dataclass(frozen=True)

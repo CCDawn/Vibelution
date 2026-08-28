@@ -6,7 +6,7 @@ import hashlib
 import uuid
 from typing import Any
 
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 
 from .budget_lifecycle import build_initial_budget_ledgers, remaining_budget_policy
 from .checkpoint_lifecycle import fork_checkpoint_at_node
@@ -48,6 +48,9 @@ def fork_iteration_revision(
             (parent.get("langGraph") or {}).get("checkpointId") or ""
         )
         child_thread_id = f"thread-{child_run_id}"
+        # Fail-closed: fork on the parent's pinned graph; the child record
+        # copies the parent's workflowVersionId/structureHash below.
+        definition = resolve_definition_for_run_record(parent)
         child_checkpoint_id = fork_checkpoint_at_node(
             checkpoint_path,
             source_thread_id=str(parent["threadId"]),
@@ -59,8 +62,8 @@ def fork_iteration_revision(
                 "current_node_id": "hypothesis_design",
                 "iteration_decision": {},
             },
+            definition=definition,
         )
-        definition = build_challenge_cup_workflow_definition()
         protocol_spec = next(
             item for item in definition.nodes if item.nodeId == "protocol_design"
         )

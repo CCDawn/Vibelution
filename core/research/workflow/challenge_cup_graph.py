@@ -24,6 +24,7 @@ from .iteration_decisions import (
     route_target_after_governance,
     route_target_for_decision,
 )
+from .models import WorkflowDefinition
 
 
 class ChallengeCupState(TypedDict, total=False):
@@ -37,18 +38,14 @@ class ChallengeCupState(TypedDict, total=False):
     pending_fork: bool
 
 
-def _node_order() -> list[str]:
-    return [
-        node.nodeId for node in build_challenge_cup_workflow_definition().nodes
-    ]
+def _node_order(definition: WorkflowDefinition) -> list[str]:
+    return [node.nodeId for node in definition.nodes]
 
 
-def _make_node_fn(node_id: str) -> Callable[[ChallengeCupState], ChallengeCupState]:
-    spec = next(
-        node
-        for node in build_challenge_cup_workflow_definition().nodes
-        if node.nodeId == node_id
-    )
+def _make_node_fn(
+    node_id: str, definition: WorkflowDefinition
+) -> Callable[[ChallengeCupState], ChallengeCupState]:
+    spec = next(node for node in definition.nodes if node.nodeId == node_id)
 
     def request_external_execution(state: ChallengeCupState) -> ChallengeCupState:
         interrupt(
@@ -99,21 +96,30 @@ def route_after_version_governance(
     return route_target_after_governance(kind_raw)  # type: ignore[return-value]
 
 
-def build_challenge_cup_graph() -> StateGraph:
-    order = _node_order()
+def build_challenge_cup_graph(
+    definition: WorkflowDefinition | None = None,
+) -> StateGraph:
+    """Build the control graph for one pinned workflow definition.
+
+    ``definition=None`` keeps the historical behavior of compiling the current
+    ``build_challenge_cup_workflow_definition()`` output; run-driven callers
+    must pass the definition resolved from the run's version identity instead.
+    """
+    resolved = definition or build_challenge_cup_workflow_definition()
+    order = _node_order(resolved)
     builder: StateGraph = StateGraph(ChallengeCupState)
     for node_id in order:
-        builder.add_node(node_id, _make_node_fn(node_id))
+        builder.add_node(node_id, _make_node_fn(node_id, resolved))
     builder.add_edge(START, order[0])
-    for source, target in graph_static_edge_pairs():
+    for source, target in graph_static_edge_pairs(resolved):
         builder.add_edge(source, target)
-    iteration_targets = graph_conditional_targets("iteration_decision")
+    iteration_targets = graph_conditional_targets("iteration_decision", resolved)
     builder.add_conditional_edges(
         "iteration_decision",
         route_after_iteration_decision,
         {target: target for target in iteration_targets} | {END: END},
     )
-    governance_targets = graph_conditional_targets("version_governance")
+    governance_targets = graph_conditional_targets("version_governance", resolved)
     builder.add_conditional_edges(
         "version_governance",
         route_after_version_governance,
@@ -123,8 +129,8 @@ def build_challenge_cup_graph() -> StateGraph:
     return builder
 
 
-def compile_challenge_cup_graph(checkpointer: Any):
-    return build_challenge_cup_graph().compile(checkpointer=checkpointer)
+def compile_challenge_cup_graph(checkpointer: Any, definition: WorkflowDefinition | None = None):
+    return build_challenge_cup_graph(definition).compile(checkpointer=checkpointer)
 
 
 def compiled_iteration_route_map() -> dict[str, str | None]:

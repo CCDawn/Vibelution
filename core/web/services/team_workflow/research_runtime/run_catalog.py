@@ -23,6 +23,7 @@ def catalog_dict_from_run(run: RunRecord) -> dict[str, Any]:
         "runId": run.run_id,
         "workflowId": run.workflow_id,
         "workflowVersionId": run.workflow_version_id,
+        "structureHash": run.structure_hash,
         "teamId": run.team_id,
         "projectId": run.project_id,
         "questionId": run.question_id,

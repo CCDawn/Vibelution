@@ -7,10 +7,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from core.research.workflow.definition import (
-    CHALLENGE_CUP_WORKFLOW_ID,
-    build_challenge_cup_workflow_definition,
-)
+from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 
 from .checkpoint_lifecycle import fork_checkpoint_at_node
 from .human_gate_artifacts import canonical_sha256
@@ -75,7 +73,9 @@ def create_human_gate_child_run(
     correction_node_id, predecessor_node_id = human_gate_correction_route(
         str(task.get("nodeId") or "")
     )
-    definition = build_challenge_cup_workflow_definition()
+    # Fail-closed: fork on the parent's pinned graph; the child record copies
+    # the parent's workflowVersionId/structureHash below.
+    definition = resolve_definition_for_run_record(parent)
     correction_spec = next(
         item for item in definition.nodes if item.nodeId == correction_node_id
     )
@@ -89,6 +89,7 @@ def create_human_gate_child_run(
         predecessor_node_id=predecessor_node_id,
         resume_node_id=correction_node_id,
         state_patch={"current_node_id": predecessor_node_id},
+        definition=definition,
     )
     bindings = list(parent.get("bindingSnapshots") or [])
     binding = next(

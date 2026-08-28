@@ -1,4 +1,11 @@
-"""LangGraph checkpoint lifecycle without executing workflow nodes."""
+"""LangGraph checkpoint lifecycle without executing workflow nodes.
+
+Every graph used here is compiled from a pinned ``WorkflowDefinition``.
+Run-driven callers resolve it through the definition registry port
+(``resolve_definition_for_run_record``) from the run record's version
+identity; ``definition=None`` compiles the current definition and exists
+only for direct graph-level callers without a run context.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +15,26 @@ from langgraph.graph import START
 
 from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.models import WorkflowDefinition
 
 
-def prepare_initial_checkpoint(checkpoint_path: str, thread_id: str) -> str:
-    """Create a durable initial checkpoint with source_finding scheduled."""
+def _pinned_definition(
+    definition: WorkflowDefinition | None,
+) -> WorkflowDefinition:
+    return definition if definition is not None else build_challenge_cup_workflow_definition()
+
+
+def prepare_initial_checkpoint(
+    checkpoint_path: str,
+    thread_id: str,
+    *,
+    definition: WorkflowDefinition | None = None,
+) -> str:
+    """Create a durable initial checkpoint with the first definition node scheduled."""
+    pinned = _pinned_definition(definition)
     with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
-        graph = compile_challenge_cup_graph(checkpointer)
+        graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
         config = {"configurable": {"thread_id": thread_id}}
         saved = graph.update_state(config, {}, as_node=START)
     configurable = saved.get("configurable") or {}
@@ -23,15 +44,21 @@ def prepare_initial_checkpoint(checkpoint_path: str, thread_id: str) -> str:
     return checkpoint_id
 
 
-def latest_checkpoint_id(checkpoint_path: str, thread_id: str) -> str:
+def latest_checkpoint_id(
+    checkpoint_path: str,
+    thread_id: str,
+    *,
+    definition: WorkflowDefinition | None = None,
+) -> str:
     """Latest durable checkpoint id for a thread; empty string when unavailable.
 
     Offer building must fail soft: an unreadable or missing checkpoint store
     keeps the revise offer unavailable instead of failing the snapshot read.
     """
+    pinned = _pinned_definition(definition)
     try:
         with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
-            graph = compile_challenge_cup_graph(checkpointer)
+            graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
             state = graph.get_state({"configurable": {"thread_id": thread_id}})
         configurable = state.config.get("configurable") or {}
         return str(configurable.get("checkpoint_id") or "").strip()
@@ -46,10 +73,12 @@ def advance_checkpoint(
     checkpoint_id: str,
     completed_node_id: str,
     state_patch: dict[str, Any],
+    definition: WorkflowDefinition | None = None,
 ) -> tuple[str, list[str]]:
     """Commit a validated node result and return the scheduled successors."""
+    pinned = _pinned_definition(definition)
     with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
-        graph = compile_challenge_cup_graph(checkpointer)
+        graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
         config = {
             "configurable": {
                 "thread_id": thread_id,
@@ -75,10 +104,12 @@ def fork_checkpoint_at_node(
     predecessor_node_id: str,
     resume_node_id: str,
     state_patch: dict[str, Any] | None = None,
+    definition: WorkflowDefinition | None = None,
 ) -> str:
     """Clone source values into a new thread and schedule one correction node."""
+    pinned = _pinned_definition(definition)
     with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
-        graph = compile_challenge_cup_graph(checkpointer)
+        graph = compile_challenge_cup_graph(checkpointer, definition=pinned)
         child_config = {"configurable": {"thread_id": child_thread_id}}
         existing = graph.get_state(child_config)
         existing_values = dict(existing.values or {})

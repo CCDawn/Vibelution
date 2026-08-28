@@ -55,6 +55,7 @@ def _row_run(row: Any) -> RunRecord | None:
         created_at_ms=int(row[20]),
         updated_at_ms=int(row[21]),
         completed_at_ms=row[22],
+        structure_hash=str(row[23] or ""),
     )
 
 
@@ -114,8 +115,9 @@ class WorkflowLedgerRepository:
               input_snapshot_json, input_snapshot_hash, safety_limits_json,
               binding_snapshot_set_id, active_node_id, parent_run_id,
               forked_from_checkpoint_id, completion_kind, terminal_reason,
-              blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms,
+              structure_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run.run_id,
@@ -141,6 +143,7 @@ class WorkflowLedgerRepository:
                 run.created_at_ms,
                 run.updated_at_ms,
                 run.completed_at_ms,
+                run.structure_hash,
             ),
         )
 
@@ -152,7 +155,8 @@ class WorkflowLedgerRepository:
                    input_snapshot_json, input_snapshot_hash, safety_limits_json,
                    binding_snapshot_set_id, active_node_id, parent_run_id,
                    forked_from_checkpoint_id, completion_kind, terminal_reason,
-                   blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms
+                   blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms,
+                   structure_hash
             FROM workflow_runs WHERE run_id = ?
             """,
             (run_id,),
@@ -253,7 +257,8 @@ class WorkflowLedgerRepository:
                    input_snapshot_json, input_snapshot_hash, safety_limits_json,
                    binding_snapshot_set_id, active_node_id, parent_run_id,
                    forked_from_checkpoint_id, completion_kind, terminal_reason,
-                   blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms
+                   blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms,
+                   structure_hash
             FROM workflow_runs
             WHERE team_id = ? AND workflow_id = ?
             ORDER BY created_at_ms DESC, run_id DESC

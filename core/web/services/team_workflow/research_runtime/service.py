@@ -30,6 +30,7 @@ from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
@@ -476,9 +477,10 @@ class ResearchWorkflowRuntimeService:
         if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
             raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
         definition = build_challenge_cup_workflow_definition()
+        identity = register_or_resolve(definition)
         return {
             "workflowId": definition.workflowId,
-            "workflowVersionId": f"wv-{definition.structureHash[:12]}",
+            "workflowVersionId": identity.workflowVersionId,
             "definition": definition.to_dict(),
         }
 
@@ -780,12 +782,19 @@ class ResearchWorkflowRuntimeService:
             except ContractValidationError as exc:
                 raise ResearchWorkflowError(str(exc), code="invalid_run_input") from exc
 
-            checkpoint_id = prepare_initial_checkpoint(self._checkpoint_path, thread_id)
+            # The pinned definition must be the same object identity used for
+            # the initial checkpoint and the frozen run record.
+            definition = build_challenge_cup_workflow_definition()
+            checkpoint_id = prepare_initial_checkpoint(
+                self._checkpoint_path,
+                thread_id,
+                definition=definition,
+            )
             record = build_initial_run_record(
                 run_id=run_id,
                 workflow_id=workflow_id,
                 workflow_version_id=meta["workflowVersionId"],
-                structure_hash=meta["definition"]["structureHash"],
+                structure_hash=definition.structureHash,
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,
                 input_snapshot=input_snapshot,
@@ -793,6 +802,7 @@ class ResearchWorkflowRuntimeService:
                 idempotency_key=idempotency_key,
                 create_input_fingerprint=create_input_fingerprint,
                 created_at=created_at,
+                definition=definition,
             )
             self._store.create_run(record)
             if create_index_key:

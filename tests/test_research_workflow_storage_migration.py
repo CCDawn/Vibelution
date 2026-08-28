@@ -113,7 +113,9 @@ def _make_empty_v4_ledger(path: Path) -> None:
     connection = apsw.Connection(str(path))
     try:
         connection.execute("DROP TABLE catalog_run_authorizations")
-        connection.execute("DELETE FROM schema_migrations WHERE version = 5")
+        # Strip every migration at or above v5 so MAX(version) reports 4,
+        # independent of how far the current schema has advanced.
+        connection.execute("DELETE FROM schema_migrations WHERE version >= 5")
     finally:
         connection.close()
 
