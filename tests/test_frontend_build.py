@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -498,6 +499,44 @@ def test_stale_build_lock_is_reclaimed(monkeypatch: pytest.MonkeyPatch, tmp_path
     with frontend_build.frontend_build_lock(tmp_path) as acquired:
         assert acquired["waited"] is True
         assert lock.is_dir()
+    assert not lock.exists()
+
+
+def _terminated_child_pid() -> int:
+    hidden = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden,
+    )
+    process.terminate()
+    process.wait(timeout=15)
+    return process.pid
+
+
+def test_pid_is_alive_reports_the_current_process() -> None:
+    assert frontend_build._pid_is_alive(os.getpid()) is True
+
+
+def test_pid_is_alive_reports_a_terminated_process_as_dead() -> None:
+    assert frontend_build._pid_is_alive(_terminated_child_pid()) is False
+
+
+def test_pid_is_alive_rejects_non_positive_pids() -> None:
+    assert frontend_build._pid_is_alive(0) is False
+    assert frontend_build._pid_is_alive(-1) is False
+
+
+def test_stale_lock_with_a_dead_holder_pid_is_reclaimed_by_the_real_probe(tmp_path: Path) -> None:
+    dead_pid = _terminated_child_pid()
+    lock = frontend_build.frontend_build_lock_path(tmp_path)
+    lock.mkdir(parents=True)
+    (lock / "holder.json").write_text(json.dumps({"pid": dead_pid}), encoding="utf-8")
+
+    with frontend_build.frontend_build_lock(tmp_path) as acquired:
+        assert acquired["waited"] is True
     assert not lock.exists()
 
 
