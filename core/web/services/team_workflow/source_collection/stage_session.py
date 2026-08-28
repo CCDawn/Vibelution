@@ -24,8 +24,122 @@ _AUTO_FORMAL_RETRY_STATUSES = {
     "blocked",
 }
 
+# Auto formal retry used to re-open unbounded times along the retryOfSessionId
+# chain (observed 13 attempts). Past this depth the chain is a systemic failure,
+# not a transient one: refuse new retries and force needs_review for a human.
+_MAX_FORMAL_RETRY_DEPTH = 3
+
+_FORMAL_RETRY_DEPTH_CHAIN_WALK_LIMIT = 32
+
 # Ingestion must not open when the candidate graph is clearly not ready.
 _INGESTION_GRAPH_MISSING_LINK_HARD_LIMIT = 5
+
+
+def _source_collection_stage_task_formal_retry_depth(
+    task: dict[str, Any] | None,
+    prior_tasks: list[dict[str, Any]],
+) -> int:
+    """Return the formal-retry depth for ``task`` along the retry chain.
+
+    Depth counts formal retries: a fresh task is 0 and each formal retry of a
+    parent task is parent depth + 1. Stored ``formalRetryDepth`` anchors the
+    walk when present; legacy records without the field are computed on the
+    fly by walking ``retrySourceTaskId`` (falling back to ``retryOfSessionId``
+    matched against the parent task's ``sessionId``). Missing anchors count 0,
+    so legacy chains stay compatible without backfill.
+    """
+    s = _service()
+    if not isinstance(task, dict):
+        return 0
+    tasks_by_id: dict[str, dict[str, Any]] = {}
+    tasks_by_session_id: dict[str, dict[str, Any]] = {}
+    for item in prior_tasks:
+        if not isinstance(item, dict):
+            continue
+        task_key = s._trim_text(item.get("taskId"), max_length=160)
+        if task_key:
+            tasks_by_id.setdefault(task_key, item)
+        session_key = s._trim_text(item.get("sessionId"), max_length=160)
+        if session_key:
+            tasks_by_session_id.setdefault(session_key, item)
+
+    depth = 0
+    seen_ids: set[str] = set()
+    current: dict[str, Any] | None = task
+    for _ in range(_FORMAL_RETRY_DEPTH_CHAIN_WALK_LIMIT):
+        if not isinstance(current, dict):
+            return depth
+        raw_depth = current.get("formalRetryDepth")
+        if isinstance(raw_depth, int) and not isinstance(raw_depth, bool) and raw_depth >= 0:
+            return depth + int(raw_depth)
+        current_id = s._trim_text(current.get("taskId"), max_length=160)
+        if current_id:
+            if current_id in seen_ids:
+                return depth
+            seen_ids.add(current_id)
+        parent_id = s._trim_text(current.get("retrySourceTaskId"), max_length=160)
+        parent = tasks_by_id.get(parent_id) if parent_id else None
+        if parent is None:
+            retry_of_session_id = s._trim_text(
+                current.get("retryOfSessionId"), max_length=160
+            )
+            parent = (
+                tasks_by_session_id.get(retry_of_session_id)
+                if retry_of_session_id
+                else None
+            )
+            if parent is not None and current_id:
+                parent_task_id = s._trim_text(parent.get("taskId"), max_length=160)
+                if parent_task_id and parent_task_id == current_id:
+                    parent = None
+        if parent is None:
+            return depth
+        depth += 1
+        current = parent
+    return depth
+
+
+def _reject_source_collection_stage_task_formal_retry_depth(
+    team_id: str,
+    run_id: str,
+    *,
+    previous_stage_task: dict[str, Any],
+    formal_retry_depth: int,
+) -> None:
+    """Close a retry chain that reached the depth cap as needs_review.
+
+    Writes the terminal review state on the failed task, records an anomaly
+    event, and raises the operator-facing error. Never opens another retry.
+    """
+    s = _service()
+    now = s.utc_now_iso()
+    rejected_task = {
+        **previous_stage_task,
+        "status": "needs_review",
+        "formalRetryDepth": max(0, int(formal_retry_depth)),
+        "formalRetryDepthExhausted": True,
+        "formalRetryDepthExhaustedAt": now,
+        "updatedAt": now,
+    }
+    s._upsert_source_collection_stage_session_task(team_id, run_id, rejected_task)
+    s._record_workflow_event(
+        "source_collection.stage_session_task_formal_retry_depth_exhausted",
+        team_id,
+        fields={
+            "runId": run_id,
+            "stageId": s._trim_text(previous_stage_task.get("stageId"), max_length=80),
+            "agentId": s._trim_text(previous_stage_task.get("agentId"), max_length=160),
+            "agentRole": s._trim_text(previous_stage_task.get("agentRole"), max_length=80),
+            "taskId": s._trim_text(previous_stage_task.get("taskId"), max_length=160),
+            "sessionId": s._trim_text(previous_stage_task.get("sessionId"), max_length=160),
+            "retryDepth": max(0, int(formal_retry_depth)),
+            "maxRetryDepth": _MAX_FORMAL_RETRY_DEPTH,
+        },
+    )
+    raise s.TeamWorkflowOrchestrationError(
+        f"已拒开新的正式重试：阶段任务 {s._trim_text(previous_stage_task.get('taskId'), max_length=160)} "
+        f"已达最大重试深度（{_MAX_FORMAL_RETRY_DEPTH} 次），已转为 needs_review，需要人工审查失败原因后再继续。"
+    )
 
 
 def assert_source_collection_stage_advance_ready(
@@ -868,14 +982,13 @@ def start_source_collection_stage_session_task(
             "turnId": "",
         }
 
-    previous_stage_task = s._latest_source_collection_stage_task(
-        [
-            item
-            for item in s._source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
-            if s._trim_text(item.get("stageId"), max_length=80) == stage_id
-            and s._trim_text(item.get("agentId"), max_length=160) == agent_id
-        ]
-    )
+    prior_stage_tasks = [
+        item
+        for item in s._source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
+        if s._trim_text(item.get("stageId"), max_length=80) == stage_id
+        and s._trim_text(item.get("agentId"), max_length=160) == agent_id
+    ]
+    previous_stage_task = s._latest_source_collection_stage_task(prior_stage_tasks)
     if (
         isinstance(previous_stage_task, dict)
         and s._trim_text(previous_stage_task.get("status"), max_length=80).lower()
@@ -890,6 +1003,10 @@ def start_source_collection_stage_session_task(
         previous_stage_task.get("status") if isinstance(previous_stage_task, dict) else "",
         max_length=80,
     ).lower()
+    formal_retry_depth = _source_collection_stage_task_formal_retry_depth(
+        previous_stage_task if isinstance(previous_stage_task, dict) else None,
+        prior_stage_tasks,
+    )
     auto_formal_retry = (
         not formal_retry_requested
         and previous_stage_task_status in _AUTO_FORMAL_RETRY_STATUSES
@@ -905,6 +1022,18 @@ def start_source_collection_stage_session_task(
         if auto_formal_retry
         else ""
     )
+    if (
+        formal_retry
+        and not missing_session_recovery
+        and formal_retry_depth >= _MAX_FORMAL_RETRY_DEPTH
+        and isinstance(previous_stage_task, dict)
+    ):
+        _reject_source_collection_stage_task_formal_retry_depth(
+            normalized_team_id,
+            normalized_run_id,
+            previous_stage_task=previous_stage_task,
+            formal_retry_depth=formal_retry_depth,
+        )
     if auto_formal_retry:
         s._record_workflow_event(
             "source_collection.stage_session_task_auto_formal_retry",
@@ -1039,6 +1168,13 @@ def start_source_collection_stage_session_task(
         "formalRetry": formal_retry,
         "formalRetryRequested": formal_retry_requested,
         "formalRetryReason": formal_retry_reason,
+        "formalRetryDepth": (
+            formal_retry_depth
+            if missing_session_recovery
+            else formal_retry_depth + 1
+            if formal_retry
+            else 0
+        ),
         "evidenceRemediationContract": evidence_remediation_contract,
         "status": "queued",
         "title": s._source_collection_stage_task_title(stage_id),

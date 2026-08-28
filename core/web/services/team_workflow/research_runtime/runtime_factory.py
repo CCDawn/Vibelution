@@ -7,6 +7,7 @@ the production runtime never composes itself inside a worker or route.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,8 @@ from .readiness.knowledge_recheck import build_knowledge_readiness_recheck
 from .real_domain_ports import RealDomainPorts
 from .real_readiness_context import RealDomainReadinessContext
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class WorkflowRuntime:
@@ -58,7 +61,29 @@ class WorkflowRuntime:
         handled += self.adapter_worker.run_once(limit=limit)
         handled += self.event_publish_worker.run_once(limit=limit)
         handled += self.delivery_worker.run_once(limit=limit)
+        self._reconcile_expired_task_bundles_best_effort()
         return handled
+
+    def _reconcile_expired_task_bundles_best_effort(self) -> None:
+        """Enforce task-bundle ``deadlineSeconds`` from the resident tick.
+
+        ``reconcile_task_bundles`` had no periodic caller, so bundle deadlines
+        never fired. ``run_workers_once`` is the one loop the production pump
+        (WorkflowOutboxPump) and every test drain already drive, so it is the
+        minimal-intrusion host: no worker constructor or recently changed
+        adapter/graph worker changes hands. The domain service is peeked (not
+        created) so runtimes composed without it stay inert, and any reconcile
+        failure is swallowed after logging — deadline enforcement must never
+        break dispatch.
+        """
+        try:
+            from .service import peek_research_workflow_runtime_service
+
+            service = peek_research_workflow_runtime_service()
+            if service is not None:
+                service.reconcile_all_expired_task_bundles()
+        except Exception:  # noqa: BLE001 - deadline repair is best-effort
+            logger.exception("task bundle deadline reconciliation failed")
 
     def close(self) -> None:
         self.store.close()

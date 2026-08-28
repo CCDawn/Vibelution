@@ -5,7 +5,9 @@ HumanTasks, session bindings, handoffs, and idempotency keys are durable on disk
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -121,6 +123,15 @@ from .team_role_source import effective_binding_layers
 _FILE_STORE_TERMINAL_RUN_STATUSES = frozenset(
     {"succeeded", "failed", "cancelled", "archived"}
 )
+
+_ACTIVE_TASK_BUNDLE_STATUSES = frozenset({"pending", "queued", "running"})
+
+# Deadline enforcement runs from the resident worker tick. The per-service
+# throttle bounds the store enumeration (one list_runs pass at most once per
+# interval) even when the pump drains in a tight loop during active work.
+_EXPIRED_TASK_BUNDLE_RECONCILE_MIN_INTERVAL_S = 30.0
+
+logger = logging.getLogger(__name__)
 
 
 def _require_non_terminal_run(record: dict[str, Any], *, command: str) -> None:
@@ -494,6 +505,7 @@ class ResearchWorkflowRuntimeService:
         self._binding_config = binding_config_store or WorkflowBindingConfigStore(self._store.root)
         # Command-level idempotency is also durable via index keys with prefix.
         self._command_memory: dict[str, str] = {}  # key -> run_id snapshot path only for process; reloaded from index
+        self._last_expired_bundle_reconcile_at: float = 0.0
 
     def get_definition(self, workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID) -> dict[str, Any]:
         definition, identity = _definition_meta_from(workflow_id)
@@ -1025,6 +1037,58 @@ class ResearchWorkflowRuntimeService:
             except TaskBundleError as exc:
                 raise ResearchWorkflowError(str(exc), code=exc.code) from exc
 
+    def reconcile_all_expired_task_bundles(
+        self,
+        *,
+        min_interval_seconds: float = _EXPIRED_TASK_BUNDLE_RECONCILE_MIN_INTERVAL_S,
+    ) -> list[dict[str, Any]]:
+        """Enforce ``deadlineSeconds`` across every run with active bundles.
+
+        ``reconcile_task_bundles`` had no periodic caller, so bundle deadlines
+        never fired. The resident worker tick (WorkflowOutboxPump ->
+        ``WorkflowRuntime.run_workers_once``) now calls this best-effort. A
+        per-service throttle bounds the enumeration cost; per-run errors are
+        logged and skipped so one bad run never blocks the others.
+        """
+        now_monotonic = time.monotonic()
+        if (
+            float(min_interval_seconds) > 0
+            and now_monotonic - self._last_expired_bundle_reconcile_at
+            < float(min_interval_seconds)
+        ):
+            return []
+        self._last_expired_bundle_reconcile_at = now_monotonic
+        now = iso(utc_now())
+        reconciled: list[dict[str, Any]] = []
+        for record in self._store.list_runs():
+            if str(record.get("status") or "") in _FILE_STORE_TERMINAL_RUN_STATUSES:
+                continue
+            has_active_bundle = any(
+                str(bundle.get("status") or "") in _ACTIVE_TASK_BUNDLE_STATUSES
+                and any(
+                    str(subtask.get("status") or "") in _ACTIVE_TASK_BUNDLE_STATUSES
+                    and str(subtask.get("deadlineAt") or "") < now
+                    for subtask in list(bundle.get("subtasks") or [])
+                    if isinstance(subtask, dict)
+                )
+                for bundle in list(record.get("taskBundles") or [])
+                if isinstance(bundle, dict)
+            )
+            if not has_active_bundle:
+                continue
+            run_id = str(record.get("runId") or "")
+            if not run_id:
+                continue
+            try:
+                reconciled.append(self.reconcile_task_bundles(run_id))
+            except ResearchWorkflowError as exc:
+                logger.warning(
+                    "task bundle deadline reconcile skipped for run %s: %s",
+                    run_id,
+                    exc,
+                )
+        return reconciled
+
     def resolve_human_task(
         self,
         run_id: str,
@@ -1333,6 +1397,17 @@ class ResearchWorkflowRuntimeService:
 
 _SERVICE: ResearchWorkflowRuntimeService | None = None
 _SERVICE_LOCK = threading.Lock()
+
+
+def peek_research_workflow_runtime_service() -> ResearchWorkflowRuntimeService | None:
+    """Return the live singleton without creating one.
+
+    Background tick wiring uses this so test runtimes and processes that never
+    built the domain runtime stay inert instead of materializing a production
+    store as a side effect.
+    """
+    with _SERVICE_LOCK:
+        return _SERVICE
 
 
 def get_research_workflow_runtime_service() -> ResearchWorkflowRuntimeService:
