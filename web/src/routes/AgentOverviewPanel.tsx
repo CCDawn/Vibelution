@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import {
   Bot,
@@ -102,17 +102,29 @@ function AgentOverviewIconView({ icon }: { icon: AgentOverviewIcon }) {
 const TECHNICAL_FACT_IDS = new Set(["system-ids", "tools", "memory", "territory"]);
 
 function FactGrid({ facts }: { facts: AgentOverviewFact[] }) {
+  const hasTooltipDetail = (fact: AgentOverviewFact) =>
+    Boolean(fact.title) && fact.title !== fact.value;
   return (
     <div className={styles.factGrid}>
-      {facts.map((fact) => (
-        <VTooltip key={fact.id} content={fact.title} width="wide">
-          <section tabIndex={0} aria-label={`${fact.label}说明`}>
+      {facts.map((fact) => {
+        const factCard = (
+          <section
+            tabIndex={0}
+            aria-label={`${fact.label}${hasTooltipDetail(fact) ? "详情" : "说明"}`}
+          >
             <AgentOverviewIconView icon={fact.icon} />
             <span>{fact.label}</span>
             <strong>{fact.value}</strong>
           </section>
-        </VTooltip>
-      ))}
+        );
+        return hasTooltipDetail(fact) ? (
+          <VTooltip key={fact.id} content={fact.title} width="wide">
+            {factCard}
+          </VTooltip>
+        ) : (
+          <Fragment key={fact.id}>{factCard}</Fragment>
+        );
+      })}
     </div>
   );
 }

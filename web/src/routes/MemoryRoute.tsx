@@ -142,7 +142,6 @@ const MemoryKnowledgeUsageContractPanel = lazy(() =>
 );
 
 type Copy = {
-  eyebrow: string;
   title: string;
   subtitle: string;
   returnToAgents: string;
@@ -670,7 +669,6 @@ const MEMORY_CHANNELS: MemoryChannel[] = ["conversation", "research", "self_evol
 
 const COPY: Record<"zh" | "en", Copy> = {
   zh: {
-    eyebrow: "Memory Library",
     title: "记忆库",
     subtitle: "统一治理 Agent 私有记忆、团队知识库、来源证据和生效边界。",
     returnToAgents: "返回 Agent 配置",
@@ -1094,7 +1092,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphNoKnowledge: "无知识条目",
   },
   en: {
-    eyebrow: "Memory Library",
     title: "Memory Library",
     subtitle: "Governs Agent private memory, team knowledge, source evidence, and effective scope in one place.",
     returnToAgents: "Return to Agent config",
@@ -4262,7 +4259,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       data-vui-domain-recipe="memory-knowledge-workbench"
       data-vui-layout-id={MEMORY_LAYOUT_ID}
       ariaLabel={memoryViewLabel(copy, forcedView)}
-      eyebrow={copy.eyebrow}
       title={memoryViewLabel(copy, forcedView)}
       meta={memoryViewSubtitle(copy, forcedView)}
       actions={(
