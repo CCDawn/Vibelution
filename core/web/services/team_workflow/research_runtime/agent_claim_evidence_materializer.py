@@ -5,13 +5,20 @@ formal workflow may acknowledge an ``evidence_card_batch`` only after the
 anchored claims have been copied into the canonical Evidence Store and can be
 read back there.  This module is that explicit boundary; it deliberately skips
 summaries that do not contain a verbatim, bounded source quote.
+
+Every materializable claim is first proposed in the team's question-scoped
+claim ledger (the production writer the R2.2 claim belief gate reads), and the
+ClaimEvidence record is registered under the ledger's claim id.  That bridge is
+what lets ``evaluate_claim_belief_gate`` find an evaluable ledger row for every
+claim id an evidence record references; self-minted evidence ids without a
+ledger row would keep the gate fail-closed forever.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +27,9 @@ from .source_extraction_evidence_cards import normalize_challenge_evidence_field
 
 class EvidenceMaterializationError(RuntimeError):
     """Raised when a formal task cannot be materialized within its frozen scope."""
+
+
+_LEDGER_SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
 
 def _text(value: object) -> str:
@@ -111,6 +121,53 @@ def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any
                     break
 
 
+def _propose_ledger_claim(
+    *,
+    team_id: str,
+    question_scope: Mapping[str, Any],
+    claim_text: str,
+) -> dict[str, Any]:
+    """Propose one anchored claim in the question-scoped claim ledger.
+
+    Idempotent by ledger contract: identical claim content under the same
+    scope reuses the deterministic ledger claim id.  Failures are surfaced as
+    ``EvidenceMaterializationError`` instead of being swallowed, so an
+    unproposable claim can never silently skip the claim belief gate.
+    """
+    from core.web.services.team_workflow import claim_ledger
+
+    identity = {
+        field: _text(question_scope.get(field)) for field in _LEDGER_SCOPE_FIELDS
+    }
+    agent_id = _text(question_scope.get("agentId"))
+    mode = _text(question_scope.get("mode")).lower()
+    if not all(identity.values()) or not agent_id:
+        raise EvidenceMaterializationError(
+            "question claim scope is incomplete for claim ledger proposal"
+        )
+    payload: dict[str, Any] = {
+        **identity,
+        "agentId": agent_id,
+        "mode": mode or claim_ledger.DEFAULT_MODE,
+        "claim": claim_text,
+        "createdBy": agent_id,
+        "source": "agent",
+    }
+    try:
+        proposed = claim_ledger.propose_claim(team_id, payload)
+    except Exception as exc:  # noqa: BLE001 - structured exposure, never swallowed
+        raise EvidenceMaterializationError(
+            f"claim ledger proposal failed for question {identity['question']}: {exc}"
+        ) from exc
+    claim = proposed.get("claim") if isinstance(proposed, Mapping) else None
+    claim_id = _text(claim.get("claimId")) if isinstance(claim, Mapping) else ""
+    if not claim_id:
+        raise EvidenceMaterializationError(
+            "claim ledger proposal returned no claim id"
+        )
+    return {"claimId": claim_id, "status": _text(proposed.get("status"))}
+
+
 def materialize_claim_evidence_from_task(
     *,
     project_root: str | Path,
@@ -119,10 +176,23 @@ def materialize_claim_evidence_from_task(
     source_collection_run_id: str,
     task: dict[str, Any],
     model_ref: str,
+    question_scope: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    """Register only fully anchored claims; repeated calls remain idempotent."""
+    """Register only fully anchored claims; repeated calls remain idempotent.
+
+    ``question_scope`` is the server-authoritative scope envelope for the
+    formal run's question (``_question_scope_envelope``).  Every materialized
+    claim is proposed in the team claim ledger first and the canonical
+    ClaimEvidence record is registered under the ledger claim id, so the
+    claim belief gate can evaluate the candidate from real extraction output.
+    """
     from core.research.evidence import ClaimEvidenceStore
 
+    if not isinstance(question_scope, Mapping):
+        raise EvidenceMaterializationError(
+            "question claim scope is required to bridge materialized evidence "
+            "to the claim ledger"
+        )
     normalized_team = _text(team_id)
     normalized_workflow_run = _text(workflow_run_id)
     normalized_source_run = _text(source_collection_run_id)
@@ -175,13 +245,16 @@ def materialize_claim_evidence_from_task(
                 ],
             }
         )
-        claim_id = "workflow-claim-" + _sha256(
-            {
-                "workflowRunId": normalized_workflow_run,
-                "candidateId": candidate_id,
-                "claim": claim_text,
-            }
-        )[:24]
+        # The claim ledger owns the claim identity (content + scope hash), so
+        # the evidence record bridges to the exact row the belief gate reads.
+        # Self-minted ids (the legacy ``workflow-claim-<sha>`` scheme) could
+        # never be proposed in advance because their hash included the future
+        # workflow run id, which left the gate permanently claim-data-missing.
+        proposed = _propose_ledger_claim(
+            team_id=normalized_team,
+            question_scope=question_scope,
+            claim_text=claim_text,
+        )
         relation_support_level = {
             "supports": "supports",
             "challenges": "contradicts",
@@ -189,7 +262,7 @@ def materialize_claim_evidence_from_task(
         stored = store.register(
             normalized_team,
             {
-                "claimId": claim_id,
+                "claimId": proposed["claimId"],
                 "candidateId": candidate_id,
                 "sourceId": source_ref,
                 "sourceRevision": source_revision,
@@ -214,9 +287,37 @@ def materialize_claim_evidence_from_task(
             {
                 **stored,
                 "challengeEvidence": challenge_evidence,
+                "claimLedgerStatus": proposed["status"],
             }
         )
     return materialized
+
+
+def _formal_question_scope(team_id: str, workflow_run_id: str) -> dict[str, str]:
+    """Resolve the frozen formal run's question scope for ledger proposals.
+
+    The workflow ledger owns the run→question binding, so the claim ledger
+    proposal uses exactly the question the run was created for.  An
+    unavailable ledger or a question-less run fails closed: materializing
+    evidence that can never bridge to a claim row would only feed the belief
+    gate permanent ``claim_data_missing`` verdicts.
+    """
+    from .formal_write_runtime import get_write_store
+    from .hypothesis_first_chain import _question_scope_envelope
+
+    try:
+        run = get_write_store().get_run(_text(workflow_run_id))
+    except Exception as exc:  # noqa: BLE001 - fail closed on unavailable ledger
+        raise EvidenceMaterializationError(
+            f"formal workflow run ledger is unavailable for claim scoping: {exc}"
+        ) from exc
+    question_id = _text(getattr(run, "question_id", "") if run is not None else "")
+    if not question_id:
+        raise EvidenceMaterializationError(
+            "formal workflow run does not carry a question; claims cannot be "
+            "proposed in the question-scoped claim ledger"
+        )
+    return _question_scope_envelope(team_id, question_id)
 
 
 def _candidate_source_run_id(candidate: dict[str, Any]) -> str:
@@ -329,4 +430,5 @@ def materialize_completed_extraction_task(
         source_collection_run_id=source_collection_run_id,
         task=task,
         model_ref=model_ref,
+        question_scope=_formal_question_scope(team_id, workflow_run_id),
     )

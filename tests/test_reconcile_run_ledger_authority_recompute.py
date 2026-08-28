@@ -26,6 +26,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.research_runtime.command_offers.reconcile_run import (
@@ -282,45 +284,63 @@ def _formal_actions_from_offers(
     from core.web.routes.team_workflows.hypothesis_first_state_models import (
         HypothesisFirstStateV2,
     )
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2,
+    )
     from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
         project_state_from_records,
     )
 
-    state = HypothesisFirstStateV2.model_validate(
-        project_state_from_records(
-            team_id="research-team",
-            question_id="SCI-096",
-            reset_boundary=None,
-            chain_records=[],
-            selection_records=[],
-            meeting_records=[],
-            digest_records=[],
-            decision_records=[],
-            hypothesis_round_records=[
-                {
-                    "roundId": "round-accepted",
-                    "question": "SCI-096",
-                    "roundIndex": 1,
-                    "status": "closed",
-                    "metaReview": {"accepted": True},
-                }
-            ],
-            formal_runs=[
-                {
-                    "runId": run_id,
-                    "teamId": "research-team",
-                    "questionId": "SCI-096",
-                    "status": "blocked",
-                    "runVersion": int(run_version),
-                }
-            ],
-            formal_snapshots={
-                run_id: {
-                    "commandOffers": [_offer_as_dict(offer) for offer in offers]
-                }
+    # Offers→actions mapping is the focus here; stub the v2 convergence gate
+    # seam with an allowed verdict (the synthetic chain carries no real claim
+    # data).  The gate itself is covered by the claim-gate suites.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            hypothesis_first_state_v2,
+            "_claim_belief_gate_verdict",
+            lambda _team_id, _question_id, candidate_id: {
+                "candidateId": candidate_id,
+                "status": "allowed",
+                "reason": "",
+                "claims": [],
+                "blockedClaims": [],
             },
         )
-    )
+        state = HypothesisFirstStateV2.model_validate(
+            project_state_from_records(
+                team_id="research-team",
+                question_id="SCI-096",
+                reset_boundary=None,
+                chain_records=[],
+                selection_records=[],
+                meeting_records=[],
+                digest_records=[],
+                decision_records=[],
+                hypothesis_round_records=[
+                    {
+                        "roundId": "round-accepted",
+                        "question": "SCI-096",
+                        "roundIndex": 1,
+                        "status": "closed",
+                        "metaReview": {"accepted": True},
+                    }
+                ],
+                formal_runs=[
+                    {
+                        "runId": run_id,
+                        "teamId": "research-team",
+                        "questionId": "SCI-096",
+                        "status": "blocked",
+                        "runVersion": int(run_version),
+                    }
+                ],
+                formal_snapshots={
+                    run_id: {
+                        "commandOffers": [_offer_as_dict(offer) for offer in offers]
+                    }
+                },
+            )
+        )
     return [action for action in state.allowedActions if action.kind == "command"]
 
 

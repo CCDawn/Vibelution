@@ -532,6 +532,10 @@ class ConvergenceState(PhaseState):
     accepted: bool
     roundIndex: int = Field(..., ge=0)
     roundBudget: int = Field(..., ge=1)
+    # R2.2 claim belief gate verdict for the recommended candidate; None
+    # while the chain is not structurally converged.  Mirrors the v1 chain
+    # state's claimBeliefGate so UIs can present the gate on either surface.
+    claimBeliefGate: dict[str, Any] | None = None
 
 
 class FormalRuntimeState(PhaseState):

@@ -7,6 +7,7 @@ import pytest
 from core.research.evidence import ClaimEvidenceStore
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.models import ActorKind
+from core.web.services.team_workflow import claim_ledger
 from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
     EvidenceMaterializationError,
     build_formal_evidence_retry_contract,
@@ -16,6 +17,26 @@ from core.web.services.team_workflow.research_runtime.domain_ports import (
     AgentTaskHandle,
     BindingResolution,
 )
+
+_QUESTION_ID = "SCI-MTZ-1"
+
+
+def _claim_bridge_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict]:
+    """One tmp project root owning the team, claim ledger and evidence store.
+
+    The chain module's project root is aligned too, so the real claim belief
+    gate reads the same ledger and evidence stores the materializer wrote.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path, raising=False)
+    team_id = team_service.create_team(name="claim bridge team")["teamId"]
+    return team_id, chain._question_scope_envelope(team_id, _QUESTION_ID)
 
 
 def _v2_source_fields(**overrides: object) -> dict[str, object]:
@@ -31,10 +52,10 @@ def _v2_source_fields(**overrides: object) -> dict[str, object]:
     }
 
 
-def _verified_task() -> dict:
+def _verified_task(*, team_id: str = "team-a") -> dict:
     return {
         "taskId": "task-extract-1",
-        "teamId": "team-a",
+        "teamId": team_id,
         "runId": "sc-run-a",
         "stageId": "extraction",
         "agentId": "agent-a",
@@ -77,18 +98,21 @@ def _verified_task() -> dict:
 
 def test_materializes_only_exactly_anchored_claims_into_canonical_store(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
     created = materialize_claim_evidence_from_task(
         project_root=tmp_path,
-        team_id="team-a",
+        team_id=team_id,
         workflow_run_id="wf-run-a",
         source_collection_run_id="sc-run-a",
-        task=_verified_task(),
+        task=_verified_task(team_id=team_id),
         model_ref="provider/model-a",
+        question_scope=scope,
     )
 
     assert len(created) == 1
-    records = ClaimEvidenceStore(tmp_path).list("team-a")
+    records = ClaimEvidenceStore(tmp_path).list(team_id)
     assert len(records) == 1
     assert records[0]["candidateId"] == "candidate-a"
     assert records[0]["quote"] == "A bounded verbatim excerpt from the abstract."
@@ -110,18 +134,22 @@ def test_materializes_only_exactly_anchored_claims_into_canonical_store(
 
     duplicate = materialize_claim_evidence_from_task(
         project_root=tmp_path,
-        team_id="team-a",
+        team_id=team_id,
         workflow_run_id="wf-run-a",
         source_collection_run_id="sc-run-a",
-        task=_verified_task(),
+        task=_verified_task(team_id=team_id),
         model_ref="provider/model-a",
+        question_scope=scope,
     )
-    assert duplicate == created
-    assert len(ClaimEvidenceStore(tmp_path).list("team-a")) == 1
+    assert duplicate[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+    assert duplicate[0]["claimId"] == created[0]["claimId"]
+    assert duplicate[0]["claimLedgerStatus"] == "reused"
+    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 1
 
 
 def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task = {
         "taskId": "task-extract-key-findings",
@@ -170,13 +198,16 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
         },
     }
 
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task["teamId"] = team_id
     created = materialize_claim_evidence_from_task(
         project_root=tmp_path,
-        team_id="team-a",
+        team_id=team_id,
         workflow_run_id="wf-run-a",
         source_collection_run_id="sc-run-a",
         task=task,
         model_ref="provider/model-a",
+        question_scope=scope,
     )
 
     assert len(created) == 1
@@ -191,6 +222,7 @@ def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
 
 def test_materializes_flat_extractions_with_evidence_ref_quotes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task = {
         "taskId": "task-extract-flat",
@@ -235,13 +267,16 @@ def test_materializes_flat_extractions_with_evidence_ref_quotes(
         },
     }
 
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task["teamId"] = team_id
     created = materialize_claim_evidence_from_task(
         project_root=tmp_path,
-        team_id="team-a",
+        team_id=team_id,
         workflow_run_id="wf-run-a",
         source_collection_run_id="sc-run-a",
         task=task,
         model_ref="provider/model-a",
+        question_scope=scope,
     )
 
     assert len(created) == 1
@@ -252,8 +287,11 @@ def test_materializes_flat_extractions_with_evidence_ref_quotes(
 
 def test_verified_materialization_fails_closed_when_v2_fields_are_missing(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
     task = _verified_task()
+    task["teamId"] = team_id
     claim = task["result"]["candidateExtractions"][0]["claims"][0]
     del claim["fact"]
     claim["claim"] = "A summary must not substitute for fact."
@@ -261,23 +299,32 @@ def test_verified_materialization_fails_closed_when_v2_fields_are_missing(
     with pytest.raises(ValueError, match="missing explicit fact"):
         materialize_claim_evidence_from_task(
             project_root=tmp_path,
-            team_id="team-a",
+            team_id=team_id,
             workflow_run_id="wf-run-a",
             source_collection_run_id="sc-run-a",
             task=task,
             model_ref="provider/model-a",
+            question_scope=scope,
         )
+    # Nothing was proposed into the ledger for the failed claim.
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 0
 
 
-def test_rejects_cross_run_task_materialization(tmp_path: Path) -> None:
+def test_rejects_cross_run_task_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task = _verified_task()
+    task["teamId"] = team_id
     with pytest.raises(EvidenceMaterializationError, match="source collection run"):
         materialize_claim_evidence_from_task(
             project_root=tmp_path,
-            team_id="team-a",
+            team_id=team_id,
             workflow_run_id="wf-run-a",
             source_collection_run_id="sc-run-other",
-            task=_verified_task(),
+            task=task,
             model_ref="provider/model-a",
+            question_scope=scope,
         )
 
 
@@ -446,3 +493,180 @@ def test_extraction_prompt_requires_verbatim_quote_for_claim_evidence() -> None:
         assert field in prompt
     assert "sourceId" in prompt
     assert "不能用 URL" in prompt
+
+
+# ---------------------------------------------------------------------------
+# extraction → claim ledger bridge (production writer for the belief gate)
+# ---------------------------------------------------------------------------
+
+
+def test_materialized_claims_bridge_ledger_row_and_allow_belief_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real extraction output satisfies the claim belief gate end to end.
+
+    The materialized claim is proposed in the question-scoped claim ledger
+    (the production writer the gate reads), the ClaimEvidence record carries
+    the ledger claim id, and ``evaluate_claim_belief_gate`` allows the
+    candidate on the real stores — no seam stubs.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+    assert created[0]["claimLedgerStatus"] == "created"
+    ledger_claim_id = created[0]["claimId"]
+
+    # 1. The ledger row exists, scoped to the question the run serves.
+    listing = claim_ledger.list_claims(team_id)
+    assert listing["claimCount"] == 1
+    row = listing["claims"][0]
+    assert row["claimId"] == ledger_claim_id
+    assert row["question"] == _QUESTION_ID
+    assert row["status"] == "proposed"
+    assert row["claim"] == "The abstract reports a bounded result."
+
+    # 2. The evidence record references the same claim id.
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    assert len(stored) == 1
+    assert stored[0]["claimId"] == ledger_claim_id
+    assert stored[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+
+    # 3. The gate allows the candidate on the real ledger + evidence stores.
+    verdict = chain.evaluate_claim_belief_gate(team_id, _QUESTION_ID, ["candidate-a"])[
+        "candidate-a"
+    ]
+    assert verdict["status"] == "allowed", verdict
+    assert [item["claimId"] for item in verdict["claims"]] == [ledger_claim_id]
+
+    # 4. Idempotent replay: same content + scope reuses the same ledger row.
+    replay = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+    assert replay[0]["claimId"] == ledger_claim_id
+    assert replay[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+    assert replay[0]["claimLedgerStatus"] == "reused"
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 1
+    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 1
+
+
+def test_materialization_without_question_scope_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No unbridged evidence may be produced: scope is mandatory."""
+    team_id, _scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task = _verified_task()
+    task["teamId"] = team_id
+    with pytest.raises(EvidenceMaterializationError, match="question claim scope"):
+        materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id=team_id,
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=task,
+            model_ref="provider/model-a",
+            question_scope=None,  # type: ignore[arg-type]
+        )
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 0
+    assert ClaimEvidenceStore(tmp_path).list(team_id) == []
+
+
+def test_materialization_surfaces_ledger_proposal_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing ledger proposal is structured, never swallowed."""
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+
+    def _broken_propose(_team_id: str, _payload: dict) -> dict:
+        raise claim_ledger.ClaimLedgerError("ledger disk unavailable")
+
+    monkeypatch.setattr(claim_ledger, "propose_claim", _broken_propose)
+    task = _verified_task()
+    task["teamId"] = team_id
+    with pytest.raises(
+        EvidenceMaterializationError, match="claim ledger proposal failed"
+    ):
+        materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id=team_id,
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=task,
+            model_ref="provider/model-a",
+            question_scope=scope,
+        )
+    # The failed claim registered no evidence either: fail-closed, not partial.
+    assert ClaimEvidenceStore(tmp_path).list(team_id) == []
+
+
+def test_completed_extraction_resolves_question_scope_from_run_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production entry scopes proposals via the frozen run→question binding."""
+    from types import SimpleNamespace
+
+    from core.web.services.team_workflow.research_runtime import (
+        agent_claim_evidence_materializer as materializer,
+    )
+
+    captured: dict = {}
+
+    class _FakeStore:
+        def get_run(self, run_id: str):
+            captured["runId"] = run_id
+            return SimpleNamespace(question_id="sci-0042")
+
+    import core.web.services.team_workflow.research_runtime.formal_write_runtime as fwrt
+
+    monkeypatch.setattr(fwrt, "get_write_store", lambda: _FakeStore())
+    scope = materializer._formal_question_scope("team-a", "wf-run-9")
+    assert captured["runId"] == "wf-run-9"
+    assert scope["question"] == "SCI-0042"
+    assert all(
+        str(scope.get(field) or "").strip()
+        for field in (
+            "program",
+            "theme",
+            "campaign",
+            "question",
+            "branch",
+            "workflow",
+            "agentId",
+            "mode",
+        )
+    )
+
+
+def test_completed_extraction_fails_closed_without_run_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.web.services.team_workflow.research_runtime import (
+        agent_claim_evidence_materializer as materializer,
+    )
+    import core.web.services.team_workflow.research_runtime.formal_write_runtime as fwrt
+
+    monkeypatch.setattr(
+        fwrt, "get_write_store", lambda: SimpleNamespace(
+            get_run=lambda _run_id: SimpleNamespace(question_id="")
+        )
+    )
+    with pytest.raises(EvidenceMaterializationError, match="does not carry a question"):
+        materializer._formal_question_scope("team-a", "wf-run-9")

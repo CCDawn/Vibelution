@@ -2211,6 +2211,25 @@ def _project_formal_and_program(
     return formal, program, problems, actions, "program_delivery"
 
 
+def _claim_belief_gate_verdict(
+    team_id: str, question_id: str, candidate_id: str
+) -> dict[str, Any]:
+    """Mirror the v1 chain claim belief gate for v2 convergence consistency.
+
+    The v1 chain state is the readiness authority for the formal path; this
+    seam keeps the v2 projection on the exact same verdict so the offered
+    ``create_formal_run`` transition can never disagree with node readiness.
+    """
+    from .hypothesis_first_chain import (
+        _blocked_gate_verdict,
+        evaluate_claim_belief_gate,
+    )
+
+    return evaluate_claim_belief_gate(team_id, question_id, [candidate_id]).get(
+        candidate_id
+    ) or _blocked_gate_verdict(candidate_id, "claim_data_missing")
+
+
 def project_state_from_records(
     *,
     team_id: str,
@@ -2896,6 +2915,42 @@ def project_state_from_records(
     )
     pending_collection = any(item.get("lifecycle") != "completed" for item in collection_requests)
     converged = bool(latest_round and latest_round.get("status") == "closed" and accepted and not pending_collection)
+    # Convergence consistency (claim belief hard gate, fail-closed): v2
+    # mirrors the v1 chain state's gate so both projections agree — an
+    # accepted round whose recommended candidate carries no evaluable,
+    # unrefuted claim belief must not project ``converged`` (and must not
+    # offer ``create_formal_run``) while formal readiness stays blocked.
+    # The verdict is surfaced on the convergence payload for UI presentation.
+    claim_belief_gate: dict[str, Any] | None = None
+    if converged:
+        gate_candidate_id = (
+            str(meta_review.get("recommendationCandidateId") or "").strip()
+            if isinstance(meta_review, Mapping)
+            else ""
+        )
+        try:
+            verdict = _claim_belief_gate_verdict(
+                team_id, normalized_question_id, gate_candidate_id
+            )
+        except Exception:  # noqa: BLE001 - fail closed on unavailable gate
+            verdict = {
+                "candidateId": gate_candidate_id,
+                "status": "blocked",
+                "reason": "claim_belief_gate_unavailable",
+                "claims": [],
+                "blockedClaims": [],
+            }
+        claim_belief_gate = {
+            "decisionPoint": "converge_question",
+            "roundId": str((latest_round or {}).get("roundId") or ""),
+            "candidateId": gate_candidate_id,
+            "status": str(verdict.get("status") or ""),
+            "reason": str(verdict.get("reason") or ""),
+            "claims": list(verdict.get("claims") or []),
+            "blockedClaims": list(verdict.get("blockedClaims") or []),
+        }
+        if claim_belief_gate["status"] != "allowed":
+            converged = False
     round_index = int((latest_round or {}).get("roundIndex") or active_round or 0)
     round_budget = max(
         [int(item.get("roundBudget") or 0) for item in links] + [3]
@@ -2935,6 +2990,7 @@ def project_state_from_records(
         "accepted": converged,
         "roundIndex": round_index,
         "roundBudget": round_budget,
+        "claimBeliefGate": claim_belief_gate,
     }
 
     (

@@ -20,11 +20,54 @@ from core.web.routes.team_workflows.hypothesis_first_state_models import (
     HypothesisFirstStateV2,
     PhaseState,
 )
+from core.web.services.team_workflow.research_runtime import (
+    hypothesis_first_state_v2 as hf_state_v2_module,
+)
 from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
     finalize_state_versions,
     project_state_from_records,
 )
 from tests.helpers.managed_processes import managed_processes
+
+_REAL_CLAIM_BELIEF_GATE_VERDICT = hf_state_v2_module._claim_belief_gate_verdict
+
+
+@pytest.fixture(autouse=True)
+def _allow_claim_belief_gate(monkeypatch: pytest.MonkeyPatch):
+    """Default v2 projections to a gate-allowed context.
+
+    The claim belief hard gate itself is covered end-to-end by the claim-gate
+    and materialization suites; these unit tests stub the convergence seam so
+    they keep testing action/phase projection.  The consistency tests below
+    re-bind the real (or a blocked) verdict explicitly.
+    """
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_claim_belief_gate_verdict",
+        lambda _team_id, _question_id, candidate_id: {
+            "candidateId": candidate_id,
+            "status": "allowed",
+            "reason": "",
+            "claims": [],
+            "blockedClaims": [],
+        },
+    )
+
+
+def _blocked_claim_belief_gate(monkeypatch: pytest.MonkeyPatch, reason: str) -> None:
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_claim_belief_gate_verdict",
+        lambda _team_id, _question_id, candidate_id: {
+            "candidateId": candidate_id,
+            "status": "blocked",
+            "reason": reason,
+            "claims": [],
+            "blockedClaims": [
+                {"claimId": "claim-1", "beliefState": "contradicted"}
+            ],
+        },
+    )
 
 
 def _phase(
@@ -4302,3 +4345,168 @@ def test_route_maps_chat_room_busy_error_to_conflict() -> None:
             ),
         )
     assert exc_info.value.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# v1/v2 convergence consistency (claim belief hard gate)
+# ---------------------------------------------------------------------------
+
+
+def _converged_chain_records() -> list[dict[str, object]]:
+    return [
+        {
+            "recordKind": "hypothesis_round",
+            "roundId": "round-accepted",
+            "question": "SCI-001",
+            "roundIndex": 1,
+            "status": "closed",
+            "createdAt": "2026-08-25T00:00:00Z",
+            "metaReview": {
+                "accepted": True,
+                "recommendationCandidateId": "candidate-confirmed",
+            },
+        }
+    ]
+
+
+def test_gate_blocked_round_no_longer_projects_converged_or_create_formal_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v2 must agree with the v1 chain gate: a blocked candidate is not converged.
+
+    Before the consistency fix, v2 projected ``converged`` from structural
+    facts alone and kept offering ``create_formal_run`` while the v1 chain
+    state (readiness authority) stayed blocked on the same claim data.
+    """
+    _blocked_claim_belief_gate(monkeypatch, "claim_data_missing")
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=_converged_chain_records(),
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.accepted is False
+    assert state.convergence.claimBeliefGate is not None
+    assert state.convergence.claimBeliefGate["status"] == "blocked"
+    assert state.convergence.claimBeliefGate["reason"] == "claim_data_missing"
+    assert not any(
+        action.kind == "command" and action.command == "create_formal_run"
+        for action in state.allowedActions
+    )
+    assert state.currentPhase == "convergence"
+
+
+def test_v2_convergence_matches_real_claim_ledger_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real claim-ledger gate decides v2 convergence (no seam stub)."""
+    from core.research.evidence import ClaimEvidenceStore
+    from core.research.workflow.contracts import scope_hash_for
+    from core.web.services import team_service
+    from core.web.services.team_workflow import claim_ledger
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_claim_belief_gate_verdict",
+        _REAL_CLAIM_BELIEF_GATE_VERDICT,
+    )
+    team_id = team_service.create_team(name="v2 convergence gate team")["teamId"]
+    scope = chain._question_scope_envelope(team_id, "SCI-001")
+    identity = {
+        field: scope[field]
+        for field in ("program", "theme", "campaign", "question", "branch", "workflow")
+    }
+    scope_hash = scope_hash_for(
+        **identity, agent_id=scope["agentId"], mode=scope["mode"]
+    )
+    created = claim_ledger.propose_claim(
+        team_id,
+        {
+            **identity,
+            "agentId": scope["agentId"],
+            "mode": scope["mode"],
+            "claim": "Candidate candidate-confirmed carries a review-supported core claim.",
+            "createdBy": scope["agentId"],
+            "source": "agent",
+        },
+    )
+    claim_id = created["claim"]["claimId"]
+    evidence_id = "ce-v2-convergence-1"
+    claim_ledger.support_claim(
+        team_id,
+        claim_id,
+        {
+            "evidenceRefs": [
+                {
+                    "claimEvidenceId": evidence_id,
+                    "scopeHash": scope_hash,
+                    "reviewStatus": "accepted",
+                    "supportLevel": "supports",
+                    "sourceId": "fixture:v2-convergence",
+                }
+            ],
+            "supportedBy": scope["agentId"],
+        },
+    )
+    # The candidate bridge the gate consumes comes from the evidence store
+    # under the same project root the chain reads.
+    monkeypatch.setattr(
+        chain,
+        "_claim_evidence_records",
+        lambda _team_id: [
+            {
+                "claimEvidenceId": evidence_id,
+                "claimId": claim_id,
+                "candidateId": "candidate-confirmed",
+                "sourceId": "fixture:v2-convergence",
+                "reviewStatus": "accepted",
+                "supportLevel": "supports",
+                "scopeHash": scope_hash,
+            }
+        ],
+    )
+
+    # v1 chain gate verdict and v2 convergence must agree on the same data.
+    assert chain.evaluate_claim_belief_gate(
+        team_id, "SCI-001", ["candidate-confirmed"]
+    )["candidate-confirmed"]["status"] == "allowed"
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id=team_id,
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=_converged_chain_records(),
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.accepted is True
+    assert state.convergence.claimBeliefGate is not None
+    assert state.convergence.claimBeliefGate["status"] == "allowed"
+    assert state.convergence.claimBeliefGate["candidateId"] == "candidate-confirmed"
+    assert any(
+        action.kind == "command" and action.command == "create_formal_run"
+        for action in state.allowedActions
+    )
+    # The real evidence store is untouched by the projection.
+    assert ClaimEvidenceStore(tmp_path).list(team_id) == []
