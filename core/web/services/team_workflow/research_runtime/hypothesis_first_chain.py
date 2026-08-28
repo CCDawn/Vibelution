@@ -1794,6 +1794,61 @@ def _submit_formal_v2_command(
         command_node_id = requested_node_id
         payload = dict(offered_payload)
         command_idempotency_key = offered_idempotency_key
+    if kind is WorkflowCommandKind.START_NODE:
+        requested_node_id = str(node_id or "").strip()
+        if not requested_node_id:
+            raise HypothesisFirstChainError("start_node requires nodeId")
+        snapshot = get_query_service().get_snapshot(
+            team_id=team_id,
+            run_id=run.run_id,
+        )
+        snapshot_payload = snapshot.to_dict() if hasattr(snapshot, "to_dict") else snapshot
+        offers = (
+            list(snapshot_payload.get("commandOffers") or [])
+            if isinstance(snapshot_payload, Mapping)
+            else []
+        )
+        offer = next(
+            (
+                item
+                for item in offers
+                if isinstance(item, Mapping)
+                and str(item.get("command") or "") == WorkflowCommandKind.START_NODE.value
+                and str(item.get("nodeId") or "").strip() == requested_node_id
+                and item.get("available") is True
+            ),
+            None,
+        )
+        if offer is None:
+            raise HypothesisFirstChainError(
+                "formal node start offer is unavailable or no longer matches the node"
+            )
+        offered_version = offer.get("expectedRunVersion")
+        if offered_version is not None:
+            try:
+                if int(offered_version) != int(run.run_version):
+                    raise HypothesisFirstChainError(
+                        "formal node start offer is stale"
+                    )
+            except (TypeError, ValueError) as exc:
+                raise HypothesisFirstChainError(
+                    "formal node start offer has an invalid run version"
+                ) from exc
+        offered_payload = offer.get("payload")
+        if not isinstance(offered_payload, Mapping):
+            raise HypothesisFirstChainError(
+                "formal node start offer has an invalid payload"
+            )
+        offered_idempotency_key = str(
+            offer.get("idempotencyKey") or ""
+        ).strip()
+        if not offered_idempotency_key:
+            raise HypothesisFirstChainError(
+                "formal node start offer has no idempotency key"
+            )
+        command_node_id = requested_node_id
+        payload = dict(offered_payload)
+        command_idempotency_key = offered_idempotency_key
     if kind is WorkflowCommandKind.FORK_REVISION:
         snapshot = get_query_service().get_snapshot(team_id=team_id, run_id=run.run_id)
         snapshot_payload = snapshot.to_dict() if hasattr(snapshot, "to_dict") else snapshot
@@ -1852,6 +1907,100 @@ def _submit_formal_v2_command(
     except Exception as exc:
         raise _formal_command_rejection(exc) from exc
     return receipt.to_dict()
+
+
+def _formal_run_entry_node_id(run: Mapping[str, Any]) -> str:
+    """Resolve the first startable node of the run's pinned definition.
+
+    The graph compiles ``START -> nodes[0]`` from the resolved definition, so
+    a fresh ``created`` run can only meaningfully start at its entry node.
+    HUMAN nodes never receive start offers, so they are skipped exactly the
+    way the offer builder skips them.
+    """
+    from core.research.workflow.definition_registry import (
+        resolve_definition_for_run_record,
+    )
+    from core.research.workflow.models import ActorKind
+
+    definition = resolve_definition_for_run_record(dict(run))
+    return next(
+        (
+            node.nodeId
+            for node in definition.nodes
+            if node.actorKind is not ActorKind.HUMAN
+        ),
+        "",
+    )
+
+
+def _auto_start_created_formal_run(
+    team_id: str,
+    *,
+    run: Mapping[str, Any],
+    idempotency_key: str,
+) -> dict[str, Any] | None:
+    """Submit the entry-node start_node right after ``create_formal_run``.
+
+    Without this a created formal run waits indefinitely for a manual UI
+    start (the graph worker's created-run reconciliation deliberately spares
+    hypothesis-first-era runs only).  The start goes through the same offer
+    gate as the UI: the offer's own idempotencyKey keeps replays idempotent,
+    and an unavailable (readiness-blocked) offer keeps the historical
+    behavior — wait for a human start, never bypass readiness.  Best-effort:
+    any failure records a scene event and returns None instead of failing
+    the create command.
+    """
+    run_id = str(run.get("runId") or "").strip()
+    if not run_id:
+        return None
+    try:
+        entry_node_id = _formal_run_entry_node_id(run)
+        if not entry_node_id:
+            raise HypothesisFirstChainError(
+                "formal run definition has no startable entry node"
+            )
+        receipt = _submit_formal_v2_command(
+            team_id,
+            run_id=run_id,
+            node_id=entry_node_id,
+            command="start_node",
+            idempotency_key=idempotency_key,
+        )
+    except HypothesisFirstChainError as exc:
+        # Offer unavailable (readiness gate) or formal runtime absent (e.g.
+        # command-line path): keep the historical wait-for-manual-start state.
+        _record_scene_event(
+            "formal_run_auto_start_waited",
+            outcome="waited_for_manual_start",
+            fields={
+                "runId": run_id,
+                "reason": str(exc),
+                "errorType": type(exc).__name__,
+            },
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 - auto-start must never fail create
+        _record_scene_event(
+            "formal_run_auto_start_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "runId": run_id,
+                "reason": str(exc),
+                "errorType": type(exc).__name__,
+            },
+        )
+        return None
+    _record_scene_event(
+        "formal_run_auto_start_submitted",
+        outcome="submitted",
+        fields={
+            "runId": run_id,
+            "commandId": str(receipt.get("commandId") or ""),
+            "receiptStatus": str(receipt.get("status") or ""),
+        },
+    )
+    return receipt
 
 
 def _retry_program_delivery(
@@ -2453,6 +2602,16 @@ def _execute_v2_command_impl(
                     payload.get("hypothesisRoundId") or ""
                 ),
             )
+            # A created run has no automatic start channel (graph-worker
+            # reconciliation spares only hypothesis-first-era runs), so submit
+            # the entry start_node immediately; readiness-blocked offers keep
+            # the historical wait-for-manual-start behavior.
+            if isinstance(result, Mapping) and str(result.get("runId") or "").strip():
+                _auto_start_created_formal_run(
+                    normalized_team_id,
+                    run=result,
+                    idempotency_key=idempotency_key,
+                )
         elif command == "retry_formal_node":
             result = _submit_formal_v2_command(
                 normalized_team_id,

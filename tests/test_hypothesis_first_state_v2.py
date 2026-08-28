@@ -2180,6 +2180,364 @@ def test_submit_formal_retry_keeps_readiness_rejection_structure(
     assert error.blockers == [blocker.to_dict()]
 
 
+@pytest.mark.parametrize(
+    "offers",
+    [
+        [{
+            "command": "start_node",
+            "nodeId": "problem_understanding",
+            "available": False,
+            "payload": {},
+        }],
+        [{
+            "command": "start_node",
+            "nodeId": "hypothesis_design",
+            "available": True,
+            "payload": {},
+        }],
+        [{
+            "command": "retry_node",
+            "nodeId": "problem_understanding",
+            "available": True,
+            "idempotencyKey": "offer:run-fresh:problem_understanding:retry_node:a2:v1",
+            "payload": {"retryKind": "same_node"},
+        }],
+        [],
+    ],
+    ids=["unavailable", "tampered-node", "wrong-command", "no-offers"],
+)
+def test_submit_formal_start_rejects_unavailable_or_mismatched_offer(
+    offers: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        hypothesis_first_chain,
+        runtime_factory,
+    )
+
+    run = SimpleNamespace(run_id="run-fresh", team_id="team-1", run_version=1)
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            assert (team_id, run_id) == ("team-1", "run-fresh")
+            return {"commandOffers": offers}
+
+    class CommandService:
+        def submit(self, _request):
+            pytest.fail("an unavailable or mismatched start offer must not submit")
+
+    runtime = SimpleNamespace(
+        store=SimpleNamespace(get_run=lambda run_id: run if run_id == run.run_id else None),
+        command_service=CommandService(),
+    )
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: runtime)
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+
+    with pytest.raises(hypothesis_first_chain.HypothesisFirstChainError):
+        hypothesis_first_chain._submit_formal_v2_command(
+            "team-1",
+            run_id="run-fresh",
+            node_id="problem_understanding",
+            command="start_node",
+            idempotency_key="hf2:create-formal-run:round-accepted:1",
+        )
+
+
+def test_submit_formal_start_uses_current_offer_payload_and_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.research.workflow.contracts import WorkflowCommandKind
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        hypothesis_first_chain,
+        runtime_factory,
+    )
+
+    run = SimpleNamespace(run_id="run-fresh", team_id="team-1", run_version=1)
+    snapshot = {
+        "run": {"runVersion": 1},
+        "commandOffers": [{
+            "command": "start_node",
+            "nodeId": "problem_understanding",
+            "available": True,
+            "idempotencyKey": "offer:run-fresh:problem_understanding:start_node:v1",
+            "payload": {},
+        }],
+    }
+    calls: list[object] = []
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            assert (team_id, run_id) == ("team-1", "run-fresh")
+            return snapshot
+
+    class CommandService:
+        def submit(self, request):
+            calls.append(request)
+            return SimpleNamespace(to_dict=lambda: {"status": "accepted"})
+
+    runtime = SimpleNamespace(
+        store=SimpleNamespace(get_run=lambda run_id: run if run_id == run.run_id else None),
+        command_service=CommandService(),
+    )
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: runtime)
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+
+    result = hypothesis_first_chain._submit_formal_v2_command(
+        "team-1",
+        run_id="run-fresh",
+        node_id="problem_understanding",
+        command="start_node",
+        idempotency_key="hf2:create-formal-run:round-accepted:1",
+    )
+
+    assert result == {"status": "accepted"}
+    assert len(calls) == 1
+    request = calls[0]
+    assert request.command is WorkflowCommandKind.START_NODE
+    assert request.run_id == "run-fresh"
+    assert request.team_id == "team-1"
+    assert request.node_id == "problem_understanding"
+    assert request.expected_run_version == 1
+    # The offer's own idempotency key (not the chain action key) makes replays
+    # of the same start land on the command service idempotency fence.
+    assert request.idempotency_key == "offer:run-fresh:problem_understanding:start_node:v1"
+    assert request.payload == {}
+
+
+def _patch_create_formal_run_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    offers: list[dict[str, object]],
+    runtime: Any = None,
+) -> tuple[list[object], list[tuple[str, dict[str, Any]]]]:
+    """Shared scaffolding: v2 envelope for create_formal_run + runtime fakes.
+
+    Returns ``(submit_calls, scene_events)``.  ``runtime=None`` simulates the
+    command-line path where no production runtime (command service) exists.
+    """
+    from types import SimpleNamespace
+
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.research.workflow.definition_registry import definition_identity
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+        run_creation,
+        runtime_factory,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:converged-round",
+        "allowedActions": [{
+            "kind": "command",
+            "actionId": "create-formal-run-v2:round-accepted:1",
+            "command": "create_formal_run",
+            "payload": {"hypothesisRoundId": "round-accepted"},
+            "enabled": True,
+            "idempotencyKey": "hf2:create-formal-run:round-accepted:1",
+        }],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    identity = definition_identity(build_challenge_cup_workflow_definition())
+    created_run = {
+        "runId": "run-fresh",
+        "workflowId": identity.workflowId,
+        "workflowVersionId": identity.workflowVersionId,
+        "structureHash": identity.structureHash,
+        "teamId": "team-1",
+        "questionId": "SCI-001",
+        "status": "queued",
+        "runVersion": 1,
+    }
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **_kwargs: dict(created_run),
+    )
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            assert (team_id, run_id) == ("team-1", "run-fresh")
+            return {"commandOffers": offers}
+
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+
+    submit_calls: list[object] = []
+
+    class CommandService:
+        def submit(self, request):
+            submit_calls.append(request)
+            return SimpleNamespace(to_dict=lambda: {"status": "accepted"})
+
+    run = SimpleNamespace(run_id="run-fresh", team_id="team-1", run_version=1)
+    runtime_with_commands = SimpleNamespace(
+        store=SimpleNamespace(get_run=lambda run_id: run if run_id == run.run_id else None),
+        command_service=CommandService(),
+    )
+    monkeypatch.setattr(
+        runtime_factory,
+        "production_workflow_runtime",
+        lambda: runtime_with_commands if runtime is not None else None,
+    )
+
+    scene_events: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_record_scene_event",
+        lambda event_code, **kwargs: scene_events.append((event_code, dict(kwargs))),
+    )
+    return submit_calls, scene_events
+
+
+_CREATE_FORMAL_RUN_REQUEST = {
+    "actionId": "create-formal-run-v2:round-accepted:1",
+    "idempotencyKey": "hf2:create-formal-run:round-accepted:1",
+    "expectedStateVersion": "hf2-action:converged-round",
+    "command": "create_formal_run",
+    "payload": {"hypothesisRoundId": "round-accepted"},
+}
+
+_START_OFFER = {
+    "command": "start_node",
+    "nodeId": "problem_understanding",
+    "available": True,
+    "idempotencyKey": "offer:run-fresh:problem_understanding:start_node:v1",
+    "payload": {},
+    "expectedRunVersion": 1,
+}
+
+
+def test_create_formal_run_auto_submits_entry_start_node_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.workflow.contracts import WorkflowCommandKind
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    submit_calls, scene_events = _patch_create_formal_run_envelope(
+        monkeypatch, tmp_path, offers=[dict(_START_OFFER)], runtime=object()
+    )
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        dict(_CREATE_FORMAL_RUN_REQUEST),
+        question_id="SCI-001",
+    )
+
+    # The create result envelope is unchanged and the start was submitted
+    # exactly once, riding the entry node's start offer.
+    assert result["result"]["runId"] == "run-fresh"
+    assert result["command"] == "create_formal_run"
+    assert len(submit_calls) == 1
+    request = submit_calls[0]
+    assert request.command is WorkflowCommandKind.START_NODE
+    assert request.run_id == "run-fresh"
+    assert request.team_id == "team-1"
+    assert request.node_id == "problem_understanding"
+    assert request.idempotency_key == "offer:run-fresh:problem_understanding:start_node:v1"
+    submitted = [
+        event for event, _fields in scene_events
+        if event == "formal_run_auto_start_submitted"
+    ]
+    assert submitted == ["formal_run_auto_start_submitted"]
+
+
+def test_create_formal_run_auto_start_replay_uses_offer_idempotency_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replays ride the same offer idempotencyKey, so the service never re-runs."""
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    submit_calls, _scene_events = _patch_create_formal_run_envelope(
+        monkeypatch, tmp_path, offers=[dict(_START_OFFER)], runtime=object()
+    )
+
+    for _ in range(2):
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            dict(_CREATE_FORMAL_RUN_REQUEST),
+            question_id="SCI-001",
+        )
+
+    assert len(submit_calls) == 2
+    keys = {request.idempotency_key for request in submit_calls}
+    assert keys == {"offer:run-fresh:problem_understanding:start_node:v1"}
+
+
+def test_create_formal_run_auto_start_waits_when_offer_not_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A readiness-blocked start offer must keep the historical manual wait."""
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    blocked = dict(_START_OFFER, available=False)
+    submit_calls, scene_events = _patch_create_formal_run_envelope(
+        monkeypatch, tmp_path, offers=[blocked], runtime=object()
+    )
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        dict(_CREATE_FORMAL_RUN_REQUEST),
+        question_id="SCI-001",
+    )
+
+    # Create still succeeds, nothing is submitted, and the wait is observable.
+    assert result["result"]["runId"] == "run-fresh"
+    assert submit_calls == []
+    waited = [
+        fields for event, fields in scene_events
+        if event == "formal_run_auto_start_waited"
+    ]
+    assert len(waited) == 1
+    assert waited[0]["outcome"] == "waited_for_manual_start"
+    assert waited[0]["fields"]["runId"] == "run-fresh"
+
+
+def test_create_formal_run_auto_start_skips_without_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No production runtime (command-line path): skip quietly, create stands."""
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    submit_calls, scene_events = _patch_create_formal_run_envelope(
+        monkeypatch, tmp_path, offers=[dict(_START_OFFER)], runtime=None
+    )
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        dict(_CREATE_FORMAL_RUN_REQUEST),
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["runId"] == "run-fresh"
+    assert submit_calls == []
+    waited = [
+        fields for event, fields in scene_events
+        if event == "formal_run_auto_start_waited"
+    ]
+    assert len(waited) == 1
+
+
 def test_formal_command_rejection_maps_runtime_guard_errors() -> None:
     from core.research.workflow.ledger import CommandNotAllowedError
     from core.web.services.team_workflow.research_runtime import (
