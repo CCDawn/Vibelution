@@ -450,6 +450,173 @@ def test_live_turn_wait_wall_clock_cap_fails(tmp_path: Path) -> None:
         harness.close()
 
 
+def _stale_outbox(harness, action: PendingAction, worker: AdapterDispatchWorker, *, attempt_count: int):
+    from dataclasses import replace as _replace
+
+    outbox = _leased_outbox(harness, action, attempt_count=attempt_count)
+    return _replace(
+        outbox,
+        created_at_ms=FIXED_NOW_MS - worker._MAX_LIVE_TURN_WAIT_MS - 1_000,
+    )
+
+
+def _publish_provisional_anchor(harness, action: PendingAction) -> None:
+    from core.web.services.team_workflow.research_runtime.domain_ports import (
+        AgentTaskHandle,
+        BindingResolution,
+    )
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        publish_agent_task_started_anchor,
+    )
+
+    publish_agent_task_started_anchor(
+        harness.store,
+        action=action,
+        binding=BindingResolution(agent_id="agent-finder", role_key="source_finder"),
+        handle=AgentTaskHandle(
+            session_id="session-finding",
+            session_attempt=1,
+            task_id="stagetask-finding",
+            turn_id="turn-finding",
+        ),
+    )
+
+
+def test_live_turn_wait_timeout_reconciles_stage_task(monkeypatch, tmp_path: Path) -> None:
+    """After the 2h wall-clock cap fails the attempt, the abandoned wait must
+    still run the pushed-writeback leg: the stage task store is reconciled from
+    the anchor identity with interrupted semantics for a non-terminal turn."""
+    import core.web.services.session.turn_diagnostics as turn_diagnostics
+    import core.web.services.team_workflow.source_collection.stage_writeback as stage_writeback
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        stage_writeback,
+        "reconcile_source_collection_stage_session_task_after_turn",
+        lambda team_id, task_id, **kwargs: calls.append(
+            {"teamId": team_id, "taskId": task_id, **kwargs}
+        )
+        or {"status": "reconciled", "taskStatus": "needs_review"},
+    )
+    monkeypatch.setattr(
+        turn_diagnostics,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id="": {
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "terminal": False,
+            "terminalStatus": "",
+            "completionSource": "running",
+        },
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        _publish_provisional_anchor(harness, action)
+        worker = _worker(harness)
+        stale = _stale_outbox(harness, action, worker, attempt_count=1)
+
+        worker._requeue_live_turn_wait(stale, action, "turn_not_ready:running")
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "failed"
+        # The reconcile ran once with the dispatch anchor identity.
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["teamId"] == "research-team"
+        assert call["taskId"] == "stagetask-finding"
+        assert call["session_id"] == "session-finding"
+        assert call["turn_id"] == "turn-finding"
+        assert call["run_id"] == "run-test"
+        assert call["final_status"] == "interrupted"
+        assert call["reason"] == "live_turn_wait_timeout"
+    finally:
+        harness.close()
+
+
+def test_live_turn_wait_timeout_reconcile_error_is_swallowed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A failing stage-task reconcile must never break the failure path: the
+    outbox attempt stays failed and the exception does not propagate."""
+    import core.web.services.session.turn_diagnostics as turn_diagnostics
+    import core.web.services.team_workflow.source_collection.stage_writeback as stage_writeback
+
+    monkeypatch.setattr(
+        stage_writeback,
+        "reconcile_source_collection_stage_session_task_after_turn",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr(
+        turn_diagnostics,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id="": {
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "terminal": True,
+            "terminalStatus": "completed",
+        },
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        _publish_provisional_anchor(harness, action)
+        worker = _worker(harness)
+        stale = _stale_outbox(harness, action, worker, attempt_count=1)
+
+        worker._requeue_live_turn_wait(stale, action, "turn_not_ready:running")
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "failed"
+        problem = json.loads(row.last_problem_json or "{}")
+        assert problem.get("code") == "live_turn_wait_timeout"
+    finally:
+        harness.close()
+
+
+def test_live_turn_wait_requeue_records_workflow_heartbeat(tmp_path: Path) -> None:
+    """Each live-turn wait requeue appends one structured workflow event so a
+    multi-hour wait is visible in workflow_events (it used to be silent)."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        outbox = _leased_outbox(harness, action, attempt_count=99)
+
+        worker._requeue_live_turn_wait(outbox, action, "turn_not_ready:running")
+
+        events = [
+            event
+            for event in harness.store.list_events("run-test")
+            if event.event_type == "adapter_dispatch_live_turn_wait_heartbeat"
+        ]
+        assert len(events) == 1
+        payload = json.loads(events[0].payload_json)
+        assert payload["runId"] == "run-test"
+        assert payload["actionId"] == "act-agent"
+        assert payload["nodeId"] == "source_finding"
+        assert payload["attemptCount"] == 99
+        assert payload["waitedMs"] == 1_000
+        assert payload["maxWaitMs"] == worker._MAX_LIVE_TURN_WAIT_MS
+        # The requeue itself is unchanged: pending with attempts reset.
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "pending"
+        assert row.attempt_count == 0
+    finally:
+        harness.close()
+
+
 def test_turn_alive_progressing_requires_running_source() -> None:
     from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
         _turn_alive_progressing,

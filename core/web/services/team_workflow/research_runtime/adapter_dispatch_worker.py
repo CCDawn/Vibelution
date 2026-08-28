@@ -1036,12 +1036,19 @@ class AdapterDispatchWorker:
     def _requeue_live_turn_wait(self, outbox: Any, action: PendingAction, detail: str) -> None:
         now_ms = self._now()
         created_at_ms = int(getattr(outbox, "created_at_ms", 0) or 0)
-        if created_at_ms and now_ms - created_at_ms > self._MAX_LIVE_TURN_WAIT_MS:
+        waited_ms = now_ms - created_at_ms if created_at_ms else 0
+        if created_at_ms and waited_ms > self._MAX_LIVE_TURN_WAIT_MS:
             self._fail_attempt(
                 outbox,
                 action,
                 {"code": "live_turn_wait_timeout", "detail": str(detail)[:400]},
             )
+            # The abandoned wait previously skipped the pushed-writeback leg
+            # (reconcile_source_collection_stage_session_task_after_turn), so
+            # the stage task stayed "running" in its store while the ledger
+            # attempt was already failed. Best-effort reconcile closes that
+            # state fork; it must never break the dispatch path.
+            self._reconcile_stage_task_after_wait_timeout(action)
             return
         _record_scene_event(
             "adapter_dispatch.live_turn_wait",
@@ -1049,9 +1056,17 @@ class AdapterDispatchWorker:
             fields={
                 **_action_identity(action),
                 "attemptCount": int(getattr(outbox, "attempt_count", 0) or 0),
-                "waitedMs": now_ms - created_at_ms if created_at_ms else 0,
+                "waitedMs": waited_ms,
                 "detail": str(detail)[:160],
             },
+        )
+        # The wait window itself is silent in workflow_events (~125s requeues
+        # only touch outbox rows); emit one heartbeat event per requeue so a
+        # wedged turn is observable in the run's event stream.
+        self._record_live_turn_wait_heartbeat(
+            action,
+            attempt_count=int(getattr(outbox, "attempt_count", 0) or 0),
+            waited_ms=waited_ms,
         )
         outbox_api.requeue_action(
             self._store,
@@ -1064,6 +1079,183 @@ class AdapterDispatchWorker:
             ),
             reset_attempts=True,
         )
+
+    def _record_live_turn_wait_heartbeat(
+        self, action: PendingAction, *, attempt_count: int, waited_ms: int
+    ) -> None:
+        """Append one workflow event per live-turn wait requeue (observability).
+
+        The outbox requeue itself never touches workflow_events, so a turn
+        that waits for hours used to be invisible in the run's event stream.
+        Pure diagnostics: any failure is swallowed after a scene event.
+        """
+        now_ms = self._now()
+        payload = {
+            **_action_identity(action),
+            "attemptCount": int(attempt_count or 0),
+            "waitedMs": int(waited_ms or 0),
+            "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+        }
+
+        def mutate(uow):
+            run = uow.repository.get_run(action.run_id)
+            if run is None:
+                return False
+            sequence = uow.repository.advance_last_sequence(action.run_id, 1, now_ms)
+            if sequence is None:
+                return False
+            uow.repository.insert_event(
+                _event(
+                    run_id=action.run_id,
+                    sequence=sequence,
+                    run_version=run.run_version,
+                    event_id=new_id("evt"),
+                    event_type="adapter_dispatch_live_turn_wait_heartbeat",
+                    correlation_id=action.action_id,
+                    payload=payload,
+                    now_ms=now_ms,
+                )
+            )
+            return True
+
+        try:
+            self._store.submit(mutate, force_flush=True).result(timeout=30)
+        except Exception as exc:  # noqa: BLE001 - heartbeat must never break requeue
+            _record_scene_event(
+                "adapter_dispatch.live_turn_wait_heartbeat_failed",
+                outcome="failed",
+                fields={
+                    **_action_identity(action),
+                    "waitedMs": int(waited_ms or 0),
+                    "errorType": type(exc).__name__,
+                    "error": str(exc)[:200],
+                },
+            )
+
+    def _reconcile_stage_task_after_wait_timeout(self, action: PendingAction) -> None:
+        """Close the stage-task writeback window an abandoned live wait left open.
+
+        After the wall-clock cap fails the attempt, the canonical Agent turn may
+        still be running (or may have finished unnoticed). The stage session
+        task only settles through
+        ``reconcile_source_collection_stage_session_task_after_turn`` — normally
+        invoked by ``complete_agent_turn_outputs`` at turn terminal, which the
+        abandoned wait never reaches. Locate the dispatch anchor (the same
+        taskId/sessionId/turnId the writeback leg would have used), read the
+        current completion snapshot, and reconcile; a non-terminal snapshot
+        reconciles under ``interrupted`` semantics. Idempotent and best-effort:
+        any failure is logged and never blocks the dispatch path.
+        """
+        try:
+            from .task_adapter_registry import resolve_agent_task_adapter
+
+            adapter_spec = resolve_agent_task_adapter(action.node_id)
+            if adapter_spec is None or adapter_spec.family != "source_collection":
+                return
+
+            anchor = self._store.read(
+                lambda repo: repo.get_anchor_by_node_run(action.node_run_id)
+            )
+            payload: dict[str, Any] = {}
+            if anchor is not None and len(anchor) > 13:
+                try:
+                    raw = json.loads(anchor[13] or "{}")
+                    if isinstance(raw, dict):
+                        payload = raw
+                except (TypeError, ValueError):
+                    payload = {}
+            def scalar(index: int, key: str) -> str:
+                column = ""
+                if anchor is not None and len(anchor) > index:
+                    column = str(anchor[index] or "")
+                return str(column or payload.get(key) or "").strip()
+            session_id = scalar(5, "sessionId")
+            task_id = scalar(7, "taskId")
+            turn_id = scalar(8, "turnId")
+            if not task_id:
+                _record_scene_event(
+                    "adapter_dispatch.live_turn_wait_reconcile_skipped",
+                    outcome="skipped",
+                    fields={
+                        **_action_identity(action),
+                        "reason": "no_anchor_task_identity",
+                    },
+                )
+                return
+
+            run = self._store.get_run(action.run_id)
+            input_snapshot: dict[str, Any] = {}
+            if run is not None and run.input_snapshot_json:
+                try:
+                    raw = json.loads(run.input_snapshot_json)
+                    if isinstance(raw, dict):
+                        input_snapshot = raw
+                except (TypeError, ValueError):
+                    input_snapshot = {}
+            team_id = str(
+                (run.team_id if run is not None else "")
+                or input_snapshot.get("teamId")
+                or ""
+            ).strip()
+            source_collection_run_id = (
+                str(input_snapshot.get("sourceCollectionRunId") or "").strip()
+                or str(action.run_id or "").strip()
+            )
+            if not team_id:
+                raise RuntimeError("run has no teamId for stage task reconcile")
+
+            final_status = ""
+            if session_id:
+                from core.web.services.session.turn_diagnostics import (
+                    get_session_turn_completion_snapshot,
+                )
+
+                snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+                if bool(snapshot.get("terminal")):
+                    final_status = str(snapshot.get("terminalStatus") or "").strip()
+            if not final_status:
+                # Wait abandoned before a terminal snapshot: fall to the
+                # interrupted/block semantics instead of leaving running.
+                final_status = "interrupted"
+
+            from core.web.services.team_workflow.source_collection.stage_writeback import (
+                reconcile_source_collection_stage_session_task_after_turn,
+            )
+
+            result = reconcile_source_collection_stage_session_task_after_turn(
+                team_id,
+                task_id,
+                run_id=source_collection_run_id,
+                session_id=session_id,
+                turn_id=turn_id,
+                final_status=final_status,
+                reason="live_turn_wait_timeout",
+            )
+            _record_scene_event(
+                "adapter_dispatch.live_turn_wait_reconciled",
+                outcome="settled",
+                fields={
+                    **_action_identity(action),
+                    "taskId": task_id,
+                    "finalStatus": final_status,
+                    "reconcileStatus": str(
+                        (result or {}).get("status") or ""
+                    )[:80],
+                    "taskStatus": str(
+                        (result or {}).get("taskStatus") or ""
+                    )[:80],
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - writeback repair is best-effort
+            _record_scene_event(
+                "adapter_dispatch.live_turn_wait_reconcile_failed",
+                outcome="failed",
+                fields={
+                    **_action_identity(action),
+                    "errorType": type(exc).__name__,
+                    "error": str(exc)[:200],
+                },
+            )
 
     def _requeue_or_fail(self, outbox: Any, action: PendingAction, detail: str) -> None:
         now_ms = self._now()
