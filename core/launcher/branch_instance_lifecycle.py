@@ -213,6 +213,21 @@ def _instance_runtime_projection(
         else:
             failure_message = registry_failure or workbench_failure
 
+    normalized_phase = str(phase or "").strip().lower()
+    normalized_desired = str(desired_state or "").strip().lower()
+    normalized_observed = str(observed_state or "").strip().lower()
+    # Worktree items carry observedState="idle" until a live probe observes
+    # them; "idle"/"partial" do not contradict a desired-closed settle.
+    steady_settled = normalized_phase in {"", "steady"} and (
+        normalized_desired == normalized_observed
+        or (normalized_desired == "closed" and normalized_observed in {"", "idle", "partial"})
+    )
+    if steady_settled:
+        # Successful transitions clear failureMessage at the source; a stale
+        # slot state.json (e.g. leftover from a failed manual launcher call)
+        # must not keep a settled row in error until the next action runs.
+        failure_message = ""
+
     if (
         not bundle
         and backend_alive

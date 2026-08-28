@@ -2512,7 +2512,12 @@ def main(argv: list[str] | None = None) -> int:
                 f", generation={state.get('instanceGeneration')})."
             )
             return 0
-        raise RuntimeError(f"Unsupported launcher action: {args.action}")
+        raise RuntimeError(
+            "Unsupported launcher action: "
+            f"{args.action} (supported: start, stop, focus, restart; "
+            "status belongs to the PS1 adapter scripts/vibelution_launcher.ps1"
+            " / python -m core.runtime_manager.cli status)"
+        )
     except Exception as exc:
         state = _read_state()
         _write_state(

@@ -83,3 +83,23 @@ def test_runtime_scene_seal_is_idempotent_and_stop_uses_same_helper(tmp_path, mo
     assert manifest["result"] == "explicit_stop"
     assert manifest["stop_reason"] == "Workbench processes confirmed closed."
     assert (scene_dir / "manifest.json").read_bytes() == first_bytes
+
+
+def test_python_launcher_unsupported_action_reports_supported_actions(tmp_path, monkeypatch, capsys) -> None:
+    launcher = _load_launcher_module()
+    runtime_dir = tmp_path / ".runtime" / "launcher"
+    state_path = runtime_dir / "state.json"
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(launcher, "STATE_PATH", state_path)
+
+    exit_code = launcher.main(["--action", "status"])
+
+    assert exit_code == 1
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["phase"] == "failed"
+    message = str(state["failureMessage"])
+    assert "Unsupported launcher action: status" in message
+    assert "supported: start, stop, focus, restart" in message
+    assert "vibelution_launcher.ps1" in message
+    captured = capsys.readouterr()
+    assert "supported: start, stop, focus, restart" in captured.err

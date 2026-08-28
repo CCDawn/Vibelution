@@ -534,6 +534,82 @@ def test_overlay_prefers_registry_starting_over_stale_worktree_failure(tmp_path,
     assert "error" not in runtime
 
 
+def test_overlay_ignores_stale_failure_message_in_settled_steady_row(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    _write_workbench_state(
+        path,
+        desiredState="closed",
+        observedState="closed",
+        phase="steady",
+        failureMessage="RuntimeError: Unsupported launcher action: status",
+    )
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            {
+                "instanceId": "worktree:feature",
+                "projectRoot": str(path),
+                "port": 8003,
+                "status": "closed",
+                "desiredState": "closed",
+                "phase": "steady",
+                "failureMessage": "",
+            }
+        ],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "closed"
+    assert payload["items"][0]["startable"] is True
+    assert "error" not in runtime
+
+
+def test_overlay_keeps_runtime_error_when_steady_row_disagrees_with_desired(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    _write_workbench_state(
+        path,
+        desiredState="open",
+        observedState="closed",
+        phase="steady",
+        failureMessage="上次启动失败",
+    )
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            {
+                "instanceId": "worktree:feature",
+                "projectRoot": str(path),
+                "port": 8003,
+                "status": "closed",
+                "desiredState": "open",
+                "phase": "steady",
+                "failureMessage": "",
+            }
+        ],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "error"
+    assert runtime["error"]["code"] == "runtime_error"
+    assert runtime["error"]["message"] == "上次启动失败"
+
+
 def _stale_starting_entry(path: Path, **overrides: object) -> dict[str, object]:
     entry: dict[str, object] = {
         "instanceId": "worktree:feature",
