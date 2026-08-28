@@ -6,8 +6,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import threading
 import time
+from collections import deque
 from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -263,6 +265,89 @@ def _find_ui_tool_calls_message_index(messages: List[Any]) -> int:
         if isinstance(message, dict) and "toolCalls" in message:
             return index
     return -1
+
+
+_RESPONSE_CALL_ID_SUFFIX_PATTERN = re.compile(r"-resp-\d+$")
+
+
+def _next_response_tool_call_id(original_id: str, known_ids: set) -> str:
+    """Return the next free ``<base>-resp-<n>`` id for a replayed call id.
+
+    GLM-style providers replay an id they can already see in the request
+    chain when a turn is nudged to continue. The replayed id is renamed
+    before it enters the journal or the next request so the chain never
+    carries two calls claiming one id. A prior ``-resp-<n>`` suffix is
+    stripped from the base first, so suffixes never stack.
+    """
+
+    base = _RESPONSE_CALL_ID_SUFFIX_PATTERN.sub("", original_id) or original_id
+    counter = 1
+    while True:
+        candidate = f"{base}-resp-{counter}"
+        if candidate not in known_ids:
+            return candidate
+        counter += 1
+
+
+def _dedupe_outcome_tool_calls_against_chain(
+    outcome: Any,
+    messages: List[Any],
+) -> Any:
+    """Rename outcome tool call ids that collide with the request chain.
+
+    Runs on the canonical ``TurnOutcome`` right after decode, before the
+    outcome reaches the agent loop, the journal, or the next request build.
+    Only in-memory canonical objects are replaced (copy-on-write); a renamed
+    call keeps its provider item identity so receipts stay traceable, while
+    ``pending_tool_call_ids`` and any already-decoded ``tool_results`` follow
+    the rename so pairing stays intact. When nothing collides the outcome is
+    returned unchanged.
+    """
+
+    if outcome is None or not getattr(outcome, "tool_calls", None):
+        return outcome
+    from core.chat.model_messages import collect_chain_tool_call_ids
+
+    known_ids = set(collect_chain_tool_call_ids(messages))
+    known_ids.update(str(result.call_id or "") for result in (outcome.tool_results or ()))
+    rename_queues: Dict[str, "deque[str]"] = {}
+    rename_pairs: List[Tuple[str, str]] = []
+    renamed_calls = []
+    for call in outcome.tool_calls:
+        call_id = str(call.call_id or "").strip()
+        if not call_id or call_id not in known_ids:
+            known_ids.add(call_id)
+            renamed_calls.append(call)
+            continue
+        new_id = _next_response_tool_call_id(call_id, known_ids)
+        known_ids.add(new_id)
+        rename_pairs.append((call_id, new_id))
+        rename_queues.setdefault(call_id, deque()).append(new_id)
+        renamed_calls.append(replace(call, call_id=new_id))
+    if not rename_pairs:
+        return outcome
+
+    def _renamed_ids(sequence: Any) -> List[str]:
+        queues = {old_id: deque(new_ids) for old_id, new_ids in rename_queues.items()}
+        mapped: List[str] = []
+        for call_id in sequence:
+            call_id = str(call_id or "")
+            queue = queues.get(call_id)
+            mapped.append(queue.popleft() if queue else call_id)
+        return mapped
+
+    renamed_results = tuple(
+        replace(result, call_id=_renamed_ids([str(result.call_id)])[0])
+        if str(result.call_id) in rename_queues
+        else result
+        for result in (outcome.tool_results or ())
+    )
+    return replace(
+        outcome,
+        tool_calls=tuple(renamed_calls),
+        tool_results=renamed_results,
+        pending_tool_call_ids=tuple(_renamed_ids(outcome.pending_tool_call_ids or ())),
+    )
 
 
 def _current_llm_cancel_reason() -> str:
@@ -2976,6 +3061,7 @@ class LLMClient:
             metadata,
             invocation_scope=invocation_scope,
         )
+        turn_outcome = _dedupe_outcome_tool_calls_against_chain(turn_outcome, messages)
         latency_ms = int((time.time() - start) * 1000)
         message = self._responses_message(response) if _payload_uses_responses(payload) else self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
@@ -3362,6 +3448,7 @@ class LLMClient:
         invocation_scope: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
         scene_identity: Optional[Dict[str, Any]] = None,
+        request_messages: Optional[List[Any]] = None,
         receipt_builder: Optional[
             Callable[[TurnOutcome, UsageStats | None], TurnOutcome]
         ] = None,
@@ -3481,6 +3568,10 @@ class LLMClient:
                                 yield projected
                             _raise_if_llm_cancelled()
                         turn_outcome = normalized_iterator.outcome
+                        turn_outcome = _dedupe_outcome_tool_calls_against_chain(
+                            turn_outcome,
+                            list(request_messages or []),
+                        )
                         if receipt_builder is not None:
                             turn_outcome = receipt_builder(
                                 turn_outcome, provider_usage or canonical_usage
@@ -3716,6 +3807,7 @@ class LLMClient:
                             "invocationId": event_metadata.get("invocationId", ""),
                             "attempt": attempt,
                         },
+                        request_messages=list(messages or []),
                         receipt_builder=lambda outcome, usage: self._attach_model_invocation_receipt(
                             outcome,
                             metadata=metadata,
