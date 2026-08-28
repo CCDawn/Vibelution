@@ -71,3 +71,44 @@ def test_runtime_effect_dispatch_forwards_trusted_restart_requester(monkeypatch)
     assert captured["commandType"] == "hot_restart_workbench"
     assert captured["args"]["allowActiveSessionId"] == "session-approval"
     assert captured["args"]["allowActiveRunId"] == "swte-activation"
+
+
+def test_runtime_effect_dispatch_without_session_falls_back_to_plain_restart(monkeypatch):
+    """Empty/blank sourceSessionId must not enqueue a doomed hot restart."""
+
+    captured: dict = {}
+
+    def fake_submit(command_type: str, *, requested_by: str, args: dict) -> dict:
+        captured["commandType"] = command_type
+        captured["args"] = args
+        return {"commandId": "command-fallback", "accepted": True}
+
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher.command_queue,
+        "submit_command",
+        fake_submit,
+    )
+
+    base_intent = {
+        "action": "restart_after_apply",
+        "actorType": "supervised_approval_agent",
+        "reason": "activate candidate",
+        "sourceRunId": "swte-activation",
+        "sourceTaskId": "",
+        "sourceWorktree": "C:/candidate",
+        "intentId": "intent-activation",
+    }
+
+    result = lifecycle_action_dispatcher.dispatch_runtime_effect_intent(
+        {**base_intent, "sourceSessionId": ""}
+    )
+
+    assert result["dispatched"] is True
+    assert captured["commandType"] == "restart_workbench"
+
+    result = lifecycle_action_dispatcher.dispatch_runtime_effect_intent(
+        {**base_intent, "sourceSessionId": "   "}
+    )
+
+    assert result["dispatched"] is True
+    assert captured["commandType"] == "restart_workbench"

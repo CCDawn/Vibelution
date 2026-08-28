@@ -12,10 +12,27 @@ RUNTIME_ACTION_COMMANDS = {
     "request_app_exit": "close_workbench",
 }
 
+# Hot restart is session-scoped: the runtime-manager daemon fails a
+# hot_restart_workbench command without a sessionId (HotRestartSessionRequired)
+# and that sticky failure poisons the workbench lifecycle.  When the intent
+# carries no trusted source session, fall back to a plain restart instead.
+RUNTIME_ACTION_SESSION_FALLBACK_COMMANDS = {
+    "restart_after_apply": "restart_workbench",
+}
+
+
+def _runtime_command_for_action(action: str, source_session_id: str) -> str | None:
+    if source_session_id:
+        return RUNTIME_ACTION_COMMANDS.get(action)
+    return RUNTIME_ACTION_SESSION_FALLBACK_COMMANDS.get(action) or RUNTIME_ACTION_COMMANDS.get(
+        action
+    )
+
 
 def dispatch_runtime_effect_intent(intent: dict[str, Any]) -> dict[str, Any]:
     action = str(intent.get("action") or "").strip()
-    command_type = RUNTIME_ACTION_COMMANDS.get(action)
+    source_session_id = str(intent.get("sourceSessionId") or "").strip()
+    command_type = _runtime_command_for_action(action, source_session_id)
     if not command_type:
         return {"dispatched": False, "reason": "not_runtime_effect"}
     result = command_queue.submit_command(
