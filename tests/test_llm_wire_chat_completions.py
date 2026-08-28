@@ -225,7 +225,7 @@ def test_chat_parallel_tool_calls_preserve_provider_ids_and_order():
     assert [call.name for call in decoded.outcome.tool_calls] == ["first", "second"]
 
 
-def test_chat_malformed_tool_arguments_remain_non_executable_mapping():
+def test_chat_malformed_tool_arguments_are_intercepted_as_incomplete():
     decoded = ChatCompletionsWireAdapter().decode_stream(
         [
             {
@@ -253,8 +253,140 @@ def test_chat_malformed_tool_arguments_remain_non_executable_mapping():
 
     tuple(decoded)
 
-    assert decoded.outcome.kind == "tool_calls"
-    assert decoded.outcome.tool_calls[0].arguments == {}
+    # Truncated arguments must never surface as an executable tool call.
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == "chat.finish.tool_arguments_unparsable"
+    assert decoded.outcome.tool_calls == ()
+    assert decoded.outcome.pending_tool_call_ids == ()
+    terminal_events = [event for event in decoded.outcome.events if event.terminal]
+    assert terminal_events[-1].provider_event_type == "chat.finish.tool_arguments_unparsable"
+
+
+def test_chat_finish_length_with_truncated_call_stays_incomplete():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-truncated",
+                                    "function": {
+                                        "name": "writeback",
+                                        "arguments": '{"teamId": "research-team", "result_json": "{\"items"',
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == "chat.finish.tool_arguments_unparsable"
+    assert decoded.outcome.tool_calls == ()
+
+
+def test_chat_late_argument_chunk_after_finish_does_not_escape_interception():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-late",
+                                    "function": {"name": "lookup", "arguments": '{"query": "va'},
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            # Relay reorders: a trailing argument fragment arrives after the
+            # finish chunk completed the choice. It must be accumulated (not
+            # dropped) and the outcome must stay intercepted.
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "lid"}}]},
+                        "finish_reason": None,
+                    }
+                ]
+            },
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == "chat.finish.tool_arguments_unparsable"
+    assert decoded.outcome.tool_calls == ()
+
+
+def test_chat_late_argument_chunk_completing_call_keeps_interception_for_resend():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-late-recovered",
+                                    "function": {"name": "lookup", "arguments": '{"query": "va'},
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            # The late fragment completes the JSON object. The terminal event
+            # was already emitted as incomplete, so the canonical outcome stays
+            # incomplete and the client layer resends the same request instead
+            # of executing a call whose arguments were partially delivered.
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"tool_calls": [{"index": 0, "function": {"arguments": 'lid"}'}}]},
+                        "finish_reason": None,
+                    }
+                ]
+            },
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == "chat.finish.tool_arguments_unparsable"
+    assert decoded.outcome.tool_calls == ()
 
 
 def test_chat_tool_result_encoder_preserves_call_id():

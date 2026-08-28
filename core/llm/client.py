@@ -51,6 +51,7 @@ from .usage import read_usage_int as _read_provider_usage_int
 from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
 from .wire.chat_completions import STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
+from .wire.chat_completions import TOOL_ARGUMENTS_UNPARSABLE
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
 
@@ -191,6 +192,10 @@ def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = 
     if outcome.kind != "incomplete":
         return False
     if outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL:
+        return True
+    # Truncated tool-call arguments are always provider-stream corruption:
+    # resending the same request is the only safe recovery.
+    if outcome.error == TOOL_ARGUMENTS_UNPARSABLE:
         return True
     return allow_chat and outcome.error == STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
 
@@ -4019,9 +4024,10 @@ class LLMClient:
                         model=self.profile.model,
                     )
                 self._record_canonical_outcome(canonical_outcome, phase="stream")
-                chat_partial_output = (
-                    canonical_outcome.error == STREAM_EXHAUSTED_WITHOUT_FINISH_REASON and emitted
-                )
+                chat_partial_output = bool(emitted) and canonical_outcome.error in {
+                    STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
+                    TOOL_ARGUMENTS_UNPARSABLE,
+                }
                 allow_chat_retry = self.protocol_route.protocol == ModelProtocol.DEEPSEEK_REASONING
                 if _is_retryable_stream_exhaustion(
                     canonical_outcome,

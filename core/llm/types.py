@@ -89,6 +89,10 @@ class ToolCall:
     arguments: Dict[str, Any] = field(default_factory=dict)
     raw_arguments: Any = None
     provider_payload: Dict[str, Any] = field(default_factory=dict)
+    # True when the provider streamed non-empty arguments text that failed to
+    # parse as a JSON object. ``arguments`` is then an empty dict purely as a
+    # placeholder; the call must never be executed or approved on that basis.
+    arguments_unparsable: bool = False
 
 
 @dataclass

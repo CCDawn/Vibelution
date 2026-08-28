@@ -186,6 +186,42 @@ def source_collection_stage_writeback_tool(
 ) -> str:
     """Write structured stage task results back to the team workflow."""
 
+    # All parameters are optional in the signature, so executor-side signature
+    # binding cannot reject an empty-arguments call (e.g. streaming arguments
+    # loss). An empty writeback target must fail closed instead of silently
+    # writing an empty result into the team workflow.
+    if not _text(team_id) and not _text(task_id):
+        _record_stage_tool_event(
+            "tool.source_collection_stage_writeback.failed",
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": "",
+                "taskId": "",
+                "status": _text(status),
+                "recordedByAgent": _text(recorded_by_agent),
+                "errorType": "missing_writeback_target",
+            },
+        )
+        return json.dumps(
+            {
+                "status": "error",
+                "errorType": "missing_writeback_target",
+                "message": (
+                    "[工具参数错误] source_collection_stage_writeback_tool 收到空参数："
+                    "回写必须指向具体的阶段任务，请携带 team_id 与 task_id（以及 result_json）重试。"
+                ),
+                "teamId": "",
+                "taskId": "",
+                "recovery": _source_collection_context_recovery_hint(
+                    team_id="",
+                    task_id="",
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     try:
         from core.web.services import team_workflow_orchestration_service as workflow_service
 

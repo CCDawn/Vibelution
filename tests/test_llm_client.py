@@ -5418,3 +5418,160 @@ def _invocation_metadata() -> dict:
         "invocationId": "invocation-dedupe",
         "iteration": 0,
     }
+
+
+def test_chat_truncated_tool_arguments_resend_same_request_and_recover(monkeypatch):
+    """端到端：首次流式 tool arguments 截断 → 同请求重发 → 第二次完整下发。"""
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-4.6",
+            "llm.profiles.primary.transport": "chat_completions",
+            "llm.profiles.primary.streaming": True,
+            "llm.profiles.primary.retry_policy.max_attempts": 2,
+        }
+    )
+    attempts = {"count": 0}
+    published_statuses = []
+
+    def chat_backend(payload):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            # Relay 流尾截断：arguments 只到一半就收到 finish_reason。
+            return iter(
+                [
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call-1",
+                                            "function": {
+                                                "name": "source_collection_stage_writeback_tool",
+                                                "arguments": '{"teamId": "research-team", "result_json": "{\"sum',
+                                            },
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+                ]
+            )
+        return iter(
+            [
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "function": {
+                                            "name": "source_collection_stage_writeback_tool",
+                                            "arguments": '{"teamId": "research-team", "result_json": "{}"}',
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: published_statuses.append((status, fields)),
+    )
+    client = LLMClient(config=config, backend=chat_backend)
+
+    events = list(client.stream_events([{"role": "user", "content": "写回阶段结果"}]))
+
+    # 第一次尝试零下发（无 text/tool_call_final/done），第二次完整成功。
+    assert attempts["count"] == 2
+    tool_finals = [event for event in events if event.type == "tool_call_final"]
+    assert len(tool_finals) == 1
+    call = tool_finals[0].tool_calls[0]
+    assert call.name == "source_collection_stage_writeback_tool"
+    assert call.arguments == {"teamId": "research-team", "result_json": "{}"}
+    done_events = [event for event in events if event.type == "done"]
+    assert len(done_events) == 1
+    outcome = done_events[0].provider_payload["turn_outcome"]
+    assert outcome.kind == "tool_calls"
+    assert outcome.pending_tool_call_ids == ("call-1",)
+    assert [status for status, _fields in published_statuses if status in {"retrying", "retry_recovered"}] == [
+        "retrying",
+        "retry_recovered",
+    ]
+
+
+def test_chat_truncated_tool_arguments_with_partial_output_does_not_retry(monkeypatch):
+    """已有可见输出下发时不重发（避免重复输出），以 incomplete 终态收尾。"""
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-4.6",
+            "llm.profiles.primary.transport": "chat_completions",
+            "llm.profiles.primary.streaming": True,
+            "llm.profiles.primary.retry_policy.max_attempts": 2,
+        }
+    )
+    attempts = {"count": 0}
+
+    def chat_backend(payload):
+        attempts["count"] += 1
+        return iter(
+            [
+                {"choices": [{"index": 0, "delta": {"content": "部分输出"}, "finish_reason": None}]},
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "function": {"name": "lookup", "arguments": '{"query": "trunc'},
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    client = LLMClient(config=config, backend=chat_backend)
+
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert attempts["count"] == 1
+    assert [event.type for event in events] == ["text_delta", "done"]
+    outcome = events[-1].provider_payload["turn_outcome"]
+    assert outcome.kind == "incomplete"
+    assert outcome.error == "chat.finish.tool_arguments_unparsable"

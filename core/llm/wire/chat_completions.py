@@ -40,6 +40,12 @@ from .types import BuiltPayload
 
 STREAM_EXHAUSTED_WITHOUT_FINISH_REASON = "stream_exhausted_without_finish_reason"
 
+# Terminal marker for tool calls whose streamed arguments text failed to parse
+# as a JSON object. The turn is downgraded to ``incomplete`` so the client's
+# retryable-stream path can resend the same request instead of forwarding an
+# empty-arguments (``{}``) tool call to the approval/execution layers.
+TOOL_ARGUMENTS_UNPARSABLE = "chat.finish.tool_arguments_unparsable"
+
 
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -271,6 +277,7 @@ class _ChatTurnAssembler:
         self.think_parsers: dict[int, ThinkTagStreamParser] = {}
         self.tool_calls: list[CanonicalToolCall] = []
         self._terminal_seen = False
+        self._late_tool_deltas_seen = False
         self._outcome: TurnOutcome | None = None
 
     @property
@@ -283,6 +290,10 @@ class _ChatTurnAssembler:
         chunk = _as_dict(raw_chunk)
         usage = _as_dict(chunk.get("usage"))
         if self._terminal_seen:
+            # Relays may emit trailing tool-call argument chunks after (or in
+            # the same batch as) the terminal chunk. Never silently drop them:
+            # keep accumulating so finish() can re-evaluate the outcome.
+            self._accumulate_late_tool_deltas(chunk)
             if not usage:
                 return []
             usage_event = self._usage_event(usage)
@@ -330,11 +341,66 @@ class _ChatTurnAssembler:
 
     def finish(self) -> list[LLMProtocolEvent]:
         if self._terminal_seen:
+            if self._late_tool_deltas_seen:
+                self._refine_outcome_with_late_tool_deltas()
             return []
         return self._terminal(
             "incomplete",
             provider_event_type=STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
             error=STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
+        )
+
+    def _accumulate_late_tool_deltas(self, chunk: Mapping[str, Any]) -> bool:
+        """Accumulate tool-call deltas that arrive after the terminal chunk.
+
+        Returns True when any late tool delta was seen. Deltas are merged into
+        the existing per-choice accumulators so diagnostics keep the raw
+        argument fragments and finish() can re-check for unparsable calls.
+        """
+
+        saw_tool_deltas = False
+        for raw_choice in list(chunk.get("choices") or []):
+            choice = _as_dict(raw_choice)
+            choice_index = int(choice.get("index") or 0)
+            delta = _as_dict(choice.get("delta"))
+            tool_deltas = list(delta.get("tool_calls") or [])
+            if not tool_deltas:
+                continue
+            saw_tool_deltas = True
+            self._late_tool_deltas_seen = True
+            accumulator = self.tool_accumulators.setdefault(choice_index, ToolCallAccumulator())
+            for fallback_index, raw_tool in enumerate(tool_deltas):
+                tool = _as_dict(raw_tool)
+                tool_index = int(tool.get("index") if tool.get("index") is not None else fallback_index)
+                provider_call_id = str(tool.get("id") or "")
+                if provider_call_id:
+                    self.tool_call_ids_by_position.setdefault((choice_index, tool_index), provider_call_id)
+            accumulator.add_deltas(tool_deltas)
+        return saw_tool_deltas
+
+    def _refine_outcome_with_late_tool_deltas(self) -> None:
+        """Re-check the frozen outcome once late tool deltas were observed.
+
+        If the rebuilt calls still (or newly) contain unparsable arguments, the
+        outcome is downgraded to ``incomplete`` with the unparsable marker so
+        the client retries the same request instead of emitting a tool call
+        with empty arguments. The already-emitted terminal event is left as
+        is; consumers act on the canonical outcome, not on replayed events.
+        """
+
+        if self._outcome is None:
+            return
+        rebuilt_calls: list[Any] = []
+        for choice_index in sorted(self.tool_accumulators):
+            rebuilt_calls.extend(self.tool_accumulators[choice_index].final_calls())
+        if not any(call.arguments_unparsable for call in rebuilt_calls):
+            return
+        self._outcome = replace(
+            self._outcome,
+            kind="incomplete",
+            tool_calls=(),
+            pending_tool_call_ids=(),
+            error=TOOL_ARGUMENTS_UNPARSABLE,
         )
 
     def _delta(self, choice_index: int, delta: Mapping[str, Any]) -> list[LLMProtocolEvent]:
@@ -428,6 +494,19 @@ class _ChatTurnAssembler:
     def _finish_choice(self, choice_index: int, finish_reason: str) -> list[LLMProtocolEvent]:
         emitted = self._flush_think_parser(choice_index)
         calls = self.tool_accumulators.get(choice_index, ToolCallAccumulator()).final_calls()
+        if any(call.arguments_unparsable for call in calls):
+            # Truncated/corrupt streamed arguments must never reach the
+            # approval or execution layers as an empty-arguments call.
+            # Downgrade to an incomplete turn so the client retry path can
+            # resend the same request.
+            emitted.extend(
+                self._terminal(
+                    "incomplete",
+                    provider_event_type=TOOL_ARGUMENTS_UNPARSABLE,
+                    error=TOOL_ARGUMENTS_UNPARSABLE,
+                )
+            )
+            return emitted
         for index, call in enumerate(calls):
             provider_call_id = self.tool_call_ids_by_position.get((choice_index, index), "")
             call_id = provider_call_id or f"chat:{self.scope.invocation_id}:tool:{index}"

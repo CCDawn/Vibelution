@@ -32,14 +32,37 @@ def extract_text_content(content: Any) -> str:
 
 
 def parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
+    parsed, _unparsable = parse_tool_arguments_checked(raw_args)
+    return parsed
+
+
+def parse_tool_arguments_checked(raw_args: Any) -> tuple[Dict[str, Any], bool]:
+    """Parse streamed tool arguments and report whether they are unparsable.
+
+    Returns ``(arguments, unparsable)``. Non-empty arguments text that fails to
+    parse as a JSON object must never silently degrade to ``{}``: the flag lets
+    the wire layer intercept the call instead of executing an empty-arguments
+    tool invocation. Empty (or absent) arguments stay unparsable=False because
+    providers legitimately emit them for argument-free tools.
+    """
+
     if isinstance(raw_args, str):
+        if not raw_args.strip():
+            return {}, False
         try:
-            return json.loads(raw_args) if raw_args.strip() else {}
+            parsed = json.loads(raw_args)
         except json.JSONDecodeError:
-            return {}
+            return {}, True
+        if isinstance(parsed, dict):
+            return parsed, False
+        # JSON that parses to a non-object (number, list, string...) is not a
+        # valid tool-arguments mapping either.
+        return {}, True
     if isinstance(raw_args, dict):
-        return raw_args
-    return {}
+        return raw_args, False
+    if raw_args is None:
+        return {}, False
+    return {}, True
 
 
 def extract_message_tool_calls(message: Dict[str, Any]) -> List[ToolCall]:
@@ -51,6 +74,7 @@ def extract_message_tool_calls(message: Dict[str, Any]) -> List[ToolCall]:
             continue
         function = _as_dict(tool.get("function") or {})
         raw_args = function.get("arguments") or {}
+        parsed_args, arguments_unparsable = parse_tool_arguments_checked(raw_args)
         raw_id = str(tool.get("id") or "").strip()
         call_id = _unique_response_call_id(raw_id, f"tool_{index}", seen_ids)
         if raw_id and call_id != raw_id:
@@ -59,9 +83,10 @@ def extract_message_tool_calls(message: Dict[str, Any]) -> List[ToolCall]:
             ToolCall(
                 id=call_id,
                 name=str(function.get("name") or ""),
-                arguments=parse_tool_arguments(raw_args),
+                arguments=parsed_args,
                 raw_arguments=raw_args,
                 provider_payload=tool,
+                arguments_unparsable=arguments_unparsable,
             )
         )
     return items
@@ -143,6 +168,7 @@ class ToolCallAccumulator:
     @staticmethod
     def _to_tool_call(index: int, state: Dict[str, Any]) -> ToolCall:
         raw_args = state.get("arguments") or ""
+        parsed_args, arguments_unparsable = parse_tool_arguments_checked(raw_args)
         provider_payload = {
             "id": state.get("id") or f"tool_{index}",
             "type": "function",
@@ -154,9 +180,10 @@ class ToolCallAccumulator:
         return ToolCall(
             id=str(state.get("id") or f"tool_{index}"),
             name=str(state.get("name") or ""),
-            arguments=parse_tool_arguments(raw_args),
+            arguments=parsed_args,
             raw_arguments=raw_args,
             provider_payload=provider_payload,
+            arguments_unparsable=arguments_unparsable,
         )
 
 
@@ -451,13 +478,15 @@ class ResponsesToolCallAccumulator:
         if not name:
             return None
         raw_args = state.get("arguments") or ""
+        parsed_args, arguments_unparsable = parse_tool_arguments_checked(raw_args)
         provider_payload = item if isinstance(item, dict) else {}
         return ToolCall(
             id=call_id or item_id or name,
             name=name,
-            arguments=parse_tool_arguments(raw_args),
+            arguments=parsed_args,
             raw_arguments=raw_args,
             provider_payload=provider_payload,
+            arguments_unparsable=arguments_unparsable,
         )
 
     @classmethod
@@ -550,4 +579,5 @@ __all__ = [
     "extract_message_tool_calls",
     "extract_text_content",
     "parse_tool_arguments",
+    "parse_tool_arguments_checked",
 ]
