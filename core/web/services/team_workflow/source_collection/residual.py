@@ -497,6 +497,13 @@ def _import_source_collection_local_workspace_sources(
 
     status = "completed" if imported and not failed else ("partial" if imported else ("failed" if failed else "empty"))
     summary = s._source_collection_local_scan_summary(status=status, imported=imported, skipped=skipped, failed=failed)
+    managed_summary = s._import_source_collection_managed_root_sources(
+        team_id,
+        run_id,
+        payload,
+        assignments=assignments,
+    )
+    summary["managedRoots"] = managed_summary
     s._record_workflow_event(
         "source_collection.local_workspace_imported",
         team_id,
@@ -531,6 +538,555 @@ def _load_candidate_store(team_id: str) -> dict[str, Any]:
     }
     s._write_json(path, payload)
     return payload
+
+
+def _normalize_managed_root_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """解析 run payload 中的受管根选择：managedSourceRoots / managedSourceRootIds。"""
+
+    s = _service()
+    selection: list[str] = []
+    select_all = False
+    raw = payload.get("managedSourceRoots")
+    if isinstance(raw, bool):
+        select_all = bool(raw)
+    elif isinstance(raw, list):
+        for item in raw[:32]:
+            if isinstance(item, str) and s._trim_text(item, max_length=64):
+                selection.append(s._trim_text(item, max_length=64).lower())
+            elif isinstance(item, dict) and s._trim_text(item.get("rootId"), max_length=64):
+                selection.append(s._trim_text(item.get("rootId"), max_length=64).lower())
+    elif isinstance(raw, dict):
+        select_all = raw.get("all") is True or raw.get("enabled") is True
+        ids = raw.get("rootIds")
+        if isinstance(ids, list):
+            for item in ids[:32]:
+                if isinstance(item, str) and s._trim_text(item, max_length=64):
+                    selection.append(s._trim_text(item, max_length=64).lower())
+    ids_field = payload.get("managedSourceRootIds")
+    if isinstance(ids_field, list):
+        for item in ids_field[:32]:
+            if isinstance(item, str) and s._trim_text(item, max_length=64):
+                selection.append(s._trim_text(item, max_length=64).lower())
+    deduped: list[str] = []
+    for root_id in selection:
+        if root_id not in deduped:
+            deduped.append(root_id)
+    return {
+        "configured": select_all or bool(deduped),
+        "selectAll": select_all,
+        "rootIds": deduped,
+    }
+
+
+def _source_collection_managed_scan_summary(
+    *,
+    status: str,
+    roots: list[dict[str, Any]] | None = None,
+    imported: list[dict[str, Any]] | None = None,
+    skipped: list[dict[str, Any]] | None = None,
+    failed: list[dict[str, Any]] | None = None,
+    blocked: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    imported_items = list(imported or [])
+    skipped_items = list(skipped or [])
+    failed_items = list(failed or [])
+    blocked_items = list(blocked or [])
+    return {
+        "status": status,
+        "rootCount": len(list(roots or [])),
+        "roots": list(roots or [])[:16],
+        "importedCount": len(imported_items),
+        "skippedCount": len(skipped_items),
+        "failedCount": len(failed_items),
+        "blockedCount": len(blocked_items),
+        "imported": imported_items[:40],
+        "skipped": skipped_items[:40],
+        "failed": failed_items[:40],
+        "blocked": blocked_items[:40],
+    }
+
+
+def _managed_root_title_from_parse(parse_result: dict[str, Any], display_relative: str) -> str:
+    s = _service()
+    for block in list(parse_result.get("blocks") or []):
+        locator = str(block.get("locator") or "")
+        if locator.startswith("heading:") or locator == "title" or locator.startswith("slide:1:"):
+            text = s._trim_text(block.get("text"), max_length=240)
+            if text:
+                return text
+    return s._trim_text(Path(display_relative).stem.replace("_", " "), max_length=240) or Path(display_relative).name
+
+
+def _source_collection_managed_root_record_payload(
+    *,
+    run_id: str,
+    source_assignment: dict[str, Any],
+    root_entry: dict[str, Any],
+    category: str,
+    locator: str,
+    display_relative: str,
+    sha256: str,
+    size_bytes: int,
+    parse_result: dict[str, Any],
+    zip_lineage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """受管根文件 → DataRecord payload；rawLocation 只写 managed:// locator。"""
+
+    s = _service()
+    from core.web.services.team_workflow.source_collection import managed_roots
+
+    meta = parse_result.get("meta") if isinstance(parse_result.get("meta"), dict) else {}
+    suffix = s._trim_text(meta.get("suffix"), max_length=24)
+    allowed_evidence = managed_roots.category_allows_evidence(category)
+    locations = s._normalize_text_list(
+        [block.get("locator") for block in list(parse_result.get("blocks") or []) if isinstance(block, dict)],
+        max_items=200,
+        max_length=160,
+    )
+    warnings = s._normalize_text_list(parse_result.get("warnings"), max_items=16, max_length=120)
+    metadata: dict[str, Any] = {
+        "sourceCollectionRunId": run_id,
+        "sha256": s._trim_text(sha256, max_length=128),
+        "managedSourceRoot": {
+            "rootId": s._trim_text(root_entry.get("rootId"), max_length=64),
+            "displayName": s._trim_text(root_entry.get("displayName"), max_length=120),
+            "trustClass": s._trim_text(root_entry.get("trustClass"), max_length=40),
+        },
+        "managedRootImport": {
+            "locator": s._trim_text(locator, max_length=1000),
+            "relativePath": s._trim_text(display_relative, max_length=900),
+            "extension": suffix,
+            "category": s._trim_text(category, max_length=60),
+            "allowedForEvidence": allowed_evidence,
+            "candidateOnly": not allowed_evidence,
+        },
+        "mimeType": s._trim_text(meta.get("magicKind"), max_length=40),
+        "parserVersion": s._trim_text(meta.get("parserVersion"), max_length=60),
+        "structuredLocations": locations,
+        "warnings": warnings,
+        "allowedForAnalysis": allowed_evidence,
+    }
+    if zip_lineage:
+        metadata["zipLineage"] = {
+            "parentSha256": s._trim_text(zip_lineage.get("parentSha256"), max_length=128),
+            "parentLocator": s._trim_text(zip_lineage.get("parentLocator"), max_length=1000),
+            "entryName": s._trim_text(zip_lineage.get("entryName"), max_length=400),
+        }
+    # 受管根内稳定身份键（不含绝对路径），让候选桥在跨 run 重复导入时去重。
+    metadata["sourceIdentityKey"] = s._trim_text(
+        f"managed:{root_entry.get('rootId')}:{display_relative}",
+        max_length=160,
+    )
+    return {
+        "sourceType": "note" if suffix in {".md", ".txt"} else "file",
+        "sourceRef": s._trim_text(locator, max_length=1000),
+        "rawLocation": s._trim_text(locator, max_length=1000),
+        "title": s._managed_root_title_from_parse(parse_result, display_relative),
+        "summary": s._trim_text(parse_result.get("summaryText"), max_length=4000),
+        "metadata": metadata,
+        "qualitySignals": {
+            "managedRootImport": True,
+            "sizeBytes": int(size_bytes or 0),
+            "truncated": bool(meta.get("truncated")),
+            "warningCount": len(warnings),
+            "allowedForEvidence": allowed_evidence,
+        },
+        "collectionTrace": {
+            "sourceCollectionRunId": run_id,
+            "assignmentId": s._trim_text(source_assignment.get("assignmentId"), max_length=160),
+            "agentRole": s._trim_text(source_assignment.get("agentRole"), max_length=80) or "source_intake",
+            "agentId": s._trim_text(source_assignment.get("agentId"), max_length=160),
+            "collectionMode": "local_workspace",
+            "managedRootId": s._trim_text(root_entry.get("rootId"), max_length=64),
+        },
+    }
+
+
+def _import_source_collection_managed_root_sources(
+    team_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+    *,
+    assignments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """受管桌面资料根导入旁路（手动刷新语义，无任何后台监听）。
+
+    - 根必须先在 managed_roots registry 登记；localPath 只存在于 registry。
+    - DataRecord/候选/manifest 侧只允许 ``managed://<rootId>/<relative>`` locator。
+    - blocked 文件进入结构化审计（reason+detail），绝不静默截断。
+    - allowedForEvidence=false 类别产物带 candidate-only 标记（allowedForAnalysis=False）。
+    """
+
+    s = _service()
+    from core.web.services.team_workflow.source_collection import local_parsing, managed_roots
+
+    request = s._normalize_managed_root_request(payload)
+    if not request["configured"]:
+        return s._source_collection_managed_scan_summary(status="not_configured")
+
+    if request["selectAll"]:
+        root_ids = [
+            str(entry.get("rootId") or "")
+            for entry in list(managed_roots.list_managed_source_roots().get("roots") or [])
+            if bool(entry.get("enabled", True))
+        ]
+    else:
+        root_ids = request["rootIds"]
+
+    source_assignment = next(
+        (
+            item for item in assignments
+            if isinstance(item, dict)
+            and s._trim_text(item.get("agentRole"), max_length=80) in s.SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+        ),
+        {},
+    )
+    all_imported: list[dict[str, Any]] = []
+    all_skipped: list[dict[str, Any]] = []
+    all_failed: list[dict[str, Any]] = []
+    all_blocked: list[dict[str, Any]] = []
+    root_summaries: list[dict[str, Any]] = []
+
+    for root_ref in root_ids[:16]:
+        root_id = s._trim_text(root_ref, max_length=64).lower()
+        entry = managed_roots.get_managed_source_root(root_id)
+        if entry is None:
+            all_skipped.append({"rootId": root_id, "reason": "root_not_registered"})
+            continue
+        if not bool(entry.get("enabled", True)):
+            all_skipped.append({"rootId": root_id, "reason": "root_disabled"})
+            continue
+        try:
+            root_path = Path(str(entry.get("localPath") or "")).resolve()
+        except (OSError, ValueError):
+            all_skipped.append({"rootId": root_id, "reason": "root_path_invalid"})
+            continue
+        if not root_path.is_dir():
+            all_skipped.append({"rootId": root_id, "reason": "root_path_missing"})
+            continue
+        root_outcome = s._scan_managed_root_for_import(
+            team_id,
+            run_id,
+            root_id=root_id,
+            entry=entry,
+            root_path=root_path,
+            source_assignment=source_assignment,
+        )
+        all_imported.extend(root_outcome["imported"])
+        all_skipped.extend(root_outcome["skipped"])
+        all_failed.extend(root_outcome["failed"])
+        all_blocked.extend(root_outcome["blocked"])
+        root_summaries.append(root_outcome["summary"])
+        managed_roots.mark_managed_root_scanned(root_id)
+
+    if root_summaries:
+        status = (
+            "completed" if all_imported and not (all_failed or all_blocked)
+            else ("partial" if all_imported else ("failed" if (all_failed or all_blocked) else "empty"))
+        )
+    else:
+        status = "empty"
+    summary = s._source_collection_managed_scan_summary(
+        status=status,
+        roots=root_summaries,
+        imported=all_imported,
+        skipped=all_skipped,
+        failed=all_failed,
+        blocked=all_blocked,
+    )
+    s._record_workflow_event(
+        "source_collection.managed_root_imported",
+        team_id,
+        fields={
+            "runId": run_id,
+            "status": status,
+            "rootCount": len(root_summaries),
+            "importedCount": summary["importedCount"],
+            "skippedCount": summary["skippedCount"],
+            "failedCount": summary["failedCount"],
+            "blockedCount": summary["blockedCount"],
+        },
+        level="warning" if all_failed or all_blocked else "info",
+        outcome="failed" if (all_failed or all_blocked) and not all_imported else "completed",
+    )
+    return summary
+
+
+def _scan_managed_root_for_import(
+    team_id: str,
+    run_id: str,
+    *,
+    root_id: str,
+    entry: dict[str, Any],
+    root_path: Path,
+    source_assignment: dict[str, Any],
+) -> dict[str, Any]:
+    """扫描单个受管根：预算 → 分类 → 解析链 → DataRecord → 候选桥。"""
+
+    s = _service()
+    from core.web.services.team_workflow.source_collection import local_parsing, managed_roots
+
+    budget = entry.get("scanBudget") if isinstance(entry.get("scanBudget"), dict) else {}
+    max_files = s._normalize_int(
+        budget.get("maxFiles"),
+        default=managed_roots.MANAGED_SCAN_BUDGET_DEFAULTS["maxFiles"],
+        minimum=1,
+        maximum=managed_roots.MANAGED_SCAN_BUDGET_LIMITS["maxFiles"][1],
+    )
+    max_total_bytes = s._normalize_int(
+        budget.get("maxTotalBytes"),
+        default=managed_roots.MANAGED_SCAN_BUDGET_DEFAULTS["maxTotalBytes"],
+        minimum=1,
+        maximum=managed_roots.MANAGED_SCAN_BUDGET_LIMITS["maxTotalBytes"][1],
+    )
+    max_file_bytes = s._normalize_int(
+        budget.get("maxFileBytes"),
+        default=managed_roots.MANAGED_SCAN_BUDGET_DEFAULTS["maxFileBytes"],
+        minimum=1,
+        maximum=managed_roots.MANAGED_SCAN_BUDGET_LIMITS["maxFileBytes"][1],
+    )
+    allowed_types = set(entry.get("allowedTypes") or managed_roots.MANAGED_SOURCE_ROOT_ALLOWED_EXTENSIONS)
+
+    skipped: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    selected: list[tuple[Path, str, int]] = []
+    total_bytes = 0
+    budget_exhausted = False
+    budget_reason = ""
+    try:
+        iterable = sorted(path for path in root_path.rglob("*") if path.is_file())
+    except OSError:
+        return {
+            "imported": [],
+            "skipped": [{"rootId": root_id, "reason": "root_unreadable"}],
+            "failed": [],
+            "blocked": [],
+            "summary": {"rootId": root_id, "status": "failed", "importedCount": 0, "skippedCount": 1, "failedCount": 0, "blockedCount": 0, "budgetTruncated": False, "budgetReason": ""},
+        }
+    for file_path in iterable:
+        relative_parts = {part.lower() for part in file_path.relative_to(root_path).parts}
+        if relative_parts & s.SOURCE_COLLECTION_LOCAL_SCAN_EXCLUDED_PARTS:
+            continue
+        relative_path = file_path.relative_to(root_path).as_posix()
+        try:
+            size_bytes = file_path.stat().st_size
+        except OSError:
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": "stat_failed"})
+            continue
+        if budget_exhausted:
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": budget_reason})
+            continue
+        if len(selected) >= max_files:
+            budget_exhausted = True
+            budget_reason = "budget_max_files_exceeded"
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": budget_reason})
+            continue
+        if total_bytes + size_bytes > max_total_bytes:
+            budget_exhausted = True
+            budget_reason = "budget_max_total_bytes_exceeded"
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": budget_reason})
+            continue
+        if size_bytes > max_file_bytes:
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": "file_too_large", "sizeBytes": size_bytes})
+            continue
+        suffix = file_path.suffix.lower()
+        if suffix not in allowed_types:
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": "unsupported_extension"})
+            continue
+        category = managed_roots.derive_managed_category(relative_path, entry.get("categoryPolicy"))
+        if not managed_roots.category_enabled_by_default(category) and not s._managed_category_policy_enabled(entry, category):
+            skipped.append({"rootId": root_id, "path": relative_path, "reason": "category_disabled", "category": category})
+            continue
+        selected.append((file_path, relative_path, size_bytes))
+        total_bytes += size_bytes
+
+    record_payloads: list[dict[str, Any]] = []
+    imported: list[dict[str, Any]] = []
+    for file_path, relative_path, size_bytes in selected:
+        suffix = file_path.suffix.lower()
+        try:
+            file_bytes = file_path.read_bytes()
+        except OSError as exc:
+            failed.append({"rootId": root_id, "path": relative_path, "reason": "read_failed", "error": str(exc)[:200]})
+            continue
+        sha256 = hashlib.sha256(file_bytes).hexdigest()
+        parse_result = local_parsing.parse_local_file(file_path, suffix=suffix, allowed_extensions=allowed_types)
+        if parse_result.get("status") != "parsed":
+            blocked.append(
+                {
+                    "rootId": root_id,
+                    "path": relative_path,
+                    "reason": s._trim_text(parse_result.get("blockedReason"), max_length=120) or "blocked",
+                    "detail": s._trim_text(parse_result.get("blockedDetail"), max_length=300),
+                }
+            )
+            continue
+        category = managed_roots.derive_managed_category(relative_path, entry.get("categoryPolicy"))
+        locator = managed_roots.build_managed_locator(root_id, relative_path)
+        record_payloads.append(
+            s._source_collection_managed_root_record_payload(
+                run_id=run_id,
+                source_assignment=source_assignment,
+                root_entry=entry,
+                category=category,
+                locator=locator,
+                display_relative=relative_path,
+                sha256=sha256,
+                size_bytes=size_bytes,
+                parse_result=parse_result,
+            )
+        )
+        imported.append({"rootId": root_id, "path": relative_path, "locator": locator, "category": category})
+        if parse_result.get("kind") == "zip":
+            extracted_results = [
+                item for item in list(parse_result.get("extracted") or [])
+                if isinstance(item, dict) and item.get("status") == "parsed" and isinstance(item.get("parse"), dict)
+            ]
+            for extracted in extracted_results[:64]:
+                entry_name = s._trim_text(extracted.get("entryName"), max_length=400)
+                entry_locator = managed_roots.build_zip_entry_locator(root_id, relative_path, entry_name)
+                record_payloads.append(
+                    s._source_collection_managed_root_record_payload(
+                        run_id=run_id,
+                        source_assignment=source_assignment,
+                        root_entry=entry,
+                        category=category,
+                        locator=entry_locator,
+                        display_relative=f"{relative_path}!/{entry_name}",
+                        sha256=s._trim_text(extracted.get("sha256"), max_length=128),
+                        size_bytes=int(extracted.get("sizeBytes") or 0),
+                        parse_result=extracted["parse"],
+                        zip_lineage={
+                            "parentSha256": sha256,
+                            "parentLocator": locator,
+                            "entryName": entry_name,
+                        },
+                    )
+                )
+                imported.append({"rootId": root_id, "path": f"{relative_path}!/{entry_name}", "locator": entry_locator, "category": category})
+
+    created_records = s._create_managed_root_records(team_id, run_id, source_assignment, record_payloads)
+    candidate_errors = s._bridge_managed_root_records_to_candidates(
+        team_id,
+        run_id,
+        created_records,
+        source_assignment=source_assignment,
+    )
+    failed.extend(candidate_errors)
+
+    imported_count = len(imported)
+    root_status = (
+        "completed" if imported_count and not (failed or blocked)
+        else ("partial" if imported_count else ("failed" if (failed or blocked) else "empty"))
+    )
+    summary = {
+        "rootId": root_id,
+        "displayName": s._trim_text(entry.get("displayName"), max_length=120),
+        "status": root_status,
+        "importedCount": imported_count,
+        "skippedCount": len(skipped),
+        "failedCount": len(failed),
+        "blockedCount": len(blocked),
+        "budgetTruncated": bool(budget_exhausted),
+        "budgetReason": budget_reason,
+        "scannedBytes": total_bytes,
+    }
+    return {"imported": imported, "skipped": skipped, "failed": failed, "blocked": blocked, "summary": summary}
+
+
+def _managed_category_policy_enabled(entry: dict[str, Any], category: str) -> bool:
+    """categoryPolicy 覆盖默认关闭类别的开关（enableCategories 列表）。"""
+
+    policy = entry.get("categoryPolicy") if isinstance(entry.get("categoryPolicy"), dict) else {}
+    enabled_categories = policy.get("enableCategories") if isinstance(policy.get("enableCategories"), list) else []
+    return category in {str(item).strip() for item in enabled_categories}
+
+
+def _create_managed_root_records(
+    team_id: str,
+    run_id: str,
+    source_assignment: dict[str, Any],
+    record_payloads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """分批写入 DataRecord（record_collection_output 单批上限 200）。"""
+
+    s = _service()
+    created_records: list[dict[str, Any]] = []
+    assignment_id = s._trim_text(source_assignment.get("assignmentId"), max_length=160)
+    batches = [record_payloads[index : index + 200] for index in range(0, len(record_payloads), 200)] or [[]]
+    for batch in batches:
+        try:
+            if assignment_id:
+                output = s.data_processing_service.record_collection_output(
+                    run_id,
+                    assignment_id,
+                    {
+                        "status": "completed",
+                        "records": batch,
+                        "notes": f"Imported {len(batch)} managed source root files.",
+                        "qualitySignals": {"managedRootImport": True, "recordCount": len(batch)},
+                    },
+                )
+                created_records.extend(item for item in list(output.get("createdRecords") or []) if isinstance(item, dict))
+            else:
+                created_records.extend(s.data_processing_service.add_record(run_id, item) for item in batch)
+        except s.data_processing_service.DataProcessingError as exc:
+            s._record_workflow_event(
+                "source_collection.managed_root_records_failed",
+                team_id,
+                fields={"runId": run_id, "error": str(exc)[:200]},
+                level="warning",
+                outcome="failed",
+            )
+    return created_records
+
+
+def _bridge_managed_root_records_to_candidates(
+    team_id: str,
+    run_id: str,
+    created_records: list[dict[str, Any]],
+    *,
+    source_assignment: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """受管根 DataRecord → source_manifest 候选；candidate-only 类别带标记。"""
+
+    s = _service()
+    failures: list[dict[str, Any]] = []
+    for record in created_records:
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        managed_import = metadata.get("managedRootImport") if isinstance(metadata.get("managedRootImport"), dict) else {}
+        root_ref = metadata.get("managedSourceRoot") if isinstance(metadata.get("managedSourceRoot"), dict) else {}
+        allowed_evidence = bool(managed_import.get("allowedForEvidence", True))
+        locator = s._trim_text(managed_import.get("locator"), max_length=1000)
+        try:
+            s.import_data_record_as_source_candidate(
+                team_id,
+                run_id,
+                s._trim_text(record.get("recordId"), max_length=160),
+                {
+                    "sourcePath": locator,
+                    "allowedForAnalysis": allowed_evidence,
+                    "createdByAgent": s._trim_text(source_assignment.get("agentId"), max_length=160) or "source_finder",
+                    "tags": ["source_collection", "managed_root", "knowledge_expansion"],
+                    "metadata": {
+                        "sourceCollectionRunId": run_id,
+                        "sourceCollectionManagedRootImport": True,
+                        "managedRootImport": managed_import,
+                        "candidateOnly": not allowed_evidence,
+                    },
+                },
+            )
+        except s.TeamWorkflowOrchestrationError as exc:
+            failures.append(
+                {
+                    "rootId": s._trim_text(root_ref.get("rootId"), max_length=64),
+                    "recordId": s._trim_text(record.get("recordId"), max_length=160),
+                    "reason": "candidate_import_failed",
+                    "error": str(exc)[:200],
+                }
+            )
+    return failures
 
 
 def _load_source_collection_exclusion_store(team_id: str) -> dict[str, Any]:
