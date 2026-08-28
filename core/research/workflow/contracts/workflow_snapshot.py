@@ -225,6 +225,100 @@ class BudgetSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgeInvocationRecentSummary:
+    """One recent knowledge-collection invocation (canvas lineage row)."""
+
+    invocation_id: str
+    parent_node_id: str
+    status: str | None
+    handoff_state: str | None
+    current_knowledge_node_id: str | None
+    knowledge_child_run_id: str | None = None
+    knowledge_package_ref: str | None = None
+    package_content_hash: str | None = None
+    error_summary: str | None = None
+    created_at_ms: int = 0
+    updated_at_ms: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "invocationId": self.invocation_id,
+            "parentNodeId": self.parent_node_id,
+            "status": self.status,
+            "handoffState": self.handoff_state,
+            "currentKnowledgeNodeId": self.current_knowledge_node_id,
+            "knowledgeChildRunId": self.knowledge_child_run_id,
+            "knowledgePackageRef": self.knowledge_package_ref,
+            "packageContentHash": self.package_content_hash,
+            "errorSummary": self.error_summary,
+            "createdAtMs": self.created_at_ms,
+            "updatedAtMs": self.updated_at_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeInvocationBadge:
+    """Per-main-node knowledge invocation aggregate (canvas badge facts)."""
+
+    node_id: str
+    total_count: int
+    running_count: int
+    awaiting_handoff_count: int
+    absorbed_count: int
+    failed_count: int = 0
+    latest: KnowledgeInvocationRecentSummary | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "nodeId": self.node_id,
+            "totalCount": self.total_count,
+            "runningCount": self.running_count,
+            "awaitingHandoffCount": self.awaiting_handoff_count,
+            "absorbedCount": self.absorbed_count,
+            "failedCount": self.failed_count,
+            "latest": self.latest.to_dict() if self.latest is not None else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CommandOfferAuthorization:
+    """Server-signed executability facts for one canonical command offer.
+
+    ``requiresOperator`` mirrors the command service's own enforcement set so
+    the UI can render a disabled operator-only action (with reason) instead of
+    letting the user hit the 403.  The signature binds the offer to
+    (runId, idempotencyKey, command, nodeId, expectedRunVersion) and an
+    explicit validity window; ``authorizationStatus`` is ``authorized`` only
+    while that window is open and the scope matches.
+    """
+
+    idempotency_key: str
+    command: str
+    node_id: str | None
+    requires_operator: bool
+    authorization_status: str
+    authorization_reason: str
+    signed_at_ms: int
+    expires_at_ms: int
+    expected_run_version: int
+    signature: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "idempotencyKey": self.idempotency_key,
+            "command": self.command,
+            "nodeId": self.node_id,
+            "requiresOperator": self.requires_operator,
+            "authorizationStatus": self.authorization_status,
+            "authorizationReason": self.authorization_reason,
+            "signedAt": self.signed_at_ms,
+            "expiresAt": self.expires_at_ms,
+            "expectedRunVersion": self.expected_run_version,
+            "signature": self.signature,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchWorkflowNodeDetail:
     run_id: str
     team_id: str
@@ -315,6 +409,31 @@ class ResearchWorkflowSnapshot:
     artifact_summary: Mapping[str, Any] = field(default_factory=dict)
     delivery_status: str | None = None
     launch_context: Mapping[str, Any] = field(default_factory=dict)
+    # Knowledge-sideflow badge aggregates keyed by parent node id.  Empty for
+    # runs without knowledge invocations; old readers ignore it.
+    invocation_badges: Mapping[str, KnowledgeInvocationBadge] = field(
+        default_factory=dict
+    )
+    # Server-signed offer authorization envelopes; merged into the serialized
+    # commandOffers entries (additive keys) so the canonical action DTO carries
+    # requiresOperator/authorizationStatus/... without a second truth source.
+    command_authorizations: tuple[CommandOfferAuthorization, ...] = ()
+
+    def _serialized_command_offers(self) -> list[dict[str, Any]]:
+        auth_by_key = {
+            item.idempotency_key: item for item in self.command_authorizations
+        }
+        offers: list[dict[str, Any]] = []
+        for offer in self.command_offers:
+            payload = offer.to_dict()
+            authorization = auth_by_key.get(str(offer.idempotency_key))
+            if authorization is not None:
+                merged = authorization.to_dict()
+                # expectedRunVersion already exists on the offer payload.
+                merged.pop("expectedRunVersion", None)
+                payload.update(merged)
+            offers.append(payload)
+        return offers
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -326,7 +445,7 @@ class ResearchWorkflowSnapshot:
             },
             "activeNodeIds": list(self.active_node_ids),
             "pendingHumanTasks": [item.to_dict() for item in self.pending_human_tasks],
-            "commandOffers": [offer.to_dict() for offer in self.command_offers],
+            "commandOffers": self._serialized_command_offers(),
             "handoffSummary": self.handoff_summary.to_dict(),
             "agentBindingSummary": self.agent_binding_summary.to_dict(),
             "budgetSummary": self.budget_summary.to_dict(),
@@ -342,4 +461,8 @@ class ResearchWorkflowSnapshot:
             "artifactSummary": dict(self.artifact_summary),
             "deliveryStatus": self.delivery_status,
             "launchContext": dict(self.launch_context),
+            "invocationBadges": {
+                node_id: badge.to_dict()
+                for node_id, badge in self.invocation_badges.items()
+            },
         }

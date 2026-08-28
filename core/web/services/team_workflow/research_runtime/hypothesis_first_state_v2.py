@@ -1605,6 +1605,22 @@ def _collection_request_state(
         child = _phase()
     child["runId"] = run_id
     handed_off = status == "handed_off"
+    # Real cross-run handoff status, derived from facts this projection
+    # already owns (request status, recorded handoff error, child lifecycle).
+    # Superset of KnowledgeHandoffState: ``failed``/``needs_context`` mark the
+    # recovery states the canvas actions ("重试资料交接") act on.
+    raw_handoff_error = request.get("handoffError")
+    handoff_error = raw_handoff_error if isinstance(raw_handoff_error, Mapping) else {}
+    if handed_off:
+        handoff_status = "accepted"
+    elif handoff_error:
+        handoff_status = "failed"
+    elif child["lifecycle"] == "completed":
+        handoff_status = "pending"
+    elif run_id:
+        handoff_status = "pending"
+    else:
+        handoff_status = "needs_context"
     if handed_off:
         handoff = _phase("completed", "succeeded", "terminal", updated_at=updated_at)
         request_phase = _phase("completed", "succeeded", "terminal", updated_at=updated_at)
@@ -1661,6 +1677,7 @@ def _collection_request_state(
         "childRun": child,
         "sources": sources,
         "handoff": handoff,
+        "handoffStatus": handoff_status,
     }
 
 
@@ -3245,6 +3262,24 @@ def project_state_from_records(
                 )
             )
         elif (
+            child_run_id
+            and str(request_state.get("handoffStatus") or "").lower() == "failed"
+        ):
+            # A previous handoff attempt failed (recorded handoffError); the
+            # child run's package is still there, so the recovery action is a
+            # handoff retry — reachable again now that the projection emits a
+            # real handoff status.
+            allowed_actions.append(
+                _command_action(
+                    "handoff_collection",
+                    action_id=f"handoff-collection:{request_id}",
+                    label="重试资料交接",
+                    target_phase="collection",
+                    target_node_id="hf_collection",
+                    payload={"requestId": request_id, "childRunId": child_run_id},
+                )
+            )
+        elif (
             child_lifecycle == "completed"
             and handoff_lifecycle == "waiting_human"
         ):
@@ -3259,7 +3294,6 @@ def project_state_from_records(
                 )
             )
         elif child_run_id and str(request_state.get("handoffStatus") or "").lower() in {
-            "failed",
             "pending",
             "needs_context",
         }:

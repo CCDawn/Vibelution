@@ -101,6 +101,37 @@ def project_research_ledger_from_snapshot(snapshot: ResearchWorkflowSnapshot) ->
     return payload
 
 
+def project_knowledge_invocations(snapshot: ResearchWorkflowSnapshot) -> dict[str, Any]:
+    """knowledge_invocations domain projection (per-node badge aggregates).
+
+    Serves the snapshot's invocation badge aggregates through the standard
+    per-domain GET projection surface; the aggregates themselves are built
+    once by the snapshot projection builder.
+    """
+    run = snapshot.run.to_dict()
+    return {
+        "runId": run["runId"],
+        "teamId": run["teamId"],
+        "runVersion": run["runVersion"],
+        "badges": {
+            node_id: badge.to_dict()
+            for node_id, badge in snapshot.invocation_badges.items()
+        },
+        "totals": {
+            "totalCount": sum(badge.total_count for badge in snapshot.invocation_badges.values()),
+            "runningCount": sum(
+                badge.running_count for badge in snapshot.invocation_badges.values()
+            ),
+            "awaitingHandoffCount": sum(
+                badge.awaiting_handoff_count for badge in snapshot.invocation_badges.values()
+            ),
+            "absorbedCount": sum(
+                badge.absorbed_count for badge in snapshot.invocation_badges.values()
+            ),
+        },
+    }
+
+
 __all__ = [
     "HandoffQueryError",
     "project_budget_from_snapshot",
@@ -109,6 +140,7 @@ __all__ = [
     "project_handoff_detail",
     "project_handoffs",
     "project_hypotheses_from_snapshot",
+    "project_knowledge_invocations",
     "project_research_ledger_from_snapshot",
     "snapshot_projection_record",
 ]

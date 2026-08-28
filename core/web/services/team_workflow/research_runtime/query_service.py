@@ -157,12 +157,13 @@ class WorkflowQueryService:
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
 
+        definition = self._definition_for_run(run)
         offers = build_command_offers(
             readiness_service=self._readiness,
             context=self._readiness_context(),
             team_id=scoped_team,
             run=run,
-            definition=self._definition,
+            definition=definition,
             pending_human_tasks=human_tasks,
             attempts=attempts,
             evaluated_at_ms=(
@@ -174,7 +175,7 @@ class WorkflowQueryService:
         return build_research_workflow_snapshot(
             ProjectionInputs(
                 run=run,
-                definition=self._definition,
+                definition=definition,
                 attempts=tuple(attempts),
                 pending_human_tasks=tuple(human_tasks),
                 handoffs=tuple(handoffs),
@@ -188,10 +189,33 @@ class WorkflowQueryService:
                 discussion_meetings=discussion_meetings,
                 discussion_rooms=discussion_rooms,
                 execution_anchors=tuple(execution_anchors),
+                knowledge_invocations=tuple(knowledge_invocations),
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )
         )
+
+    def _definition_for_run(self, run: Any) -> Any:
+        """Resolve the definition pinned by the run's version identity.
+
+        The canvas must render the topology the run was created with (2.1.0
+        legacy runs keep the 17-node chain; 3.0.0/sideflow runs render their
+        own pinned graph).  Resolution is fail-soft: an unregistered legacy
+        version id falls back to the service default instead of failing the
+        whole snapshot read.
+        """
+        try:
+            from core.research.workflow.definition_registry import resolve_definition
+
+            return resolve_definition(
+                workflow_id=str(getattr(run, "workflow_id", "") or ""),
+                workflow_version_id=str(
+                    getattr(run, "workflow_version_id", "") or ""
+                ),
+                run_id=str(getattr(run, "run_id", "") or ""),
+            )
+        except Exception:  # noqa: BLE001 - snapshot reads fail soft to default
+            return self._definition
 
     def get_node_detail(
         self, *, team_id: str, run_id: str, node_id: str
@@ -343,6 +367,7 @@ class WorkflowQueryService:
                 for row in repo.list_budget_receipts_for_run(run_id)
             ]
             artifact_receipts = repo.list_artifact_receipts_for_run(run_id)
+            knowledge_invocations = _load_knowledge_invocations(repo, run_id)
             latest_seq = repo.latest_event_sequence(run_id)
             events = _read_bounded_events(
                 repo,
@@ -388,6 +413,24 @@ class WorkflowQueryService:
             return self._store.read(load)
         # Narrow test doubles may raise WorkflowLedgerUnavailable directly.
         return load(self._store)  # type: ignore[arg-type]
+
+
+def _load_knowledge_invocations(
+    repo: WorkflowLedgerRepository, run_id: str
+) -> list[Any]:
+    """Load the run's knowledge invocations (fail-soft, additive projection).
+
+    Older test doubles / schemas may not carry the ``knowledge_invocations``
+    table; a missing source degrades to "no knowledge activity" instead of
+    failing the whole snapshot.
+    """
+    loader = getattr(repo, "list_knowledge_invocations_for_parent", None)
+    if loader is None:
+        return []
+    try:
+        return list(loader(run_id))
+    except Exception:  # noqa: BLE001 - badge reads must not break snapshots
+        return []
 
 
 def _latest_attempt_anchor_rows(

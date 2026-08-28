@@ -454,6 +454,10 @@ class CollectionRequestState(PhaseState):
     childRun: CollectionChildRunState
     sources: list[CollectionSourceState]
     handoff: CollectionHandoffState
+    # Real cross-run handoff status derived by the projection from its own
+    # child-run / handoff facts (superset of KnowledgeHandoffState with the
+    # recovery states the "重试资料交接" action acts on).
+    handoffStatus: Literal["accepted", "pending", "failed", "needs_context"]
 
 
 class StateAggregate(StrictWireModel):

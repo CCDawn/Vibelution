@@ -13,9 +13,12 @@ from core.research.workflow.contracts.workflow_snapshot import (
     AgentBindingSummary,
     BudgetReceiptRef,
     BudgetSummary,
+    CommandOfferAuthorization,
     HandoffRefSummary,
     HandoffSummary,
     HumanTaskSummary,
+    KnowledgeInvocationBadge,
+    KnowledgeInvocationRecentSummary,
     NodeAttemptSummary,
     WorkflowRunSummary,
 )
@@ -28,6 +31,8 @@ from .command_offers.retry_node import (
     succeeded_node_rerun_available,
     succeeded_node_rerun_target,
 )
+from .knowledge_invocation_projection import project_knowledge_invocation_badges
+from .offer_authorization import build_offer_authorizations
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +60,14 @@ class ProjectionInputs:
     # mappings by the query layer).  They let currentTask surface the live
     # Agent task identity during dispatch instead of only after final commit.
     execution_anchors: tuple[Mapping[str, Any], ...] = ()
+    # Knowledge-sideflow invocation rows for this run (already loaded by the
+    # query layer; the builder stays a pure function over its inputs).
+    knowledge_invocations: tuple[Any, ...] = ()
+    # Offer authorization signing: explicit key/now keep the builder
+    # deterministic for tests; ``None`` resolves the server control secret and
+    # wall clock.
+    authorization_key: str | None = None
+    now_ms: int | None = None
 
 
 def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkflowSnapshot:
@@ -141,6 +154,9 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         # value to a top-level response field without creating another rule.
         launch_context["activeDiscussionAnchor"] = discussion_anchor
 
+    invocation_badges = _invocation_badges(inputs)
+    command_authorizations = _offer_authorizations(inputs)
+
     return ResearchWorkflowSnapshot(
         run=run_summary,
         definition=inputs.definition.to_dict(),
@@ -185,7 +201,94 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         ),
         delivery_status=_normalize_delivery_status(inputs.delivery_status),
         launch_context=launch_context,
+        invocation_badges=invocation_badges,
+        command_authorizations=command_authorizations,
     )
+
+
+def _invocation_badges(
+    inputs: ProjectionInputs,
+) -> dict[str, KnowledgeInvocationBadge]:
+    """Knowledge invocation aggregates keyed by parent node id (additive)."""
+    if not inputs.knowledge_invocations:
+        return {}
+    raw_badges = project_knowledge_invocation_badges(inputs.knowledge_invocations)
+    badges: dict[str, KnowledgeInvocationBadge] = {}
+    for node_id, payload in raw_badges.items():
+        latest_row = payload.get("latest")
+        latest = (
+            KnowledgeInvocationRecentSummary(
+                invocation_id=str(latest_row.get("invocationId") or ""),
+                parent_node_id=str(latest_row.get("parentNode_id") or node_id),
+                status=latest_row.get("status"),
+                handoff_state=latest_row.get("handoffState"),
+                current_knowledge_node_id=latest_row.get("currentKnowledgeNodeId"),
+                knowledge_child_run_id=latest_row.get("knowledgeChildRunId"),
+                knowledge_package_ref=latest_row.get("knowledgePackageRef"),
+                package_content_hash=latest_row.get("packageContentHash"),
+                error_summary=latest_row.get("errorSummary"),
+                created_at_ms=int(latest_row.get("createdAtMs") or 0),
+                updated_at_ms=int(latest_row.get("updatedAtMs") or 0),
+            )
+            if isinstance(latest_row, Mapping)
+            else None
+        )
+        badges[node_id] = KnowledgeInvocationBadge(
+            node_id=node_id,
+            total_count=int(payload.get("totalCount") or 0),
+            running_count=int(payload.get("runningCount") or 0),
+            awaiting_handoff_count=int(payload.get("awaitingHandoffCount") or 0),
+            absorbed_count=int(payload.get("absorbedCount") or 0),
+            failed_count=int(payload.get("failedCount") or 0),
+            latest=latest,
+        )
+    return badges
+
+
+def _offer_authorizations(
+    inputs: ProjectionInputs,
+) -> tuple[CommandOfferAuthorization, ...]:
+    """Server-signed executability envelopes for the canonical offers.
+
+    ``signedAt`` anchors to the snapshot's own ``generated_at`` so identical
+    inputs rebuild byte-identical snapshots (deterministic read model); the
+    wall clock is only the fallback when the stamp cannot be parsed.
+    """
+    if not inputs.command_offers:
+        return ()
+    envelopes = build_offer_authorizations(
+        run_id=inputs.run.run_id,
+        run_version=inputs.run.run_version,
+        offers=inputs.command_offers,
+        now_ms=inputs.now_ms if inputs.now_ms is not None else _ms_from_iso(
+            inputs.generated_at
+        ),
+        key=inputs.authorization_key,
+    )
+    return tuple(
+        CommandOfferAuthorization(
+            idempotency_key=str(item.get("idempotencyKey") or ""),
+            command=str(item.get("command") or ""),
+            node_id=item.get("nodeId"),
+            requires_operator=bool(item.get("requiresOperator")),
+            authorization_status=str(item.get("authorizationStatus") or ""),
+            authorization_reason=str(item.get("authorizationReason") or ""),
+            signed_at_ms=int(item.get("signedAt") or 0),
+            expires_at_ms=int(item.get("expiresAt") or 0),
+            expected_run_version=int(item.get("expectedRunVersion") or 0),
+            signature=str(item.get("signature") or ""),
+        )
+        for item in envelopes
+    )
+
+
+def _ms_from_iso(value: str) -> int | None:
+    from datetime import datetime
+
+    try:
+        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return None
 
 
 _LIVE_ATTEMPT_STATUS = frozenset(

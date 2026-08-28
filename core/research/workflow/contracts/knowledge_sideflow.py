@@ -43,8 +43,10 @@ KNOWLEDGE_INVOCATION_TERMINAL_STATUSES = frozenset(
 class KnowledgeHandoffState(str, Enum):
     """Cross-run handoff consumption state of the produced package.
 
-    Deliberately NOT spelled ``handoffStatus``: that key is a dead branch
-    marker in hypothesis_first_state_v2 and must never be re-anchored here.
+    Deliberately NOT spelled ``handoffStatus``: that spelling belongs to the
+    hypothesis-first projection layer, where ``collection_request_state`` now
+    emits a real ``handoffStatus`` (accepted/pending/failed/needs_context)
+    derived from its own child-run and handoff facts.
     """
 
     PENDING = "pending"

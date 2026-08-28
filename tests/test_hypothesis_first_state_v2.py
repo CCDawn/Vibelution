@@ -4510,3 +4510,109 @@ def test_v2_convergence_matches_real_claim_ledger_gate(
     )
     # The real evidence store is untouched by the projection.
     assert ClaimEvidenceStore(tmp_path).list(team_id) == []
+
+
+def test_awaiting_handoff_collection_exposes_confirm_and_retry_actions() -> None:
+    """The handoff actions stay reachable: the projection emits a real status.
+
+    Regression lock: ``collection_request_state`` used to omit
+    ``handoffStatus`` entirely, which made the "重试资料交接" elif branch
+    read a key that never existed (dead branch).  The status is now derived
+    from the request's own child-run / handoff facts.
+    """
+    # Child completed, no handoff recorded yet -> awaiting human acceptance.
+    awaiting = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-awaiting",
+                    "questionId": "SCI-001",
+                    "status": "active",
+                    "collectionRunId": "child-done",
+                    "collectionRunStatus": "succeeded",
+                    "searchEnvelope": {"keywords": ["water"]},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    request_state = awaiting.collection.requests[0]
+    assert request_state.handoffStatus == "pending"
+    confirm = next(
+        action
+        for action in awaiting.allowedActions
+        if action.kind == "command" and action.command == "handoff_collection"
+    )
+    assert confirm.label == "确认资料交接"
+    assert confirm.payload.requestId == "request-awaiting"
+    assert confirm.payload.childRunId == "child-done"
+
+    # A previously failed handoff attempt (recorded handoffError) offers the
+    # explicit retry-handoff recovery instead of a plain confirmation.
+    failed_handoff = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-handoff-failed",
+                    "questionId": "SCI-001",
+                    "status": "active",
+                    "collectionRunId": "child-handoff-failed",
+                    "collectionRunStatus": "succeeded",
+                    "searchEnvelope": {"keywords": ["water"]},
+                    "handoffError": {"code": "handoff_write_failed"},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    assert failed_handoff.collection.requests[0].handoffStatus == "failed"
+    retry = next(
+        action
+        for action in failed_handoff.allowedActions
+        if action.kind == "command" and action.command == "handoff_collection"
+    )
+    assert retry.label == "重试资料交接"
+    assert retry.payload.childRunId == "child-handoff-failed"
+
+    # No child run bound -> needs_context, handed_off -> accepted.
+    assert awaiting.collection.requests[0].handoffStatus != "needs_context"
+    orphan = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": "request-orphan",
+                    "questionId": "SCI-001",
+                    "status": "pending",
+                    "collectionRunId": "",
+                    "collectionRunStatus": "",
+                    "searchEnvelope": {"keywords": ["water"]},
+                }
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+    assert orphan.collection.requests[0].handoffStatus == "needs_context"
