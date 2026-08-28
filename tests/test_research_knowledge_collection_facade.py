@@ -12,9 +12,19 @@ import json
 import pytest
 
 from core.research.workflow.contracts import scope_hash_for
-from core.web.services import data_processing_service
+from core.web.services import (
+    agent_directory_service,
+    data_processing_service,
+    session_service,
+    team_service,
+    team_workflow_orchestration_service,
+)
 from core.web.services.team_workflow.source_collection import facade
 from core.web.services.team_workflow.source_collection import runs as source_collection_runs
+from tests._support.team_workflow.helpers import (
+    _use_fake_local_research_config,
+    _use_tmp_project_root,
+)
 
 
 def _valid_envelope() -> dict:
@@ -66,6 +76,39 @@ def _valid_search_envelope() -> dict:
 
 def _fake_list_runs(runs=None):
     return lambda **kwargs: {"runs": list(runs or [])}
+
+
+def _normalized_search(search_raw=None) -> dict:
+    return facade._normalize_search_envelope(search_raw or _valid_search_envelope())
+
+
+def _request_fingerprint(search_raw=None, requirements=None) -> str:
+    return facade.search_envelope_fingerprint(
+        _normalized_search(search_raw),
+        facade._normalize_requirements(requirements),
+    )
+
+
+def _stored_run(
+    run_id: str,
+    *,
+    updated_at: str,
+    fingerprint: str = "",
+) -> dict:
+    """Build a stored source-collection run as list_processing_runs returns it."""
+    metadata: dict = {
+        "startedFrom": "team_workflow_source_collection",
+        "teamId": "research-team",
+    }
+    if fingerprint:
+        metadata["searchEnvelopeFingerprint"] = fingerprint
+    return {
+        "runId": run_id,
+        "updatedAt": updated_at,
+        "createdAt": updated_at,
+        "metadata": metadata,
+        "scope": {"researchScopeHash": _valid_envelope()["scopeHash"]},
+    }
 
 
 def _fake_summary(*, record_count=0, candidate_count=0):
@@ -260,10 +303,15 @@ def test_facade_inspect_returns_not_found_without_creating(monkeypatch):
 
 def test_facade_ensure_is_idempotent_when_state_exists(monkeypatch):
     created = []
+    existing = _stored_run(
+        "dprun-existing",
+        updated_at="2026-08-17T00:00:00Z",
+        fingerprint=_request_fingerprint(),
+    )
     monkeypatch.setattr(
         data_processing_service,
         "list_processing_runs",
-        _fake_list_runs([{"runId": "dprun-existing", "updatedAt": "2026-08-17T00:00:00Z"}]),
+        _fake_list_runs([existing]),
     )
     monkeypatch.setattr(
         source_collection_runs,
@@ -298,12 +346,14 @@ def test_facade_ensure_is_idempotent_when_state_exists(monkeypatch):
 
 def test_facade_ensure_creates_run_when_missing(monkeypatch):
     created_payloads = []
+    expected_fingerprint = _request_fingerprint()
 
     def fake_list(**kwargs):
         assert kwargs["scope_filters"] == {"researchScopeHash": _valid_envelope()["scopeHash"]}
         assert kwargs["metadata_filters"] == {
             "startedFrom": "team_workflow_source_collection",
             "teamId": "research-team",
+            "searchEnvelopeFingerprint": expected_fingerprint,
         }
         return {"runs": []}
 
@@ -333,6 +383,7 @@ def test_facade_ensure_creates_run_when_missing(monkeypatch):
     assert len(created_payloads) == 1
     team_id, payload = created_payloads[0]
     assert team_id == "research-team"
+    assert payload["searchEnvelopeFingerprint"] == expected_fingerprint
     assert payload["scope"]["researchScopeHash"] == _valid_envelope()["scopeHash"]
     assert payload["scope"]["researchScopeCacheKey"].startswith("scope:")
     assert payload["scope"]["searchEnvelope"]["keywords"] == ["predictive coding", "neural plasticity"]
@@ -370,3 +421,316 @@ def test_facade_surfaces_run_creation_failure(monkeypatch):
             searchEnvelope=_valid_search_envelope(),
         )
     assert exc.value.code == "run_creation_failed"
+
+
+def test_search_envelope_fingerprint_is_canonical_and_order_insensitive():
+    a = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["b 关键词", "a keyword"]}),
+        {},
+    )
+    b = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["a keyword", "b 关键词"]}),
+        {},
+    )
+    assert a == b
+    assert len(a) == 64
+    assert a == a.lower()
+
+
+def test_search_envelope_fingerprint_changes_with_keywords_and_requirements():
+    base = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["alpha"]}),
+        {},
+    )
+    other_keywords = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["alpha", "beta"]}),
+        {},
+    )
+    other_requirements = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["alpha"]}),
+        {"minEvidenceLevel": "primary"},
+    )
+    other_policy = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["alpha"]}),
+        {},
+        source_policy_version="2",
+    )
+    assert base != other_keywords
+    assert base != other_requirements
+    assert base != other_policy
+
+
+def test_facade_ensure_creates_new_run_for_new_keywords(monkeypatch):
+    created_payloads = []
+    stale = _stored_run(
+        "dprun-old",
+        updated_at="2026-08-27T00:00:00Z",
+        fingerprint=_request_fingerprint({"keywords": ["old topic"]}),
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([stale]),
+    )
+
+    def fake_start(team_id, payload):
+        created_payloads.append(dict(payload))
+        return {"runId": "dprun-new", "run": {"runId": "dprun-new"}}
+
+    monkeypatch.setattr(source_collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope={"keywords": ["new topic"]},
+    )
+
+    assert result["status"] == "ok"
+    assert result["created"] is True
+    assert result["idempotent"] is False
+    assert result["locator"]["runId"] == "dprun-new"
+    assert len(created_payloads) == 1
+    assert created_payloads[0]["searchEnvelopeFingerprint"] == _request_fingerprint(
+        {"keywords": ["new topic"]}
+    )
+
+
+def test_facade_ensure_replays_same_envelope_idempotently(monkeypatch):
+    created = []
+    fingerprint = _request_fingerprint()
+    existing = _stored_run(
+        "dprun-same",
+        updated_at="2026-08-27T00:00:00Z",
+        fingerprint=fingerprint,
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([existing]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(record_count=7),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["status"] == "ok"
+    assert result["created"] is False
+    assert result["idempotent"] is True
+    assert result["locator"]["runId"] == "dprun-same"
+    assert created == []
+
+
+def test_facade_ensure_creates_new_run_for_new_requirements(monkeypatch):
+    created = []
+    existing = _stored_run(
+        "dprun-relaxed",
+        updated_at="2026-08-27T00:00:00Z",
+        fingerprint=_request_fingerprint(requirements={}),
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([existing]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {"runId": "dprun-new"},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+        requirements={"minEvidenceLevel": "primary"},
+    )
+
+    assert result["created"] is True
+    assert result["idempotent"] is False
+    assert created
+
+
+def test_facade_ensure_never_reuses_run_without_fingerprint(monkeypatch):
+    created = []
+    legacy = _stored_run("dprun-legacy", updated_at="2026-08-27T00:00:00Z")
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([legacy]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {"runId": "dprun-new"},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["created"] is True
+    assert result["idempotent"] is False
+    assert result["locator"]["runId"] == "dprun-new"
+    assert created
+
+
+def test_facade_ensure_picks_latest_run_within_same_fingerprint(monkeypatch):
+    fingerprint = _request_fingerprint()
+    runs_list = [
+        _stored_run(
+            "dprun-older",
+            updated_at="2026-08-26T00:00:00Z",
+            fingerprint=fingerprint,
+        ),
+        _stored_run(
+            "dprun-newest",
+            updated_at="2026-08-27T12:00:00Z",
+            fingerprint=fingerprint,
+        ),
+    ]
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(runs_list),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["idempotent"] is True
+    assert result["locator"]["runId"] == "dprun-newest"
+
+
+def test_facade_inspect_still_finds_latest_run_regardless_of_fingerprint(monkeypatch):
+    created = []
+    differing = _stored_run(
+        "dprun-inspect",
+        updated_at="2026-08-27T00:00:00Z",
+        fingerprint=_request_fingerprint({"keywords": ["unrelated topic"]}),
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([differing]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(record_count=4),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="inspect",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["action"] == "inspect"
+    assert result["found"] is True
+    assert result["created"] is False
+    assert result["locator"]["runId"] == "dprun-inspect"
+    assert created == []
+
+
+def test_start_source_collection_run_persists_search_envelope_fingerprint(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="知识搜集团队",
+        members=[{"agentId": agent["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    fingerprint = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope({"keywords": ["predictive coding"]}),
+        {},
+    )
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "知识搜集",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": agent["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+            "searchEnvelopeFingerprint": fingerprint,
+        },
+    )
+
+    run = response["run"]
+    assert run["metadata"]["startedFrom"] == "team_workflow_source_collection"
+    assert run["metadata"]["searchEnvelopeFingerprint"] == fingerprint
+
+
+def test_start_source_collection_run_without_fingerprint_omits_metadata_key(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="普通搜集团队",
+        members=[{"agentId": agent["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "常规搜集",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": agent["agentId"]},
+            "querySeeds": ["sleep homeostasis"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+    run = response["run"]
+    assert "searchEnvelopeFingerprint" not in run["metadata"]

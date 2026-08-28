@@ -316,16 +316,34 @@ def test_request_status_through_real_facade_and_scope(tmp_path, monkeypatch):
 
     def fake_list_runs(*, limit=200, metadata_filters=None, scope_filters=None, **_):
         scope_hash = str((scope_filters or {}).get("researchScopeHash") or "")
-        runs = [
-            {
-                "runId": f"dprun-kr-{index + 1}",
-                "createdAt": "2026-08-21T00:00:00Z",
-                "updatedAt": "2026-08-21T00:00:00Z",
-            }
-            for index, item in enumerate(created)
-            if not scope_hash
-            or str(item.get("scope", {}).get("researchScopeHash") or "") == scope_hash
-        ]
+        expected_fingerprint = str(
+            (metadata_filters or {}).get("searchEnvelopeFingerprint") or ""
+        )
+        runs = []
+        for index, item in enumerate(created):
+            if (
+                scope_hash
+                and str(item.get("scope", {}).get("researchScopeHash") or "") != scope_hash
+            ):
+                continue
+            run_fingerprint = str(item.get("searchEnvelopeFingerprint") or "")
+            if expected_fingerprint and run_fingerprint != expected_fingerprint:
+                continue
+            runs.append(
+                {
+                    "runId": f"dprun-kr-{index + 1}",
+                    "createdAt": "2026-08-21T00:00:00Z",
+                    "updatedAt": "2026-08-21T00:00:00Z",
+                    "metadata": (
+                        {
+                            "startedFrom": "team_workflow_source_collection",
+                            "searchEnvelopeFingerprint": run_fingerprint,
+                        }
+                        if run_fingerprint
+                        else {}
+                    ),
+                }
+            )
         return {"runs": runs}
 
     def fake_summary(team_id, run_id=""):
