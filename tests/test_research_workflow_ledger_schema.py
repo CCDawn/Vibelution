@@ -212,11 +212,12 @@ def test_fresh_v5_uses_current_checksum(tmp_path: Path) -> None:
 
     import apsw
 
+    v5_migration = next(m for m in MIGRATIONS if m.version == 5)
+    assert v5_migration.checksum != V5_LEGACY_CHECKSUM
     connection = apsw.Connection(str(path), flags=apsw.SQLITE_OPEN_READONLY)
-    assert MIGRATIONS[-1].checksum != V5_LEGACY_CHECKSUM
     assert connection.execute(
         "SELECT checksum FROM schema_migrations WHERE version = 5"
-    ).fetchone()[0] == MIGRATIONS[-1].checksum
+    ).fetchone()[0] == v5_migration.checksum
     connection.close()
 
 

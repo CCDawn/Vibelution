@@ -48,6 +48,12 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
     prompt_cache_policy = s._source_collection_prompt_cache_policy(normalized_team_id, request_payload, roles)
     scope = s._normalize_metadata(request_payload.get("scope"))
+    # Optional ensure-idempotency fingerprint set by the knowledge-collection
+    # facade (see facade.search_envelope_fingerprint).  Only the explicit
+    # metadata key is propagated; arbitrary caller metadata is never merged.
+    search_envelope_fingerprint = s._trim_text(
+        request_payload.get("searchEnvelopeFingerprint"), max_length=128
+    )
     question_id = request_payload.get("questionId") or scope.get("questionId")
     required_model_policy = (
         request_payload.get("requiredModelPolicy")
@@ -93,32 +99,35 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         roles,
         request_payload,
     )
+    run_metadata = {
+        "startedFrom": "team_workflow_source_collection",
+        "teamId": normalized_team_id,
+        "workflowKind": workflow_kind,
+        "workflowPurpose": workflow_kind,
+        "collectionMode": collection_mode,
+        "researchProjectId": research_project["projectId"],
+        "experimentName": research_project["name"],
+        **challenge_task_contract,
+        "requestedByAgent": requested_by_agent,
+        "ownerAgentId": owner_agent_id,
+        "searchPlanId": preliminary_search_plan["planId"],
+        "queryCount": preliminary_search_plan["queryCount"],
+        "querySeedCount": len(preliminary_search_plan["querySeeds"]),
+        "promptCachePolicyId": prompt_cache_policy["policyId"],
+        "promptCacheRequirement": prompt_cache_policy["requirement"],
+        "promptCacheModelId": prompt_cache_policy["modelId"],
+        "promptCacheMode": prompt_cache_policy["promptCacheMode"],
+        "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
+        "sessionCleanupStatus": session_cleanup["status"],
+        "sessionCleanupCleanedCount": session_cleanup["cleanedCount"],
+    }
+    if search_envelope_fingerprint:
+        run_metadata["searchEnvelopeFingerprint"] = search_envelope_fingerprint
     run = s.data_processing_service.create_processing_run(
         s.data_processing_service.DEFAULT_PROFILE_ID,
         title=title,
         scope=scope,
-        metadata={
-            "startedFrom": "team_workflow_source_collection",
-            "teamId": normalized_team_id,
-            "workflowKind": workflow_kind,
-            "workflowPurpose": workflow_kind,
-            "collectionMode": collection_mode,
-            "researchProjectId": research_project["projectId"],
-            "experimentName": research_project["name"],
-            **challenge_task_contract,
-            "requestedByAgent": requested_by_agent,
-            "ownerAgentId": owner_agent_id,
-            "searchPlanId": preliminary_search_plan["planId"],
-            "queryCount": preliminary_search_plan["queryCount"],
-            "querySeedCount": len(preliminary_search_plan["querySeeds"]),
-            "promptCachePolicyId": prompt_cache_policy["policyId"],
-            "promptCacheRequirement": prompt_cache_policy["requirement"],
-            "promptCacheModelId": prompt_cache_policy["modelId"],
-            "promptCacheMode": prompt_cache_policy["promptCacheMode"],
-            "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
-            "sessionCleanupStatus": session_cleanup["status"],
-            "sessionCleanupCleanedCount": session_cleanup["cleanedCount"],
-        },
+        metadata=run_metadata,
     )
     search_plan = s._build_source_collection_search_plan(
         team_id=normalized_team_id,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 
 from .checkpoint_lifecycle import advance_checkpoint
 from .human_gate_artifacts import build_human_gate_artifacts, canonical_sha256
@@ -146,7 +146,9 @@ def resolve_human_task(
             "Human task already resolved",
             code="human_task_resolved",
         )
-    definition = build_challenge_cup_workflow_definition()
+    # Fail-closed: validate and advance against the definition pinned to the
+    # run's version identity, never the current code's graph.
+    definition = resolve_definition_for_run_record(record)
     node_id = str(task.get("nodeId") or "")
     node_spec = next(
         (item for item in definition.nodes if item.nodeId == node_id),
@@ -294,6 +296,7 @@ def resolve_human_task(
             "completed_node_ids": completed_ids,
             "artifact_refs": [item.artifactId for item in manifests],
         },
+        definition=definition,
     )
     output_refs = [
         {

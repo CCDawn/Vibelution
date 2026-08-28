@@ -10,7 +10,7 @@ from typing import Any
 
 from core.research.workflow.contracts import WorkflowRunInputSnapshot
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
-from core.research.workflow.models import RunAgentBindingSnapshot
+from core.research.workflow.models import RunAgentBindingSnapshot, WorkflowDefinition
 
 from .budget_lifecycle import build_initial_budget_ledgers
 
@@ -76,8 +76,10 @@ def build_initial_node_run(
     input_snapshot: WorkflowRunInputSnapshot,
     checkpoint_id: str,
     binding_snapshots: list[dict[str, Any]],
+    definition: WorkflowDefinition | None = None,
 ) -> dict[str, Any]:
-    first_node = build_challenge_cup_workflow_definition().nodes[0]
+    pinned = definition or build_challenge_cup_workflow_definition()
+    first_node = pinned.nodes[0]
     binding = next(
         (item for item in binding_snapshots if item["nodeId"] == first_node.nodeId),
         None,
@@ -119,12 +121,14 @@ def build_initial_run_record(
     idempotency_key: str,
     create_input_fingerprint: str,
     created_at: str,
+    definition: WorkflowDefinition | None = None,
 ) -> dict[str, Any]:
     first_node_run = build_initial_node_run(
         run_id=run_id,
         input_snapshot=input_snapshot,
         checkpoint_id=checkpoint_id,
         binding_snapshots=binding_snapshots,
+        definition=definition,
     )
     budget_ledgers = build_initial_budget_ledgers(
         run_id=run_id,

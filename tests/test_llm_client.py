@@ -27,7 +27,7 @@ from core.llm.client import (
 from core.llm.errors import classify_exception
 from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
 from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
-from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
@@ -5193,3 +5193,228 @@ def test_context_recovery_uses_larger_context_profile_only():
     selected_window = config.llm.get_provider(config.llm.get_profile(fallback).provider_id).context_window
     assert fallback is not None
     assert selected_window > current_window
+
+
+def _chain_history_with_call_id(call_id: str) -> list:
+    return [
+        {"role": "user", "content": "读取资料"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "ctx_tool", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": call_id, "content": "first page"},
+    ]
+
+
+def _tool_call_outcome(call_id: str, *, item_id: str = "item-1") -> TurnOutcome:
+    identity = CanonicalItemIdentity(
+        session_id="session-dedupe",
+        turn_id="turn-dedupe",
+        invocation_id="invocation-dedupe",
+        iteration=1,
+        item_id=item_id,
+    )
+    call = CanonicalToolCall(identity=identity, call_id=call_id, name="ctx_tool")
+    return TurnOutcome(
+        kind="tool_calls",
+        identity=identity,
+        tool_calls=(call,),
+        pending_tool_call_ids=(call_id,),
+    )
+
+
+def test_response_tool_call_replaying_chain_id_is_renamed_before_journal():
+    from core.llm.client import _dedupe_outcome_tool_calls_against_chain
+
+    history = _chain_history_with_call_id("call_dup")
+    outcome = _tool_call_outcome("call_dup")
+
+    renamed = _dedupe_outcome_tool_calls_against_chain(outcome, history)
+
+    assert renamed.tool_calls[0].call_id == "call_dup-resp-1"
+    assert renamed.pending_tool_call_ids == ("call_dup-resp-1",)
+    # The provider item identity stays traceable; the raw outcome is untouched.
+    assert renamed.tool_calls[0].identity.item_id == "item-1"
+    assert outcome.tool_calls[0].call_id == "call_dup"
+    assert outcome.pending_tool_call_ids == ("call_dup",)
+
+
+def test_response_tool_call_renames_are_unique_across_repeated_collisions():
+    from dataclasses import replace
+
+    from core.llm.client import _dedupe_outcome_tool_calls_against_chain
+
+    history = _chain_history_with_call_id("call_dup")
+    identity = CanonicalItemIdentity(
+        session_id="session-dedupe",
+        turn_id="turn-dedupe",
+        invocation_id="invocation-dedupe",
+        iteration=1,
+        item_id="item-1",
+    )
+    second_identity = replace(identity, item_id="item-2")
+    outcome = TurnOutcome(
+        kind="tool_calls",
+        identity=identity,
+        tool_calls=(
+            CanonicalToolCall(identity=identity, call_id="call_dup", name="ctx_tool"),
+            CanonicalToolCall(identity=second_identity, call_id="call_dup", name="ctx_tool"),
+        ),
+        pending_tool_call_ids=("call_dup", "call_dup"),
+    )
+
+    renamed = _dedupe_outcome_tool_calls_against_chain(outcome, history)
+
+    assert [call.call_id for call in renamed.tool_calls] == [
+        "call_dup-resp-1",
+        "call_dup-resp-2",
+    ]
+    assert renamed.pending_tool_call_ids == ("call_dup-resp-1", "call_dup-resp-2")
+
+
+def test_response_tool_call_replays_of_renamed_id_do_not_stack_suffixes():
+    from core.llm.client import (
+        _dedupe_outcome_tool_calls_against_chain,
+        _next_response_tool_call_id,
+    )
+
+    # History already contains the previous response rename "-resp-1".
+    history = _chain_history_with_call_id("call_dup") + [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_dup-resp-1",
+                    "type": "function",
+                    "function": {"name": "ctx_tool", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_dup-resp-1", "content": "second page"},
+    ]
+
+    replayed_original = _dedupe_outcome_tool_calls_against_chain(
+        _tool_call_outcome("call_dup"), history
+    )
+    assert replayed_original.tool_calls[0].call_id == "call_dup-resp-2"
+
+    # The model replaying the renamed id gets a fresh suffix, never a stack.
+    replayed_rename = _dedupe_outcome_tool_calls_against_chain(
+        _tool_call_outcome("call_dup-resp-1"), history
+    )
+    assert replayed_rename.tool_calls[0].call_id == "call_dup-resp-2"
+    assert _next_response_tool_call_id("call_dup-resp-1", set()) == "call_dup-resp-1"
+
+
+def test_response_tool_call_rename_follows_results_and_skips_clean_outcomes():
+    from dataclasses import replace
+
+    from core.llm.client import _dedupe_outcome_tool_calls_against_chain
+    from core.llm.types import CanonicalToolResult
+
+    history = _chain_history_with_call_id("call_dup")
+    identity = CanonicalItemIdentity(
+        session_id="session-dedupe",
+        turn_id="turn-dedupe",
+        invocation_id="invocation-dedupe",
+        iteration=1,
+        item_id="item-1",
+    )
+    clean = TurnOutcome(
+        kind="tool_calls",
+        identity=identity,
+        tool_calls=(CanonicalToolCall(identity=identity, call_id="call_fresh", name="ctx_tool"),),
+    )
+    assert _dedupe_outcome_tool_calls_against_chain(clean, history) is clean
+
+    outcome = TurnOutcome(
+        kind="tool_calls",
+        identity=identity,
+        tool_calls=(CanonicalToolCall(identity=identity, call_id="call_dup", name="ctx_tool"),),
+        tool_results=(
+            CanonicalToolResult(
+                identity=identity,
+                call_id="call_dup",
+                tool_name="ctx_tool",
+                output={"page": 1},
+            ),
+        ),
+        pending_tool_call_ids=("call_dup",),
+    )
+
+    renamed = _dedupe_outcome_tool_calls_against_chain(outcome, history)
+
+    assert renamed.tool_results[0].call_id == "call_dup-resp-1"
+    assert renamed.tool_results[0].output == {"page": 1}
+
+
+def test_invoke_outcome_renames_replayed_tool_call_id_against_request_chain():
+    sent_payloads = []
+
+    def backend(payload):
+        sent_payloads.append(payload)
+        if len(sent_payloads) == 1:
+            return {
+                "id": "resp_replay_dup",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "function_replay_dup",
+                        "type": "function_call",
+                        "call_id": "call_dup",
+                        "name": "ctx_tool",
+                        "arguments": "{}",
+                    }
+                ],
+            }
+        return {
+            "id": "resp_final",
+            "status": "completed",
+            "output": [
+                {
+                    "id": "message_final",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "done"}],
+                }
+            ],
+        }
+
+    from tests.test_llm_responses_replay_continuation import _config as replay_config
+
+    client = LLMClient(config=replay_config(), backend=backend)
+    history = _chain_history_with_call_id("call_dup")
+    outcome = client.invoke_outcome(history, metadata=_invocation_metadata())
+
+    # The replayed "call_dup" never escapes the client: journal and next
+    # request see "call_dup-resp-1" with consistent pairing.
+    assert [call.call_id for call in outcome.tool_calls] == ["call_dup-resp-1"]
+
+    assistant = client.project_outcome_message(outcome)
+    assert assistant.tool_calls[0]["id"] == "call_dup-resp-1"
+
+    tool_message = {"role": "tool", "tool_call_id": "call_dup-resp-1", "content": "next page"}
+    followup = client.invoke_outcome(
+        [*history, assistant, tool_message],
+        metadata=_invocation_metadata(),
+    )
+    assert followup.kind == "final_answer"
+    # The second request passed the projector with unique ids and a paired chain.
+    assert len(sent_payloads) == 2
+
+
+def _invocation_metadata() -> dict:
+    return {
+        "sessionId": "session-dedupe",
+        "turnId": "turn-dedupe",
+        "invocationId": "invocation-dedupe",
+        "iteration": 0,
+    }

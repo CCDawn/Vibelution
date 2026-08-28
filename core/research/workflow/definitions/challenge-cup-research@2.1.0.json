@@ -1,0 +1,537 @@
+{
+  "contentHash": "9a4b74e7f21a409c55ed2ef0faf4a61f9c777368b775da3c666c8a8cfc320d53",
+  "definition": {
+    "edges": [
+      {
+        "edgeId": "e_problem_find",
+        "fromNodeId": "problem_understanding",
+        "gateKind": "auto",
+        "label": "问题理解",
+        "requiredArtifactKinds": [
+          "problem_understanding"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "source_finding"
+      },
+      {
+        "edgeId": "e_find_extract",
+        "fromNodeId": "source_finding",
+        "gateKind": "auto",
+        "label": "候选资料",
+        "requiredArtifactKinds": [
+          "source_candidate_batch"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "source_extraction"
+      },
+      {
+        "edgeId": "e_extract_rel",
+        "fromNodeId": "source_extraction",
+        "gateKind": "auto",
+        "label": "证据卡",
+        "requiredArtifactKinds": [
+          "evidence_card_batch"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "evidence_relations"
+      },
+      {
+        "edgeId": "e_rel_ingest",
+        "fromNodeId": "evidence_relations",
+        "gateKind": "auto",
+        "label": "关系图",
+        "requiredArtifactKinds": [
+          "evidence_relation_graph"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "knowledge_ingestion"
+      },
+      {
+        "edgeId": "e_ingest_handoff",
+        "fromNodeId": "knowledge_ingestion",
+        "gateKind": "human",
+        "label": "入库草稿",
+        "requiredArtifactKinds": [
+          "knowledge_package_draft"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "knowledge_handoff"
+      },
+      {
+        "edgeId": "e_kc_hypothesis",
+        "fromNodeId": "knowledge_handoff",
+        "gateKind": "knowledge_package",
+        "label": "Knowledge Package",
+        "requiredArtifactKinds": [
+          "knowledge_package"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "hypothesis_design"
+      },
+      {
+        "edgeId": "e_hyp_proto",
+        "fromNodeId": "hypothesis_design",
+        "gateKind": "auto",
+        "label": "假设集",
+        "requiredArtifactKinds": [
+          "hypothesis_set"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "protocol_design"
+      },
+      {
+        "edgeId": "e_proto_review",
+        "fromNodeId": "protocol_design",
+        "gateKind": "auto",
+        "label": "协议草稿",
+        "requiredArtifactKinds": [
+          "protocol_draft"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "protocol_review"
+      },
+      {
+        "edgeId": "e_review_freeze",
+        "fromNodeId": "protocol_review",
+        "gateKind": "human",
+        "label": "评审通过",
+        "requiredArtifactKinds": [
+          "protocol_review_report"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "protocol_freeze"
+      },
+      {
+        "edgeId": "e_freeze_smoke",
+        "fromNodeId": "protocol_freeze",
+        "gateKind": "frozen_protocol",
+        "label": "冻结协议",
+        "requiredArtifactKinds": [
+          "frozen_protocol"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "smoke_gate"
+      },
+      {
+        "edgeId": "e_smoke_run",
+        "fromNodeId": "smoke_gate",
+        "gateKind": "smoke",
+        "label": "试跑放行",
+        "requiredArtifactKinds": [
+          "smoke_release",
+          "frozen_protocol"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "controlled_run"
+      },
+      {
+        "edgeId": "e_run_eval",
+        "fromNodeId": "controlled_run",
+        "gateKind": "auto",
+        "label": "运行产物",
+        "requiredArtifactKinds": [
+          "run_artifacts"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "result_evaluation"
+      },
+      {
+        "edgeId": "e_eval_decision",
+        "fromNodeId": "result_evaluation",
+        "gateKind": "auto",
+        "label": "评价报告",
+        "requiredArtifactKinds": [
+          "evaluation_report"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "iteration_decision"
+      },
+      {
+        "edgeId": "e_decision_rerun",
+        "fromNodeId": "iteration_decision",
+        "gateKind": "auto",
+        "label": "同协议重跑",
+        "requiredArtifactKinds": [
+          "iteration_decision",
+          "frozen_protocol"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "controlled_run"
+      },
+      {
+        "edgeId": "e_decision_promote",
+        "fromNodeId": "iteration_decision",
+        "gateKind": "auto",
+        "label": "晋升版本",
+        "requiredArtifactKinds": [
+          "iteration_decision"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "version_governance"
+      },
+      {
+        "edgeId": "e_decision_rollback",
+        "fromNodeId": "iteration_decision",
+        "gateKind": "auto",
+        "label": "回滚版本",
+        "requiredArtifactKinds": [
+          "iteration_decision"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "version_governance"
+      },
+      {
+        "edgeId": "e_decision_stop",
+        "fromNodeId": "iteration_decision",
+        "gateKind": "auto",
+        "label": "停止迭代",
+        "requiredArtifactKinds": [
+          "iteration_decision"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "version_governance"
+      },
+      {
+        "edgeId": "e_version_promotion",
+        "fromNodeId": "version_governance",
+        "gateKind": "promotion",
+        "label": "晋升提案",
+        "requiredArtifactKinds": [
+          "version_governance_record"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "candidate_promotion"
+      },
+      {
+        "edgeId": "e_version_package",
+        "fromNodeId": "version_governance",
+        "gateKind": "auto",
+        "label": "停止并打包",
+        "requiredArtifactKinds": [
+          "version_governance_record"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "result_package"
+      },
+      {
+        "edgeId": "e_promo_package",
+        "fromNodeId": "candidate_promotion",
+        "gateKind": "human",
+        "label": "确认晋升/回滚",
+        "requiredArtifactKinds": [
+          "promotion_proposal"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "result_package"
+      }
+    ],
+    "label": "挑战杯科研流程",
+    "nodes": [
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "问题理解",
+        "nodeId": "problem_understanding",
+        "primaryRoleKey": "source_finder",
+        "producesArtifactKinds": [
+          "problem_understanding"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "资料寻找",
+        "nodeId": "source_finding",
+        "primaryRoleKey": "source_finder",
+        "producesArtifactKinds": [
+          "source_candidate_batch"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "资料提炼",
+        "nodeId": "source_extraction",
+        "primaryRoleKey": "source_extractor",
+        "producesArtifactKinds": [
+          "evidence_card_batch"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "证据关系",
+        "nodeId": "evidence_relations",
+        "primaryRoleKey": "source_relation_mapper",
+        "producesArtifactKinds": [
+          "evidence_relation_graph"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "知识入库",
+        "nodeId": "knowledge_ingestion",
+        "primaryRoleKey": "source_ingestor",
+        "producesArtifactKinds": [
+          "knowledge_package_draft"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [
+          "knowledge_package",
+          "human"
+        ],
+        "actorKind": "human",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "知识包交接",
+        "nodeId": "knowledge_handoff",
+        "primaryRoleKey": "research_owner",
+        "producesArtifactKinds": [
+          "knowledge_package"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [
+          "knowledge_package"
+        ],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "假设设计",
+        "nodeId": "hypothesis_design",
+        "primaryRoleKey": "experiment_planner",
+        "producesArtifactKinds": [
+          "hypothesis_set"
+        ],
+        "sessionScopePolicy": "candidate_fan_out",
+        "stageId": "experiment_design"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "协议设计",
+        "nodeId": "protocol_design",
+        "primaryRoleKey": "experiment_planner",
+        "producesArtifactKinds": [
+          "research_plan",
+          "protocol_draft"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "experiment_design"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "协议评审",
+        "nodeId": "protocol_review",
+        "primaryRoleKey": "experiment_ledger",
+        "producesArtifactKinds": [
+          "protocol_review_report"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "experiment_design"
+      },
+      {
+        "acceptsGateKinds": [
+          "human"
+        ],
+        "actorKind": "human",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "协议冻结",
+        "nodeId": "protocol_freeze",
+        "primaryRoleKey": "research_owner",
+        "producesArtifactKinds": [
+          "frozen_protocol"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "experiment_design"
+      },
+      {
+        "acceptsGateKinds": [
+          "smoke",
+          "human",
+          "frozen_protocol"
+        ],
+        "actorKind": "human",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "试跑放行",
+        "nodeId": "smoke_gate",
+        "primaryRoleKey": "research_owner",
+        "producesArtifactKinds": [
+          "smoke_evidence",
+          "smoke_release"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "experiment_design"
+      },
+      {
+        "acceptsGateKinds": [
+          "frozen_protocol",
+          "smoke"
+        ],
+        "actorKind": "system",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "受控运行",
+        "nodeId": "controlled_run",
+        "primaryRoleKey": "formal_runner",
+        "producesArtifactKinds": [
+          "run_artifacts"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "execution_iteration"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "结果评价",
+        "nodeId": "result_evaluation",
+        "primaryRoleKey": "experiment_ledger",
+        "producesArtifactKinds": [
+          "evaluation_report"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "execution_iteration"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "迭代决策",
+        "nodeId": "iteration_decision",
+        "primaryRoleKey": "iteration_planner",
+        "producesArtifactKinds": [
+          "iteration_decision"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "execution_iteration"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "版本治理",
+        "nodeId": "version_governance",
+        "primaryRoleKey": "iteration_versioning",
+        "producesArtifactKinds": [
+          "version_governance_record"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "execution_iteration"
+      },
+      {
+        "acceptsGateKinds": [
+          "promotion",
+          "human"
+        ],
+        "actorKind": "human",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "候选晋升",
+        "nodeId": "candidate_promotion",
+        "primaryRoleKey": "iteration_versioning",
+        "producesArtifactKinds": [
+          "promotion_proposal"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "execution_iteration"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "system",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "结果打包",
+        "nodeId": "result_package",
+        "primaryRoleKey": "package_builder",
+        "producesArtifactKinds": [
+          "research_result_package"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "execution_iteration"
+      }
+    ],
+    "schemaVersion": "2.1.0",
+    "stages": [
+      {
+        "index": 1,
+        "label": "知识搜集",
+        "nodeIds": [
+          "problem_understanding",
+          "source_finding",
+          "source_extraction",
+          "evidence_relations",
+          "knowledge_ingestion",
+          "knowledge_handoff"
+        ],
+        "stageId": "knowledge_collection"
+      },
+      {
+        "index": 2,
+        "label": "实验设计",
+        "nodeIds": [
+          "hypothesis_design",
+          "protocol_design",
+          "protocol_review",
+          "protocol_freeze",
+          "smoke_gate"
+        ],
+        "stageId": "experiment_design"
+      },
+      {
+        "index": 3,
+        "label": "执行迭代",
+        "nodeIds": [
+          "controlled_run",
+          "result_evaluation",
+          "iteration_decision",
+          "version_governance",
+          "candidate_promotion",
+          "result_package"
+        ],
+        "stageId": "execution_iteration"
+      }
+    ],
+    "structureHash": "9a4b74e7f21a409c55ed2ef0faf4a61f9c777368b775da3c666c8a8cfc320d53",
+    "workflowId": "challenge-cup-research"
+  },
+  "schemaVersion": "2.1.0",
+  "snapshotKind": "workflow_definition_snapshot",
+  "snapshotVersion": 1,
+  "workflowId": "challenge-cup-research",
+  "workflowVersionId": "wv-9a4b74e7f21a"
+}

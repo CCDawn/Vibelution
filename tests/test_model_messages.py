@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from core.chat.model_messages import (
@@ -10,6 +11,7 @@ from core.chat.model_messages import (
     normalize_provider_turn_messages,
 )
 from core.llm.payload_validator import validate_tool_result_pairing
+from core.llm.semantic_projector import SemanticProjectionError
 
 
 def test_history_tool_calls_keep_provider_tool_chain():
@@ -420,3 +422,161 @@ def test_payload_validator_terminal_gate_still_rejects_unnormalized_duplicates()
     assert not result.ok
     assert result.error_type == "duplicate_tool_call_id"
     assert result.details["toolCallId"] == "call_same"
+
+
+def _langchain_replay_chain():
+    """Journal dict history plus an in-flight LangChain pair replaying its id."""
+
+    return [
+        {"role": "user", "content": "读取资料"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_same",
+                    "type": "function",
+                    "function": {"name": "cli_tool", "arguments": "{\"command\":\"first\"}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_same", "content": "first result"},
+        AIMessage(
+            content="",
+            tool_calls=[{"id": "call_same", "name": "cli_tool", "args": {}, "type": "tool_call"}],
+        ),
+        ToolMessage(content="second result", tool_call_id="call_same"),
+    ]
+
+
+def _project_chain_or_error(messages):
+    from core.llm.semantic_messages import InvocationScope, SemanticGenerationSettings
+    from core.llm.semantic_projector import (
+        SemanticProjectionInput,
+        project_semantic_request,
+    )
+
+    scope = InvocationScope(session_id="session-dedupe", turn_id="turn-dedupe", invocation_id="invocation-dedupe", iteration=1)
+    return project_semantic_request(
+        SemanticProjectionInput(
+            messages=tuple(messages),
+            tools=(),
+            scope=scope,
+            settings=SemanticGenerationSettings(max_output_tokens=1024),
+            tool_to_schema=lambda tool: {},
+        )
+    )
+
+
+def test_langchain_replay_of_history_tool_call_id_is_renamed_in_chain():
+    raw_chain = _langchain_replay_chain()
+    messages = normalize_provider_turn_messages(raw_chain)
+
+    dict_ids = [
+        call["id"]
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "assistant"
+        for call in message.get("tool_calls") or []
+    ]
+    object_calls = [
+        call
+        for message in messages
+        if not isinstance(message, dict)
+        for call in (getattr(message, "tool_calls", None) or [])
+    ]
+    object_result_ids = [
+        getattr(message, "tool_call_id", "")
+        for message in messages
+        if not isinstance(message, dict) and getattr(message, "type", "") == "tool"
+    ]
+
+    # The replayed LangChain call is renamed together with its tool result.
+    assert dict_ids == ["call_same"]
+    assert [call["id"] for call in object_calls] == ["call_same-dedup-1"]
+    assert object_result_ids == ["call_same-dedup-1"]
+    assert object_calls[0]["name"] == "cli_tool"
+    # Copy-on-write: the original in-flight objects keep their raw ids.
+    assert raw_chain[3].tool_calls[0]["id"] == "call_same"
+    assert raw_chain[4].tool_call_id == "call_same"
+    # Terminal gate passes on the normalized chain and still rejects the raw one.
+    request = _project_chain_or_error(messages)
+    projected_ids = sorted(
+        part.call.call_id
+        for message in request.messages
+        for part in (message.parts or [])
+        if type(part).__name__ == "ToolCallPart"
+    )
+    assert projected_ids == ["call_same", "call_same-dedup-1"]
+    with pytest.raises(SemanticProjectionError) as exc_info:
+        _project_chain_or_error(raw_chain)
+    assert exc_info.value.code == "duplicate_tool_call_id"
+
+
+def test_response_renamed_ids_entering_chain_do_not_get_dedup_suffix():
+    # A response-side rename journaled <orig>-resp-1; replaying it into the
+    # chain must be a no-op: no -dedup- suffix stacks on top.
+    messages = normalize_provider_turn_messages(
+        [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_same",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_same", "content": "first result"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_same-resp-1",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_same-resp-1", "content": "second result"},
+        ]
+    )
+
+    ids = [call["id"] for message in messages for call in message.get("tool_calls") or []]
+    result_ids = [message["tool_call_id"] for message in messages if message.get("role") == "tool"]
+    assert ids == ["call_same", "call_same-resp-1"]
+    assert result_ids == ids
+    assert not any("-dedup-" in tool_call_id for tool_call_id in ids + result_ids)
+    assert validate_tool_result_pairing(messages).ok
+    twice = normalize_provider_turn_messages(messages)
+    assert [call["id"] for message in twice for call in message.get("tool_calls") or []] == ids
+
+
+def test_collect_chain_tool_call_ids_covers_raw_and_langchain_shapes():
+    from core.chat.model_messages import collect_chain_tool_call_ids
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "toolCalls": [
+                {"id": "call_bundle", "name": "cli_tool", "status": "done", "summary": "done"},
+                {"name": "unnamed_id_tool", "result": "ok"},
+            ],
+        },
+        AIMessage(
+            content="",
+            tool_calls=[{"id": "call_live", "name": "cli_tool", "args": {}, "type": "tool_call"}],
+            additional_kwargs={"tool_calls": [{"id": "call_raw_kwargs", "type": "function"}]},
+        ),
+        ToolMessage(content="result", tool_call_id="call_live"),
+    ]
+
+    ids = collect_chain_tool_call_ids(messages)
+
+    assert {"call_bundle", "call_live", "call_raw_kwargs"} <= ids
+    # Synthesized history ids from the provider projection are included too.
+    assert any(tool_call_id.startswith("history_tool_") for tool_call_id in ids)

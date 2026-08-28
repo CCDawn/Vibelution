@@ -793,8 +793,14 @@ def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
     Idempotent: once ids are unique the pass is a no-op, and ``-dedup-``
     suffixes are never stacked because renamed ids are registered as known.
 
+    Both dict messages and non-dict LangChain-style messages (``AIMessage`` /
+    ``ToolMessage``) are covered: the live turn chain mixes ledger-replayed
+    dicts with in-flight LangChain objects, and the projector accepts both
+    shapes, so a replayed id must be renamed in either shape.
+
     Persisted journal/session ids are untouched: every mutated dict here is a
-    fresh copy created by this normalization pass (copy-on-write projection).
+    fresh copy created by this normalization pass, and non-dict messages are
+    only replaced through ``model_copy`` (copy-on-write projection).
     """
 
     known_ids = _collect_chain_tool_call_ids(messages)
@@ -803,11 +809,6 @@ def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
     turn_result_seen: dict[str, int] = {}
     deduped: list[Any] = []
     for message in messages:
-        if not isinstance(message, dict):
-            turn_final_ids = {}
-            turn_result_seen = {}
-            deduped.append(message)
-            continue
         role = _provider_message_role(message)
         if role == "assistant":
             turn_final_ids = {}
@@ -816,9 +817,9 @@ def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
             if not tool_calls:
                 deduped.append(message)
                 continue
-            message = dict(message)
-            message["tool_calls"] = []
             finals_by_id: dict[str, list[str]] = {}
+            renamed_calls: list[dict[str, Any]] = []
+            renamed_any = False
             for call in tool_calls:
                 call = dict(call)
                 call_id = str(call.get("id") or "").strip()
@@ -833,8 +834,10 @@ def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
                         used_ids.add(new_id)
                         finals.append(new_id)
                         call["id"] = new_id
-                message["tool_calls"].append(call)
-            if any(final_id != call_id for call_id, finals in finals_by_id.items() for final_id in finals):
+                        renamed_any = True
+                renamed_calls.append(call)
+            if renamed_any:
+                message = _replace_message_tool_calls(message, renamed_calls)
                 _rewrite_assistant_tool_call_id_metadata(message, finals_by_id)
             turn_final_ids = finals_by_id
             deduped.append(message)
@@ -848,8 +851,7 @@ def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
                 if position < len(finals):
                     new_id = finals[position]
                     if new_id != tool_call_id:
-                        message = dict(message)
-                        message["tool_call_id"] = new_id
+                        message = _replace_message_tool_call_id(message, new_id)
                         _rewrite_tool_message_call_id_metadata(message, tool_call_id, new_id)
             deduped.append(message)
             continue
@@ -859,19 +861,130 @@ def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
     return deduped
 
 
+def _replace_message_tool_calls(message: Any, renamed_calls: list[dict[str, Any]]) -> Any:
+    """Return ``message`` with ``tool_calls`` replaced, copy-on-write."""
+
+    if isinstance(message, dict):
+        copied = dict(message)
+        copied["tool_calls"] = [dict(call) for call in renamed_calls]
+        return copied
+    model_copy = getattr(message, "model_copy", None)
+    if not callable(model_copy):
+        return message
+    raw_calls = getattr(message, "tool_calls", None)
+    pending = list(renamed_calls)
+    merged: list[Any] = []
+    replaced = False
+    for raw_call in list(raw_calls or []):
+        if isinstance(raw_call, dict) and pending:
+            merged.append(dict(pending.pop(0)))
+            replaced = True
+        else:
+            merged.append(raw_call)
+    if not replaced:
+        return message
+    try:
+        return model_copy(update={"tool_calls": merged})
+    except Exception:
+        return message
+
+
+def _replace_message_tool_call_id(message: Any, new_id: str) -> Any:
+    """Return ``message`` with ``tool_call_id`` replaced, copy-on-write."""
+
+    if isinstance(message, dict):
+        copied = dict(message)
+        copied["tool_call_id"] = new_id
+        return copied
+    model_copy = getattr(message, "model_copy", None)
+    if not callable(model_copy):
+        return message
+    try:
+        return model_copy(update={"tool_call_id": new_id})
+    except Exception:
+        return message
+
+
 def _collect_chain_tool_call_ids(messages: list[Any]) -> set[str]:
-    """Return every assistant tool call id and tool result id in the chain."""
+    """Return every assistant tool call id and tool result id in the chain.
+
+    Accepts both dict messages and non-dict LangChain-style messages; the
+    ``_provider_message_*`` helpers read tool data from either shape.
+    """
 
     ids: set[str] = set()
     for message in messages:
-        if not isinstance(message, dict):
-            continue
         role = _provider_message_role(message)
         if role == "assistant":
             ids.update(_message_tool_call_ids(message))
             continue
         if role == "tool":
             tool_call_id = _provider_message_tool_call_id(message)
+            if tool_call_id:
+                ids.add(tool_call_id)
+    return ids
+
+
+def collect_chain_tool_call_ids(messages: Iterable[Any]) -> set[str]:
+    """Return every tool call id the given chain already uses.
+
+    This is the collision space for response-side dedupe: a new model
+    response whose tool call id lands in this set would be rejected by the
+    projector/validator as ``duplicate_tool_call_id`` once it enters the
+    chain, so callers rename it before the id is journaled or replayed.
+
+    The result is the union of ids visible in the raw input shapes (journal
+    ``toolCalls`` bundles, LangChain objects, ``additional_kwargs``) and ids
+    visible in the provider-normalized projection (including synthesized
+    ``history_tool_*`` ids and ``-dedup-`` renames), so callers never miss a
+    collision regardless of which shape history arrives in.
+    """
+
+    materialized = list(messages or [])
+    raw_ids = _scan_raw_chain_tool_call_ids(materialized)
+    normalized_ids = _collect_chain_tool_call_ids(
+        ProviderMessageChain.from_messages(materialized).messages
+    )
+    return raw_ids | normalized_ids
+
+
+def _scan_raw_chain_tool_call_ids(messages: list[Any]) -> set[str]:
+    """Scan raw message shapes for tool call ids without normalizing them."""
+
+    ids: set[str] = set()
+
+    def _collect_call_entry_ids(entries: Any) -> None:
+        for entry in list(entries or []):
+            if isinstance(entry, dict):
+                tool_call_id = _explicit_tool_call_id(entry)
+            else:
+                tool_call_id = str(getattr(entry, "id", "") or "").strip()
+            if tool_call_id:
+                ids.add(tool_call_id)
+
+    for message in messages:
+        additional_kwargs = (
+            message.get("additional_kwargs")
+            if isinstance(message, dict)
+            else getattr(message, "additional_kwargs", None)
+        )
+        if isinstance(additional_kwargs, dict):
+            _collect_call_entry_ids(additional_kwargs.get("tool_calls"))
+        if isinstance(message, dict):
+            role = _normalize_role(message.get("role"))
+            if role == "assistant":
+                _collect_call_entry_ids(_tool_entries(message))
+            elif role == "tool":
+                for key in ("tool_call_id", "toolCallId", "id"):
+                    value = str(message.get(key) or "").strip()
+                    if value:
+                        ids.add(value)
+            continue
+        role = _provider_message_role(message)
+        if role == "assistant":
+            _collect_call_entry_ids(getattr(message, "tool_calls", None))
+        elif role == "tool":
+            tool_call_id = str(getattr(message, "tool_call_id", "") or "").strip()
             if tool_call_id:
                 ids.add(tool_call_id)
     return ids
@@ -890,7 +1003,7 @@ def _rewrite_assistant_tool_call_id_metadata(
     message: dict[str, Any],
     finals_by_id: dict[str, list[str]],
 ) -> None:
-    metadata = message.get("metadata")
+    metadata = message.get("metadata") if isinstance(message, dict) else None
     if not isinstance(metadata, dict) or not metadata:
         return
     updated = dict(metadata)
@@ -924,7 +1037,7 @@ def _rewrite_assistant_tool_call_id_metadata(
 
 
 def _rewrite_tool_message_call_id_metadata(message: dict[str, Any], old_id: str, new_id: str) -> None:
-    metadata = message.get("metadata")
+    metadata = message.get("metadata") if isinstance(message, dict) else None
     if not isinstance(metadata, dict) or not metadata:
         return
     updated = dict(metadata)

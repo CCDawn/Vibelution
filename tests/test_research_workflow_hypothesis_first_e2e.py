@@ -344,17 +344,38 @@ def _stateful_collection_fakes(
 
     def fake_list_runs(*, limit=200, metadata_filters=None, scope_filters=None, **_):
         scope_hash = str((scope_filters or {}).get("researchScopeHash") or "")
-        runs = [
-            {
-                "runId": item["runId"],
-                "createdAt": item["createdAt"],
-                "updatedAt": item["updatedAt"],
-            }
-            for item in created
-            if not scope_hash
-            or str(item["payload"].get("scope", {}).get("researchScopeHash") or "")
-            == scope_hash
-        ]
+        expected_fingerprint = str(
+            (metadata_filters or {}).get("searchEnvelopeFingerprint") or ""
+        )
+        runs = []
+        for item in created:
+            if (
+                scope_hash
+                and str(item["payload"].get("scope", {}).get("researchScopeHash") or "")
+                != scope_hash
+            ):
+                continue
+            # Mirror the production metadata channel: runs.start_source_collection_run
+            # persists the ensure fingerprint into run metadata; legacy runs
+            # (no fingerprint) can never satisfy a fingerprint-filtered lookup.
+            run_fingerprint = str(item["payload"].get("searchEnvelopeFingerprint") or "")
+            if expected_fingerprint and run_fingerprint != expected_fingerprint:
+                continue
+            runs.append(
+                {
+                    "runId": item["runId"],
+                    "createdAt": item["createdAt"],
+                    "updatedAt": item["updatedAt"],
+                    "metadata": (
+                        {
+                            "startedFrom": "team_workflow_source_collection",
+                            "searchEnvelopeFingerprint": run_fingerprint,
+                        }
+                        if run_fingerprint
+                        else {}
+                    ),
+                }
+            )
         return {"runs": runs}
 
     def fake_summary(team_id, run_id=""):

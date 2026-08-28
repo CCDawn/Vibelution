@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping
 
 
 class ActorKind(str, Enum):
@@ -163,6 +163,23 @@ class WorkflowNodeSpec:
             "sessionScopePolicy": self.sessionScopePolicy.value,
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowNodeSpec:
+        return cls(
+            nodeId=str(data["nodeId"]),
+            stageId=WorkflowStageId(str(data["stageId"])),
+            label=str(data["label"]),
+            actorKind=ActorKind(str(data["actorKind"])),
+            primaryRoleKey=str(data["primaryRoleKey"]),
+            description=str(data.get("description") or ""),
+            collaboratorRoleKeys=tuple(str(k) for k in data.get("collaboratorRoleKeys") or ()),
+            acceptsGateKinds=tuple(GateKind(str(g)) for g in data.get("acceptsGateKinds") or ()),
+            producesArtifactKinds=tuple(str(k) for k in data.get("producesArtifactKinds") or ()),
+            sessionScopePolicy=NodeSessionScopePolicy(
+                str(data.get("sessionScopePolicy") or NodeSessionScopePolicy.NODE_SHARED.value)
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowStageSpec:
@@ -178,6 +195,15 @@ class WorkflowStageSpec:
             "label": self.label,
             "nodeIds": list(self.nodeIds),
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowStageSpec:
+        return cls(
+            stageId=WorkflowStageId(str(data["stageId"])),
+            index=int(data["index"]),
+            label=str(data["label"]),
+            nodeIds=tuple(str(n) for n in data.get("nodeIds") or ()),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +227,18 @@ class WorkflowEdgeSpec:
             "requiresHumanAccept": self.requiresHumanAccept,
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowEdgeSpec:
+        return cls(
+            edgeId=str(data["edgeId"]),
+            fromNodeId=str(data["fromNodeId"]),
+            toNodeId=str(data["toNodeId"]),
+            label=str(data["label"]),
+            gateKind=GateKind(str(data["gateKind"])),
+            requiredArtifactKinds=tuple(str(k) for k in data.get("requiredArtifactKinds") or ()),
+            requiresHumanAccept=bool(data.get("requiresHumanAccept") or False),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowDefinition:
@@ -222,6 +260,23 @@ class WorkflowDefinition:
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowDefinition:
+        """Parse a definition dict (e.g. a registry snapshot payload).
+
+        Unknown enum values or missing keys raise ``ValueError``/``KeyError``
+        so a corrupted snapshot fails closed instead of parsing loosely.
+        """
+        return cls(
+            workflowId=str(data["workflowId"]),
+            schemaVersion=str(data["schemaVersion"]),
+            label=str(data["label"]),
+            stages=tuple(WorkflowStageSpec.from_dict(item) for item in data.get("stages") or ()),
+            nodes=tuple(WorkflowNodeSpec.from_dict(item) for item in data.get("nodes") or ()),
+            edges=tuple(WorkflowEdgeSpec.from_dict(item) for item in data.get("edges") or ()),
+            structureHash=str(data.get("structureHash") or ""),
+        )
 
 
 @dataclass(frozen=True, slots=True)

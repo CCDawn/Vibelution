@@ -1406,7 +1406,10 @@ def _source_asset_blockers(asset: ResearchWorkflowAsset) -> list[dict[str, objec
     if not evidence.valid:
         blockers.append({"code": "sqlite_integrity_failed", "relativePath": asset.relative_path, "sqlite": evidence.to_dict()})
     if asset.relative_path == LEDGER_FILENAME:
-        if evidence.schema_version == 5:
+        # The v5 checksum row is part of the migration history of every
+        # ledger at schema version >= 5; a tampered or unknown value must be
+        # rejected regardless of how far the schema has advanced since.
+        if evidence.schema_version is not None and evidence.schema_version >= 5:
             try:
                 accepted, detail = _validate_v5_ledger(asset.source_path)
             except _SQLiteBundleSnapshotError as exc:

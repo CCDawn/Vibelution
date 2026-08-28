@@ -312,17 +312,28 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
 _CONDITIONAL_GRAPH_SOURCES = frozenset({"iteration_decision", "version_governance"})
 
 
-def graph_static_edge_pairs() -> tuple[tuple[str, str], ...]:
+def _definition_edges(
+    definition: WorkflowDefinition | None = None,
+) -> tuple[WorkflowEdgeSpec, ...]:
+    return definition.edges if definition is not None else _edges()
+
+
+def graph_static_edge_pairs(
+    definition: WorkflowDefinition | None = None,
+) -> tuple[tuple[str, str], ...]:
     """Return definition edges installed as ordinary LangGraph edges."""
 
     return tuple(
         (edge.fromNodeId, edge.toNodeId)
-        for edge in _edges()
+        for edge in _definition_edges(definition)
         if edge.fromNodeId not in _CONDITIONAL_GRAPH_SOURCES
     )
 
 
-def graph_conditional_targets(source_node_id: str) -> tuple[str, ...]:
+def graph_conditional_targets(
+    source_node_id: str,
+    definition: WorkflowDefinition | None = None,
+) -> tuple[str, ...]:
     """Return unique conditional destinations for one graph decision node."""
 
     if source_node_id not in _CONDITIONAL_GRAPH_SOURCES:
@@ -330,7 +341,7 @@ def graph_conditional_targets(source_node_id: str) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
             edge.toNodeId
-            for edge in _edges()
+            for edge in _definition_edges(definition)
             if edge.fromNodeId == source_node_id
         )
     )

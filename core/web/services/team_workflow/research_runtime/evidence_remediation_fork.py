@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from core.research.workflow.contracts import WorkflowRunInputSnapshot
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 
 from .budget_lifecycle import build_initial_budget_ledgers, remaining_budget_policy
 from .checkpoint_lifecycle import fork_checkpoint_at_node
@@ -248,6 +248,9 @@ def fork_evidence_remediation(
         created_at=created_at,
     )
     child_thread_id = f"thread-{child_run_id}"
+    # Fail-closed: fork on the parent's pinned graph; the child record copies
+    # the parent's workflowVersionId/structureHash below.
+    definition = resolve_definition_for_run_record(parent)
     child_checkpoint_id = fork_checkpoint_at_node(
         checkpoint_path,
         source_thread_id=str(parent["threadId"]),
@@ -259,8 +262,8 @@ def fork_evidence_remediation(
             "current_node_id": _PREDECESSOR_NODE_ID,
             "evidence_remediation_contract": contract,
         },
+        definition=definition,
     )
-    definition = build_challenge_cup_workflow_definition()
     node_spec = next(item for item in definition.nodes if item.nodeId == _NODE_ID)
     binding = next(
         (

@@ -13,6 +13,8 @@ executes a provider search and never writes formal knowledge.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping
 from datetime import datetime
@@ -23,6 +25,16 @@ from core.research.workflow.contracts import ContractValidationError, ResearchSc
 FACADE_SCHEMA_VERSION = 1
 
 SEARCH_ENVELOPE_SCHEMA_VERSION = 1
+
+# Version of the source-selection policy that governs how a collection run
+# turns its search envelope into evidence.  Bump this whenever the policy
+# changes in a way that must invalidate previously collected evidence; it is
+# part of the ensure idempotency fingerprint.
+KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "1"
+
+# Metadata key on the processing run that stores the ensure idempotency
+# fingerprint (see ``search_envelope_fingerprint``).
+SEARCH_ENVELOPE_FINGERPRINT_METADATA_KEY = "searchEnvelopeFingerprint"
 
 SEARCH_ENVELOPE_SOURCE_TYPES = {
     "paper",
@@ -245,6 +257,50 @@ def _normalize_requirements(requirements: Mapping[str, Any] | None) -> dict[str,
     return result
 
 
+def search_envelope_fingerprint(
+    search_envelope: Mapping[str, Any] | None,
+    requirements: Mapping[str, Any] | None,
+    source_policy_version: str = KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION,
+) -> str:
+    """Return the stable sha256 fingerprint of one concrete evidence request.
+
+    ``ensure`` may only reuse an existing collection run when that run provably
+    served the same request: the same canonical searchEnvelope (keywords are
+    deduplicated and sorted, so ordering is irrelevant), the same normalized
+    requirements, and the same source policy version.  The fingerprint is
+    persisted in the processing run metadata under
+    ``SEARCH_ENVELOPE_FINGERPRINT_METADATA_KEY``; runs created before this
+    guard have no fingerprint and can therefore never match, so ``ensure``
+    re-creates instead of silently reusing stale state.
+
+    Extend ``source_policy_version`` (currently the constant
+    ``KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION``) whenever the
+    source-selection policy itself starts to change what a given envelope
+    should collect.
+    """
+    keywords = sorted(
+        {
+            _text(item, limit=200)
+            for item in (search_envelope or {}).get("keywords") or []
+            if _text(item, limit=200)
+        }
+    )
+    payload = {
+        "sourcePolicyVersion": (
+            _text(source_policy_version) or KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION
+        ),
+        "searchEnvelope": {**_object(search_envelope), "keywords": keywords},
+        "requirements": _object(requirements),
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 _WRITEBACK_POLICY_KEYS = (
     "writesFormalKnowledge",
     "writesRag",
@@ -322,25 +378,48 @@ def _collection_boundaries() -> dict[str, bool | str]:
     }
 
 
-def _find_existing_run(team_id: str, scope_hash: str) -> dict[str, Any] | None:
+def _find_existing_run(
+    team_id: str,
+    scope_hash: str,
+    search_fingerprint: str = "",
+) -> dict[str, Any] | None:
     s = _service()
+    metadata_filters: dict[str, str] = {
+        "startedFrom": "team_workflow_source_collection",
+        "teamId": team_id,
+    }
+    if search_fingerprint:
+        metadata_filters[SEARCH_ENVELOPE_FINGERPRINT_METADATA_KEY] = search_fingerprint
     try:
         payload = s.list_processing_runs(
             limit=200,
-            metadata_filters={
-                "startedFrom": "team_workflow_source_collection",
-                "teamId": team_id,
-            },
+            metadata_filters=metadata_filters,
             scope_filters={"researchScopeHash": scope_hash},
         )
     except s.DataProcessingError as exc:
         raise ResearchKnowledgeCollectionError(
             str(exc), code="run_lookup_failed"
         ) from exc
+
+    def _run_fingerprint(item: dict[str, Any]) -> str:
+        metadata = item.get("metadata")
+        if not isinstance(metadata, Mapping):
+            return ""
+        return _text(metadata.get(SEARCH_ENVELOPE_FINGERPRINT_METADATA_KEY))
+
     runs = [
         item
         for item in list(payload.get("runs") or [])
-        if isinstance(item, dict) and _text(item.get("runId"))
+        if isinstance(item, dict)
+        and _text(item.get("runId"))
+        # Defensive post-filter: a run whose metadata lacks the fingerprint
+        # (created before this guard, or by another entrypoint) cannot prove
+        # it served the same evidence request and must never be reused by
+        # ensure; re-create instead of silently returning stale state.
+        and (
+            not search_fingerprint
+            or _run_fingerprint(item) == search_fingerprint
+        )
     ]
     if not runs:
         return None
@@ -423,6 +502,12 @@ def _ensure_payload(
         "title": "D03 knowledge collection",
         "goal": " ".join(keywords)[:1000] or envelope.question[:1000],
         "topic": (keywords[0] if keywords else envelope.theme)[:500],
+        # Persisted by start_source_collection_run into the processing run
+        # metadata so later ensure calls can prove envelope identity.
+        SEARCH_ENVELOPE_FINGERPRINT_METADATA_KEY: search_envelope_fingerprint(
+            search,
+            requirements,
+        ),
         "scope": {
             "researchScopeHash": envelope.scopeHash,
             "researchScopeCacheKey": envelope.cacheKey,
@@ -498,7 +583,19 @@ def research_knowledge_collection_facade(
     )
     requirements = _normalize_requirements(requirements)
     writeback_policy = _normalize_writeback_policy(writebackPolicy)
-    existing_run = _find_existing_run(normalized_team_id, envelope.scopeHash)
+    # ensure reuses a run only when its persisted fingerprint proves the same
+    # evidence request; inspect stays a pure scope-level reader and must keep
+    # surfacing the latest run regardless of the requested envelope.
+    search_fingerprint = (
+        search_envelope_fingerprint(search, requirements)
+        if normalized_action == "ensure"
+        else ""
+    )
+    existing_run = _find_existing_run(
+        normalized_team_id,
+        envelope.scopeHash,
+        search_fingerprint,
+    )
     base = {
         "schemaVersion": FACADE_SCHEMA_VERSION,
         "teamId": normalized_team_id,

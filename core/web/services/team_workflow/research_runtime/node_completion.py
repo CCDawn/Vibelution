@@ -11,7 +11,7 @@ from core.research.workflow.contracts import (
     ArtifactManifest,
     ContractValidationError,
 )
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 
 from .artifact_quality_gate import ArtifactQualityError, validate_artifact_quality
 from .artifact_reuse import ArtifactReuseError, validate_artifact_reuse
@@ -220,7 +220,9 @@ def complete_node_execution(
             budget_reservations=budget_reservations,
         )
 
-    definition = build_challenge_cup_workflow_definition()
+    # Fail-closed: drive this node with the definition pinned to the run's
+    # version identity, never with whatever the current code builds.
+    definition = resolve_definition_for_run_record(record)
     completed_ids = list(record.get("completedNodeIds") or [])
     for item in record.get("nodeRuns") or []:
         if item.get("status") == "succeeded" and item.get("nodeId") not in completed_ids:
@@ -245,6 +247,7 @@ def complete_node_execution(
         checkpoint_id=(record.get("langGraph") or {}).get("checkpointId") or "",
         completed_node_id=node_id,
         state_patch=state_patch,
+        definition=definition,
     )
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
         if any(

@@ -17,6 +17,7 @@ from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.ledger import EventRecord, RunRecord
 from core.research.workflow.models import ActorKind
 
@@ -558,8 +559,12 @@ def create_run(
     catalog_run_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     store = get_write_store()
+    # Register-or-resolve: the definition driving this run is pinned by its
+    # (workflowId, workflowVersionId, structureHash) identity in the registry
+    # before any checkpoint or ledger write happens.
     definition = build_challenge_cup_workflow_definition()
-    workflow_version_id = f"wv-{definition.structureHash[:12]}"
+    identity = register_or_resolve(definition)
+    workflow_version_id = identity.workflowVersionId
     fingerprints = _create_request_fingerprints(run_input)
     fingerprint = fingerprints[0]
     run_id = run_id_for_create(workflow_id, idempotency_key)
@@ -605,7 +610,11 @@ def create_run(
     thread_id = f"thread-{run_id}"
     data_root = research_workflow_data_root()
     checkpoint_path = str(data_root / "checkpoints.sqlite")
-    checkpoint_id = prepare_initial_checkpoint(checkpoint_path, thread_id)
+    checkpoint_id = prepare_initial_checkpoint(
+        checkpoint_path,
+        thread_id,
+        definition=definition,
+    )
     now_ms = int(time.time() * 1000)
     snapshot_dict = input_snapshot.to_dict()
     snapshot_dict["createInputFingerprint"] = fingerprint
@@ -652,6 +661,7 @@ def create_run(
         active_node_id=first_agent,
         parent_run_id=None,
         forked_from_checkpoint_id=None,
+        structure_hash=definition.structureHash,
         completion_kind=None,
         terminal_reason=None,
         blocked_problem_json=None,

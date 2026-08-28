@@ -1198,6 +1198,7 @@ class WorkflowCommandService:
             created_at_ms=now_ms,
             updated_at_ms=now_ms,
             completed_at_ms=None,
+            structure_hash=parent.structure_hash,
         )
         uow.repository.insert_run(child)
 

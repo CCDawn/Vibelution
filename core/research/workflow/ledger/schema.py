@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # v5 was first deployed with a checksum that is already present in user
 # ledgers.  It is accepted only together with an independent schema-shape
@@ -487,6 +487,16 @@ MIGRATIONS: tuple[Migration, ...] = (
         statements=(
             V5_CATALOG_TABLE_STATEMENT,
             V5_CATALOG_LOOKUP_INDEX_STATEMENT,
+        ),
+    ),
+    # Additive: workflow_runs.structure_hash completes the per-run definition
+    # identity (workflowId, workflowVersionId, structureHash) so checkpoint
+    # operations can pin the graph version a run was created with.  Old rows
+    # default to '' (version id only) and stay readable.
+    Migration(
+        version=6,
+        statements=(
+            "ALTER TABLE workflow_runs ADD COLUMN structure_hash TEXT NOT NULL DEFAULT ''",
         ),
     ),
 )
