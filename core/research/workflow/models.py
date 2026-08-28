@@ -17,6 +17,7 @@ class ActorKind(str, Enum):
 
 
 class WorkflowStageId(str, Enum):
+    PROBLEM_UNDERSTANDING = "problem_understanding"
     KNOWLEDGE_COLLECTION = "knowledge_collection"
     EXPERIMENT_DESIGN = "experiment_design"
     EXECUTION_ITERATION = "execution_iteration"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from core.research.competition.question_result_package import canonical_model_policy
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
@@ -656,6 +658,11 @@ def test_start_source_collection_run_imports_local_workspace_sources_for_knowled
     assert candidate["metadata"]["sourceCategory"] == "local_file"
     assert candidate["metadata"]["localWorkspaceImport"]["relativePath"] == "workspace/knowledge/notes/predictive-coding.md"
     assert candidate["sourcePath"].endswith("workspace/knowledge/notes/predictive-coding.md")
+    # 旧 localScanScope 入口也不得把绝对路径写进 rawLocation（与受管根 managed:// 同风格）
+    record = context["records"][0]
+    assert record["rawLocation"] == "project://workspace/knowledge/notes/predictive-coding.md"
+    assert not re.match(r"^[A-Za-z]:[/\\]", record["rawLocation"])
+    assert "C:\\" not in str(record.get("metadata", {}))
 
 def test_start_source_collection_run_blocks_without_required_prompt_cache(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)

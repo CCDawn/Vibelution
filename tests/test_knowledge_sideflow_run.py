@@ -43,6 +43,7 @@ from core.research.workflow.knowledge_sideflow_definition import (
     build_challenge_cup_workflow_definition_v3,
     build_knowledge_sideflow_workflow_definition,
 )
+from core.research.workflow.models import WorkflowStageId
 from core.research.workflow.ledger.schema import SCHEMA_VERSION
 from tests._support.graph_helpers import GraphHarness
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
@@ -169,6 +170,14 @@ def test_sideflow_and_v3_definitions_bootstrap_and_pin(tmp_path: Path) -> None:
     v3_edges = {(edge.edgeId, edge.fromNodeId, edge.toNodeId) for edge in v3.edges}
     assert ("e_problem_hypothesis", "problem_understanding", "hypothesis_design") in v3_edges
     assert all(edge.edgeId != "e_kc_hypothesis" for edge in v3.edges)
+    # 知识搜集已移出主流程：3.0.0 首阶段不再沿用 knowledge_collection 命名
+    first_stage = v3.stages[0]
+    assert first_stage.stageId == WorkflowStageId.PROBLEM_UNDERSTANDING
+    assert first_stage.label == "问题理解"
+    assert first_stage.nodeIds == ("problem_understanding",)
+    assert all(stage.stageId != WorkflowStageId.KNOWLEDGE_COLLECTION for stage in v3.stages)
+    entry_node = next(node for node in v3.nodes if node.nodeId == "problem_understanding")
+    assert entry_node.stageId == WorkflowStageId.PROBLEM_UNDERSTANDING
 
 
 def test_default_definition_stays_2_1_0() -> None:

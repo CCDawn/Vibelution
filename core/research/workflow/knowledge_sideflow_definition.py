@@ -160,8 +160,12 @@ def build_challenge_cup_workflow_definition_v3() -> WorkflowDefinition:
 def _v3_base_draft() -> WorkflowDefinition:
     """2.1.0 definition minus the five sideflow knowledge nodes.
 
-    ``problem_understanding`` is the 3.0.0 entry and stays in the knowledge
-    stage; the five sideflow nodes (and every edge touching them) are gone.
+    ``problem_understanding`` is the 3.0.0 entry.  Knowledge collection has
+    left the main flow, so the entry no longer sits in a
+    ``knowledge_collection`` stage: the first stage is renamed to
+    ``problem_understanding`` (label ``问题理解``) to keep stage naming
+    consistent with that semantics.  The five sideflow nodes (and every edge
+    touching them) are gone.
     """
     from .definition import build_challenge_cup_workflow_definition
 
@@ -176,6 +180,23 @@ def _v3_base_draft() -> WorkflowDefinition:
         for stage in base.stages
     )
     stages = tuple(stage for stage in stages if stage.nodeIds)
+    # 知识搜集已移出主流程：3.0.0 首阶段改为独立的问题理解语义。
+    nodes = tuple(
+        dataclasses.replace(node, stageId=WorkflowStageId.PROBLEM_UNDERSTANDING)
+        if node.nodeId == "problem_understanding"
+        else node
+        for node in nodes
+    )
+    stages = tuple(
+        dataclasses.replace(
+            stage,
+            stageId=WorkflowStageId.PROBLEM_UNDERSTANDING,
+            label="问题理解",
+        )
+        if stage.stageId == WorkflowStageId.KNOWLEDGE_COLLECTION
+        else stage
+        for stage in stages
+    )
     return WorkflowDefinition(
         workflowId=base.workflowId,
         schemaVersion=base.schemaVersion,

@@ -11,6 +11,7 @@ fixture 全部在测试内构造（手拼 OOXML zip / 最小 PDF），不依赖�
 """
 from __future__ import annotations
 
+import re
 import tempfile
 import zipfile
 from pathlib import Path
@@ -539,6 +540,7 @@ def test_source_collection_run_imports_managed_roots_with_locators_and_candidate
     for record in managed_records:
         assert record["rawLocation"].startswith("managed://")
         assert record["sourceRef"].startswith("managed://")
+        assert not re.match(r"^[A-Za-z]:[/\\]", record["rawLocation"])
         assert "C:\\" not in str(record.get("metadata", {}))
         assert "C:/Users" not in str(record.get("metadata", {}))
     for candidate in candidates:

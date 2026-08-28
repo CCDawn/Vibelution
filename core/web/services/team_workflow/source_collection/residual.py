@@ -410,7 +410,9 @@ def _import_source_collection_local_workspace_sources(
             {
                 "sourceType": "note" if file_path.suffix.lower() in {".md", ".txt"} else "file",
                 "sourceRef": relative_path,
-                "rawLocation": str(file_path),
+                # 旧 localScanScope 入口同样只写稳定非绝对 locator（§2.3/§5.1），
+                # 与受管根 managed:// 同风格；仓库相对路径用 "/" 分隔。
+                "rawLocation": f"project://{relative_path}",
                 "title": s._source_collection_local_file_title(file_path, sample_bytes),
                 "summary": summary,
                 "metadata": {

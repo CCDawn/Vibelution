@@ -1,5 +1,5 @@
 {
-  "contentHash": "e5894122982e7118e4b0e36e7c6ab7700e0849752bf41ac1ea984bf49419beda",
+  "contentHash": "268aa6e8dea852deab89c9b61efd62e640c32981150d4a02ec5eb16ce2fc2241",
   "definition": {
     "edges": [
       {
@@ -184,7 +184,7 @@
           "problem_understanding"
         ],
         "sessionScopePolicy": "node_shared",
-        "stageId": "knowledge_collection"
+        "stageId": "problem_understanding"
       },
       {
         "acceptsGateKinds": [
@@ -361,11 +361,11 @@
     "stages": [
       {
         "index": 1,
-        "label": "知识搜集",
+        "label": "问题理解",
         "nodeIds": [
           "problem_understanding"
         ],
-        "stageId": "knowledge_collection"
+        "stageId": "problem_understanding"
       },
       {
         "index": 2,
@@ -393,12 +393,12 @@
         "stageId": "execution_iteration"
       }
     ],
-    "structureHash": "e5894122982e7118e4b0e36e7c6ab7700e0849752bf41ac1ea984bf49419beda",
+    "structureHash": "268aa6e8dea852deab89c9b61efd62e640c32981150d4a02ec5eb16ce2fc2241",
     "workflowId": "challenge-cup-research"
   },
   "schemaVersion": "3.0.0",
   "snapshotKind": "workflow_definition_snapshot",
   "snapshotVersion": 1,
   "workflowId": "challenge-cup-research",
-  "workflowVersionId": "wv-e5894122982e"
+  "workflowVersionId": "wv-268aa6e8dea8"
 }
