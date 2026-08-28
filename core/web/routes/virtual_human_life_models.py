@@ -19,6 +19,19 @@ class VirtualHumanSnapshotResponse(BaseModel):
     todaySchedule: dict[str, Any] | None = None
     tomorrowSchedule: dict[str, Any] | None = None
     proactiveUsage: dict[str, int] = Field(default_factory=dict)
+    health: dict[str, Any] | None = None
+
+
+class VirtualHumanMemoryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agentId: str
+    episodeId: str
+    text: str
+    occurredAt: str = ""
+    salienceScore: int = 0
+    sourceEventIds: list[str] = Field(default_factory=list)
+    promotedAt: str = ""
 
 
 class VirtualHumanScheduleResponse(BaseModel):

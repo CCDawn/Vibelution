@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import queue
 import shutil
 import tempfile
 import threading
@@ -23,15 +24,26 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .manifest import (
     PLUGIN_ID,
     PROMPT_PACK_ID,
+    PROMPT_PACK_FILES,
     STORAGE_SCHEMA_VERSION,
     TOOL_BUNDLE_ID,
     VIRTUAL_HUMAN_TOOL_NAMES,
+)
+from .domain import (
+    apply_completed_event_to_state,
+    apply_relationship_interaction_to_state,
+    compute_event_salience,
+    evolve_state_for_time,
+)
+from .planning import (
+    PLANNER_ACTIVITY_KINDS,
+    build_deterministic_schedule,
+    validate_schedule_proposal,
 )
 from .prompt_pack import load_prompt_pack
 from .storage import VirtualHumanLifeStorageError, VirtualHumanLifeStore
 
 logger = logging.getLogger(__name__)
-
 
 class VirtualHumanLifeError(RuntimeError):
     """Base virtual human life error."""
@@ -97,6 +109,9 @@ class VirtualHumanLifeService:
         delivery_receipt_resolver: Callable[[str, dict[str, Any]], dict[str, Any] | None]
         | None = None,
         episodic_writer: Callable[..., dict[str, Any]] | None = None,
+        episodic_lister: Callable[..., list[dict[str, Any]]] | None = None,
+        schedule_planner: Callable[[dict[str, Any]], Any] | None = None,
+        schedule_planner_timeout_seconds: float = 2.0,
         now_provider: Callable[[], datetime] = _utc_now,
         runtime_acceptance_provider: Callable[[], bool] | None = None,
     ) -> None:
@@ -110,6 +125,11 @@ class VirtualHumanLifeService:
         self.proactive_submitter = proactive_submitter
         self.delivery_receipt_resolver = delivery_receipt_resolver
         self.episodic_writer = episodic_writer
+        self.episodic_lister = episodic_lister
+        self.schedule_planner = schedule_planner
+        self.schedule_planner_timeout_seconds = max(
+            0.2, min(30.0, float(schedule_planner_timeout_seconds or 2.0))
+        )
         self.now_provider = now_provider
         self.runtime_acceptance_provider = runtime_acceptance_provider
         self._agent_locks_guard = threading.Lock()
@@ -260,6 +280,7 @@ class VirtualHumanLifeService:
                 "todaySchedule": None,
                 "tomorrowSchedule": None,
                 "proactiveUsage": {"delivered": 0, "limit": 0, "remaining": 0},
+                "health": self._health_projection(agent_id, binding=None),
             }
         local_now = self._local_now(binding)
         today = local_now.date().isoformat()
@@ -281,6 +302,7 @@ class VirtualHumanLifeService:
             "storageSchemaVersion": STORAGE_SCHEMA_VERSION,
             "toolBundleId": TOOL_BUNDLE_ID,
             "promptPackId": PROMPT_PACK_ID,
+            "health": self._health_projection(agent_id, binding=binding),
         }
 
     def schedule_for(self, agent_id: str, local_date: str) -> dict[str, Any]:
@@ -289,7 +311,14 @@ class VirtualHumanLifeService:
         payload = self.store.read_json(agent_id, f"schedules/{local_date}.json")
         if payload is None:
             binding = self._require_enabled_binding(agent_id)
-            payload = self._generate_schedule(agent_id, date.fromisoformat(local_date), binding)
+            # Reads and ordinary snapshot projections must stay cheap and
+            # deterministic.  The injected Agent planner is reserved for an
+            # explicit replan/planTomorrow command or the nightly heartbeat;
+            # otherwise a missing historical file could block a UI request on
+            # an external model call.
+            payload = self._deterministic_schedule(
+                agent_id, date.fromisoformat(local_date), binding
+            )
             self.store.write_json(agent_id, f"schedules/{local_date}.json", payload)
         return deepcopy(payload)
 
@@ -477,6 +506,9 @@ class VirtualHumanLifeService:
                     ),
                     "heartbeatAt": _iso(current),
                 }
+            evolved_state = evolve_state_for_time(state, now=local_now)
+            state.clear()
+            state.update(evolved_state)
             completed_events: list[dict[str, Any]] = []
             tool_activities_to_dispatch: list[tuple[str, dict[str, Any]]] = []
             current_activity_id = ""
@@ -536,12 +568,36 @@ class VirtualHumanLifeService:
             planning_time = self._clock(binding.get("nightlyPlanningTime"), default=time(22, 30))
             if local_now.time().replace(tzinfo=None) >= planning_time:
                 tomorrow_path = f"schedules/{tomorrow.isoformat()}.json"
-                if self.store.read_json(agent_id, tomorrow_path) is None:
+                existing_tomorrow = self.store.read_json(agent_id, tomorrow_path)
+                needs_agent_planning = bool(
+                    self.schedule_planner is not None
+                    and isinstance(existing_tomorrow, dict)
+                    and str(existing_tomorrow.get("plannerStatus") or "").strip()
+                    not in {"accepted", "fallback"}
+                )
+                if existing_tomorrow is None or needs_agent_planning:
+                    generated_tomorrow = self._generate_schedule(
+                        agent_id, tomorrow, binding
+                    )
+                    if isinstance(existing_tomorrow, dict):
+                        generated_tomorrow["scheduleVersion"] = int(
+                            existing_tomorrow.get("scheduleVersion") or 1
+                        ) + 1
+                        generated_tomorrow["planningReviewAt"] = _iso(current)
                     self.store.write_json(
                         agent_id,
                         tomorrow_path,
-                        self._generate_schedule(agent_id, tomorrow, binding),
+                        generated_tomorrow,
                     )
+            elif self.store.read_json(agent_id, f"schedules/{tomorrow.isoformat()}.json") is None:
+                # Keep startup/pre-night behavior deterministic and cheap.  The
+                # nightly pass above is the only point that asks an injected
+                # planner to replace this provisional schedule.
+                self.store.write_json(
+                    agent_id,
+                    f"schedules/{tomorrow.isoformat()}.json",
+                    self._deterministic_schedule(agent_id, tomorrow, binding),
+                )
             state["currentActivityId"] = current_activity_id
             state["lastHeartbeatAt"] = _iso(current)
             state["updatedAt"] = _iso(current)
@@ -562,7 +618,7 @@ class VirtualHumanLifeService:
             review_dates.update(date_text for date_text, _schedule in schedules_to_advance)
             for review_date in sorted(review_dates):
                 try:
-                    review = self.review_diary(agent_id, local_date=review_date)
+                    review = self._review_diary_locked(agent_id, local_date=review_date)
                 except Exception as exc:  # noqa: BLE001 - diary failure never rolls back events
                     logger.warning(
                         "Virtual human diary review failed for agent=%s date=%s (%s).",
@@ -653,10 +709,184 @@ class VirtualHumanLifeService:
         *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        self.require_agent(agent_id)
         bounded = max(1, min(500, int(limit or 100)))
         return deepcopy(
             self.store.read_jsonl(agent_id, "memory/promotion_receipts.jsonl")[-bounded:]
         )
+
+    def list_memories(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Project VHL promotion receipts onto the Agent's current episodes.
+
+        The receipt ledger remains the plugin's promotion authority, while the
+        canonical episodic event store remains the source of memory text.  No
+        second memory store is created and a receipt for another Agent can never
+        be joined because both reads are scoped by ``agent_id``.
+        """
+
+        self.require_agent(agent_id)
+        bounded = max(1, min(500, int(limit or 100)))
+        receipts = self.store.read_jsonl(agent_id, "memory/promotion_receipts.jsonl")
+        episodes = self._list_current_episodic_events(agent_id)
+        episodes_by_id = {
+            str(item.get("episodeId") or item.get("eventId") or "").strip(): item
+            for item in episodes
+            if str(item.get("episodeId") or item.get("eventId") or "").strip()
+        }
+        projected: list[dict[str, Any]] = []
+        seen_receipt_ids: set[str] = set()
+        seen_episode_ids: set[str] = set()
+        for receipt in reversed(receipts):
+            if not isinstance(receipt, dict):
+                continue
+            receipt_id = str(receipt.get("receiptId") or "").strip()
+            episode_id = str(receipt.get("episodeId") or "").strip()
+            episode = episodes_by_id.get(episode_id)
+            if not episode or (receipt_id and receipt_id in seen_receipt_ids):
+                continue
+            # A source event is promoted once; old corrupted ledgers should not
+            # make the UI display the same episode repeatedly.
+            if episode_id in seen_episode_ids:
+                continue
+            if receipt_id:
+                seen_receipt_ids.add(receipt_id)
+            seen_episode_ids.add(episode_id)
+            source_event_ids = [
+                str(item).strip()
+                for item in list(receipt.get("sourceEventIds") or [])
+                if str(item).strip()
+            ]
+            projected.append(
+                {
+                    "agentId": str(agent_id).strip(),
+                    "episodeId": episode_id,
+                    "text": str(episode.get("text") or "").strip()[:1200],
+                    "occurredAt": str(
+                        receipt.get("occurredAt") or episode.get("occurredAt") or ""
+                    ).strip(),
+                    "salienceScore": _clamp(
+                        receipt.get("salienceScore"), 0, 100, 0
+                    ),
+                    "sourceEventIds": source_event_ids,
+                    "promotedAt": str(
+                        receipt.get("promotedAt")
+                        or receipt.get("writtenAt")
+                        or receipt.get("createdAt")
+                        or ""
+                    ).strip(),
+                }
+            )
+            if len(projected) >= bounded:
+                break
+        projected.reverse()
+        return deepcopy(projected)
+
+    def _list_current_episodic_events(self, agent_id: str) -> list[dict[str, Any]]:
+        if self.episodic_lister is None:
+            return []
+        try:
+            rows = self.episodic_lister(str(agent_id).strip(), limit=500)
+        except TypeError:
+            try:
+                rows = self.episodic_lister(str(agent_id).strip())
+            except Exception as exc:  # noqa: BLE001 - optional memory adapter boundary
+                logger.warning(
+                    "Virtual human episodic memory lookup failed for agent=%s (%s).",
+                    str(agent_id).strip(),
+                    type(exc).__name__,
+                )
+                return []
+        except Exception as exc:  # noqa: BLE001 - optional memory adapter boundary
+            logger.warning(
+                "Virtual human episodic memory lookup failed for agent=%s (%s).",
+                str(agent_id).strip(),
+                type(exc).__name__,
+            )
+            return []
+        return [item for item in list(rows or []) if isinstance(item, dict)]
+
+    def _health_projection(
+        self,
+        agent_id: str,
+        *,
+        binding: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        enabled = bool(binding and binding.get("enabled"))
+        heartbeat_enabled = enabled
+        if heartbeat_enabled and self.runtime_acceptance_provider is not None:
+            try:
+                heartbeat_enabled = bool(self.runtime_acceptance_provider())
+            except Exception:  # noqa: BLE001 - health is fail-closed
+                heartbeat_enabled = False
+        agent = self._agent(agent_id, include_archived=True)
+        profile = agent.get("personaProfile") if isinstance(agent, dict) else None
+        persona_initialized = bool(
+            isinstance(profile, dict)
+            and any(
+                bool(value)
+                for value in profile.values()
+                if value is not None and str(value).strip() != ""
+            )
+        )
+        prompt_ready = False
+        prompt_segment_count = 0
+        if enabled:
+            try:
+                prompt_ready = bool(load_prompt_pack())
+                prompt_segment_count = 2 if prompt_ready else 0
+            except Exception:  # noqa: BLE001 - health must stay redacted and bounded
+                prompt_ready = False
+                prompt_segment_count = 0
+        receipts = self.store.read_jsonl(agent_id, "memory/promotion_receipts.jsonl")
+        promotion_times = [
+            str(
+                item.get("promotedAt")
+                or item.get("writtenAt")
+                or item.get("createdAt")
+                or ""
+            ).strip()
+            for item in receipts
+            if isinstance(item, dict)
+        ]
+        promotion_times = [item for item in promotion_times if item]
+        attempts = self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
+        latest_attempt = attempts[-1] if attempts else {}
+        latest_status = str(latest_attempt.get("status") or "").strip() or None
+        latest_at = str(
+            latest_attempt.get("updatedAt")
+            or latest_attempt.get("deliveredAt")
+            or latest_attempt.get("createdAt")
+            or ""
+        ).strip() or None
+        latest_error = ""
+        if latest_status not in {None, "delivered"}:
+            latest_error = str(
+                latest_attempt.get("failureType")
+                or latest_attempt.get("cancellationReason")
+                or latest_attempt.get("expiryReason")
+                or ""
+            ).strip()[:160]
+        return {
+            "personaInitialized": persona_initialized,
+            "promptPackReady": bool(prompt_ready),
+            "promptSegmentCount": int(prompt_segment_count),
+            "promptPackFileCount": len(PROMPT_PACK_FILES) if prompt_ready else 0,
+            "memoryPromotionCount": len({
+                str(item.get("receiptId") or "")
+                for item in receipts
+                if isinstance(item, dict) and str(item.get("receiptId") or "").strip()
+            }),
+            "latestPromotionAt": max(promotion_times) if promotion_times else None,
+            "heartbeatEnabled": heartbeat_enabled,
+            "lastProactiveStatus": latest_status,
+            "lastProactiveAt": latest_at,
+            "lastProactiveError": latest_error or None,
+        }
 
     def execute_command(
         self,
@@ -713,6 +943,7 @@ class VirtualHumanLifeService:
                 state=state,
                 command=normalized_command,
                 arguments=normalized_arguments,
+                command_id=normalized_key,
             )
             state["stateVersion"] = current_version + 1
             state["updatedAt"] = _iso(self._now())
@@ -737,6 +968,10 @@ class VirtualHumanLifeService:
             return deepcopy(response)
 
     def review_diary(self, agent_id: str, *, local_date: str) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            return self._review_diary_locked(agent_id, local_date=local_date)
+
+    def _review_diary_locked(self, agent_id: str, *, local_date: str) -> dict[str, Any]:
         binding = self._require_enabled_binding(agent_id)
         normalized_date = str(local_date or "").strip() or self._local_now(binding).date().isoformat()
         date.fromisoformat(normalized_date)
@@ -757,6 +992,17 @@ class VirtualHumanLifeService:
             for source_id in list(row.get("sourceEventIds") or [])
             if str(source_id)
         }
+        existing_episode_by_source: dict[str, str] = {}
+        for episode in self._list_current_episodic_events(agent_id):
+            episode_id = str(episode.get("episodeId") or episode.get("eventId") or "").strip()
+            if not episode_id:
+                continue
+            for ref in list(episode.get("refs") or []):
+                if not isinstance(ref, dict) or str(ref.get("type") or "") != "item":
+                    continue
+                source_id = str(ref.get("id") or "").strip()
+                if source_id:
+                    existing_episode_by_source.setdefault(source_id, episode_id)
         created: list[dict[str, Any]] = []
         promoted: list[dict[str, Any]] = []
         for event in events:
@@ -769,6 +1015,7 @@ class VirtualHumanLifeService:
                 or not str(outcome.get("summary") or "").strip()
             ):
                 continue
+            salience = compute_event_salience(event)
             if event_id not in recorded_source_ids:
                 entry = {
                     "diaryEntryId": f"diary-{uuid.uuid4().hex[:16]}",
@@ -777,6 +1024,7 @@ class VirtualHumanLifeService:
                     "title": str(event.get("title") or "生活记录")[:160],
                     "content": str(outcome.get("summary") or "").strip()[:1200],
                     "sourceEventIds": [event_id],
+                    "salienceScore": salience,
                     "writtenAt": _iso(self._now()),
                     "projectionKind": "deterministic_event_summary",
                 }
@@ -787,29 +1035,26 @@ class VirtualHumanLifeService:
                 )
                 recorded_source_ids.add(event_id)
                 created.append(entry)
-            salience = _clamp(outcome.get("salienceScore"), 0, 100, 0)
-            if (
-                salience < 70
-                or self.episodic_writer is None
-                or event_id in promoted_source_ids
-            ):
+            if salience < 70 or event_id in promoted_source_ids:
                 continue
-            try:
-                episode = self.episodic_writer(
-                    str(agent_id).strip(),
-                    kind="private_note",
-                    text=str(outcome.get("summary") or "").strip(),
-                    refs=[{"type": "item", "id": event_id}],
-                    occurred_at=str(event.get("occurredAt") or ""),
-                )
-            except Exception as exc:  # noqa: BLE001 - optional memory adapter boundary
-                logger.warning(
-                    "Virtual human memory promotion failed for agent=%s (%s).",
-                    str(agent_id).strip(),
-                    type(exc).__name__,
-                )
-                continue
-            episode_id = str((episode or {}).get("episodeId") or "").strip()
+            episode_id = existing_episode_by_source.get(event_id, "")
+            if not episode_id and self.episodic_writer is not None:
+                try:
+                    episode = self.episodic_writer(
+                        str(agent_id).strip(),
+                        kind="private_note",
+                        text=str(outcome.get("summary") or "").strip(),
+                        refs=[{"type": "item", "id": event_id}],
+                        occurred_at=str(event.get("occurredAt") or ""),
+                    )
+                except Exception as exc:  # noqa: BLE001 - optional memory adapter boundary
+                    logger.warning(
+                        "Virtual human memory promotion failed for agent=%s (%s).",
+                        str(agent_id).strip(),
+                        type(exc).__name__,
+                    )
+                    continue
+                episode_id = str((episode or {}).get("episodeId") or "").strip()
             if not episode_id:
                 continue
             receipt = {
@@ -820,9 +1065,15 @@ class VirtualHumanLifeService:
                 "salienceScore": salience,
                 "occurredAt": str(event.get("occurredAt") or ""),
                 "writtenAt": _iso(self._now()),
+                "promotedAt": _iso(self._now()),
             }
+            # The source-event index is the idempotency boundary.  Re-read is
+            # intentionally avoided because this method owns the agent lock.
+            if event_id in promoted_source_ids:
+                continue
             self.store.append_jsonl(agent_id, "memory/promotion_receipts.jsonl", receipt)
             promoted_source_ids.add(event_id)
+            existing_episode_by_source[event_id] = episode_id
             promoted.append(receipt)
         return {
             "localDate": normalized_date,
@@ -1530,6 +1781,7 @@ class VirtualHumanLifeService:
         state: dict[str, Any],
         command: str,
         arguments: dict[str, Any],
+        command_id: str = "",
     ) -> dict[str, Any]:
         local_now = self._local_now(binding)
         local_date = str(arguments.get("localDate") or local_now.date().isoformat()).strip()
@@ -1545,8 +1797,16 @@ class VirtualHumanLifeService:
             target_date = (local_now.date() + timedelta(days=1)).isoformat()
             existing = self.store.read_json(agent_id, f"schedules/{target_date}.json")
             created = existing is None
-            if existing is None:
+            should_refresh = bool(
+                self.schedule_planner is not None
+                and isinstance(existing, dict)
+                and str(existing.get("plannerStatus") or "").strip()
+                not in {"accepted", "fallback"}
+            )
+            if existing is None or should_refresh:
                 existing = self._generate_schedule(agent_id, date.fromisoformat(target_date), binding)
+                if should_refresh:
+                    existing["scheduleVersion"] = int(existing.get("scheduleVersion") or 1) + 1
                 self.store.write_json(agent_id, f"schedules/{target_date}.json", existing)
             return {"schedule": deepcopy(existing), "created": created}
         if command == "triggerDiaryReview":
@@ -1596,6 +1856,20 @@ class VirtualHumanLifeService:
                 "relationships.json",
                 {"relationships": list(by_target.values()), "updatedAt": _iso(self._now())},
             )
+            evolved_state = apply_relationship_interaction_to_state(
+                state,
+                interaction_id=(
+                    f"relationship:{command_id}"
+                    if command_id
+                    else f"relationship:{target_id}:{self._now().isoformat()}"
+                ),
+                intimacy_delta=_clamp(arguments.get("intimacyDelta"), -20, 20, 0),
+                trust_delta=_clamp(arguments.get("trustDelta"), -20, 20, 0),
+                kind=str(arguments.get("kind") or "interaction")[:120],
+                now=self._now(),
+            )
+            state.clear()
+            state.update(evolved_state)
             if target_id == "user":
                 state["relationshipSummary"] = (
                     f"与用户的关系：亲近度 {relationship['intimacy']}/100，"
@@ -1687,8 +1961,18 @@ class VirtualHumanLifeService:
             ]
             generated["activities"] = [*terminal, *generated["activities"]]
             generated["scheduleVersion"] = int(previous.get("scheduleVersion") or 1) + 1
-            generated["planningMode"] = "deterministic_replan"
+            planner_status = str(generated.get("plannerStatus") or "").strip().lower()
+            if planner_status == "accepted":
+                # Preserve the evidence that this replan came from the Agent
+                # planner; otherwise a successful LLM proposal would be
+                # mislabeled as deterministic in the UI and audit trail.
+                generated["planningMode"] = "agent_proposed"
+            elif planner_status == "fallback":
+                generated["planningMode"] = "deterministic_replan_fallback"
+            else:
+                generated["planningMode"] = "deterministic_replan"
             generated["replanReason"] = str(arguments.get("reason") or "")[:300]
+            generated["replanRequestedAt"] = _iso(self._now())
             self.store.write_json(agent_id, f"schedules/{local_date}.json", generated)
             return {"schedule": deepcopy(generated)}
         if command not in {
@@ -1750,6 +2034,9 @@ class VirtualHumanLifeService:
                 "agentId": str(agent_id).strip(),
                 "activityId": activity_id,
                 "kind": "activity_completed",
+                "activityKind": str(
+                    activity.get("activityKind") or activity.get("kind") or "simulated"
+                ).strip().lower(),
                 "title": str(activity.get("title") or "计划活动"),
                 "startedAt": str(activity.get("startedAt") or activity.get("startAt") or ""),
                 "occurredAt": _iso(now),
@@ -1821,7 +2108,7 @@ class VirtualHumanLifeService:
                 self.store.write_json(
                     agent_id,
                     path,
-                    self._generate_schedule(agent_id, target_date, binding),
+                    self._deterministic_schedule(agent_id, target_date, binding),
                 )
 
     def _default_binding(self, agent_id: str) -> dict[str, Any]:
@@ -1904,6 +2191,8 @@ class VirtualHumanLifeService:
             "energy": 76,
             "sleepState": "awake",
             "socialNeed": 42,
+            "processedEventIds": [],
+            "processedInteractionIds": [],
             "relationshipSummary": "正在与用户建立尊重边界的长期陪伴关系。",
             "lifePaused": False,
             "scheduleVersion": 1,
@@ -1917,45 +2206,99 @@ class VirtualHumanLifeService:
         local_date: date,
         binding: dict[str, Any],
     ) -> dict[str, Any]:
-        zone = self._zone(binding)
-        seed = int(
-            hashlib.sha256(f"{agent_id}:{local_date.isoformat()}".encode()).hexdigest()[:8],
-            16,
+        fallback = self._deterministic_schedule(agent_id, local_date, binding)
+        if self.schedule_planner is None:
+            return fallback
+        proposal, failure_reason = self._invoke_schedule_planner(
+            agent_id,
+            local_date=local_date,
+            binding=binding,
         )
-        variants = [
-            ("整理房间和做早餐", "专注处理自己的学习与创作", "傍晚散步", "写私人日记并放松"),
-            ("慢慢醒来并准备早餐", "阅读和推进个人项目", "做一顿晚饭", "听音乐并回顾一天"),
-            ("晨间伸展和早餐", "练习一项长期技能", "去附近走走", "整理明天的想法"),
-        ]
-        titles = variants[seed % len(variants)]
-        slots = [(8, 0, 9, 0), (10, 0, 12, 0), (18, 0, 19, 0), (21, 30, 22, 15)]
-        activities: list[dict[str, Any]] = []
-        for index, (title, slot) in enumerate(zip(titles, slots), start=1):
-            start_hour, start_minute, end_hour, end_minute = slot
-            start_at = datetime.combine(local_date, time(start_hour, start_minute), tzinfo=zone)
-            end_at = datetime.combine(local_date, time(end_hour, end_minute), tzinfo=zone)
-            activities.append(
-                {
-                    "activityId": f"life-{local_date.isoformat()}-{index}",
-                    "title": title,
-                    "kind": "simulated",
-                    "startAt": _iso(start_at),
-                    "endAt": _iso(end_at),
-                    "status": "planned",
-                    "origin": "deterministic_daily_plan",
-                }
-            )
-        return {
-            "schemaVersion": STORAGE_SCHEMA_VERSION,
+        activities, validation_reason = validate_schedule_proposal(
+            proposal,
+            agent_id=agent_id,
+            local_date=local_date,
+            zone=self._zone(binding),
+        )
+        if activities:
+            return {
+                **fallback,
+                "activities": activities,
+                "planningMode": "agent_proposed",
+                "plannerStatus": "accepted",
+                "plannerFallbackReason": "",
+            }
+        fallback["plannerStatus"] = "fallback"
+        fallback["plannerFallbackReason"] = (
+            validation_reason or failure_reason or "invalid_proposal"
+        )
+        return fallback
+
+    def _deterministic_schedule(
+        self,
+        agent_id: str,
+        local_date: date,
+        binding: dict[str, Any],
+    ) -> dict[str, Any]:
+        return build_deterministic_schedule(
+            agent_id,
+            local_date,
+            timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+            zone=self._zone(binding),
+            now=self._now(),
+        )
+
+    def _invoke_schedule_planner(
+        self,
+        agent_id: str,
+        *,
+        local_date: date,
+        binding: dict[str, Any],
+    ) -> tuple[Any, str]:
+        """Invoke an injected Agent planner with a hard timeout and no disk writes."""
+
+        context = {
             "agentId": str(agent_id).strip(),
             "localDate": local_date.isoformat(),
             "timezone": str(binding.get("timezone") or "Asia/Shanghai"),
-            "scheduleVersion": 1,
-            "planningMode": "deterministic_mvp",
-            "activities": activities,
-            "createdAt": _iso(self._now()),
-            "updatedAt": _iso(self._now()),
+            "constraints": {
+                "maxActivities": 8,
+                "maxDurationMinutes": 480,
+                "sameLocalDate": True,
+                "allowedKinds": ["simulated", "tool"],
+                "allowedActivityKinds": list(PLANNER_ACTIVITY_KINDS),
+            },
+            "state": self.store.read_json(agent_id, "state.json") or {},
+            # The requested date is tomorrow, so filtering the diary by that
+            # date would always hide the recent experiences that should guide
+            # planning.  Keep the input bounded but use the latest entries
+            # across already recorded local days.
+            "recentDiary": self.list_diary(agent_id, limit=5),
         }
+        result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+        def run() -> None:
+            try:
+                result_queue.put(("ok", self.schedule_planner(context)))
+            except Exception as exc:  # noqa: BLE001 - adapter boundary
+                result_queue.put(("error", type(exc).__name__))
+
+        worker = threading.Thread(
+            target=run,
+            name="virtual-human-schedule-planner",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=self.schedule_planner_timeout_seconds)
+        if worker.is_alive():
+            return None, "timeout"
+        try:
+            status, value = result_queue.get_nowait()
+        except queue.Empty:
+            return None, "adapter_error"
+        if status != "ok":
+            return None, "adapter_error"
+        return value, ""
 
     def _advance_schedule_activities(
         self,
@@ -2014,6 +2357,9 @@ class VirtualHumanLifeService:
                 "agentId": str(agent_id).strip(),
                 "activityId": str(activity.get("activityId") or ""),
                 "kind": "activity_completed",
+                "activityKind": str(
+                    activity.get("activityKind") or activity.get("kind") or "simulated"
+                ).strip().lower(),
                 "title": str(activity.get("title") or "计划活动"),
                 "localDate": event_local_date,
                 "occurredAt": _iso(current),
@@ -2108,15 +2454,17 @@ class VirtualHumanLifeService:
 
     @staticmethod
     def _simulated_activity_salience(title: str) -> int:
-        normalized = str(title or "")
-        if any(
-            keyword in normalized
-            for keyword in ("创作", "项目", "技能", "学习", "阅读", "回顾", "想法")
-        ):
-            return 76
-        if any(keyword in normalized for keyword in ("散步", "音乐", "日记", "整理")):
-            return 58
-        return 36
+        return compute_event_salience(
+            {
+                "kind": "activity_completed",
+                "title": str(title or ""),
+                "outcome": {
+                    "status": "succeeded",
+                    "kind": "deterministic_simulation",
+                    "summary": f"完成了{title or '计划活动'}。",
+                },
+            }
+        )
 
     def _apply_completed_event_to_state(
         self,
@@ -2124,23 +2472,9 @@ class VirtualHumanLifeService:
         event: dict[str, Any],
         now: datetime,
     ) -> None:
-        mood = state.get("mood") if isinstance(state.get("mood"), dict) else {}
-        valence = _clamp(mood.get("valence"), -100, 100, 0)
-        mood.update(
-            {
-                "label": "happy" if valence >= 5 else "calm",
-                "valence": min(100, valence + 5),
-                "arousal": _clamp(mood.get("arousal"), 0, 100, 30),
-                "stability": _clamp(mood.get("stability"), 0, 100, 70),
-                "causeEventIds": (
-                    [*list(mood.get("causeEventIds") or []), str(event.get("eventId") or "")]
-                )[-8:],
-                "updatedAt": _iso(now),
-            }
-        )
-        state["mood"] = mood
-        state["energy"] = max(0, _clamp(state.get("energy"), 0, 100, 70) - 2)
-        state["currentActivityId"] = ""
+        evolved_state = apply_completed_event_to_state(state, event, now=now)
+        state.clear()
+        state.update(evolved_state)
 
     def _require_enabled_binding(self, agent_id: str) -> dict[str, Any]:
         binding = self.binding_for(agent_id)

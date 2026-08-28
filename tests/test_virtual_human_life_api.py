@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,6 +11,7 @@ from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeServic
 from core.web.routes import agent_plugins, virtual_human_life
 from core.web.services.virtual_human_life_service import (
     _default_agent_persona_initializer,
+    _default_schedule_planner,
     set_virtual_human_life_service_for_tests,
     stop_virtual_human_life_runtime,
 )
@@ -223,6 +226,104 @@ def test_virtual_human_reads_reject_unknown_agent_and_invalid_query(tmp_path) ->
         set_virtual_human_life_service_for_tests(None)
 
 
+def test_virtual_human_memories_are_agent_scoped_and_health_fails_closed(
+    tmp_path,
+) -> None:
+    agents = {
+        "agent-a": {
+            "agentId": "agent-a",
+            "status": "active",
+            "directSessionId": "session-a",
+            "personaProfile": {"personality": "安静"},
+        },
+        "agent-b": {
+            "agentId": "agent-b",
+            "status": "active",
+            "directSessionId": "session-b",
+        },
+    }
+    episodes = {
+        "agent-a": [
+            {
+                "episodeId": "episode-a",
+                "text": "A 的长期记忆",
+                "occurredAt": "2026-08-27T12:00:00Z",
+                "refs": [{"type": "item", "id": "event-a"}],
+            }
+        ],
+        "agent-b": [
+            {
+                "episodeId": "episode-b",
+                "text": "B 的长期记忆",
+                "occurredAt": "2026-08-27T12:00:00Z",
+                "refs": [{"type": "item", "id": "event-b"}],
+            }
+        ],
+    }
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: agents.get(agent_id),
+        agent_lister=lambda: list(agents.values()),
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        episodic_lister=lambda agent_id, limit=500: episodes.get(agent_id, []),
+        runtime_acceptance_provider=lambda: False,
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.set_binding("agent-b", enabled=True, expected_version=0)
+    service.store.append_jsonl(
+        "agent-a",
+        "memory/promotion_receipts.jsonl",
+        {
+            "receiptId": "receipt-a",
+            "episodeId": "episode-a",
+            "sourceEventIds": ["event-a"],
+            "salienceScore": 88,
+            "occurredAt": "2026-08-27T12:00:00Z",
+            "promotedAt": "2026-08-27T13:00:00Z",
+        },
+    )
+    service.store.append_jsonl(
+        "agent-b",
+        "memory/promotion_receipts.jsonl",
+        {
+            "receiptId": "receipt-b",
+            "episodeId": "episode-b",
+            "sourceEventIds": ["event-b"],
+            "salienceScore": 91,
+            "occurredAt": "2026-08-27T12:00:00Z",
+            "promotedAt": "2026-08-27T13:00:00Z",
+        },
+    )
+    set_virtual_human_life_service_for_tests(service)
+    app = FastAPI()
+    app.include_router(virtual_human_life.router, prefix="/api")
+    client = TestClient(app)
+    try:
+        memories_a = client.get(
+            "/api/agents/agent-a/plugins/virtual-human-life/memories"
+        )
+        assert memories_a.status_code == 200, memories_a.text
+        assert memories_a.json()[0]["agentId"] == "agent-a"
+        assert memories_a.json()[0]["text"] == "A 的长期记忆"
+        assert client.get(
+            "/api/agents/missing/plugins/virtual-human-life/memories"
+        ).status_code == 404
+
+        snapshot = client.get(
+            "/api/agents/agent-a/plugins/virtual-human-life/snapshot"
+        )
+        assert snapshot.status_code == 200, snapshot.text
+        health = snapshot.json()["health"]
+        assert health["heartbeatEnabled"] is False
+        assert health["personaInitialized"] is True
+        assert "独立存在的虚构人物" not in json.dumps(snapshot.json(), ensure_ascii=False)
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
 def test_virtual_human_json_routes_declare_response_models() -> None:
     for route in [*agent_plugins.router.routes, *virtual_human_life.router.routes]:
         assert route.response_model is not None, route.path
@@ -328,3 +429,93 @@ def test_virtual_human_persona_initializer_preserves_user_authored_or_cleared_pr
     assert _default_agent_persona_initializer("custom")["reason"] == "already_configured"
     assert _default_agent_persona_initializer("cleared")["reason"] == "defaults_disabled"
     assert updates == []
+
+
+def test_default_schedule_planner_reuses_agent_dialogue_route_without_tools(
+    monkeypatch,
+) -> None:
+    from core.web.services import agent_directory_service
+    import core.llm as llm_module
+    import core.llm.agent_runtime as agent_runtime_module
+    import config.settings as settings_module
+
+    agent = {
+        "agentId": "agent-a",
+        "displayName": "独立人物",
+        "status": "active",
+        "llmBindings": {"dialogue": {"modelId": "model-dialogue"}},
+        "personaProfile": {
+            "personality": "有自己的兴趣和边界。",
+            "identityNotes": "独立存在的虚构人物，不是用户本人。",
+        },
+    }
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agent if agent_id == "agent-a" else None,
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "agent_dialogue_model_id",
+        lambda value: value["llmBindings"]["dialogue"]["modelId"],
+    )
+    config = object()
+    monkeypatch.setattr(settings_module, "get_config", lambda: config)
+    resolved = SimpleNamespace(
+        runtime_profile_id="primary",
+        config=config,
+        model_id="model-dialogue",
+    )
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "resolve_agent_llm",
+        lambda *_args, **_kwargs: resolved,
+    )
+    client = object()
+    def fake_get_llm_client(**kwargs):
+        calls["clientKwargs"] = kwargs
+        return client
+
+    monkeypatch.setattr(llm_module, "get_llm_client", fake_get_llm_client)
+
+    def fake_invoke(_client, messages, *, tools, context, metadata):
+        calls["messages"] = messages
+        calls["tools"] = tools
+        calls["context"] = context
+        calls["metadata"] = metadata
+        return SimpleNamespace(
+            content=(
+                "```json\n"
+                '{"activities":[{"title":"写歌","activityKind":"creative",'
+                '"startAt":"09:30","endAt":"10:30"}]}\n'
+                "```"
+            )
+        )
+
+    monkeypatch.setattr(llm_module, "invoke_llm", fake_invoke)
+
+    result = _default_schedule_planner(
+        {
+            "agentId": "agent-a",
+            "localDate": "2026-08-30",
+            "timezone": "Asia/Shanghai",
+            "state": {"energy": 76, "socialNeed": 42},
+            "recentDiary": [
+                {
+                    "localDate": "2026-08-29",
+                    "title": "完成一段旋律",
+                    "content": "留下了一个很喜欢的动机。",
+                }
+            ],
+            "constraints": {"allowedActivityKinds": ["creative"]},
+        }
+    )
+
+    assert result["activities"][0]["activityKind"] == "creative"
+    assert calls["tools"] == []
+    assert calls["context"].conversation_bound is False
+    assert calls["context"].agent_id == "agent-a"
+    payload = json.loads(calls["messages"][1]["content"])
+    assert payload["recentDiary"][0]["summary"] == "留下了一个很喜欢的动机。"
+    assert payload["constraints"]["allowedExecutionKinds"] == ["simulated"]

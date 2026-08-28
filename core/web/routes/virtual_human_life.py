@@ -19,6 +19,7 @@ from core.web.routes.virtual_human_life_models import (
     VirtualHumanCommandResponse,
     VirtualHumanDiaryEntryResponse,
     VirtualHumanEventResponse,
+    VirtualHumanMemoryResponse,
     VirtualHumanRelationshipResponse,
     VirtualHumanScheduleResponse,
     VirtualHumanSnapshotResponse,
@@ -29,6 +30,7 @@ from core.web.services.virtual_human_life_service import (
     preview_legacy_pet_import,
     virtual_human_diary,
     virtual_human_events,
+    virtual_human_memories,
     virtual_human_relationships,
     virtual_human_schedule,
     virtual_human_snapshot,
@@ -118,6 +120,22 @@ def life_diary(
 def life_relationships(agent_id: str) -> list[dict]:
     try:
         return virtual_human_relationships(agent_id)
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.get(
+    "/agents/{agent_id}/plugins/virtual-human-life/memories",
+    response_model=list[VirtualHumanMemoryResponse],
+    response_model_exclude_unset=True,
+)
+def life_memories(
+    agent_id: str,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[dict]:
+    try:
+        return virtual_human_memories(agent_id, limit=limit)
     except Exception as exc:
         _raise_life_http_error(exc)
         raise

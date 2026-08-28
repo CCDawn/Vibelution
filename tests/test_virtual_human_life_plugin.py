@@ -904,6 +904,263 @@ def test_diary_review_retries_memory_promotion_without_duplicating_the_diary(
     assert len(episodes) == 1
 
 
+def test_legacy_event_salience_is_derived_without_rewriting_event_ledger(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    episodes: list[dict] = []
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        episodic_writer=lambda agent_id, **payload: episodes.append(payload)
+        or {"episodeId": "episode-legacy", **payload},
+        now_provider=lambda: datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl(
+        "agent-a",
+        "events/2026-08-27.jsonl",
+        {
+            "eventId": "event-legacy-salience",
+            "agentId": "agent-a",
+            "kind": "activity_completed",
+            "title": "完成自己的创作项目",
+            "occurredAt": "2026-08-27T12:00:00Z",
+            "outcome": {
+                "status": "succeeded",
+                "summary": "完成了一段新的旋律草稿。",
+            },
+        },
+    )
+
+    first = service.review_diary("agent-a", local_date="2026-08-27")
+    second = service.review_diary("agent-a", local_date="2026-08-27")
+
+    assert first["promotedMemoryCount"] == 1
+    assert second["promotedMemoryCount"] == 0
+    assert len(episodes) == 1
+    assert service.list_events("agent-a", date="2026-08-27")[0]["outcome"].get(
+        "salienceScore"
+    ) is None
+    receipt = service.list_memory_promotion_receipts("agent-a")[0]
+    assert receipt["salienceScore"] >= 70
+    assert receipt["promotedAt"]
+
+
+def test_memory_projection_reuses_existing_episode_without_duplicate_write(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    writer_calls: list[dict] = []
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        episodic_writer=lambda _agent_id, **payload: writer_calls.append(payload)
+        or {"episodeId": "should-not-be-created", **payload},
+        episodic_lister=lambda _agent_id, limit=500: [
+            {
+                "episodeId": "episode-existing",
+                "text": "原来就存在的长期记忆。",
+                "occurredAt": "2026-08-27T12:00:00Z",
+                "refs": [{"type": "item", "id": "event-existing"}],
+            }
+        ],
+        now_provider=lambda: datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl(
+        "agent-a",
+        "events/2026-08-27.jsonl",
+        {
+            "eventId": "event-existing",
+            "agentId": "agent-a",
+            "kind": "activity_completed",
+            "title": "完成创作",
+            "occurredAt": "2026-08-27T12:00:00Z",
+            "outcome": {
+                "status": "succeeded",
+                "summary": "完成一段重要的新作品。",
+                "salienceScore": 88,
+            },
+        },
+    )
+
+    reviewed = service.review_diary("agent-a", local_date="2026-08-27")
+    memories = service.list_memories("agent-a")
+
+    assert reviewed["promotedMemoryCount"] == 1
+    assert writer_calls == []
+    assert memories == [
+        {
+            "agentId": "agent-a",
+            "episodeId": "episode-existing",
+            "text": "原来就存在的长期记忆。",
+            "occurredAt": "2026-08-27T12:00:00Z",
+            "salienceScore": 88,
+            "sourceEventIds": ["event-existing"],
+            "promotedAt": memories[0]["promotedAt"],
+        }
+    ]
+
+
+def test_schedule_planner_accepts_valid_proposal_and_falls_back_on_invalid(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+
+    def valid_planner(_context: dict) -> dict:
+        return {
+            "activities": [
+                {
+                    "title": "写一封给未来自己的信",
+                    "kind": "creative",
+                    "startAt": "09:30",
+                    "endAt": "10:30",
+                }
+            ]
+        }
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        schedule_planner=valid_planner,
+        now_provider=lambda: datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    # Ordinary reads must not block on an LLM call; only the explicit planning
+    # command opts into the injected planner.
+    provisional = service.schedule_for("agent-a", "2026-08-30")
+    assert provisional["planningMode"] == "deterministic_mvp"
+    valid = service.execute_command(
+        "agent-a",
+        command="planTomorrow",
+        expected_version=service.snapshot("agent-a")["state"]["stateVersion"],
+        idempotency_key="plan-tomorrow-valid",
+    )["result"]["schedule"]
+    assert valid["planningMode"] == "agent_proposed"
+    assert valid["plannerStatus"] == "accepted"
+    assert valid["activities"][0]["kind"] == "simulated"
+
+    invalid_service = VirtualHumanLifeService(
+        project_root=tmp_path / "invalid",
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "invalid" / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        schedule_planner=lambda _context: {
+            "activities": [
+                {
+                    "title": "冲突一",
+                    "startAt": "10:00",
+                    "endAt": "12:00",
+                },
+                {
+                    "title": "冲突二",
+                    "startAt": "11:00",
+                    "endAt": "13:00",
+                },
+            ]
+        },
+        now_provider=lambda: datetime(2026, 8, 27, 13, 0, tzinfo=timezone.utc),
+    )
+    invalid_service.set_binding("agent-a", enabled=True, expected_version=0)
+    invalid = invalid_service.execute_command(
+        "agent-a",
+        command="planTomorrow",
+        expected_version=invalid_service.snapshot("agent-a")["state"]["stateVersion"],
+        idempotency_key="plan-tomorrow-invalid",
+    )["result"]["schedule"]
+    assert invalid["planningMode"] == "deterministic_mvp"
+    assert invalid["plannerStatus"] == "fallback"
+    assert invalid["plannerFallbackReason"] == "overlap"
+
+
+def test_nightly_heartbeat_replaces_provisional_schedule_once_with_planner(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    planner_calls: list[dict] = []
+
+    def planner(context: dict) -> dict:
+        planner_calls.append(context)
+        return {
+            "activities": [
+                {
+                    "title": "写给未来自己的信",
+                    "activityKind": "creative",
+                    "startAt": "09:30",
+                    "endAt": "10:30",
+                }
+            ]
+        }
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        schedule_planner=planner,
+        now_provider=lambda: datetime(2026, 8, 27, 14, 31, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl(
+        "agent-a",
+        "diary/2026-08-26.jsonl",
+        {
+            "diaryEntryId": "diary-recent",
+            "agentId": "agent-a",
+            "localDate": "2026-08-26",
+            "title": "昨天的创作",
+            "content": "完成了一个小想法。",
+            "sourceEventIds": ["event-old"],
+            "writtenAt": "2026-08-26T13:00:00+00:00",
+        },
+    )
+
+    first = service.heartbeat_agent(
+        "agent-a",
+        now=datetime(2026, 8, 27, 14, 31, tzinfo=timezone.utc),
+    )
+    assert first["completedEventCount"] >= 0
+    tomorrow = service.schedule_for("agent-a", "2026-08-28")
+    assert tomorrow["plannerStatus"] == "accepted"
+    assert tomorrow["planningMode"] == "agent_proposed"
+    assert len(planner_calls) == 1
+    assert planner_calls[0]["localDate"] == "2026-08-28"
+    assert planner_calls[0]["recentDiary"]
+
+    service.heartbeat_agent(
+        "agent-a",
+        now=datetime(2026, 8, 27, 14, 32, tzinfo=timezone.utc),
+    )
+    assert len(planner_calls) == 1
+
+
 def test_relationship_interaction_updates_numeric_projection_without_prompting_raw_note(
     service: VirtualHumanLifeService,
 ) -> None:
