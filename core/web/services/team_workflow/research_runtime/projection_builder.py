@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from core.research.workflow.contracts import CommandOffer, ResearchWorkflowSnapshot
@@ -63,11 +63,20 @@ class ProjectionInputs:
     # Knowledge-sideflow invocation rows for this run (already loaded by the
     # query layer; the builder stays a pure function over its inputs).
     knowledge_invocations: tuple[Any, ...] = ()
+    # Real per-child-run node states (childRunId → sideflow nodeId → status),
+    # loaded by the query layer from the child run's node attempts.  These
+    # give the five-node progress card its true middle-node facts.
+    knowledge_child_node_states: Mapping[str, Mapping[str, str]] = field(
+        default_factory=dict
+    )
     # Offer authorization signing: explicit key/now keep the builder
     # deterministic for tests; ``None`` resolves the server control secret and
     # wall clock.
     authorization_key: str | None = None
     now_ms: int | None = None
+    # Definition resolution diagnostic from the query layer ("pinned" |
+    # "legacy_default" | "degraded"); surfaced verbatim in the snapshot.
+    definition_resolution: str = "pinned"
 
 
 def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkflowSnapshot:
@@ -203,6 +212,7 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         launch_context=launch_context,
         invocation_badges=invocation_badges,
         command_authorizations=command_authorizations,
+        definition_resolution=str(inputs.definition_resolution or "pinned"),
     )
 
 
@@ -229,6 +239,11 @@ def _invocation_badges(
                 error_summary=latest_row.get("errorSummary"),
                 created_at_ms=int(latest_row.get("createdAtMs") or 0),
                 updated_at_ms=int(latest_row.get("updatedAtMs") or 0),
+                child_node_states=dict(
+                    inputs.knowledge_child_node_states.get(
+                        str(latest_row.get("knowledgeChildRunId") or ""), {}
+                    )
+                ),
             )
             if isinstance(latest_row, Mapping)
             else None

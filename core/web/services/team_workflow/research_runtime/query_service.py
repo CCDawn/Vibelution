@@ -7,6 +7,7 @@ fails closed; legacy JSON stores are never consulted.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
@@ -32,6 +33,12 @@ from .projection_builder import ProjectionInputs, build_research_workflow_snapsh
 from .readiness import NodeReadinessService
 from .readiness.common import DomainReadinessContext
 from .run_catalog import catalog_dict_from_run
+
+logger = logging.getLogger(__name__)
+
+# Schema version of the registered legacy snapshot that pre-identity runs
+# fall back to (challenge-cup-research@2.1.0, the 17-node chain).
+_LEGACY_SCHEMA_VERSION = "2.1.0"
 
 
 class WorkflowQueryError(RuntimeError):
@@ -153,11 +160,12 @@ class WorkflowQueryService:
             latest_seq,
             execution_anchors,
             knowledge_invocations,
+            knowledge_child_node_states,
         ) = bundle
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
 
-        definition = self._definition_for_run(run)
+        definition, definition_resolution = self._definition_for_run(run)
         offers = build_command_offers(
             readiness_service=self._readiness,
             context=self._readiness_context(),
@@ -176,6 +184,7 @@ class WorkflowQueryService:
             ProjectionInputs(
                 run=run,
                 definition=definition,
+                definition_resolution=definition_resolution,
                 attempts=tuple(attempts),
                 pending_human_tasks=tuple(human_tasks),
                 handoffs=tuple(handoffs),
@@ -190,42 +199,117 @@ class WorkflowQueryService:
                 discussion_rooms=discussion_rooms,
                 execution_anchors=tuple(execution_anchors),
                 knowledge_invocations=tuple(knowledge_invocations),
+                knowledge_child_node_states=dict(knowledge_child_node_states),
                 latest_event_sequence=latest_seq,
                 generated_at=self._clock_iso(),
             )
         )
 
-    def _definition_for_run(self, run: Any) -> Any:
+    def _definition_for_run(self, run: Any) -> tuple[Any, str]:
         """Resolve the definition pinned by the run's version identity.
 
         The canvas must render the topology the run was created with (2.1.0
         legacy runs keep the 17-node chain; 3.0.0/sideflow runs render their
-        own pinned graph).  Resolution is fail-soft: an unregistered legacy
-        version id falls back to the service default instead of failing the
-        whole snapshot read.
+        own pinned graph).  Returns ``(definition, resolution)`` where
+        resolution is one of:
+
+        - ``"pinned"``: the registry resolved the run's version identity
+          (including its structureHash).
+        - ``"legacy_default"``: the run predates version identities (empty
+          ``workflow_version_id``); the fallback is the REGISTERED 2.1.0
+          snapshot definition — never the current in-code build.
+        - ``"degraded"``: the run's version identity exists but could not be
+          honored (unknown version / hash mismatch / registry unavailable).
+          The substitution is diagnostic-visible in the snapshot
+          (``definitionResolution``) and logged, never silent.
         """
+        workflow_id = str(getattr(run, "workflow_id", "") or "").strip()
+        version_id = str(getattr(run, "workflow_version_id", "") or "").strip()
+        structure_hash = str(getattr(run, "structure_hash", "") or "").strip()
+        run_id = str(getattr(run, "run_id", "") or "")
+        if not version_id:
+            legacy = self._registered_legacy_definition(workflow_id)
+            if legacy is not None:
+                return legacy, "legacy_default"
+            logger.warning(
+                "workflow_definition_degraded: run has no version identity and "
+                "no registered %s snapshot; falling back to the service default "
+                "(runId=%s workflowId=%s)",
+                _LEGACY_SCHEMA_VERSION,
+                run_id or "<unknown>",
+                workflow_id or "<unknown>",
+            )
+            return self._definition, "degraded"
         try:
             from core.research.workflow.definition_registry import resolve_definition
 
-            return resolve_definition(
-                workflow_id=str(getattr(run, "workflow_id", "") or ""),
-                workflow_version_id=str(
-                    getattr(run, "workflow_version_id", "") or ""
+            return (
+                resolve_definition(
+                    workflow_id=workflow_id,
+                    workflow_version_id=version_id,
+                    structure_hash=structure_hash,
+                    run_id=run_id,
                 ),
-                run_id=str(getattr(run, "run_id", "") or ""),
+                "pinned",
             )
-        except Exception:  # noqa: BLE001 - snapshot reads fail soft to default
-            return self._definition
+        except Exception as exc:  # noqa: BLE001 - snapshot reads fail soft, visibly
+            logger.warning(
+                "workflow_definition_degraded: pinned resolution failed; "
+                "falling back to the service default "
+                "(runId=%s workflowId=%s workflowVersionId=%s structureHash=%s error=%s)",
+                run_id or "<unknown>",
+                workflow_id or "<unknown>",
+                version_id,
+                structure_hash or "<absent>",
+                exc,
+            )
+            return self._definition, "degraded"
+
+    def _registered_legacy_definition(self, workflow_id: str) -> Any | None:
+        """The registered 2.1.0 snapshot definition for ``workflow_id``.
+
+        Ancient runs carry no version identity; the only honest fallback is
+        the registered legacy snapshot, resolved through the registry (the
+        same reader every other consumer uses) — never a fresh compile of the
+        current graph.
+        """
+        try:
+            from core.research.workflow.definition_registry import (
+                registered_definitions,
+            )
+
+            return next(
+                (
+                    item
+                    for item in registered_definitions()
+                    if str(item.workflowId) == workflow_id
+                    and str(item.schemaVersion) == _LEGACY_SCHEMA_VERSION
+                ),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - legacy fallback stays fail-soft
+            return None
 
     def get_node_detail(
         self, *, team_id: str, run_id: str, node_id: str
     ) -> ResearchWorkflowNodeDetail:
-        node = next(
-            (item for item in self._definition.nodes if item.nodeId == node_id),
-            None,
-        )
-        if node is None:
-            raise NodeNotFoundError(node_id)
+        # Node membership is judged against the run's OWN pinned definition,
+        # not the service default: a 2.1.0 run and a 3.0.0 run have different
+        # node sets (e.g. knowledge_handoff exists only in the legacy chain).
+        try:
+            run = self._store.get_run(run_id)
+        except (WorkflowLedgerUnavailableError, WorkflowLedgerClosedError) as exc:
+            raise WorkflowLedgerUnavailable(str(exc)) from exc
+        if run is not None:
+            definition, _ = self._definition_for_run(run)
+            node = next(
+                (item for item in definition.nodes if item.nodeId == node_id),
+                None,
+            )
+            if node is None:
+                raise NodeNotFoundError(node_id)
+        # A missing run skips the node check on purpose: get_snapshot below
+        # raises the precise RunNotFoundError / TeamScopeMismatchError.
 
         def load(_repo: WorkflowLedgerRepository):
             snap = self.get_snapshot(team_id=team_id, run_id=run_id)
@@ -368,6 +452,9 @@ class WorkflowQueryService:
             ]
             artifact_receipts = repo.list_artifact_receipts_for_run(run_id)
             knowledge_invocations = _load_knowledge_invocations(repo, run_id)
+            knowledge_child_node_states = _load_knowledge_child_node_states(
+                repo, knowledge_invocations
+            )
             latest_seq = repo.latest_event_sequence(run_id)
             events = _read_bounded_events(
                 repo,
@@ -388,9 +475,6 @@ class WorkflowQueryService:
                 events,
                 launch_context,
             )
-            knowledge_invocations = repo.list_knowledge_invocations_for_parent(
-                run_id
-            )
             return (
                 run,
                 attempts,
@@ -407,6 +491,7 @@ class WorkflowQueryService:
                 latest_seq,
                 execution_anchors,
                 knowledge_invocations,
+                knowledge_child_node_states,
             )
 
         if hasattr(self._store, "read"):
@@ -431,6 +516,45 @@ def _load_knowledge_invocations(
         return list(loader(run_id))
     except Exception:  # noqa: BLE001 - badge reads must not break snapshots
         return []
+
+
+def _load_knowledge_child_node_states(
+    repo: WorkflowLedgerRepository,
+    invocations: Sequence[Any],
+) -> dict[str, dict[str, str]]:
+    """Per-child-run latest node status, keyed by sideflow node id.
+
+    The five-node sideflow progress must come from the child run's REAL node
+    attempts — an invocation-level status alone cannot say which middle node
+    is running. Fail-soft per child run: a missing/unreadable child run
+    simply yields no per-node states and the readers fall back to the
+    invocation-level derivation.
+    """
+    loader = getattr(repo, "list_attempts", None)
+    if loader is None:
+        return {}
+    states: dict[str, dict[str, str]] = {}
+    for row in invocations:
+        child_run_id = str(getattr(row, "knowledge_child_run_id", "") or "").strip()
+        if not child_run_id or child_run_id in states:
+            continue
+        try:
+            attempts = list(loader(child_run_id))
+        except Exception:  # noqa: BLE001 - child progress must not break snapshots
+            continue
+        latest_by_node: dict[str, Any] = {}
+        for attempt in attempts:
+            node_id = str(getattr(attempt, "node_id", "") or "")
+            if not node_id:
+                continue
+            prior = latest_by_node.get(node_id)
+            if prior is None or int(attempt.attempt) >= int(prior.attempt):
+                latest_by_node[node_id] = attempt
+        states[child_run_id] = {
+            node_id: str(getattr(attempt, "status", "") or "")
+            for node_id, attempt in latest_by_node.items()
+        }
+    return states
 
 
 def _latest_attempt_anchor_rows(

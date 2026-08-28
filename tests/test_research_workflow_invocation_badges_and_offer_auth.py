@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.contracts.workflow_snapshot import CommandOffer
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
@@ -42,6 +44,7 @@ from core.web.services.team_workflow.research_runtime.projection_builder import 
     build_research_workflow_snapshot,
 )
 from core.web.services.team_workflow.research_runtime.query_service import (
+    NodeNotFoundError,
     WorkflowQueryService,
 )
 from tests._support.command_helpers import CommandHarness
@@ -50,6 +53,7 @@ from tests._support.workflow_ledger_helpers import (
     FIXED_NOW_MS,
     build_attempt_record,
     build_command_record,
+    build_event_record,
     build_run_record,
 )
 
@@ -90,6 +94,14 @@ def _invocation(
 
 def _seed_run_with_invocations(harness: CommandHarness, run_id: str = "run-snap") -> None:
     harness.seed_run(run_id=run_id, status="running", run_version=3)
+    # The knowledge child run needs its own run row (node_attempts FK).
+    harness.seed_run(
+        run_id="child-run-2",
+        status="running",
+        run_version=1,
+        workflow_version_id="",
+        parent_run_id=run_id,
+    )
 
     def mutate(uow):
         uow.repository.insert_command(
@@ -133,6 +145,36 @@ def _seed_run_with_invocations(harness: CommandHarness, run_id: str = "run-snap"
                 handoff_state="accepted",
             )
         )
+        # Real child-run node attempts: the five-node sideflow progress reads
+        # these instead of guessing middle nodes from the invocation status.
+        uow.repository.insert_command(
+            build_command_record(
+                command_id="cmd-child-seed",
+                run_id="child-run-2",
+                node_id="source_finding",
+                accepted_run_version=1,
+                expected_run_version=1,
+                idempotency_key="seed:child-run-2",
+            )
+        )
+        for index, (node_id, status) in enumerate(
+            [
+                ("source_finding", "succeeded"),
+                ("source_extraction", "succeeded"),
+                ("evidence_relations", "running"),
+            ],
+            start=1,
+        ):
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id=f"nr-child-run-2-{index}",
+                    run_id="child-run-2",
+                    node_id=node_id,
+                    attempt=1,
+                    status=status,
+                    command_id="cmd-child-seed",
+                )
+            )
 
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
@@ -167,12 +209,19 @@ def test_snapshot_projects_knowledge_invocation_badges(tmp_path: Path) -> None:
         assert hypothesis_badge.latest.status == "awaiting_handoff"
         assert hypothesis_badge.latest.handoff_state == "pending"
         assert hypothesis_badge.latest.current_knowledge_node_id == "knowledge_handoff"
+        # Real child-run node states ride along for the five-card progress.
+        assert hypothesis_badge.latest.child_node_states == {
+            "source_finding": "succeeded",
+            "source_extraction": "succeeded",
+            "evidence_relations": "running",
+        }
 
         serialized = snapshot.to_dict()
         assert serialized["invocationBadges"]["hypothesis_design"]["totalCount"] == 2
         latest = serialized["invocationBadges"]["hypothesis_design"]["latest"]
         assert latest["currentKnowledgeNodeId"] == "knowledge_handoff"
         assert latest["knowledgeChildRunId"] == "child-run-2"
+        assert latest["childNodeStates"]["evidence_relations"] == "running"
     finally:
         harness.close()
 
@@ -272,10 +321,38 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
             run_version=1,
             workflow_version_id=v3_version_id,
         )
+        mismatch_record = replace(
+            build_run_record(
+                run_id="run-v3-hashmismatch",
+                status="created",
+                run_version=1,
+                workflow_version_id=v3_version_id,
+            ),
+            structure_hash="f" * 64,
+        )
+
+        def _seed_mismatch(uow):
+            uow.repository.insert_run(mismatch_record)
+            uow.repository.insert_event(
+                build_event_record(
+                    sequence=1,
+                    run_id="run-v3-hashmismatch",
+                    event_type="run_created",
+                    event_id="evt-created-run-v3-hashmismatch",
+                )
+            )
+
+        harness.store.submit(_seed_mismatch, force_flush=True).result(timeout=10)
         harness.seed_run(
-            run_id="run-legacy",
+            run_id="run-legacy-unregistered",
             status="created",
             run_version=1,
+        )
+        harness.seed_run(
+            run_id="run-ancient",
+            status="created",
+            run_version=1,
+            workflow_version_id="",
         )
         query = _query(harness)
 
@@ -285,14 +362,73 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
         )
         assert len(resolved.nodes) == 12
 
+        # Registered version id resolves the pinned 3.0.0 graph.
         snapshot_v3 = query.get_snapshot(team_id="research-team", run_id="run-v3")
         assert snapshot_v3.definition["schemaVersion"] == "3.0.0"
         assert len(snapshot_v3.definition["nodes"]) == 12
+        assert snapshot_v3.definition_resolution == "pinned"
+        assert snapshot_v3.to_dict()["definitionResolution"] == "pinned"
 
-        # Unregistered legacy version id fails soft to the service default.
-        snapshot_legacy = query.get_snapshot(team_id="research-team", run_id="run-legacy")
-        assert snapshot_legacy.definition["schemaVersion"] == "2.1.0"
-        assert len(snapshot_legacy.definition["nodes"]) == 17
+        # Registered version id but mismatched structureHash: read stays soft
+        # but is visibly degraded, not silently swapped.
+        snapshot_mismatch = query.get_snapshot(
+            team_id="research-team", run_id="run-v3-hashmismatch"
+        )
+        assert snapshot_mismatch.definition_resolution == "degraded"
+        assert snapshot_mismatch.to_dict()["definitionResolution"] == "degraded"
+
+        # Unregistered (non-empty) version id also degrades visibly.
+        snapshot_degraded = query.get_snapshot(
+            team_id="research-team", run_id="run-legacy-unregistered"
+        )
+        assert snapshot_degraded.definition_resolution == "degraded"
+        assert snapshot_degraded.definition["schemaVersion"] == "2.1.0"
+        assert len(snapshot_degraded.definition["nodes"]) == 17
+
+        # Ancient run without a version identity falls back to the REGISTERED
+        # 2.1.0 snapshot (never the current in-code build), marked as such.
+        snapshot_ancient = query.get_snapshot(
+            team_id="research-team", run_id="run-ancient"
+        )
+        assert snapshot_ancient.definition_resolution == "legacy_default"
+        assert snapshot_ancient.definition["schemaVersion"] == "2.1.0"
+        assert len(snapshot_ancient.definition["nodes"]) == 17
+    finally:
+        harness.close()
+
+
+def test_get_node_detail_judges_membership_against_pinned_definition(
+    tmp_path: Path,
+) -> None:
+    v3 = build_challenge_cup_workflow_definition_v3()
+    v3_version_id = workflow_version_id_for(v3.structureHash)
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(
+            run_id="run-v3",
+            status="created",
+            run_version=1,
+            workflow_version_id=v3_version_id,
+        )
+        harness.seed_run(
+            run_id="run-ancient",
+            status="created",
+            run_version=1,
+            workflow_version_id="",
+        )
+        query = _query(harness)
+
+        # knowledge_handoff only exists in the 17-node legacy chain; a 3.0.0
+        # run must reject it against its OWN pinned definition.
+        with pytest.raises(NodeNotFoundError):
+            query.get_node_detail(
+                team_id="research-team", run_id="run-v3", node_id="knowledge_handoff"
+            )
+        # The legacy fallback still resolves it for an ancient run.
+        detail = query.get_node_detail(
+            team_id="research-team", run_id="run-ancient", node_id="knowledge_handoff"
+        )
+        assert detail.node_id == "knowledge_handoff"
     finally:
         harness.close()
 

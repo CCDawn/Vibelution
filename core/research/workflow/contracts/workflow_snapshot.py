@@ -239,6 +239,11 @@ class KnowledgeInvocationRecentSummary:
     error_summary: str | None = None
     created_at_ms: int = 0
     updated_at_ms: int = 0
+    # Real per-sideflow-node status of the child run's latest attempt, keyed
+    # by the five sideflow node ids ("succeeded"/"running"/"failed"/...).
+    # Empty when the child run's attempts are unavailable — readers then fall
+    # back to the invocation-level derivation, never invent middle nodes.
+    child_node_states: Mapping[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -253,6 +258,7 @@ class KnowledgeInvocationRecentSummary:
             "errorSummary": self.error_summary,
             "createdAtMs": self.created_at_ms,
             "updatedAtMs": self.updated_at_ms,
+            "childNodeStates": dict(self.child_node_states),
         }
 
 
@@ -418,6 +424,11 @@ class ResearchWorkflowSnapshot:
     # commandOffers entries (additive keys) so the canonical action DTO carries
     # requiresOperator/authorizationStatus/... without a second truth source.
     command_authorizations: tuple[CommandOfferAuthorization, ...] = ()
+    # How the read layer resolved this run's pinned definition:
+    # "pinned" | "legacy_default" | "degraded".  "degraded" means the run's
+    # version identity could not be honored and a fallback definition is in
+    # use — the snapshot is diagnostic-visible, never a silent substitution.
+    definition_resolution: str = "pinned"
 
     def _serialized_command_offers(self) -> list[dict[str, Any]]:
         auth_by_key = {
@@ -465,4 +476,5 @@ class ResearchWorkflowSnapshot:
                 node_id: badge.to_dict()
                 for node_id, badge in self.invocation_badges.items()
             },
+            "definitionResolution": str(self.definition_resolution or "pinned"),
         }
