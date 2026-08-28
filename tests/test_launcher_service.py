@@ -2365,7 +2365,8 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
                     }
                 ),
             ]
-        ),
+        )
+        + "\n",
         encoding="utf-8",
     )
     (results_dir / "cmd-recovered.json").write_text(
@@ -2407,10 +2408,17 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
     assert evidence["restartQueue"]["lastActiveWorkCount"] == 2
     assert "2" in evidence["restartQueue"]["statusLine"]
     assert evidence["results"]["recent"][0]["commandId"] in {"cmd-result", "cmd-recovered"}
-    assert evidence["events"]["recent"][0]["type"] == "command_queue.command_result_written"
-    assert evidence["events"]["recent"][0]["commandType"] == "restart_workbench"
-    assert evidence["events"]["recent"][0]["requestedBy"] == "launcher_api"
-    assert evidence["events"]["recent"][0]["resultPath"] == "cmd-recovered.json"
+    # get_launcher_status may append a launcher.status.stale_close_recovery_requested
+    # audit event after the offline recovery probe, so the newest event is not
+    # stable; pin the queue-events order contract instead of a brittle index.
+    event_types = [str(event["type"]) for event in evidence["events"]["recent"]]
+    assert "command_queue.command_result_written" in event_types
+    assert event_types.index("command_queue.command_result_written") < event_types.index("command_queue.processing_recovered")
+    result_event = next(event for event in evidence["events"]["recent"] if event["type"] == "command_queue.command_result_written")
+    assert result_event["commandId"] == "cmd-recovered"
+    assert result_event["commandType"] == "restart_workbench"
+    assert result_event["requestedBy"] == "launcher_api"
+    assert result_event["resultPath"] == "cmd-recovered.json"
     assert evidence["recovery"]["active"] is True
     assert evidence["recovery"]["commandId"] == "cmd-recovered"
     assert evidence["recovery"]["commandType"] == "restart_workbench"
@@ -2574,7 +2582,8 @@ def test_launcher_status_recovers_offline_stale_close_processing(tmp_path, monke
                         }
                     ),
                 ]
-            ),
+            )
+            + "\n",
             encoding="utf-8",
         )
 
@@ -2619,7 +2628,18 @@ def test_launcher_status_recovers_offline_stale_close_processing(tmp_path, monke
     assert evidence["state"]["managerPid"] == 0
     assert evidence["state"]["activeCommand"]["commandId"] == ""
     assert evidence["results"]["recent"][0]["commandId"] == command_id
-    assert evidence["events"]["recent"][0]["type"] == "command_queue.recovered_stale_close_completed"
+    # The status poll appends its launcher.status.stale_close_recovery_requested
+    # audit event after the mocked recovery rewrote the events file, so the
+    # audit event is legitimately the newest entry. Pin the recovery order
+    # contract: the recovered-stale-close completion must be present and newer
+    # than its command result event.
+    event_types = [str(event["type"]) for event in evidence["events"]["recent"]]
+    assert event_types[0] == "launcher.status.stale_close_recovery_requested"
+    assert "command_queue.recovered_stale_close_completed" in event_types
+    assert event_types.index("command_queue.recovered_stale_close_completed") < event_types.index("command_queue.command_result_written")
+    recovered_event = next(event for event in evidence["events"]["recent"] if event["type"] == "command_queue.recovered_stale_close_completed")
+    assert recovered_event["commandId"] == command_id
+    assert recovered_event["commandType"] == "close_workbench"
     assert payload["projectBundle"]["observedState"] == "closed"
     assert payload["runtimeManager"]["running"] is False
     assert payload["runtimeManager"]["runtimeState"] == "idle"
