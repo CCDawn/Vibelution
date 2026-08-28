@@ -496,6 +496,7 @@ def _ensure_payload(
     search: dict[str, Any],
     requirements: dict[str, Any],
     writeback_policy: dict[str, Any],
+    hypothesis_candidate_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     keywords = list(search.get("keywords") or [])
     return {
@@ -516,6 +517,10 @@ def _ensure_payload(
             "searchEnvelope": search,
             "requirements": requirements,
             "writebackPolicy": writeback_policy,
+            # Hypothesis candidate ids (the claim belief gate's aggregation
+            # dimension) served by this collection run; evidence
+            # materialization reads them back to bridge canonical records.
+            "hypothesisCandidateIds": list(hypothesis_candidate_ids or []),
             "collectionMode": "web_search",
         },
         "agentRoles": ["source_finder"],
@@ -530,12 +535,19 @@ def _create_collection_run(
     search: dict[str, Any],
     requirements: dict[str, Any],
     writeback_policy: dict[str, Any],
+    hypothesis_candidate_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     runs = _source_collection_runs_module()
     try:
         response = runs.start_source_collection_run(
             team_id,
-            _ensure_payload(envelope, search, requirements, writeback_policy),
+            _ensure_payload(
+                envelope,
+                search,
+                requirements,
+                writeback_policy,
+                hypothesis_candidate_ids,
+            ),
         )
     except Exception as exc:
         raise ResearchKnowledgeCollectionError(
@@ -560,6 +572,7 @@ def research_knowledge_collection_facade(
     searchEnvelope: Mapping[str, Any] | None = None,
     requirements: Mapping[str, Any] | None = None,
     writebackPolicy: Mapping[str, Any] | None = None,
+    hypothesisCandidateIds: list[str] | None = None,
     team_id: str = "research-team",
 ) -> dict[str, Any]:
     """Single facade for D03 stage-1 knowledge collection.
@@ -568,6 +581,11 @@ def research_knowledge_collection_facade(
       when present (idempotent) and otherwise creates the source-collection run,
       always returning only a distilled summary/status/locator.
     - ``inspect`` is strictly read-only and never creates or mutates state.
+    - ``hypothesisCandidateIds`` are the hypothesis candidate ids served by the
+      requested collection; ``ensure`` persists them on the created run's scope
+      (``scope.hypothesisCandidateIds``) so evidence materialization can bridge
+      canonical claims back to the gate's candidate dimension.  An empty list
+      keeps the legacy single-dimension behavior.
     """
     normalized_action = _text(action).lower()
     if normalized_action not in {"ensure", "inspect"}:
@@ -583,6 +601,11 @@ def research_knowledge_collection_facade(
     )
     requirements = _normalize_requirements(requirements)
     writeback_policy = _normalize_writeback_policy(writebackPolicy)
+    hypothesis_candidate_ids = list(
+        dict.fromkeys(
+            _text_list(hypothesisCandidateIds, max_items=24, max_length=160)
+        )
+    )
     # ensure reuses a run only when its persisted fingerprint proves the same
     # evidence request; inspect stays a pure scope-level reader and must keep
     # surfacing the latest run regardless of the requested envelope.
@@ -644,6 +667,7 @@ def research_knowledge_collection_facade(
         search,
         requirements,
         writeback_policy,
+        hypothesis_candidate_ids,
     )
     run_id = _run_id_from_start_response(created_run)
     return {

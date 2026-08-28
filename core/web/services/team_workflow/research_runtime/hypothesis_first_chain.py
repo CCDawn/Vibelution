@@ -4364,11 +4364,24 @@ def _append_collection_request(
     requirements: Mapping[str, Any],
     writeback_policy: Mapping[str, Any],
     collection_run_id: str,
+    *,
+    hypothesis_candidate_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     request_hash = _request_hash(
         meeting_round, decision_id, envelope, requirements, writeback_policy
     )
     request_id = f"hfcr-{request_hash[:16]}"
+    # Hypothesis candidate ids (``_candidate_id_for`` space) carried by the
+    # decision's ``candidateRefs``.  They bridge the collection run back to the
+    # claim belief gate's candidate dimension; the request id already hashes
+    # candidateRefs through decisionId, so the hash itself stays unchanged.
+    candidates = list(
+        dict.fromkeys(
+            str(item or "").strip()
+            for item in list(hypothesis_candidate_ids or [])
+            if str(item or "").strip()
+        )
+    )
     record = {
         "schemaVersion": SCHEMA_VERSION,
         "recordKind": COLLECTION_REQUEST_KIND,
@@ -4385,6 +4398,7 @@ def _append_collection_request(
         "searchEnvelope": dict(envelope),
         "requirements": dict(requirements),
         "writebackPolicy": dict(writeback_policy),
+        "hypothesisCandidateIds": candidates,
         "collectionRunId": str(collection_run_id or ""),
         "collectionRunStatus": "",
         "createdAt": _utc_now(),
@@ -4489,12 +4503,21 @@ def _process_collection_decisions(
             )
             continue
         scope_envelope = _scope_envelope_for_meeting(meeting_round)
+        # ``candidateRefs`` on a request_new_evidence decision are hypothesis
+        # candidate ids (the gate's aggregation dimension).  Keep them on the
+        # collection request and on the collection run so materialization can
+        # bridge canonical evidence back to that dimension; decisions without
+        # candidateRefs keep the previous behavior unchanged.
+        hypothesis_candidate_ids = list(
+            dict.fromkeys(_normalized_str_list(raw.get("candidateRefs")))
+        )
         ensured = facade.research_knowledge_collection_facade(
             action="ensure",
             scope=scope_envelope,
             searchEnvelope=envelope,
             requirements=requirements,
             writebackPolicy=writeback_policy,
+            hypothesisCandidateIds=hypothesis_candidate_ids,
             team_id=team_id,
         )
         locator = ensured.get("locator") if isinstance(ensured.get("locator"), Mapping) else {}
@@ -4506,6 +4529,7 @@ def _process_collection_decisions(
             requirements,
             writeback_policy,
             str(locator.get("runId") or ""),
+            hypothesis_candidate_ids=hypothesis_candidate_ids,
         )
         requests_out.append(record)
         collection_run_id = str(record.get("collectionRunId") or "").strip()

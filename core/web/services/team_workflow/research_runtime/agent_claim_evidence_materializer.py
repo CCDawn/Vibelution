@@ -12,6 +12,16 @@ ClaimEvidence record is registered under the ledger's claim id.  That bridge is
 what lets ``evaluate_claim_belief_gate`` find an evaluable ledger row for every
 claim id an evidence record references; self-minted evidence ids without a
 ledger row would keep the gate fail-closed forever.
+
+Candidate dimensions: extraction records anchor claims to *source* candidate
+ids (``candidate-...`` space).  The claim belief gate aggregates evidence per
+*hypothesis* candidate id (``<question>-c<hash>`` space).  When the canonical
+collection run persists ``scope.hypothesisCandidateIds``, each claim is
+registered once per dimension — one record with the source candidate id and
+one per hypothesis candidate id — so the gate can aggregate on its own id
+space.  The evidence id hash includes ``candidateId``, so the two dimensions
+never collide and repeated runs stay idempotent.  Runs without that scope
+field keep the legacy single-dimension behavior.
 """
 
 from __future__ import annotations
@@ -168,6 +178,33 @@ def _propose_ledger_claim(
     return {"claimId": claim_id, "status": _text(proposed.get("status"))}
 
 
+def _normalized_hypothesis_candidate_ids(value: object) -> list[str]:
+    """Deduplicated, order-preserving hypothesis candidate id list."""
+    raw = list(value) if isinstance(value, (list, tuple, set)) else []
+    return list(dict.fromkeys(_text(item) for item in raw if _text(item)))
+
+
+def _collection_run_hypothesis_candidate_ids(source_collection_run_id: str) -> list[str]:
+    """Read the hypothesis candidate ids persisted on the canonical run scope.
+
+    Runs created before the bridge (or by entrypoints that never carry
+    hypothesis candidates) have no ``scope.hypothesisCandidateIds``; they keep
+    the legacy single-dimension materialization, so an unreadable run fails
+    open to an empty list here while the downstream gate stays fail-closed.
+    """
+    from core.web.services import data_processing_service
+
+    run_id = _text(source_collection_run_id)
+    if not run_id:
+        return []
+    try:
+        run = data_processing_service.get_processing_run(run_id)
+    except Exception:  # noqa: BLE001 - absent run keeps legacy behavior
+        return []
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    return _normalized_hypothesis_candidate_ids(scope.get("hypothesisCandidateIds"))
+
+
 def materialize_claim_evidence_from_task(
     *,
     project_root: str | Path,
@@ -177,6 +214,7 @@ def materialize_claim_evidence_from_task(
     task: dict[str, Any],
     model_ref: str,
     question_scope: Mapping[str, Any],
+    hypothesis_candidate_ids: object = None,
 ) -> list[dict[str, Any]]:
     """Register only fully anchored claims; repeated calls remain idempotent.
 
@@ -185,6 +223,12 @@ def materialize_claim_evidence_from_task(
     claim is proposed in the team claim ledger first and the canonical
     ClaimEvidence record is registered under the ledger claim id, so the
     claim belief gate can evaluate the candidate from real extraction output.
+
+    ``hypothesis_candidate_ids`` optionally carries the gate's candidate
+    dimension (``scope.hypothesisCandidateIds`` of the canonical run).  When
+    non-empty, each claim is additionally registered once per hypothesis
+    candidate id so the belief gate can aggregate on its own id space; the
+    ledger proposal still happens exactly once per claim.
     """
     from core.research.evidence import ClaimEvidenceStore
 
@@ -205,6 +249,9 @@ def materialize_claim_evidence_from_task(
 
     extractor_agent_id = _text(task.get("agentId"))
     normalized_model_ref = _text(model_ref)
+    bridged_candidate_ids = _normalized_hypothesis_candidate_ids(
+        hypothesis_candidate_ids
+    )
     store = ClaimEvidenceStore(project_root)
     materialized: list[dict[str, Any]] = []
     for index, (extraction, claim) in enumerate(_materializable_claims(task)):
@@ -259,25 +306,23 @@ def materialize_claim_evidence_from_task(
             "supports": "supports",
             "challenges": "contradicts",
         }.get(challenge_evidence["relation"], "insufficient")
-        stored = store.register(
-            normalized_team,
-            {
-                "claimId": proposed["claimId"],
-                "candidateId": candidate_id,
-                "sourceId": source_ref,
-                "sourceRevision": source_revision,
-                "locator": locator,
-                "quote": quote,
-                "evidenceKind": "primary_result",
-                "reasoningRole": "fact",
-                "supportLevel": relation_support_level,
-                "extractionMethod": "model",
-                "extractorAgentId": extractor_agent_id,
-                "modelRef": normalized_model_ref,
-                "sourceCollectionRunId": normalized_source_run,
-                "workflowRunId": normalized_workflow_run,
-            },
-        )
+        evidence_payload = {
+            "claimId": proposed["claimId"],
+            "candidateId": candidate_id,
+            "sourceId": source_ref,
+            "sourceRevision": source_revision,
+            "locator": locator,
+            "quote": quote,
+            "evidenceKind": "primary_result",
+            "reasoningRole": "fact",
+            "supportLevel": relation_support_level,
+            "extractionMethod": "model",
+            "extractorAgentId": extractor_agent_id,
+            "modelRef": normalized_model_ref,
+            "sourceCollectionRunId": normalized_source_run,
+            "workflowRunId": normalized_workflow_run,
+        }
+        stored = store.register(normalized_team, evidence_payload)
         # ClaimEvidenceStore intentionally owns its compact legacy record
         # shape.  Keep the explicit v2 envelope on the materialization result
         # so callers can carry the fields without teaching that core store to
@@ -290,6 +335,24 @@ def materialize_claim_evidence_from_task(
                 "claimLedgerStatus": proposed["status"],
             }
         )
+        # Second candidate dimension: one extra record per hypothesis
+        # candidate id so ``evaluate_claim_belief_gate`` can aggregate on the
+        # hypothesis id space.  The ledger claim is proposed exactly once
+        # above; the evidence id hash includes ``candidateId``, so these
+        # records are distinct and re-registration stays idempotent.
+        for bridged_candidate_id in bridged_candidate_ids:
+            if bridged_candidate_id == candidate_id:
+                continue
+            bridged = store.register(
+                normalized_team,
+                {**evidence_payload, "candidateId": bridged_candidate_id},
+            )
+            materialized.append(
+                {
+                    **bridged,
+                    "claimLedgerStatus": proposed["status"],
+                }
+            )
     return materialized
 
 
@@ -431,4 +494,7 @@ def materialize_completed_extraction_task(
         task=task,
         model_ref=model_ref,
         question_scope=_formal_question_scope(team_id, workflow_run_id),
+        hypothesis_candidate_ids=_collection_run_hypothesis_candidate_ids(
+            source_collection_run_id
+        ),
     )

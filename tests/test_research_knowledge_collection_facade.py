@@ -393,6 +393,82 @@ def test_facade_ensure_creates_run_when_missing(monkeypatch):
     assert payload["ownerAgentId"] == "agent-alpha"
 
 
+def test_facade_ensure_persists_hypothesis_candidate_ids_on_run_scope(monkeypatch):
+    """ensure persists the gate's candidate dimension without breaking reuse.
+
+    ``hypothesisCandidateIds`` are normalized (strip/dedupe) onto the created
+    run's scope; they deliberately do NOT participate in the ensure
+    fingerprint, so the same evidence request stays idempotent regardless of
+    which hypothesis candidates a replay carries.
+    """
+    created_payloads = []
+
+    def fake_start(team_id, payload):
+        created_payloads.append((team_id, dict(payload)))
+        return {"runId": "dprun-hf", "run": {"runId": "dprun-hf"}}
+
+    monkeypatch.setattr(data_processing_service, "list_processing_runs", _fake_list_runs())
+    monkeypatch.setattr(source_collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+        hypothesisCandidateIds=[
+            "sci-091-c1a2b3c4",
+            "sci-091-c1a2b3c4",
+            " ",
+            "sci-091-c9f8e7d6c",
+        ],
+    )
+
+    assert result["created"] is True
+    assert created_payloads[0][1]["scope"]["hypothesisCandidateIds"] == [
+        "sci-091-c1a2b3c4",
+        "sci-091-c9f8e7d6c",
+    ]
+
+    # Default (no candidates) keeps the field present but empty.
+    created_payloads.clear()
+    facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+    assert created_payloads[0][1]["scope"]["hypothesisCandidateIds"] == []
+
+    # Replays with different candidates reuse the same run (fingerprint only
+    # covers the evidence request itself).
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(
+            [
+                _stored_run(
+                    "dprun-hf",
+                    updated_at="2026-08-28T00:00:00Z",
+                    fingerprint=_request_fingerprint(),
+                )
+            ]
+        ),
+    )
+    created_payloads.clear()
+    replay = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+        hypothesisCandidateIds=["sci-091-cdeadbeef"],
+    )
+    assert replay["idempotent"] is True
+    assert replay["locator"]["runId"] == "dprun-hf"
+    assert created_payloads == []
+
+
 def test_facade_surfaces_run_lookup_failure(monkeypatch):
     def fail_list(**kwargs):
         raise data_processing_service.DataProcessingError("lookup failed")

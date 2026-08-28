@@ -1251,6 +1251,78 @@ def test_collection_decisions_start_one_background_search_per_reused_run(
     ]
 
 
+def test_collection_decisions_carry_hypothesis_candidate_refs_to_request_and_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """request_new_evidence candidateRefs survive into the run's gate dimension.
+
+    The decision's ``candidateRefs`` (hypothesis candidate ids) are normalized
+    onto the collection request ledger record and passed to the facade ensure
+    payload so the created collection run persists them
+    (``scope.hypothesisCandidateIds``) for evidence materialization.
+    """
+    decisions = [
+        {
+            "decision": chain.REQUEST_EVIDENCE_DECISION,
+            "candidateRefs": [
+                "sci-mtz-1-c1a2b3c4",
+                "sci-mtz-1-c1a2b3c4",
+                " ",
+                "sci-mtz-1-c9f8e7d6c",
+            ],
+            "evidenceRefs": ["message-a"],
+            "searchEnvelope": {"keywords": ["predictive coding"]},
+        },
+    ]
+    meeting, close_result = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=decisions
+    )
+    facade_calls: list[dict[str, object]] = []
+
+    def fake_facade(**kwargs):
+        facade_calls.append(dict(kwargs))
+        return {"locator": {"runId": "dprun-hf-start"}}
+
+    monkeypatch.setattr(facade, "research_knowledge_collection_facade", fake_facade)
+    monkeypatch.setattr(
+        collection_runs,
+        "start_source_collection_search_background",
+        lambda team_id, run_id, payload=None: {"runId": run_id, "status": "running"},
+    )
+
+    result = chain._process_collection_decisions(
+        "team-hf-start",
+        meeting,
+        close_result,
+        {"decisions": decisions},
+    )
+
+    expected_refs = ["sci-mtz-1-c1a2b3c4", "sci-mtz-1-c9f8e7d6c"]
+    request = result["requests"][0]
+    assert request["hypothesisCandidateIds"] == expected_refs
+    assert facade_calls[0]["hypothesisCandidateIds"] == expected_refs
+
+    # A decision without candidateRefs keeps the field present but empty, so
+    # manually created runs and legacy decisions behave exactly as before.
+    legacy = [
+        {
+            "decision": chain.REQUEST_EVIDENCE_DECISION,
+            "evidenceRefs": ["message-b"],
+            "searchEnvelope": {"keywords": ["predictive coding"]},
+        },
+    ]
+    legacy_meeting, legacy_close = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=legacy
+    )
+    legacy_result = chain._process_collection_decisions(
+        "team-hf-start",
+        legacy_meeting,
+        legacy_close,
+        {"decisions": legacy},
+    )
+    assert legacy_result["requests"][0]["hypothesisCandidateIds"] == []
+
+
 def test_collection_decision_marks_request_failed_when_background_start_rejects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

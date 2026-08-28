@@ -20,6 +20,15 @@ from core.web.services.team_workflow.research_runtime.domain_ports import (
 
 _QUESTION_ID = "SCI-MTZ-1"
 
+# The two candidate id spaces that must never be conflated:
+# - SOURCE_CANDIDATE_ID is the *source* candidate id an extraction record
+#   anchors to (source_manifest space, ``candidate-<ts>-<hex>``).
+# - HYPOTHESIS_CANDIDATE_ID is the *hypothesis* candidate id the claim belief
+#   gate aggregates on (``_candidate_id_for`` space, ``<question>-c<hash>``).
+SOURCE_CANDIDATE_ID = "candidate-20260828022248-178dd034"
+GAP_SOURCE_CANDIDATE_ID = "candidate-20260828022248-9f8e7d6c"
+HYPOTHESIS_CANDIDATE_ID = "sci-mtz-1-c1a2b3c4"
+
 
 def _claim_bridge_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict]:
     """One tmp project root owning the team, claim ledger and evidence store.
@@ -62,7 +71,7 @@ def _verified_task(*, team_id: str = "team-a") -> dict:
         "result": {
             "candidateExtractions": [
                 {
-                    "candidateId": "candidate-a",
+                    "candidateId": SOURCE_CANDIDATE_ID,
                     "decision": "keep",
                     "evidenceStatus": "verified_abstract",
                     **_v2_source_fields(),
@@ -76,7 +85,7 @@ def _verified_task(*, team_id: str = "team-a") -> dict:
                     ],
                 },
                 {
-                    "candidateId": "candidate-gap",
+                    "candidateId": GAP_SOURCE_CANDIDATE_ID,
                     "decision": "keep",
                     "evidenceStatus": "missing_evidence_anchor",
                     **_v2_source_fields(
@@ -114,15 +123,15 @@ def test_materializes_only_exactly_anchored_claims_into_canonical_store(
     assert len(created) == 1
     records = ClaimEvidenceStore(tmp_path).list(team_id)
     assert len(records) == 1
-    assert records[0]["candidateId"] == "candidate-a"
+    assert records[0]["candidateId"] == SOURCE_CANDIDATE_ID
     assert records[0]["quote"] == "A bounded verbatim excerpt from the abstract."
     assert records[0]["workflowRunId"] == "wf-run-a"
     assert records[0]["sourceCollectionRunId"] == "sc-run-a"
     assert records[0]["reviewStatus"] == "pending"
     assert records[0]["formalKnowledgeWriteAllowed"] is False
     assert created[0]["challengeEvidence"] == {
-        "sourceId": "candidate-a",
-        "candidateId": "candidate-a",
+        "sourceId": SOURCE_CANDIDATE_ID,
+        "candidateId": SOURCE_CANDIDATE_ID,
         "title": "A bounded source",
         "source_type": "peer_reviewed_paper",
         "source_url": "https://example.org/paper-a",
@@ -331,13 +340,13 @@ def test_rejects_cross_run_task_materialization(
 def test_retry_contract_targets_all_candidates_missing_canonical_evidence() -> None:
     candidates = [
         {
-            "candidateId": "candidate-a",
+            "candidateId": SOURCE_CANDIDATE_ID,
             "metadata": {
                 "importedFromDataRecord": {"runId": "sc-run-a"},
             },
         },
         {
-            "candidateId": "candidate-b",
+            "candidateId": "candidate-20260828022248-7c6d5e4f",
             "metadata": {
                 "sourceCollectionTrace": {"runId": "sc-run-a"},
             },
@@ -351,7 +360,7 @@ def test_retry_contract_targets_all_candidates_missing_canonical_evidence() -> N
     ]
     evidence = [
         {
-            "candidateId": "candidate-a",
+            "candidateId": SOURCE_CANDIDATE_ID,
             "sourceCollectionRunId": "sc-run-a",
             "workflowRunId": "wf-run-a",
         }
@@ -364,8 +373,10 @@ def test_retry_contract_targets_all_candidates_missing_canonical_evidence() -> N
         evidence_records=evidence,
     )
 
-    assert contract["evidenceGapCandidateIds"] == ["candidate-b"]
-    assert contract["scopeCandidateIds"] == ["candidate-b"]
+    assert contract["evidenceGapCandidateIds"] == [
+        "candidate-20260828022248-7c6d5e4f"
+    ]
+    assert contract["scopeCandidateIds"] == ["candidate-20260828022248-7c6d5e4f"]
     assert contract["requiredExistingLocatorFetch"] is True
 
 
@@ -506,9 +517,89 @@ def test_materialized_claims_bridge_ledger_row_and_allow_belief_gate(
     """Real extraction output satisfies the claim belief gate end to end.
 
     The materialized claim is proposed in the question-scoped claim ledger
-    (the production writer the gate reads), the ClaimEvidence record carries
-    the ledger claim id, and ``evaluate_claim_belief_gate`` allows the
-    candidate on the real stores — no seam stubs.
+    (the production writer the gate reads), the ClaimEvidence records carry
+    the ledger claim id in BOTH candidate dimensions — the source candidate
+    the extraction anchored to and the hypothesis candidate the gate
+    aggregates on (``scope.hypothesisCandidateIds``) — so
+    ``evaluate_claim_belief_gate`` allows the hypothesis candidate on the real
+    stores.  No seam stubs.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+    )
+    assert created[0]["claimLedgerStatus"] == "created"
+    ledger_claim_id = created[0]["claimId"]
+
+    # 1. The ledger row exists exactly once — dual-mount never re-proposes.
+    listing = claim_ledger.list_claims(team_id)
+    assert listing["claimCount"] == 1
+    row = listing["claims"][0]
+    assert row["claimId"] == ledger_claim_id
+    assert row["question"] == _QUESTION_ID
+    assert row["status"] == "proposed"
+    assert row["claim"] == "The abstract reports a bounded result."
+
+    # 2. Two evidence records, one per candidate dimension, same claim id.
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    assert [item["candidateId"] for item in stored] == [
+        SOURCE_CANDIDATE_ID,
+        HYPOTHESIS_CANDIDATE_ID,
+    ]
+    assert [item["claimId"] for item in stored] == [ledger_claim_id, ledger_claim_id]
+    assert len({item["claimEvidenceId"] for item in stored}) == 2
+    assert stored[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+
+    # 3. The gate allows the HYPOTHESIS candidate on the real stores.
+    # (Production gate call sites always query the hypothesis candidate id
+    # space — ``recommendationCandidateId`` — which is exactly the dimension
+    # the second record bridges.)
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )[HYPOTHESIS_CANDIDATE_ID]
+    assert verdict["status"] == "allowed", verdict
+    assert [item["claimId"] for item in verdict["claims"]] == [ledger_claim_id]
+
+    # 4. Idempotent replay: same content + scope reuses the ledger row and
+    # both evidence records; no row count doubles anywhere.
+    replay = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+    )
+    assert replay[0]["claimId"] == ledger_claim_id
+    assert replay[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+    assert replay[0]["claimLedgerStatus"] == "reused"
+    assert replay[1]["claimEvidenceId"] == stored[1]["claimEvidenceId"]
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 1
+    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 2
+
+
+def test_materialization_without_hypothesis_candidates_keeps_gate_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without hypothesis candidate context the legacy behavior is preserved.
+
+    A run that carries no ``hypothesisCandidateIds`` materializes only the
+    source candidate dimension; the gate keeps failing closed with
+    ``claim_data_missing`` for the hypothesis candidate (the pre-fix
+    production deadlock must not silently turn into an allow).
     """
     from core.web.services.team_workflow.research_runtime import (
         hypothesis_first_chain as chain,
@@ -524,46 +615,17 @@ def test_materialized_claims_bridge_ledger_row_and_allow_belief_gate(
         model_ref="provider/model-a",
         question_scope=scope,
     )
-    assert created[0]["claimLedgerStatus"] == "created"
-    ledger_claim_id = created[0]["claimId"]
+    assert len(created) == 1
 
-    # 1. The ledger row exists, scoped to the question the run serves.
-    listing = claim_ledger.list_claims(team_id)
-    assert listing["claimCount"] == 1
-    row = listing["claims"][0]
-    assert row["claimId"] == ledger_claim_id
-    assert row["question"] == _QUESTION_ID
-    assert row["status"] == "proposed"
-    assert row["claim"] == "The abstract reports a bounded result."
-
-    # 2. The evidence record references the same claim id.
     stored = ClaimEvidenceStore(tmp_path).list(team_id)
-    assert len(stored) == 1
-    assert stored[0]["claimId"] == ledger_claim_id
-    assert stored[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
+    assert [item["candidateId"] for item in stored] == [SOURCE_CANDIDATE_ID]
 
-    # 3. The gate allows the candidate on the real ledger + evidence stores.
-    verdict = chain.evaluate_claim_belief_gate(team_id, _QUESTION_ID, ["candidate-a"])[
-        "candidate-a"
-    ]
-    assert verdict["status"] == "allowed", verdict
-    assert [item["claimId"] for item in verdict["claims"]] == [ledger_claim_id]
-
-    # 4. Idempotent replay: same content + scope reuses the same ledger row.
-    replay = materialize_claim_evidence_from_task(
-        project_root=tmp_path,
-        team_id=team_id,
-        workflow_run_id="wf-run-a",
-        source_collection_run_id="sc-run-a",
-        task=_verified_task(team_id=team_id),
-        model_ref="provider/model-a",
-        question_scope=scope,
-    )
-    assert replay[0]["claimId"] == ledger_claim_id
-    assert replay[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
-    assert replay[0]["claimLedgerStatus"] == "reused"
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )[HYPOTHESIS_CANDIDATE_ID]
+    assert verdict["status"] == "blocked"
+    assert verdict["reason"] == "claim_data_missing"
     assert claim_ledger.list_claims(team_id)["claimCount"] == 1
-    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 1
 
 
 def test_materialization_without_question_scope_fails_closed(
@@ -670,3 +732,54 @@ def test_completed_extraction_fails_closed_without_run_question(
     )
     with pytest.raises(EvidenceMaterializationError, match="does not carry a question"):
         materializer._formal_question_scope("team-a", "wf-run-9")
+
+
+def test_completed_extraction_reads_hypothesis_candidates_from_run_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production entry resolves the gate dimension from the canonical run."""
+    from core.web.services.team_workflow.research_runtime import (
+        agent_claim_evidence_materializer as materializer,
+    )
+    import core.web.services.data_processing_service as dps
+
+    monkeypatch.setattr(
+        dps,
+        "get_processing_run",
+        lambda run_id: {
+            "runId": run_id,
+            "scope": {
+                "hypothesisCandidateIds": [
+                    HYPOTHESIS_CANDIDATE_ID,
+                    HYPOTHESIS_CANDIDATE_ID,
+                    " ",
+                ],
+            },
+        },
+    )
+    assert materializer._collection_run_hypothesis_candidate_ids("sc-run-a") == [
+        HYPOTHESIS_CANDIDATE_ID
+    ]
+
+
+def test_completed_extraction_without_run_scope_keeps_legacy_dimension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-bridge runs (no scope field, or absent run) stay single-dimension."""
+    from core.web.services.team_workflow.research_runtime import (
+        agent_claim_evidence_materializer as materializer,
+    )
+    import core.web.services.data_processing_service as dps
+
+    monkeypatch.setattr(
+        dps,
+        "get_processing_run",
+        lambda run_id: {"runId": run_id, "scope": {"collectionMode": "web_search"}},
+    )
+    assert materializer._collection_run_hypothesis_candidate_ids("sc-run-a") == []
+
+    def _missing(_run_id: str) -> dict:
+        raise dps.DataProcessingNotFoundError("run deleted")
+
+    monkeypatch.setattr(dps, "get_processing_run", _missing)
+    assert materializer._collection_run_hypothesis_candidate_ids("sc-run-a") == []
