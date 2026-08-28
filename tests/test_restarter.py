@@ -19,13 +19,28 @@
 import os
 import sys
 import argparse
-import errno
 import logging
+import subprocess
 import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
 import pytest
+
+
+def _terminated_child_pid() -> int:
+    """拉起一个 CREATE_NO_WINDOW 子进程并等它终止，返回可复用的死 pid。"""
+    hidden = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden,
+    )
+    process.terminate()
+    process.wait(timeout=15)
+    return process.pid
 
 
 # ============================================================================
@@ -270,71 +285,87 @@ class TestIsProcessAlive:
                     from core.restarter_manager.restarter import is_process_alive
                     assert is_process_alive(12345) is False
 
-    def test_windows_fallback_probe_success(self):
-        """Windows fallback os.kill(pid, 0) 成功表示进程存在"""
+    def test_windows_fallback_delegates_to_shared_liveness_probe(self):
+        """Windows fallback 委托共享探活，不再用 os.kill 错误码当存活信号"""
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
             with patch('core.restarter_manager.restarter.IS_WINDOWS', True):
                 with patch('os.kill') as mock_kill:
-                    from core.restarter_manager.restarter import is_process_alive
-                    assert is_process_alive(12345) is True
-                    mock_kill.assert_called_once_with(12345, 0)
+                    with patch(
+                        'core.restarter_manager.restarter.is_pid_alive',
+                        return_value=True,
+                    ) as mock_probe:
+                        from core.restarter_manager.restarter import is_process_alive
+                        assert is_process_alive(12345) is True
+                        mock_probe.assert_called_once_with(12345)
+                        # os.kill(pid, 0) 在无控制台 Windows 进程里对死、活 pid
+                        # 一律抛 OSError（WinError 87/6），不是存活信号。
+                        mock_kill.assert_not_called()
 
-    def test_windows_fallback_winerror_87_means_dead(self):
-        """Windows fallback WinError 87（PID 不存在）返回 False"""
-        missing_pid_error = OSError("invalid argument")
-        missing_pid_error.winerror = 87
+    def test_fallback_reports_live_process_alive_without_psutil(self):
+        """无 psutil 时活进程（自己）必须被判活，不得误判为死"""
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('core.restarter_manager.restarter.IS_WINDOWS', True):
-                with patch('os.kill', side_effect=missing_pid_error):
-                    from core.restarter_manager.restarter import is_process_alive
-                    assert is_process_alive(12345) is False
+            from core.restarter_manager.restarter import is_process_alive
+            assert is_process_alive(os.getpid()) is True
 
-    def test_fallback_permission_denied_means_present(self):
+    def test_fallback_reports_terminated_process_dead_without_psutil(self):
+        """无 psutil 时已终止进程必须被判死，restarter 不再长等待"""
+        dead_pid = _terminated_child_pid()
+        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
+            from core.restarter_manager.restarter import is_process_alive
+            assert is_process_alive(dead_pid) is False
+
+    def test_fallback_permission_denied_fail_closed_to_present(self):
         """拒绝访问意味着进程存在但不可检查，按仍存活处理"""
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('os.kill', side_effect=PermissionError("access denied")):
+            with patch(
+                'core.restarter_manager.restarter.is_pid_alive',
+                side_effect=PermissionError("access denied"),
+            ):
                 from core.restarter_manager.restarter import is_process_alive
                 assert is_process_alive(12345) is True
 
     def test_fallback_unresolved_error_fail_closed_to_present(self):
         """无法判定的探测失败 fail-closed 按仍存活处理"""
-        unresolved_error = OSError("unexpected")
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('os.kill', side_effect=unresolved_error):
+            with patch(
+                'core.restarter_manager.restarter.is_pid_alive',
+                side_effect=OSError("unexpected"),
+            ):
                 from core.restarter_manager.restarter import is_process_alive
                 assert is_process_alive(12345) is True
-
-    def test_fallback_esrch_errno_means_dead(self):
-        """ESRCH errno 表示进程不存在"""
-        esrch_error = OSError()
-        esrch_error.errno = errno.ESRCH
-        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
-            with patch('os.kill', side_effect=esrch_error):
-                from core.restarter_manager.restarter import is_process_alive
-                assert is_process_alive(12345) is False
 
     def test_unix_fallback_process_lookup_error_means_dead(self):
         """Unix fallback ProcessLookupError 表示进程不存在"""
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
             with patch('core.restarter_manager.restarter.IS_WINDOWS', False):
-                with patch('os.kill', side_effect=ProcessLookupError()):
+                with patch('os.name', 'posix'):
+                    with patch('os.kill', side_effect=ProcessLookupError()):
+                        from core.restarter_manager.restarter import is_process_alive
+                        assert is_process_alive(12345) is False
+
+    def test_unix_fallback_permission_denied_means_present(self):
+        """Unix fallback PermissionError 表示进程存在但不可检查"""
+        with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
+            with patch('os.name', 'posix'):
+                with patch('os.kill', side_effect=PermissionError("access denied")):
                     from core.restarter_manager.restarter import is_process_alive
-                    assert is_process_alive(12345) is False
+                    assert is_process_alive(12345) is True
 
     def test_unix_fallback_never_spawns_external_commands(self):
         """Unix fallback 不再 spawn /bin/kill 外部命令，直接走 os.kill 探测"""
         kill_calls = []
         with patch('core.restarter_manager.restarter.PSUTIL_AVAILABLE', False):
             with patch('core.restarter_manager.restarter.IS_WINDOWS', False):
-                with patch('subprocess.run') as mock_run:
-                    def fake_kill(pid, sig):
-                        kill_calls.append((pid, sig))
-                        return None
-                    with patch('os.kill', side_effect=fake_kill):
-                        from core.restarter_manager.restarter import is_process_alive
-                        assert is_process_alive(12345) is True
-                        assert kill_calls == [(12345, 0)]
-                        mock_run.assert_not_called()
+                with patch('os.name', 'posix'):
+                    with patch('subprocess.run') as mock_run:
+                        def fake_kill(pid, sig):
+                            kill_calls.append((pid, sig))
+                            return None
+                        with patch('os.kill', side_effect=fake_kill):
+                            from core.restarter_manager.restarter import is_process_alive
+                            assert is_process_alive(12345) is True
+                            assert kill_calls == [(12345, 0)]
+                            mock_run.assert_not_called()
 
 
 # ============================================================================

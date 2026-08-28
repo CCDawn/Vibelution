@@ -11,7 +11,6 @@
 """
 
 import argparse
-import errno
 import json
 import logging
 import os
@@ -20,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from core.infrastructure.process_liveness import is_pid_alive
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 # 跨平台支持
@@ -151,25 +151,23 @@ def is_process_alive(pid: int) -> bool:
 def _pid_present_without_psutil(pid: int) -> bool:
     """无外部命令的 fail-closed PID 存在性探测。
 
-    错误映射照抄 scripts/vibelution_launcher.py::_pid_probe，fail-closed 立场与
-    core/runtime_manager/instances_registry.py::_pid_is_present 一致：确定的死亡
-    信号返回 False；无法判定的状态一律按“仍被占用”处理（返回 True），让 restarter
-    继续等待而不是抢跑重启。绝不 spawn taskkill/tasklist 等可弹控制台的工具。
+    fail-closed 立场与 core/runtime_manager/instances_registry.py::_pid_is_present
+    一致：确定的死亡信号返回 False；无法判定的状态一律按“仍被占用”处理
+    （返回 True），让 restarter 继续等待而不是抢跑重启。绝不 spawn
+    taskkill/tasklist 等可弹控制台的工具。
+
+    Windows 下不能再用 os.kill(pid, 0) 自行映射错误码：sig==0 走
+    GenerateConsoleCtrlEvent，在无控制台进程（pythonw / CREATE_NO_WINDOW）里
+    对死、活 pid 一律抛 OSError（WinError 87/6），错误码不是存活信号——只补
+    WinError 6 会把活 agent 误判为死、抢跑重启。因此委托
+    core.infrastructure.process_liveness 的 kernel32 OpenProcess 探活给出
+    权威答案；POSIX 的 ProcessLookupError/PermissionError 语义由 helper 保留。
     """
 
     logger = logging.getLogger("Restarter")
     try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # 拒绝访问意味着进程存在但不可检查。
-        return True
+        return is_pid_alive(int(pid))
     except OSError as exc:
-        # Windows 下 os.kill 对不存在的 PID 报 WinError 87 / EINVAL。
-        if getattr(exc, "winerror", None) == 87 or getattr(exc, "errno", None) == errno.ESRCH:
-            return False
         logger.warning(
             "检查进程 %s 存活状态失败（按仍存活处理）: %s", pid, exc
         )

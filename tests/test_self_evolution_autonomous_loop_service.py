@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from copy import deepcopy
 
 import pytest
@@ -11,7 +14,50 @@ from core.web.services.self_evolution_autonomous_loop_service import (
     AutonomousLoopHooks,
     AutonomousLoopValidationError,
     SelfEvolutionAutonomousLoopService,
+    _default_process_alive,
 )
+
+
+def _terminated_child_pid() -> int:
+    hidden = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden,
+    )
+    process.terminate()
+    process.wait(timeout=15)
+    return process.pid
+
+
+def test_default_process_alive_rejects_terminated_and_nonpositive_pids():
+    """默认探活必须把已终止/非法 pid 判死，把活进程判活。"""
+    assert _default_process_alive(0) is False
+    assert _default_process_alive(-1) is False
+    assert _default_process_alive(os.getpid()) is True
+    assert _default_process_alive(_terminated_child_pid()) is False
+
+
+def test_service_default_probe_keeps_a_live_run_owns_its_lock(tmp_path):
+    """回归：无控制台 Windows 上 os.kill 探活会把活 run 的进程误判为死，
+    清退仍在执行的自演化任务；默认探活改走共享 kernel32 探活后，
+    持有 run 的活进程必须被判活。"""
+    service = SelfEvolutionAutonomousLoopService(
+        store=WorkRunStore(tmp_path),
+        hooks=AutonomousLoopHooks(
+            observe=lambda _context: {"summary": "s"},
+            plan=lambda _context: {"summary": "p"},
+            evolve=lambda _context: {"summary": "e"},
+            integrate=lambda _context: {"summary": "i"},
+            cleanup=lambda _context: {"status": "cleaned"},
+        ),
+        process_id=os.getpid(),
+    )
+    assert service._process_alive(os.getpid()) is True
+    assert service._process_alive(0) is False
+    assert service._process_alive(_terminated_child_pid()) is False
 
 
 def _build_service(

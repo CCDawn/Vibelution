@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from core.infrastructure.process_liveness import is_pid_alive
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.self_evolution_candidate_target_contract import (
@@ -692,18 +693,14 @@ def _phase_context(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 def _default_process_alive(pid: int) -> bool:
-    candidate = int(pid or 0)
-    if candidate <= 0:
-        return False
-    if candidate == os.getpid():
-        return True
-    try:
-        os.kill(candidate, 0)
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+    """Probe run liveness through the shared kernel-backed helper.
+
+    ``os.kill(pid, 0)`` misreads console-less Windows processes (it raises for
+    dead *and* live pids alike), which would reap self-evolution runs that are
+    still executing.  ``core.infrastructure.process_liveness`` answers
+    authoritatively on every platform.
+    """
+    return is_pid_alive(int(pid or 0))
 
 
 def _require_phase(

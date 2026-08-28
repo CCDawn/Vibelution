@@ -28,6 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.infrastructure.process_liveness import is_pid_alive
+
 from .atomic_fs import atomic_write_text
 from .paths import research_workflow_data_root
 
@@ -218,22 +220,14 @@ def _default_owner_alive(pid: int) -> bool:
     """Return process liveness while treating probe permission as alive.
 
     A failed liveness probe is not permission to drop a destructive fence.
-    ``PermissionError`` therefore remains alive, matching the other local
-    process-lease implementations in this repository.
+    The shared helper keeps that stance: on Windows it answers via kernel32
+    instead of ``os.kill(pid, 0)`` (which raises for dead *and* live pids
+    alike in console-less processes, wrongly releasing the fence), and
+    ``ACCESS_DENIED``/``PermissionError`` remain alive, matching the other
+    local process-lease implementations in this repository.
     """
 
-    normalized = int(pid or 0)
-    if normalized <= 0:
-        return False
-    if normalized == os.getpid():
-        return True
-    try:
-        os.kill(normalized, 0)
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+    return is_pid_alive(int(pid or 0))
 
 
 def _owner_alive_value(

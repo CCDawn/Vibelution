@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.codex_sandbox.process import terminate_process_tree
+from core.infrastructure.process_liveness import is_pid_alive
 from core.runtime_manager.process_identity import inspect_process_identity
 from vibelution_storage import (
     ProjectStorageMigrationStateError,
@@ -359,71 +360,17 @@ def inspect_frontend_build(project_root: Path | str, *, package_manager: str | N
     }
 
 
-_WINDOWS_KERNEL32: Any = None
-_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-_ERROR_ACCESS_DENIED = 5
-_STILL_ACTIVE_EXIT_CODE = 259
-
-
-def _windows_kernel32() -> Any:
-    """Lazy kernel32 binding with 64-bit-safe signatures for liveness probes."""
-    global _WINDOWS_KERNEL32
-    if _WINDOWS_KERNEL32 is None:
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.OpenProcess.restype = ctypes.c_void_p
-        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-        kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD))
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-        _WINDOWS_KERNEL32 = kernel32
-    return _WINDOWS_KERNEL32
-
-
-def _pid_is_alive_windows(pid: int) -> bool:
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = _windows_kernel32()
-    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        # ERROR_ACCESS_DENIED means something owns this pid; treating it as
-        # alive is conservative because stealing its lock would be worse than
-        # waiting one more poll cycle.
-        return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            # The handle was just opened, so a failed query is ambiguous:
-            # keep the lock rather than reclaim it on inconclusive evidence.
-            return True
-        return int(exit_code.value) == _STILL_ACTIVE_EXIT_CODE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def _pid_is_alive(pid: int) -> bool:
     """Report whether a build-lock holder pid still owns a live process.
 
-    Windows cannot use ``os.kill(pid, 0)`` for this: with signal 0 it maps to
-    ``GenerateConsoleCtrlEvent``, which raises ``OSError`` (WinError 87/6) for
-    dead and live pids alike inside the console-less runtime process.  The
-    kernel API answers authoritatively instead.
+    Delegates to the shared liveness probe: ``os.kill(pid, 0)`` cannot answer
+    this on Windows because signal 0 maps to ``GenerateConsoleCtrlEvent`` and
+    raises ``OSError`` (WinError 87/6) for dead and live pids alike inside the
+    console-less runtime process.  The kernel32 implementation and its
+    conservative ``ACCESS_DENIED`` handling live in
+    :mod:`core.infrastructure.process_liveness`.
     """
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        return _pid_is_alive_windows(int(pid))
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return is_pid_alive(pid)
 
 
 @contextmanager

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -11,6 +14,20 @@ from core.web.services.team_workflow.research_runtime import (
 
 def _inventory_hash(value: str = "inventory") -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _terminated_child_pid() -> int:
+    hidden = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden,
+    )
+    process.terminate()
+    process.wait(timeout=15)
+    return process.pid
 
 
 def test_fence_is_persistent_idempotent_and_conflict_safe(tmp_path, monkeypatch):
@@ -189,4 +206,43 @@ def test_fence_unknown_owner_stays_fail_closed(tmp_path, monkeypatch):
             operation="question_launch",
             now_ms=1_750_000_000_100,
             owner_alive=lambda _pid: None,
+        )
+
+
+def test_default_owner_alive_rejects_terminated_and_nonpositive_pids():
+    """默认探活必须把已终止/非法 pid 判死，把活进程判活。"""
+    assert fence._default_owner_alive(0) is False
+    assert fence._default_owner_alive(-1) is False
+    assert fence._default_owner_alive(os.getpid()) is True
+    assert fence._default_owner_alive(_terminated_child_pid()) is False
+
+
+def test_fence_default_probe_keeps_a_live_owner_active(tmp_path, monkeypatch):
+    """回归：无控制台 Windows 上 os.kill 探活会把活 owner 误判为死，
+    提前放行破坏性维护 fence；默认探活改走共享 kernel32 探活后，
+    活 owner 的 fence 必须保持 active、不被 reclaim。"""
+    monkeypatch.setattr(fence, "research_workflow_data_root", lambda: tmp_path)
+    acquired = fence.acquire_fence(
+        "research-team",
+        purge_plan_id="plan-live",
+        inventory_hash=_inventory_hash("live"),
+        acquired_by="reset-test",
+        ttl_ms=3_600_000,
+        owner_pid=os.getpid(),
+        now_ms=1_750_000_000_000,
+    )
+    assert acquired["ownerPid"] == os.getpid()
+
+    inspected = fence.inspect_fence(
+        "research-team",
+        now_ms=1_750_000_000_001,
+    )
+    assert inspected["status"] == "active"
+    assert inspected["reclaimed"] is False
+    assert inspected["activeFence"] is not None
+    with pytest.raises(fence.ChallengeCupMaintenanceActiveError):
+        fence.assert_writes_allowed(
+            "research-team",
+            operation="question_launch",
+            now_ms=1_750_000_000_001,
         )
