@@ -122,8 +122,34 @@ class HumanTaskNotFoundError(WorkflowCommandError):
         self.task_id = task_id
 
 
+class KnowledgeCommandError(WorkflowCommandError):
+    """Typed knowledge sideflow command failure; ``code`` is stable for HTTP
+    mapping (mirrors KnowledgeSideflowError codes)."""
+
+    def __init__(self, detail: str, *, code: str = "invalid_request") -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
 _ATTEMPT_CREATING_COMMANDS = frozenset(
     {WorkflowCommandKind.START_NODE, WorkflowCommandKind.RETRY_NODE}
+)
+
+# Knowledge sideflow facade (plan §4.6): team-authorized sessions may ensure
+# or inspect a knowledge collection at allowed nodes.  These commands never
+# enter the operator-only set and never bump the parent runVersion — the
+# parent run is only ever touched by the one appended invocation event owned
+# by the knowledge sideflow service.
+_KNOWLEDGE_FLOW_COMMANDS = frozenset(
+    {
+        WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION,
+        WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION,
+    }
+)
+
+_KNOWLEDGE_TERMINAL_RUN_STATUSES = frozenset(
+    {"succeeded", "failed", "cancelled", "archived"}
 )
 
 # 高影响命令：必须由服务端可验证的 operator 身份执行（P1-6）。
@@ -199,6 +225,13 @@ class WorkflowCommandService:
 
         if request.command in _OPERATOR_ONLY_COMMANDS:
             self._authorize_operator(request)
+
+        if request.command in _KNOWLEDGE_FLOW_COMMANDS:
+            # The knowledge sideflow service owns its own single-writer
+            # transactions, so these handlers run OUTSIDE a command-service
+            # ledger transaction (no attempt, no runVersion bump on the
+            # parent) and reuse the sideflow's idempotency instead.
+            return self._handle_knowledge_flow_command(request)
 
         handler = self._handlers.get(request.command)
         if handler is None:
@@ -302,6 +335,252 @@ class WorkflowCommandService:
             and not operator_has_privileged_role(context.roles)
         ):
             raise CommandForbiddenError("command_forbidden")
+
+    # ------------------------------------------------ knowledge sideflow
+
+    def _handle_knowledge_flow_command(self, request: CommandRequest) -> CommandReceipt:
+        if request.command is WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION:
+            return self._handle_ensure_knowledge_collection(request)
+        return self._handle_inspect_knowledge_collection(request)
+
+    def _handle_ensure_knowledge_collection(
+        self, request: CommandRequest
+    ) -> CommandReceipt:
+        """Ensure (idempotently) one knowledge invocation for the parent run.
+
+        The parent run's version/status/active node never move; the sideflow
+        service owns the child-run transaction and appends the only parent
+        event.  A replayed request returns the SAME invocation without a
+        second child run.
+        """
+        from .knowledge_capability import normalize_root_ids
+        from .knowledge_sideflow_service import (
+            KnowledgeSideflowError,
+            ensure_knowledge_invocation,
+        )
+
+        run = self._store.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        if str(run.status) in _KNOWLEDGE_TERMINAL_RUN_STATUSES:
+            raise CommandNotAllowedError(
+                f"run {request.run_id} 已结束，不能发起知识搜集"
+            )
+        payload = dict(request.payload or {})
+        question_id = str(payload.get("questionId") or "").strip()
+        if not question_id:
+            raise KnowledgeCommandError(
+                "ensure_knowledge_collection 需要 questionId",
+                code="invalid_request",
+            )
+        parent_node_id = str(request.node_id or run.active_node_id or "").strip()
+        if not parent_node_id:
+            raise KnowledgeCommandError(
+                "ensure_knowledge_collection 需要 nodeId（或 run 存在 activeNode）",
+                code="invalid_request",
+            )
+        self._assert_node_in_pinned_definition(run, parent_node_id)
+        try:
+            parent_attempt = int(payload.get("parentAttempt") or 1)
+        except (TypeError, ValueError):
+            parent_attempt = 1
+        managed_root_ids = normalize_root_ids(payload.get("managedSourceRootIds"))
+        scope = {
+            "questionId": question_id.strip().upper(),
+            "projectId": str(run.project_id or ""),
+            "managedSourceRootIds": managed_root_ids,
+        }
+        try:
+            outcome = ensure_knowledge_invocation(
+                self._store,
+                parent_run_id=request.run_id,
+                parent_node_id=parent_node_id,
+                question_id=question_id,
+                scope=scope,
+                search_envelope=_normalized_search_envelope(
+                    payload.get("searchEnvelope")
+                ),
+                requirements=_normalized_requirements(payload.get("requirements")),
+                source_policy_version=_normalized_source_policy_version(
+                    payload.get("sourcePolicyVersion")
+                ),
+                parent_node_run_id=str(payload.get("parentNodeRunId") or ""),
+                parent_attempt=parent_attempt,
+                source_manifest_ref=str(payload.get("sourceManifestRef") or ""),
+                wake_worker=self._wake_worker,
+            )
+        except KnowledgeSideflowError as exc:
+            raise KnowledgeCommandError(str(exc), code=exc.code) from exc
+        invocation = outcome["invocation"]
+        fresh = self._store.get_run(request.run_id)
+        return CommandReceipt(
+            command_id=new_id("cmd"),
+            run_id=request.run_id,
+            status="accepted",
+            # The parent runVersion is intentionally unchanged.
+            accepted_run_version=int(run.run_version),
+            idempotency_key=request.idempotency_key,
+            latest_event_sequence=int(fresh.last_event_sequence) if fresh else 0,
+            result={
+                "invocationId": str(invocation.invocation_id),
+                "childRunId": str(
+                    outcome.get("childRunId")
+                    or invocation.knowledge_child_run_id
+                    or ""
+                ),
+                "replayed": bool(outcome.get("replayed")),
+                "reused": bool(outcome.get("reused")),
+                "invocationStatus": str(invocation.status),
+                "handoffState": str(invocation.handoff_state),
+                "managedSourceRootIds": managed_root_ids,
+            },
+        )
+
+    def _handle_inspect_knowledge_collection(
+        self, request: CommandRequest
+    ) -> CommandReceipt:
+        """Read-only knowledge invocation inspection for the parent run."""
+        from core.research.workflow.knowledge_sideflow_definition import (
+            KNOWLEDGE_SIDEFLOW_NODE_IDS,
+        )
+
+        run = self._store.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        payload = dict(request.payload or {})
+        invocation_id = str(payload.get("invocationId") or "").strip()
+        store = self._store
+        if invocation_id:
+            invocation = store.read(
+                lambda repo: repo.get_knowledge_invocation(invocation_id)
+            )
+            if invocation is None or str(invocation.parent_run_id) != request.run_id:
+                raise KnowledgeCommandError(
+                    f"knowledge invocation {invocation_id} 不属于 run {request.run_id}",
+                    code="unknown_invocation",
+                )
+            invocations = [invocation]
+        else:
+            invocations = store.read(
+                lambda repo: repo.list_knowledge_invocations_for_parent(request.run_id)
+            )
+
+        invocation_views = [self._inspect_invocation(item) for item in invocations]
+        child_view: dict[str, Any] | None = None
+        selected = invocation_views[0] if invocation_views else None
+        if selected is None:
+            recovery_actions: list[str] = ["ensure_knowledge_collection"]
+        else:
+            child_view = self._inspect_child_run(
+                str(selected["childRunId"] or ""), KNOWLEDGE_SIDEFLOW_NODE_IDS
+            )
+            recovery_actions = _knowledge_recovery_actions(selected, child_view)
+        return CommandReceipt(
+            command_id=new_id("cmd"),
+            run_id=request.run_id,
+            status="accepted",
+            accepted_run_version=int(run.run_version),
+            idempotency_key=request.idempotency_key,
+            latest_event_sequence=int(run.last_event_sequence),
+            result={
+                "invocationId": invocation_id or (
+                    str(selected["invocationId"]) if selected else ""
+                ),
+                "invocations": invocation_views,
+                "childRun": child_view,
+                "recoveryActions": recovery_actions,
+            },
+        )
+
+    def _inspect_invocation(self, invocation: Any) -> dict[str, Any]:
+        error: dict[str, Any] | None = None
+        raw_error = str(getattr(invocation, "error_json", "") or "")
+        if raw_error:
+            try:
+                parsed = json.loads(raw_error)
+                error = dict(parsed) if isinstance(parsed, Mapping) else {"detail": raw_error}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                error = {"detail": raw_error}
+        return {
+            "invocationId": str(invocation.invocation_id),
+            "parentRunId": str(invocation.parent_run_id),
+            "parentNodeId": str(invocation.parent_node_id),
+            "parentNodeRunId": str(invocation.parent_node_run_id or ""),
+            "parentAttempt": int(invocation.parent_attempt or 1),
+            "questionId": str(invocation.question_id),
+            "status": str(invocation.status),
+            "handoffState": str(invocation.handoff_state),
+            "childRunId": str(invocation.knowledge_child_run_id or ""),
+            "knowledgePackageRef": str(invocation.knowledge_package_ref or ""),
+            "packageContentHash": str(invocation.package_content_hash or ""),
+            "sourcePolicyVersion": str(invocation.source_policy_version or ""),
+            "error": error,
+            "createdAtMs": int(invocation.created_at_ms or 0),
+            "updatedAtMs": int(invocation.updated_at_ms or 0),
+        }
+
+    def _inspect_child_run(
+        self, child_run_id: str, node_ids: tuple[str, ...]
+    ) -> dict[str, Any] | None:
+        if not child_run_id:
+            return None
+        store = self._store
+        child = store.get_run(child_run_id)
+        if child is None:
+            return None
+        nodes: dict[str, Any] = {}
+        for node_id in node_ids:
+            latest = store.latest_attempt(child_run_id, node_id)
+            nodes[node_id] = {
+                "attempt": int(latest.attempt) if latest else 0,
+                "status": str(latest.status) if latest else "not_started",
+                "nodeRunId": str(latest.node_run_id) if latest else None,
+            }
+        artifact_count = store.read(
+            lambda repo: repo.execute(
+                "SELECT COUNT(*) FROM artifact_receipts WHERE run_id = ?",
+                (child_run_id,),
+            ).fetchone()[0]
+        )
+        try:
+            limits = json.loads(child.safety_limits_json or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            limits = {}
+        return {
+            "runId": child.run_id,
+            "workflowId": child.workflow_id,
+            "status": child.status,
+            "activeNodeId": child.active_node_id,
+            "runVersion": int(child.run_version),
+            "nodes": nodes,
+            "sourceCount": int(artifact_count or 0),
+            "budget": dict(limits) if isinstance(limits, Mapping) else {},
+            "completionKind": str(child.completion_kind or ""),
+            "terminalReason": str(child.terminal_reason or ""),
+        }
+
+    def _assert_node_in_pinned_definition(self, run: Any, node_id: str) -> None:
+        from core.research.workflow.definition_registry import (
+            resolve_definition_for_run_record,
+        )
+
+        try:
+            resolve_definition_for_run_record(
+                {
+                    "runId": run.run_id,
+                    "workflowId": run.workflow_id,
+                    "workflowVersionId": run.workflow_version_id,
+                    "structureHash": run.structure_hash,
+                    "completedNodeIds": [node_id],
+                    "runtimeCurrentNodeIds": [],
+                },
+                expected_node_ids=[node_id],
+            )
+        except Exception as exc:  # noqa: BLE001 - any resolution failure blocks
+            raise KnowledgeCommandError(
+                f"node {node_id} 不属于 run {run.run_id} 冻结的工作流定义",
+                code="unknown_node",
+            ) from exc
 
     def _replay(self, existing: Any, request_hash: str) -> CommandReceipt:
         if existing.request_hash != request_hash:
@@ -1500,3 +1779,63 @@ def _human_resume_dispatch(uow, request: CommandRequest, node_run_id: str, recei
         now_ms=now_ms,
         receipt_payload=receipt.to_dict(),
     )
+
+
+def _normalized_search_envelope(raw: Any) -> dict[str, Any]:
+    """Client envelope -> canonical search-envelope fingerprint input.
+
+    Only the three contract fields are accepted: keywords, evidenceTypes and
+    the time window; everything else is dropped so the envelope hash can
+    never be polluted by client-controlled extras.
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+    envelope: dict[str, Any] = {}
+    keywords = raw.get("keywords")
+    if isinstance(keywords, (list, tuple)):
+        envelope["keywords"] = [
+            str(item).strip() for item in keywords[:32] if str(item).strip()
+        ]
+    evidence_types = raw.get("evidenceTypes")
+    if isinstance(evidence_types, (list, tuple)):
+        envelope["evidenceTypes"] = [
+            str(item).strip() for item in evidence_types[:32] if str(item).strip()
+        ]
+    time_window = raw.get("timeWindow")
+    if isinstance(time_window, Mapping):
+        envelope["timeWindow"] = dict(time_window)
+    return envelope
+
+
+def _normalized_requirements(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    return {}
+
+
+def _normalized_source_policy_version(raw: Any) -> str:
+    version = str(raw or "").strip()
+    return version or "1"
+
+
+def _knowledge_recovery_actions(
+    invocation_view: Mapping[str, Any],
+    child_view: Mapping[str, Any] | None,
+) -> list[str]:
+    """Fail-closed recovery hints derived from durable state only."""
+    actions: list[str] = []
+    status = str(invocation_view.get("status") or "")
+    if status == "awaiting_handoff":
+        actions.append("resolve_human_task:knowledge_handoff")
+    elif status == "failed":
+        actions.append("ensure_knowledge_collection:retry")
+    elif status == "cancelled":
+        actions.append("ensure_knowledge_collection")
+    elif status == "completed" and str(invocation_view.get("handoffState")) == "rejected":
+        actions.append("ensure_knowledge_collection")
+    child_status = str((child_view or {}).get("status") or "")
+    if child_status in {"blocked", "reconciliation_required"}:
+        actions.append(f"reconcile_run:{invocation_view.get('childRunId')}")
+    if not actions:
+        actions.append("none")
+    return actions

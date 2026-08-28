@@ -21,6 +21,11 @@ class WorkflowCommandKind(str, Enum):
     CANCEL_RUN = "cancel_run"
     ARCHIVE_RUN = "archive_run"
     RECONCILE_RUN = "reconcile_run"
+    # Knowledge sideflow facade (plan §4.6): team-authorized sessions may
+    # request/inspect a knowledge collection at allowed nodes.  Deliberately
+    # NOT operator-only — the privileged-command set is unchanged.
+    ENSURE_KNOWLEDGE_COLLECTION = "ensure_knowledge_collection"
+    INSPECT_KNOWLEDGE_COLLECTION = "inspect_knowledge_collection"
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +130,9 @@ class CommandReceipt:
     idempotency_key: str
     latest_event_sequence: int
     problem: Any | None = None
+    # Optional command-specific result payload (e.g. knowledge invocation
+    # facts).  ``None`` keeps the historical wire shape byte-identical.
+    result: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -136,4 +144,6 @@ class CommandReceipt:
             "latestEventSequence": self.latest_event_sequence,
             "problem": self.problem,
         }
+        if self.result is not None:
+            payload["result"] = dict(self.result)
         return payload

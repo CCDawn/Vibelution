@@ -152,6 +152,7 @@ class WorkflowQueryService:
             discussion_rooms,
             latest_seq,
             execution_anchors,
+            knowledge_invocations,
         ) = bundle
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
@@ -168,6 +169,7 @@ class WorkflowQueryService:
                 self._evaluated_at_ms() if self._evaluated_at_ms is not None else None
             ),
             revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
+            invocations=knowledge_invocations,
         )
         return build_research_workflow_snapshot(
             ProjectionInputs(
@@ -361,6 +363,9 @@ class WorkflowQueryService:
                 events,
                 launch_context,
             )
+            knowledge_invocations = repo.list_knowledge_invocations_for_parent(
+                run_id
+            )
             return (
                 run,
                 attempts,
@@ -376,6 +381,7 @@ class WorkflowQueryService:
                 discussion_rooms,
                 latest_seq,
                 execution_anchors,
+                knowledge_invocations,
             )
 
         if hasattr(self._store, "read"):

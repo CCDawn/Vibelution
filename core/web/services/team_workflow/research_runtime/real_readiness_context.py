@@ -172,6 +172,43 @@ class RealDomainReadinessContext:
             hypothesis_first_chain._input_snapshot(run)
         )
 
+    def accepted_knowledge_invocations(
+        self, team_id: str, run_id: str
+    ) -> list[Mapping[str, Any]]:
+        """Knowledge sideflow invocations absorbed into this run (v7 ledger).
+
+        Read-only window over ``knowledge_invocations``; the readiness gate
+        in ``readiness.experiment`` applies its own completed/accepted/hash
+        filters, so this returns the raw invocation facts.
+        """
+        try:
+            records = self._store.submit(
+                lambda uow: uow.repository.list_knowledge_invocations_for_parent(
+                    run_id
+                ),
+                force_flush=True,
+            ).result(timeout=10)
+        except Exception:  # noqa: BLE001 - unreadable ledger fails closed
+            return []
+        views: list[Mapping[str, Any]] = []
+        for record in records or []:
+            if record is None:
+                continue
+            if str(record.parent_run_id) != run_id:
+                continue
+            views.append(
+                {
+                    "invocationId": str(record.invocation_id),
+                    "parentRunId": str(record.parent_run_id),
+                    "parentNodeId": str(record.parent_node_id),
+                    "status": str(record.status),
+                    "handoffState": str(record.handoff_state),
+                    "packageContentHash": str(record.package_content_hash or ""),
+                    "knowledgePackageRef": str(record.knowledge_package_ref or ""),
+                }
+            )
+        return views
+
     def hypothesis_first_chain_state(
         self, team_id: str, question_id: str
     ) -> Mapping[str, Any] | None:

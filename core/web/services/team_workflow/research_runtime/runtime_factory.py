@@ -32,6 +32,7 @@ from .graph_dispatch_worker import GraphDispatchWorker
 from .outbox_pump import WorkflowOutboxPump
 from .readiness import NodeReadinessService
 from .readiness.common import RunSnapshot
+from .readiness.knowledge_recheck import build_knowledge_readiness_recheck
 from .real_domain_ports import RealDomainPorts
 from .real_readiness_context import RealDomainReadinessContext
 
@@ -187,7 +188,12 @@ def build_workflow_runtime(
         store=store,
         owner_id="event-publish-worker",
         commit_hook=combined_wake,
-        notify_readiness=combined_wake,
+        readiness_recheck=build_knowledge_readiness_recheck(
+            store=store,
+            command_service=command_service,
+            readiness_invalidate=readiness.invalidate,
+            now_provider=clock,
+        ),
     )
     return WorkflowRuntime(
         store=store,

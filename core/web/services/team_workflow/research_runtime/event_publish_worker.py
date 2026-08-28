@@ -35,6 +35,7 @@ class EventPublishWorker:
         commit_hook: Callable[[], None] | None = None,
         deliver: Callable[[dict], dict] | None = None,
         notify_readiness: Callable[[], None] | None = None,
+        readiness_recheck: Callable[[dict], None] | None = None,
     ) -> None:
         self._store = store
         self._owner = owner_id
@@ -42,6 +43,7 @@ class EventPublishWorker:
         self._now = now_provider or (lambda: int(time.time() * 1000))
         self._commit_hook = commit_hook
         self._notify_readiness = notify_readiness
+        self._readiness_recheck = readiness_recheck
         self._deliver = deliver
 
     def _deliver_payload(self, payload: dict) -> dict:
@@ -87,10 +89,21 @@ class EventPublishWorker:
             self._dead_letter(action, exc, deterministic=True)
             return
         try:
-            self._deliver_payload(payload)
+            result = self._deliver_payload(payload)
         except Exception as exc:  # noqa: BLE001 - delivery failure is data
             self._requeue_or_dead_letter(action, exc)
             return
+        # Post-absorption hook (plan Task 4): re-check the affected parent
+        # node's readiness and create a successor attempt through the command
+        # service when the readiness authority allows it.  Strictly advisory:
+        # a failing re-check never fails the delivery (the parent event is
+        # already durably absorbed and the ACK below must still land).
+        recheck = self._readiness_recheck
+        if recheck is not None and isinstance(result, dict) and result.get("status") == "absorbed":
+            try:
+                recheck(payload)
+            except Exception:  # noqa: BLE001 - advisory by contract
+                pass
 
         def mutate(uow):
             uow.repository.ack_outbox(action.action_id, self._owner, self._now())

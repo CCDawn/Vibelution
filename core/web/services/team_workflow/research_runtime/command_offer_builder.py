@@ -27,6 +27,7 @@ def build_command_offers(
     attempts: Sequence[NodeAttemptRecord] = (),
     evaluated_at_ms: int | None = None,
     revise_checkpoint_id: str | None = None,
+    invocations: Sequence[Any] = (),
 ) -> list[CommandOffer]:
     if run is None:
         if run_id is None or run_version is None:
@@ -67,4 +68,5 @@ def build_command_offers(
         attempts=attempts,
         evaluated_at_ms=evaluated_at_ms,
         revise_checkpoint_id=revise_checkpoint_id,
+        invocations=invocations,
     )

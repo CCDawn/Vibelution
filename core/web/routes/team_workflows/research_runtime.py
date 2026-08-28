@@ -23,6 +23,7 @@ from core.web.services.team_workflow.research_runtime.command_service import (
     CommandForbiddenError,
     HumanTaskNotFoundError,
     InvalidHumanTaskStateError,
+    KnowledgeCommandError,
     NodeNotReadyError,
     WorkflowCommandError,
 )
@@ -150,6 +151,38 @@ class CommandPayload(VersionedCommandPayload):
     command: str = Field(..., min_length=1)
     nodeId: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeSearchEnvelopePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keywords: list[str] = Field(default_factory=list, max_length=32)
+    evidenceTypes: list[str] = Field(default_factory=list, max_length=32)
+    timeWindow: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeCollectionPayload(VersionedCommandPayload):
+    """ensure_knowledge_collection payload (knowledge sideflow facade).
+
+    ``searchEnvelope`` (keywords / evidenceTypes / timeWindow) and
+    ``requirements`` map into the invocation envelope fingerprints, so a
+    changed request is a NEW invocation while an identical request replays
+    the same one.  ``managedSourceRootIds`` joins the scope fingerprint and
+    is passed through to the collection chain.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    questionId: str = Field(..., min_length=1)
+    nodeId: str | None = None
+    searchEnvelope: KnowledgeSearchEnvelopePayload = Field(
+        default_factory=KnowledgeSearchEnvelopePayload
+    )
+    requirements: dict[str, Any] = Field(default_factory=dict)
+    sourcePolicyVersion: str = "1"
+    managedSourceRootIds: list[str] = Field(default_factory=list, max_length=32)
+    parentNodeRunId: str = ""
+    parentAttempt: int = Field(default=1, ge=1)
 
 
 class AgentBindingConfigPayload(TeamScopedPayload):
@@ -670,7 +703,66 @@ def research_workflow_command(
             status_code=422,
             detail={"code": "unknown_command", "message": str(exc)},
         ) from exc
-    operator = None
+    return _submit_workflow_command(
+        run_id=run_id,
+        team_id=payload.teamId,
+        kind=kind,
+        node_id=payload.nodeId,
+        expected_run_version=payload.expectedRunVersion,
+        idempotency_key=payload.idempotencyKey,
+        payload=dict(payload.payload or {}),
+        request=request,
+    )
+
+
+@router.post(
+    "/research/workflow-runs/{run_id}/knowledge-collection",
+    status_code=202,
+    response_model=ResearchWorkflowCommandReceiptResponse,
+    response_model_exclude_unset=True,
+)
+def research_workflow_ensure_knowledge_collection(
+    run_id: str,
+    payload: KnowledgeCollectionPayload,
+    request: Request,
+) -> dict:
+    """ensure_knowledge_collection facade: idempotent knowledge request.
+
+    A repeated identical request returns the SAME invocation (and never a
+    second child run); the receipt carries the invocation facts in
+    ``result``.
+    """
+    return _submit_workflow_command(
+        run_id=run_id,
+        team_id=payload.teamId,
+        kind=WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION,
+        node_id=payload.nodeId,
+        expected_run_version=payload.expectedRunVersion,
+        idempotency_key=payload.idempotencyKey,
+        payload={
+            "questionId": payload.questionId,
+            "searchEnvelope": payload.searchEnvelope.model_dump(),
+            "requirements": dict(payload.requirements or {}),
+            "sourcePolicyVersion": payload.sourcePolicyVersion,
+            "managedSourceRootIds": list(payload.managedSourceRootIds),
+            "parentNodeRunId": payload.parentNodeRunId,
+            "parentAttempt": payload.parentAttempt,
+        },
+        request=request,
+    )
+
+
+def _submit_workflow_command(
+    *,
+    run_id: str,
+    team_id: str,
+    kind: WorkflowCommandKind,
+    node_id: str | None,
+    expected_run_version: int,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    request: Request,
+) -> dict:
     try:
         with server_operator_scope_from_http(request):
             operator = current_server_operator()
@@ -679,12 +771,12 @@ def research_workflow_command(
                 CommandRequest(
                     command_id=new_id("cmd"),
                     run_id=run_id,
-                    team_id=payload.teamId,
+                    team_id=team_id,
                     command=kind,
-                    node_id=(payload.nodeId or None),
-                    expected_run_version=payload.expectedRunVersion,
-                    idempotency_key=payload.idempotencyKey,
-                    payload=dict(payload.payload or {}),
+                    node_id=(node_id or None),
+                    expected_run_version=expected_run_version,
+                    idempotency_key=idempotency_key,
+                    payload=payload,
                     requested_by=ActorRef("user", actor_id or "operator"),
                     requested_at_ms=int(time.time() * 1000),
                 )
@@ -706,6 +798,20 @@ def research_workflow_command(
         raise HTTPException(
             status_code=404,
             detail={"code": "run_not_found", "message": str(exc)},
+        ) from exc
+    except KnowledgeCommandError as exc:
+        status = {
+            "unknown_parent_run": 404,
+            "unknown_invocation": 404,
+            "unknown_node": 404,
+            "question_mismatch": 409,
+        }.get(str(getattr(exc, "code", "") or ""), 422)
+        raise HTTPException(
+            status_code=status,
+            detail={
+                "code": str(getattr(exc, "code", "") or "knowledge_command_failed"),
+                "message": str(exc),
+            },
         ) from exc
     except CommandTeamScopeMismatchError as exc:
         raise HTTPException(

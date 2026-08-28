@@ -16,6 +16,7 @@ from .archive_run import build_archive_run_offer
 from .cancel_run import build_cancel_run_offer
 from .extend_budget import build_extend_budget_offers
 from .fork_revision import build_fork_revision_offers
+from .knowledge_collection import build_knowledge_collection_offers
 from .rebind_node import build_rebind_node_offers
 from .reconcile_run import build_reconcile_run_offer
 from .resolve_human import build_resolve_human_offers
@@ -34,6 +35,7 @@ def build_command_offers(
     attempts: Sequence[NodeAttemptRecord] = (),
     evaluated_at_ms: int | None = None,
     revise_checkpoint_id: str | None = None,
+    invocations: Sequence[Any] = (),
 ) -> list[CommandOffer]:
     offers: list[CommandOffer] = []
     offers.extend(
@@ -74,6 +76,12 @@ def build_command_offers(
     offers.append(build_reconcile_run_offer(run=run))
     offers.append(build_archive_run_offer(run=run))
     offers.append(build_cancel_run_offer(run=run))
+    offers.extend(
+        build_knowledge_collection_offers(
+            run=run,
+            invocations=invocations,
+        )
+    )
     return offers
 
 

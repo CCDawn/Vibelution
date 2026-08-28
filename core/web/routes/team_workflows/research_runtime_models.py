@@ -215,3 +215,4 @@ class ResearchWorkflowCommandReceiptResponse(ResearchRuntimeJsonResponse):
     idempotencyKey: str = ""
     latestEventSequence: int = 0
     problem: Any | None = None
+    result: dict[str, Any] | None = None

@@ -280,6 +280,47 @@ def hypothesis_first_chain_state(
     return dict(state) if isinstance(state, Mapping) else {}
 
 
+def accepted_knowledge_invocations(
+    context: DomainReadinessContext, run: RunSnapshot
+) -> tuple[Mapping[str, Any], ...]:
+    """Accepted knowledge packages absorbed into this run via the sideflow.
+
+    Duck-typed like ``hypothesis_first_flow``: contexts without the probe
+    (older fakes) simply report none, so in-graph handoff behavior is
+    unchanged.  An unreadable probe also fails closed to "none" — the
+    knowledge gate then stays blocked instead of opening without evidence.
+    """
+    reader = getattr(context, "accepted_knowledge_invocations", None)
+    if not callable(reader):
+        return ()
+    try:
+        items = reader(run.team_id, run.run_id)
+    except Exception:
+        return ()
+    if not isinstance(items, (list, tuple)):
+        return ()
+    return tuple(item for item in items if isinstance(item, Mapping))
+
+
+def run_has_accepted_knowledge_package(
+    context: DomainReadinessContext, run: RunSnapshot
+) -> bool:
+    """True when an absorbed sideflow invocation carries a consumable package.
+
+    Requires completed status, accepted handoff AND a non-empty package
+    content hash — a rejected or evidence-less handoff never satisfies the
+    downstream knowledge gate.
+    """
+    for item in accepted_knowledge_invocations(context, run):
+        if (
+            str(item.get("status") or "") == "completed"
+            and str(item.get("handoffState") or "") == "accepted"
+            and str(item.get("packageContentHash") or "").strip()
+        ):
+            return True
+    return False
+
+
 def blocker(
     code: str,
     title: str,

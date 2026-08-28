@@ -15,6 +15,7 @@ from .common import (
     blocker,
     hypothesis_first_chain_state,
     hypothesis_first_run,
+    run_has_accepted_knowledge_package,
 )
 
 
@@ -26,16 +27,26 @@ def evaluate_hypothesis_design(
     context: DomainReadinessContext,
 ) -> DomainVerdict:
     blockers: list[Any] = []
-    if not common.accepted_handoff_ids:
+    # Knowledge gate: the node contract requires an ACCEPTED knowledge
+    # package.  It is satisfied by an accepted in-graph handoff (2.1.0
+    # chain) OR by a knowledge sideflow invocation absorbed into this run
+    # (main flow 3.0.0 / hypothesis-first collection).  Without either, the
+    # node stays blocked — no adapter dispatch is ever created against a
+    # missing or rejected package.
+    package_via_sideflow = run_has_accepted_knowledge_package(context, run)
+    if not common.accepted_handoff_ids and not package_via_sideflow:
         blockers.append(
             blocker(
                 "knowledge_handoff_not_accepted",
                 "知识包交接未接受",
                 "实验设计要求 accepted 的 Knowledge Package",
+                category="evidence_insufficient",
+                remediation_kind=RemediationKind.RESOLVE_HUMAN,
+                remediation_label="等待知识包交接或发起知识搜集",
             )
         )
     package = context.knowledge_package(run.team_id, run.run_id)
-    if (
+    if not package_via_sideflow and (
         not isinstance(package, dict)
         or package.get("accepted") is not True
         or not list(package.get("knowledgeItems") or [])
