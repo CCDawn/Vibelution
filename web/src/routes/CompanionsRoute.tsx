@@ -1,17 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Clock3, Sparkles } from "lucide-react";
 
 import { listVirtualHumanCompanions } from "../api/agentPlugins";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VNativeButton, VPage, VRouteLinkButton, VStateSurface } from "../components/vui";
+import { VButton, VPage, VRouteLinkButton, VStateSurface, VStatusChip } from "../components/vui";
 import { usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatRouteSelection } from "./chat/useChatRouteSelection";
+import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { CompanionPortrait } from "./companions/CompanionPortrait";
 import {
   companionAbout,
   companionIdentity,
   currentLifeActivity,
+  formatCompanionLocalTime,
+  formatLifeTime,
   lifeMoodLabel,
 } from "./companions/companionPresentation";
 import styles from "./companions/companions.styles";
@@ -20,19 +23,28 @@ const COPY = {
   zh: {
     kicker: "Virtual humans",
     title: "人物大厅",
-    subtitle: "每个人都有自己的生活、心情与记忆。进入后，你面对的是一个持续生活的人，而不是一张联系人列表。",
+    subtitle: "去见一个正在生活的人。她有自己的今天，也会记得你们共同经历过的事。",
     count: "位已启用人物",
     living: "正在生活",
     paused: "生活已暂停",
-    enter: "进入主会话",
+    enter: "进入她的房间",
+    profile: "查看人物档案",
+    localTime: "她那里",
+    codeRole: "PERSONAL COMPANION",
+    now: "此刻正在",
+    mood: "今天的心情",
+    relationship: "与你的关系",
+    tomorrow: "明日安排",
+    relationshipEmpty: "还在慢慢熟悉",
+    tomorrowEmpty: "等待今晚规划",
     loading: "正在载入人物大厅",
     loadFailed: "人物大厅暂时不可用",
     retry: "重新载入",
     empty: "还没有启用虚拟人的 Agent",
     emptyHint: "在 Agent 管理中选择一个 Agent，并在“能力绑定”里启用虚拟人生活插件。",
     manage: "前往 Agent 管理",
-    footerLeft: "人物卡片只存在于大厅；聊天页只展示当前人物。",
-    footerRight: "对话、历史和实时流式回复继续由原生 Session 链路负责。",
+    footerLeft: "人物会根据自己的计划继续生活。",
+    footerRight: "主动消息、历史和实时对话共用同一条原生 Session 记录。",
   },
   en: {
     kicker: "Virtual humans",
@@ -41,7 +53,16 @@ const COPY = {
     count: "enabled people",
     living: "Living now",
     paused: "Life paused",
-    enter: "Open main conversation",
+    enter: "Enter her room",
+    profile: "View profile",
+    localTime: "Local time",
+    codeRole: "PERSONAL COMPANION",
+    now: "Living now",
+    mood: "Today's mood",
+    relationship: "Your relationship",
+    tomorrow: "Tomorrow",
+    relationshipEmpty: "Still getting acquainted",
+    tomorrowEmpty: "Planning tonight",
     loading: "Loading companion lobby",
     loadFailed: "Companion lobby is unavailable",
     retry: "Retry",
@@ -119,39 +140,82 @@ export function CompanionsRoute() {
           {companions.map((companion) => {
             const activity = currentLifeActivity(companion.snapshot);
             const paused = Boolean(companion.snapshot.state?.lifePaused);
+            const relationship = String(companion.snapshot.state?.relationshipSummary || "").trim();
+            const tomorrowCount = companion.snapshot.tomorrowSchedule?.activities.length ?? 0;
             return (
-              <VNativeButton
+              <article
                 key={companion.agentId}
-                type="button"
                 className={styles.card}
-                aria-label={`${copy.enter} · ${companion.displayName}`}
                 data-companion-id={companion.agentId}
-                onClick={() => openCompanionSession(
-                  companion.directSessionId,
-                  companion.agentId,
-                  {
-                    returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
-                    telemetrySource: "virtual_human_companion_lobby",
-                  },
-                )}
               >
-                <CompanionPortrait companion={companion} />
-                <span className={styles.cardCopy}>
-                  <span className={styles.cardNameLine}>
-                    <strong>{companion.displayName}</strong>
-                    <span>{paused ? copy.paused : copy.living}</span>
-                  </span>
-                  <span className={styles.identity}>{companionIdentity(companion)}</span>
-                  <span className={styles.presence}>
-                    {activity?.title || copy.living} · {lifeMoodLabel(companion.snapshot, lang)}
-                  </span>
-                  <span className={styles.about}>{companionAbout(companion)}</span>
-                  <span className={styles.enter}>
-                    <span>{copy.enter}</span>
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </span>
-                </span>
-              </VNativeButton>
+                <span className={styles.cardGridLines} aria-hidden="true" />
+                <div className={styles.cardCopy}>
+                  <div className={styles.presenceRow}>
+                    <VStatusChip tone={paused ? "warning" : "success"}>
+                      {paused ? copy.paused : copy.living}
+                    </VStatusChip>
+                    <span className={styles.localTime}>
+                      {copy.localTime} · {formatCompanionLocalTime(companion.snapshot, lang)}
+                    </span>
+                  </div>
+
+                  <div className={styles.identityBlock}>
+                    <p className={styles.identityCode}>{companion.agentCode} · {copy.codeRole}</p>
+                    <h2>{companion.displayName}</h2>
+                    <p className={styles.identity}>{companionIdentity(companion)}</p>
+                    <p className={styles.about}>{companionAbout(companion)}</p>
+                  </div>
+
+                  <section className={styles.nowCard} aria-label={copy.now}>
+                    <span className={styles.nowIcon} aria-hidden="true"><Clock3 size={18} /></span>
+                    <span className={styles.nowCopy}>
+                      <span>{copy.now}</span>
+                      <strong>{activity?.title || copy.living}</strong>
+                    </span>
+                    <time className={styles.nowTime}>
+                      {activity ? `${formatLifeTime(activity.startAt, lang)}–${formatLifeTime(activity.endAt, lang)}` : ""}
+                    </time>
+                  </section>
+
+                  <div className={styles.relationshipStrip}>
+                    <span><small>{copy.mood}</small><strong>{lifeMoodLabel(companion.snapshot, lang)}</strong></span>
+                    <span><small>{copy.relationship}</small><strong>{relationship || copy.relationshipEmpty}</strong></span>
+                    <span><small>{copy.tomorrow}</small><strong>{tomorrowCount ? `${tomorrowCount}` : copy.tomorrowEmpty}</strong></span>
+                  </div>
+
+                  <div className={styles.cardActions}>
+                    <VButton
+                      type="button"
+                      className={styles.primaryAction}
+                      onPress={() => openCompanionSession(
+                        companion.directSessionId,
+                        companion.agentId,
+                        {
+                          returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
+                          telemetrySource: "virtual_human_companion_lobby",
+                        },
+                      )}
+                    >
+                      {copy.enter}
+                      <ArrowRight size={16} aria-hidden="true" />
+                    </VButton>
+                    <VRouteLinkButton
+                      variant="secondary"
+                      className={styles.secondaryAction}
+                      to={agentCenterConfigRoute({
+                        agentId: companion.agentId,
+                        pane: "config",
+                        returnTo: "/companions",
+                        returnLabel: "companions",
+                      })}
+                    >
+                      {copy.profile}
+                    </VRouteLinkButton>
+                  </div>
+                </div>
+
+                <CompanionPortrait companion={companion} className={styles.cardPortrait} />
+              </article>
             );
           })}
         </section>

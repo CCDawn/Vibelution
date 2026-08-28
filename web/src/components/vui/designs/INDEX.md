@@ -109,6 +109,12 @@
 | --- | --- |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 
+## Product — virtual-human companion
+
+| 组件 | 设计说明 |
+| --- | --- |
+| 人物大厅与聊天人物栏 | [virtual-human-companion.md](./virtual-human-companion.md) |
+
 ## Product — agent-management
 
 | 组件 | 设计说明 |

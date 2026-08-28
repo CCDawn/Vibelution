@@ -1,25 +1,37 @@
-const route = "h-full min-h-0 min-w-0 overflow-auto bg-[radial-gradient(circle_at_20%_0%,color-mix(in_srgb,var(--accent-cool)_10%,transparent),transparent_28rem),radial-gradient(circle_at_82%_2%,color-mix(in_srgb,var(--state-warning)_7%,transparent),transparent_26rem),var(--vui-surface-workspace)] px-[clamp(28px,5vw,76px)] py-9";
-const hero = "mx-auto mb-6 flex max-w-[1180px] min-w-0 items-end justify-between gap-8 max-[880px]:items-start max-[880px]:flex-col";
+const route = "h-full min-h-0 min-w-0 overflow-auto bg-[radial-gradient(circle_at_18%_2%,color-mix(in_srgb,var(--accent-cool)_12%,transparent),transparent_30rem),radial-gradient(circle_at_84%_8%,color-mix(in_srgb,var(--state-warning)_8%,transparent),transparent_28rem),var(--vui-surface-workspace)] px-[clamp(28px,5vw,78px)] py-[clamp(26px,4vh,48px)]";
+const hero = "mx-auto mb-6 flex max-w-[1220px] min-w-0 items-end justify-between gap-8 max-[900px]:items-start max-[900px]:flex-col";
 const heroCopy = "grid min-w-0 gap-2";
-const kicker = "m-0 font-mono text-[0.65rem] font-extrabold uppercase tracking-[0.14em] text-[var(--accent-cool)]";
-const title = "m-0 text-[clamp(1.55rem,2.2vw,2rem)] font-[820] tracking-[-0.035em] text-vui-fg-primary";
+const kicker = "m-0 font-mono text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-[var(--accent-cool)]";
+const title = "m-0 text-[clamp(1.65rem,2.4vw,2.25rem)] font-[820] tracking-[-0.04em] text-vui-fg-primary";
 const subtitle = "m-0 max-w-[68ch] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-vui-fg-tertiary";
-const count = "grid shrink-0 justify-items-end gap-0.5 [&>strong]:font-mono [&>strong]:text-[1.9rem] [&>strong]:text-vui-fg-primary [&>span]:[font-size:var(--vui-font-xs)] [&>span]:text-vui-fg-tertiary";
-const grid = "mx-auto grid max-w-[1180px] min-w-0 grid-cols-2 gap-4 max-[1060px]:grid-cols-1";
-const card = "!grid !h-auto min-h-[244px] w-full min-w-0 !max-w-none !grid-cols-[minmax(190px,42%)_minmax(0,1fr)] overflow-hidden !rounded-[var(--vui-radius-panel-soft)] !border !border-vui-border-subtle !bg-vui-surface-panel !p-0 text-left !text-vui-fg-primary !shadow-[var(--vui-elevation-panel)] transition-[transform,border-color,background-color] duration-150 hover:-translate-y-0.5 hover:!border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] hover:!bg-vui-surface-region max-[680px]:!grid-cols-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal";
-const cardCopy = "flex min-w-0 flex-col p-5";
-const cardNameLine = "flex min-w-0 items-baseline justify-between gap-3 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[1.05rem] [&>strong]:font-[820] [&>span]:shrink-0 [&>span]:font-mono [&>span]:text-[0.62rem] [&>span]:text-vui-fg-tertiary";
-const identity = "mt-1 line-clamp-2 [font-size:var(--vui-font-xs)] font-bold leading-[1.45] text-[var(--accent-cool)]";
-const presence = "mt-5 line-clamp-2 [font-size:var(--vui-font-sm)] leading-[1.5] text-vui-fg-secondary";
-const about = "mt-2 line-clamp-3 [font-size:var(--vui-font-xs)] leading-[1.6] text-vui-fg-tertiary";
-const enter = "mt-auto flex items-center justify-between gap-3 pt-5 [font-size:var(--vui-font-xs)] font-bold text-vui-fg-secondary [&>svg]:text-[var(--accent-cool)]";
-const portrait = "relative isolate block min-h-[244px] overflow-hidden border-r border-vui-border-subtle bg-[radial-gradient(circle_at_68%_22%,color-mix(in_srgb,var(--accent-cool)_38%,transparent),transparent_27%),linear-gradient(155deg,color-mix(in_srgb,var(--accent-cool)_20%,var(--vui-surface-panel))_0%,var(--vui-surface-rail)_62%,var(--vui-surface-workspace)_100%)] max-[680px]:min-h-[190px] max-[680px]:border-r-0 max-[680px]:border-b";
-const avatar = "relative isolate grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))]";
-const portraitImage = "absolute inset-0 z-[2] h-full w-full object-cover";
+const count = "grid shrink-0 justify-items-end gap-0.5 [&>strong]:font-mono [&>strong]:text-[2rem] [&>strong]:text-vui-fg-primary [&>span]:[font-size:var(--vui-font-xs)] [&>span]:text-vui-fg-tertiary";
+const grid = "mx-auto grid max-w-[1220px] min-w-0 gap-5";
+const card = "relative isolate grid min-h-[min(590px,calc(100dvh-250px))] min-w-0 grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)] overflow-hidden rounded-[28px] border border-vui-border-subtle bg-[radial-gradient(circle_at_84%_22%,color-mix(in_srgb,var(--accent-cool)_20%,transparent),transparent_34%),linear-gradient(135deg,var(--vui-surface-panel),color-mix(in_srgb,var(--vui-surface-workspace)_78%,black))] shadow-[var(--vui-elevation-panel)] max-[960px]:grid-cols-1";
+const cardGridLines = "pointer-events-none absolute inset-0 -z-[1] opacity-40 [background:linear-gradient(90deg,transparent_49.9%,color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)_50%,transparent_50.1%),linear-gradient(color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)_1px,transparent_1px)_0_0/100%_72px]";
+const cardCopy = "flex min-w-0 flex-col p-[clamp(30px,4vh,48px)_clamp(26px,3vw,42px)_clamp(28px,4vh,42px)_clamp(34px,4.4vw,64px)] max-[960px]:p-8";
+const presenceRow = "flex items-center justify-between gap-4";
+const localTime = "shrink-0 font-mono text-[0.66rem] text-vui-fg-tertiary";
+const identityBlock = "mt-auto min-w-0 [&>h2]:m-0 [&>h2]:mt-3 [&>h2]:text-[clamp(3rem,4vw,4.2rem)] [&>h2]:font-[760] [&>h2]:leading-none [&>h2]:tracking-[-0.06em] [&>h2]:text-vui-fg-primary";
+const identityCode = "m-0 font-mono text-[0.64rem] font-bold tracking-[0.12em] text-[var(--accent-cool)]";
+const identity = "m-0 mt-2 line-clamp-2 [font-size:var(--vui-font-sm)] font-bold leading-[1.5] text-vui-fg-secondary";
+const about = "m-0 mt-3 max-w-[58ch] line-clamp-3 [font-size:var(--vui-font-sm)] leading-[1.7] text-vui-fg-tertiary";
+const nowCard = "mt-[clamp(20px,3vh,28px)] grid min-w-0 grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-[15px] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-4 py-3";
+const nowIcon = "grid size-10 place-items-center rounded-xl bg-[color-mix(in_srgb,var(--accent-cool)_14%,transparent)] text-[var(--accent-cool)]";
+const nowCopy = "grid min-w-0 gap-0.5 [&>span]:[font-size:0.64rem] [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-sm)] [&>strong]:font-bold [&>strong]:text-vui-fg-primary";
+const nowTime = "shrink-0 font-mono text-[0.62rem] text-vui-fg-tertiary max-[560px]:hidden";
+const relationshipStrip = "mt-4 grid grid-cols-3 border-y border-vui-border-subtle [&>span]:grid [&>span]:min-w-0 [&>span]:gap-1 [&>span]:px-4 [&>span]:py-3.5 [&>span:first-child]:pl-0 [&>span+span]:border-l [&>span+span]:border-vui-border-subtle [&_small]:[font-size:0.6rem] [&_small]:text-vui-fg-tertiary [&_strong]:line-clamp-2 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-bold [&_strong]:leading-[1.45] [&_strong]:text-vui-fg-secondary max-[560px]:grid-cols-1 max-[560px]:[&>span]:px-0 max-[560px]:[&>span+span]:border-l-0 max-[560px]:[&>span+span]:border-t";
+const cardActions = "mt-[clamp(18px,2.8vh,26px)] flex flex-wrap items-center gap-2.5";
+const primaryAction = "!h-11 !min-h-11 !px-5";
+const secondaryAction = "!h-11 !min-h-11 !px-4";
+const cardPortrait = "!min-h-full max-[960px]:!min-h-[420px]";
+const portrait = "relative isolate block min-h-[430px] overflow-hidden bg-[radial-gradient(circle_at_50%_24%,color-mix(in_srgb,var(--accent-cool)_24%,transparent),transparent_43%),var(--vui-surface-rail)] before:pointer-events-none before:absolute before:inset-[11%_6%_0_5%] before:rounded-[48%_48%_0_0] before:border before:border-vui-border-subtle before:content-['']";
+const avatar = "relative isolate grid size-11 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))]";
+const portraitImage = "absolute bottom-[-2%] left-1/2 z-[2] h-[98%] w-[110%] max-w-none -translate-x-1/2 object-contain object-bottom drop-shadow-[0_24px_28px_rgba(0,0,0,0.38)]";
+const avatarImage = "absolute inset-0 z-[2] h-full w-full object-cover object-[50%_24%]";
 const portraitInitials = "absolute left-1/2 top-[38%] z-[1] -translate-x-1/2 -translate-y-1/2 font-mono text-[clamp(1rem,2vw,1.55rem)] font-extrabold tracking-[0.08em] text-vui-fg-primary";
-const portraitGlow = "absolute inset-[28%_8%_-28%_22%] -z-[1] rounded-[50%_50%_18%_18%] bg-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)]";
-const onlineDot = "absolute bottom-3 right-3 z-[3] h-2.5 w-2.5 rounded-full border-2 border-vui-surface-rail bg-[var(--state-success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--state-success)_12%,transparent)] data-[compact=true]:bottom-0 data-[compact=true]:right-0";
-const footer = "mx-auto mt-4 flex max-w-[1180px] items-center justify-between gap-5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary max-[760px]:flex-col max-[760px]:items-start";
+const portraitGlow = "pointer-events-none absolute left-1/2 top-[17%] z-[1] size-[min(30vw,390px)] -translate-x-1/2 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] shadow-[0_0_0_50px_color-mix(in_srgb,var(--vui-border-subtle)_14%,transparent),0_0_100px_color-mix(in_srgb,var(--accent-cool)_16%,transparent)]";
+const onlineDot = "absolute bottom-3 right-3 z-[3] size-2.5 rounded-full border-2 border-vui-surface-rail bg-[var(--state-success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--state-success)_12%,transparent)] data-[compact=true]:bottom-0 data-[compact=true]:right-0";
+const footer = "mx-auto mt-4 flex max-w-[1220px] items-center justify-between gap-5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary max-[760px]:flex-col max-[760px]:items-start";
 const stateHost = "mx-auto max-w-[860px] py-12";
 
 export default {
@@ -32,15 +44,27 @@ export default {
   count,
   grid,
   card,
+  cardGridLines,
   cardCopy,
-  cardNameLine,
+  presenceRow,
+  localTime,
+  identityBlock,
+  identityCode,
   identity,
-  presence,
   about,
-  enter,
+  nowCard,
+  nowIcon,
+  nowCopy,
+  nowTime,
+  relationshipStrip,
+  cardActions,
+  primaryAction,
+  secondaryAction,
+  cardPortrait,
   portrait,
   avatar,
   portraitImage,
+  avatarImage,
   portraitInitials,
   portraitGlow,
   onlineDot,

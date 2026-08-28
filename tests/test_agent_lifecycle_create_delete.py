@@ -193,6 +193,40 @@ def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_p
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
 
 
+def test_virtual_human_chat_agent_keeps_persona_without_affecting_plain_work_sessions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+
+    response = client.post(
+        "/api/agents",
+        json={
+            "displayName": "独立生活人物",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "primaryMode": "chat",
+            "promptTemplateId": "prompt-chat-default",
+            "personaProfile": {
+                "personality": "温柔、好奇，有自己的判断。",
+                "identityNotes": "我是一个独立生活的虚拟人。",
+            },
+            "metadata": {"creationToolBundleIds": ["virtual_human_life"]},
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    agent = response.json()
+    assert agent["primaryMode"] == "chat"
+    assert agent["roleKey"] == ""
+    assert agent["personaProfile"]["personality"] == "温柔、好奇，有自己的判断。"
+    assert agent["personaProfile"]["identityNotes"] == "我是一个独立生活的虚拟人。"
+
+    persisted = agent_directory_service.get_agent(agent["agentId"])
+    assert persisted is not None
+    assert persisted["personaProfile"] == agent["personaProfile"]
+    prompt_context = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+    assert "AgentPersonaProfile:" in prompt_context
+    assert "IdentityNotes: 我是一个独立生活的虚拟人。" in prompt_context
+
+
 def test_agent_create_api_allows_work_session_with_explicit_no_tools_policy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)

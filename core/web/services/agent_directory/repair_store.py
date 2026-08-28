@@ -906,6 +906,18 @@ def _is_operation_chat_agent(agent: dict[str, Any]) -> bool:
 
 def _is_profileless_session_agent(agent: dict[str, Any]) -> bool:
     s = _service()
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    creation_tool_bundle_ids = {
+        str(item or "").strip()
+        for item in list(metadata.get("creationToolBundleIds") or [])
+        if str(item or "").strip()
+    }
+    # A virtual-human Agent is still a native chat Session, but its persona is
+    # product state consumed by the shared Agent prompt context.  The creation
+    # bundle marker keeps this exception local to the plugin-created person;
+    # ordinary role-less chat Sessions remain intentionally profileless.
+    if "virtual_human_life" in creation_tool_bundle_ids:
+        return False
     primary_mode = s._normalize_primary_mode(agent.get("primaryMode") or s._infer_agent_primary_mode(agent))
     role_key = s._normalize_role_key(agent.get("roleKey") or s._infer_agent_role_key(agent))
     return s._is_session_agent_primary_mode(primary_mode) and not role_key

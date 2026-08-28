@@ -35,6 +35,36 @@ export function companionAbout(companion: VirtualHumanCompanion): string {
   ).trim();
 }
 
+export function companionReturnTarget(
+  companion: Pick<VirtualHumanCompanion, "agentId" | "directSessionId">,
+): string {
+  const search = new URLSearchParams({
+    session: companion.directSessionId,
+    companion: companion.agentId,
+  });
+  return `/chat?${search.toString()}`;
+}
+
+export function formatCompanionLocalTime(
+  snapshot: VirtualHumanSnapshot,
+  lang: "zh" | "en",
+  now = new Date(),
+): string {
+  if (Number.isNaN(now.getTime())) return "--:--";
+  const locale = lang === "zh" ? "zh-CN" : "en-US";
+  const timezone = String(snapshot.state?.timezone || snapshot.binding?.timezone || "").trim();
+  const options: Intl.DateTimeFormatOptions = {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  };
+  try {
+    return new Intl.DateTimeFormat(locale, timezone ? { ...options, timeZone: timezone } : options).format(now);
+  } catch {
+    return new Intl.DateTimeFormat(locale, options).format(now);
+  }
+}
+
 export function currentLifeActivity(snapshot: VirtualHumanSnapshot): VirtualHumanActivity | null {
   const activities = snapshot.todaySchedule?.activities ?? [];
   const currentId = String(snapshot.state?.currentActivityId || "").trim();

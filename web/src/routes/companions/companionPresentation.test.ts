@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { VirtualHumanCompanion } from "../../api/types";
 import {
+  companionReturnTarget,
   companionIdentity,
   currentLifeActivity,
+  formatCompanionLocalTime,
   upcomingLifeActivities,
 } from "./companionPresentation";
 
@@ -55,6 +57,14 @@ describe("companion presentation", () => {
     expect(companionIdentity(companion)).toBe("安静、直接");
     expect(currentLifeActivity(companion.snapshot)?.title).toBe("阅读");
     expect(upcomingLifeActivities(companion.snapshot).map((item) => item.title)).toEqual(["阅读", "散步"]);
+  });
+
+  it("keeps settings returns on the same native companion Session", () => {
+    expect(companionReturnTarget(companion)).toBe("/chat?session=session+1&companion=agent%2Fnora");
+  });
+
+  it("formats the person's real timezone without persisting a second clock", () => {
+    expect(formatCompanionLocalTime(companion.snapshot, "zh", new Date("2026-08-28T00:42:00Z"))).toBe("08:42");
   });
 
 });

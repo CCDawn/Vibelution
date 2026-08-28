@@ -5,6 +5,8 @@ import chatSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
 import streamSource from "../chat/useSessionDetailStream.ts?raw";
 import lifeRailSource from "./CompanionLifeRail.tsx?raw";
 import personRailSource from "./CompanionPersonRail.tsx?raw";
+import portraitSource from "./CompanionPortrait.tsx?raw";
+import portraitStyles from "./companions.styles.ts";
 
 describe("virtual-human native Chat reuse", () => {
   it("uses the sole Chat route writer to select a native direct Session with companion identity", () => {
@@ -17,7 +19,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("<CompanionPersonRail");
     expect(chatSource).toContain("<CompanionLifeRail");
     expect(personRailSource).toContain("agentCenterConfigRoute({");
-    expect(personRailSource).toContain('returnTo: "/companions"');
+    expect(personRailSource).toContain("returnTo: companionReturnTarget(companion)");
     expect(personRailSource).not.toContain("/companions/${");
   });
 
@@ -34,5 +36,13 @@ describe("virtual-human native Chat reuse", () => {
     expect(lobbySource).not.toContain("fetchJson");
     expect(lifeRailSource).not.toContain("fetchJson");
     expect(personRailSource).not.toContain("fetchJson");
+  });
+
+  it("uses the Agent avatar as one shared full portrait in the lobby card and chat person rail", () => {
+    expect(lobbySource).toContain("<CompanionPortrait");
+    expect(personRailSource).toContain("<CompanionPortrait");
+    expect(portraitSource).toContain("companion.avatarImageUrl");
+    expect(portraitStyles.portraitImage).toContain("object-contain");
+    expect(portraitStyles.portraitImage).toContain("object-bottom");
   });
 });

@@ -15,6 +15,7 @@ export function CompanionPortrait({
     compact ? styles.avatar : styles.portrait,
     className,
   ].filter(Boolean).join(" ");
+  const imageClassName = compact ? styles.avatarImage : styles.portraitImage;
   return (
     <span
       className={portraitClassName}
@@ -23,7 +24,7 @@ export function CompanionPortrait({
       data-companion-portrait={compact ? "avatar" : "portrait"}
     >
       {companion.avatarImageUrl ? (
-        <img src={companion.avatarImageUrl} alt="" className={styles.portraitImage} />
+        <img src={companion.avatarImageUrl} alt="" className={imageClassName} />
       ) : (
         <span className={styles.portraitInitials}>{companionInitials(companion)}</span>
       )}

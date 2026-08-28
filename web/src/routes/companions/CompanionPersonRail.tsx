@@ -7,8 +7,8 @@ import { CompanionPortrait } from "./CompanionPortrait";
 import {
   companionAbout,
   companionIdentity,
+  companionReturnTarget,
   currentLifeActivity,
-  formatLifeTime,
   lifeMoodLabel,
 } from "./companionPresentation";
 import styles from "./CompanionChatRails.styles";
@@ -55,8 +55,8 @@ export function CompanionPersonRail({
             to={agentCenterConfigRoute({
               agentId: companion.agentId,
               pane: "config",
-              returnTo: "/companions",
-              returnLabel: "companions",
+              returnTo: companionReturnTarget(companion),
+              returnLabel: companion.displayName,
             })}
             variant="ghost"
             className={styles.quietLink}
@@ -81,40 +81,37 @@ export function CompanionPersonRail({
         <>
           <div className={styles.profile}>
             <CompanionPortrait companion={companion} className={styles.railPortrait} />
-            <div className={styles.personNameRow}>
-              <div className={styles.personNameCopy}>
-                <h1>{companion.displayName}</h1>
-                <p>{companionIdentity(companion)}</p>
-              </div>
+            <div className={styles.personPresence}>
+              <span>{companion.agentCode}</span>
               <VStatusChip tone={companion.snapshot.state?.lifePaused ? "warning" : "success"}>
                 {companion.snapshot.state?.lifePaused
                   ? (lang === "zh" ? "已暂停" : "Paused")
-                  : (lang === "zh" ? "心跳在线" : "Heartbeat")}
+                  : (lang === "zh" ? "和你在一起" : "Here with you")}
               </VStatusChip>
             </div>
-            <p className={styles.about}>{companionAbout(companion)}</p>
-          </div>
-
-          <section className={styles.lifeCardAccent} aria-label={lang === "zh" ? "此刻" : "Now"}>
-            <p className={styles.cardLabel}>{lang === "zh" ? "此刻" : "Now"}</p>
-            <h2 className={styles.cardTitle}>{activity?.title || (lang === "zh" ? "按自己的节奏生活" : "Living at her own pace")}</h2>
-            {activity ? (
-              <span className={styles.cardMeta}>
-                {formatLifeTime(activity.startAt, lang)}–{formatLifeTime(activity.endAt, lang)}
-              </span>
-            ) : null}
-            <p className={styles.cardCopy}>
-              {lang === "zh" ? "生活状态会自然影响表达，但不会让实时回复变慢。" : "Life state shapes expression without delaying replies."}
-            </p>
-          </section>
-
-          <section className={styles.lifeCard} aria-label={lang === "zh" ? "心情" : "Mood"}>
-            <p className={styles.cardLabel}>{lang === "zh" ? "心情" : "Mood"}</p>
-            <div className={styles.moodRow}>
-              <strong>{lifeMoodLabel(companion.snapshot, lang)}</strong>
-              <span>{companion.snapshot.state?.energy ?? 0}% {lang === "zh" ? "体力" : "energy"}</span>
+            <div className={styles.personNameCopy}>
+              <h1>{companion.displayName}</h1>
+              <p>{companionIdentity(companion)}</p>
             </div>
-          </section>
+            <blockquote className={styles.personQuote}>{companionAbout(companion)}</blockquote>
+            <div className={styles.personFacts}>
+              <span><small>{lang === "zh" ? "心情" : "Mood"}</small><strong>{lifeMoodLabel(companion.snapshot, lang)}</strong></span>
+              <span><small>{lang === "zh" ? "关系" : "Relationship"}</small><strong>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "慢慢熟悉中" : "Getting acquainted")}</strong></span>
+              <span><small>{lang === "zh" ? "此刻" : "Now"}</small><strong>{activity?.title || (lang === "zh" ? "按自己的节奏生活" : "Living at her own pace")}</strong></span>
+            </div>
+            <VRouteLinkButton
+              to={agentCenterConfigRoute({
+                agentId: companion.agentId,
+                pane: "config",
+                returnTo: companionReturnTarget(companion),
+                returnLabel: companion.displayName,
+              })}
+              variant="secondary"
+              className={styles.profileLink}
+            >
+              {lang === "zh" ? "打开她的完整档案" : "Open full profile"}
+            </VRouteLinkButton>
+          </div>
 
           <footer className={styles.personFooter}>
             <strong>{lang === "zh" ? "当前人物专属栏" : "Current-person rail"}</strong>
