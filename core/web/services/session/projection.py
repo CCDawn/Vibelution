@@ -4027,6 +4027,21 @@ def _messages_with_live_output(
     live_message = s._build_live_output_message(session_id)
     if live_message is None:
         return detail_messages
+    live_metadata = (
+        live_message.get("metadata")
+        if isinstance(live_message.get("metadata"), dict)
+        else {}
+    )
+    live_turn_id = str(
+        live_message.get("turnId") or live_metadata.get("turnId") or ""
+    ).strip()
+    if live_turn_id and s._session_events_have_terminal_turn(
+        s._load_session_conversation_events_cached(session_id),
+        live_turn_id,
+    ):
+        # The journal is the Turn SSOT.  A checkpoint/live cache surviving a
+        # restart or late failure cannot reopen a terminal turn in the UI.
+        return detail_messages
     detail_messages = s._without_live_turn_ledger_partials(detail_messages, live_message)
     return detail_messages + [live_message]
 

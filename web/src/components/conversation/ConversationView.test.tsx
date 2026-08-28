@@ -28,6 +28,16 @@ describe("composer leading control contract", () => {
     expect(conversationViewSource).toContain("composerLeadingControl ?? (");
     expect(conversationViewSource).toContain("attachmentInputRef.current?.click()");
   });
+
+  it("keeps the native attachment input hidden independently of field layout", () => {
+    expect(styles.hiddenAttachmentInput).toContain("hidden");
+    expect(styles.hiddenAttachmentInput).not.toContain("grid");
+    const html = renderConversation([]);
+    const fileInput = html.match(/<input[^>]*type="file"[^>]*>/)?.[0] ?? "";
+    expect(fileInput).toContain("hiddenAttachmentInput");
+    expect(fileInput).toContain(" hidden");
+    expect(fileInput).not.toContain(" grid");
+  });
 });
 
 // Server-rendered integration tests must exercise the loaded Markdown renderer.

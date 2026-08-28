@@ -124,15 +124,28 @@ export const assistantTurnItemsForMessage = (message: ConversationMessage): Sess
   message.role === "assistant" ? consolidateSessionTurnItemsV2(message.turnItems) : []
 );
 
+const assistantTurnHasTerminalItemOutcome = (message: ConversationMessage): boolean => (
+  assistantTurnItemsForMessage(message).some((item) => (
+    item.terminal === true
+    && (
+      (isFinalAnswerTurnItem(item) && (item.status === "completed" || item.status === "failed"))
+      || (item.type === "error" && item.status === "failed")
+    )
+  ))
+);
+
 /** Token-streaming behaviors: answer text is actively revising. */
 export const assistantTurnIsStreaming = (message: ConversationMessage): boolean => (
-  message.role === "assistant" && message.status === "running"
+  message.role === "assistant"
+  && message.status === "running"
+  && !assistantTurnHasTerminalItemOutcome(message)
 );
 
 /** Pending or running — waiting shell / Thinking placeholder gate (broader than streaming). */
 export const assistantTurnIsInFlight = (message: ConversationMessage): boolean => (
   message.role === "assistant"
   && (message.status === "pending" || message.status === "running")
+  && !assistantTurnHasTerminalItemOutcome(message)
 );
 
 export const assistantFinalAnswerText = (message: ConversationMessage): string => (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -151,8 +152,77 @@ def test_prompt_and_tool_bundle_require_enabled_binding_and_policy_intersection(
     assert visible == [
         "virtual_human_status_tool",
         "virtual_human_schedule_tool",
+    ]
+
+    activity_visible = service.filter_tool_names(
+        "agent-a",
+        [
+            "virtual_human_status_tool",
+            "grep_search_tool",
+            "web_fetch_tool",
+        ],
+        runtime_context={
+            "runtimeMetadata": {
+                "virtualHumanLife": {
+                    "kind": "tool_activity",
+                    "activityId": "activity-reading",
+                    "requiredToolNames": ["grep_search_tool"],
+                }
+            }
+        },
+    )
+    assert activity_visible == [
+        "virtual_human_status_tool",
         "grep_search_tool",
     ]
+
+
+def test_agent_runtime_wiring_passes_tool_activity_scope_to_virtual_human_filter(
+    service: VirtualHumanLifeService,
+    monkeypatch,
+) -> None:
+    from core.web.services import agent_directory_service
+    from core.web.services.virtual_human_life_service import (
+        set_virtual_human_life_service_for_tests,
+    )
+
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-a",
+            "toolPolicy": {},
+            "runtimeMetadata": {
+                "virtualHumanLife": {
+                    "kind": "tool_activity",
+                    "activityId": "activity-runtime",
+                    "requiredToolNames": ["grep_search_tool"],
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "compute_effective_tool_visibility",
+        lambda _tools, policy: SimpleNamespace(
+            visible_tools=(
+                "virtual_human_status_tool",
+                "grep_search_tool",
+                "web_fetch_tool",
+            )
+        ),
+    )
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        assert agent_directory_service.effective_visible_tool_names_for_current_agent(
+            []
+        ) == [
+            "virtual_human_status_tool",
+            "grep_search_tool",
+        ]
+    finally:
+        set_virtual_human_life_service_for_tests(None)
 
 
 def test_heartbeat_completes_only_simulated_activity_with_an_outcome(
@@ -257,6 +327,10 @@ def test_autonomous_tool_activity_dispatches_one_native_proactive_turn(
     assert len(submitted) == 1
     assert submitted[0]["origin"] == "proactive_plugin"
     assert "联网阅读一篇新文章" in submitted[0]["trigger"]["reason"]
+    assert submitted[0]["trigger"]["toolActivity"] == {
+        "activityId": proposed["result"]["activity"]["activityId"],
+        "requiredToolNames": ["search_web_tool"],
+    }
 
 
 def test_tool_activity_proposal_rejects_overlap_and_invalid_time_window(

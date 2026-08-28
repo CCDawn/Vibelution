@@ -605,6 +605,32 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
 
         runtime_tool_grants = list(external_runtime_tool_grants(external_runtime_permission_profile))
         runtime_tool_source = f"external_agent_task:{external_runtime_permission_profile}"
+    runtime_metadata: dict[str, Any] = {}
+    proactive_plugin = (
+        context.get("proactive_plugin")
+        if isinstance(context.get("proactive_plugin"), dict)
+        else {}
+    )
+    proactive_trigger = (
+        proactive_plugin.get("trigger")
+        if isinstance(proactive_plugin.get("trigger"), dict)
+        else {}
+    )
+    tool_activity = (
+        proactive_trigger.get("toolActivity")
+        if isinstance(proactive_trigger.get("toolActivity"), dict)
+        else {}
+    )
+    if tool_activity:
+        runtime_metadata["virtualHumanLife"] = {
+            "kind": "tool_activity",
+            "activityId": str(tool_activity.get("activityId") or "").strip(),
+            "requiredToolNames": [
+                str(name or "").strip()
+                for name in list(tool_activity.get("requiredToolNames") or [])
+                if str(name or "").strip()
+            ][:8],
+        }
     prepare_timings["agentLookupMs"] = s._elapsed_ms(stage_started_at)
     stage_started_at = s._perf_counter()
     prompt_snapshot_hint = (
@@ -1010,6 +1036,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 supervised_role=supervised_runtime_role,
                 runtime_tool_grants=runtime_tool_grants,
                 runtime_tool_source=runtime_tool_source,
+                runtime_metadata=runtime_metadata,
             ),
             s.mental_model_enabled_override(mental_model_enabled),
             task_workspace_context,

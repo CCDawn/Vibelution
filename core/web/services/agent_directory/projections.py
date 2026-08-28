@@ -653,6 +653,7 @@ def active_agent_runtime(
     supervised_role: str = "",
     runtime_tool_grants: Iterable[Any] | None = None,
     runtime_tool_source: str = "",
+    runtime_metadata: dict[str, Any] | None = None,
 ):
     s = _service()
     agent = s.get_agent(agent_id) if agent_id else None
@@ -756,6 +757,10 @@ def active_agent_runtime(
             if permission_preset
             else None
         ),
+        "runtimeToolSource": str(runtime_tool_source or "").strip(),
+        "runtimeMetadata": copy.deepcopy(runtime_metadata)
+        if isinstance(runtime_metadata, dict)
+        else {},
         "toolPolicy": tool_policy,
         "externallyBlockedTools": externally_blocked_tools,
         "memoryPolicy": memory_policy,

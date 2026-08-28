@@ -390,7 +390,13 @@ class VirtualHumanLifeService:
             },
         ]
 
-    def filter_tool_names(self, agent_id: str, tool_names: Iterable[str]) -> list[str]:
+    def filter_tool_names(
+        self,
+        agent_id: str,
+        tool_names: Iterable[str],
+        *,
+        runtime_context: dict[str, Any] | None = None,
+    ) -> list[str]:
         names = [str(name or "").strip() for name in tool_names if str(name or "").strip()]
         binding = self.binding_for(agent_id)
         agent = self._agent(agent_id, include_archived=True)
@@ -400,9 +406,31 @@ class VirtualHumanLifeService:
             and agent
             and str(agent.get("status") or "active").strip().lower() == "active"
         )
-        if enabled:
-            return names
         plugin_tools = set(VIRTUAL_HUMAN_TOOL_NAMES)
+        if enabled:
+            allowed_tools = set(plugin_tools)
+            runtime_metadata = (
+                runtime_context.get("runtimeMetadata")
+                if isinstance(runtime_context, dict)
+                and isinstance(runtime_context.get("runtimeMetadata"), dict)
+                else {}
+            )
+            life_runtime = (
+                runtime_metadata.get("virtualHumanLife")
+                if isinstance(runtime_metadata.get("virtualHumanLife"), dict)
+                else {}
+            )
+            if str(life_runtime.get("kind") or "").strip() == "tool_activity":
+                allowed_tools.update(
+                    str(name or "").strip()
+                    for name in list(life_runtime.get("requiredToolNames") or [])
+                    if str(name or "").strip()
+                )
+            # ``names`` has already been intersected with the Agent ToolPolicy.
+            # This second boundary keeps ordinary companion dialogue on the
+            # dedicated plugin bundle while allowing a scheduled tool activity
+            # only the exact tools it declared up front.
+            return [name for name in names if name in allowed_tools]
         return [name for name in names if name not in plugin_tools]
 
     def heartbeat_agent(
@@ -951,6 +979,7 @@ class VirtualHumanLifeService:
         source_event_id: str = "",
         valid_for_minutes: int = 30,
         idempotency_key: str = "",
+        tool_activity: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._lock_for(agent_id):
             binding = self._require_enabled_binding(agent_id)
@@ -980,11 +1009,15 @@ class VirtualHumanLifeService:
             # message by omitting the key.
             if not normalized_idempotency_key and normalized_source_event_id:
                 normalized_idempotency_key = f"life-event:{normalized_source_event_id}"
+            normalized_tool_activity = self._normalize_proactive_tool_activity(
+                tool_activity
+            )
             request_fingerprint = self._proactive_request_fingerprint(
                 agent_id=str(agent_id).strip(),
                 reason=str(reason or "").strip()[:600],
                 source_event_id=normalized_source_event_id,
                 idempotency_key=normalized_idempotency_key,
+                tool_activity=normalized_tool_activity,
             )
             if normalized_idempotency_key:
                 previous = self._proactive_attempt_for_idempotency_key(
@@ -1042,6 +1075,8 @@ class VirtualHumanLifeService:
                 "validUntil": expires_at,
                 "localDate": local_now.date().isoformat(),
             }
+            if normalized_tool_activity:
+                attempt["toolActivity"] = normalized_tool_activity
             self.store.append_jsonl(
                 agent_id,
                 "proactive/triggers.jsonl",
@@ -1134,6 +1169,11 @@ class VirtualHumanLifeService:
                         "sourceEventId": attempt["sourceEventId"],
                         "idempotencyKey": attempt["idempotencyKey"],
                         "validUntil": attempt["validUntil"],
+                        **(
+                            {"toolActivity": dict(attempt["toolActivity"])}
+                            if isinstance(attempt.get("toolActivity"), dict)
+                            else {}
+                        ),
                     },
                 )
             except Exception as exc:  # noqa: BLE001 - Session submitter adapter boundary
@@ -2029,6 +2069,10 @@ class VirtualHumanLifeService:
                 reason=reason,
                 valid_for_minutes=60,
                 idempotency_key=f"life-activity-execution:{activity_id}",
+                tool_activity={
+                    "activityId": activity_id,
+                    "requiredToolNames": required_tools,
+                },
             )
             dispatch_status = str(attempt.get("status") or "requested")
             turn_id = str(attempt.get("turnId") or "")
@@ -2198,6 +2242,7 @@ class VirtualHumanLifeService:
         reason: str,
         source_event_id: str,
         idempotency_key: str,
+        tool_activity: dict[str, Any] | None = None,
     ) -> str:
         return hashlib.sha256(
             json.dumps(
@@ -2206,12 +2251,35 @@ class VirtualHumanLifeService:
                     "reason": reason,
                     "sourceEventId": source_event_id,
                     "idempotencyKey": idempotency_key,
+                    "toolActivity": dict(tool_activity or {}),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
+
+    @staticmethod
+    def _normalize_proactive_tool_activity(
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        activity_id = str(value.get("activityId") or "").strip()[:160]
+        required_tools: list[str] = []
+        for item in list(value.get("requiredToolNames") or []):
+            name = str(item or "").strip()[:160]
+            if not name or name in required_tools:
+                continue
+            required_tools.append(name)
+            if len(required_tools) >= 8:
+                break
+        if not activity_id or not required_tools:
+            return {}
+        return {
+            "activityId": activity_id,
+            "requiredToolNames": required_tools,
+        }
 
     def _proactive_attempt_for_idempotency_key(
         self,

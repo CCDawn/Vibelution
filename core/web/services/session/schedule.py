@@ -92,8 +92,34 @@ def _schedule_session_turn(context: dict[str, Any]) -> None:
 
 def _submit_scheduled_session_turn(context: dict[str, Any]) -> None:
     s = _service()
+    if bool(context.get("_scheduler_deferred_session_admission")):
+        from .proactive import (
+            admit_session_proactive_turn,
+            cancel_proactive_turn_context,
+        )
+
+        try:
+            admission = admit_session_proactive_turn(context)
+        except Exception:
+            cancel_proactive_turn_context(context, reason="admission_failed")
+            raise
+        if admission == "defer":
+            # A user turn won the admission race.  Relinquish the provisional
+            # scheduler slot, start the user-owned queued context, then append
+            # this low-priority proactive turn behind it.
+            _release_scheduled_session_turn(context)
+            s._schedule_session_turn(context)
+            return
+        if admission != "admitted":
+            _release_scheduled_session_turn(context)
+            return
     context["_executor_submitted_at_monotonic"] = s._perf_counter()
-    s._SESSION_EXECUTOR.submit(_execute_scheduled_session_turn, context)
+    try:
+        s._SESSION_EXECUTOR.submit(_execute_scheduled_session_turn, context)
+    except Exception:
+        if bool(context.get("_scheduler_deferred_session_admission")):
+            cancel_proactive_turn_context(context, reason="executor_submit_failed")
+        raise
 
 def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
     s = _service()

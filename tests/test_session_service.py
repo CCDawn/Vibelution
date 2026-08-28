@@ -2031,6 +2031,54 @@ def test_messages_with_live_output_reuses_normalized_projection(monkeypatch):
     ) == normalized_messages
 
 
+def test_messages_with_live_output_does_not_reopen_a_terminal_turn(monkeypatch):
+    from core.web.services import session_service
+
+    normalized_messages = [
+        {
+            "id": "assistant-terminal",
+            "role": "assistant",
+            "status": "completed",
+            "turnId": "turn-terminal",
+            "turnItems": [],
+        }
+    ]
+    live_message = {
+        "id": "assistant-live-terminal",
+        "role": "assistant",
+        "status": "running",
+        "turnId": "turn-terminal",
+        "metadata": {"turnId": "turn-terminal"},
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_build_live_output_message",
+        lambda _session_id: live_message,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_events_have_terminal_turn",
+        lambda _events, turn_id: turn_id == "turn-terminal",
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_without_live_turn_ledger_partials",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("terminal live overlay must not reach merge")
+        ),
+    )
+
+    assert session_service._messages_with_live_output(
+        "session-terminal",
+        normalized_messages=normalized_messages,
+    ) == normalized_messages
+
+
 def _stub_session_query_source(monkeypatch, summaries):
     monkeypatch.setattr(
         session_service,

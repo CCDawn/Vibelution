@@ -67,8 +67,7 @@ class SessionTurnScheduler:
             if queue_reason:
                 self._set_queue_fields(job_context, queue_reason)
                 queue_bucket = self._queues.setdefault(str(job_context["_scheduler_agent_key"]), deque())
-                queue_bucket.append(job_context)
-                queued_position = len(queue_bucket)
+                queued_position = self._enqueue_chat_context_locked(queue_bucket, job_context)
             else:
                 self._activate_locked(job_context)
                 should_start = True
@@ -276,7 +275,8 @@ class SessionTurnScheduler:
 
                     candidate_session_id = str(candidate.get("session_id") or "").strip()
                     candidate_turn_id = str(candidate.get("turn_id") or "").strip()
-                    if not (
+                    deferred_admission = bool(candidate.get("_scheduler_deferred_session_admission"))
+                    if not deferred_admission and not (
                         self._is_session_running(candidate_session_id)
                         and self._is_session_turn_current(candidate_session_id, candidate_turn_id)
                     ):
@@ -416,15 +416,51 @@ class SessionTurnScheduler:
     def _chat_queue_reason_locked(self, context: dict[str, Any], *, respect_external_waiter: bool) -> str:
         agent_key = str(context.get("_scheduler_agent_key") or "").strip()
         session_key = str(context.get("_scheduler_session_key") or "").strip()
+        session_id = str(context.get("session_id") or context.get("sessionId") or "").strip()
+        turn_id = str(context.get("turn_id") or context.get("turnId") or "").strip()
         if self._active_external_turn_ids_by_agent.get(agent_key):
             return "agent_external_active"
         if respect_external_waiter and self._agent_has_external_waiter_locked(agent_key):
             return "agent_external_waiting"
         if self._active_turn_ids_by_session.get(session_key):
             return "session_active"
+        if (
+            session_id
+            and self._is_session_running(session_id)
+            and not self._is_session_turn_current(session_id, turn_id)
+        ):
+            # A process-local scheduler entry may be missing after recovery or
+            # during the small gap before another submit reaches this lock.  A
+            # deferred plugin turn must queue behind that authoritative runtime
+            # owner instead of replacing its SessionTurnControl.
+            return "session_runtime_active"
         if self._agent_active_count_locked(agent_key) >= self._max_active_per_agent:
             return "agent_concurrency_limit"
         return ""
+
+    @staticmethod
+    def _enqueue_chat_context_locked(
+        queue_bucket: deque[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> int:
+        """Insert user turns before low-priority proactive turns, preserving FIFO peers."""
+
+        priority = int(context.get("_scheduler_priority") or 0)
+        if not queue_bucket or priority >= 100:
+            queue_bucket.append(context)
+            return len(queue_bucket)
+        items = list(queue_bucket)
+        insertion_index = len(items)
+        for index, queued in enumerate(items):
+            if bool(queued.get("_scheduler_external")):
+                continue
+            if int(queued.get("_scheduler_priority") or 0) > priority:
+                insertion_index = index
+                break
+        items.insert(insertion_index, context)
+        queue_bucket.clear()
+        queue_bucket.extend(items)
+        return insertion_index + 1
 
     def _can_start_external_locked(self, context: dict[str, Any]) -> bool:
         agent_key = str(context.get("_scheduler_agent_key") or "").strip()

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage, SessionTurnItem } from "../api/types";
 import {
+  assistantTurnIsInFlight,
+  assistantTurnIsStreaming,
   codexTranscriptFromTurnItems,
   consolidateSessionTurnItemsV2,
   hasCommittedAssistantProtocolAnswer,
@@ -32,6 +34,39 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     }) as ConversationMessage;
     expect(hasCommittedAssistantProtocolAnswer(message)).toBe(true);
     expect(message).not.toHaveProperty("content");
+  });
+
+  it("does not keep a contradictory running message in flight after a terminal item", () => {
+    const item: SessionTurnItem = {
+      ...base, id: "answer-terminal", itemId: "answer", type: "agent_message", phase: "final_answer",
+      text: "已经完成。", status: "completed", revision: 1, sequence: 1, terminal: true,
+    };
+    const staleRunningMessage: ConversationMessage = {
+      id: "message-stale-running", role: "assistant", timestamp: "2026-08-28T11:00:00Z",
+      turnId: "turn-1", status: "running", turnItems: [item],
+    };
+
+    expect(assistantTurnIsStreaming(staleRunningMessage)).toBe(false);
+    expect(assistantTurnIsInFlight(staleRunningMessage)).toBe(false);
+  });
+
+  it("keeps the turn running when only a commentary child item is terminal", () => {
+    const commentary: SessionTurnItem = {
+      ...base, id: "commentary-terminal", itemId: "commentary", type: "agent_message",
+      phase: "commentary", text: "上一段过程已经完成。", status: "completed", revision: 1,
+      sequence: 1, terminal: true,
+    };
+    const reasoning: SessionTurnItem = {
+      ...base, id: "reasoning-running", itemId: "reasoning", type: "reasoning",
+      text: "仍在继续思考。", status: "running", revision: 1, sequence: 2, terminal: false,
+    };
+    const runningMessage: ConversationMessage = {
+      id: "message-still-running", role: "assistant", timestamp: "2026-08-28T11:00:00Z",
+      turnId: "turn-1", status: "running", turnItems: [commentary, reasoning],
+    };
+
+    expect(assistantTurnIsStreaming(runningMessage)).toBe(true);
+    expect(assistantTurnIsInFlight(runningMessage)).toBe(true);
   });
 
   it("keeps the rendered tool row identity stable across revisions", () => {

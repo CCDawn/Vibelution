@@ -162,6 +162,58 @@ def test_session_turn_scheduler_reports_dropped_stale_turns_even_without_next_tu
     assert [item["turn_id"] for item in released.dropped_contexts] == ["turn-2"]
 
 
+def test_session_turn_scheduler_keeps_deferred_proactive_turn_until_admission():
+    queued = []
+    dequeued = []
+    scheduler = _scheduler(
+        running={"session-a": False},
+        current={("session-a", "turn-proactive"): False},
+        queued=queued,
+        dequeued=dequeued,
+    )
+    active = {"session_id": "session-a", "turn_id": "turn-user", "agent_id": "agent-a"}
+    proactive = {
+        "session_id": "session-a",
+        "turn_id": "turn-proactive",
+        "agent_id": "agent-a",
+        "_scheduler_deferred_session_admission": True,
+        "_scheduler_priority": 100,
+    }
+
+    scheduler.schedule(active, submit=lambda _context: None, release=lambda _context: None)
+    scheduler.schedule(proactive, submit=lambda _context: None, release=lambda _context: None)
+    released = scheduler.release(active)
+
+    assert queued == [("turn-proactive", 1)]
+    assert released is not None
+    assert released.context is not None
+    assert released.context["turn_id"] == "turn-proactive"
+    assert released.dropped_contexts == []
+    assert dequeued == ["turn-proactive"]
+
+
+def test_session_turn_scheduler_prioritizes_user_turn_ahead_of_queued_proactive_turn():
+    scheduler = _scheduler()
+    active = {"session_id": "session-a", "turn_id": "turn-active", "agent_id": "agent-a"}
+    proactive = {
+        "session_id": "session-a",
+        "turn_id": "turn-proactive",
+        "agent_id": "agent-a",
+        "_scheduler_deferred_session_admission": True,
+        "_scheduler_priority": 100,
+    }
+    user = {"session_id": "session-a", "turn_id": "turn-user", "agent_id": "agent-a"}
+
+    scheduler.schedule(active, submit=lambda _context: None, release=lambda _context: None)
+    scheduler.schedule(proactive, submit=lambda _context: None, release=lambda _context: None)
+    scheduler.schedule(user, submit=lambda _context: None, release=lambda _context: None)
+    released = scheduler.release(active)
+
+    assert released is not None
+    assert released.context is not None
+    assert released.context["turn_id"] == "turn-user"
+
+
 @pytest.mark.slow
 def test_session_turn_scheduler_releases_external_reservation_after_active_turn():
     runner = FakeTurnRunner()

@@ -313,9 +313,18 @@ def build_virtual_human_prompt_segments(
         return []
 
 
-def filter_virtual_human_tool_names(agent_id: str, tool_names: list[str]) -> list[str]:
+def filter_virtual_human_tool_names(
+    agent_id: str,
+    tool_names: list[str],
+    *,
+    runtime_context: dict[str, Any] | None = None,
+) -> list[str]:
     try:
-        return get_virtual_human_life_service().filter_tool_names(agent_id, tool_names)
+        return get_virtual_human_life_service().filter_tool_names(
+            agent_id,
+            tool_names,
+            runtime_context=runtime_context,
+        )
     except Exception as exc:  # noqa: BLE001 - tool projection must fail closed
         logger.warning(
             "Virtual human tool projection failed for agent=%s (%s).",
@@ -323,6 +332,16 @@ def filter_virtual_human_tool_names(agent_id: str, tool_names: list[str]) -> lis
             type(exc).__name__,
         )
         plugin_prefix = "virtual_human_"
+        try:
+            binding = get_virtual_human_life_service().binding_for(agent_id)
+        except Exception:  # noqa: BLE001 - fail-closed binding probe
+            binding = None
+        if binding and bool(binding.get("enabled")):
+            return [
+                name
+                for name in tool_names
+                if str(name or "").startswith(plugin_prefix)
+            ]
         return [name for name in tool_names if not str(name or "").startswith(plugin_prefix)]
 
 

@@ -1234,6 +1234,7 @@ def effective_visible_tool_names_for_current_agent(tools: Iterable[Any] | None =
     return filter_virtual_human_tool_names(
         str(runtime.get("agentId") or "").strip(),
         visible_tools,
+        runtime_context=runtime,
     )
 
 
