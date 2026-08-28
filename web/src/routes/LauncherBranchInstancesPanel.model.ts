@@ -659,9 +659,17 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
     && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial" || startingOrRestarting);
 }
 
-/** Force-stop is a recovery action for any non-current registry row. */
+/**
+ * Force-stop is a recovery action for any non-current registry row. The
+ * current/main row only gets it while its lifecycle is stuck in error: the
+ * plain stop/restart path may then be refused by the active-work guard, so
+ * this row still needs its own way out instead of a silent dead end.
+ */
 export function canForceStopInstance(item: LauncherBranchInstance): boolean {
-  return !item.current;
+  if (!item.current) {
+    return true;
+  }
+  return item.runtime.lifecycleState === "error";
 }
 
 export function paginateItems<T>(items: readonly T[], page: number, pageSize = BRANCH_INSTANCE_PAGE_SIZE) {

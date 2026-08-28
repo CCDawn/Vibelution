@@ -464,6 +464,24 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canForceStopInstance(current)).toBe(false);
   });
 
+  it("keeps a force-stop exit for the current/main row while its lifecycle is stuck in error", () => {
+    const currentError = instance({
+      current: true,
+      id: "main",
+      kind: "main",
+      branch: "main",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+        error: { code: "runtime_error", message: "launch failed" },
+      },
+    });
+    const currentRunning = instance({ current: true, id: "main", kind: "main", branch: "main" });
+
+    expect(canForceStopInstance(currentError)).toBe(true);
+    expect(canForceStopInstance(currentRunning)).toBe(false);
+  });
+
   it("lets an unknown missing-worktree leftover close without cleanup", () => {
     const missing = instance({
       id: "retired:agent-config-focused-implementation",

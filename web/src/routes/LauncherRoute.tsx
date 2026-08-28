@@ -100,6 +100,11 @@ export function LauncherRoute() {
   const { request: requestWorkbenchLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"info" | "error">("info");
+  const showNotice = (text: string, tone: "info" | "error" = "info") => {
+    setNotice(text);
+    setNoticeTone(tone);
+  };
   const [lifecycleIntents, setLifecycleIntents] = useState<LifecycleIntentTable>({});
   const lifecycleIntentsRef = useRef<LifecycleIntentTable>({});
   lifecycleIntentsRef.current = lifecycleIntents;
@@ -135,7 +140,16 @@ export function LauncherRoute() {
           return next;
         });
       }
-      setNotice(response.message || (response.accepted ? (lang === "zh" ? "生命周期操作已提交。" : "Lifecycle operation submitted.") : (lang === "zh" ? "Launcher 拒绝了该操作。" : "Launcher rejected the operation.")));
+      const fallback = response.accepted
+        ? (lang === "zh" ? "生命周期操作已提交。" : "Lifecycle operation submitted.")
+        : (lang === "zh" ? "Launcher 拒绝了该操作。" : "Launcher rejected the operation.");
+      const message = response.message || fallback;
+      // A refusal must stay visible on the row it belongs to: name the branch
+      // and flag the notice as an error instead of a neutral status line.
+      showNotice(
+        response.accepted ? message : withBranchLabel(request.instanceId, message),
+        response.accepted ? "info" : "error",
+      );
       refreshLauncherData();
     },
     onError: (error, request) => {
@@ -145,25 +159,28 @@ export function LauncherRoute() {
         lifecycleIntentsRef.current = next;
         return next;
       });
-      setNotice(error instanceof Error ? error.message : String(error));
+      showNotice(
+        withBranchLabel(request.instanceId, error instanceof Error ? error.message : String(error)),
+        "error",
+      );
       refreshLauncherData();
     },
   });
   const startupSettingsMutation = useMutation({
     mutationFn: updateLauncherStartupSettings,
     onSuccess: (response) => {
-      setNotice(response.message || (lang === "zh" ? "启动设置已保存。" : "Startup settings saved."));
+      showNotice(response.message || (lang === "zh" ? "启动设置已保存。" : "Startup settings saved."));
       refreshLauncherData();
     },
-    onError: (error) => setNotice(error instanceof Error ? error.message : String(error)),
+    onError: (error) => showNotice(error instanceof Error ? error.message : String(error), "error"),
   });
   const windowModeMutation = useMutation({
     mutationFn: saveLauncherWorkbenchWindowMode,
     onSuccess: (response) => {
-      setNotice(response.message || (lang === "zh" ? "启动窗口模式已保存。" : "Startup window mode saved."));
+      showNotice(response.message || (lang === "zh" ? "启动窗口模式已保存。" : "Startup window mode saved."));
       refreshLauncherData();
     },
-    onError: (error) => setNotice(error instanceof Error ? error.message : String(error)),
+    onError: (error) => showNotice(error instanceof Error ? error.message : String(error), "error"),
   });
 
   const status = statusQuery.data;
@@ -172,6 +189,11 @@ export function LauncherRoute() {
   const configuredWindowMode = setting?.workbench.windowMode ?? status?.settings?.workbenchWindow?.mode ?? "fullscreen";
   const effectiveWindowMode = setting?.workbench.effectiveWindowMode ?? status?.settings?.workbenchWindow?.effectiveMode ?? configuredWindowMode;
   const branchItems = branchInstancesQuery.data?.items ?? [];
+  const withBranchLabel = (instanceId: string, message: string) => {
+    const instance = branchItems.find((item) => item.id === instanceId);
+    const label = instance?.shortName || instance?.branch || instanceId;
+    return `${label}${lang === "zh" ? "：" : ": "}${message}`;
+  };
   useEffect(() => {
     setLifecycleIntents((current) => {
       const next = settleLifecycleIntentTable(current, branchItems);
@@ -198,7 +220,10 @@ export function LauncherRoute() {
       baselineLifecycleState: instance?.runtime.lifecycleState,
     });
     if (!accepted.accepted || !accepted.intent) {
-      setNotice(lifecycleIntentRejectMessage(accepted.reason === "duplicate" ? "duplicate" : "blocked", lang === "zh", intentOperation));
+      showNotice(
+        withBranchLabel(instanceId, lifecycleIntentRejectMessage(accepted.reason === "duplicate" ? "duplicate" : "blocked", lang === "zh", intentOperation)),
+        "error",
+      );
       return { accepted: false, reason: accepted.reason === "duplicate" ? "duplicate" : "blocked" };
     }
     lifecycleIntentsRef.current = accepted.table;
@@ -259,7 +284,7 @@ export function LauncherRoute() {
           />
         </div>
       </div>
-      {notice ? <VStateSurface className={styles.notice} tone="info" title={notice} /> : null}
+      {notice ? <VStateSurface className={styles.notice} tone={noticeTone} title={notice} /> : null}
       {controlPlaneStarting ? <VStateSurface className={styles.notice} tone="loading" title={lang === "zh" ? "Launcher 正在启动控制面。" : "Launcher control plane is starting."} skeletonLines={2} /> : null}
       {statusQuery.isError && !controlPlaneStarting ? <VStateSurface className={styles.notice} tone="error" title={lang === "zh" ? "Launcher 状态读取失败" : "Launcher status could not be read"} /> : null}
     </VDenseOpsPage>
