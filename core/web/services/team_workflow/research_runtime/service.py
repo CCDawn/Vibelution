@@ -451,6 +451,29 @@ def _park_auto_revision_exhausted(
     return store.get_run(parent_run_id) or completed
 
 
+def _definition_meta_from(
+    workflow_id: str,
+    definition: Any = None,
+    identity: Any = None,
+) -> tuple[Any, Any]:
+    """Validate the workflowId and return (definition, identity) for creation.
+
+    Callers that must keep ONE rollout-mode reading across a whole creation
+    transaction (e.g. ``create_run``) pass the already-resolved
+    ``definition``/``identity`` through; every independent call resolves the
+    current rollout mode exactly once here.
+    """
+    if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
+        raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
+    if definition is None or identity is None:
+        # Rollout-mode aware: off/shadow pin the 2.1.0 default, on pins the
+        # registered main-flow 3.0.0 definition (see knowledge_rollout).
+        from .knowledge_rollout import creation_workflow_definition
+
+        definition, identity = creation_workflow_definition()
+    return definition, identity
+
+
 class ResearchWorkflowRuntimeService:
     def __init__(
         self,
@@ -473,13 +496,7 @@ class ResearchWorkflowRuntimeService:
         self._command_memory: dict[str, str] = {}  # key -> run_id snapshot path only for process; reloaded from index
 
     def get_definition(self, workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID) -> dict[str, Any]:
-        if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
-            raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
-        # Rollout-mode aware: off/shadow pin the 2.1.0 default, on pins the
-        # registered main-flow 3.0.0 definition (see knowledge_rollout).
-        from .knowledge_rollout import creation_workflow_definition
-
-        definition, identity = creation_workflow_definition()
+        definition, identity = _definition_meta_from(workflow_id)
         return {
             "workflowId": definition.workflowId,
             "workflowVersionId": identity.workflowVersionId,
@@ -726,7 +743,13 @@ class ResearchWorkflowRuntimeService:
         idempotency_key: str = "",
     ) -> dict[str, Any]:
         with self._lock:
-            meta = self.get_definition(workflow_id)
+            # ONE rollout-mode reading per creation: the (definition, identity)
+            # pair resolved here is threaded through every downstream use
+            # (binding snapshots, frozen input snapshot, initial checkpoint,
+            # run record).  A mode flip between two independent reads could
+            # otherwise produce a workflowVersionId that disagrees with the
+            # checkpoint/structureHash inside the same run.
+            creation_definition, creation_identity = _definition_meta_from(workflow_id)
             create_input_fingerprints = _create_request_fingerprints(run_input)
             create_input_fingerprint = create_input_fingerprints[0]
             run_id = run_id_for_create(workflow_id, idempotency_key)
@@ -768,7 +791,7 @@ class ResearchWorkflowRuntimeService:
             )
             snapshots = build_run_binding_snapshots(
                 run_id=run_id,
-                workflow_version_id=meta["workflowVersionId"],
+                workflow_version_id=creation_identity.workflowVersionId,
                 layers=layers,
                 captured_at=_utc_now(),
             )
@@ -777,7 +800,7 @@ class ResearchWorkflowRuntimeService:
             try:
                 input_snapshot = freeze_run_input(
                     run_input,
-                    workflow_version_id=meta["workflowVersionId"],
+                    workflow_version_id=creation_identity.workflowVersionId,
                     binding_snapshots=binding_payloads,
                     created_at=created_at,
                 )
@@ -785,12 +808,9 @@ class ResearchWorkflowRuntimeService:
                 raise ResearchWorkflowError(str(exc), code="invalid_run_input") from exc
 
             # The pinned definition must be the same object identity used for
-            # the initial checkpoint and the frozen run record.  Rollout-mode
-            # aware: off/shadow keep 2.1.0, on pins main-flow 3.0.0 — matching
-            # the version identity returned by ``get_definition`` above.
-            from .knowledge_rollout import creation_workflow_definition
-
-            definition, _creation_identity = creation_workflow_definition()
+            # the initial checkpoint and the frozen run record — the exact
+            # pair resolved at the top of this method (single mode reading).
+            definition = creation_definition
             checkpoint_id = prepare_initial_checkpoint(
                 self._checkpoint_path,
                 thread_id,
@@ -799,7 +819,7 @@ class ResearchWorkflowRuntimeService:
             record = build_initial_run_record(
                 run_id=run_id,
                 workflow_id=workflow_id,
-                workflow_version_id=meta["workflowVersionId"],
+                workflow_version_id=creation_identity.workflowVersionId,
                 structure_hash=definition.structureHash,
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,

@@ -28,6 +28,7 @@ def build_command_offers(
     evaluated_at_ms: int | None = None,
     revise_checkpoint_id: str | None = None,
     invocations: Sequence[Any] = (),
+    definition_resolution: str = "pinned",
 ) -> list[CommandOffer]:
     if run is None:
         if run_id is None or run_version is None:
@@ -69,4 +70,5 @@ def build_command_offers(
         evaluated_at_ms=evaluated_at_ms,
         revise_checkpoint_id=revise_checkpoint_id,
         invocations=invocations,
+        definition_resolution=definition_resolution,
     )

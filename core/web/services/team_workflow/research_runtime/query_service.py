@@ -179,6 +179,7 @@ class WorkflowQueryService:
             ),
             revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
             invocations=knowledge_invocations,
+            definition_resolution=definition_resolution,
         )
         return build_research_workflow_snapshot(
             ProjectionInputs(

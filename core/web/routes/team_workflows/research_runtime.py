@@ -220,6 +220,7 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
     elif code in {
         "run_version_conflict",
         "idempotency_conflict",
+        "definition_resolution_degraded",
         "lease_owner_mismatch",
         "invalid_node_state",
         "invalid_human_task_state",

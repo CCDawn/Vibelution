@@ -68,14 +68,11 @@ from tests._support.graph_helpers import GraphHarness
 
 
 def _patch_mode(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
-    monkeypatch.setattr(
-        "config.settings.get_config",
-        lambda: SimpleNamespace(
-            research=SimpleNamespace(
-                knowledge_sideflow=SimpleNamespace(mode=mode)
-            )
-        ),
-    )
+    from config.models import AppConfig
+
+    config = AppConfig()
+    config.research.knowledge_sideflow.mode = mode
+    monkeypatch.setattr("config.settings.get_config", lambda: config)
 
 
 @pytest.fixture(autouse=True)
@@ -135,11 +132,10 @@ def _live_run() -> SimpleNamespace:
     return SimpleNamespace(run_id="run-1", run_version=3, status="running", active_node_id="hypothesis_design")
 
 
-@pytest.mark.parametrize("mode", ["shadow", "on"])
-def test_shadow_and_on_modes_surface_knowledge_offers(
-    monkeypatch: pytest.MonkeyPatch, mode: str
+def test_on_mode_surfaces_both_knowledge_offers(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_mode(monkeypatch, mode)
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_ON)
     offers = build_knowledge_collection_offers(run=_live_run())
     commands = [offer.command for offer in offers]
     assert WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION in commands
@@ -609,3 +605,403 @@ def test_inspect_receipt_reports_current_mode(
         assert receipt.result["knowledgeSideflowMode"] == KNOWLEDGE_SIDEFLOW_MODE_SHADOW
     finally:
         harness.close()
+
+
+# ---------------------------------------------------------------------------
+# 6) P1-1: degraded definition fail-closes mutations (submit + offers)
+# ---------------------------------------------------------------------------
+
+
+def _seeded_command_harness(tmp_path: Path, *, version_id: str) -> GraphHarness:
+    harness = GraphHarness(tmp_path)
+    harness.seed(run_id="run-gate", workflow_version_id=version_id)
+    return harness
+
+
+def test_degraded_registry_run_rejects_mutation_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.command_service import (
+        DefinitionResolutionDegradedError,
+    )
+
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_ON)
+    harness = _seeded_command_harness(tmp_path, version_id="wv-000000000000")
+    try:
+        with pytest.raises(DefinitionResolutionDegradedError) as excinfo:
+            harness.commands.command_service.submit(
+                harness.commands.request(
+                    command=WorkflowCommandKind.START_NODE,
+                    node_id="problem_understanding",
+                    run_id="run-gate",
+                    team_id="research-team",
+                    expected_run_version=1,
+                    idempotency_key="gate:start:1",
+                )
+            )
+        assert excinfo.value.code == "definition_resolution_degraded"
+    finally:
+        harness.close()
+
+
+def test_preregistry_run_keeps_legacy_mutation_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.command_service import (
+        DefinitionResolutionDegradedError,
+    )
+
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_ON)
+    harness = _seeded_command_harness(
+        tmp_path, version_id="challenge-cup-research-v2.1.0"
+    )
+    try:
+        with pytest.raises(Exception) as excinfo:  # noqa: PT011 - any outcome but degraded
+            harness.commands.command_service.submit(
+                harness.commands.request(
+                    command=WorkflowCommandKind.START_NODE,
+                    node_id="problem_understanding",
+                    run_id="run-gate",
+                    team_id="research-team",
+                    expected_run_version=1,
+                    idempotency_key="gate:start:legacy",
+                )
+            )
+        assert not isinstance(excinfo.value, DefinitionResolutionDegradedError)
+    finally:
+        harness.close()
+
+
+def test_degraded_snapshot_only_surfaces_read_only_offers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.research.workflow.contracts import WorkflowCommandKind as Kind
+    from tests._support.command_helpers import CommandHarness
+    from core.web.services.team_workflow.research_runtime.command_offers import (
+        build_command_offers,
+    )
+
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_ON)
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_stub = SimpleNamespace(
+            run_id="run-degraded",
+            run_version=4,
+            status="running",
+            active_node_id="problem_understanding",
+            forked_from_checkpoint_id=None,
+            workflow_version_id="wv-000000000000",
+        )
+        definition = build_challenge_cup_workflow_definition()
+        mutation_kinds = {
+            Kind.START_NODE,
+            Kind.RETRY_NODE,
+            Kind.RESOLVE_HUMAN_TASK,
+            Kind.REBIND_NODE,
+            Kind.FORK_REVISION,
+            Kind.EXTEND_BUDGET,
+            Kind.RECONCILE_RUN,
+            Kind.ARCHIVE_RUN,
+            Kind.CANCEL_RUN,
+            Kind.CANCEL_NODE,
+            Kind.ENSURE_KNOWLEDGE_COLLECTION,
+        }
+        degraded_offers = build_command_offers(
+            readiness_service=harness.readiness,
+            context=harness.context,
+            team_id="research-team",
+            run=run_stub,
+            definition=definition,
+            definition_resolution="degraded",
+        )
+        assert degraded_offers, "read-only inspect offer must survive degradation"
+        assert all(offer.command not in mutation_kinds for offer in degraded_offers)
+        assert all(
+            offer.command == Kind.INSPECT_KNOWLEDGE_COLLECTION
+            for offer in degraded_offers
+        )
+
+        pinned_offers = build_command_offers(
+            readiness_service=harness.readiness,
+            context=harness.context,
+            team_id="research-team",
+            run=run_stub,
+            definition=definition,
+            definition_resolution="pinned",
+        )
+        assert any(offer.command in mutation_kinds for offer in pinned_offers)
+
+        # Pre-registry literal runs: the read layer substitutes the legacy
+        # default (the same graph the command service executes), so legacy
+        # mutation semantics stay intact even when the snapshot badge reads
+        # degraded — mirrors the submit-layer registry-era carve-out.
+        legacy_stub = SimpleNamespace(
+            run_id="run-degraded",
+            run_version=4,
+            status="running",
+            active_node_id="problem_understanding",
+            forked_from_checkpoint_id=None,
+            workflow_version_id="challenge-cup-research-v2.1.0",
+        )
+        legacy_degraded_offers = build_command_offers(
+            readiness_service=harness.readiness,
+            context=harness.context,
+            team_id="research-team",
+            run=legacy_stub,
+            definition=definition,
+            definition_resolution="degraded",
+        )
+        assert any(
+            offer.command in mutation_kinds for offer in legacy_degraded_offers
+        )
+    finally:
+        harness.close()
+
+
+# ---------------------------------------------------------------------------
+# 7) P1-2: ensure is on-only, inspect is shadow/on, both fail closed off
+# ---------------------------------------------------------------------------
+
+
+def _ensure_request_for(harness: GraphHarness, idempotency_key: str):
+    return harness.commands.request(
+        command=WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION,
+        node_id="hypothesis_design",
+        run_id="run-gate",
+        team_id="research-team",
+        expected_run_version=1,
+        idempotency_key=idempotency_key,
+        payload={
+            "questionId": "SCI-096",
+            "searchEnvelope": {"keywords": ["evaporation"]},
+            "requirements": {"minSources": 2},
+            "sourcePolicyVersion": "1",
+        },
+    )
+
+
+def test_shadow_mode_never_creates_real_child_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.command_service import (
+        KnowledgeCommandError,
+    )
+    from core.web.services.team_workflow.research_runtime.command_offers.knowledge_collection import (
+        build_knowledge_collection_offers as _offers,
+    )
+
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_SHADOW)
+    harness = _seeded_command_harness(tmp_path, version_id=_legacy_version_id())
+    try:
+        # Offer layer: inspection only — ensure must not even render.
+        offers = _offers(
+            run=SimpleNamespace(
+                run_id="run-gate",
+                run_version=1,
+                status="running",
+                active_node_id="hypothesis_design",
+            )
+        )
+        commands = [offer.command for offer in offers]
+        assert WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION not in commands
+        assert WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION in commands
+
+        # Server-side gate: a direct API call is rejected fail-closed.
+        with pytest.raises(KnowledgeCommandError) as excinfo:
+            harness.commands.command_service.submit(
+                _ensure_request_for(harness, "kc:ensure:shadow-denied")
+            )
+        assert excinfo.value.code == "knowledge_sideflow_disabled"
+
+        # And inspection stays servable in shadow.
+        receipt = harness.commands.command_service.submit(
+            harness.commands.request(
+                command=WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION,
+                run_id="run-gate",
+                team_id="research-team",
+                expected_run_version=1,
+                idempotency_key="kc:inspect:shadow-ok",
+                payload={},
+            )
+        )
+        assert receipt.status == "accepted"
+        child_rows = harness.commands.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT run_id FROM workflow_runs WHERE workflow_id = "
+                "'challenge-cup-knowledge-sideflow'"
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert child_rows == []
+    finally:
+        harness.close()
+
+
+def test_off_mode_rejects_ensure_and_inspect_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.command_service import (
+        KnowledgeCommandError,
+    )
+
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_OFF)
+    harness = _seeded_command_harness(tmp_path, version_id=_legacy_version_id())
+    try:
+        with pytest.raises(KnowledgeCommandError) as ensure_exc:
+            harness.commands.command_service.submit(
+                _ensure_request_for(harness, "kc:ensure:off-denied")
+            )
+        assert ensure_exc.value.code == "knowledge_sideflow_disabled"
+        with pytest.raises(KnowledgeCommandError) as inspect_exc:
+            harness.commands.command_service.submit(
+                harness.commands.request(
+                    command=WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION,
+                    run_id="run-gate",
+                    team_id="research-team",
+                    expected_run_version=1,
+                    idempotency_key="kc:inspect:off-denied",
+                    payload={},
+                )
+            )
+        assert inspect_exc.value.code == "knowledge_sideflow_disabled"
+    finally:
+        harness.close()
+
+
+# ---------------------------------------------------------------------------
+# 8) P1-3: one rollout-mode reading per creation
+# ---------------------------------------------------------------------------
+
+
+def test_service_create_run_reads_rollout_mode_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import core.web.services.team_workflow.research_runtime.knowledge_rollout as rollout_module
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime.service import (
+        ResearchWorkflowRuntimeService,
+    )
+    from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_ON)
+    calls = {"count": 0}
+    original = rollout_module.creation_workflow_definition
+
+    def counting():
+        calls["count"] += 1
+        return original()
+
+    monkeypatch.setattr(rollout_module, "creation_workflow_definition", counting)
+
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
+    )
+    baseline_input = json.loads(
+        fixture_path.read_text(encoding="utf-8")
+    )["runInput"]
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=baseline_input,
+        idempotency_key="rollout:create:once",
+    )
+    record = service.get_run(run["runId"])
+    v3_identity = register_or_resolve(
+        build_challenge_cup_workflow_definition_v3()
+    )
+    assert record["workflowVersionId"] == v3_identity.workflowVersionId
+    assert record["structureHash"] == v3_identity.structureHash
+    assert calls["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 9) P2-4: shadow store idempotency + corruption isolation
+# ---------------------------------------------------------------------------
+
+
+def test_shadow_records_are_idempotent_on_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_SHADOW)
+    kwargs = {
+        "team_id": "team-idem",
+        "question_id": "SCI-096",
+        "scope": {"questionId": "SCI-096"},
+        "search_envelope": {"keywords": ["evaporation"]},
+        "requirements": {"minSources": 3},
+        "collection_request_id": "hfcr-idem-1",
+        "now_provider": lambda: 1_000,
+    }
+    first = record_shadow_knowledge_invocation(**kwargs)
+    assert first is not None
+    for replay_run_id in ("run-col-1", "run-col-2", "run-col-3"):
+        replayed = record_shadow_knowledge_invocation(
+            **{**kwargs, "collection_run_id": replay_run_id}
+        )
+        assert replayed["invocationId"] == first["invocationId"]
+    payload = list_shadow_knowledge_invocations("team-idem")
+    assert payload["total"] == 1
+    assert payload["records"][0]["collectionRunId"] == ""  # first record wins
+
+    # A different envelope fingerprint is a NEW shadow invocation.
+    second = record_shadow_knowledge_invocation(
+        **{
+            **kwargs,
+            "search_envelope": {"keywords": ["condensation"]},
+            "collection_request_id": "hfcr-idem-2",
+        }
+    )
+    assert second["invocationId"] != first["invocationId"]
+    assert list_shadow_knowledge_invocations("team-idem")["total"] == 2
+
+
+def test_shadow_store_quarantines_corrupt_lines_and_keeps_working(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.knowledge_rollout import (
+        _shadow_store_path,
+    )
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_SHADOW)
+    good = record_shadow_knowledge_invocation(
+        team_id="team-corrupt",
+        question_id="SCI-096",
+        scope={"questionId": "SCI-096"},
+        search_envelope={"keywords": ["evaporation"]},
+        requirements={"minSources": 3},
+        collection_request_id="hfcr-good-1",
+        now_provider=lambda: 1_000,
+    )
+    assert good is not None
+    store = _shadow_store_path("team-corrupt")
+    with store.open("a", encoding="utf-8") as handle:
+        handle.write('{"broken": json,,,}\n')
+        handle.write("not-json-at-all\n")
+
+    # Reads survive the corruption (good rows still projected).
+    payload = list_shadow_knowledge_invocations("team-corrupt")
+    assert payload["total"] == 1
+    quarantine_files = list(
+        store.parent.glob("team-corrupt.jsonl.corrupt-*.jsonl")
+    )
+    assert len(quarantine_files) == 1
+    quarantined = quarantine_files[0].read_text(encoding="utf-8")
+    assert "not-json-at-all" in quarantined
+
+    # Writes continue after isolation: a new distinct request lands.
+    followup = record_shadow_knowledge_invocation(
+        team_id="team-corrupt",
+        question_id="SCI-096",
+        scope={"questionId": "SCI-096"},
+        search_envelope={"keywords": ["condensation"]},
+        requirements={"minSources": 3},
+        collection_request_id="hfcr-good-2",
+        now_provider=lambda: 2_000,
+    )
+    assert followup is not None
+    assert list_shadow_knowledge_invocations("team-corrupt")["total"] == 2

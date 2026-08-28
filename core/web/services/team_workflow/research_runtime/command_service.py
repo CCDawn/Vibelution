@@ -132,8 +132,26 @@ class KnowledgeCommandError(WorkflowCommandError):
         self.detail = detail
 
 
+class DefinitionResolutionDegradedError(WorkflowCommandError):
+    """A mutation was attempted on a run whose pinned definition could not be
+    honored (plan §6.3): the stale-mutation path is fail-closed instead of
+    executing against a substituted graph. ``code`` maps to HTTP 409."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.code = "definition_resolution_degraded"
+        self.detail = detail
+
+
 _ATTEMPT_CREATING_COMMANDS = frozenset(
     {WorkflowCommandKind.START_NODE, WorkflowCommandKind.RETRY_NODE}
+)
+
+# Read-only commands never move a run, so they stay servable on a degraded
+# run (the snapshot itself is diagnostic-visible).  Everything else is a
+# mutation and requires the run's pinned definition to resolve.
+_READ_ONLY_COMMANDS = frozenset(
+    {WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION}
 )
 
 # Knowledge sideflow facade (plan §4.6): team-authorized sessions may ensure
@@ -222,6 +240,12 @@ class WorkflowCommandService:
             raise RunVersionConflictError(
                 f"expected {request.expected_run_version}, current {run.run_version}"
             )
+
+        if request.command not in _READ_ONLY_COMMANDS:
+            # Plan §6.3: a run whose pinned definition cannot be honored never
+            # executes a stale mutation — every non-read-only command
+            # fail-closes after the runVersion CAS, before any handler runs.
+            self._assert_pinned_definition_for_mutation(run)
 
         if request.command in _OPERATOR_ONLY_COMMANDS:
             self._authorize_operator(request)
@@ -352,13 +376,24 @@ class WorkflowCommandService:
         service owns the child-run transaction and appends the only parent
         event.  A replayed request returns the SAME invocation without a
         second child run.
+
+        Server-side rollout gate (defense in depth against direct API calls
+        that bypass the offer layer): ensure creates a REAL child run, so it
+        is only servable in mode ``on`` — shadow stays projection-only.
         """
         from .knowledge_capability import normalize_root_ids
+        from .knowledge_rollout import knowledge_ensure_enabled
         from .knowledge_sideflow_service import (
             KnowledgeSideflowError,
             ensure_knowledge_invocation,
         )
 
+        if not knowledge_ensure_enabled():
+            raise KnowledgeCommandError(
+                "知识侧流程未启用（[research.knowledge_sideflow] mode != on），"
+                "不能发起知识搜集",
+                code="knowledge_sideflow_disabled",
+            )
         run = self._store.get_run(request.run_id)
         if run is None:
             raise RunNotFoundError(request.run_id)
@@ -440,11 +475,22 @@ class WorkflowCommandService:
     def _handle_inspect_knowledge_collection(
         self, request: CommandRequest
     ) -> CommandReceipt:
-        """Read-only knowledge invocation inspection for the parent run."""
+        """Read-only knowledge invocation inspection for the parent run.
+
+        Read-only, so it stays servable in shadow/on but is rejected in mode
+        ``off`` (server-side gate against direct API calls).
+        """
         from core.research.workflow.knowledge_sideflow_definition import (
             KNOWLEDGE_SIDEFLOW_NODE_IDS,
         )
-        from .knowledge_rollout import knowledge_sideflow_mode
+        from .knowledge_rollout import knowledge_inspect_enabled, knowledge_sideflow_mode
+
+        if not knowledge_inspect_enabled():
+            raise KnowledgeCommandError(
+                "知识侧流程已关闭（[research.knowledge_sideflow] mode = off），"
+                "无法查看知识搜集进度",
+                code="knowledge_sideflow_disabled",
+            )
 
         run = self._store.get_run(request.run_id)
         if run is None:
@@ -561,6 +607,43 @@ class WorkflowCommandService:
             "completionKind": str(child.completion_kind or ""),
             "terminalReason": str(child.terminal_reason or ""),
         }
+
+    def _assert_pinned_definition_for_mutation(self, run: Any) -> None:
+        """Fail closed when a registry-era run's pinned definition degrades.
+
+        Plan §6.3: a run whose pinned definition cannot be honored never
+        executes a stale mutation.  Version identities come in two eras:
+
+        - ``wv-*`` (T2 registry identity): resolved STRICTLY through the
+          registry — unknown version, structureHash drift or registry
+          unavailability all reject the mutation with
+          ``definition_resolution_degraded`` (diagnostics included).
+        - pre-registry literals / empty ids (runs created before the
+          version-identity era): there is no pinned credential to verify, so
+          they keep the legacy mutation semantics (the read layer still shows
+          their degraded/legacy status diagnostic-visibly).
+        """
+        from core.research.workflow.definition_registry import resolve_definition
+
+        workflow_id = str(getattr(run, "workflow_id", "") or "").strip()
+        version_id = str(getattr(run, "workflow_version_id", "") or "").strip()
+        run_id = str(getattr(run, "run_id", "") or "")
+        if not version_id.startswith("wv-"):
+            return
+        try:
+            resolve_definition(
+                workflow_id=workflow_id,
+                workflow_version_id=version_id,
+                structure_hash=str(getattr(run, "structure_hash", "") or "").strip(),
+                run_id=run_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - any resolution failure blocks
+            raise DefinitionResolutionDegradedError(
+                f"run {run_id} 的钉住定义无法解析（workflowId={workflow_id} "
+                f"workflowVersionId={version_id} "
+                f"structureHash={str(getattr(run, 'structure_hash', '') or '') or '<absent>'}）："
+                f"{exc}；拒绝执行任何 mutation 命令"
+            ) from exc
 
     def _assert_node_in_pinned_definition(self, run: Any, node_id: str) -> None:
         from core.research.workflow.definition_registry import (

@@ -63,11 +63,23 @@ from tests._support.graph_helpers import GraphHarness
 
 
 @pytest.fixture(autouse=True)
-def _isolated_registry():
+def _isolated_registry(monkeypatch: pytest.MonkeyPatch):
+    from types import SimpleNamespace
+
     from core.research.workflow.definition_registry import reset_registry_for_tests
 
     reset_registry_for_tests()
     register_or_resolve(build_challenge_cup_workflow_definition())
+    # These tests exercise the ensure/inspect command surface itself, which is
+    # rollout-gated server-side; run them with the sideflow fully on.
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            research=SimpleNamespace(
+                knowledge_sideflow=SimpleNamespace(mode="on")
+            )
+        ),
+    )
     yield
     reset_registry_for_tests()
 
