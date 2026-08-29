@@ -74,6 +74,10 @@ _LLM_CANCEL_CHECKER_CONTEXT: ContextVar[Callable[[], str] | None] = ContextVar(
     "vibelution_llm_cancel_checker",
     default=None,
 )
+_LLM_PROVIDER_ABORT_CONTEXT: ContextVar[bool | None] = ContextVar(
+    "vibelution_llm_provider_abort_enabled",
+    default=None,
+)
 _LLM_ROUTE_CONCURRENCY_LIMIT = 2
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
@@ -558,12 +562,33 @@ def _record_stream_http_timing_summary(timings: Any, *, identity: Dict[str, Any]
 
 
 @contextmanager
-def llm_cancel_context(checker: Callable[[], str] | None):
+def llm_cancel_context(
+    checker: Callable[[], str] | None,
+    *,
+    enable_provider_abort: bool | None = None,
+):
     token = _LLM_CANCEL_CHECKER_CONTEXT.set(checker if callable(checker) else None)
+    abort_token = _LLM_PROVIDER_ABORT_CONTEXT.set(enable_provider_abort)
     try:
         yield
     finally:
+        _LLM_PROVIDER_ABORT_CONTEXT.reset(abort_token)
         _LLM_CANCEL_CHECKER_CONTEXT.reset(token)
+
+
+def _provider_abort_enabled(checker: Callable[[], str] | None) -> bool:
+    """Return whether this caller explicitly permits a cancellable HTTP client.
+
+    ``None`` preserves the legacy direct-client behavior for callers that use
+    ``llm_cancel_context`` themselves.  The session Agent path passes an
+    explicit value so ordinary turns with an empty checker do not allocate a
+    watcher or inject LiteLLM's ``client`` parameter.
+    """
+
+    configured = _LLM_PROVIDER_ABORT_CONTEXT.get(None)
+    if configured is not None:
+        return bool(configured)
+    return callable(checker)
 
 
 def _publish_llm_status_event(status: str, **fields: Any) -> None:
@@ -1830,8 +1855,11 @@ class _CancellableProviderStream:
     def __next__(self) -> Any:
         try:
             return next(self._iterator)
-        except StopIteration:
+        except StopIteration as exc:
             self._finish()
+            reason = _current_llm_cancel_reason()
+            if reason:
+                raise LLMCancelledError(reason) from exc
             raise
         except Exception as exc:
             self._finish()
@@ -2089,7 +2117,7 @@ class LLMClient:
     ) -> tuple[Dict[str, Any], Callable[[], None]]:
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
         if not (
-            callable(checker)
+            _provider_abort_enabled(checker)
             and _payload_uses_responses(payload)
             and bool(
                 getattr(
@@ -2160,6 +2188,13 @@ class LLMClient:
                 cleaned_up = True
             watcher_finished.set()
             watcher.join(timeout=0.2)
+            if watcher.is_alive():
+                # A provider client's ``close`` may itself block. Do not
+                # release the request slot while the old watcher still owns a
+                # handler that a later request could reuse.
+                with self._cancellable_responses_http_handler_lock:
+                    if self._cancellable_responses_http_handler is handler:
+                        self._cancellable_responses_http_handler = None
             self._cancellable_responses_stream_lock.release()
 
         return request_payload, finish
@@ -2171,7 +2206,11 @@ class LLMClient:
         """Attach a cancellable client only to the default Chat backend."""
 
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
-        if not callable(checker) or self._backend is not _default_completion_backend:
+        if (
+            not _provider_abort_enabled(checker)
+            or self._backend is not _default_completion_backend
+            or self.protocol_route.adapter_id == "anthropic_messages_native"
+        ):
             return payload, lambda: None
 
         while not self._cancellable_completion_stream_lock.acquire(timeout=0.05):
@@ -2233,6 +2272,10 @@ class LLMClient:
                 cleaned_up = True
             watcher_finished.set()
             watcher.join(timeout=0.2)
+            if watcher.is_alive():
+                with self._cancellable_completion_http_handler_lock:
+                    if self._cancellable_completion_http_handler is handler:
+                        self._cancellable_completion_http_handler = None
             self._cancellable_completion_stream_lock.release()
 
         return request_payload, finish
@@ -2244,7 +2287,7 @@ class LLMClient:
         """Prepare cancellation for default non-stream Chat/Responses calls."""
 
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
-        if not callable(checker):
+        if not _provider_abort_enabled(checker):
             return payload, lambda: None
         if _payload_uses_responses(payload):
             backend = self._responses_backend
@@ -2254,7 +2297,10 @@ class LLMClient:
             request_lock = self._cancellable_responses_request_lock
             factory = _new_cancellable_responses_http_handler
         elif "messages" in payload:
-            enabled = self._backend is _default_completion_backend
+            enabled = (
+                self._backend is _default_completion_backend
+                and self.protocol_route.adapter_id != "anthropic_messages_native"
+            )
             handler_attr = "_cancellable_completion_http_handler"
             handler_lock = self._cancellable_completion_http_handler_lock
             request_lock = self._cancellable_completion_request_lock
@@ -2325,6 +2371,10 @@ class LLMClient:
                 cleaned_up = True
             watcher_finished.set()
             watcher.join(timeout=0.2)
+            if watcher.is_alive():
+                with handler_lock:
+                    if getattr(self, handler_attr) is handler:
+                        setattr(self, handler_attr, None)
             request_lock.release()
 
         return request_payload, finish

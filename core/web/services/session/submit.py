@@ -40,14 +40,56 @@ def _normalize_trace_context_carrier(value: object) -> dict[str, str]:
     return context.to_carrier() if context is not None else {}
 
 
-def _challenge_deadline_at_ms_for_submit(message_metadata: Mapping[str, Any] | None) -> int | None:
-    """Copy an active workflow deadline into the executor-bound context only."""
+def _challenge_deadline_scope_metadata(
+    message_metadata: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Resolve workflow scope from top-level or server-owned stage metadata.
+
+    Source-collection stage messages predate the generic workflow metadata and
+    keep their formal node binding inside ``challengeTaskContract``. The
+    nested object in a client-visible message is only a locator/cache; read the
+    canonical stage task before allowing it to arm the Challenge deadline.
+    """
 
     metadata = message_metadata if isinstance(message_metadata, Mapping) else {}
-    if not (
+    if (
         str(metadata.get("workflowRunId") or "").strip()
         and str(metadata.get("nodeRunId") or "").strip()
     ):
+        return metadata
+
+    source_task_id = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+    team_id = str(metadata.get("teamId") or "").strip()
+    if not source_task_id or not team_id:
+        return None
+    try:
+        from core.web.services.team_workflow.source_collection.stage_session import (
+            _read_source_collection_stage_session_task_record,
+        )
+
+        task = _read_source_collection_stage_session_task_record(team_id, source_task_id)
+    except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if not isinstance(task, Mapping):
+        return None
+    if str(task.get("taskId") or "").strip() != source_task_id:
+        return None
+    contract = task.get("challengeTaskContract")
+    if not isinstance(contract, Mapping):
+        return None
+    if not (
+        str(contract.get("workflowRunId") or "").strip()
+        and str(contract.get("nodeRunId") or "").strip()
+    ):
+        return None
+    return contract
+
+
+def _challenge_deadline_at_ms_for_submit(message_metadata: Mapping[str, Any] | None) -> int | None:
+    """Copy an active workflow deadline into the executor-bound context only."""
+
+    scope_metadata = _challenge_deadline_scope_metadata(message_metadata)
+    if scope_metadata is None:
         return None
     try:
         from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (

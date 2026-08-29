@@ -30,6 +30,13 @@ from .domain_ports import (
     ReadBackVerdict,
     ScopedAgentTaskHandle,
 )
+from .challenge_turn_policy import (
+    CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+    CHALLENGE_TURN_WAIT_WINDOW_MS,
+    ChallengeTaskDeadlineExceeded,
+    challenge_deadline_problem,
+    remaining_challenge_task_ms,
+)
 from .ids import new_id
 from .agent_node_execution import _formal_task_authorities
 from .formal_hypothesis_fanout import (
@@ -85,6 +92,22 @@ DEFAULT_AGENT_ESTIMATE_TOKENS = 25_000
 _HYPOTHESIS_SELECTION_MISSING = (
     "hypothesis_design requires a current hypothesis selection"
 )
+
+
+def _hypothesis_fan_out_wait_timeout_ms(*, child_turn_id: str) -> int:
+    """Bound each child wait by the one shared Challenge logical deadline."""
+
+    remaining_ms = remaining_challenge_task_ms()
+    if remaining_ms is None:
+        return CHALLENGE_TURN_WAIT_WINDOW_MS
+    if remaining_ms <= 0:
+        raise ChallengeTaskDeadlineExceeded(
+            challenge_deadline_problem(
+                waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                turn_chain=[child_turn_id],
+            )
+        )
+    return min(CHALLENGE_TURN_WAIT_WINDOW_MS, int(remaining_ms))
 
 
 def _binding_session_scope(
@@ -1054,9 +1077,13 @@ class RealDomainPorts:
                     "hypothesis candidate anchor is incomplete: " + child.candidate_id
                 )
             try:
+                child_wait_timeout_ms = _hypothesis_fan_out_wait_timeout_ms(
+                    child_turn_id=child.turn_id,
+                )
                 completion = wait_for_agent_turn_terminal(
                     child.session_id,
                     child.turn_id,
+                    timeout_ms=child_wait_timeout_ms,
                 )
             except TurnNotReadyError:
                 raise

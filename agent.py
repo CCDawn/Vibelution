@@ -3084,12 +3084,28 @@ class SelfEvolvingAgent:
         self._last_llm_error_details = {}
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
+
+        def _turn_llm_cancel_context(checker):
+            # Provider abort is a Challenge-only extension. Ordinary Agent
+            # turns still observe the stop checker, but must not allocate a
+            # LiteLLM HTTP watcher merely because the checker is callable.
+            return llm_cancel_context(
+                checker,
+                enable_provider_abort=bool(
+                    getattr(
+                        getattr(self, "_turn_interrupt_checker", None),
+                        "_vibelution_provider_abort_enabled",
+                        False,
+                    )
+                ),
+            )
+
         result = invoke_agent_llm_turn(
             messages=messages,
             replay_state=replay_state,
             hooks=AgentLlmTurnHooks(
                 get_ui=get_ui,
-                llm_cancel_context=llm_cancel_context,
+                llm_cancel_context=_turn_llm_cancel_context,
                 raise_if_stop=self._raise_if_turn_stop_requested,
                 current_stop_reason=self._current_turn_stop_reason,
                 get_llm_for_mode=self._get_llm_for_current_mode,

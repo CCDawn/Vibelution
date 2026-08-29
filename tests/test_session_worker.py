@@ -85,6 +85,58 @@ def test_challenge_deadline_is_executor_ephemeral_and_continuation_safe() -> Non
     ) is None
 
 
+def test_source_stage_deadline_uses_canonical_task_contract(monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_task_deadline_scope,
+    )
+    from core.web.services.team_workflow.source_collection import stage_session
+
+    monkeypatch.setattr(
+        stage_session,
+        "_read_source_collection_stage_session_task_record",
+        lambda team_id, task_id: {
+            "taskId": task_id,
+            "teamId": team_id,
+            "challengeTaskContract": {
+                "workflowRunId": "workflow-1",
+                "nodeRunId": "node-1",
+            },
+        },
+    )
+    metadata = {
+        "kind": "source_collection_stage_session_task",
+        "teamId": "team-1",
+        "sourceCollectionStageTaskId": "stage-task-1",
+        # The initial stage message intentionally has no generic node fields.
+    }
+    with challenge_task_deadline_scope(1_000):
+        assert submit._challenge_deadline_at_ms_for_submit(metadata) == 301_000
+
+
+def test_source_stage_deadline_does_not_trust_message_contract(monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_task_deadline_scope,
+    )
+    from core.web.services.team_workflow.source_collection import stage_session
+
+    monkeypatch.setattr(
+        stage_session,
+        "_read_source_collection_stage_session_task_record",
+        lambda *_args: None,
+    )
+    metadata = {
+        "kind": "source_collection_stage_session_task",
+        "teamId": "team-1",
+        "sourceCollectionStageTaskId": "stage-task-1",
+        "challengeTaskContract": {
+            "workflowRunId": "forged-workflow",
+            "nodeRunId": "forged-node",
+        },
+    }
+    with challenge_task_deadline_scope(1_000):
+        assert submit._challenge_deadline_at_ms_for_submit(metadata) is None
+
+
 def test_challenge_deadline_checker_isolated_from_ordinary_chat() -> None:
     assert worker._challenge_deadline_stop_reason(
         300_000,
@@ -101,6 +153,162 @@ def test_challenge_deadline_checker_isolated_from_ordinary_chat() -> None:
         turn_id="ordinary-chat",
         now_ms=999_999,
     ) == ""
+
+
+def test_challenge_deadline_cancel_is_not_provider_retry_failure() -> None:
+    class CancelledError(Exception):
+        category = "cancelled"
+
+    class ProviderError(Exception):
+        category = "provider_error"
+
+    cancelled = CancelledError("cancelled")
+    assert worker._is_challenge_deadline_cancelled(
+        {"_challenge_task_deadline_at_ms": 1},
+        cancelled,
+        turn_id="turn-expired",
+    ) is True
+    assert worker._is_challenge_deadline_cancelled(
+        {"_challenge_task_deadline_at_ms": 9_999_999_999_999},
+        cancelled,
+        turn_id="turn-live",
+    ) is False
+    provider_error = ProviderError("provider failed")
+    assert worker._is_challenge_deadline_cancelled(
+        {"_challenge_task_deadline_at_ms": 1},
+        provider_error,
+        turn_id="turn-expired",
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("error_category", "expected_persistence"),
+    [("cancelled", "stopped"), ("provider_error", "failure")],
+)
+def test_run_session_turn_impl_routes_provider_error_by_category(
+    monkeypatch,
+    tmp_path,
+    error_category: str,
+    expected_persistence: str,
+) -> None:
+    """Only deadline-triggered provider cancellation uses stopped persistence."""
+
+    from pathlib import Path
+
+    from core.llm.types import LLMError
+
+    calls: list[str] = []
+    lifecycle: list[tuple[str, dict]] = []
+    control = session_service.SessionTurnControl(session_id="session-1", turn_id="turn-1")
+    context = {
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "turn_control": control,
+        "user_message": "run challenge task",
+        "_challenge_task_deadline_at_ms": 1,
+    }
+
+    class _Decision:
+        effective_enabled = False
+
+    class _Assembly:
+        def __init__(self) -> None:
+            self.history_messages: list[dict] = []
+            self.events: list = []
+            self.included_event_ids: list[str] = []
+            self.omitted_event_count = 0
+            self.checkpoint_event_id = ""
+
+        @staticmethod
+        def to_composition_patch() -> dict:
+            return {}
+
+    runtime_agent = SimpleNamespace()
+
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda *_args: True)
+    monkeypatch.setattr(session_service, "_normalize_optional_bool", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "resolve_feature_decision", lambda *_args, **_kwargs: _Decision())
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *_args: tmp_path)
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda: None)
+    monkeypatch.setattr(session_service, "_supervised_role_for_runtime_context", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_supervised_runtime_tool_grants_for_context", lambda *_args: None)
+    monkeypatch.setattr(session_service, "_supervised_workspace_override_path", lambda *_args: None)
+    monkeypatch.setattr(session_service, "_normalize_message_attachments", lambda *_args: [])
+    monkeypatch.setattr(
+        session_service,
+        "_lightweight_chat_payload_decision",
+        lambda *_args, **_kwargs: (False, "unified_conversation_chain"),
+    )
+    monkeypatch.setattr(session_service, "sync_llm_key_env_from_persisted_user_env", lambda **_kwargs: {"ok": True})
+    monkeypatch.setattr(session_service, "_source_collection_stage_task_context_metadata", lambda *_args: {})
+    monkeypatch.setattr(session_service, "_source_collection_stage_task_required_tool_names", lambda *_args: [])
+    monkeypatch.setattr(session_service, "_session_task_workspace_for_turn", lambda *_args, **_kwargs: Path(tmp_path))
+    monkeypatch.setattr(session_service, "_session_tool_workspace_override", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "active_agent_runtime", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "mental_model_enabled_override", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        session_service,
+        "_acquire_chat_agent_for_session",
+        lambda *_args, **_kwargs: (runtime_agent, {}),
+    )
+    monkeypatch.setattr(session_service, "_capture_session_ui_stream", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "_history_messages_for_agent_seed", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda *_args: [])
+    monkeypatch.setattr(session_service, "assemble_conversation_context", lambda *_args, **_kwargs: _Assembly())
+    monkeypatch.setattr(session_service, "_session_context_segments_without_prompt_template", lambda *_args: [])
+    monkeypatch.setattr(session_service, "_prompt_snapshot_context_segment", lambda *_args: None)
+    monkeypatch.setattr(session_service, "_session_context_segments_block", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_recent_session_guidance_context_block", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_skill_runtime_context_from_invocation", lambda *_args: "")
+    monkeypatch.setattr(session_service, "refresh_active_skill_contract_status", lambda value: value)
+    monkeypatch.setattr(session_service, "_active_skill_runtime_context_from_contract", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_build_last_context_composition", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_live_context_composition", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_workspace_relative_path", lambda *_args: "session-1")
+    monkeypatch.setattr(session_service, "_session_prompt_cache_partition", lambda *_args, **_kwargs: "partition")
+    monkeypatch.setattr(session_service, "_session_prompt_cache_scope", lambda *_args, **_kwargs: "chat_session")
+    monkeypatch.setattr(session_service, "_session_prompt_cache_log_fields", lambda **_kwargs: {})
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", lambda _sid, phase, **kwargs: lifecycle.append((phase, kwargs)))
+    monkeypatch.setattr(session_service, "_record_session_execution_registry_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_turn_trace_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_turn_progress_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_model_thinking_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_get_turn_control_stop_reason", lambda *_args: "")
+    monkeypatch.setattr(session_service, "_get_session_stop_reason", lambda *_args: "")
+    monkeypatch.setattr(worker, "build_research_thinking_budget_segment", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        worker,
+        "_run_session_continuation_loop",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            LLMError(error_category, "provider outcome", retryable=False)
+        ),
+    )
+    monkeypatch.setattr(worker, "_wait_for_tool_execution_quiescence", lambda *_args: None)
+    monkeypatch.setattr(worker, "_finish_session_turn_worker", lambda *_args: None)
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_result",
+        lambda *_args, **_kwargs: calls.append("stopped"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_failure",
+        lambda *_args, **_kwargs: calls.append("failure"),
+    )
+
+    worker._run_session_turn_impl(context)
+
+    assert calls == [expected_persistence]
+    assert not [phase for phase, _kwargs in lifecycle if phase == "user_visible_finished"]
+    exception_events = [kwargs for phase, kwargs in lifecycle if phase == "exception"]
+    assert exception_events
+    if error_category == "cancelled":
+        assert exception_events[-1]["outcome"] == "stopped"
+        assert exception_events[-1]["fields"]["reasonCode"] == "challenge_logical_task_deadline_exhausted"
+    else:
+        assert exception_events[-1]["outcome"] == "failed"
+        assert exception_events[-1]["fields"]["reasonCode"] == ""
 
 
 def test_receipt_context_accepts_binding_without_research_project_id(
