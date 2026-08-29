@@ -232,6 +232,7 @@ def test_prompt_and_tool_bundle_require_enabled_binding_and_policy_intersection(
     assert segments[0]["trust"] == "operator_controlled"
     assert segments[1]["trust"] == "derived_runtime"
     assert "agent-a" not in segments[0]["block"]
+    assert 'action="record_reply"' in segments[0]["block"]
 
     visible = service.filter_tool_names(
         "agent-a",
@@ -1314,3 +1315,52 @@ def test_legacy_pet_import_requires_preview_digest_and_preserves_source(
         "user",
         "old-friend",
     }
+    relationship_base = service.store.read_json("agent-a", "relationships/base.json")
+    assert {
+        item["targetId"]: (item["intimacy"], item["trust"])
+        for item in relationship_base["relationships"]
+    } == {
+        "user": (72, 72),
+        "old-friend": (66, 66),
+    }
+    affect_state = service.store.read_json("agent-a", "affect/state.json")
+    assert affect_state["baselineMood"]["valence"] == 60
+
+    schedule = service.schedule_for("agent-a", "2026-08-27")
+    schedule["activities"] = [
+        {
+            "activityId": "future-after-import",
+            "title": "晚间整理房间",
+            "kind": "simulated",
+            "activityKind": "home",
+            "startAt": "2026-08-27T23:00:00+08:00",
+            "endAt": "2026-08-27T23:30:00+08:00",
+            "status": "planned",
+        }
+    ]
+    service.save_schedule("agent-a", schedule)
+
+    service.heartbeat_agent(
+        "agent-a",
+        now=datetime(2026, 8, 27, 9, 1, tzinfo=timezone.utc),
+        allow_planner=False,
+    )
+
+    snapshot = service.snapshot("agent-a")
+    assert snapshot["state"]["mood"]["valence"] == 60
+
+    interaction = service.execute_command(
+        "agent-a",
+        command="recordRelationshipInteraction",
+        expected_version=snapshot["state"]["stateVersion"],
+        idempotency_key="legacy-relationship-after-import",
+        arguments={
+            "targetId": "user",
+            "kind": "supportive_conversation",
+            "intimacyDelta": 4,
+            "trustDelta": 6,
+        },
+    )
+
+    assert interaction["result"]["relationship"]["intimacy"] == 76
+    assert interaction["result"]["relationship"]["trust"] == 78

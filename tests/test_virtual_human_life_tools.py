@@ -12,6 +12,7 @@ from core.web.services.virtual_human_life_service import (
 from tools.Key_Tools import create_key_tools
 from tools.virtual_human_life_tools import (
     virtual_human_activity_tool,
+    virtual_human_proactive_message_tool,
     virtual_human_schedule_tool,
     virtual_human_status_tool,
 )
@@ -219,5 +220,62 @@ def test_virtual_human_schedule_tool_can_propose_a_permission_gated_activity(
         assert activity["kind"] == "tool"
         assert activity["requiredToolNames"] == ["generate_image_tool"]
         assert activity["executionPolicy"] == "agent_tool_policy"
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_proactive_tool_reuses_existing_bundle_for_open_loop_lifecycle(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    agent = {"agentId": "agent-a", "status": "active", "directSessionId": "session-a"}
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": "agent-a", "sessionId": "session-a"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        service.set_binding("agent-a", enabled=True, expected_version=0)
+        state_version = service.snapshot("agent-a")["state"]["stateVersion"]
+
+        recorded = json.loads(
+            virtual_human_proactive_message_tool(
+                action="record_open_loop",
+                expected_version=state_version,
+                idempotency_key="promise-song-progress",
+                topic_key="song-progress",
+                loop_kind="promise",
+                summary="晚点分享歌曲进展",
+                source_turn_id="turn-1",
+                expires_in_minutes=120,
+            )
+        )
+        assert recorded["ok"] is True
+        assert recorded["commandResult"]["result"]["openLoop"]["status"] == "open"
+
+        resolved = json.loads(
+            virtual_human_proactive_message_tool(
+                action="resolve_open_loop",
+                expected_version=recorded["commandResult"]["stateVersion"],
+                idempotency_key="resolve-song-progress",
+                topic_key="song-progress",
+                resolution="已经分享了进展",
+                source_turn_id="turn-2",
+            )
+        )
+        assert resolved["ok"] is True
+        assert resolved["commandResult"]["result"]["openLoop"]["status"] == "resolved"
     finally:
         set_virtual_human_life_service_for_tests(None)
