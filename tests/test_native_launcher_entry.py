@@ -127,7 +127,38 @@ def test_native_launcher_forwards_lifecycle_to_packaged_electron():
     forward_index = source.index("private static bool ForwardOrLaunchElectron")
     forward_block = source[native_action_index:forward_index]
     assert "Electron main owns lifecycle commands" in forward_block
-    assert "native_action.electron_launch_failed" in forward_block
+    assert "native_action.bridge_failed" in forward_block
+
+
+def test_native_launcher_forwards_bridge_exit_code_and_parent_console_message():
+    source = _source()
+    native_action_index = source.index("private static int RunNativeAction")
+    forward_index = source.index("private static bool ForwardOrLaunchElectron")
+    forward_block = source[native_action_index:forward_index]
+
+    # The bridge settles lifecycle commands itself: rejection exits 3 with
+    # lifecycleSettlement.message on stdout. The shim must forward that exit
+    # code as its own process exit code (other non-zero codes collapse to 1)
+    # instead of swallowing every failure into exit 1.
+    assert "BridgeFailureException" in source
+    assert "ExitCode" in source
+    assert "throw new BridgeFailureException(" in source
+    assert "BridgeFailureException" in forward_block
+    assert "return 3" in forward_block
+    assert "MapBridgeExitCode" in forward_block
+
+    # Terminal-driven failures must explain themselves on the parent console:
+    # attach the parent console (never create a new one), write the settlement
+    # message, then detach.
+    assert "AttachConsole(AttachParentProcess)" in source
+    assert "GetStdHandle" in source
+    assert "FreeConsole" in source
+    assert "new UTF8Encoding(false)" in source
+    assert "ExtractBridgeSettlementMessage" in source
+    assert "lifecycleSettlement" in source
+    # AllocConsole would pop a visible console window and violate the product
+    # no-console red line.
+    assert "AllocConsole" not in source
 
 
 def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
