@@ -2552,11 +2552,10 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             meeting_outcomes: list[Any] = []
             llm_response_callback_id = ""
             if receipt_context is not None:
-                # Formal meeting turns bypass the session UI stream, so nothing
-                # journals their canonical TurnOutcome. Without the journal the
-                # receipt readback below always fails closed; capture the
-                # outcomes here and commit them to the speaker Child Session
-                # ledger before registration, mirroring stream_capture.
+                # Formal meeting turns bypass the session UI stream. Capture
+                # canonical outcomes so conversation content can still be
+                # committed while receipts go directly to the Challenge Cup
+                # registry instead of becoming conversation state.
                 from core.infrastructure.event_bus import EventNames, get_event_bus
 
                 def _capture_meeting_llm_outcome(event: Any) -> None:
@@ -2611,6 +2610,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                         turn_identity,
                         outcome,
                     )
+                meeting_receipts = [
+                    dict(receipt)
+                    for outcome in meeting_outcomes
+                    if isinstance(
+                        receipt := getattr(outcome, "model_invocation_receipt", None),
+                        Mapping,
+                    )
+                ]
                 register_speaker_receipts(
                     project_root=PROJECT_ROOT,
                     team_id=str(context.get("teamId") or "").strip(),
@@ -2618,6 +2625,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     workflow_run_id=str(receipt_context.get("receiptRunId") or "").strip(),
                     session_id=session_id,
                     turn_identity=turn_identity,
+                    receipts=meeting_receipts,
                 )
     if agent_context is not None and agent_context.agent_id:
         stage_started_at = _perf_counter()

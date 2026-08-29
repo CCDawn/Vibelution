@@ -141,6 +141,9 @@ def _ensure_fixed_role_tool_policy(
     normalized_tool_policies: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     s = _service()
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if str(metadata.get("challengeCupTeamId") or "").strip():
+        return None
     desired_kind = s._fixed_role_tool_policy_kind(agent)
     if not desired_kind:
         return None
@@ -160,7 +163,6 @@ def _ensure_fixed_role_tool_policy(
     elif desired_kind == "self_evolution_executable":
         desired_policy = s.default_self_evolution_executable_tool_policy(policy_id)
     elif desired_kind == "role_profile":
-        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         desired_policy = s.agent_role_tool_profile_service.resolve_role_tool_policy(
             role_key=str(agent.get("roleKey") or ""),
             primary_mode=str(agent.get("primaryMode") or ""),

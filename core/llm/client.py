@@ -2863,6 +2863,10 @@ class LLMClient:
                     "outputTokens": usage.get("outputTokens", 0),
                     "totalTokens": usage.get("totalTokens", 0),
                     "cachedInputTokens": usage.get("cachedInputTokens", 0),
+                    "reasoningTokens": usage.get(
+                        "reasoningTokens",
+                        usage.get("reasoningOutputTokens", 0),
+                    ),
                 }.items()
             }
             evidence_locator = (
@@ -2872,9 +2876,12 @@ class LLMClient:
             )
             evidence_locator.update(
                 {
-                    "kind": str(evidence_locator.get("kind") or "turn_journal"),
+                    "kind": str(
+                        evidence_locator.get("kind")
+                        or "challenge_model_invocation_receipt_registry"
+                    ),
                     "outputRef": (
-                        f"turn-journal://{quote(binding['sessionId'], safe='')}"
+                        f"challenge-receipt://{quote(binding['questionId'], safe='')}"
                         f"/{quote(context['receiptRunId'], safe='')}"
                         f"/{quote(binding['taskId'], safe='')}"
                         f"/{quote(binding['turnId'], safe='')}"
@@ -3149,6 +3156,7 @@ class LLMClient:
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
                 "cachedInputTokens": usage.cached_input_tokens,
+                "reasoningTokens": usage.reasoning_output_tokens,
             },
         )
         self._record_canonical_outcome(turn_outcome, phase="invoke")
@@ -3829,6 +3837,9 @@ class LLMClient:
                                 "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
                                 "cachedInputTokens": int(
                                     getattr(usage, "cached_input_tokens", 0) or 0
+                                ),
+                                "reasoningTokens": int(
+                                    getattr(usage, "reasoning_output_tokens", 0) or 0
                                 ),
                             },
                         ),

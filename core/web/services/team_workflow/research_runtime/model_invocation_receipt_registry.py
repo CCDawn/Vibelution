@@ -327,6 +327,47 @@ def register_question_model_invocation_receipts(
     )
 
 
+def question_model_invocation_receipts(
+    team_id: str,
+    *,
+    question_id: str,
+    workflow_run_id: str,
+    session_id: str = "",
+    turn_id: str = "",
+) -> list[dict[str, Any]]:
+    """Read validated receipt payloads from the Challenge Cup audit store.
+
+    Optional Session/Turn filters let the session completion adapter recover
+    only the receipts for the canonical turn without reading conversation
+    journal content. Corrupt or mismatched stores fail closed as an empty set.
+    """
+
+    normalized_team = str(team_id or "").strip()
+    normalized_question = str(question_id or "").strip().upper()
+    normalized_run = str(workflow_run_id or "").strip()
+    normalized_session = str(session_id or "").strip()
+    normalized_turn = str(turn_id or "").strip()
+    try:
+        payload = _load(_path(normalized_team, normalized_question, normalized_run))
+        existing_values = _validate_store_payload(
+            payload,
+            team_id=normalized_team,
+            question_id=normalized_question,
+            workflow_run_id=normalized_run,
+        )
+    except (OSError, TypeError, ValueError):
+        return []
+    receipts: list[dict[str, Any]] = []
+    for raw in existing_values:
+        scope = raw.get("scope") if isinstance(raw.get("scope"), Mapping) else {}
+        if normalized_session and str(scope.get("sessionId") or "").strip() != normalized_session:
+            continue
+        if normalized_turn and str(scope.get("turnId") or "").strip() != normalized_turn:
+            continue
+        receipts.append(deepcopy(raw))
+    return receipts
+
+
 def question_model_invocation_receipt_refs(
     team_id: str,
     *,

@@ -19,6 +19,8 @@ import {
 import type { ResearchStageRoundStartPayload } from "../workflowStartMutationModel";
 import type { ResearchWorkspaceView } from "../researchWorkspaceModel";
 import type { ResearchStageUnlock } from "../researchPrimaryActionModel";
+import { isChallengeCupResearchWorkflowTeam } from "../teamKindModel";
+import { researchStageAgentManagementRoute } from "../researchStageAgentPresentation";
 import {
   compactSourceCollectionQuerySeeds,
   splitDraftList,
@@ -62,6 +64,22 @@ export function createSourceCollectionStageAdvance(ctx: SourceCollectionControll
         : `${sourceCollectionStageAdvanceFailureTitle("en")}: system busy or no team selected.`);
       return;
     }
+    const initialChatState = sourceCollectionStageAgentChatState(stageId);
+    const initialBinding = initialChatState.binding;
+    const initialAgentId = String(initialBinding?.agent?.agentId || "").trim();
+    const initialBoundAgentId = String(initialBinding?.agentId || "").trim();
+    if (
+      isChallengeCupResearchWorkflowTeam(selectedTeam)
+      && !initialAgentId
+      && initialChatState.status !== "loading"
+    ) {
+      navigate(
+        initialBoundAgentId
+          ? researchStageAgentManagementRoute(initialBoundAgentId)
+          : "/agents?pane=config",
+      );
+      return;
+    }
     const knowledgeActionItemCodes = (teamWorkflowKnowledgeIngestionStatus?.actionItems || [])
       .map((item: { code?: string }) => String(item?.code || "").trim()).filter(Boolean);
     const preflight = preflightSourceCollectionStageAdvance({
@@ -93,12 +111,21 @@ export function createSourceCollectionStageAdvance(ctx: SourceCollectionControll
     openSourceCollectionStage(stageId);
     const chatState = sourceCollectionStageAgentChatState(stageId);
     const binding = chatState.binding;
-    const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
+    const agentId = String(binding?.agent?.agentId || "").trim();
+    const boundAgentId = String(binding?.agentId || "").trim();
     const agentRole = String(binding?.key || "").trim();
     if (!agentId) {
+      if (isChallengeCupResearchWorkflowTeam(selectedTeam)) {
+        navigate(
+          boundAgentId
+            ? researchStageAgentManagementRoute(boundAgentId)
+            : "/agents?pane=config",
+        );
+        return;
+      }
       setSourceCollectionStageAdvanceFailure(lang === "zh"
-        ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：缺少阶段 Agent，请先修复团队绑定。`
-        : `${sourceCollectionStageAdvanceFailureTitle("en")}: stage Agent missing; repair team bindings.`);
+        ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：缺少阶段 Agent，请配置对应 Agent。`
+        : `${sourceCollectionStageAdvanceFailureTitle("en")}: stage Agent missing; configure the Agent.`);
       if (chatState.status === "repair") repairSelectedWorkflowTeamAgentsIfNeeded();
       return;
     }

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from core.logging.trace_context import (
     bind_trace_context,
     get_current_trace_context,
     new_trace_context,
 )
 from core.web.services import session_service
-from core.web.services.session import worker
+from core.web.services.session import stream_capture, worker
 
 
 def test_facade_reexports_worker_entrypoints() -> None:
@@ -115,9 +117,97 @@ def test_receipt_context_accepts_binding_without_research_project_id(
     )
 
     assert context is not None
+    assert context["teamId"] == "team-1"
     assert context["questionStageBinding"]["formalNodeRunId"] == "node-run-1"
     assert context["modelPolicySha256"] == "a" * 64
     assert context["expectedModelRoute"]["modelRef"] == "default/qwen-alias"
+
+
+def test_challenge_receipt_sink_uses_existing_registry_only(monkeypatch) -> None:
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
+        lambda team_id, **kwargs: recorded.append({"teamId": team_id, **kwargs}) or [],
+    )
+    capture = stream_capture.SessionTurnCapture(
+        session_id="session-1",
+        turn_id="turn-1",
+        model_invocation_receipt_context={
+            "teamId": "team-1",
+            "questionStageBinding": {
+                "questionId": "SCI-096",
+                "workflowRunId": "run-1",
+            },
+        },
+    )
+    outcome = SimpleNamespace(model_invocation_receipt={"receiptId": "receipt-1"})
+
+    assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is True
+    assert recorded == [
+        {
+            "teamId": "team-1",
+            "question_id": "SCI-096",
+            "workflow_run_id": "run-1",
+            "receipts": [{"receiptId": "receipt-1"}],
+        }
+    ]
+
+
+def test_ordinary_session_does_not_write_challenge_receipt_registry(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ordinary chat must not write challenge receipts")
+        ),
+    )
+    capture = stream_capture.SessionTurnCapture(session_id="session-chat", turn_id="turn-chat")
+    outcome = SimpleNamespace(model_invocation_receipt={"receiptId": "receipt-chat"})
+
+    assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is False
+
+
+def test_challenge_receipt_projection_failure_does_not_break_chat(monkeypatch) -> None:
+    diagnostics: list[dict] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("registry unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        lambda component, phase, event_code, **kwargs: diagnostics.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        ),
+    )
+    capture = stream_capture.SessionTurnCapture(
+        session_id="session-1",
+        turn_id="turn-1",
+        model_invocation_receipt_context={
+            "teamId": "team-1",
+            "questionStageBinding": {
+                "questionId": "SCI-096",
+                "workflowRunId": "run-1",
+            },
+        },
+    )
+    outcome = SimpleNamespace(model_invocation_receipt={"receiptId": "receipt-1"})
+
+    assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is False
+    assert diagnostics[0]["eventCode"] == (
+        "challenge_model_invocation_receipt_projection_failed"
+    )
+    assert diagnostics[0]["fields"] == {
+        "teamId": "team-1",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-1",
+        "errorType": "RuntimeError",
+    }
 
 
 def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:

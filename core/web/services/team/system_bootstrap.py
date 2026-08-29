@@ -213,8 +213,8 @@ def _system_team_bootstrap_required_steps() -> list[str]:
         required_steps.append("evolution_system_teams")
     if s.ai_search_system_team_missing():
         required_steps.append("ai_search_system_team")
-    if s.challenge_cup_research_team_agents_need_repair():
-        required_steps.append("challenge_cup_research_team_agents")
+    if s.challenge_cup_research_team_missing():
+        required_steps.append("challenge_cup_research_team")
     if s.knowledge_expansion_team_agents_need_repair():
         required_steps.append("knowledge_expansion_team_agents")
     return required_steps
@@ -246,8 +246,8 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
         fields={"requestId": request_id, "requiredSteps": list(required_steps), "reason": reason},
     )
     try:
-        if "challenge_cup_research_team_agents" in required_steps:
-            s.ensure_challenge_cup_research_team_agents(purge_stale=True)
+        if "challenge_cup_research_team" in required_steps:
+            s.bootstrap_challenge_cup_research_team()
         if "ai_search_system_team" in required_steps:
             s.ensure_ai_search_system_team()
         if "knowledge_expansion_team_agents" in required_steps:

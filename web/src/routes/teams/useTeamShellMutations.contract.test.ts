@@ -15,7 +15,6 @@ const mutationOwners = [
   "sendTeamMessageMutation",
   "revokeTeamMessageMutation",
   "syncTeamChatRoomMutation",
-  "repairChallengeCupTeamAgentsMutation",
   "repairKnowledgeExpansionTeamAgentsMutation",
   "startTeamRoundMutation",
   "stopTeamRoundMutation",
@@ -54,10 +53,17 @@ describe("team shell mutations contract", () => {
     expect(mutationsSource).toContain("sendTeamProjectBusMessage");
     expect(mutationsSource).toContain("revokeProjectAgentBusMessage");
     expect(mutationsSource).toContain("syncTeamChatRoom(");
-    expect(mutationsSource).toContain("repairChallengeCupTeamAgents(");
     expect(mutationsSource).toContain("repairKnowledgeExpansionTeamAgents(");
     expect(mutationsSource).toContain("startChatRoomRound(");
     expect(mutationsSource).toContain("stopChatRoomRound(");
     expect(mutationsSource).toContain('source: "team_workspace"');
+  });
+
+  it("does not expose a Challenge Cup Agent repair or override mutation", () => {
+    expect(mutationsSource).not.toContain("repairChallengeCupTeamAgents");
+    expect(mutationsSource).not.toContain("challenge_team_agents_auto_repair");
+    expect(mutationsSource).not.toContain("activeBinding");
+    expect(mutationsSource).not.toContain("roleMigration");
+    expect(mutationsSource).not.toContain("legacyBindings");
   });
 });

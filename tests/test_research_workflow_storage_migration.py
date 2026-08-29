@@ -226,6 +226,133 @@ def test_preview_uses_only_research_workflows_scope(tmp_path: Path, monkeypatch)
     assert "challenge_cup_real_batch/real-1.json" in result.excluded_assets
 
 
+def test_preview_ignores_bak_files_in_target_staging_scan_and_fingerprint(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    (source / "runs").mkdir()
+    (source / "runs" / "run-1.json").write_text('{"runId":"run-1"}\n', encoding="utf-8")
+    baseline = storage_migration._source_tree_fingerprint(source)
+    backup = source / "index.json.bak-scope-stamp"
+    backup.write_text("not a canonical asset", encoding="utf-8")
+    target_backup = target / "migration" / ".stale.staging.bak-scope-stamp"
+    target_backup.parent.mkdir(parents=True, exist_ok=True)
+    target_backup.write_text("not a canonical staging asset", encoding="utf-8")
+
+    result = preview_research_workflow_migration(
+        project,
+        source_root=source,
+        target_root=target,
+        projects_home=projects_home,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        sample_delay_seconds=0,
+    )
+
+    assert storage_migration._source_tree_fingerprint(source) == baseline
+    assert "index.json.bak-scope-stamp" in result.excluded_assets
+    assert not any(
+        item.get("code") == "stale_migration_staging_asset"
+        and item.get("relativePath") == "migration/.stale.staging.bak-scope-stamp"
+        for item in result.blockers
+    )
+
+
+def test_preview_reports_manual_scope_stamp_and_manual_replay_as_alias_audit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, projects_home, _source, target, _marker = _fixture_roots(tmp_path, monkeypatch)
+    workspace = (
+        target.parent
+        / "workspace"
+        / "teams"
+        / "t"
+        / "research_projects"
+    )
+    candidate_store = workspace / "p" / "workspace" / "candidate_store"
+    candidate_store.mkdir(parents=True, exist_ok=True)
+    candidate_store_payload = {
+        "schemaVersion": 1,
+        "storeKind": "candidate_store",
+        "candidates": [
+            {
+                "candidateId": "candidate-manual-scope",
+                "candidateType": "source_manifest",
+                "researchProjectId": "challenge-sci-003",
+                "metadata": {
+                    "researchProjectId": "challenge-sci-003",
+                    "sourceCollectionRunId": "dprun-manual",
+                    "workflowRunId": "run-manual",
+                },
+            },
+            {
+                "candidateId": "candidate-without-scope",
+                "candidateType": "source_manifest",
+                "metadata": {},
+            },
+        ],
+    }
+    (candidate_store / "index.json").write_text(
+        json.dumps(candidate_store_payload),
+        encoding="utf-8",
+    )
+    # A malformed backup must be ignored by the same inventory contract.
+    # Keep the fixture below the Windows MAX_PATH boundary; the production
+    # exclusion is component based and therefore also covers this equivalent
+    # backup suffix.
+    backup_path = candidate_store / "x.json.bak-scope-stamp"
+    backup_path.write_text("{", encoding="utf-8")
+
+    task_store = workspace / "p" / "workspace" / "source_collection_runs" / "r"
+    task_store.mkdir(parents=True, exist_ok=True)
+    (task_store / "stage_session_tasks.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "source_collection_stage_session_tasks",
+                "tasks": [
+                    {
+                        "taskId": "stagetask-20260829040433-1b95a996",
+                        "runId": "r",
+                        "workflowRunId": "run-manual",
+                        "researchProjectId": "challenge-sci-003",
+                        "sessionId": "session-manual",
+                        "turn": {"turnId": "turn-manual"},
+                        "idempotencyKey": "stage-task:manual",
+                        "stageId": "finding",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = preview_research_workflow_migration(
+        project,
+        projects_home=projects_home,
+        quiescence_probe=lambda _project: {"ok": True, "blockers": []},
+        sample_delay_seconds=0,
+    )
+    hygiene = result.to_dict()["scopeHygiene"]
+    items = hygiene["items"]
+    by_id = {item["entityId"]: item for item in items}
+
+    assert hygiene["schemaVersion"] == 1
+    assert "candidate-without-scope" not in by_id
+    stamped = by_id["candidate-manual-scope"]
+    assert stamped["classification"] == "manual_scope_stamp"
+    assert stamped["action"] == "canonical_migration"
+    assert stamped["owner"] == "challenge-sci-003"
+
+    replay = by_id["stagetask-20260829040433-1b95a996"]
+    assert replay["classification"] == "manual_replay"
+    assert replay["lineageClassification"] == "partial_noncanonical_lineage"
+    assert replay["action"] == "alias/audit"
+    assert replay["needsReview"] is True
+    assert "x.json.bak-scope-stamp" in hygiene["excludedPaths"]
+
+
 def test_preview_rejects_unknown_workflow_sqlite_asset(tmp_path: Path, monkeypatch) -> None:
     project, projects_home, source, _target, _marker = _fixture_roots(tmp_path, monkeypatch)
     unknown = source / "workflow-checkpoints.sqlite"

@@ -316,10 +316,9 @@ export type EffectiveAgentBindingsResponse = {
   bindings: EffectiveAgentBinding[];
 };
 
-/** Controlled-write binding config payload (whole-layer replacement). */
+/** Run-scoped Agent overrides; Team members own workflow defaults. */
 export type AgentBindingConfigPayload = {
   teamId: string;
-  workflowDefaults?: Record<string, string>;
   stageOverrides?: Record<string, Record<string, string>>;
   nodeOverrides?: Record<string, string>;
 };

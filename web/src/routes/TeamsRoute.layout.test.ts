@@ -251,7 +251,7 @@ describe("research project workspace", () => {
   it("never routes an active source-collection batch to a legacy direct Agent session", () => {
     // R2-j: stage agent chat helpers live in createSourceCollectionStageAgentHelpers.
     expect(createSourceCollectionStageAgentHelpersSource).toContain(
-      "const route = currentTaskSessionRoute;",
+      'const route = binding?.agent ? currentTaskSessionRoute : "";',
     );
     expect(createSourceCollectionStageAgentHelpersSource).toContain("projectRunAvailable: Boolean(selectedSourceCollectionRunEffectiveId)");
     expect(createSourceCollectionStageAgentHelpersSource).not.toContain("currentTaskSessionRoute || researchStageAgentDirectChatRoute(");
@@ -264,6 +264,25 @@ describe("research project workspace", () => {
     );
     expect(panel).toContain("进入 Agent 私聊");
     expect(panel).toContain("Open Agent chat");
+  });
+
+  it("keeps Challenge Cup Agent configuration in Agent SSOT", () => {
+    expect(routeSource).not.toContain("repairChallengeCupTeamAgentsMutation");
+    expect(routeSource).not.toContain("repairChallengeCupTeamAgents(");
+    expect(teamShellMutationsSource).not.toContain("repairChallengeCupTeamAgents");
+    expect(createSourceCollectionStageAgentHelpersSource).not.toContain("repairChallengeCupTeamAgents");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain(
+      "isChallengeCupResearchWorkflowTeam(selectedTeam)",
+    );
+    expect(createSourceCollectionStageAgentHelpersSource).toContain(
+      "researchStageAgentManagementRoute(boundAgentId)",
+    );
+    expect(createSourceCollectionStageAgentHelpersSource).toContain('"/agents?pane=config"');
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain(
+      "researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)",
+    );
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("配置 Agent");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).not.toContain("修复团队 Agent");
   });
 
   it("does not enable legacy experiment projections from the Challenge workflow shell", () => {
@@ -1566,13 +1585,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("进入实验设计（离开${RESEARCH_STAGE_TERMS.knowledge_collection.zh}）");
     expect(routeSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
-    expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
-    // Wave 8Q: agent repair endpoints live on useTeamShellMutations.
-    expect(teamShellMutationsSource).toContain("repairChallengeCupTeamAgents(");
     expect(routeSource).toContain("repairKnowledgeExpansionTeamAgentsMutation");
     expect(teamShellMutationsSource).toContain("repairKnowledgeExpansionTeamAgents(");
-    // Wave 8M: repair/open-chat CTAs live on active-stage workspace (and recovery).
-    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("修复团队 Agent");
+    // Wave 8M: configure/open-chat CTAs live on active-stage workspace (and recovery).
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("配置 Agent");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(teamRouteShellModelSource).toContain("Agent 私聊");
     expect(routeSource).toMatch(/from "\.\/(?:teams\/)?teamRouteShellModel"/);
@@ -2252,7 +2268,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("createdByAgent: sourceCollectionQualityAgentId");
     expect(routeSource).not.toContain("sourceCollectionStageRoomKey");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
-    expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId)");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(teamRouteShellModelSource).toContain("已复用正在运行的");

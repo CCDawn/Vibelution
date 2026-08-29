@@ -186,7 +186,6 @@ class KnowledgeCollectionPayload(VersionedCommandPayload):
 
 
 class AgentBindingConfigPayload(TeamScopedPayload):
-    workflowDefaults: dict[str, str] = Field(default_factory=dict)
     stageOverrides: dict[str, dict[str, str]] = Field(default_factory=dict)
     nodeOverrides: dict[str, str] = Field(default_factory=dict)
 

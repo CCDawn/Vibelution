@@ -209,7 +209,7 @@ def test_facade_reexports_research_organization() -> None:
     assert facade._members_from_research_organization is research_organization._members_from_research_organization
     assert facade._canvas_from_research_organization is research_organization._canvas_from_research_organization
     assert facade._organization_reporting_edges is research_organization._organization_reporting_edges
-    assert facade._sync_research_team_member_agent_roles is research_organization._sync_research_team_member_agent_roles
+    assert not hasattr(facade, "_sync_research_team_member_agent_roles")
 
 
 def test_facade_reexports_ai_search_runs() -> None:
@@ -247,12 +247,12 @@ def test_facade_reexports_chat_room_links() -> None:
 
 def test_facade_reexports_system_teams_materialize() -> None:
     assert facade.ensure_ai_search_system_team is system_teams.ensure_ai_search_system_team
-    assert facade.ensure_challenge_cup_research_team_agents is system_teams.ensure_challenge_cup_research_team_agents
+    assert facade.bootstrap_challenge_cup_research_team is system_teams.bootstrap_challenge_cup_research_team
     assert facade.ensure_knowledge_expansion_team_agents is system_teams.ensure_knowledge_expansion_team_agents
     assert facade.ensure_evolution_system_teams is system_teams.ensure_evolution_system_teams
     assert facade.evolution_system_teams_missing is system_teams.evolution_system_teams_missing
     assert facade.ai_search_system_team_missing is system_teams.ai_search_system_team_missing
-    assert facade.challenge_cup_research_team_agents_need_repair is system_teams.challenge_cup_research_team_agents_need_repair
+    assert facade.challenge_cup_research_team_missing is system_teams.challenge_cup_research_team_missing
     assert facade.knowledge_expansion_team_agents_need_repair is system_teams.knowledge_expansion_team_agents_need_repair
     assert facade._ensure_evolution_system_team_in_state is system_teams._ensure_evolution_system_team_in_state
     assert facade._system_members_from_agents is system_teams._system_members_from_agents
@@ -288,11 +288,11 @@ def test_system_bootstrap_required_steps_orders_missing_checks(monkeypatch) -> N
 
     monkeypatch.setattr(facade, "evolution_system_teams_missing", lambda: calls.append("evolution") or True)
     monkeypatch.setattr(facade, "ai_search_system_team_missing", lambda: calls.append("ai_search") or False)
-    monkeypatch.setattr(facade, "challenge_cup_research_team_agents_need_repair", lambda: calls.append("challenge") or True)
+    monkeypatch.setattr(facade, "challenge_cup_research_team_missing", lambda: calls.append("challenge") or True)
     monkeypatch.setattr(facade, "knowledge_expansion_team_agents_need_repair", lambda: calls.append("knowledge") or False)
 
     steps = system_bootstrap._system_team_bootstrap_required_steps()
-    assert steps == ["evolution_system_teams", "challenge_cup_research_team_agents"]
+    assert steps == ["evolution_system_teams", "challenge_cup_research_team"]
     assert calls == ["evolution", "ai_search", "challenge", "knowledge"]
 
 
@@ -317,8 +317,8 @@ def test_system_bootstrap_materializes_challenge_team_before_slow_evolution(
     )
     monkeypatch.setattr(
         facade,
-        "ensure_challenge_cup_research_team_agents",
-        lambda **kwargs: calls.append("challenge"),
+        "bootstrap_challenge_cup_research_team",
+        lambda: calls.append("challenge"),
     )
     monkeypatch.setattr(
         facade,
@@ -341,7 +341,7 @@ def test_system_bootstrap_materializes_challenge_team_before_slow_evolution(
         [
             "evolution_system_teams",
             "ai_search_system_team",
-            "challenge_cup_research_team_agents",
+            "challenge_cup_research_team",
             "knowledge_expansion_team_agents",
         ],
         "test",

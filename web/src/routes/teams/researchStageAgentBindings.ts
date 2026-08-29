@@ -1,5 +1,6 @@
 /**
- * Pure: map canvas/member roles onto research-stage agent binding tables.
+ * Pure: map Team member roles onto research-stage Agent binding tables.
+ * Canvas data is accepted for call-site compatibility but is projection-only.
  * Extracted from useTeamsWorkbenchModel (behavior-conserving).
  */
 import type { AgentConfigWorkspaceAgent, Team, TeamOrganizationCanvas } from "../../api/types";
@@ -15,39 +16,30 @@ export type ResearchStageAgentBinding = ResearchStageAgentRoleDefinition & {
   agentId: string;
   agent: AgentConfigWorkspaceAgent | null;
   bindingLabel: string;
-  bindingSource: string;
+  bindingSource: "member" | "fallback" | "";
 };
 
 export type ResearchStageAgentBindingsByStage = Record<ResearchStageType, ResearchStageAgentBinding[]>;
 
 export function buildResearchStageAgentBindingsByStage(options: {
+  /** Read-only canvas projection; never a source for Agent identity. */
   canvas: TeamOrganizationCanvas | null | undefined;
   selectedTeam: Team | null | undefined;
   activeAgentsById: Map<string, AgentConfigWorkspaceAgent>;
   knowledgeExpansionWorkflowTeamSelected: boolean;
 }): ResearchStageAgentBindingsByStage {
   const {
-    canvas,
     selectedTeam,
     activeAgentsById,
     knowledgeExpansionWorkflowTeamSelected,
   } = options;
 
-  const roleBindings = new Map<string, { agentId: string; label: string; source: "canvas" | "member" | "fallback" }>();
+  // Team.members is the Agent SSOT for workflow role bindings. Canvas nodes
+  // are a display projection and must never override the canonical member.
+  const roleBindings = new Map<string, { agentId: string; label: string; source: "member" }>();
   const roleDefinitions = knowledgeExpansionWorkflowTeamSelected
     ? KNOWLEDGE_EXPANSION_STAGE_AGENT_ROLES
     : RESEARCH_STAGE_AGENT_ROLES;
-
-  for (const node of canvas?.nodes ?? []) {
-    const role = normalizeAgentRoleKey(node.role);
-    if (role && node.agentId && !roleBindings.has(role)) {
-      roleBindings.set(role, {
-        agentId: node.agentId,
-        label: node.label || node.agentName || node.agentCode || node.agentId,
-        source: "canvas",
-      });
-    }
-  }
 
   for (const member of selectedTeam?.members ?? []) {
     const role = normalizeAgentRoleKey(member.role);
@@ -66,7 +58,9 @@ export function buildResearchStageAgentBindingsByStage(options: {
         const matched = definition.roleKeys
           .map((role) => roleBindings.get(normalizeAgentRoleKey(role)))
           .find(Boolean);
-        const fallbackAgentId = definition.fallbackAgentId && activeAgentsById.has(definition.fallbackAgentId)
+        const fallbackAgentId = knowledgeExpansionWorkflowTeamSelected
+          && definition.fallbackAgentId
+          && activeAgentsById.has(definition.fallbackAgentId)
           ? definition.fallbackAgentId
           : "";
         const agentId = matched?.agentId || fallbackAgentId || "";

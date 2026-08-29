@@ -30,6 +30,7 @@ from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
 )
+from core.web.services import agent_directory_service, team_service
 from core.web.services.team_workflow import llm_review_runners
 from core.web.services.team_workflow.hypothesis_review_executor import (
     ProviderBoundReviewResult,
@@ -106,6 +107,29 @@ def test_review_llm_uses_challenge_cup_team_model_instead_of_operator_primary(
         return _Client()
 
     base_config = object()
+    monkeypatch.setattr(
+        team_service,
+        "get_team_light",
+        lambda team_id: {
+            "teamId": team_id,
+            "members": [
+                {
+                    "role": "challenge_cup_evaluator",
+                    "agentId": "agent-evaluator",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **kwargs: {
+            "agentId": agent_id,
+            "llmBindings": {
+                "dialogue": {"modelId": "relay_openai/gpt-5.6-luna"}
+            },
+        },
+    )
     monkeypatch.setattr(llm_review_runners, "get_config", lambda: base_config)
     monkeypatch.setattr(
         llm_review_runners,
@@ -118,7 +142,7 @@ def test_review_llm_uses_challenge_cup_team_model_instead_of_operator_primary(
 
     assert captured == {
         "baseConfig": base_config,
-        "model_id": llm_review_runners.CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
+        "model_id": "relay_openai/gpt-5.6-luna",
         "runtime_profile_id": "primary",
         "slot": "dialogue",
         "clientProfileId": "primary",
@@ -126,6 +150,7 @@ def test_review_llm_uses_challenge_cup_team_model_instead_of_operator_primary(
     }
     assert resolved is not None
     assert resolved["providerId"] == "team-provider"
+    assert resolved["agentId"] == "agent-evaluator"
     assert resolved["modelId"] == "team-model"
     assert resolved["modelRef"] == "team-provider/team-model"
 

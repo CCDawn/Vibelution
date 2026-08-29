@@ -268,6 +268,16 @@ def _repair_team(
     agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
 ) -> bool:
     s = _service()
+    # The Challenge Cup Team is an explicit asset mapping whose membership is
+    # edited only through the Team surface. Generic repair may maintain the
+    # Team/chat-room projection contract, but must not normalize, prune, or
+    # resync its role -> agentId assignments.
+    if str(team.get("teamId") or "").strip() == s.CHALLENGE_CUP_RESEARCH_TEAM_ID:
+        changed = s._repair_team_contract_only(team)
+        if s._team_chat_room_needs_sync(team, agent_refs=agent_refs):
+            s._ensure_team_chat_room_link(team, agent_refs=agent_refs)
+            changed = True
+        return changed
     changed = False
     team_id = s._safe_token(team.get("teamId"), default="", max_length=96)
     if team.get("teamId") != team_id:
@@ -310,8 +320,6 @@ def _repair_team(
         changed = True
         for removed_agent_id in removed_agent_ids:
             s._remove_agent_from_team_canvas(team, removed_agent_id)
-    if s._infer_team_kind(team) == "research":
-        s._sync_research_team_member_agent_roles(team.get("members") or [])
     if removed_agent_ids or s._team_chat_room_needs_sync(team, agent_refs=agent_refs):
         s._ensure_team_chat_room_link(team, agent_refs=agent_refs)
         changed = True

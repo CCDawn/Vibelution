@@ -2506,6 +2506,10 @@ def test_formal_meeting_speaker_builds_question_receipt_context():
 
 def test_formal_meeting_speaker_without_receipt_fails_closed(monkeypatch):
     monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.question_model_invocation_receipts",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
         "core.chat.conversation_ledger.load_conversation_events",
         lambda *_args: [],
     )
@@ -2524,7 +2528,10 @@ def test_formal_meeting_speaker_without_receipt_fails_closed(monkeypatch):
         )
 
 
-def test_formal_meeting_speaker_turn_journals_receipt_outcome(tmp_path, monkeypatch):
+def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
+    tmp_path,
+    monkeypatch,
+):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -2550,9 +2557,6 @@ def test_formal_meeting_speaker_turn_journals_receipt_outcome(tmp_path, monkeypa
     )
 
     registered_receipts = []
-    from core.web.services.team_workflow.research_runtime import (
-        model_invocation_receipt_registry,
-    )
     from core.web.services.team_workflow.research_runtime import (
         model_invocation_receipt_registry,
     )
@@ -2676,7 +2680,7 @@ def test_formal_meeting_speaker_turn_journals_receipt_outcome(tmp_path, monkeypa
         / "turn_journal.jsonl"
     )
     assert journal_path.exists(), "formal meeting turn must journal its canonical outcome"
-    committed_with_receipt = []
+    committed_events = []
     for line in journal_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -2688,9 +2692,11 @@ def test_formal_meeting_speaker_turn_journals_receipt_outcome(tmp_path, monkeypa
         if event.get("turnId") != f"chat-room:round-formal-1:{participant_id}":
             continue
         payload = event.get("payload") or {}
-        if isinstance(payload.get("modelInvocationReceipt"), dict):
-            committed_with_receipt.append(payload["modelInvocationReceipt"])
-    assert [receipt.get("receiptId") for receipt in committed_with_receipt] == ["receipt-meeting-1"]
+        committed_events.append(payload)
+    assert len(committed_events) == 1
+    assert "modelInvocationReceipt" not in committed_events[0]
+    assert "requestExcerpt" not in str(committed_events[0])
+    assert "responseExcerpt" not in str(committed_events[0])
     assert [receipt.get("receiptId") for receipt in registered_receipts] == ["receipt-meeting-1"]
 
 
