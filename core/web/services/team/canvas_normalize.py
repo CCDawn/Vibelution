@@ -440,7 +440,12 @@ def _remove_agent_from_team_canvas(team: dict[str, Any], agent_id: str) -> None:
         "nodes": nodes,
         "edges": edges,
     }
-    s._write_json(canvas_path, canvas)
+    stored_canvas = (
+        s._challenge_cup_canvas_storage_projection(canvas)
+        if team_id == s.CHALLENGE_CUP_RESEARCH_TEAM_ID
+        else canvas
+    )
+    s._write_json(canvas_path, stored_canvas)
 
 
 def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:

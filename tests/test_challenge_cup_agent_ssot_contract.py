@@ -303,6 +303,40 @@ def test_challenge_cup_raw_team_canvas_projection_keeps_only_ssot_bindings(
         }.issubset(node)
 
 
+def test_challenge_cup_member_removal_reapplies_canvas_ssot_projection(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_ssot()
+    team = team_service.bootstrap_challenge_cup_research_team()["team"]
+    canvas_path = team_service._team_canvas_path(team["teamId"])
+    raw_canvas = _read_json(canvas_path)
+    for node in raw_canvas["nodes"]:
+        node["agentCode"] = "legacy-copy"
+        node["agentName"] = "legacy-copy"
+        node["agentSourceRef"] = {"owner": "legacy"}
+        node["agentProjectionEdit"] = {"canWrite": True}
+        node["agentProjectionCanWrite"] = True
+    canvas_path.write_text(
+        json.dumps(raw_canvas, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    removed_agent_id = str(team["members"][0]["agentId"])
+    team_service._remove_agent_from_team_canvas(team, removed_agent_id)
+
+    stored = _read_json(canvas_path)
+    assert all(
+        str(node.get("agentId") or "") != removed_agent_id
+        for node in stored["nodes"]
+    )
+    assert all(
+        _AGENT_PROJECTION_FIELDS.isdisjoint(_mapping_keys(node))
+        for node in stored["nodes"]
+    )
+
+
 def test_challenge_cup_team_binding_projection_contains_no_agent_config_fields(
     tmp_path,
     monkeypatch,
