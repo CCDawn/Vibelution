@@ -1145,6 +1145,102 @@ def read_model_invocation_receipt_from_events(
     return receipts[-1] if receipts else None
 
 
+def _lifecycle_resolved_tool_identities(event_list: list[TurnJournalEvent]) -> dict[str, tuple[set[str], set[str]]]:
+    """Collect per-turn tool call identities resolved by lifecycle result events.
+
+    ``tool_result`` / CLI result events already project the canonical tool
+    chain for a turn. Persisted assistant partial / message payloads may embed
+    the same calls — including their result bodies — as a legacy ``toolCalls``
+    bundle (see ``persist_session_turn_result``). For the model replay those
+    embedded result copies must be dropped or the same tool call enters model
+    history twice; the UI visible projection keeps them untouched.
+    """
+
+    identities: dict[str, tuple[set[str], set[str]]] = {}
+    for event in event_list:
+        if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
+            continue
+        if not event.visible_in_model:
+            continue
+        turn_id = str(event.turn_id or "").strip()
+        if not turn_id:
+            continue
+        tool_call_id = _event_tool_call_id(event)
+        payload = dict(event.payload or {})
+        tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
+        name = str(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name") or "").strip()
+        ids, names = identities.setdefault(turn_id, (set(), set()))
+        if tool_call_id:
+            ids.add(tool_call_id)
+        if name:
+            names.add(name)
+    return identities
+
+
+_EMBEDDED_ASSISTANT_MESSAGE_KINDS = frozenset(
+    {
+        "journal_assistant_message",
+        "journal_assistant_partial",
+    }
+)
+
+
+def _message_without_lifecycle_projected_tool_results(
+    message: dict[str, Any],
+    lifecycle_tool_identities: dict[str, tuple[set[str], set[str]]],
+) -> dict[str, Any]:
+    """Drop embedded tool result copies already projected from lifecycle events.
+
+    Applies only to journal assistant partial/message projections (never to
+    lifecycle bundles). Only exact identity matches are removed — explicit
+    call id, or tool name within the same turn when the entry carries no id —
+    and only when the entry actually carries a result body. Bare call
+    envelopes stay: they carry parallel-call atomicity when results follow as
+    lifecycle events, and unmatched embedded calls are the only record of
+    that call.
+    """
+
+    if not isinstance(message, dict):
+        return message
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    if str(metadata.get("kind") or "").strip() not in _EMBEDDED_ASSISTANT_MESSAGE_KINDS:
+        return message
+    identity = lifecycle_tool_identities.get(_message_turn_id(message))
+    if identity is None:
+        return message
+    resolved_ids, resolved_names = identity
+    embedded = message.get("toolCalls") or message.get("tool_calls") or []
+    kept: list[dict[str, Any]] = []
+    removed = False
+    for entry in _normalize_tool_payload(embedded):
+        if _tool_call_has_result_payload(entry):
+            explicit_id = str(
+                entry.get("id")
+                or entry.get("toolCallId")
+                or entry.get("tool_call_id")
+                or entry.get("taskId")
+                or ""
+            ).strip()
+            name = str(entry.get("name") or entry.get("toolName") or entry.get("tool_name") or "").strip()
+            duplicated = (
+                (explicit_id and explicit_id in resolved_ids)
+                or (not explicit_id and bool(name) and name in resolved_names)
+            )
+            if duplicated:
+                removed = True
+                continue
+        kept.append(entry)
+    if not removed:
+        return message
+    stripped = dict(message)
+    if kept:
+        stripped["toolCalls"] = kept
+    else:
+        stripped.pop("toolCalls", None)
+        stripped.pop("tool_calls", None)
+    return stripped
+
+
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     event_list = list(events or [])
     messages: list[dict[str, Any]] = []
@@ -1335,6 +1431,7 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
 
     event_list = list(events or [])
     event_by_id = {event.event_id: event for event in event_list if event.event_id}
+    lifecycle_tool_identities = _lifecycle_resolved_tool_identities(event_list)
     messages: list[dict[str, Any]] = []
     for message in _filter_recoverable_status_messages(model_visible_messages_from_events(event_list)):
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
@@ -1345,7 +1442,12 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
             if checkpoint_message:
                 messages.append(checkpoint_message)
             continue
-        messages.append(message)
+        messages.append(
+            _message_without_lifecycle_projected_tool_results(
+                message,
+                lifecycle_tool_identities,
+            )
+        )
     return normalize_model_messages(messages)
 
 
