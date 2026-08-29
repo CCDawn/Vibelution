@@ -7,6 +7,7 @@ membership/binding projection and must not copy or reconcile Agent config.
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
@@ -95,6 +96,56 @@ def _agent_config(agent: dict) -> dict:
     }
 
 
+_AGENT_OWNED_CONFIG_FIELDS = {
+    "llmBindings",
+    "modelId",
+    "model",
+    "protocol",
+    "prompt",
+    "promptTemplateId",
+    "defaultPromptTemplateId",
+    "toolPolicyId",
+    "toolPolicy",
+    "tools",
+    "memoryPolicyId",
+    "memoryPolicy",
+    "permissionPreset",
+    "permissions",
+    "runtimePermissions",
+    "personaProfile",
+    "persona",
+    "taskProfile",
+    "task",
+    "contextCompressionPolicy",
+    "delegationPolicy",
+    "supervisionPolicy",
+    "metadata",
+    "configSchemaVersion",
+    "configRevision",
+    "configHash",
+    "agentConfig",
+    "configuration",
+}
+
+
+def _mapping_keys(value) -> set[str]:
+    """Return all mapping keys so nested config copies are also rejected."""
+
+    if isinstance(value, dict):
+        return {str(key) for key in value} | {
+            key
+            for child in value.values()
+            for key in _mapping_keys(child)
+        }
+    if isinstance(value, list):
+        return {key for child in value for key in _mapping_keys(child)}
+    return set()
+
+
+def _read_json(path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_challenge_cup_bootstrap_reuses_existing_agent_ssot_without_config_mutation(
     tmp_path,
     monkeypatch,
@@ -121,6 +172,14 @@ def test_challenge_cup_bootstrap_reuses_existing_agent_ssot_without_config_mutat
     assert result["created"] is True
     assert {member["agentId"] for member in result["team"]["members"]} == seeded_ids
     assert {agent["agentId"] for agent in result["agents"]} == seeded_ids
+    for agent_id, expected in before.items():
+        assert _agent_config(agent_directory_service.get_agent(agent_id)) == expected
+
+    second_result = team_service.bootstrap_challenge_cup_research_team()
+
+    assert second_result["created"] is False
+    assert {member["agentId"] for member in second_result["team"]["members"]} == seeded_ids
+    assert {agent["agentId"] for agent in second_result["agents"]} == seeded_ids
     for agent_id, expected in before.items():
         assert _agent_config(agent_directory_service.get_agent(agent_id)) == expected
 
@@ -154,3 +213,73 @@ def test_challenge_cup_team_binding_projection_contains_no_agent_config_fields(
     for member in sources["members"]:
         assert config_fields.isdisjoint(member)
         assert set(member) >= {"agentId", "role"}
+
+
+def test_challenge_cup_role_bindings_are_unique_and_raw_projections_have_no_agent_config(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    result = team_service.bootstrap_challenge_cup_research_team()
+
+    expected_roles = {
+        str(role["role"])
+        for role in team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+    }
+    members = [
+        member
+        for member in result["team"].get("members", [])
+        if isinstance(member, dict)
+    ]
+    member_roles = [str(member.get("role") or "").strip() for member in members]
+    member_agent_ids = [str(member.get("agentId") or "").strip() for member in members]
+
+    assert len(members) == len(expected_roles)
+    assert set(member_roles) == expected_roles
+    assert all(member_agent_ids)
+    assert len(member_agent_ids) == len(set(member_agent_ids))
+
+    registry_agents = [
+        agent
+        for agent in agent_directory_service.list_agents(
+            include_archived=False,
+            detail="summary",
+        )
+        if str((agent.get("metadata") or {}).get("challengeCupTeamId") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    ]
+    registry_roles = [
+        str((agent.get("metadata") or {}).get("challengeCupTeamRole") or "").strip()
+        for agent in registry_agents
+    ]
+    registry_agent_ids = [str(agent.get("agentId") or "").strip() for agent in registry_agents]
+    assert set(registry_roles) == expected_roles
+    assert len(registry_roles) == len(set(registry_roles))
+    assert set(registry_agent_ids) == set(member_agent_ids)
+
+    raw_team_state = _read_json(team_service._teams_index_path())
+    raw_team = next(
+        team
+        for team in raw_team_state["teams"]
+        if team.get("teamId") == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    )
+    raw_canvas = _read_json(
+        team_service._team_canvas_path(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID)
+    )
+    canvas_nodes = [
+        node for node in raw_canvas.get("nodes", []) if isinstance(node, dict)
+    ]
+    canvas_roles = [str(node.get("role") or "").strip() for node in canvas_nodes]
+    canvas_agent_ids = [str(node.get("agentId") or "").strip() for node in canvas_nodes]
+
+    assert set(canvas_roles) == expected_roles
+    assert len(canvas_roles) == len(set(canvas_roles))
+    assert set(canvas_agent_ids) == set(member_agent_ids)
+    sources = team_service.list_team_role_binding_sources(
+        team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    )
+    assert sources["team_exists"] is True
+    assert sources["canvas_nodes"] == []
+
+    for projection in (raw_team, *members, raw_canvas, *canvas_nodes):
+        assert _AGENT_OWNED_CONFIG_FIELDS.isdisjoint(_mapping_keys(projection))
