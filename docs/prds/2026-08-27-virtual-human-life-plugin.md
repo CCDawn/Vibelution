@@ -2,10 +2,10 @@
 
 - Status: `active-plan`
 - Owner: Vibelution product planning
-- Scope: 按单个 Agent 启用的独立虚构人物生活插件；包含生活心跳、主动活动、心情、次日规划、日记、长期记忆、工具包、提示词包、主动消息和隔离验收
-- Planning snapshot: Vibelution `main@527819208e191897cd6de68e1140fb407f939f50`；外部参考固定到 `menglimi/astrbot_plugin_private_companion@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`
+- Scope: 按单个 Agent 启用的独立虚构人物生活插件；包含生活心跳、主动活动、心情、次日规划、日记、长期记忆、工具包、提示词包、主动消息、因果连续的长期目标/情绪余波/关系账本/未完话题和隔离验收
+- Planning snapshot: Vibelution `main@3d7d11dc529a36dd9717c5f78ac26e390c439e40`；首版外部参考固定到 `menglimi/astrbot_plugin_private_companion@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`；拟人化第二阶段研究快照为 `main@85cc366ee6e1ccf08b357e8b9e396c3abb842ff4`
 - Supersedes: 无
-- Implementation link: `codex/virtual-human-life-plugin`；后端生活域、Agent-scoped API、Prompt Pack、工具包、主动轮次与生命周期已完成实现，桌面端人物大厅与原生 Chat 复用方案已获用户批准并进入最终集成验收
+- Implementation link: 首版实现已合入本地 `main`；用户于 2026-08-29 批准第二阶段因果连续性改造，并确认已与 AstrBot Private Companion 上游沟通，允许在 Vibelution 中选择性复用和改造其代码
 - Validation: 用户决策复核、本地 owning surface 核查、外部参考代码切片核查、插件/API/工具/主动轮次测试、生命周期回归、前端合同与构建、浏览器运行时验收、`git diff --check`
 - Close condition: 用户批准后转为 `user-approved`；实施开始后转为 `active-plan`；实施完成、被替代或放弃时转为 `implemented`、`superseded` 或 `historical` 并按项目规则归档
 
@@ -25,6 +25,9 @@
 8. 应用关闭期间不宣称实时运行。启动后只允许合并漏掉的心跳；纯模拟活动仅在规则能产生有效 outcome 时形成 `simulatedAfterRestart=true` 事件，工具型活动不得推定完成。
 9. 主动生活触发使用正式的 `proactive_turn` 内部来源，不通过普通 `submit_session_message()` 伪造用户消息。
 10. 插件启用或后端重启会恢复生活心跳和主动消息能力，但不等于立即发送“启动问候”；任何实际发送仍需通过有效期、额度、间隔、免打扰、会话和权限门。
+11. 拟人化第二阶段以“实际事件 → 情绪/目标/关系/未完事项 → 计划/表达/主动联系 → 新实际事件”为唯一因果闭环，不增加无来源的人设或数值漂移。
+12. 默认保留原生实时会话，不通过人为延迟来伪造真实感；忙碌、休息和睡眠默认只影响状态、语气和主动联系。可选沉浸延迟须作为后续独立产品开关。
+13. AstrBot Private Companion 的上游代码可在用户确认的授权范围内选择性复用和改造；每个实现切片必须固定上游 commit、记录来源与改造边界，且不得引入第二套 Agent、Session、Memory、ToolPolicy 或运行时权威。
 
 ## 3. 产品定位
 
@@ -60,7 +63,7 @@
 - 多 Agent 城镇级社会模拟；
 - 自动操作用户文件、账号或外部服务；
 - SillyTavern 完整角色卡兼容；
-- 复制外部参考仓库代码；
+- 整仓复制外部参考仓库、引入 AstrBot 运行时或脱离来源 receipt 的无边界复制；
 - 将全部现有 Agent 自动转换为虚拟人；
 - 让计划本身成为日记或长期记忆。
 
@@ -80,6 +83,12 @@
 | Tool Bundle | 插件声明的工具集合；最终可见和可执行范围是 Tool Registry、Agent ToolPolicy、插件绑定和当前活动授权的交集 |
 | Proactive Turn | 由插件内部事实触发、没有用户消息的 Agent Turn；触发记录不投影为 `user_message`，可见结果仍按 assistant 消息进入现有会话 |
 | Delivery Attempt | 一次主动消息发送事务；具有稳定 attempt ID、预留令牌、有效期和最终送达 receipt |
+| Life Drive | 人物的长期目标、个人项目、习惯和技能；只能由已完成活动和可追溯事件推进 |
+| Affect Episode | 一次有来源、对象、强度、置信度、余波和恢复语义的情绪事件；`state.mood` 只是其当前投影 |
+| Relationship Event | 对一次互动、边界、冲突或修复的幂等账本记录；关系阶段和表达档位由账本派生 |
+| Open Loop | 尚未解决的话题、承诺、稍后追问或等待条件；具有下次检查时间和明确终态 |
+| Proactive Candidate | 由生活事件、Life Drive、Affect Episode、Relationship Event 或 Open Loop 形成的可分享意图；通过评分、抑制和发送前复核后才能进入 Delivery Attempt |
+| Reflection Proposal | 夜间反思产生的待校验偏好、目标、技能或自我叙事更新；未通过来源、冲突和边界校验前不得写入稳定上下文 |
 
 ## 6. 用户故事
 
@@ -117,6 +126,22 @@
 
 插件启用后主动消息默认开启。Agent 可以分享活动结果、在重要日期表达关心、询问用户是否愿意聊天或分享日记片段。主动消息必须服从每日次数、最小间隔、免打扰时间、会话可用性、插件绑定状态和消息工具授权。
 
+### 6.7 拥有长期人生线
+
+虚拟人可以有自己的长期目标、个人项目、习惯和技能。次日计划需从这些 Life Drive、当前需求、已有承诺和环境事实中选择下一步；只有具有 outcome 的完成事件能推进进度。
+
+### 6.8 保留情绪余波与关系修复
+
+情绪变化必须指向具体事件和对象，并按余波与恢复规则渐变，不得每轮对话立即回归默认心情。关系变化记入幂等事件账本，经过单次/每日上限、阶段迟滞、自然回落和道歉修复后，再投影为当前表达档位。
+
+### 6.9 记得未说完的事
+
+用户或虚拟人提到“稍后再说”、“完成后告诉你”或可验证的承诺时，形成 Open Loop。它可以在后续被解决、取消、过期或转化为主动候选，但不能每次对话重复追问。
+
+### 6.10 经过生活再主动分享
+
+生活事件先形成 Proactive Candidate，再综合价值、时效、新颖度、可分享性、用户未回复、主题重复、忙碌/睡眠、关系和免打扰决定是否发送。未进入 Delivery Attempt 的候选必须保留抑制原因和终态。
+
 ## 7. 功能需求
 
 | 编号 | 功能 | 优先级 | 验收结果 |
@@ -143,6 +168,14 @@
 | FR-20 | 梦境/夜间反思 | P1 | 从近期真实经历派生 |
 | FR-21 | 多 Agent 社交活动 | P2 | 后续复用 ChatRoom，不进入首版 |
 | FR-22 | 酒馆式分支和角色卡导入 | P2 | 后续阶段，不阻塞生活 MVP |
+| FR-23 | 长期目标、项目、习惯和技能 | P0 / 拟人化二阶段 | 日程有长期动因；进度只由实际完成事件推进 |
+| FR-24 | 事件化情绪与余波 | P0 / 拟人化二阶段 | Affect Episode 可追溯、可恢复、可去重；数值状态只是投影 |
+| FR-25 | 关系事件账本 | P0 / 拟人化二阶段 | 阶段迟滞、变化上限、自然回落和修复语义稳定 |
+| FR-26 | 主动候选生命周期 | P0 / 拟人化二阶段 | 来源、评分、时间窗、抑制原因、发送前复核和终态可审计 |
+| FR-27 | 未完话题与承诺 | P1 / 拟人化二阶段 | Open Loop 有下次检查时间、去重和明确终态 |
+| FR-28 | 夜间反思与记忆强化 | P1 / 拟人化二阶段 | Reflection Proposal 通过来源、冲突和边界校验后才合并 |
+| FR-29 | 环境与位置连续性 | P1 / 拟人化二阶段 | 天气、位置和工具事实有来源；移动过程不跳变 |
+| FR-30 | 可选语音、表情和桌面存在感 | P2 | 作为可选表现层，不接管生活、记忆或会话权威 |
 
 ## 8. 非功能需求
 
@@ -694,19 +727,35 @@ POST /api/agents/{agentId}/plugins/virtual-human-life/import-legacy-pet
 workspace/agents/{agentId}/plugins/virtual-human-life/
 ├── binding.json
 ├── state.json
+├── drives/
+│   ├── goals.json
+│   ├── projects.json
+│   ├── habits.json
+│   └── skills.json
 ├── schedules/
 │   └── YYYY-MM-DD.json
 ├── events/
 │   └── YYYY-MM-DD.jsonl
+├── affect/
+│   └── episodes.jsonl
+├── relationships/
+│   ├── events.jsonl
+│   └── projections.json
+├── conversation/
+│   └── open_loops.jsonl
 ├── diary/
 ├── proactive/
+│   ├── candidates.jsonl
 │   ├── triggers.jsonl
 │   └── deliveries.jsonl
+├── reflection/
+│   ├── proposals.jsonl
+│   └── receipts.jsonl
 ├── runs/
 └── migration_receipts/
 ```
 
-最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。MVP 的 binding、运行快照、trigger、delivery ledger 和迁移 receipt 全部位于 Agent workspace 安全边界内；若后续引入 workspace 外 outbox，必须先接入 Agent purge 的 prepare/commit/rollback 注册表。
+最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。MVP 的 binding、运行快照、trigger、delivery ledger 和迁移 receipt 全部位于 Agent workspace 安全边界内；若后续引入 workspace 外 outbox，必须先接入 Agent purge 的 prepare/commit/rollback 注册表。拟人化二阶段中，`state.json`、`relationships/projections.json` 和页面展示都是可重建投影；Life Event、Affect Episode、Relationship Event、Open Loop 和 delivery/reflection receipt 才是可追溯事实。原生 Agent episodic memory 仍是长期记忆文本的唯一权威，插件只保留晋升 receipt，不建第二套长期记忆库。
 
 ### 19.2 旧宠物数据迁移
 
@@ -788,10 +837,13 @@ web/src/routes/                             Agent 插件设置和生活面板
 
 ### 22.1 主要参考
 
-- [`menglimi/astrbot_plugin_private_companion`](https://github.com/menglimi/astrbot_plugin_private_companion/tree/8c2d982b1148d521e0a4889f4ba1b8309b011d5e)，本次固定参考 `main@8c2d982b1148d521e0a4889f4ba1b8309b011d5e`、metadata `6.4.1`；参考插件 manifest、生活状态、日程、主动消息、作用域隔离和配置思路。此前调研 tip `5bc3c9b47cbfff00c93c5a94558b6261426a3245` 仅保留为历史快照，不再作为实现依据。
-- 实施收口时又按本地 active registry 的当前候选 `e82c20908da50a0c6b524a43760590f95f752552` 复核上述机制；候选更新未改变 `REFERENCE_ONLY` 裁决，根许可证仍未确认。
+- [`menglimi/astrbot_plugin_private_companion`](https://github.com/menglimi/astrbot_plugin_private_companion/tree/85cc366ee6e1ccf08b357e8b9e396c3abb842ff4)：首版研究保留 `8c2d982b1148d521e0a4889f4ba1b8309b011d5e`快照；拟人化第二阶段固定 `main@85cc366ee6e1ccf08b357e8b9e396c3abb842ff4`，重点复用/改造主动候选、情绪余波、关系账本、未完话题、个人目标和 Bot 自我时间线。
+- 用户于 2026-08-29 明确声明已与上游沟通并获得代码复用许可。该声明将 AstrBot 裁决从“许可证不明时只参考”更新为“可在许可范围内选择性复用”；上游仍无 GitHub 可识别的公开许可证，因此权限依据是权利人单独许可，不得外推为任意用途的公开开源授权。
 - [SillyTavern](https://github.com/SillyTavern/SillyTavern)：参考角色卡、World Info、群聊和分支交互。
 - [Generative Agents](https://arxiv.org/abs/2304.03442)：参考 observation、planning、reflection 和 memory retrieval。
+- [Letta Code](https://github.com/letta-ai/letta-code)：参考周期反思、记忆分层、显式合并与可审计记忆改写；不引入其 Agent Runtime 或自改写 harness。
+- [Graphiti](https://github.com/getzep/graphiti)：参考时态事实、来源、有效窗口、冲突失效和历史保留；不引入 Neo4j、FalkorDB 或第二套记忆图。
+- [Project AIRI](https://github.com/moeru-ai/airi)：参考遗忘/强化、情绪参与记忆召回、语音生命周期和 Live2D 表现层；不作为生活或记忆权威。
 - [APScheduler](https://apscheduler.readthedocs.io/)：参考 persistent scheduling、misfire、coalescing 和并发语义，不作为 MVP 必选依赖。
 - [AI Town](https://github.com/a16z-infra/ai-town)：参考共享世界状态和多角色社交，首版不接入其技术栈。
 
@@ -801,15 +853,17 @@ web/src/routes/                             Agent 插件设置和生活面板
 | --- | --- | --- | --- |
 | `main.py`、`plugin_bootstrap.py`、`tests/test_background_task_lifecycle.py` | manifest、初始化/终止、后台任务登记与取消 | Plugin Runtime Supervisor、`onHostStart/onHostStop`、binding revision 栅栏 | AstrBot decorator、事件总线和巨型 Plugin class |
 | `daily_state_tick.py`、`agenda_runtime.py`、`tests/test_agenda_contracts_policy.py`、`tests/test_schedule_reconciler_semantics.py` | 计划不是事实、时区窗口、状态 reconciliation、无证据不得完成 | Life State Machine、Life Event outcome 门、重启补算 | 与 AstrBot 用户/群聊状态耦合的数据模型 |
-| `proactive_engine.py`、`tests/test_proactive_chat_integration.py`、`tests/test_proactive_expiry_lifecycle.py`、`tests/test_outbound_duplicate_guard.py` | 候选有效期、安静时段、额度、冷却、碰撞、预留令牌、最终发送确认和 stale recovery | Proactive Turn Trigger、DeliveryAttempt、发送前 binding 栅栏 | AstrBot 平台 UMO、装饰发送链、陪伴专属启发式 |
+| `proactive_engine.py`、`proactive.py`、`proactive_message.py` 及对应生命周期/去重测试 | 生活事件形成候选、价值与时间窗评分、未回应降速、免打扰/忙碌/关系门、发送前复核、终态和审计 | `proactive/candidates.jsonl` →现有 Trigger/DeliveryAttempt；原生 Proactive Turn admission 和 Session 串行不变 | AstrBot 平台 UMO、装饰发送链、群聊/社交平台专属策略 |
+| `domains/affect/` 及关系/边界修复相关测试 | 情绪事件、来源与对象、短期余波、表达档位、关系账本、变化上限、阶段迟滞和道歉修复 | `affect/episodes.jsonl`、`relationships/events.jsonl`、可重建关系投影和 Prompt 表达段 | 主要/次要用户的平台角色架构、成人内容策略和群聊私聊耦合 |
+| `daily_state.py` 中技能/目标、`user_memory.py` 中未完话题和 Bot 自我时间线 | 长期目标只由完成日程推进；未完话题的去重、过期与追问条件；自我叙事从真实事件派生 | `drives/*`、`conversation/open_loops.jsonl`、Reflection Proposal 与原生 episodic memory receipt | AstrBot 用户画像存储、平台身份归并和内容扩展数据 |
 | `identity_namespace.py`、`scoped_domain_contract.py` | 显式 namespace、contract fingerprint、缺失上下文 fail-closed、禁止把权限字段混入内容 | `agentId + pluginId` binding、Agent workspace、Prompt/工具/记忆作用域校验 | 原文件代码和 AstrBot 私聊/群聊身份枚举 |
 | `config_migration.py`、migration/storage tests | 预览、版本、receipt、失败恢复 | 旧 `pet_info.json` 显式导入和 Agent purge saga | 自动迁移、双写或兼容 AstrBot 存储格式 |
 
-该仓库当前仍没有 GitHub 可识别许可证，根目录未见明确 `LICENSE`。同时其 `main.py`、`proactive_engine.py`、`page_api.py` 等文件已形成与 AstrBot 深度耦合的大型实现面，因此裁决是只借可观察行为、状态机和测试命题，不复制源码、Prompt 文本、配置 schema 或文件结构。
+直接复用不等于整仓照搬。实施时必须以 Vibelution owning surface 为单一写入者，逐切片记录 `sourceRepo/sourceCommit/sourcePaths/permissionBasis/adaptationBoundary/verification`；保留授权要求的署名或来源声明。若授权原文含私人信息，只在安全的非仓库位置保留原文，仓库 receipt 记摘要/引用；未获得明确分发和署名条款前，不把该单独许可作为远端推送或公开发布依据。
 
 ### 22.3 决策
 
-主决策为 `ADAPT` Vibelution 本地 Agent、pet_system、Session、Memory、ToolPolicy、lifespan 和 VUI；外部项目均为 `REFERENCE_ONLY`。AstrBot 参考仓库在研究时没有可确认的根许可证，因此不得复制其代码。实施前应按 Vibelution 复用证据流程固定候选 commit、license/readiness 和借鉴切片。
+主决策为 `ADAPT` Vibelution 本地 Agent、Session、Memory、ToolPolicy、lifespan 和 VUI；AstrBot Private Companion 为 `REUSE_WITH_EXPLICIT_PERMISSION`，其他外部项目为 `ADAPT` 或 `REFERENCE_ONLY`。复用单位是经审查的领域算法、数据契约和测试思路，不是 AstrBot 插件运行时、平台身份或页面框架。实施前按 Vibelution 复用证据流程固定候选 commit、permission/readiness、来源切片和改造边界。
 
 实现优先级为：
 
@@ -821,6 +875,38 @@ PROJECT_REUSE
 ```
 
 不引入 AstrBot、APScheduler、SillyTavern 或 AI Town 作为运行时依赖。外部参考变化快，实施时必须继续以本节固定 commit 为证据，不跟随未经审查的默认分支漂移。
+
+### 22.4 拟人化二阶段的因果闭环
+
+```mermaid
+flowchart LR
+    E[实际生活/互动事件]
+    A[Affect Episode]
+    D[目标 项目 习惯 技能]
+    R[Relationship Event]
+    O[Open Loop]
+    P[日程 记忆召回 表达投影]
+    C[Proactive Candidate]
+    T[原生 Session / Proactive Turn]
+
+    E --> A
+    E --> D
+    E --> R
+    E --> O
+    A --> P
+    D --> P
+    R --> P
+    O --> P
+    A --> C
+    D --> C
+    R --> C
+    O --> C
+    P --> T
+    C --> T
+    T --> E
+```
+
+这个闭环只消费已有事件和经授权环境事实。模型可以提议 Affect Episode、Life Drive 调整、Open Loop 或 Reflection Proposal，但不能越过 schema、冲突、幂等、作用域和权限校验直接改写稳定 Persona、长期记忆、关系阶段或现实事实。
 
 ## 23. 实施任务图
 
@@ -837,6 +923,12 @@ flowchart LR
     T8[T8 Agent-scoped API 和前端 DTO]
     T9[T9 Agent 插件设置与生活面板]
     T10[T10 集成验收 兼容和运行时证据]
+    T11[T11 授权复用切片和因果数据契约]
+    T12[T12 长期目标 项目 习惯 技能与日程]
+    T13[T13 情绪余波和关系事件账本]
+    T14[T14 主动候选 未完话题和承诺]
+    T15[T15 夜间反思 记忆强化和环境连续]
+    T16[T16 桌面端因果展示与长程验收]
 
     T0 --> T1
     T1 --> T2
@@ -856,6 +948,15 @@ flowchart LR
     T7 --> T8
     T8 --> T9
     T9 --> T10
+    T10 --> T11
+    T11 --> T12
+    T11 --> T13
+    T12 --> T14
+    T13 --> T14
+    T12 --> T15
+    T13 --> T15
+    T14 --> T16
+    T15 --> T16
 ```
 
 Critical Path：
@@ -868,10 +969,14 @@ Critical Path：
 → Proactive Turn 与发送事务
 → API
 → UI
-→ 集成验收
+→ 首版集成验收
+→ 授权复用与因果数据契约
+→ 长期生活线和情绪/关系账本
+→ 主动候选和未完事项
+→ 反思、桌面端因果展示与长程验收
 ```
 
-工具权限和 Prompt Pack 可在生活数据契约稳定后并行设计；Proactive Turn 必须等待监督器、工具权限和 Prompt 段契约汇合，不能先以普通用户消息入口占位。
+工具权限和 Prompt Pack 可在生活数据契约稳定后并行设计；Proactive Turn 必须等待监督器、工具权限和 Prompt 段契约汇合，不能先以普通用户消息入口占位。第二阶段先固定授权切片和事件/投影契约；长期生活线与情绪/关系账本可在不重叠的存储文件上并行实现，主动候选必须消费两者已稳定的投影。
 
 ## 24. 任务卡
 
@@ -952,6 +1057,48 @@ Critical Path：
 - Mode: BDD/TDD + 浏览器验收。
 - Verification/Stop: 启用 Agent 正常生活并通过 `proactive_turn` 主动发消息；普通 Agent 零变化；禁用/归档后立即停止影响；重启无重复发送；未获远端授权不得 push/发布。
 
+### Task 11：固定授权复用切片和因果数据契约
+
+- Owner/Boundary: 上游来源 receipt、固定 commit、事件/投影 SSOT 表、schema version 和 migration 边界；不写业务功能。
+- Dependency: Task 10 首版基线和用户的代码复用许可。
+- Mode: BDD/TDD（schema/迁移契约）。
+- Verification/Stop: 每个直接复用切片有 `sourceRepo/sourceCommit/sourcePaths/permissionBasis/adaptationBoundary/verification`；无来源或会形成第二权威的切片不实施；远端发布仍需单独授权和分发/署名条款。
+
+### Task 12：建立长期目标、项目、习惯和技能闭环
+
+- Owner/Boundary: `drives/*`、完成事件到进度投影、次日规划候选和 Prompt 摘要；不改 Session 或原生记忆写入。
+- Dependency: Task 11。
+- Mode: BDD/TDD。
+- Verification/Stop: 未完成、取消、失败或重复事件不推进目标；规划能说明活动与 Life Drive 的来源关系；长期目标不改写 Persona 核心不变量。
+
+### Task 13：建立情绪余波和关系事件账本
+
+- Owner/Boundary: `affect/episodes.jsonl`、`relationships/events.jsonl`、可重建投影、恢复/回落和表达档位；不增加平台帐号角色或成人内容例外。
+- Dependency: Task 11。
+- Mode: BDD/TDD。
+- Verification/Stop: 事件幂等、单次/每日变化有界、阶段迟滞、自然回落和道歉修复可重放；没有来源时不允许关系跳变。
+
+### Task 14：建立主动候选、未完话题和承诺
+
+- Owner/Boundary: `proactive/candidates.jsonl`、`conversation/open_loops.jsonl`、评分/抑制/过期、发送前复核和现有 DeliveryAttempt 衔接；不改原生 Session 串行。
+- Dependency: Task 12 和 Task 13。
+- Mode: BDD/TDD。
+- Verification/Stop: 用户未回复、主题重复、免打扰、忙碌/睡眠和关系边界有可解释抑制结果；候选未出队不创建 Turn；最终回复后无残留“正在输入”。
+
+### Task 15：建立夜间反思、记忆强化和环境连续
+
+- Owner/Boundary: Reflection Proposal、记忆重要度/时间/情绪/未解决度投影、位置移动和授权环境事实；原生 Agent episodic memory 仍为唯一长期记忆权威。
+- Dependency: Task 12 和 Task 13。
+- Mode: BDD/TDD。
+- Verification/Stop: 反思失败不改生活事实；冲突事实通过 supersession 保留历史；梦境不能晋升为外部事实；地点转换有时间与来源。
+
+### Task 16：完成桌面端因果展示和长程验收
+
+- Owner/Boundary: `/companions` 右侧生活投影和人物卡片中的当前原因、长期人生线、自然关系描述与主动诊断；不新建聊天页或移动端范围。
+- Dependency: Task 14 和 Task 15。
+- Mode: BDD/TDD + VUI/desktop 浏览器验收。
+- Verification/Stop: 连续时钟模拟至少 7 天，证明目标推进、情绪恢复、关系迟滞、话题去重、未回应降速、记忆溯源和跨 Agent/Session 隔离；默认实时对话不人为降速。
+
 ## 25. 验证矩阵
 
 ### 25.1 隔离
@@ -1021,6 +1168,17 @@ Critical Path：
 - runtime-scene 能重建心跳、计划、执行、失败、恢复和主动消息分支；
 - Launcher 环境下无可见控制台窗口。
 
+### 25.8 拟人化因果连续性
+
+- 固定时钟和固定事件输入产生可重放的 Life Drive、Affect Episode、Relationship Event 和 Open Loop 投影；
+- 目标、项目、习惯和技能只由具有 outcome 的完成事件推进；失败、取消、跳过、重复和计划不推进；
+- 情绪余波按来源、强度、置信度和恢复规则演化，不在心跳中无来源跳变；
+- 关系变化幂等，满足单次/每日上限、阶段迟滞、自然回落和道歉修复；
+- 主动候选同时验证价值、时间窗、主题去重、未回应降速和发送前复核；抑制和过期不创建 Turn；
+- Open Loop 只能进入 `open/resolved/cancelled/expired`终态，同一话题不重复追问；
+- Reflection Proposal 在合并前校验来源、冲突、作用域和 Persona 不变量；梦境不成为事实；
+- 至少运行 7 天确定性时钟场景，验证不刷屏、不记忆泛滥、不跨 Agent/Session 串线，且默认对话不人为变慢。
+
 ## 26. 主要风险和控制
 
 | 风险 | 控制 |
@@ -1039,7 +1197,9 @@ Critical Path：
 | Agent purge 半清理 | 接入既有 prepare/commit/rollback 补偿和安全 workspace 删除边界 |
 | 宠物旧数据污染新模型 | 显式选择目标 Agent 后才导入 |
 | 插件故障拖垮后端 | Agent 级隔离、超时、熔断和 bounded logs |
-| 参考项目许可证不明确 | 只参考设计，不复制实现 |
+| 上游无公开许可证，单独许可范围被误解 | 每个复用切片固定 commit 并记录 permission basis、来源、改造边界和署名要求；推送/发布前单独确认分发条款 |
+| 复用 AstrBot 引入第二套事实源 | 只复用领域机制和经审查切片；Vibelution Agent、Session、Memory、ToolPolicy、workspace 和 VUI 仍为唯一权威 |
+| 为拟人故意延迟回复 | 默认保留实时对话和单一“正在输入”；忙碌/睡眠只影响状态、语气和主动联系，沉浸延迟需独立开关 |
 | 插件生态范围失控 | MVP 只交付可信第一方插件和最小通用契约 |
 
 ## 27. 回滚与停用
@@ -1054,4 +1214,6 @@ Critical Path：
 
 ## 28. 用户批准门
 
-用户已明确批准按本方案实施，并授权在独立 `codex/*` 分支连续开发至完成；批准范围包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。桌面端隔离预览已获批准，批准对象为 `/companions` 人物大厅、左侧当前人物栏、中间原生 Chat、右侧生活信息栏以及“切换人物必须返回大厅”的交互。若后续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API、移动端范围或上述 UI 结果，应更新本文档并重新检查任务图后再实施。
+用户已明确批准按本方案实施，并授权在独立 `codex/*` 分支连续开发至完成；批准范围包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。桌面端隔离预览已获批准，批准对象为 `/companions` 人物大厅、左侧当前人物栏、中间原生 Chat、右侧生活信息栏以及“切换人物必须返回大厅”的交互。
+
+2026-08-29，用户进一步批准拟人化第二阶段的长期目标/项目/习惯/技能、事件化情绪余波、关系事件账本、主动候选、未完话题/承诺、夜间反思和因果展示；默认对话仍为实时。用户同时确认已与 AstrBot Private Companion 上游沟通，允许 Vibelution 选择性复用和改造其代码；该许可不自动授权远端 push、公开发布、越过署名/分发条款或整仓引入 AstrBot 运行时。若后续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API、移动端范围或上述 UI 结果，应更新本文档并重新检查任务图后再实施。
