@@ -74,6 +74,24 @@ internal static class VibelutionLauncher
         public bool FromShortcut;
     }
 
+    // The Python desktop-entry bridge settles lifecycle commands itself and
+    // reports its outcome through the process exit code (3 = settlement
+    // rejection with lifecycleSettlement.message on stdout). Carrying the exit
+    // code on the exception keeps that verdict alive instead of collapsing
+    // every bridge failure into exit 1.
+    private sealed class BridgeFailureException : Exception
+    {
+        public readonly int ExitCode;
+        public readonly string BridgeStdout;
+
+        public BridgeFailureException(int exitCode, string message, string bridgeStdout)
+            : base(message)
+        {
+            this.ExitCode = exitCode;
+            this.BridgeStdout = bridgeStdout ?? "";
+        }
+    }
+
     private sealed class TrayApplicationContext : ApplicationContext
     {
         private readonly string projectDir;
@@ -945,6 +963,15 @@ internal static class VibelutionLauncher
                 WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=open");
                 return 0;
             }
+            if (lastBridgeFailure != null)
+            {
+                // The bridge itself failed or rejected the request; its exit
+                // code (3 on a lifecycle settlement rejection) belongs to the
+                // shim exit code, and the settlement message belongs on the
+                // parent console instead of vanishing behind exit 1.
+                ReportBridgeFailureToParentConsole(lastBridgeFailure);
+                return MapBridgeExitCode(lastBridgeFailure.ExitCode);
+            }
             WriteNativeEntryLog(projectDir, "native_action.electron_launch_failed", "action=open");
             return 1;
         }
@@ -963,17 +990,135 @@ internal static class VibelutionLauncher
             return 0;
         }
 
+        if (lastBridgeFailure != null)
+        {
+            // Lifecycle settlement rejection lands here: the Python bridge
+            // already settled the command and exited 3 with
+            // lifecycleSettlement.message. Log the bridge outcome and surface
+            // both the message and the exit code to the caller.
+            WriteNativeEntryLog(projectDir, "native_action.bridge_failed", "action=" + action + " exitCode=" + lastBridgeFailure.ExitCode.ToString());
+            ReportBridgeFailureToParentConsole(lastBridgeFailure);
+            return MapBridgeExitCode(lastBridgeFailure.ExitCode);
+        }
+
         WriteNativeEntryLog(projectDir, "native_action.electron_launch_failed", "action=" + action);
         return 1;
+    }
+
+    private static int MapBridgeExitCode(int bridgeExitCode)
+    {
+        if (bridgeExitCode == 3)
+        {
+            return 3;
+        }
+        return 1;
+    }
+
+    private const int StdOutputHandle = -11;
+    private const uint AttachParentProcess = 0xFFFFFFFFu;
+    private static BridgeFailureException lastBridgeFailure;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint processId);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool FreeConsole();
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int handle);
+
+    private static void ReportBridgeFailureToParentConsole(BridgeFailureException failure)
+    {
+        // A WinExe process has no console of its own. When the shim was driven
+        // from a terminal, attach the parent console so the settlement message
+        // and exit code are visible; a shortcut/Explorer launch has no parent
+        // console (attach fails) and must stay silent. Never allocate a new
+        // console: an appearing console window violates the product
+        // no-visible-console red line.
+        try
+        {
+            if (!AttachConsole(AttachParentProcess))
+            {
+                return;
+            }
+            IntPtr stdOutput = GetStdHandle(StdOutputHandle);
+            if (stdOutput == IntPtr.Zero || stdOutput == (IntPtr)(-1))
+            {
+                return;
+            }
+            string settlement = ExtractBridgeSettlementMessage(failure.BridgeStdout);
+            string message = !string.IsNullOrWhiteSpace(settlement) ? settlement : ShortStaticMessage(failure.Message);
+            var stream = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle(stdOutput, false), FileAccess.Write);
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true })
+            {
+                Console.SetOut(writer);
+                Console.Out.WriteLine("Vibelution 请求未完成：" + message);
+                Console.Out.WriteLine("(desktop entry bridge exitCode=" + failure.ExitCode.ToString() + ")");
+                Console.Out.Flush();
+            }
+        }
+        catch
+        {
+            // Console reporting is best-effort; the log and exit code carry
+            // the failure even when no parent console exists.
+        }
+        finally
+        {
+            try
+            {
+                FreeConsole();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static string ExtractBridgeSettlementMessage(string bridgeStdout)
+    {
+        if (string.IsNullOrEmpty(bridgeStdout))
+        {
+            return "";
+        }
+        string[] lines = bridgeStdout.Replace("\r\n", "\n").Split('\n');
+        for (int index = lines.Length - 1; index >= 0; index--)
+        {
+            string line = lines[index].Trim();
+            if (line.Length == 0 || line[0] != '{')
+            {
+                continue;
+            }
+            int settlementIndex = line.IndexOf("\"lifecycleSettlement\"", StringComparison.Ordinal);
+            if (settlementIndex < 0)
+            {
+                continue;
+            }
+            string message = ExtractJsonString(line.Substring(settlementIndex), "message");
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                return message;
+            }
+        }
+        return "";
     }
 
     private static bool ForwardOrLaunchElectron(string projectDir, string action, List<string> forwardedArgs)
     {
         bool openWorkbench = action == "open" || action == "start" || action == "restart" || action == "rebuild-and-start";
+        lastBridgeFailure = null;
         try
         {
             LaunchCurrentElectronMain(projectDir, action, openWorkbench);
             return true;
+        }
+        catch (BridgeFailureException ex)
+        {
+            // The Python bridge settled the command itself (a lifecycle
+            // rejection exits 3 with lifecycleSettlement.message). Remember
+            // the failure so RunNativeAction can forward its exit code.
+            lastBridgeFailure = ex;
+            WriteNativeEntryLog(projectDir, "native_action.bridge_failed", "action=" + action + " exitCode=" + ex.ExitCode.ToString() + " " + ShortStaticMessage(ex.Message));
+            return false;
         }
         catch (Exception ex)
         {
@@ -1139,7 +1284,10 @@ internal static class VibelutionLauncher
             process.WaitForExit();
             if (process.ExitCode != 0)
             {
-                throw new InvalidOperationException("Desktop entry Python bridge failed: " + ShortMessage(stderr.ToString() + " " + stdout.ToString()));
+                throw new BridgeFailureException(
+                    process.ExitCode,
+                    "Desktop entry Python bridge failed: " + ShortMessage(stderr.ToString() + " " + stdout.ToString()),
+                    stdout.ToString());
             }
         }
     }

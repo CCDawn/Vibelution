@@ -273,4 +273,35 @@ describe("Electron main Launcher IPC facade", () => {
     const secondBody = mainSource.slice(secondStart, secondStart + 900);
     expect(secondBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
   });
+
+  it("never lets a window-level or forwarded stop abort an in-flight restart", () => {
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    // The provenance-aware entry keeps operator commands as the default.
+    expect(lifecycleBody).toContain('provenance: LauncherLifecycleProvenance = "operator"');
+    // Only the plain stop operation relaxes its supersede semantics.
+    expect(lifecycleBody).toContain("joinDecisionForLauncherLifecycleStop(operation, provenance)");
+    expect(lifecycleBody).toContain("beginIntentWithOptions");
+    expect(lifecycleBody).toContain('"joined-in-flight-restart"');
+    expect(lifecycleBody).toContain("joined_in_flight_restart");
+    expect(lifecycleBody).toContain("waitForInFlightRestartSettlement");
+
+    const stopStart = mainSource.indexOf("async function stopWorkbenchBackend(");
+    const stopEnd = mainSource.indexOf("\nasync function ", stopStart + 1);
+    const stopBody = mainSource.slice(stopStart, stopEnd);
+    // A normal window close joins/waits; a confirmed force close keeps superseding.
+    expect(stopBody).toContain('transaction.mode === "force" ? "operator" : "window-close"');
+
+    const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
+    const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);
+    const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
+    expect(secondInstanceBody).toContain('"forwarded"');
+
+    // A permanently failed restart lease must not keep absorbing joins.
+    const lifecycleFailedIndex = lifecycleBody.indexOf("mutation.outcome === \"failed\"");
+    expect(lifecycleFailedIndex).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBody.slice(lifecycleFailedIndex, lifecycleFailedIndex + 400)).toContain(
+      "clearSlotIfCurrent(intentLease)",
+    );
+  });
 });

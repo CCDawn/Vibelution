@@ -162,4 +162,117 @@ describe("LauncherLifecycleSupervisor", () => {
     await expect(supervisor.executeMutation({ lease, mutate, reconcile })).resolves.toEqual({ outcome: "ignored" });
     expect(reconcile).not.toHaveBeenCalled();
   });
+
+  it("joins an in-flight restart instead of aborting it when joinInFlightRestart is set", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const restart = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
+
+    const stop = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+
+    expect(stop.outcome).toBe("joined-in-flight-restart");
+    if (stop.outcome !== "joined-in-flight-restart") {
+      throw new Error("expected join outcome");
+    }
+    expect(stop.lease.revision).toBe(restart.revision);
+    expect(restart.signal.aborted).toBe(false);
+    expect(supervisor.isCurrent(restart)).toBe(true);
+    expect(supervisor.snapshot("main")).toMatchObject({ operation: "restart", phase: "intent" });
+  });
+
+  it("keeps operator stop semantics: a default beginIntent still supersedes an in-flight restart", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const restart = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
+
+    const stop = supervisor.beginIntent({ instanceId: "main", operation: "stop", desiredState: "closed" });
+
+    expect(restart.signal.aborted).toBe(true);
+    expect(restart.signal.reason).toBeInstanceOf(Error);
+    expect((restart.signal.reason as Error).message).toContain("launcher lifecycle intent superseded for main");
+    expect(stop.revision).toBeGreaterThan(restart.revision);
+    expect(supervisor.isCurrent(restart)).toBe(false);
+  });
+
+  it("only joins a restart that is still executing its mutation in intent phase", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+
+    // A bound restart has settled its mutation (bindCommand moves the lease to
+    // observing), so a join-eligible stop supersedes it as before.
+    const settledRestart = bind(
+      supervisor,
+      supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" }),
+      "cmd-restart-settled",
+    );
+    const settledJoin = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+    expect(settledJoin.outcome).toBe("begun");
+    expect(settledRestart.signal.aborted).toBe(true);
+
+    // A restart whose READY was fully claimed is likewise joinable no longer.
+    const readyRestart = bind(
+      supervisor,
+      supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" }),
+      "cmd-restart-ready",
+    );
+    expect(supervisor.claimReady(readyRestart)).toBe(true);
+    expect(supervisor.completeReady(readyRestart)).toBe(true);
+    const readyJoin = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+    expect(readyJoin.outcome).toBe("begun");
+    expect(readyRestart.signal.aborted).toBe(true);
+
+    // A non-restart in-flight lease never joins either.
+    const start = supervisor.beginIntent({ instanceId: "main", operation: "start", desiredState: "open" });
+    const startJoin = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+    expect(startJoin.outcome).toBe("begun");
+    expect(start.signal.aborted).toBe(true);
+  });
+
+  it("keeps beginIntentWithOptions without options identical to beginIntent", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const restart = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
+
+    const stop = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+    );
+
+    expect(stop.outcome).toBe("begun");
+    if (stop.outcome !== "begun") {
+      throw new Error("expected begun outcome");
+    }
+    expect(stop.lease.revision).toBeGreaterThan(restart.revision);
+    expect(restart.signal.aborted).toBe(true);
+  });
+
+  it("clears only the identical failed lease so dead restarts cannot absorb joins", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const failed = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
+
+    expect(supervisor.clearSlotIfCurrent(failed)).toBe(true);
+    expect(supervisor.snapshot("main")).toBeNull();
+    expect(supervisor.clearSlotIfCurrent(failed)).toBe(false);
+
+    // A cleared failed restart no longer absorbs a join-eligible stop.
+    const joinAfterClear = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+    expect(joinAfterClear.outcome).toBe("begun");
+
+    // A newer intent is never cleared through a stale lease reference.
+    const stale = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
+    const newer = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
+    expect(supervisor.clearSlotIfCurrent(stale)).toBe(false);
+    expect(supervisor.isCurrent(newer)).toBe(true);
+    expect(supervisor.snapshot("main")).toMatchObject({ revision: newer.revision });
+  });
 });

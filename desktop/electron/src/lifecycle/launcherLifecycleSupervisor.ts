@@ -35,6 +35,23 @@ export type LauncherLifecycleSnapshot = Omit<LauncherLifecycleLease, "signal"> &
   readyClaimed: boolean;
 };
 
+export type LauncherLifecycleBeginOptions = {
+  /**
+   * Window-level and forwarded stop provenance must never abort an in-flight
+   * restart lease: killing the restart mid stop+start leaves the backend down
+   * and the restart command never settles. When set and the current lease for
+   * this instance is an actively running restart (intent phase, mutation still
+   * executing), the begin returns that lease for joining instead of aborting.
+   * Every other in-flight lease keeps the unconditional supersede semantics,
+   * and an operator stop supersedes a restart exactly as before.
+   */
+  joinInFlightRestart?: boolean;
+};
+
+export type LauncherLifecycleBeginResult =
+  | { outcome: "begun"; lease: LauncherLifecycleLease }
+  | { outcome: "joined-in-flight-restart"; lease: LauncherLifecycleLease };
+
 type LifecycleSlot = {
   lease: LauncherLifecycleLease;
   controller: AbortController;
@@ -78,9 +95,25 @@ export class LauncherLifecycleSupervisor {
   private readonly mutationTails = new Map<string, Promise<void>>();
 
   beginIntent(intent: LauncherLifecycleIntent): LauncherLifecycleLease {
+    return this.beginIntentWithOptions(intent).lease;
+  }
+
+  /**
+   * beginIntent with optional join semantics; see LauncherLifecycleBeginOptions.
+   */
+  beginIntentWithOptions(
+    intent: LauncherLifecycleIntent,
+    options: LauncherLifecycleBeginOptions = {},
+  ): LauncherLifecycleBeginResult {
     const instanceId = intent.instanceId.trim();
     if (!instanceId) {
       throw new Error("launcher lifecycle instance id is required");
+    }
+    if (options.joinInFlightRestart === true) {
+      const joinable = this.joinableInFlightRestartSlot(instanceId);
+      if (joinable) {
+        return { outcome: "joined-in-flight-restart", lease: joinable.lease };
+      }
     }
     const previous = this.slots.get(instanceId);
     previous?.controller.abort(new Error(`launcher lifecycle intent superseded for ${instanceId}`));
@@ -105,7 +138,38 @@ export class LauncherLifecycleSupervisor {
       phase: "intent",
       readyClaimed: false,
     });
-    return lease;
+    return { outcome: "begun", lease };
+  }
+
+  /**
+   * A restart lease is joinable only while its mutation may still be executing
+   * (intent phase). Once the mutation settles, bindCommand moves the lease to
+   * observing and a later stop may supersede it exactly as before.
+   */
+  private joinableInFlightRestartSlot(instanceId: string): LifecycleSlot | null {
+    const slot = this.slots.get(instanceId);
+    if (!slot || slot.controller.signal.aborted) {
+      return null;
+    }
+    if (slot.lease.operation !== "restart" || slot.phase !== "intent") {
+      return null;
+    }
+    return slot;
+  }
+
+  /**
+   * Drops the slot for a lease whose mutation failed permanently. Without this
+   * the dead lease would keep occupying the instance in intent phase and a
+   * later join-eligible stop would keep joining a restart that can never
+   * finish. Only the exact lease (revision + abort signal identity) is
+   * cleared; a newer intent for the same instance is never touched.
+   */
+  clearSlotIfCurrent(lease: LauncherLifecycleLease): boolean {
+    const slot = this.slots.get(lease.instanceId);
+    if (!slot || slot.lease.revision !== lease.revision || slot.controller.signal !== lease.signal) {
+      return false;
+    }
+    return this.slots.delete(lease.instanceId);
   }
 
   bindCommand(
