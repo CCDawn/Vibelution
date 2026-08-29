@@ -684,6 +684,7 @@ GET  /api/agents/{agentId}/plugins/virtual-human-life/snapshot
 GET  /api/agents/{agentId}/plugins/virtual-human-life/schedule
 GET  /api/agents/{agentId}/plugins/virtual-human-life/events
 GET  /api/agents/{agentId}/plugins/virtual-human-life/diary
+POST /api/agents/{agentId}/plugins/virtual-human-life/sessions/{sessionId}/messages
 POST /api/agents/{agentId}/plugins/virtual-human-life/commands
 POST /api/agents/{agentId}/plugins/virtual-human-life/import-legacy-pet
 ```
@@ -742,7 +743,8 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 │   ├── events.jsonl
 │   └── projections.json
 ├── conversation/
-│   └── open_loops.jsonl
+│   ├── open_loops.jsonl
+│   └── mailbox.json
 ├── diary/
 ├── proactive/
 │   ├── candidates.jsonl
@@ -755,7 +757,7 @@ workspace/agents/{agentId}/plugins/virtual-human-life/
 └── migration_receipts/
 ```
 
-最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。MVP 的 binding、运行快照、trigger、delivery ledger 和迁移 receipt 全部位于 Agent workspace 安全边界内；若后续引入 workspace 外 outbox，必须先接入 Agent purge 的 prepare/commit/rollback 注册表。拟人化二阶段中，`state.json`、`relationships/projections.json` 和页面展示都是可重建投影；Life Event、Affect Episode、Relationship Event、Open Loop 和 delivery/reflection receipt 才是可追溯事实。原生 Agent episodic memory 仍是长期记忆文本的唯一权威，插件只保留晋升 receipt，不建第二套长期记忆库。
+最终路径由 Agent `MemoryPolicy.privateMemoryRoot` 或 workspace resolver 解析，不能硬编码相对当前工作目录。MVP 的 binding、运行快照、trigger、delivery ledger 和迁移 receipt 全部位于 Agent workspace 安全边界内；若后续引入 workspace 外 outbox，必须先接入 Agent purge 的 prepare/commit/rollback 注册表。`conversation/mailbox.json` 是插件私有的待处理命令账本：只保存到达序号、来源、幂等键和短租约，不保存会话 transcript、推理或工具轨迹，也不迁移普通 ConversationStore；命令进入 completed/cancelled 终态时必须删除正文、附件与引用，只保留不可逆指纹和原生收据。真正出队后继续由原生 Session Journal、worker 和 SSE 唯一负责对话。拟人化二阶段中，`state.json`、`relationships/projections.json` 和页面展示都是可重建投影；Life Event、Affect Episode、Relationship Event、Open Loop 和 delivery/reflection receipt 才是可追溯事实。原生 Agent episodic memory 仍是长期记忆文本的唯一权威，插件只保留晋升 receipt，不建第二套长期记忆库。
 
 ### 19.2 旧宠物数据迁移
 
@@ -1078,12 +1080,12 @@ Critical Path：
 - Mode: BDD/TDD。
 - Verification/Stop: 事件幂等、单次/每日变化有界、阶段迟滞、自然回落和道歉修复可重放；没有来源时不允许关系跳变。
 
-### Task 14：建立主动候选、未完话题和承诺
+### Task 14：建立主动候选、未完话题、承诺和 Companion mailbox
 
-- Owner/Boundary: `proactive/candidates.jsonl`、`conversation/open_loops.jsonl`、评分/抑制/过期、发送前复核和现有 DeliveryAttempt 衔接；不改原生 Session 串行。
+- Owner/Boundary: `proactive/candidates.jsonl`、`conversation/open_loops.jsonl`、`conversation/mailbox.json`、评分/抑制/过期、发送前复核和现有 DeliveryAttempt 衔接；普通 Agent 不创建 mailbox，不改原生 Session 接口、busy、Journal、worker 或 SSE 语义。
 - Dependency: Task 12 和 Task 13。
 - Mode: BDD/TDD。
-- Verification/Stop: 用户未回复、主题重复、免打扰、忙碌/睡眠和关系边界有可解释抑制结果；候选未出队不创建 Turn；最终回复后无残留“正在输入”。
+- Verification/Stop: 用户未回复、主题重复、免打扰、忙碌/睡眠和关系边界有可解释抑制结果；候选未出队不创建 Turn；用户与已选主动消息按真实到达 FIFO 串行；用户可在回复期间继续入队；普通 Agent 仍走原 submit/follow-up 行为；后续气泡决策器完成前只允许保留 generation fence，不宣称多气泡已交付；最终回复后无残留“正在输入”。
 
 ### Task 15：建立夜间反思、记忆强化和环境连续
 

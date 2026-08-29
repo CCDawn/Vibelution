@@ -11,10 +11,83 @@ from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeServic
 from core.web.routes import agent_plugins, virtual_human_life
 from core.web.services.virtual_human_life_service import (
     _default_agent_persona_initializer,
+    _default_conversation_receipt_resolver,
+    _default_proactive_admission_resolver,
     _default_schedule_planner,
     set_virtual_human_life_service_for_tests,
     stop_virtual_human_life_runtime,
 )
+
+
+def test_default_conversation_receipt_resolver_reads_native_user_event(
+    monkeypatch,
+) -> None:
+    from core.chat.turn_journal import EVENT_USER_MESSAGE
+    from core.web.services.session import journal_bridge
+
+    monkeypatch.setattr(
+        journal_bridge,
+        "load_session_conversation_events_snapshot",
+        lambda session_id: [
+            SimpleNamespace(
+                session_id=session_id,
+                turn_id="turn-user",
+                event_type=EVENT_USER_MESSAGE,
+                correlation_id="submission-user",
+                timestamp="2026-08-30T00:00:01+00:00",
+                event_id="event-user",
+            )
+        ],
+    )
+
+    receipt = _default_conversation_receipt_resolver(
+        "session-a",
+        {"command": {"clientSubmissionId": "submission-user"}},
+    )
+
+    assert receipt == {
+        "turnId": "turn-user",
+        "acceptedAt": "2026-08-30T00:00:01+00:00",
+        "receiptEventId": "event-user",
+    }
+
+
+def test_default_proactive_admission_resolver_reads_native_turn_start(
+    monkeypatch,
+) -> None:
+    from core.chat.turn_journal import EVENT_TURN_STARTED
+    from core.web.services.session import journal_bridge
+
+    monkeypatch.setattr(
+        journal_bridge,
+        "load_session_conversation_events_snapshot",
+        lambda session_id: [
+            SimpleNamespace(
+                session_id=session_id,
+                turn_id="turn-proactive",
+                event_type=EVENT_TURN_STARTED,
+                correlation_id="delivery-token",
+                timestamp="2026-08-30T00:00:02+00:00",
+                event_id="event-proactive",
+            )
+        ],
+    )
+
+    receipt = _default_proactive_admission_resolver(
+        "agent-a",
+        {
+            "sessionId": "session-a",
+            "command": {
+                "proactiveAttempt": {"delivery_token": "delivery-token"}
+            },
+        },
+    )
+
+    assert receipt == {
+        "turnId": "turn-proactive",
+        "admittedAt": "2026-08-30T00:00:02+00:00",
+        "receiptEventId": "event-proactive",
+    }
 
 
 def _client(tmp_path) -> tuple[TestClient, VirtualHumanLifeService]:
@@ -113,6 +186,85 @@ def test_agent_plugin_and_virtual_human_routes_are_typed_and_agent_scoped(tmp_pa
         )
         assert command.status_code == 200, command.text
         assert command.json()["result"]["activity"]["status"] == "skipped"
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_companion_message_endpoint_queues_without_registering_normal_session_routes(
+    tmp_path,
+) -> None:
+    agent = {"agentId": "agent-a", "status": "active", "directSessionId": "session-a"}
+    submitted: list[dict] = []
+    busy = [True]
+
+    def submitter(**payload):
+        if busy[0]:
+            return {"accepted": False, "busy": True}
+        submitted.append(dict(payload))
+        return {
+            "accepted": True,
+            "turnId": "turn-a",
+            "acceptedAt": "2026-08-30T00:00:00+00:00",
+        }
+
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=submitter,
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0, config={})
+    set_virtual_human_life_service_for_tests(service)
+    app = FastAPI()
+    app.include_router(virtual_human_life.router, prefix="/api")
+    client = TestClient(app)
+    try:
+        queued = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/sessions/session-a/messages",
+            json={
+                "clientSubmissionId": "submission-a",
+                "content": "我可以在你说话时继续发消息",
+                "contentUtf8Base64": "5oiR5Y+v5Lul",
+                "attachmentIds": ["artifact-image-a"],
+                "references": [{"sessionId": "session-reference-a"}],
+            },
+        )
+
+        assert queued.status_code == 202, queued.text
+        assert queued.json()["queued"] is True
+        assert queued.json()["accepted"] is False
+        assert queued.json()["queueSequence"] == 1
+        assert submitted == []
+        assert client.post(
+            "/api/sessions/session-a/messages",
+            json={"content": "ordinary route is intentionally absent"},
+        ).status_code == 404
+
+        busy[0] = False
+        accepted = service.dispatch_conversation_mailbox_once(
+            "agent-a", session_id="session-a"
+        )
+        assert accepted["accepted"] is True
+        assert submitted == [
+            {
+                "session_id": "session-a",
+                "content": "我可以在你说话时继续发消息",
+                "client_submission_id": "submission-a",
+                "content_utf8_base64": "5oiR5Y+v5Lul",
+                "attachment_ids": ["artifact-image-a"],
+                "references": [{"sessionId": "session-reference-a"}],
+                "mental_model_enabled": None,
+                "runtime_status_enabled": None,
+                "turn_status_tail": None,
+            }
+        ]
     finally:
         set_virtual_human_life_service_for_tests(None)
 

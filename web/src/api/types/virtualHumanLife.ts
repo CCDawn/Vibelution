@@ -14,6 +14,7 @@ export type AgentPluginBinding = {
   proactiveDailyLimit?: number;
   proactiveMinimumIntervalMinutes?: number;
   quietHours?: { start?: string; end?: string };
+  rhythmConfig?: Record<string, unknown>;
   toolBundleId?: string;
   promptPackId?: string;
 };
@@ -488,6 +489,28 @@ export type VirtualHumanCommandResponse = {
   idempotencyKey: string;
   stateVersion: number;
   result: Record<string, unknown>;
+};
+
+export type VirtualHumanConversationMessageRequest = {
+  clientSubmissionId: string;
+  content: string;
+  contentUtf8Base64?: string;
+  attachmentIds?: string[];
+  references?: unknown[];
+  mentalModelEnabled?: boolean;
+  runtimeStatusEnabled?: boolean;
+  turnStatusTail?: unknown;
+};
+
+export type VirtualHumanConversationMessageResponse = {
+  accepted: boolean;
+  queued: boolean;
+  sessionId: string;
+  turnId: string;
+  clientSubmissionId: string;
+  status: string;
+  acceptedAt: string;
+  queueSequence: number;
 };
 
 export type VirtualHumanCompanion = {

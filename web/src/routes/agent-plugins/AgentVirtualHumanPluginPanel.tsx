@@ -15,6 +15,11 @@ import {
   VStatusChip,
 } from "../../components/vui";
 import styles from "./AgentVirtualHumanPluginPanel.styles";
+import {
+  DEFAULT_VIRTUAL_HUMAN_PROACTIVE_DAILY_LIMIT,
+  DEFAULT_VIRTUAL_HUMAN_PROACTIVE_MINIMUM_INTERVAL_MINUTES,
+  mergeVirtualHumanBindingConfig,
+} from "./virtualHumanProactiveSettings";
 
 const PLUGIN_ID = "virtual-human-life";
 
@@ -32,8 +37,8 @@ const DEFAULT_DRAFT: BindingDraft = {
   autonomyLevel: "autonomous",
   proactiveMessagesEnabled: true,
   nightlyPlanningTime: "22:30",
-  proactiveDailyLimit: 2,
-  proactiveMinimumIntervalMinutes: 180,
+  proactiveDailyLimit: DEFAULT_VIRTUAL_HUMAN_PROACTIVE_DAILY_LIMIT,
+  proactiveMinimumIntervalMinutes: DEFAULT_VIRTUAL_HUMAN_PROACTIVE_MINIMUM_INTERVAL_MINUTES,
   quietStart: "23:00",
   quietEnd: "08:00",
 };
@@ -50,15 +55,18 @@ function draftFromBinding(binding: AgentPluginBinding | null | undefined): Bindi
   };
 }
 
-function bindingConfig(draft: BindingDraft): Record<string, unknown> {
-  return {
+function bindingConfig(
+  binding: AgentPluginBinding | null | undefined,
+  draft: BindingDraft,
+): Record<string, unknown> {
+  return mergeVirtualHumanBindingConfig(binding, {
     autonomyLevel: draft.autonomyLevel,
     proactiveMessagesEnabled: draft.proactiveMessagesEnabled,
     nightlyPlanningTime: draft.nightlyPlanningTime,
     proactiveDailyLimit: draft.proactiveDailyLimit,
     proactiveMinimumIntervalMinutes: draft.proactiveMinimumIntervalMinutes,
     quietHours: { start: draft.quietStart, end: draft.quietEnd },
-  };
+  });
 }
 
 type HealthTone = "neutral" | "success" | "warning" | "danger";
@@ -257,7 +265,7 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
       updateAgentPluginBinding(agentId, PLUGIN_ID, {
         enabled,
         expectedVersion: binding?.configVersion ?? 0,
-        config: bindingConfig(nextDraft),
+        config: bindingConfig(binding, nextDraft),
       })
     ),
     onSuccess: async (nextBinding) => {

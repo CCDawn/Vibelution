@@ -22,6 +22,7 @@ export type ChatCenterTabStripProps = {
   workspaceActiveTab: string;
   sessionTabs: ReactNode;
   fileTabs: ReactNode;
+  companionActions?: ReactNode;
   leftOverlayVisible: boolean;
   rightOverlayVisible: boolean;
   conversationIndexOverlayOpen: boolean;
@@ -44,6 +45,7 @@ export function ChatCenterTabStrip({
   workspaceActiveTab,
   sessionTabs,
   fileTabs,
+  companionActions,
   leftOverlayVisible,
   rightOverlayVisible,
   conversationIndexOverlayOpen,
@@ -87,6 +89,7 @@ export function ChatCenterTabStrip({
         ) : null}
         <Suspense fallback={null}>{fileTabs}</Suspense>
       </div>
+      {companionActions}
       {!leftOverlayVisible || !rightOverlayVisible ? (
         <div className={styles.overlayPaneControls}>
           {!leftOverlayVisible ? (

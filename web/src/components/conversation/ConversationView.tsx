@@ -4285,6 +4285,24 @@ export function ConversationView({
                 className={styles.companionTypingTurn}
                 data-companion-typing-rail="assistant"
               >
+                <div
+                  className={styles.companionTypingAvatar}
+                  data-companion-typing-avatar="true"
+                  aria-hidden="true"
+                >
+                  <ConversationTurnAvatarContent
+                    content={resolveMessageTurnAvatar(companionTypingMessage, {
+                      resolveTurnAvatar,
+                      assistantAvatarImageUrl,
+                      assistantAvatarFallback,
+                      assistantLabel,
+                      userAvatarImageUrl,
+                      userAvatarLabel,
+                      agentInboxMessage: false,
+                      groupTranscriptMessage: false,
+                    })}
+                  />
+                </div>
                 <div className={styles.companionTypingContent}>
                   <ConversationActiveTurnStatusNote
                     message={companionTypingMessage}

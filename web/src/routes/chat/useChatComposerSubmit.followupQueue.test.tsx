@@ -20,6 +20,7 @@ vi.mock("./chatSubmitTelemetry", () => ({
 
 type HarnessProps = {
   sessionId?: string;
+  companionAgentId?: string;
   busy: boolean;
   draft: string;
   queues: Record<string, ComposerQueueItem[]>;
@@ -46,6 +47,7 @@ function mutationStub<TVariables>(
 
 function Harness({
   sessionId = "session-1",
+  companionAgentId,
   busy,
   draft,
   queues,
@@ -116,6 +118,7 @@ function Harness({
     detail: { id: sessionId, activeTurnId: `turn-${sessionId}` } as SessionDetail,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
+    companionAgentId,
   });
 
   return (
@@ -214,6 +217,34 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       "先不要改测试，只汇报改了哪些文件。",
     ]);
     expect(submitTurn).not.toHaveBeenCalled();
+    expect(guidance).not.toHaveBeenCalled();
+  });
+
+  it("submits busy Companion text to the plugin mailbox without changing the ordinary follow-up queue", async () => {
+    const { mutations, submitTurn, guidance } = createMutations();
+    let queues: Record<string, ComposerQueueItem[]> = {};
+    await mount({
+      companionAgentId: "agent-companion",
+      busy: true,
+      draft: "你先忙，我也可以继续发消息。",
+      queues: {},
+      mutations,
+      onQueues: (next) => {
+        queues = next;
+      },
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+    });
+
+    expect(queues["session-1"]).toBeUndefined();
+    expect(submitTurn).toHaveBeenCalledTimes(1);
+    expect(submitTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      content: "你先忙，我也可以继续发消息。",
+      queuedBehindActiveTurn: true,
+    }));
     expect(guidance).not.toHaveBeenCalled();
   });
 

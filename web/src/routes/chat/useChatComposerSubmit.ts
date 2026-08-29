@@ -14,6 +14,7 @@ import {
   submitSessionGuidance,
   submitSessionMessage,
 } from "../../api/chat";
+import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ConversationMessage,
@@ -73,7 +74,7 @@ import {
   type ComposerQueueItem,
 } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
-import { startUserAction } from "../../app/userActionTelemetry";
+import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
 import { resolveSessionStopTurnId, cancelCongestedQueriesForSessionStop } from "./chatStopTurnModel";
 
 type ChatEditTarget = { messageId: string; original: string };
@@ -89,6 +90,16 @@ export type SubmitTurnVariables = {
   attachmentIds?: string[];
   references?: SessionReferenceAttachment[];
   requestStartedAtMs: number;
+  queuedBehindActiveTurn?: boolean;
+};
+
+type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
+  queued?: boolean;
+  queueSequence?: number;
+};
+
+type ChatSubmitMutationContext = {
+  telemetry: UserActionTracker;
 };
 
 export type EditResubmitVariables = {
@@ -103,7 +114,7 @@ export type EditResubmitVariables = {
 };
 
 export type ChatComposerTurnMutations = {
-  submitTurnMutation: UseMutationResult<SessionTurnAcceptedResponse, Error, SubmitTurnVariables, unknown>;
+  submitTurnMutation: UseMutationResult<ChatSubmitAcceptedResponse, Error, SubmitTurnVariables, unknown>;
   editResubmitMutation: UseMutationResult<SessionDetail, Error, EditResubmitVariables, unknown>;
   stopTurnMutation: UseMutationResult<SessionDetail, Error, { sessionId: string; turnId: string }, unknown>;
   sessionGuidanceMutation: UseMutationResult<
@@ -126,6 +137,7 @@ export type UseChatComposerTurnMutationsOptions = {
   setSessionImageAttachments: Dispatch<SetStateAction<Record<string, ComposerImageAttachment[]>>>;
   setSessionReferenceAttachments: Dispatch<SetStateAction<Record<string, SessionReferenceAttachment[]>>>;
   setSessionEditTargets: Dispatch<SetStateAction<Record<string, ChatEditTarget>>>;
+  companionAgentId?: string;
 };
 
 /**
@@ -144,8 +156,14 @@ export function useChatComposerTurnMutations({
   setSessionImageAttachments,
   setSessionReferenceAttachments,
   setSessionEditTargets,
+  companionAgentId,
 }: UseChatComposerTurnMutationsOptions): ChatComposerTurnMutations {
-  const submitTurnMutation = useMutation({
+  const submitTurnMutation = useMutation<
+    ChatSubmitAcceptedResponse,
+    Error,
+    SubmitTurnVariables,
+    ChatSubmitMutationContext
+  >({
     mutationFn: async (
       {
         sessionId,
@@ -172,7 +190,7 @@ export function useChatComposerTurnMutations({
           clientSubmissionId,
         },
       );
-      return submitSessionMessage(sessionId, {
+      const payload = {
         content,
         clientSubmissionId,
         contentUtf8Base64: encodeUtf8Base64(content),
@@ -181,6 +199,12 @@ export function useChatComposerTurnMutations({
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail: resolvedTail,
+      };
+      if (companionAgentId) {
+        return submitVirtualHumanConversationMessage(companionAgentId, sessionId, payload);
+      }
+      return submitSessionMessage(sessionId, {
+        ...payload,
       });
     },
     onMutate: async (variables) => {
@@ -204,18 +228,20 @@ export function useChatComposerTurnMutations({
         },
       );
       const createdAt = new Date().toISOString();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: optimisticTurnIdForSubmission("submit", variables.sessionId, createdAt),
-            clientSubmissionId: variables.clientSubmissionId,
-            updatedAt: createdAt,
-          }),
-        )
-      );
+      if (!companionAgentId && !variables.queuedBehindActiveTurn) {
+        setActiveTurnLayersBySession((current) =>
+          setActiveTurnLayerForSession(
+            current,
+            variables.sessionId,
+            createOptimisticActiveTurnLayer({
+              sessionId: variables.sessionId,
+              turnId: optimisticTurnIdForSubmission("submit", variables.sessionId, createdAt),
+              clientSubmissionId: variables.clientSubmissionId,
+              updatedAt: createdAt,
+            }),
+          )
+        );
+      }
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
         markSessionDetailRunning(appendOptimisticUserMessage(detailState, variables)),
       );
@@ -279,7 +305,9 @@ export function useChatComposerTurnMutations({
           : acceptedDetail;
       });
       setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
+        acceptedTurn.queued || variables.queuedBehindActiveTurn
+          ? current
+          : setActiveTurnLayerForSession(
           current,
           variables.sessionId,
           acceptedTurnId
@@ -290,7 +318,7 @@ export function useChatComposerTurnMutations({
               updatedAt: acceptedTurn.acceptedAt,
             })
             : undefined,
-        )
+          )
       );
       // The optimistic detail/index updates above already expose the accepted turn.
       // SSE owns authoritative reconciliation when available; the existing polling
@@ -320,9 +348,11 @@ export function useChatComposerTurnMutations({
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
         removeOptimisticUserMessage(detailState, variables),
       );
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
-      );
+      if (!variables.queuedBehindActiveTurn) {
+        setActiveTurnLayersBySession((current) =>
+          setActiveTurnLayerForSession(current, variables.sessionId, undefined)
+        );
+      }
       setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content));
       setSessionComposerErrors((current) => ({
         ...current,
@@ -578,6 +608,7 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   detail: SessionDetail | undefined;
   setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   setRuntimeStatusEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
+  companionAgentId?: string;
 };
 
 export type UseChatComposerSubmitActionsResult = {
@@ -637,6 +668,7 @@ export function useChatComposerSubmitActions({
   detail,
   setMentalModelEnabledForNextTurn,
   setRuntimeStatusEnabledForNextTurn,
+  companionAgentId,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
   const stoppedTurnAutoFlushRef = useRef<{ sessionId: string; turnId: string } | null>(null);
   const pendingStopAfterAcceptRef = useRef("");
@@ -793,6 +825,7 @@ export function useChatComposerSubmitActions({
     mentalModelEnabled: boolean,
     runtimeStatusEnabled: boolean,
     clientSubmissionId: string,
+    queuedBehindActiveTurn = false,
   ) => {
     if (imageUploadInFlightRef.current[sessionId]) {
       postSubmitTelemetry(
@@ -880,6 +913,7 @@ export function useChatComposerSubmitActions({
         attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
+        queuedBehindActiveTurn,
       });
     } catch (error) {
       postSubmitTelemetry(
@@ -949,6 +983,32 @@ export function useChatComposerSubmitActions({
             ? "运行中的排队消息仅支持文本，请先移除图片和会话引用。"
             : "Queued follow-ups are text-only while a turn is running. Remove images and session references first.",
         }));
+        return;
+      }
+      if (companionAgentId) {
+        const content = activeDraftEffective.trim();
+        if (!content) {
+          return;
+        }
+        if (activeImageAttachments.length > 0 || activeReferenceAttachments.length > 0) {
+          setSessionComposerErrors((current) => ({
+            ...current,
+            [activeSessionId]: lang === "zh"
+              ? "人物正在回复时只能继续发送文字；附件和会话引用请等当前回复结束后再发送。"
+              : "While the companion is replying, only text can be queued. Send attachments or session references after the current reply finishes.",
+          }));
+          return;
+        }
+        void submitTurnWithAttachments(
+          activeSessionId,
+          content,
+          [],
+          [],
+          mentalModelEnabledForNextTurn,
+          runtimeStatusEnabledForNextTurn,
+          createClientSubmissionId(activeSessionId),
+          true,
+        );
         return;
       }
       const queue = sessionFollowupQueues[activeSessionId] ?? [];
@@ -1126,6 +1186,7 @@ export function useChatComposerSubmitActions({
     activeReferenceAttachments,
     activeSessionId,
     composerDisabled,
+    companionAgentId,
     editResubmitMutation,
     lang,
     mentalModelEnabledForNextTurn,

@@ -596,7 +596,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const composerDisabled = conversationComposer.disabled");
     expect(routeSource).toContain("<ChatSessionWorkspacePanel");
     expect(routeSource).toContain("conversation={detail ? {");
-    expect(routeSource).toContain("composer: conversationComposer");
+    expect(routeSource).toContain("composer: companionConversationComposer");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatConversationComposerBridge");
     expect(chatSessionWorkspacePanelSource).toContain("composer={conversation.composer}");
     expect(routeSource).toContain("submitTurnMutation");

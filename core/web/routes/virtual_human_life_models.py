@@ -91,6 +91,32 @@ class VirtualHumanCommandResponse(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+class VirtualHumanConversationMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clientSubmissionId: str = Field(min_length=1, max_length=128)
+    content: str = Field(min_length=1, max_length=20000)
+    contentUtf8Base64: str = Field(default="", max_length=40000)
+    attachmentIds: list[str] = Field(default_factory=list, max_length=20)
+    references: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    mentalModelEnabled: bool | None = None
+    runtimeStatusEnabled: bool | None = None
+    turnStatusTail: dict[str, Any] | None = None
+
+
+class VirtualHumanConversationMessageResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    accepted: bool
+    queued: bool
+    sessionId: str
+    turnId: str = ""
+    status: str
+    acceptedAt: str = ""
+    clientSubmissionId: str
+    queueSequence: int = Field(ge=1)
+
+
 class LegacyPetImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

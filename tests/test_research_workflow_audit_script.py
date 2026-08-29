@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from scripts import audit_research_workflow_runtime as audit
+from tests._support.workflow_ledger_helpers import build_run_record, open_ledger_store
 
 
 def _build_run_record(**overrides) -> dict:
@@ -448,6 +449,44 @@ class TestAuditInventory:
 
 
 class TestAuditCli:
+    def test_cli_prefers_canonical_ledger_over_legacy_json_store(
+        self, tmp_path: Path, data_root: Path
+    ) -> None:
+        _write_run(data_root, _build_run_record(runId="run-legacy-only"))
+        ledger_path = data_root / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            for run_id in ("run-ledger-a", "run-ledger-b"):
+                store.submit(
+                    lambda uow, run_id=run_id: uow.repository.insert_run(
+                        build_run_record(run_id=run_id)
+                    ),
+                    force_flush=True,
+                ).result(timeout=10)
+        finally:
+            store.close()
+
+        output = tmp_path / "audit.json"
+        code = audit.main(
+            [
+                "--data-root",
+                str(data_root),
+                "--project-root",
+                str(tmp_path),
+                "--output",
+                str(output),
+            ]
+        )
+
+        assert code == 0
+        report = json.loads(output.read_text(encoding="utf-8"))
+        assert report["source"] == "workflow-ledger"
+        assert report["summary"]["runCount"] == 2
+        assert {entry["runId"] for entry in report["runs"]} == {
+            "run-ledger-a",
+            "run-ledger-b",
+        }
+
     def test_cli_clean_fixture_exit_zero(
         self, tmp_path: Path, data_root: Path, empty_checkpoint: Path
     ) -> None:

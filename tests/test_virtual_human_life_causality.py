@@ -65,6 +65,7 @@ def test_authorized_reuse_receipt_and_causal_paths_are_explicit() -> None:
     assert receipt["publicationBoundary"] == "requires_separate_attribution_and_distribution_confirmation"
     assert {slice_["sliceId"] for slice_ in receipt["slices"]} >= {
         "proactive-candidate-policy",
+        "conversation-arrival-fence",
         "affect-afterglow",
         "relationship-ledger",
         "life-drives-and-open-loops",
@@ -89,6 +90,7 @@ def test_authorized_reuse_receipt_and_causal_paths_are_explicit() -> None:
         "relationshipProjection": "relationships.json",
         "proactiveCandidates": "proactive/candidates.jsonl",
         "openLoops": "conversation/open_loops.jsonl",
+        "conversationMailbox": "conversation/mailbox.json",
         "reflectionProposals": "reflections/proposals.jsonl",
         "memoryReinforcements": "memory/reinforcement_receipts.jsonl",
         "memoryReconciliations": "memory/reconciliation_receipts.jsonl",
