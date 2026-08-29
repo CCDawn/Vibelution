@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from core.research.workflow.contracts.model_invocation_receipt import (
@@ -9,6 +10,9 @@ from core.research.workflow.ledger import outbox as outbox_api
 from core.web.services.team_workflow.research_runtime import (
     model_invocation_receipt_registry as registry,
 )
+from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+    read_node_budget_window,
+)
 from core.web.services.team_workflow.research_runtime.receipt_persistence import (
     MAX_RECEIPT_PERSISTENCE_LEASE_ATTEMPTS,
     RECEIPT_PERSISTENCE_IDEMPOTENCY_PREFIX,
@@ -16,7 +20,11 @@ from core.web.services.team_workflow.research_runtime.receipt_persistence import
     enqueue_question_model_invocation_receipt,
 )
 from tests._support.command_helpers import CommandHarness
-from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_attempt_record,
+    build_command_record,
+)
 
 
 def _receipt() -> dict:
@@ -42,7 +50,12 @@ def _receipt() -> dict:
         response_content={"kind": "bounded"},
         started_at_ms=100,
         finished_at_ms=120,
-        token_usage={"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+        token_usage={
+            "inputTokens": 10,
+            "outputTokens": 5,
+            "totalTokens": 15,
+            "reasoningTokens": 3,
+        },
         metadata={"outcomeKinds": ["candidate"]},
         evidence_locator={
             **scope,
@@ -70,6 +83,77 @@ def _outbox_row(harness: CommandHarness):
     )
 
 
+def _seed_budget_receipt(harness: CommandHarness) -> None:
+    def mutate(uow):
+        uow.repository.insert_command(build_command_record())
+        uow.repository.insert_attempt(
+            build_attempt_record(node_run_id="node-run-1")
+        )
+        uow.repository.insert_budget_receipt(
+            receipt_id="budget-receipt-1",
+            run_id="run-test",
+            node_run_id="node-run-1",
+            reservation_id="reservation-node-run-1",
+            stage_id="knowledge_collection",
+            policy_hash="policy-1",
+            reserved_json=json.dumps(
+                {"reserved": {"estimatedTokens": 25_000, "tokens": 25_000}}
+            ),
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+    harness.store.submit(
+        mutate,
+        force_flush=True,
+    ).result(timeout=5)
+
+
+def test_receipt_intent_and_budget_usage_commit_exactly_once(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _seed_budget_receipt(harness)
+
+        first = enqueue_question_model_invocation_receipt(
+            harness.store,
+            team_id="research-team",
+            question_id="SCI-096",
+            workflow_run_id="run-test",
+            receipt=_receipt(),
+            now_ms=FIXED_NOW_MS,
+        )
+        second = enqueue_question_model_invocation_receipt(
+            harness.store,
+            team_id="research-team",
+            question_id="SCI-096",
+            workflow_run_id="run-test",
+            receipt=_receipt(),
+            now_ms=FIXED_NOW_MS + 1,
+        )
+
+        window = read_node_budget_window(
+            harness.store,
+            "run-test",
+            "node-run-1",
+            "reservation-node-run-1",
+        )
+        settled = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT settled_json FROM budget_receipts WHERE reservation_id = ?",
+                ("reservation-node-run-1",),
+            ).fetchone()
+        )
+        settled_payload = json.loads(settled[0])
+        assert first["created"] is True
+        assert second["created"] is False
+        assert window["used"] == 15
+        assert window["remaining"] == 24_985
+        assert settled_payload["usage"]["reasoningTokens"] == 3
+        assert len(settled_payload["invocations"]) == 1
+    finally:
+        harness.close()
+
+
 def test_registry_failure_survives_restart_and_replays_exactly_once(
     tmp_path: Path,
 ) -> None:
@@ -77,6 +161,7 @@ def test_registry_failure_survives_restart_and_replays_exactly_once(
     first = CommandHarness(ledger_path)
     try:
         first.seed_run()
+        _seed_budget_receipt(first)
         enqueue_question_model_invocation_receipt(
             first.store,
             team_id="research-team",
@@ -130,6 +215,7 @@ def test_stale_owner_cannot_write_receipt_after_lease_loss(tmp_path: Path) -> No
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
+        _seed_budget_receipt(harness)
         enqueue_question_model_invocation_receipt(
             harness.store,
             team_id="research-team",
@@ -177,6 +263,7 @@ def test_uncertain_registry_success_replays_without_duplicate_receipt(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
+        _seed_budget_receipt(harness)
         enqueue_question_model_invocation_receipt(
             harness.store,
             team_id="research-team",
@@ -224,6 +311,7 @@ def test_registry_io_does_not_hold_workflow_ledger_writer(tmp_path: Path) -> Non
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
+        _seed_budget_receipt(harness)
         enqueue_question_model_invocation_receipt(
             harness.store,
             team_id="research-team",
@@ -260,6 +348,7 @@ def test_registry_retry_exhaustion_becomes_terminal_failed(tmp_path: Path) -> No
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
+        _seed_budget_receipt(harness)
         enqueue_question_model_invocation_receipt(
             harness.store,
             team_id="research-team",

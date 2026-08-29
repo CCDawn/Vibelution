@@ -353,6 +353,131 @@ def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
     )
 
 
+def _budgeted_receipt_context(callback):
+    return {
+        "receiptRunAuthority": "workflow_run",
+        "receiptRunId": "workflow-run-1",
+        "modelPolicySha256": "a" * 64,
+        "expectedModelRoute": {
+            "modelRef": "default/qwen-alias",
+            "providerId": "default",
+            "modelId": "qwen-plus",
+        },
+        "questionInvocationBinding": {
+            "questionId": "SCI-001",
+            "questionRunId": "workflow-run-1",
+            "workflowRunId": "workflow-run-1",
+            "workflowId": "workflow-1",
+            "workflowVersionId": "version-1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "sessionId": "session-1",
+            "taskId": "task-1",
+            "turnId": "turn-1",
+            "outcomeKinds": ["candidate"],
+        },
+        "invocationBudgetPreflight": callback,
+    }
+
+
+@pytest.mark.parametrize(
+    ("transport", "output_key"),
+    [("chat_completions", "max_tokens"), ("responses", "max_output_tokens")],
+)
+def test_challenge_budget_clamps_each_wire_payload_before_provider(
+    transport, output_key
+):
+    observed = []
+    allowed_outputs = [123, 45]
+
+    def preflight(**kwargs):
+        observed.append(kwargs)
+        return {
+            "remainingTokens": 700,
+            "maxOutputTokens": allowed_outputs[len(observed) - 1],
+        }
+
+    settings = {
+        "llm.profiles.primary.transport": transport,
+        "llm.profiles.primary.max_output_tokens": 1000,
+    }
+    if transport == "responses":
+        settings.update(
+            {
+                "llm.providers.default.kind": "relay",
+                "llm.providers.default.api_key": "test-key",
+                "llm.providers.default.base_url": "https://relay.example.test/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "qwen-plus",
+            }
+        )
+    config = make_config(**settings)
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    scope = InvocationScope(
+        session_id="session-1",
+        turn_id="turn-1",
+        invocation_id="invocation-1",
+        iteration=0,
+    )
+    with model_invocation_receipt_context_scope(
+        _budgeted_receipt_context(preflight)
+    ):
+        first_payload = client._build_payload(
+            [{"role": "user", "content": "propose"}],
+            invocation_scope=scope,
+        )
+        second_payload = client._build_payload(
+            [{"role": "user", "content": "propose"}],
+            invocation_scope=scope,
+        )
+
+    assert first_payload[output_key] == 123
+    assert second_payload[output_key] == 45
+    assert len(observed) == 2
+    assert observed[0]["max_output_tokens"] == 1000
+    assert observed[0]["estimated_input_tokens"] > 0
+
+
+def test_challenge_budget_exhaustion_blocks_before_provider_call():
+    provider_calls = []
+
+    def backend(payload):
+        provider_calls.append(payload)
+        raise AssertionError("provider must not be called")
+
+    client = LLMClient(config=make_config(), backend=backend)
+    with model_invocation_receipt_context_scope(
+        _budgeted_receipt_context(
+            lambda **_kwargs: {"remainingTokens": 0, "maxOutputTokens": 0}
+        )
+    ), pytest.raises(LLMError) as exc_info:
+        client.invoke(
+            [{"role": "user", "content": "propose"}],
+            metadata={
+                "sessionId": "session-1",
+                "turnId": "turn-1",
+                "invocationId": "invocation-1",
+            },
+        )
+
+    assert exc_info.value.category == "budget_exhausted"
+    assert exc_info.value.retryable is False
+    assert provider_calls == []
+
+
+def test_ordinary_chat_payload_keeps_profile_output_limit_without_budget_callback():
+    config = make_config(
+        **{"llm.profiles.primary.max_output_tokens": 777}
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "hello"}])
+
+    assert payload["max_tokens"] == 777
+
+
 def test_receipt_identity_changes_for_provider_attempts() -> None:
     receipt_context = {
         "receiptRunAuthority": "workflow_run",

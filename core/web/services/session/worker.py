@@ -289,7 +289,7 @@ def _model_invocation_receipt_context(
     ):
         return None
     run_id = str(binding.get("workflowRunId") or "").strip()
-    return {
+    receipt_context: dict[str, Any] = {
         "receiptRunAuthority": "workflow_run",
         "receiptRunId": run_id,
         "teamId": team_id,
@@ -297,6 +297,68 @@ def _model_invocation_receipt_context(
         "questionStageBinding": stage_binding,
         "outcomeKinds": list(binding.get("outcomeKinds") or []),
         "expectedModelRoute": expected_route,
+    }
+
+    def invocation_budget_preflight(
+        *, estimated_input_tokens: int, max_output_tokens: int
+    ) -> dict[str, int]:
+        return _challenge_invocation_budget_preflight(
+            receipt_context,
+            estimated_input_tokens=estimated_input_tokens,
+            max_output_tokens=max_output_tokens,
+        )
+
+    # Ephemeral callable: it is bound only in the current ContextVar scope and
+    # is never projected into the conversation journal or task record.
+    receipt_context["invocationBudgetPreflight"] = invocation_budget_preflight
+    return receipt_context
+
+
+def _challenge_budget_window(receipt_context: dict[str, Any]) -> dict[str, Any]:
+    binding = (
+        receipt_context.get("questionStageBinding")
+        if isinstance(receipt_context.get("questionStageBinding"), dict)
+        else {}
+    )
+    run_id = str(binding.get("workflowRunId") or "").strip()
+    node_run_id = str(binding.get("formalNodeRunId") or "").strip()
+    if not run_id or not node_run_id:
+        raise RuntimeError("challenge_budget_binding_missing")
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        read_node_budget_window,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        production_workflow_runtime,
+    )
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        raise RuntimeError("challenge_budget_authority_unavailable")
+    return read_node_budget_window(
+        runtime.store,
+        run_id,
+        node_run_id,
+        f"reservation-{node_run_id}",
+    )
+
+
+def _challenge_invocation_budget_preflight(
+    receipt_context: dict[str, Any],
+    *,
+    estimated_input_tokens: int,
+    max_output_tokens: int,
+) -> dict[str, int]:
+    window = _challenge_budget_window(receipt_context)
+    if str(window.get("status") or "") not in {"reserved", "consumed"}:
+        raise RuntimeError("challenge_budget_reservation_terminal")
+    remaining = max(0, int(window.get("remaining") or 0))
+    estimated_input = max(0, int(estimated_input_tokens or 0))
+    profile_limit = max(0, int(max_output_tokens or 0))
+    allowed_output = min(profile_limit, max(0, remaining - estimated_input))
+    return {
+        "remainingTokens": remaining,
+        "estimatedInputTokens": estimated_input,
+        "maxOutputTokens": allowed_output,
     }
 
 
@@ -1819,60 +1881,19 @@ def _reseed_agent_turn_context_blocks(agent: Any, *, static_block: str, volatile
             volatile_seed(volatile_block)
 
 
-def _session_turn_token_budget_line(context: dict[str, Any]) -> tuple[int, str]:
+def _session_turn_token_budget_line(
+    receipt_context: dict[str, Any] | None,
+) -> tuple[int, str]:
     """Resolve the real-time token circuit-breaker line for one session turn.
 
-    Availability order: the formal task's ``budgetRequest.requested.tokens``
-    when the turn metadata can locate the workflow-run budget reservation;
-    otherwise the conservative session default. The line bounds input+output
-    tokens accumulated across the session turn's continuation loop.
+    Formal Challenge turns read the canonical Workflow Ledger reservation.
+    Ordinary chat keeps the conservative session default.  There is no legacy
+    run-JSON fallback and no client metadata authority.
     """
 
-    metadata = (
-        context.get("message_metadata")
-        if isinstance(context.get("message_metadata"), dict)
-        else {}
-    )
-    workflow_run_id = str(metadata.get("workflowRunId") or "").strip()
-    node_run_id = str(metadata.get("nodeRunId") or "").strip()
-    if workflow_run_id and node_run_id:
-        try:
-            from core.web.services.team_workflow.research_runtime.store import (
-                WorkflowRunStore,
-            )
-
-            record = WorkflowRunStore().get_run(workflow_run_id)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-            record = None
-        if isinstance(record, dict):
-            reservation_ids = {f"reservation-{node_run_id}"}
-            for node_run in record.get("nodeRuns") or []:
-                if (
-                    isinstance(node_run, dict)
-                    and str(node_run.get("nodeRunId") or "").strip() == node_run_id
-                ):
-                    ledger_ref = str(node_run.get("budgetLedgerRef") or "").strip()
-                    if ledger_ref:
-                        reservation_ids.add(ledger_ref)
-            for reservation in record.get("budgetReservations") or []:
-                if not isinstance(reservation, dict):
-                    continue
-                if str(reservation.get("reservationId") or "").strip() not in reservation_ids:
-                    continue
-                requested = (
-                    reservation.get("requested")
-                    if isinstance(reservation.get("requested"), dict)
-                    else {}
-                )
-                requested_tokens = requested.get("tokens")
-                # A zero/negative or malformed token request must not arm an
-                # instant fuse; fall through to the conservative default.
-                if (
-                    isinstance(requested_tokens, int)
-                    and not isinstance(requested_tokens, bool)
-                    and requested_tokens > 0
-                ):
-                    return requested_tokens, "task_budget_request"
+    if isinstance(receipt_context, dict):
+        window = _challenge_budget_window(receipt_context)
+        return max(0, int(window.get("remaining") or 0)), "workflow_ledger_reservation"
     return DEFAULT_SESSION_TOKEN_BUDGET, "session_default"
 
 
@@ -1908,7 +1929,15 @@ def _run_session_continuation_loop(
     # Real-time token fuse state: session-scoped counters for this turn's
     # continuation loop only (no cross-session or cross-turn shared state), so
     # concurrent sessions stay isolated and replays stay idempotent.
-    token_budget_line, token_budget_source = _session_turn_token_budget_line(context)
+    canonical_turn_id = str(getattr(turn_control, "turn_id", "") or "").strip()
+    receipt_context = _model_invocation_receipt_context(
+        context,
+        session_id=session_id,
+        turn_id=canonical_turn_id,
+    )
+    token_budget_line, token_budget_source = _session_turn_token_budget_line(
+        receipt_context
+    )
     cumulative_session_tokens = 0
     normalized_required_tool_names = [
         str(item or "").strip()
@@ -2037,12 +2066,6 @@ def _run_session_continuation_loop(
         )
         from core.llm.client import model_invocation_receipt_context_scope
 
-        canonical_turn_id = str(getattr(turn_control, "turn_id", "") or "").strip()
-        receipt_context = _model_invocation_receipt_context(
-            context,
-            session_id=session_id,
-            turn_id=canonical_turn_id,
-        )
         if turn_capture is not None:
             turn_capture.model_invocation_receipt_context = receipt_context
         with model_invocation_receipt_context_scope(receipt_context):

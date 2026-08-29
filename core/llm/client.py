@@ -2711,7 +2711,25 @@ class LLMClient:
             )
         else:
             raise AssertionError("registered wire adapter uses unsupported protocol")
-        self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
+        final_payload = self._apply_invocation_budget_preflight(
+            built.payload,
+            metadata=metadata,
+            invocation_scope=invocation_scope,
+        )
+        self._last_payload_protocol_summary = dict(
+            built.summary or payload_protocol_summary(final_payload, self.protocol_route)
+        )
+        final_output_limit = final_payload.get(
+            "max_output_tokens", final_payload.get("max_tokens")
+        )
+        if isinstance(final_output_limit, int) and not isinstance(
+            final_output_limit, bool
+        ):
+            self._last_payload_protocol_summary["maxTokens"] = final_output_limit
+            if final_output_limit < max(
+                0, int(getattr(self.profile, "max_output_tokens", 0) or 0)
+            ):
+                self._last_payload_protocol_summary["budgetOutputClamped"] = True
         if output_schema is not None:
             self._last_payload_protocol_summary.update(
                 {
@@ -2726,7 +2744,7 @@ class LLMClient:
                 provider_tool_chain_repaired,
                 int(self._last_payload_protocol_summary.get("payloadPolicyProviderToolChainRepaired") or 0),
             )
-        return built.payload
+        return final_payload
 
     def _usage_from_response(self, response: Any, latency_ms: int) -> UsageStats:
         usage = getattr(response, "usage", None)
@@ -3026,6 +3044,97 @@ class LLMClient:
             "expectedModelId": expected_model,
             "expectedModelRef": expected_model_ref,
         }
+
+    def _apply_invocation_budget_preflight(
+        self,
+        payload: Dict[str, Any],
+        *,
+        metadata: Optional[Dict[str, Any]],
+        invocation_scope: Any,
+    ) -> Dict[str, Any]:
+        """Apply an ephemeral server-owned budget clamp before provider I/O."""
+
+        raw = _MODEL_INVOCATION_RECEIPT_CONTEXT.get()
+        callback = (
+            raw.get("invocationBudgetPreflight")
+            if isinstance(raw, Mapping)
+            else None
+        )
+        if not callable(callback):
+            return payload
+        context = self._receipt_context(metadata, invocation_scope)
+        if context is None:
+            raise LLMError(
+                "budget_authority_error",
+                "Challenge invocation budget binding is invalid.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            )
+        output_key = (
+            "max_output_tokens" if "max_output_tokens" in payload else "max_tokens"
+        )
+        profile_limit = max(0, int(payload.get(output_key) or 0))
+        estimated_input = _estimate_messages_for_usage(
+            payload.get("messages") or payload.get("input") or []
+        )
+        schema_payload = {
+            key: payload.get(key)
+            for key in ("tools", "response_format", "text")
+            if payload.get(key) not in (None, [], {})
+        }
+        if schema_payload:
+            estimated_input += _estimate_text_for_usage(
+                json.dumps(
+                    schema_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+            )
+        try:
+            decision = callback(
+                estimated_input_tokens=estimated_input,
+                max_output_tokens=profile_limit,
+            )
+        except Exception as exc:
+            raise LLMError(
+                "budget_authority_error",
+                "Challenge invocation budget authority is unavailable.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            ) from exc
+        if not isinstance(decision, Mapping):
+            raise LLMError(
+                "budget_authority_error",
+                "Challenge invocation budget decision is invalid.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            )
+        allowed_output = max(0, int(decision.get("maxOutputTokens") or 0))
+        remaining = max(0, int(decision.get("remainingTokens") or 0))
+        if allowed_output <= 0:
+            raise LLMError(
+                "budget_exhausted",
+                "Challenge invocation token budget is exhausted.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "payloadValidationResult": "blocked_before_provider",
+                    "remainingTokens": remaining,
+                    "estimatedInputTokens": estimated_input,
+                },
+            )
+        clamped = dict(payload)
+        clamped[output_key] = min(profile_limit, allowed_output)
+        return clamped
 
     def _attach_model_invocation_receipt(
         self,

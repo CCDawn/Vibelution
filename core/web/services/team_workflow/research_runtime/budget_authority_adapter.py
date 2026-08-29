@@ -596,8 +596,8 @@ def _result_with_projection(
     return result
 
 
-def record_budget_usage(
-    store: WorkflowLedgerStore,
+def record_budget_usage_in_uow(
+    uow: Any,
     *,
     run_id: str,
     node_run_id: str,
@@ -608,11 +608,13 @@ def record_budget_usage(
     reasoning_tokens: int = 0,
     usage_estimated: bool = False,
 ) -> dict[str, Any]:
-    """Atomically append one provider invocation to a Ledger receipt.
+    """Append one provider invocation inside an existing Ledger transaction.
 
     ``invocation_id`` is the idempotency key.  The projection is stored in the
     receipt's existing ``settled_json`` column, keeping the Workflow Ledger as
-    the sole budget authority and keeping conversation state untouched.
+    the sole budget authority and keeping conversation state untouched.  The
+    caller owns commit/rollback so receipt delivery intent and usage can share
+    one transaction.
     """
     run_id = _identity(run_id, "run_id")
     node_run_id = _identity(node_run_id, "node_run_id")
@@ -636,106 +638,112 @@ def record_budget_usage(
         "usageEstimated": usage_estimated,
     }
 
-    def mutate(uow):
-        row = uow.repository.execute(
-            "SELECT receipt_id, run_id, node_run_id, reservation_id, stage_id, "
-            "policy_hash, reserved_json, settled_json, status, created_at_ms, "
-            "updated_at_ms FROM budget_receipts WHERE reservation_id = ?",
-            (reservation_id,),
-        ).fetchone()
-        if row is None:
-            raise BudgetAuthorityError(
-                f"budget receipt missing for {reservation_id}",
-                code="budget_receipt_missing",
-            )
-        mapped = _row_mapping(row)
-        _assert_row_binding(
-            mapped,
-            run_id=run_id,
-            node_run_id=node_run_id,
-            reservation_id=reservation_id,
+    row = uow.repository.execute(
+        "SELECT receipt_id, run_id, node_run_id, reservation_id, stage_id, "
+        "policy_hash, reserved_json, settled_json, status, created_at_ms, "
+        "updated_at_ms FROM budget_receipts WHERE reservation_id = ?",
+        (reservation_id,),
+    ).fetchone()
+    if row is None:
+        raise BudgetAuthorityError(
+            f"budget receipt missing for {reservation_id}",
+            code="budget_receipt_missing",
         )
-        current_payload = _payload(
-            mapped.get("settled_json"), label="settled_json"
+    mapped = _row_mapping(row)
+    _assert_row_binding(
+        mapped,
+        run_id=run_id,
+        node_run_id=node_run_id,
+        reservation_id=reservation_id,
+    )
+    current_payload = _payload(mapped.get("settled_json"), label="settled_json")
+    invocations_raw = current_payload.get("invocations")
+    if invocations_raw is None:
+        existing_invocations: Mapping[str, Any] = {}
+    elif isinstance(invocations_raw, Mapping):
+        existing_invocations = invocations_raw
+    else:
+        raise BudgetAuthorityError(
+            "budget invocation projection is corrupt",
+            code="budget_receipt_corrupt",
         )
-        invocations_raw = current_payload.get("invocations")
-        if invocations_raw is None:
-            existing_invocations: Mapping[str, Any] = {}
-        elif isinstance(invocations_raw, Mapping):
-            existing_invocations = invocations_raw
-        else:
-            raise BudgetAuthorityError(
-                "budget invocation projection is corrupt",
-                code="budget_receipt_corrupt",
-            )
-        if invocation_id in existing_invocations:
-            return _result_with_projection(
-                mapped,
-                current_payload,
-                invocation_id=invocation_id,
-                idempotent=True,
-            )
-        if str(mapped.get("status") or "") not in {"reserved", "consumed"}:
-            raise BudgetAuthorityError(
-                f"budget receipt {reservation_id} is terminal "
-                f"({mapped.get('status')}); cannot record usage",
-                code="budget_usage_terminal",
-            )
-        if len(existing_invocations) >= MAX_RECORDED_INVOCATIONS:
-            raise BudgetAuthorityError(
-                "budget invocation projection capacity exhausted",
-                code="budget_usage_projection_full",
-            )
-
-        invocation_map = dict(existing_invocations)
-        invocation_map[invocation_id] = invocation_usage
-        working = dict(current_payload)
-        working["invocations"] = invocation_map
-        prior_usage_raw = working.get("usage")
-        prior_usage = (
-            dict(prior_usage_raw) if isinstance(prior_usage_raw, Mapping) else {}
-        )
-        prior_tokens = _usage_tokens(
-            {"usage": prior_usage, "invocations": existing_invocations}
-        )
-        prior_input, _ = _optional_counter(
-            prior_usage, "inputTokens", "input_tokens", "promptTokens"
-        )
-        prior_output, _ = _optional_counter(
-            prior_usage, "outputTokens", "output_tokens", "completionTokens"
-        )
-        prior_reasoning, _ = _optional_counter(
-            prior_usage, "reasoningTokens", "reasoning_tokens"
-        )
-        aggregate = dict(prior_usage)
-        aggregate.update(
-            {
-                "inputTokens": prior_input + input_count,
-                "outputTokens": prior_output + output_count,
-                "reasoningTokens": prior_reasoning + reasoning_count,
-                "tokens": prior_tokens + input_count + output_count,
-                "usageEstimated": _usage_estimated(prior_usage)
-                or usage_estimated,
-            }
-        )
-        working["usage"] = aggregate
-        working["source"] = "budget-authority-adapter"
-        updated_json = json.dumps(working, ensure_ascii=False)
-        uow.repository.update_budget_receipt(
-            str(mapped["receipt_id"]),
-            status=str(mapped.get("status") or "reserved"),
-            now_ms=int(time.time() * 1000),
-            settled_json=updated_json,
-        )
-        mapped["settled_json"] = updated_json
+    if invocation_id in existing_invocations:
         return _result_with_projection(
             mapped,
-            working,
+            current_payload,
             invocation_id=invocation_id,
-            idempotent=False,
+            idempotent=True,
+        )
+    if str(mapped.get("status") or "") not in {"reserved", "consumed"}:
+        raise BudgetAuthorityError(
+            f"budget receipt {reservation_id} is terminal "
+            f"({mapped.get('status')}); cannot record usage",
+            code="budget_usage_terminal",
+        )
+    if len(existing_invocations) >= MAX_RECORDED_INVOCATIONS:
+        raise BudgetAuthorityError(
+            "budget invocation projection capacity exhausted",
+            code="budget_usage_projection_full",
         )
 
-    return store.submit(mutate, force_flush=True).result(timeout=30)
+    invocation_map = dict(existing_invocations)
+    invocation_map[invocation_id] = invocation_usage
+    working = dict(current_payload)
+    working["invocations"] = invocation_map
+    prior_usage_raw = working.get("usage")
+    prior_usage = (
+        dict(prior_usage_raw) if isinstance(prior_usage_raw, Mapping) else {}
+    )
+    prior_tokens = _usage_tokens(
+        {"usage": prior_usage, "invocations": existing_invocations}
+    )
+    prior_input, _ = _optional_counter(
+        prior_usage, "inputTokens", "input_tokens", "promptTokens"
+    )
+    prior_output, _ = _optional_counter(
+        prior_usage, "outputTokens", "output_tokens", "completionTokens"
+    )
+    prior_reasoning, _ = _optional_counter(
+        prior_usage, "reasoningTokens", "reasoning_tokens"
+    )
+    aggregate = dict(prior_usage)
+    aggregate.update(
+        {
+            "inputTokens": prior_input + input_count,
+            "outputTokens": prior_output + output_count,
+            "reasoningTokens": prior_reasoning + reasoning_count,
+            "tokens": prior_tokens + input_count + output_count,
+            "usageEstimated": _usage_estimated(prior_usage) or usage_estimated,
+        }
+    )
+    working["usage"] = aggregate
+    working["source"] = "budget-authority-adapter"
+    updated_json = json.dumps(working, ensure_ascii=False)
+    uow.repository.update_budget_receipt(
+        str(mapped["receipt_id"]),
+        status=str(mapped.get("status") or "reserved"),
+        now_ms=int(time.time() * 1000),
+        settled_json=updated_json,
+    )
+    mapped["settled_json"] = updated_json
+    return _result_with_projection(
+        mapped,
+        working,
+        invocation_id=invocation_id,
+        idempotent=False,
+    )
+
+
+def record_budget_usage(
+    store: WorkflowLedgerStore,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Atomically append one provider invocation to a Ledger receipt."""
+
+    return store.submit(
+        lambda uow: record_budget_usage_in_uow(uow, **kwargs),
+        force_flush=True,
+    ).result(timeout=30)
 
 
 def settle_budget_authority(

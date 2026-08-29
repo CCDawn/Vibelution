@@ -816,72 +816,30 @@ def test_turn_llm_usage_tokens_extracts_provider_usage() -> None:
     ) == 3
 
 
-def test_session_turn_token_budget_line_prefers_task_budget_request(monkeypatch) -> None:
-    class _FakeStore:
-        def __init__(self, *args, **kwargs) -> None:
-            return None
-
-        def get_run(self, run_id: str):
-            assert run_id == "run-1"
-            return {
-                "nodeRuns": [
-                    {
-                        "nodeRunId": "node-run-1",
-                        "budgetLedgerRef": "reservation-node-run-1",
-                    }
-                ],
-                "budgetReservations": [
-                    {
-                        "reservationId": "reservation-node-run-1",
-                        "requested": {"tokens": 123456, "toolCalls": 4},
-                    },
-                ],
-            }
-
+def test_session_turn_token_budget_line_reads_canonical_ledger_window(monkeypatch) -> None:
+    receipt_context = {"questionStageBinding": {"workflowRunId": "run-1"}}
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.store.WorkflowRunStore",
-        _FakeStore,
+        worker,
+        "_challenge_budget_window",
+        lambda context: (
+            {"remaining": 123456}
+            if context is receipt_context
+            else pytest.fail("unexpected receipt context")
+        ),
     )
 
-    assert worker._session_turn_token_budget_line(
-        {
-            "message_metadata": {
-                "workflowRunId": "run-1",
-                "nodeRunId": "node-run-1",
-            }
-        }
-    ) == (123456, "task_budget_request")
+    assert worker._session_turn_token_budget_line(receipt_context) == (
+        123456,
+        "workflow_ledger_reservation",
+    )
 
 
-def test_session_turn_token_budget_line_falls_back_to_session_default(monkeypatch) -> None:
+def test_session_turn_token_budget_line_keeps_ordinary_chat_default() -> None:
     assert worker.DEFAULT_SESSION_TOKEN_BUDGET == 2_000_000
-    assert worker._session_turn_token_budget_line({}) == (
+    assert worker._session_turn_token_budget_line(None) == (
         worker.DEFAULT_SESSION_TOKEN_BUDGET,
         "session_default",
     )
-    assert worker._session_turn_token_budget_line(
-        {"message_metadata": {"workflowRunId": "run-1"}}
-    ) == (worker.DEFAULT_SESSION_TOKEN_BUDGET, "session_default")
-
-    class _BrokenStore:
-        def __init__(self, *args, **kwargs) -> None:
-            return None
-
-        def get_run(self, run_id: str):
-            raise OSError("missing workflow run record")
-
-    monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.store.WorkflowRunStore",
-        _BrokenStore,
-    )
-    assert worker._session_turn_token_budget_line(
-        {
-            "message_metadata": {
-                "workflowRunId": "run-1",
-                "nodeRunId": "node-run-1",
-            }
-        }
-    ) == (worker.DEFAULT_SESSION_TOKEN_BUDGET, "session_default")
 
 
 def test_continuation_loop_stops_when_token_budget_exhausted(tmp_path, monkeypatch) -> None:
