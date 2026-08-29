@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 
+_CHALLENGE_DEADLINE_PROBLEM_CODE = "challenge_logical_task_deadline_exhausted"
+
+
 def _service():
     """Late-bound facade module (avoids import cycles at package import time)."""
 
@@ -343,6 +346,19 @@ def _persist_session_turn_result(
     source_collection_stage_task_metadata = s._source_collection_stage_task_turn_metadata(messages, turn_id)
     result_stop_requested = bool(result.get("stop_requested")) if isinstance(result, dict) else False
     stop_requested = result_stop_requested and runtime_stop_requested
+    stop_reason = (
+        str(
+            result.get("stop_reason")
+            or result.get("stopReason")
+            or ""
+        ).strip().lower()
+        if isinstance(result, dict)
+        else ""
+    )
+    challenge_deadline_cancelled = (
+        result_stop_requested
+        and stop_reason == _CHALLENGE_DEADLINE_PROBLEM_CODE
+    )
     if s._is_provider_failed_result(result):
         raw_error = s._provider_failure_raw_error(result)
         error_type = s._failure_error_type(raw_error)
@@ -409,6 +425,8 @@ def _persist_session_turn_result(
         last_llm_payload_trace = s._current_session_live_llm_payload_trace(session_id)
         if last_llm_payload_trace is not None:
             conversation["last_llm_payload_trace"] = last_llm_payload_trace
+        conversation.pop("last_turn_terminal_problem_code", None)
+        conversation.pop("lastTurnTerminalProblemCode", None)
         conversation["last_turn_status"] = "failed"
         conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
             "failed_provider",
@@ -597,6 +615,11 @@ def _persist_session_turn_result(
     )
     cache_composition = s._build_session_cache_composition(turn_id, llm_usage)
     final_status = s._chat_turn_result_status(result_status, result, stop_requested=stop_requested)
+    # Challenge logical-deadline cancellation is an adapter-owned terminal
+    # outcome, not an operator stop.  Keep ordinary stop semantics unchanged,
+    # but never project this bounded deadline outcome through ``ready``.
+    if challenge_deadline_cancelled:
+        final_status = "cancelled"
     feedback_events_for_result = s._extract_chat_feedback_events(result, final_status=final_status)
     runtime_failed = final_status in {"failed_runtime", "failed"} and not stop_requested
     if runtime_failed:
@@ -712,8 +735,22 @@ def _persist_session_turn_result(
     conversation["last_turn_status"] = (
         "failed"
         if final_status in {"failed_provider", "failed_runtime", "failed"}
-        else ("needs_continue" if final_status == "needs_continue" else ("paused_limit" if final_status == "paused_limit" else "ready"))
+        else (
+            "cancelled"
+            if challenge_deadline_cancelled
+            else (
+                "needs_continue"
+                if final_status == "needs_continue"
+                else ("paused_limit" if final_status == "paused_limit" else "ready")
+            )
+        )
     )
+    if challenge_deadline_cancelled:
+        conversation["last_turn_terminal_problem_code"] = _CHALLENGE_DEADLINE_PROBLEM_CODE
+        conversation["last_turn_terminal_reason"] = _CHALLENGE_DEADLINE_PROBLEM_CODE
+    else:
+        conversation.pop("last_turn_terminal_problem_code", None)
+        conversation.pop("lastTurnTerminalProblemCode", None)
     # Terminal anchor: "ready" is also written by stop handling and stale
     # restart repair, so the completion snapshot can only trust "ready" as a
     # terminal verdict when it is anchored to THIS turn's real settlement.
@@ -722,11 +759,12 @@ def _persist_session_turn_result(
         conversation["last_turn_terminal_turn_id"] = normalized_turn_id
     else:
         conversation.pop("last_turn_terminal_turn_id", None)
-    conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
-        final_status,
-        result=result if isinstance(result, dict) else None,
-        stop_requested=stop_requested,
-    )
+    if not challenge_deadline_cancelled:
+        conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
+            final_status,
+            result=result if isinstance(result, dict) else None,
+            stop_requested=stop_requested,
+        )
     conversation["updated_at"] = assistant_entry["timestamp"]
     if not _commit_session_turn_runtime_state(
         session_id,
@@ -903,7 +941,9 @@ def _persist_session_turn_result(
     # (see "Non-tool failures" note above): the error stays visible through
     # conversation["last_turn_error"] only.
     terminal_event = s.EVENT_TURN_FAILED if final_status in {"failed_provider", "failed_runtime", "failed"} else (
-        s.EVENT_TURN_INTERRUPTED if stop_requested or final_status in {"stopped", "stopped_by_user"} else s.EVENT_TURN_COMPLETED
+        s.EVENT_TURN_INTERRUPTED
+        if challenge_deadline_cancelled or stop_requested or final_status in {"stopped", "stopped_by_user"}
+        else s.EVENT_TURN_COMPLETED
     )
     s._append_session_conversation_event(
         session_id,
@@ -927,7 +967,7 @@ def _persist_session_turn_result(
         status=(
             "failed"
             if final_status in {"failed_provider", "failed_runtime", "failed"}
-            else "ready"
+            else ("stopped" if challenge_deadline_cancelled else "ready")
         ),
         last_preview=visible_assistant_text,
     )
@@ -972,6 +1012,8 @@ def _persist_session_turn_runtime_error(
     if turn_id and not s._is_session_turn_current(session_id, turn_id):
         return
     conversation.pop("messages", None)
+    conversation.pop("last_turn_terminal_problem_code", None)
+    conversation.pop("lastTurnTerminalProblemCode", None)
     conversation["last_turn_status"] = normalized_status
     conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(normalized_status)
     conversation["last_turn_error"] = turn_error
@@ -1093,6 +1135,8 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         )
         timestamp = str(error_entry.get("timestamp") or s._now_timestamp()).strip()
         conversation.pop("messages", None)
+        conversation.pop("last_turn_terminal_problem_code", None)
+        conversation.pop("lastTurnTerminalProblemCode", None)
         conversation["last_turn_status"] = "failed"
         conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_provider")
         conversation["last_turn_error"] = turn_error
@@ -1199,6 +1243,8 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     )
     timestamp = str(error_entry.get("timestamp") or s._now_timestamp()).strip()
     conversation.pop("messages", None)
+    conversation.pop("last_turn_terminal_problem_code", None)
+    conversation.pop("lastTurnTerminalProblemCode", None)
     conversation["last_turn_error"] = turn_error
     conversation["last_turn_status"] = "failed"
     conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_runtime")

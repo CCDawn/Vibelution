@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 
 import pytest
@@ -423,3 +424,75 @@ def test_persist_turn_result_completed_still_journals_assistant_message(
     assistant_events = [event for event in events if event.event_type == session_service.EVENT_ASSISTANT_MESSAGE]
     assert len(assistant_events) == 1
     assert "已完成资料搜集。" in str(assistant_events[0].payload.get("content") or "")
+
+
+def test_persist_challenge_deadline_cancel_is_not_ready_or_success(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Challenge deadline cancellation remains a failure-terminal projection."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {
+            "status": "stopped",
+            "summary": "",
+            "raw_output": "",
+            "stop_requested": True,
+            "stop_reason": "challenge_logical_task_deadline_exhausted",
+        },
+        turn_id="turn-a",
+    )
+
+    stored = load_session_chat_state(tmp_path, "session-a")
+    assert stored is not None
+    assert stored["last_turn_status"] == "cancelled"
+    assert stored["last_turn_terminal_problem_code"] == "challenge_logical_task_deadline_exhausted"
+    assert stored["last_turn_terminal_reason"] == "challenge_logical_task_deadline_exhausted"
+
+    snapshot = session_service.get_session_turn_completion_snapshot("session-a", "turn-a")
+    assert snapshot["terminal"] is True
+    assert snapshot["terminalStatus"] == "cancelled"
+    assert snapshot["terminalStatus"] != "ready"
+    assert snapshot["terminalProblemCode"] == "challenge_logical_task_deadline_exhausted"
+    assert snapshot["terminalReason"] == "challenge_logical_task_deadline_exhausted"
+
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        wait_for_agent_turn_terminal,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        wait_for_agent_turn_terminal("session-a", "turn-a", timeout_ms=1, poll_ms=1)
+    detail = json.loads(str(raised.value))
+    assert detail["terminalStatus"] == "cancelled"
+    assert detail["terminalProblemCode"] == "challenge_logical_task_deadline_exhausted"
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    assert any(event.event_type == session_service.EVENT_TURN_INTERRUPTED for event in events)
+
+
+def test_persist_operator_stop_keeps_existing_ready_semantics(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_is_session_stop_requested", lambda _sid: True)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {
+            "status": "stopped",
+            "summary": "",
+            "raw_output": "",
+            "stop_requested": True,
+            "stop_reason": "operator_requested_stop",
+        },
+        turn_id="turn-a",
+    )
+
+    stored = load_session_chat_state(tmp_path, "session-a")
+    assert stored is not None
+    assert stored["last_turn_status"] == "ready"
+    assert stored["last_turn_terminal_reason"] == "stopped_by_user"
+    assert "last_turn_terminal_problem_code" not in stored
