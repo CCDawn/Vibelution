@@ -7028,6 +7028,7 @@ def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_rea
     }
     observations = _repeat_last([closed_observation, closed_observation])
 
+    monkeypatch.setattr(daemon, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(next_state) or next_state)
     monkeypatch.setattr(daemon, "observe_workbench", observations)
@@ -7081,6 +7082,7 @@ def test_handle_open_command_skips_prelaunch_reconcile(monkeypatch):
     saved_states: list[dict] = []
     events: list[tuple[str, dict]] = []
 
+    monkeypatch.setattr(daemon, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(json.loads(json.dumps(next_state))) or next_state)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
@@ -7129,6 +7131,7 @@ def test_handle_close_command_skips_prehandler_reconcile(monkeypatch):
     saved_states: list[dict] = []
     events: list[tuple[str, dict]] = []
 
+    monkeypatch.setattr(daemon, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(json.loads(json.dumps(next_state))) or next_state)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
@@ -10112,6 +10115,7 @@ def test_handle_close_workbench_fails_when_post_close_verification_still_sees_br
     )
     events: list[tuple[str, dict]] = []
 
+    monkeypatch.setattr(daemon, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-24T05:30:00+00:00")
