@@ -3473,7 +3473,10 @@ def test_chat_completion_non_stream_cancellation_interrupts_blocked_backend_requ
     def run_request():
         try:
             client = LLMClient(config=config)
-            with llm_cancel_context(lambda: cancelled["reason"]):
+            with llm_cancel_context(
+                lambda: cancelled["reason"],
+                enable_chat_provider_abort=True,
+            ):
                 client._invoke_backend_with_retry(
                     {
                         "model": "glm-5.3-flash",
@@ -3561,7 +3564,7 @@ def test_chat_completion_with_ordinary_empty_checker_does_not_inject_client(monk
 
     monkeypatch.setattr(litellm, "completion", completion, raising=False)
     client = LLMClient(config=config)
-    with llm_cancel_context(lambda: "", enable_provider_abort=False):
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=False):
         client._invoke_payload_once(
             {
                 "model": "glm-5.3-flash",
@@ -3587,7 +3590,7 @@ def test_native_anthropic_route_does_not_inject_litellm_client(monkeypatch):
         "stream": True,
     }
 
-    with llm_cancel_context(lambda: "", enable_provider_abort=True):
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
         prepared, finish = client._prepare_cancellable_chat_stream(payload)
     try:
         assert prepared is payload
@@ -3626,7 +3629,10 @@ def test_slow_cancel_watcher_cannot_reuse_handler_after_finish_timeout(monkeypat
         new_handler,
     )
     payload = {"messages": [{"role": "user", "content": "ping"}], "stream": True}
-    with llm_cancel_context(lambda: cancelled["reason"], enable_provider_abort=True):
+    with llm_cancel_context(
+        lambda: cancelled["reason"],
+        enable_chat_provider_abort=True,
+    ):
         _prepared, finish = client._prepare_cancellable_chat_stream(payload)
         cancelled["reason"] = "challenge deadline"
         assert close_entered.wait(1.0)
@@ -3662,7 +3668,7 @@ def test_cancellable_stream_rechecks_stop_after_provider_exhaustion():
         ExhaustedIterator(),
         lambda: None,
     )
-    with llm_cancel_context(lambda: state["reason"], enable_provider_abort=True), pytest.raises(
+    with llm_cancel_context(lambda: state["reason"]), pytest.raises(
         client_module.LLMCancelledError,
         match="challenge deadline",
     ):
@@ -3711,7 +3717,10 @@ def test_chat_completion_stream_cancellation_interrupts_blocked_backend_request(
     def run_request():
         try:
             client = LLMClient(config=config)
-            with llm_cancel_context(lambda: cancelled["reason"]):
+            with llm_cancel_context(
+                lambda: cancelled["reason"],
+                enable_chat_provider_abort=True,
+            ):
                 list(client.stream_events([{"role": "user", "content": "ping"}]))
         except Exception as exc:
             observed["error"] = exc
@@ -3779,7 +3788,7 @@ def test_responses_stream_cancellation_interrupts_blocked_backend_request(monkey
     def run_stream():
         try:
             client = LLMClient(config=config)
-            with llm_cancel_context(cancel_checker):
+            with llm_cancel_context(cancel_checker, enable_chat_provider_abort=False):
                 list(client.stream_events([{"role": "user", "content": "ping"}]))
         except Exception as exc:
             observed["error"] = exc

@@ -74,9 +74,9 @@ _LLM_CANCEL_CHECKER_CONTEXT: ContextVar[Callable[[], str] | None] = ContextVar(
     "vibelution_llm_cancel_checker",
     default=None,
 )
-_LLM_PROVIDER_ABORT_CONTEXT: ContextVar[bool | None] = ContextVar(
-    "vibelution_llm_provider_abort_enabled",
-    default=None,
+_LLM_CHAT_PROVIDER_ABORT_CONTEXT: ContextVar[bool] = ContextVar(
+    "vibelution_llm_chat_provider_abort_enabled",
+    default=False,
 )
 _LLM_ROUTE_CONCURRENCY_LIMIT = 2
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
@@ -565,30 +565,27 @@ def _record_stream_http_timing_summary(timings: Any, *, identity: Dict[str, Any]
 def llm_cancel_context(
     checker: Callable[[], str] | None,
     *,
-    enable_provider_abort: bool | None = None,
+    enable_chat_provider_abort: bool = False,
 ):
     token = _LLM_CANCEL_CHECKER_CONTEXT.set(checker if callable(checker) else None)
-    abort_token = _LLM_PROVIDER_ABORT_CONTEXT.set(enable_provider_abort)
+    abort_token = _LLM_CHAT_PROVIDER_ABORT_CONTEXT.set(bool(enable_chat_provider_abort))
     try:
         yield
     finally:
-        _LLM_PROVIDER_ABORT_CONTEXT.reset(abort_token)
+        _LLM_CHAT_PROVIDER_ABORT_CONTEXT.reset(abort_token)
         _LLM_CANCEL_CHECKER_CONTEXT.reset(token)
 
 
-def _provider_abort_enabled(checker: Callable[[], str] | None) -> bool:
-    """Return whether this caller explicitly permits a cancellable HTTP client.
+def _chat_provider_abort_enabled(checker: Callable[[], str] | None) -> bool:
+    """Return whether this caller explicitly permits Chat HTTP cancellation.
 
-    ``None`` preserves the legacy direct-client behavior for callers that use
-    ``llm_cancel_context`` themselves.  The session Agent path passes an
-    explicit value so ordinary turns with an empty checker do not allocate a
-    watcher or inject LiteLLM's ``client`` parameter.
+    Responses cancellation predates the Challenge deadline path and continues
+    to follow the ordinary stop checker. Chat Completions cancellation is the
+    new capability and remains opt-in so normal Agent turns keep their prior
+    provider behavior.
     """
 
-    configured = _LLM_PROVIDER_ABORT_CONTEXT.get(None)
-    if configured is not None:
-        return bool(configured)
-    return callable(checker)
+    return callable(checker) and _LLM_CHAT_PROVIDER_ABORT_CONTEXT.get()
 
 
 def _publish_llm_status_event(status: str, **fields: Any) -> None:
@@ -2117,7 +2114,7 @@ class LLMClient:
     ) -> tuple[Dict[str, Any], Callable[[], None]]:
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
         if not (
-            _provider_abort_enabled(checker)
+            callable(checker)
             and _payload_uses_responses(payload)
             and bool(
                 getattr(
@@ -2207,7 +2204,7 @@ class LLMClient:
 
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
         if (
-            not _provider_abort_enabled(checker)
+            not _chat_provider_abort_enabled(checker)
             or self._backend is not _default_completion_backend
             or self.protocol_route.adapter_id == "anthropic_messages_native"
         ):
@@ -2287,18 +2284,19 @@ class LLMClient:
         """Prepare cancellation for default non-stream Chat/Responses calls."""
 
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
-        if not _provider_abort_enabled(checker):
-            return payload, lambda: None
         if _payload_uses_responses(payload):
             backend = self._responses_backend
-            enabled = bool(getattr(backend, "_vibelution_default_responses_backend", False))
+            enabled = callable(checker) and bool(
+                getattr(backend, "_vibelution_default_responses_backend", False)
+            )
             handler_attr = "_cancellable_responses_http_handler"
             handler_lock = self._cancellable_responses_http_handler_lock
             request_lock = self._cancellable_responses_request_lock
             factory = _new_cancellable_responses_http_handler
         elif "messages" in payload:
             enabled = (
-                self._backend is _default_completion_backend
+                _chat_provider_abort_enabled(checker)
+                and self._backend is _default_completion_backend
                 and self.protocol_route.adapter_id != "anthropic_messages_native"
             )
             handler_attr = "_cancellable_completion_http_handler"

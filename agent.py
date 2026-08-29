@@ -3091,10 +3091,10 @@ class SelfEvolvingAgent:
             # LiteLLM HTTP watcher merely because the checker is callable.
             return llm_cancel_context(
                 checker,
-                enable_provider_abort=bool(
+                enable_chat_provider_abort=bool(
                     getattr(
                         getattr(self, "_turn_interrupt_checker", None),
-                        "_vibelution_provider_abort_enabled",
+                        "_vibelution_chat_provider_abort_enabled",
                         False,
                     )
                 ),

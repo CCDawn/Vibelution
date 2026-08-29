@@ -727,7 +727,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     # capability marker must live on the session-owned checker before the
     # Agent wraps it. This keeps provider HTTP abort opt-in to Challenge turns
     # while ordinary turns retain cooperative stop checks without a watcher.
-    interrupt_checker._vibelution_provider_abort_enabled = bool(challenge_deadline_at_ms)
+    interrupt_checker._vibelution_chat_provider_abort_enabled = bool(challenge_deadline_at_ms)
     try:
         agent_prompt_snapshot = (
             s._ensure_session_agent_prompt_snapshot(
