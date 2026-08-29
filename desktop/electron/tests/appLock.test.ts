@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  createSingleInstanceEnvelope,
   pinSharedDesktopShellUserData,
   resolveDesktopShellUserDataRoot,
+  resolveSingleInstanceProvenance,
   resolveSecondInstanceIntent,
   shouldPinSharedDesktopShellUserData,
   shouldRunDesktopWhenReadyHandlers,
@@ -29,6 +31,55 @@ describe("singleInstanceDecision", () => {
 
   it("focuses the existing launcher for secondary launches", () => {
     expect(singleInstanceDecision(false)).toEqual({ action: "focus_existing", reason: "secondary_launch" });
+  });
+});
+
+describe("single-instance lifecycle envelope", () => {
+  it("defaults legacy or malformed second-instance metadata to operator", () => {
+    expect(resolveSingleInstanceProvenance(undefined)).toBe("operator");
+    expect(resolveSingleInstanceProvenance({})).toBe("operator");
+    expect(
+      resolveSingleInstanceProvenance({
+        schemaVersion: 1,
+        kind: "not-vibelution",
+        lifecycle: { provenance: "forwarded" }
+      })
+    ).toBe("operator");
+  });
+
+  it("round-trips explicit Runtime Manager forwarding provenance", () => {
+    const envelope = createSingleInstanceEnvelope({
+      lifecycleCommand: "stop",
+      lifecycleSource: "web_ui",
+      lifecycleReason: "web_close_button",
+      lifecycleStopManager: false,
+      explicitlyForwarded: true
+    });
+    expect(envelope).toEqual({
+      schemaVersion: 1,
+      kind: "vibelution-single-instance",
+      lifecycle: {
+        command: "stop",
+        provenance: "forwarded",
+        source: "web_ui",
+        reason: "web_close_button",
+        stopManager: false
+      }
+    });
+    expect(resolveSingleInstanceProvenance(envelope)).toBe("forwarded");
+  });
+
+  it("encodes a plain CLI lifecycle launch as operator provenance", () => {
+    const envelope = createSingleInstanceEnvelope({ lifecycleCommand: "stop" });
+    expect(envelope).toEqual({
+      schemaVersion: 1,
+      kind: "vibelution-single-instance",
+      lifecycle: {
+        command: "stop",
+        provenance: "operator"
+      }
+    });
+    expect(resolveSingleInstanceProvenance(envelope)).toBe("operator");
   });
 });
 

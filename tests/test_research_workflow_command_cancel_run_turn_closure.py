@@ -9,6 +9,7 @@ until the 30-minute projection reconciler ran.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -17,9 +18,18 @@ import pytest
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.runtime_manager import work_run_store as work_run_store_module
 from core.web.services import session_service
+from core.web.services.team_workflow.research_runtime.cancel_run_cleanup import (
+    CancelRunCleanupWorker,
+    build_cancel_run_cleanup_record,
+)
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 
 from tests._support.command_helpers import CommandHarness
+from tests._support.workflow_ledger_helpers import (
+    build_command_record,
+    build_outbox_record,
+    open_ledger_store,
+)
 
 
 def _iso(dt: datetime) -> str:
@@ -297,6 +307,11 @@ def test_cancel_run_replay_does_not_repeat_side_effect(
         _seed_file_run(file_run_store)
         first = _submit_cancel(harness, idempotency_key="cancel-key-1")
         replay = _submit_cancel(harness, idempotency_key="cancel-key-1")
+        cleanup_rows = [
+            item
+            for item in harness.store.list_pending_outbox("run-cancel")
+            if item.idempotency_key == "cancel_run_cleanup:run-cancel"
+        ]
     finally:
         harness.close()
 
@@ -307,3 +322,355 @@ def test_cancel_run_replay_does_not_repeat_side_effect(
     # Exactly the first submit's side effect (running subtask turn-a plus the
     # binding turn-d); the replayed command adds no further stops.
     assert stops == [("session-a", "turn-a"), ("session-a", "turn-d")]
+    assert len(cleanup_rows) == 1
+
+
+def test_cancel_run_persists_cleanup_intent_for_retry(
+    tmp_path, monkeypatch, file_run_store
+):
+    """The cancellation transaction must leave a durable cleanup intent."""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _FakeWorkRunStore())
+    # Keep this test at the transaction boundary: the resident worker owns
+    # the external stop side effect and will consume the pending action later.
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "WorkflowCommandService._close_cancel_run_inflight_turns",
+        lambda *_args, **_kwargs: None,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="running")
+        _seed_file_run(file_run_store)
+        receipt = _submit_cancel(harness, idempotency_key="cancel-key-1")
+        rows = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT action_kind, idempotency_key, status, payload_json "
+                "FROM outbox_actions WHERE run_id = ?",
+                ("run-cancel",),
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+    finally:
+        harness.close()
+
+    assert receipt.status == "accepted"
+    assert len(rows) == 1
+    action_kind, idempotency_key, status, payload_json = rows[0]
+    assert action_kind == "reconcile"
+    assert idempotency_key == "cancel_run_cleanup:run-cancel"
+    assert status == "pending"
+    payload = json.loads(payload_json)
+    assert payload["kind"] == "cancel_run_chat_turn_cleanup"
+    assert payload["runId"] == "run-cancel"
+
+
+def test_cleanup_worker_does_not_lease_unrelated_reconcile_action(
+    tmp_path, monkeypatch
+):
+    """The cleanup namespace must not consume another ``reconcile`` action."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "_collect_cancel_run_turn_pairs",
+        lambda _run_id: [],
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="cancelled")
+        cleanup = build_cancel_run_cleanup_record(
+            run_id="run-cancel",
+            command_id="cmd-cancel",
+            now_ms=1_750_000_010_000,
+        )
+        unrelated = build_outbox_record(
+            action_id="act-unrelated-reconcile",
+            run_id="run-cancel",
+            command_id="cmd-other",
+            action_kind="reconcile",
+            idempotency_key="reconcile:other-run",
+        )
+
+        def insert_actions(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-cancel",
+                    run_id="run-cancel",
+                    idempotency_key="cancel:key",
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-other",
+                    run_id="run-cancel",
+                    idempotency_key="other:key",
+                )
+            )
+            uow.repository.insert_outbox(cleanup)
+            uow.repository.insert_outbox(unrelated)
+
+        harness.store.submit(insert_actions, force_flush=True).result(timeout=10)
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+
+        assert worker.run_once() == 1
+        rows = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                """
+                SELECT idempotency_key, status, lease_owner
+                FROM outbox_actions
+                ORDER BY action_id
+                """
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+    finally:
+        harness.close()
+
+    assert {
+        row[0]: (row[1], row[2])
+        for row in rows
+    } == {
+        "cancel_run_cleanup:run-cancel": ("succeeded", None),
+        "reconcile:other-run": ("pending", None),
+    }
+
+
+def test_cleanup_worker_requeues_transient_stop_then_acknowledges_terminal_turn(
+    tmp_path, monkeypatch, file_run_store
+):
+    """A stop failure is retried from the durable action, not swallowed."""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    work_runs_root = tmp_path / "work_runs"
+    real_store = work_run_store_module.WorkRunStore(root=work_runs_root)
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", real_store)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: True)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "WorkflowCommandService._close_cancel_run_inflight_turns",
+        lambda *_args, **_kwargs: None,
+    )
+
+    turn_id = "turn-a"
+    real_store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": turn_id,
+            "runKind": "chat_turn",
+            "sessionId": "session-a",
+            "status": "running",
+            "currentPhase": "running",
+            "startedAt": _iso(datetime.now(timezone.utc)),
+            "updatedAt": _iso(datetime.now(timezone.utc)),
+            "finishedAt": "",
+        },
+        active_run_id=turn_id,
+    )
+    attempts = {"count": 0}
+
+    def stop_then_finish(session_id: str, *, expected_turn_id: str = ""):
+        assert session_id == "session-a"
+        assert expected_turn_id == turn_id
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("temporary stop transport failure")
+        now = _iso(datetime.now(timezone.utc))
+        real_store.persist_snapshot(
+            "chat_turn",
+            {
+                **real_store.load_snapshot("chat_turn", turn_id),
+                "status": "stopped",
+                "currentPhase": "stopped",
+                "updatedAt": now,
+                "finishedAt": now,
+            },
+            active_run_id=turn_id,
+        )
+        return {"currentPhase": "stopped"}
+
+    monkeypatch.setattr(session_service, "request_stop_session_turn", stop_then_finish)
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="running")
+        _seed_file_run(
+            file_run_store,
+            binding_snapshots=[
+                {
+                    "snapshotId": "snap-1",
+                    "sessionId": "session-a",
+                    "taskId": "task-1",
+                    "turnId": turn_id,
+                }
+            ],
+        )
+        _submit_cancel(harness, idempotency_key="cancel-key-1")
+        clock = [1_750_000_010_000]
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: clock[0],
+            retry_delay_ms=0,
+        )
+        assert worker.run_once() == 1
+        pending = harness.store.list_pending_outbox("run-cancel")
+        assert len(pending) == 1
+        assert pending[0].status == "pending"
+        assert attempts["count"] == 1
+
+        clock[0] += 1
+        assert worker.run_once() == 1
+        row = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT status FROM outbox_actions WHERE idempotency_key = ?",
+                ("cancel_run_cleanup:run-cancel",),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert row[0] == "succeeded"
+        latest = real_store.load_snapshot("chat_turn", turn_id)
+        assert latest is not None and latest["status"] == "stopped"
+        assert real_store.load_run_index("chat_turn")["activeRunId"] == ""
+    finally:
+        harness.close()
+
+
+def test_cleanup_worker_does_not_ack_live_turn_before_terminal_snapshot(
+    tmp_path, monkeypatch, file_run_store
+):
+    """A stop request that only reaches ``stopping`` remains retryable."""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    work_runs_root = tmp_path / "work_runs"
+    real_store = work_run_store_module.WorkRunStore(root=work_runs_root)
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", real_store)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: True)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "WorkflowCommandService._close_cancel_run_inflight_turns",
+        lambda *_args, **_kwargs: None,
+    )
+    turn_id = "turn-a"
+    now = _iso(datetime.now(timezone.utc))
+    real_store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": turn_id,
+            "runKind": "chat_turn",
+            "sessionId": "session-a",
+            "status": "running",
+            "currentPhase": "running",
+            "startedAt": now,
+            "updatedAt": now,
+            "finishedAt": "",
+        },
+        active_run_id=turn_id,
+    )
+
+    monkeypatch.setattr(
+        session_service,
+        "request_stop_session_turn",
+        lambda *_args, **_kwargs: {"currentPhase": "stopping"},
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="running")
+        _seed_file_run(
+            file_run_store,
+            binding_snapshots=[
+                {
+                    "snapshotId": "snap-1",
+                    "sessionId": "session-a",
+                    "taskId": "task-1",
+                    "turnId": turn_id,
+                }
+            ],
+        )
+        _submit_cancel(harness, idempotency_key="cancel-key-1")
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+        assert worker.run_once() == 1
+        row = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT status FROM outbox_actions WHERE idempotency_key = ?",
+                ("cancel_run_cleanup:run-cancel",),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert row[0] == "pending"
+        assert real_store.load_snapshot("chat_turn", turn_id)["status"] == "running"
+        assert real_store.load_run_index("chat_turn")["activeRunId"] == turn_id
+    finally:
+        harness.close()
+
+
+def test_cleanup_worker_recovers_pending_intent_after_store_reopen(
+    tmp_path, monkeypatch, file_run_store
+):
+    """A newly constructed worker resumes an intent left by a prior process."""
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    work_runs_root = tmp_path / "work_runs"
+    real_store = work_run_store_module.WorkRunStore(root=work_runs_root)
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", real_store)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: False)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "WorkflowCommandService._close_cancel_run_inflight_turns",
+        lambda *_args, **_kwargs: None,
+    )
+    turn_id = "turn-a"
+    now = _iso(datetime.now(timezone.utc))
+    real_store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": turn_id,
+            "runKind": "chat_turn",
+            "sessionId": "session-a",
+            "status": "running",
+            "currentPhase": "running",
+            "startedAt": now,
+            "updatedAt": now,
+            "finishedAt": "",
+        },
+        active_run_id=turn_id,
+    )
+
+    ledger_path = tmp_path / "ledger.sqlite3"
+    harness = CommandHarness(ledger_path)
+    harness.seed_run(run_id="run-cancel", status="running")
+    _seed_file_run(
+        file_run_store,
+        binding_snapshots=[
+            {"snapshotId": "snap-1", "sessionId": "session-a", "taskId": "task-1", "turnId": turn_id}
+        ],
+    )
+    _submit_cancel(harness, idempotency_key="cancel-key-1")
+    harness.close()
+
+    reopened = open_ledger_store(ledger_path)
+    try:
+        worker = CancelRunCleanupWorker(
+            store=reopened,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+        assert worker.run_once() == 1
+        row = reopened.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT status FROM outbox_actions WHERE idempotency_key = ?",
+                ("cancel_run_cleanup:run-cancel",),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert row[0] == "succeeded"
+        latest = real_store.load_snapshot("chat_turn", turn_id)
+        assert latest is not None and latest["status"] == "stopped"
+        assert real_store.load_run_index("chat_turn")["activeRunId"] == ""
+    finally:
+        reopened.close()

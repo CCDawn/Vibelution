@@ -21,6 +21,7 @@ def lease_ready_actions(
     limit: int = 8,
     lease_ms: int = 30_000,
     action_kinds: tuple[str, ...] | None = None,
+    idempotency_prefix: str | None = None,
     max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
 ) -> list[OutboxRecord]:
     future = store.submit(
@@ -30,6 +31,7 @@ def lease_ready_actions(
             limit=limit,
             lease_ms=lease_ms,
             action_kinds=action_kinds,
+            idempotency_prefix=idempotency_prefix,
             max_attempts=max_attempts,
         ),
         force_flush=True,

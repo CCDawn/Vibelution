@@ -164,7 +164,7 @@ describe("Electron main Launcher IPC facade", () => {
     const projectSlotBody = mainSource.slice(projectSlotStart, projectSlotEnd);
     expect(projectSlotBody).toContain("await launcherControlPlaneReady");
 
-    const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
+    const secondInstanceStart = mainSource.indexOf('app.on("second-instance"');
     const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);
     const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
     expect(secondInstanceBody).toContain("await launcherControlPlaneReady");
@@ -172,7 +172,9 @@ describe("Electron main Launcher IPC facade", () => {
     const firstLifecycleIndex = mainSource.indexOf("const firstLifecycle =");
     const firstLifecycleEnd = mainSource.indexOf("// T6:", firstLifecycleIndex);
     const firstLifecycleBody = mainSource.slice(firstLifecycleIndex, firstLifecycleEnd);
-    expect(firstLifecycleBody).toContain("await handleSecondInstanceLifecycleCommand(firstLifecycle)");
+    expect(firstLifecycleBody).toContain(
+      "await handleSecondInstanceLifecycleCommand(firstLifecycle, desktopLifecycleProvenance)"
+    );
     expect(firstLifecycleBody).not.toContain("void handleSecondInstanceLifecycleCommand(firstLifecycle)");
   });
 
@@ -292,10 +294,12 @@ describe("Electron main Launcher IPC facade", () => {
     // A normal window close joins/waits; a confirmed force close keeps superseding.
     expect(stopBody).toContain('transaction.mode === "force" ? "operator" : "window-close"');
 
-    const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
+    const secondInstanceStart = mainSource.indexOf('app.on("second-instance"');
     const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);
     const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
-    expect(secondInstanceBody).toContain('"forwarded"');
+    expect(secondInstanceBody).toContain("resolveSingleInstanceProvenance(additionalData)");
+    expect(secondInstanceBody).toContain("secondInstanceProvenance");
+    expect(secondInstanceBody).toContain("provenance: LauncherLifecycleProvenance = \"operator\"");
 
     // A permanently failed restart lease must not keep absorbing joins.
     const lifecycleFailedIndex = lifecycleBody.indexOf("mutation.outcome === \"failed\"");

@@ -24,6 +24,7 @@ from .adapter_dispatch_worker import AdapterDispatchWorker
 from .adapters.domain_adapters import register_default_adapters
 from .checkpoint_fork_worker import CheckpointForkWorker
 from .checkpoint_lifecycle import latest_checkpoint_id
+from .cancel_run_cleanup import CancelRunCleanupWorker
 from .command_service import WorkflowCommandService
 from .delivery_worker import DeliveryOrchestrationWorker
 from .event_publish_worker import EventPublishWorker
@@ -52,11 +53,13 @@ class WorkflowRuntime:
     graph_worker: GraphDispatchWorker
     adapter_worker: AdapterDispatchWorker
     fork_worker: CheckpointForkWorker
+    cancel_run_cleanup_worker: CancelRunCleanupWorker
     delivery_worker: DeliveryOrchestrationWorker
     event_publish_worker: EventPublishWorker
 
     def run_workers_once(self, limit: int = 4) -> int:
         handled = self.fork_worker.run_once(limit=limit)
+        handled += self.cancel_run_cleanup_worker.run_once(limit=limit)
         handled += self.graph_worker.run_once(limit=limit)
         handled += self.adapter_worker.run_once(limit=limit)
         handled += self.event_publish_worker.run_once(limit=limit)
@@ -204,6 +207,11 @@ def build_workflow_runtime(
         owner_id="checkpoint-fork-worker",
         commit_hook=combined_wake,
     )
+    cancel_run_cleanup_worker = CancelRunCleanupWorker(
+        store=store,
+        owner_id="cancel-run-cleanup-worker",
+        now_provider=clock,
+    )
     delivery_worker = DeliveryOrchestrationWorker(
         store=store,
         owner_id="delivery-worker",
@@ -231,6 +239,7 @@ def build_workflow_runtime(
         graph_worker=graph_worker,
         adapter_worker=adapter_worker,
         fork_worker=fork_worker,
+        cancel_run_cleanup_worker=cancel_run_cleanup_worker,
         delivery_worker=delivery_worker,
         event_publish_worker=event_publish_worker,
     )

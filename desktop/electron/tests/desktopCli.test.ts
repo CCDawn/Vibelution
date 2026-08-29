@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "../src/cli/desktopCli.js";
+import {
+  applyDesktopCliToEnvironment,
+  parseDesktopCliArgs,
+  parseDesktopLifecycleLaunchMetadata
+} from "../src/cli/desktopCli.js";
 import { desktopSmokeSummary, desktopSmokeSummaryPath } from "../src/smoke/desktopSmoke.js";
 import { desktopWorkbenchCloseCanarySummary, desktopWorkbenchCloseCanarySummaryPath } from "../src/smoke/workbenchCloseCanary.js";
 
@@ -17,6 +21,78 @@ describe("desktop CLI arguments", () => {
     );
     expect(parseDesktopCliArgs(["--project", "C:/repo"]).lifecycleCommand).toBe("");
     expect(parseDesktopCliArgs(["--workspace", "C:/repo", "toggle"]).lifecycleCommand).toBe("toggle");
+  });
+
+  it("keeps ordinary CLI lifecycle launches as operator-originated", () => {
+    expect(
+      parseDesktopLifecycleLaunchMetadata(["--project", "C:/repo", "stop"], {})
+    ).toEqual({
+      command: "stop",
+      source: "",
+      reason: "",
+      stopManager: false,
+      explicitlyForwarded: false
+    });
+  });
+
+  it("does not treat empty inherited provenance variables as a forwarded request", () => {
+    expect(
+      parseDesktopLifecycleLaunchMetadata(["--project", "C:/repo", "stop"], {
+        VIBELUTION_LIFECYCLE_SOURCE: "",
+        VIBELUTION_LIFECYCLE_REASON: "",
+        VIBELUTION_LIFECYCLE_STOP_MANAGER: ""
+      })
+    ).toMatchObject({
+      command: "stop",
+      explicitlyForwarded: false
+    });
+  });
+
+  it("recognizes the explicit Runtime Manager forwarding markers", () => {
+    expect(
+      parseDesktopLifecycleLaunchMetadata(
+        [
+          "--project",
+          "C:/repo",
+          "stop",
+          "--lifecycle-source",
+          "web_ui",
+          "--lifecycle-reason",
+          "web_close_button",
+          "--lifecycle-stop-manager",
+          "1"
+        ],
+        {}
+      )
+    ).toEqual({
+      command: "stop",
+      source: "web_ui",
+      reason: "web_close_button",
+      stopManager: true,
+      explicitlyForwarded: true
+    });
+  });
+
+  it("does not mistake forwarding marker values for lifecycle commands", () => {
+    expect(
+      parseDesktopCliArgs(["--lifecycle-source", "stop", "--lifecycle-reason", "restart"])
+    ).toMatchObject({ lifecycleCommand: "" });
+  });
+
+  it("accepts environment forwarding markers when an older argv path is used", () => {
+    expect(
+      parseDesktopLifecycleLaunchMetadata(["--project", "C:/repo", "stop"], {
+        VIBELUTION_LIFECYCLE_SOURCE: "runtime_manager_daemon",
+        VIBELUTION_LIFECYCLE_REASON: "browser_missing_auto_close",
+        VIBELUTION_LIFECYCLE_STOP_MANAGER: "0"
+      })
+    ).toEqual({
+      command: "stop",
+      source: "runtime_manager_daemon",
+      reason: "browser_missing_auto_close",
+      stopManager: false,
+      explicitlyForwarded: true
+    });
   });
 
   it("keeps --project as a slot apply path and does not treat it as workspace root", () => {

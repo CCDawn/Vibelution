@@ -21,7 +21,7 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench");
     expect(source).toContain("const secondCli = parseDesktopCliArgs(argv)");
     expect(source).toContain("resolveSecondInstanceIntent({");
-    expect(source).toContain("applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand)");
+    expect(source).toContain("applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance)");
     expect(source).toContain("lifecycleCommand: secondCli.lifecycleCommand");
     expect(source).not.toContain('if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open")');
     expect(source).toContain("secondCli.openWorkbench");
@@ -34,10 +34,12 @@ describe("Electron main public deep-link consumption", () => {
   it("pins a shared userData lock and focuses the existing shell on a bare second launch", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const pinIndex = source.indexOf("pinSharedDesktopShellUserData(app,");
-    const lockIndex = source.indexOf("app.requestSingleInstanceLock()");
+    const lockIndex = source.indexOf("app.requestSingleInstanceLock(singleInstanceEnvelope)");
 
     expect(pinIndex).toBeGreaterThan(0);
     expect(lockIndex).toBeGreaterThan(pinIndex);
+    expect(source).toContain("createSingleInstanceEnvelope");
+    expect(source).toContain("resolveSingleInstanceProvenance(additionalData)");
     expect(source).toContain('intent.action === "focus_existing_shell"');
     expect(source).toContain("focusExistingDesktopShell()");
   });

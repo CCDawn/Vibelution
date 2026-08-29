@@ -29,13 +29,13 @@ describe("Electron main startup sequence", () => {
     );
     const pendingProjectIndex = source.indexOf("if (pendingProjectRoot)");
     const applySlotIndex = source.indexOf(
-      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle)"
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance)"
     );
     const noProjectLifecycleIndex = source.indexOf(
       'else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null)'
     );
     const noProjectHandleIndex = source.indexOf(
-      "await handleSecondInstanceLifecycleCommand(firstLifecycle)"
+      "await handleSecondInstanceLifecycleCommand(firstLifecycle, desktopLifecycleProvenance)"
     );
 
     expect(deferIndex).toBeGreaterThan(0);
@@ -45,7 +45,7 @@ describe("Electron main startup sequence", () => {
     expect(noProjectLifecycleIndex).toBeGreaterThan(applySlotIndex);
     expect(noProjectHandleIndex).toBeGreaterThan(noProjectLifecycleIndex);
     expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
-      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle)"
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance)"
     );
     expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
       "} else if (firstLifecycle && firstLifecycle !== \"status\" && windowProvider !== null)"

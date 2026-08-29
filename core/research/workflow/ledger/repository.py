@@ -802,12 +802,16 @@ class WorkflowLedgerRepository:
         limit: int = 8,
         lease_ms: int = 30_000,
         action_kinds: tuple[str, ...] | None = None,
+        idempotency_prefix: str | None = None,
         max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
     ) -> list[OutboxRecord]:
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         self._fail_leases_over_attempt_gate(
-            now_ms=now_ms, max_attempts=max_attempts, action_kinds=action_kinds
+            now_ms=now_ms,
+            max_attempts=max_attempts,
+            action_kinds=action_kinds,
+            idempotency_prefix=idempotency_prefix,
         )
         kind_filter = ""
         params: list[Any] = [now_ms]
@@ -815,6 +819,13 @@ class WorkflowLedgerRepository:
             placeholders = ",".join("?" for _ in action_kinds)
             kind_filter = f"AND action_kind IN ({placeholders})"
             params.extend(action_kinds)
+        if idempotency_prefix:
+            # ``LIKE`` treats ``_`` and ``%`` in the caller prefix as
+            # wildcards.  Use a length-bounded substring comparison so lease
+            # ownership remains literal even for namespaced keys such as
+            # ``cancel_run_cleanup:``.
+            kind_filter += " AND SUBSTR(idempotency_key, 1, ?) = ?"
+            params.extend([len(idempotency_prefix), idempotency_prefix])
         params.extend([now_ms, limit])
         rows = self.execute(
             f"""
@@ -868,6 +879,7 @@ class WorkflowLedgerRepository:
         now_ms: int,
         max_attempts: int,
         action_kinds: tuple[str, ...] | None,
+        idempotency_prefix: str | None,
     ) -> None:
         """Sweep actions at/over the lease-attempt gate to terminal failed in
         the caller's unit of work. Scope and eligibility mirror the lease scan;
@@ -882,6 +894,9 @@ class WorkflowLedgerRepository:
             placeholders = ",".join("?" for _ in action_kinds)
             kind_filter = f"AND action_kind IN ({placeholders})"
             params.extend(action_kinds)
+        if idempotency_prefix:
+            kind_filter += " AND SUBSTR(idempotency_key, 1, ?) = ?"
+            params.extend([len(idempotency_prefix), idempotency_prefix])
         params.append(now_ms)
         self.execute(
             f"""

@@ -5,12 +5,18 @@ import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { deflateSync } from "node:zlib";
 import {
+  createSingleInstanceEnvelope,
   pinSharedDesktopShellUserData,
+  resolveSingleInstanceProvenance,
   resolveSecondInstanceIntent,
   shouldRunDesktopWhenReadyHandlers,
   singleInstanceDecision
 } from "./appLock.js";
-import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "./cli/desktopCli.js";
+import {
+  applyDesktopCliToEnvironment,
+  parseDesktopCliArgs,
+  parseDesktopLifecycleLaunchMetadata
+} from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import {
   DESKTOP_LAUNCH_PROFILE_FILE,
@@ -325,7 +331,17 @@ const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
   console.warn(error instanceof Error ? error.message : String(error));
 });
 let conversationNotificationService: ConversationNotificationService | null = null;
-const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
+const desktopLaunchArgv = process.argv.slice(1);
+const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
+const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(desktopLaunchArgv, process.env);
+const singleInstanceEnvelope = createSingleInstanceEnvelope({
+  lifecycleCommand: desktopLifecycleLaunchMetadata.command,
+  lifecycleSource: desktopLifecycleLaunchMetadata.source,
+  lifecycleReason: desktopLifecycleLaunchMetadata.reason,
+  lifecycleStopManager: desktopLifecycleLaunchMetadata.stopManager,
+  explicitlyForwarded: desktopLifecycleLaunchMetadata.explicitlyForwarded
+});
+const desktopLifecycleProvenance = resolveSingleInstanceProvenance(singleInstanceEnvelope);
 let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
 let pendingProjectRoot = desktopCliArgs.projectRoot;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
@@ -363,7 +379,7 @@ pinSharedDesktopShellUserData(app, {
   workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
   env: process.env
 });
-const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
+const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock(singleInstanceEnvelope));
 nativeTheme.themeSource = "light";
 const runPrimaryWhenReady = shouldRunDesktopWhenReadyHandlers({
   lockAction: lockDecision.action,
@@ -4219,7 +4235,11 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   await startOrFocusWorkbenchFromProductEntryOnShell();
 }
 
-async function applyPendingProjectSlot(projectRoot: string, lifecycleCommand = ""): Promise<void> {
+async function applyPendingProjectSlot(
+  projectRoot: string,
+  lifecycleCommand = "",
+  provenance: LauncherLifecycleProvenance = "operator"
+): Promise<void> {
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
@@ -4266,7 +4286,7 @@ async function applyPendingProjectSlot(projectRoot: string, lifecycleCommand = "
         await orchestrateLauncherLifecycle(plan.operation, {
           schemaVersion: 1,
           path: "project-slot"
-        });
+        }, provenance);
       } else {
         await orchestrateBranchInstanceLifecycle(plan.operation, {
           schemaVersion: 1,
@@ -4446,7 +4466,7 @@ app.whenReady()
       return;
     }
     if (pendingProjectRoot) {
-      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle);
+      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance);
     } else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
@@ -4455,7 +4475,7 @@ app.whenReady()
           console.warn(error instanceof Error ? error.message : String(error));
         });
       } else {
-        await handleSecondInstanceLifecycleCommand(firstLifecycle);
+        await handleSecondInstanceLifecycleCommand(firstLifecycle, desktopLifecycleProvenance);
       }
     }
     // T6: window actions are orchestrated by Electron main; the Python desktop
@@ -4487,7 +4507,8 @@ app.whenReady()
   });
 }
 
-app.on("second-instance", (_event, argv) => {
+app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
+  const secondInstanceProvenance = resolveSingleInstanceProvenance(additionalData);
   const secondCli = parseDesktopCliArgs(argv);
   const intent = resolveSecondInstanceIntent({
     deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
@@ -4500,11 +4521,11 @@ app.on("second-instance", (_event, argv) => {
     return;
   }
   if (intent.action === "apply_project") {
-    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand);
+    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance);
     return;
   }
   if (intent.action === "lifecycle") {
-    void handleSecondInstanceLifecycleCommand(intent.command).catch((error: unknown) => {
+    void handleSecondInstanceLifecycleCommand(intent.command, secondInstanceProvenance).catch((error: unknown) => {
       console.warn(error instanceof Error ? error.message : String(error));
     });
     return;
@@ -4520,7 +4541,10 @@ app.on("second-instance", (_event, argv) => {
   }
 });
 
-async function handleSecondInstanceLifecycleCommand(command: string): Promise<void> {
+async function handleSecondInstanceLifecycleCommand(
+  command: string,
+  provenance: LauncherLifecycleProvenance = "operator"
+): Promise<void> {
   if (launcherBootstrap === null || windowProvider === null) {
     // Electron emits second-instance after ready, but the primary app may not
     // have finished its asynchronous Launcher bootstrap yet.
@@ -4541,7 +4565,7 @@ async function handleSecondInstanceLifecycleCommand(command: string): Promise<vo
       await orchestrateLauncherLifecycle(
         observed === "open" || observed === "running" || observed === "starting" ? "stop" : "start",
         { schemaVersion: 1, path: "toggle" },
-        "forwarded"
+        provenance
       );
     } catch (error: unknown) {
       notifyDesktopTray("Vibelution", `切换失败：${error instanceof Error ? error.message.slice(0, 220) : String(error)}`, "warning");
@@ -4550,11 +4574,7 @@ async function handleSecondInstanceLifecycleCommand(command: string): Promise<vo
   }
   const operation = command === "rebuild-and-start" ? "rebuild-and-start" : command;
   try {
-    // Commands arriving through the second-instance argv channel are forwarded
-    // by the daemon handoff (e.g. the web close button), not new operator
-    // lifecycle decisions; a forwarded stop must join, not abort, an in-flight
-    // restart.
-    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command }, "forwarded");
+    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command }, provenance);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `Launcher 命令失败：${detail.slice(0, 300)}`, "warning");

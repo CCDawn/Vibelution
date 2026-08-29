@@ -332,9 +332,10 @@ class WorkflowCommandService:
             )
         receipt = future.result(timeout=30)
         if request.command is WorkflowCommandKind.CANCEL_RUN and receipt.status == "accepted":
-            # Post-commit, best-effort: stop the chat turns still in flight
-            # for this run.  Never runs inside the ledger transaction and
-            # never touches the receipt (see _close_cancel_run_inflight_turns).
+            # Post-commit, best-effort fast path: the durable cleanup intent
+            # was committed with the command and the resident outbox worker
+            # remains the retry/terminal-confirmation path. Never runs inside
+            # the ledger transaction and never touches the receipt.
             # Replay returns earlier via the idempotency lookup, so a replayed
             # cancel_run cannot re-run this side effect.
             self._close_cancel_run_inflight_turns(request.run_id)
@@ -379,15 +380,17 @@ class WorkflowCommandService:
     # ------------------------------------------------ cancel_run turn closure
 
     def _close_cancel_run_inflight_turns(self, run_id: str) -> None:
-        """Best-effort stop of chat turns still in flight for a cancelled run.
+        """Best-effort fast stop of turns owned by a cancelled run.
 
         Runs strictly AFTER the ledger transaction committed: stopping a turn
         performs chat IO, takes the session chat-state lock and republishes
         the detail projection, none of which may run inside the single-writer
         SQLite transaction or under the 30s submit future timeout.
 
-        Failures are logged and swallowed — the cancel command itself must
-        stay successful, and the side effect must never break the caller.
+        Failures are logged and swallowed here because the cancel command must
+        stay successful; the command transaction also writes a durable outbox
+        intent, which is retried by ``CancelRunCleanupWorker``. This fast path
+        deliberately does not acknowledge that intent.
         Idempotency: replayed cancel_run commands return at the idempotency
         lookup before this hook, and turns already carrying a terminal
         snapshot are skipped, so repeats are natural no-ops.
@@ -955,6 +958,21 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
+        # Cancellation and session-turn stopping are separate state machines.
+        # Persist the cleanup intent in this same transaction so a process
+        # crash after the run transition cannot lose the stop request. The
+        # resident workflow outbox tick retries the external session side
+        # effect and acknowledges only after terminal snapshot verification.
+        from .cancel_run_cleanup import build_cancel_run_cleanup_record
+
+        uow.repository.insert_outbox(
+            build_cancel_run_cleanup_record(
+                run_id=request.run_id,
+                command_id=command_id,
+                now_ms=now_ms,
+            )
+        )
+        uow.after_commit(self._wake_worker)
         uow.repository.update_run_status(
             request.run_id,
             request.team_id,
