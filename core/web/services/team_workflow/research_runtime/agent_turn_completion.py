@@ -378,6 +378,8 @@ def wait_for_agent_turn_terminal(
                 "turnId": normalized_turn_id,
                 "terminalStatus": status,
                 "completionSource": last_snapshot.get("completionSource"),
+                "terminalProblemCode": last_snapshot.get("terminalProblemCode"),
+                "terminalReason": last_snapshot.get("terminalReason"),
                 "failureClass": (
                     "terminal_failure"
                     if status in _FAILURE_TERMINAL_STATUSES
@@ -747,6 +749,18 @@ def _wait_with_bounded_turn_continuation(
             if failure_detail is None:
                 raise
             failure_status = str(failure_detail.get("terminalStatus") or "").strip().lower()
+            failure_problem_code = str(
+                failure_detail.get("terminalProblemCode")
+                or failure_detail.get("terminalReason")
+                or ""
+            ).strip().lower()
+            if failure_problem_code == "challenge_logical_task_deadline_exhausted":
+                raise ChallengeTaskDeadlineExceeded(
+                    challenge_deadline_problem(
+                        waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                        turn_chain=turn_chain,
+                    )
+                ) from exc
             if (
                 source_collection_scope
                 and original_snapshot is not None

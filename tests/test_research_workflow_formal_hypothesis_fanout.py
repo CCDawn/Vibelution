@@ -87,6 +87,43 @@ def test_pending_action_rejects_candidate_identity_on_root_scope() -> None:
         )
 
 
+def test_hypothesis_fan_out_wait_uses_one_shared_deadline(monkeypatch) -> None:
+    remaining = iter((300_000, 90_000))
+    monkeypatch.setattr(
+        real_ports_module,
+        "remaining_challenge_task_ms",
+        lambda: next(remaining),
+    )
+
+    assert real_ports_module._hypothesis_fan_out_wait_timeout_ms(
+        child_turn_id="turn-1"
+    ) == 120_000
+    assert real_ports_module._hypothesis_fan_out_wait_timeout_ms(
+        child_turn_id="turn-2"
+    ) == 90_000
+
+
+def test_hypothesis_fan_out_deadline_exhaustion_fails_before_child_wait(monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        ChallengeTaskDeadlineExceeded,
+    )
+
+    monkeypatch.setattr(real_ports_module, "remaining_challenge_task_ms", lambda: 0)
+
+    with pytest.raises(ChallengeTaskDeadlineExceeded) as raised:
+        real_ports_module._hypothesis_fan_out_wait_timeout_ms(child_turn_id="turn-expired")
+
+    assert raised.value.problem["code"] == "challenge_logical_task_deadline_exhausted"
+
+
+def test_hypothesis_fan_out_wait_preserves_ordinary_default_timeout(monkeypatch) -> None:
+    monkeypatch.setattr(real_ports_module, "remaining_challenge_task_ms", lambda: None)
+
+    assert real_ports_module._hypothesis_fan_out_wait_timeout_ms(
+        child_turn_id="ordinary-turn"
+    ) == 120_000
+
+
 def test_candidate_action_cannot_join_a_different_frozen_selection() -> None:
     payload = json.dumps(
         {

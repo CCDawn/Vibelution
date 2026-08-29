@@ -213,6 +213,18 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
             # Receipt audit readback must never break ordinary chat diagnostics.
             model_invocation_receipts = []
         last_turn_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
+        terminal_problem_code = str(
+            conversation.get("last_turn_terminal_problem_code")
+            or conversation.get("lastTurnTerminalProblemCode")
+            or conversation.get("terminalProblemCode")
+            or ""
+        ).strip()[:128]
+        terminal_reason = str(
+            conversation.get("last_turn_terminal_reason")
+            or conversation.get("lastTurnTerminalReason")
+            or conversation.get("terminalReason")
+            or ""
+        ).strip()[:256]
         messages = s._session_ledger_visible_messages(session_id)
 
     assistant_message = s._find_turn_scoped_assistant_message(messages, normalized_turn_id)
@@ -283,6 +295,10 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         "activeTurnId": active_turn_id,
         "turnCurrent": turn_current,
     }
+    if terminal_problem_code:
+        snapshot["terminalProblemCode"] = terminal_problem_code
+    if terminal_reason:
+        snapshot["terminalReason"] = terminal_reason
     if model_invocation_receipts:
         snapshot["modelInvocationReceipts"] = deepcopy(model_invocation_receipts)
         snapshot["modelInvocationReceipt"] = deepcopy(model_invocation_receipts[-1])

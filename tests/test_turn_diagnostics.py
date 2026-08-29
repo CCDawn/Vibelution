@@ -272,7 +272,7 @@ def test_diagnostics_unwrap_message_envelopes_and_json_response_without_true_att
     assert metadata["context_composition"]["turnId"] == "7"
 
 
-def test_completion_snapshot_reads_receipt_from_canonical_journal_after_restart_style_projection(
+def test_completion_snapshot_reads_only_legacy_receipt_from_journal_after_restart_style_projection(
     tmp_path,
     monkeypatch,
 ):
@@ -372,5 +372,9 @@ def test_completion_snapshot_reads_receipt_from_canonical_journal_after_restart_
     snapshot = session_turn_diagnostics.get_session_turn_completion_snapshot("session-1", "turn-1")
 
     assert snapshot["terminal"] is True
-    assert snapshot["modelInvocationReceipt"] == receipt
-    assert snapshot["modelInvocationReceipts"] == [earlier_receipt, receipt]
+    # New canonical outcomes persist Challenge receipts through the durable
+    # registry and deliberately omit them from conversation events.  The
+    # journal reader remains a compatibility path for historical receipts;
+    # it must not recreate the registry-only receipt from ``TurnOutcome``.
+    assert snapshot["modelInvocationReceipt"] == earlier_receipt
+    assert snapshot["modelInvocationReceipts"] == [earlier_receipt]

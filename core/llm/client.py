@@ -74,6 +74,10 @@ _LLM_CANCEL_CHECKER_CONTEXT: ContextVar[Callable[[], str] | None] = ContextVar(
     "vibelution_llm_cancel_checker",
     default=None,
 )
+_LLM_CHAT_PROVIDER_ABORT_CONTEXT: ContextVar[bool] = ContextVar(
+    "vibelution_llm_chat_provider_abort_enabled",
+    default=False,
+)
 _LLM_ROUTE_CONCURRENCY_LIMIT = 2
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
@@ -558,12 +562,30 @@ def _record_stream_http_timing_summary(timings: Any, *, identity: Dict[str, Any]
 
 
 @contextmanager
-def llm_cancel_context(checker: Callable[[], str] | None):
+def llm_cancel_context(
+    checker: Callable[[], str] | None,
+    *,
+    enable_chat_provider_abort: bool = False,
+):
     token = _LLM_CANCEL_CHECKER_CONTEXT.set(checker if callable(checker) else None)
+    abort_token = _LLM_CHAT_PROVIDER_ABORT_CONTEXT.set(bool(enable_chat_provider_abort))
     try:
         yield
     finally:
+        _LLM_CHAT_PROVIDER_ABORT_CONTEXT.reset(abort_token)
         _LLM_CANCEL_CHECKER_CONTEXT.reset(token)
+
+
+def _chat_provider_abort_enabled(checker: Callable[[], str] | None) -> bool:
+    """Return whether this caller explicitly permits Chat HTTP cancellation.
+
+    Responses cancellation predates the Challenge deadline path and continues
+    to follow the ordinary stop checker. Chat Completions cancellation is the
+    new capability and remains opt-in so normal Agent turns keep their prior
+    provider behavior.
+    """
+
+    return callable(checker) and _LLM_CHAT_PROVIDER_ABORT_CONTEXT.get()
 
 
 def _publish_llm_status_event(status: str, **fields: Any) -> None:
@@ -1807,6 +1829,16 @@ def _new_cancellable_responses_http_handler(payload: Dict[str, Any]) -> Any:
     return HTTPHandler(timeout=timeout, ssl_verify=ssl_verify)
 
 
+def _new_cancellable_completion_http_handler(payload: Dict[str, Any]) -> Any:
+    """Create a LiteLLM HTTP client for an interruptible Chat Completions call."""
+
+    from litellm import HTTPHandler
+
+    timeout = payload.get("timeout")
+    ssl_verify = payload.get("ssl_verify")
+    return HTTPHandler(timeout=timeout, ssl_verify=ssl_verify)
+
+
 class _CancellableProviderStream:
     """Finalize a cancellable provider request when its iterator ends or is closed."""
 
@@ -1820,8 +1852,11 @@ class _CancellableProviderStream:
     def __next__(self) -> Any:
         try:
             return next(self._iterator)
-        except StopIteration:
+        except StopIteration as exc:
             self._finish()
+            reason = _current_llm_cancel_reason()
+            if reason:
+                raise LLMCancelledError(reason) from exc
             raise
         except Exception as exc:
             self._finish()
@@ -1982,6 +2017,11 @@ class LLMClient:
         self._cancellable_responses_http_handler: Any = None
         self._cancellable_responses_http_handler_lock = threading.Lock()
         self._cancellable_responses_stream_lock = threading.Lock()
+        self._cancellable_responses_request_lock = self._cancellable_responses_stream_lock
+        self._cancellable_completion_http_handler: Any = None
+        self._cancellable_completion_http_handler_lock = threading.Lock()
+        self._cancellable_completion_stream_lock = threading.Lock()
+        self._cancellable_completion_request_lock = self._cancellable_completion_stream_lock
         self.adapter = get_provider_adapter(self.provider, self.profile)
         self._resolved_spec = discover_model(self.config, self.profile_id)
         _model_id, model_entry = self.config.llm.get_model_library_entry_for_profile(self.profile)
@@ -2145,12 +2185,205 @@ class LLMClient:
                 cleaned_up = True
             watcher_finished.set()
             watcher.join(timeout=0.2)
+            if watcher.is_alive():
+                # A provider client's ``close`` may itself block. Do not
+                # release the request slot while the old watcher still owns a
+                # handler that a later request could reuse.
+                with self._cancellable_responses_http_handler_lock:
+                    if self._cancellable_responses_http_handler is handler:
+                        self._cancellable_responses_http_handler = None
             self._cancellable_responses_stream_lock.release()
 
         return request_payload, finish
 
+    def _prepare_cancellable_chat_stream(
+        self,
+        payload: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Callable[[], None]]:
+        """Attach a cancellable client only to the default Chat backend."""
+
+        checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
+        if (
+            not _chat_provider_abort_enabled(checker)
+            or self._backend is not _default_completion_backend
+            or self.protocol_route.adapter_id == "anthropic_messages_native"
+        ):
+            return payload, lambda: None
+
+        while not self._cancellable_completion_stream_lock.acquire(timeout=0.05):
+            try:
+                reason = str(checker() or "").strip()
+            except Exception:
+                reason = ""
+            if reason:
+                raise LLMCancelledError(reason)
+        try:
+            with self._cancellable_completion_http_handler_lock:
+                handler = self._cancellable_completion_http_handler
+                if handler is None:
+                    handler = _new_cancellable_completion_http_handler(payload)
+                    self._cancellable_completion_http_handler = handler
+        except Exception:
+            self._cancellable_completion_stream_lock.release()
+            raise
+
+        request_payload = dict(payload)
+        request_payload["client"] = handler
+        watcher_finished = threading.Event()
+        cleanup_lock = threading.Lock()
+        cleaned_up = False
+
+        def watch_for_cancellation() -> None:
+            while not watcher_finished.wait(0.05):
+                try:
+                    reason = str(checker() or "").strip()
+                except Exception:
+                    reason = ""
+                if not reason:
+                    continue
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+                with self._cancellable_completion_http_handler_lock:
+                    if self._cancellable_completion_http_handler is handler:
+                        self._cancellable_completion_http_handler = None
+                return
+
+        watcher = threading.Thread(
+            target=watch_for_cancellation,
+            name="vibelution-llm-cancel-watch",
+            daemon=True,
+        )
+        try:
+            watcher.start()
+        except Exception:
+            self._cancellable_completion_stream_lock.release()
+            raise
+
+        def finish() -> None:
+            nonlocal cleaned_up
+            with cleanup_lock:
+                if cleaned_up:
+                    return
+                cleaned_up = True
+            watcher_finished.set()
+            watcher.join(timeout=0.2)
+            if watcher.is_alive():
+                with self._cancellable_completion_http_handler_lock:
+                    if self._cancellable_completion_http_handler is handler:
+                        self._cancellable_completion_http_handler = None
+            self._cancellable_completion_stream_lock.release()
+
+        return request_payload, finish
+
+    def _prepare_cancellable_non_stream_request(
+        self,
+        payload: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Callable[[], None]]:
+        """Prepare cancellation for default non-stream Chat/Responses calls."""
+
+        checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
+        if _payload_uses_responses(payload):
+            backend = self._responses_backend
+            enabled = callable(checker) and bool(
+                getattr(backend, "_vibelution_default_responses_backend", False)
+            )
+            handler_attr = "_cancellable_responses_http_handler"
+            handler_lock = self._cancellable_responses_http_handler_lock
+            request_lock = self._cancellable_responses_request_lock
+            factory = _new_cancellable_responses_http_handler
+        elif "messages" in payload:
+            enabled = (
+                _chat_provider_abort_enabled(checker)
+                and self._backend is _default_completion_backend
+                and self.protocol_route.adapter_id != "anthropic_messages_native"
+            )
+            handler_attr = "_cancellable_completion_http_handler"
+            handler_lock = self._cancellable_completion_http_handler_lock
+            request_lock = self._cancellable_completion_request_lock
+            factory = _new_cancellable_completion_http_handler
+        else:
+            enabled = False
+            handler_attr = ""
+            handler_lock = None
+            request_lock = None
+            factory = None
+        if not enabled or handler_lock is None or request_lock is None or factory is None:
+            return payload, lambda: None
+        while not request_lock.acquire(timeout=0.05):
+            try:
+                reason = str(checker() or "").strip()
+            except Exception:
+                reason = ""
+            if reason:
+                raise LLMCancelledError(reason)
+        with handler_lock:
+            try:
+                handler = getattr(self, handler_attr)
+                if handler is None:
+                    handler = factory(payload)
+                    setattr(self, handler_attr, handler)
+            except Exception:
+                request_lock.release()
+                raise
+        request_payload = dict(payload)
+        request_payload["client"] = handler
+        watcher_finished = threading.Event()
+        cleanup_lock = threading.Lock()
+        cleaned_up = False
+
+        def watch_for_cancellation() -> None:
+            while not watcher_finished.wait(0.05):
+                try:
+                    reason = str(checker() or "").strip()
+                except Exception:
+                    reason = ""
+                if not reason:
+                    continue
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+                with handler_lock:
+                    if getattr(self, handler_attr) is handler:
+                        setattr(self, handler_attr, None)
+                return
+
+        watcher = threading.Thread(
+            target=watch_for_cancellation,
+            name="vibelution-llm-cancel-watch",
+            daemon=True,
+        )
+        try:
+            watcher.start()
+        except Exception:
+            request_lock.release()
+            raise
+
+        def finish() -> None:
+            nonlocal cleaned_up
+            with cleanup_lock:
+                if cleaned_up:
+                    return
+                cleaned_up = True
+            watcher_finished.set()
+            watcher.join(timeout=0.2)
+            if watcher.is_alive():
+                with handler_lock:
+                    if getattr(self, handler_attr) is handler:
+                        setattr(self, handler_attr, None)
+            request_lock.release()
+
+        return request_payload, finish
+
     def _open_provider_stream(self, payload: Dict[str, Any]) -> Any:
-        request_payload, finish_cancel_watch = self._prepare_cancellable_responses_stream(payload)
+        if _payload_uses_responses(payload):
+            request_payload, finish_cancel_watch = self._prepare_cancellable_responses_stream(payload)
+        elif "messages" in payload:
+            request_payload, finish_cancel_watch = self._prepare_cancellable_chat_stream(payload)
+        else:
+            request_payload, finish_cancel_watch = payload, lambda: None
         backend = self._backend_for_payload(request_payload)
         if request_payload is payload:
             return backend(payload)
@@ -2478,7 +2711,25 @@ class LLMClient:
             )
         else:
             raise AssertionError("registered wire adapter uses unsupported protocol")
-        self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
+        final_payload = self._apply_invocation_budget_preflight(
+            built.payload,
+            metadata=metadata,
+            invocation_scope=invocation_scope,
+        )
+        self._last_payload_protocol_summary = dict(
+            built.summary or payload_protocol_summary(final_payload, self.protocol_route)
+        )
+        final_output_limit = final_payload.get(
+            "max_output_tokens", final_payload.get("max_tokens")
+        )
+        if isinstance(final_output_limit, int) and not isinstance(
+            final_output_limit, bool
+        ):
+            self._last_payload_protocol_summary["maxTokens"] = final_output_limit
+            if final_output_limit < max(
+                0, int(getattr(self.profile, "max_output_tokens", 0) or 0)
+            ):
+                self._last_payload_protocol_summary["budgetOutputClamped"] = True
         if output_schema is not None:
             self._last_payload_protocol_summary.update(
                 {
@@ -2493,7 +2744,7 @@ class LLMClient:
                 provider_tool_chain_repaired,
                 int(self._last_payload_protocol_summary.get("payloadPolicyProviderToolChainRepaired") or 0),
             )
-        return built.payload
+        return final_payload
 
     def _usage_from_response(self, response: Any, latency_ms: int) -> UsageStats:
         usage = getattr(response, "usage", None)
@@ -2793,6 +3044,97 @@ class LLMClient:
             "expectedModelId": expected_model,
             "expectedModelRef": expected_model_ref,
         }
+
+    def _apply_invocation_budget_preflight(
+        self,
+        payload: Dict[str, Any],
+        *,
+        metadata: Optional[Dict[str, Any]],
+        invocation_scope: Any,
+    ) -> Dict[str, Any]:
+        """Apply an ephemeral server-owned budget clamp before provider I/O."""
+
+        raw = _MODEL_INVOCATION_RECEIPT_CONTEXT.get()
+        callback = (
+            raw.get("invocationBudgetPreflight")
+            if isinstance(raw, Mapping)
+            else None
+        )
+        if not callable(callback):
+            return payload
+        context = self._receipt_context(metadata, invocation_scope)
+        if context is None:
+            raise LLMError(
+                "budget_authority_error",
+                "Challenge invocation budget binding is invalid.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            )
+        output_key = (
+            "max_output_tokens" if "max_output_tokens" in payload else "max_tokens"
+        )
+        profile_limit = max(0, int(payload.get(output_key) or 0))
+        estimated_input = _estimate_messages_for_usage(
+            payload.get("messages") or payload.get("input") or []
+        )
+        schema_payload = {
+            key: payload.get(key)
+            for key in ("tools", "response_format", "text")
+            if payload.get(key) not in (None, [], {})
+        }
+        if schema_payload:
+            estimated_input += _estimate_text_for_usage(
+                json.dumps(
+                    schema_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+            )
+        try:
+            decision = callback(
+                estimated_input_tokens=estimated_input,
+                max_output_tokens=profile_limit,
+            )
+        except Exception as exc:
+            raise LLMError(
+                "budget_authority_error",
+                "Challenge invocation budget authority is unavailable.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            ) from exc
+        if not isinstance(decision, Mapping):
+            raise LLMError(
+                "budget_authority_error",
+                "Challenge invocation budget decision is invalid.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider"},
+            )
+        allowed_output = max(0, int(decision.get("maxOutputTokens") or 0))
+        remaining = max(0, int(decision.get("remainingTokens") or 0))
+        if allowed_output <= 0:
+            raise LLMError(
+                "budget_exhausted",
+                "Challenge invocation token budget is exhausted.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "payloadValidationResult": "blocked_before_provider",
+                    "remainingTokens": remaining,
+                    "estimatedInputTokens": estimated_input,
+                },
+            )
+        clamped = dict(payload)
+        clamped[output_key] = min(profile_limit, allowed_output)
+        return clamped
 
     def _attach_model_invocation_receipt(
         self,
@@ -3286,8 +3628,21 @@ class LLMClient:
 
     def _invoke_payload_once(self, payload: Dict[str, Any]) -> Any:
         _raise_if_llm_cancelled()
-        with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-            return self._backend_for_payload(payload)(payload)
+        request_payload, finish_cancel_watch = self._prepare_cancellable_non_stream_request(payload)
+        try:
+            with _llm_provider_proxy_env(self.config, request_payload.get("base_url")):
+                response = self._backend_for_payload(request_payload)(request_payload)
+            _raise_if_llm_cancelled()
+            return response
+        except LLMCancelledError:
+            raise
+        except Exception as exc:
+            reason = _current_llm_cancel_reason()
+            if reason:
+                raise LLMCancelledError(reason) from exc
+            raise
+        finally:
+            finish_cancel_watch()
 
     def _backend_for_payload(self, payload: Dict[str, Any]):
         if self.protocol_route.adapter_id == "anthropic_messages_native":
@@ -3324,10 +3679,22 @@ class LLMClient:
                     tool_count=tool_count,
                 ):
                     _raise_if_llm_cancelled()
-                    with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-                        response = self._backend_for_payload(payload)(payload)
+                    request_payload, finish_cancel_watch = self._prepare_cancellable_non_stream_request(payload)
+                    try:
+                        with _llm_provider_proxy_env(self.config, request_payload.get("base_url")):
+                            response = self._backend_for_payload(request_payload)(request_payload)
+                        _raise_if_llm_cancelled()
                         _LLM_BACKEND_ATTEMPT_CONTEXT.set((attempt, max(0, attempt - 1)))
                         return response
+                    except LLMCancelledError:
+                        raise
+                    except Exception as exc:
+                        reason = _current_llm_cancel_reason()
+                        if reason:
+                            raise LLMCancelledError(reason) from exc
+                        raise
+                    finally:
+                        finish_cancel_watch()
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
             except Exception as exc:
