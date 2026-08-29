@@ -1374,21 +1374,28 @@ async function stopWorkbenchBackend(
   void paths;
   void bootstrap;
   const operation = transaction.mode === "force" ? "force-stop" : "stop";
-  const result = await orchestrateLauncherLifecycle(operation, {
-    schemaVersion: 1,
-    path: operation,
-    init: {
-      method: "POST",
-      body: {
-        requestId: transaction.requestId,
-        closeId: transaction.closeId,
-        deferWindowClose: true,
-        confirmed: transaction.mode === "force",
-        operatorIntent: transaction.mode === "force" ? "force_close" : "close",
-        activeWorkState: transaction.activeWorkState
+  const result = await orchestrateLauncherLifecycle(
+    operation,
+    {
+      schemaVersion: 1,
+      path: operation,
+      init: {
+        method: "POST",
+        body: {
+          requestId: transaction.requestId,
+          closeId: transaction.closeId,
+          deferWindowClose: true,
+          confirmed: transaction.mode === "force",
+          operatorIntent: transaction.mode === "force" ? "force_close" : "close",
+          activeWorkState: transaction.activeWorkState
+        }
       }
-    }
-  });
+    },
+    // A force close is an explicitly confirmed destructive operator intent and
+    // keeps the original supersede semantics; a normal window close must not
+    // abort an in-flight restart.
+    transaction.mode === "force" ? "operator" : "window-close"
+  );
   if (!result.accepted) {
     throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
   }
@@ -2889,7 +2896,8 @@ function launcherIpcTrustedOrigins(): string[] {
 
 async function orchestrateLauncherLifecycle(
   operation: string,
-  payload: LauncherIpcInvokePayload
+  payload: LauncherIpcInvokePayload,
+  provenance: LauncherLifecycleProvenance = "operator"
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -2934,11 +2942,34 @@ async function orchestrateLauncherLifecycle(
   }
 
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
-  const intentLease = launcherLifecycleSupervisor.beginIntent({
-    instanceId: "main",
-    operation: lifecycleOperation,
-    desiredState
-  });
+  const stopJoinDecision = joinDecisionForLauncherLifecycleStop(operation, provenance);
+  if (stopJoinDecision.waitForInFlightRestart) {
+    // A window-level stop must not abort an in-flight restart; wait for the
+    // restart mutation to settle first, then stop the (restarted) backend.
+    await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS);
+  }
+  const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
+    {
+      instanceId: "main",
+      operation: lifecycleOperation,
+      desiredState
+    },
+    { joinInFlightRestart: stopJoinDecision.joinInFlightRestart }
+  );
+  if (begunIntent.outcome === "joined-in-flight-restart") {
+    // A forwarded stop never aborts the in-flight restart; report it as
+    // accepted so the forwarding side settles without a failure, while the
+    // restart keeps running to completion.
+    return {
+      schemaVersion: 1,
+      accepted: true,
+      operation,
+      commandId: randomUUID(),
+      code: "joined_in_flight_restart",
+      message: "在途 Launcher restart 正在执行；本次转发的 stop 未中断它。"
+    };
+  }
+  const intentLease = begunIntent.lease;
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
     const servingVersion = !frontendReleaseChanged && !unpackagedElectronRebuilt && !packagedShellStale
@@ -3035,6 +3066,10 @@ async function orchestrateLauncherLifecycle(
     }
   });
   if (mutation.outcome === "failed") {
+    // A permanently failed intent must not keep occupying the instance slot in
+    // intent phase, or a later join-eligible stop would keep joining a
+    // restart that can never finish.
+    launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
     throw mutation.error;
   }
   if (mutation.outcome === "uncertain") {
@@ -3156,6 +3191,85 @@ function supersededLifecycleResult(operation: string, commandId = ""): Orchestra
     code: "lifecycle_intent_superseded",
     message: "A newer Launcher lifecycle intent superseded this command."
   };
+}
+
+/**
+ * Where a lifecycle command came from. Operator-proven commands (CLI shim over
+ * the launcher IPC host, tray menu, desktop-shell shutdown) keep the original
+ * unconditional supersede semantics. Window-level close transactions and
+ * commands forwarded by the daemon through second-instance argv are not new
+ * operator lifecycle decisions, so a stop from them must never abort an
+ * in-flight restart (2026-08-29: a forwarded stop kept superseding a CLI
+ * restart 1-5s in, so the restart never settled and the backend stayed down).
+ */
+type LauncherLifecycleProvenance = "operator" | "window-close" | "forwarded";
+
+type LauncherLifecycleStopJoinDecision = {
+  /**
+   * beginIntent must join an in-flight restart instead of aborting it. The
+   * caller turns a join into an accepted no-op result.
+   */
+  joinInFlightRestart: boolean;
+  /**
+   * Wait (bounded) for an in-flight restart to settle before creating the
+   * lease, so the stop runs against the settled state instead of killing the
+   * restart. Used by the window-close path, which still needs the backend
+   * actually stopped afterwards.
+   */
+  waitForInFlightRestart: boolean;
+};
+
+/**
+ * Only the plain "stop" operation relaxes its supersede semantics. force-stop
+ * stays an explicit confirmed destructive intent and always supersedes, and
+ * operator-proven stops keep superseding exactly as before.
+ */
+function joinDecisionForLauncherLifecycleStop(
+  operation: string,
+  provenance: LauncherLifecycleProvenance
+): LauncherLifecycleStopJoinDecision {
+  if (operation !== "stop") {
+    return { joinInFlightRestart: false, waitForInFlightRestart: false };
+  }
+  if (provenance === "forwarded") {
+    return { joinInFlightRestart: true, waitForInFlightRestart: false };
+  }
+  if (provenance === "window-close") {
+    return { joinInFlightRestart: false, waitForInFlightRestart: true };
+  }
+  return { joinInFlightRestart: false, waitForInFlightRestart: false };
+}
+
+const RESTART_SETTLEMENT_POLL_INTERVAL_MS = 250;
+const WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS = 90_000;
+
+/**
+ * A restart lease is "in flight" while it occupies the supervisor slot in
+ * intent phase (its stop+start mutation runs in that phase; bindCommand only
+ * moves it to observing after the mutation settled). The wait ends when the
+ * slot is gone (cleared after a failed mutation), is no longer a restart, or
+ * has left the intent phase.
+ */
+function inFlightRestartLeaseSettled(instanceId: string): boolean {
+  const snapshot = launcherLifecycleSupervisor.snapshot(instanceId);
+  return snapshot === null
+    || snapshot.operation !== "restart"
+    || snapshot.phase !== "intent";
+}
+
+async function waitForInFlightRestartSettlement(instanceId: string, timeoutMs: number): Promise<void> {
+  const deadlineMs = Date.now() + timeoutMs;
+  while (!inFlightRestartLeaseSettled(instanceId)) {
+    if (Date.now() >= deadlineMs) {
+      throw new Error(
+        `In-flight Launcher restart did not settle within ${Math.round(timeoutMs / 1000)}s; `
+        + "the window close stop was not accepted because it must not abort a running restart."
+      );
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, RESTART_SETTLEMENT_POLL_INTERVAL_MS);
+    });
+  }
 }
 
 function isCurrentCheckoutInstance(instanceId: string): boolean {
@@ -4430,7 +4544,8 @@ async function handleSecondInstanceLifecycleCommand(command: string): Promise<vo
       const observed = String(summary.observedState || "").trim().toLowerCase();
       await orchestrateLauncherLifecycle(
         observed === "open" || observed === "running" || observed === "starting" ? "stop" : "start",
-        { schemaVersion: 1, path: "toggle" }
+        { schemaVersion: 1, path: "toggle" },
+        "forwarded"
       );
     } catch (error: unknown) {
       notifyDesktopTray("Vibelution", `切换失败：${error instanceof Error ? error.message.slice(0, 220) : String(error)}`, "warning");
@@ -4439,7 +4554,11 @@ async function handleSecondInstanceLifecycleCommand(command: string): Promise<vo
   }
   const operation = command === "rebuild-and-start" ? "rebuild-and-start" : command;
   try {
-    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command });
+    // Commands arriving through the second-instance argv channel are forwarded
+    // by the daemon handoff (e.g. the web close button), not new operator
+    // lifecycle decisions; a forwarded stop must join, not abort, an in-flight
+    // restart.
+    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command }, "forwarded");
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `Launcher 命令失败：${detail.slice(0, 300)}`, "warning");
