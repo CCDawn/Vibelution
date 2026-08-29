@@ -430,6 +430,7 @@ from core.web.services.team_workflow.facade_helpers import (
 )
 from core.web.services.team_workflow.source_collection.stage_reconcile import (
     _source_collection_stage_task_writeback_contract,
+    _source_collection_finding_prior_query_memory_message,
     _normalize_source_collection_stage_id,
     _normalize_source_collection_agent_role,
     _ensure_source_collection_stage_agent_direct_session,

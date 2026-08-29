@@ -622,6 +622,24 @@ def seed_source_collection_agent_session_context(
         source_candidates=source_candidates,
         storage_artifacts=storage_artifacts,
     )
+    if (
+        stage_id == "finding"
+        and experiment_session.get("retryOfSessionId")
+        and experiment_session.get("recoveryReason") != "missing_canonical_session"
+    ):
+        # Link audit A2: a retry-lineage session is reseeded with the prior
+        # attempts' tried/invalid retrieval memory so the new attempt does not
+        # re-run the same queries. Missing-session recovery replays the same
+        # task, so its memory stays out to avoid a misleading hint.
+        prior_finding_tasks = [
+            item
+            for item in s._source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
+            if s._trim_text(item.get("stageId"), max_length=80) == stage_id
+            and s._trim_text(item.get("agentId"), max_length=160) == agent_id
+        ]
+        message_content += s._source_collection_finding_prior_query_memory_message(
+            prior_finding_tasks
+        )
     if problem_understanding_context:
         message_content += _source_collection_problem_understanding_message(
             problem_understanding_context
@@ -1137,6 +1155,17 @@ def start_source_collection_stage_session_task(
         previous_task=previous_stage_task,
         context_mode=source_context_mode,
     )
+    if (
+        stage_id == "finding"
+        and formal_retry
+        and formal_retry_reason != "missing_canonical_session"
+    ):
+        # Link audit A2: a formal retry must not re-run the queries its prior
+        # attempts already searched / judged invalid; the memory is deduped
+        # and bounded inside the renderer.
+        task_message += s._source_collection_finding_prior_query_memory_message(
+            prior_stage_tasks
+        )
     if problem_understanding_context:
         task_message += _source_collection_problem_understanding_message(
             problem_understanding_context

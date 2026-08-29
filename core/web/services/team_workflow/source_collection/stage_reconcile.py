@@ -2597,6 +2597,118 @@ def _source_collection_stage_previous_attempt_lines(previous_task: dict[str, Any
     return lines
 
 
+# Link audit A2: finding retry attempts re-ran queries the previous attempt
+# had already searched and judged invalid (observed as a 17-step DOI guess
+# spiral). The injected memory is strictly bounded so it cannot bloat the
+# prompt across deep retry chains.
+_FINDING_QUERY_MEMORY_MAX_ITEMS = 30
+_FINDING_QUERY_MEMORY_ITEM_MAX_LENGTH = 200
+_FINDING_QUERY_MEMORY_REASON_MAX_LENGTH = 120
+
+
+def _source_collection_finding_prior_query_memory_message(
+    prior_tasks: list[dict[str, Any]],
+) -> str:
+    """Render prior finding attempts' retrieval memory for a formal retry.
+
+    Collects queries from ``result.searchTrace[]`` and locators from
+    ``result.invalidSources[]`` of prior failed finding attempts, deduped
+    case/whitespace-insensitively and bounded (30 items, 200 chars each).
+    Newest attempt wins first so the bound keeps the most recent memory.
+    The block is a "do not repeat" memory only; it deliberately carries no
+    invitation to keep searching or paginate (single-read contract).
+    """
+    s = _service()
+    from .stage_session import _AUTO_FORMAL_RETRY_STATUSES
+
+    memory_tasks = [
+        item
+        for item in prior_tasks
+        if isinstance(item, dict)
+        and s._normalize_source_collection_stage_id(item.get("stageId"), default="") == "finding"
+        and s._trim_text(item.get("status"), max_length=80).lower() in _AUTO_FORMAL_RETRY_STATUSES
+    ]
+    if not memory_tasks:
+        return ""
+    memory_tasks.sort(
+        key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""),
+        reverse=True,
+    )
+
+    def _memory_key(value: str) -> str:
+        return " ".join(value.split()).casefold()
+
+    queries: list[str] = []
+    seen_queries: set[str] = set()
+    invalid_entries: list[str] = []
+    seen_invalid: set[str] = set()
+    for task in memory_tasks:
+        writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+        result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        for container in (result, writeback):
+            trace = container.get("searchTrace")
+            if isinstance(trace, list):
+                for item in trace:
+                    if len(queries) >= _FINDING_QUERY_MEMORY_MAX_ITEMS:
+                        break
+                    if not isinstance(item, dict):
+                        continue
+                    query = s._trim_text(
+                        item.get("query"),
+                        max_length=_FINDING_QUERY_MEMORY_ITEM_MAX_LENGTH,
+                    )
+                    query_key = _memory_key(query)
+                    if not query or query_key in seen_queries:
+                        continue
+                    seen_queries.add(query_key)
+                    queries.append(query)
+            invalid_sources = container.get("invalidSources")
+            if isinstance(invalid_sources, list):
+                for item in invalid_sources:
+                    if len(invalid_entries) >= _FINDING_QUERY_MEMORY_MAX_ITEMS:
+                        break
+                    if not isinstance(item, dict):
+                        continue
+                    locator = s._trim_text(
+                        item.get("url")
+                        or item.get("sourceUrl")
+                        or item.get("locator")
+                        or item.get("doi")
+                        or item.get("DOI")
+                        or item.get("sourceRef"),
+                        max_length=_FINDING_QUERY_MEMORY_ITEM_MAX_LENGTH,
+                    )
+                    locator_key = _memory_key(locator)
+                    if not locator or locator_key in seen_invalid:
+                        continue
+                    seen_invalid.add(locator_key)
+                    reason = s._trim_text(
+                        item.get("reason") or item.get("failureReason"),
+                        max_length=_FINDING_QUERY_MEMORY_REASON_MAX_LENGTH,
+                    )
+                    invalid_entries.append(f"{locator}（原因：{reason}）" if reason else locator)
+        if (
+            len(queries) >= _FINDING_QUERY_MEMORY_MAX_ITEMS
+            and len(invalid_entries) >= _FINDING_QUERY_MEMORY_MAX_ITEMS
+        ):
+            break
+    if not queries and not invalid_entries:
+        return ""
+    lines = ["", "## 上一轮检索记忆（不要重复）"]
+    if queries:
+        lines.append(
+            "- 上一轮 attempt 已检索过以下 query，不要原样或仅换大小写/编码/URL 形状重复执行："
+        )
+        lines.extend(f"  - {query}" for query in queries)
+    if invalid_entries:
+        lines.append("- 上一轮已把以下来源判为无效，不要重试同一 locator 或其变体：")
+        lines.extend(f"  - {entry}" for entry in invalid_entries)
+    lines.append(
+        "- 边界：以上是已试检索记忆，只用于避免重复无效检索；不是继续检索或翻页补读的邀请。"
+    )
+    return "\n".join(lines)
+
+
 def _source_collection_stage_task_has_missing_coverage(task: dict[str, Any] | None) -> bool:
     s = _service()
     if not isinstance(task, dict) or not task:
