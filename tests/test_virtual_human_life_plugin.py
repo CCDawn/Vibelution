@@ -63,6 +63,8 @@ def test_enable_is_per_agent_autonomous_and_optimistically_versioned(
     assert binding["enabled"] is True
     assert binding["autonomyLevel"] == "autonomous"
     assert binding["proactiveMessagesEnabled"] is True
+    assert binding["proactiveDailyLimit"] == 10
+    assert binding["proactiveMinimumIntervalMinutes"] == 60
     assert binding["bindingRevision"] == 1
     assert service.binding_for("agent-b") is None
     assert service.plugin_root("agent-b").exists() is False

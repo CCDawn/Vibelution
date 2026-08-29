@@ -10,6 +10,9 @@ describe("Agent virtual-human plugin settings", () => {
     expect(panelSource).toContain("updateAgentPluginBinding(agentId, PLUGIN_ID");
     expect(panelSource).toContain("proactiveMessagesEnabled");
     expect(panelSource).toContain("autonomyLevel");
+    expect(panelSource).toContain("DEFAULT_VIRTUAL_HUMAN_PROACTIVE_DAILY_LIMIT");
+    expect(panelSource).toContain("DEFAULT_VIRTUAL_HUMAN_PROACTIVE_MINIMUM_INTERVAL_MINUTES");
+    expect(panelSource).toContain("mergeVirtualHumanBindingConfig(binding");
   });
 
   it("places the plugin under Agent capability binding without replacing tool policy", () => {

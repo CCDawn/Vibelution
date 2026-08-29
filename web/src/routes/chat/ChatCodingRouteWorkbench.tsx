@@ -160,6 +160,7 @@ import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
+import { CompanionProactiveSettingsPopover } from "../companions/CompanionProactiveSettingsPopover";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
 import {
@@ -2902,6 +2903,9 @@ export function ChatCodingRoute() {
             projectBusActive={projectBusActive}
             showSessionTabs={!companionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
             showAgentFallbackTab={!companionMode}
+            companionActions={companionMode && activeCompanion ? (
+              <CompanionProactiveSettingsPopover companion={activeCompanion} lang={lang} />
+            ) : null}
             workspaceActiveTab={workspace.activeTab}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}

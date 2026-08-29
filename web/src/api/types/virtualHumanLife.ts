@@ -14,6 +14,7 @@ export type AgentPluginBinding = {
   proactiveDailyLimit?: number;
   proactiveMinimumIntervalMinutes?: number;
   quietHours?: { start?: string; end?: string };
+  rhythmConfig?: Record<string, unknown>;
   toolBundleId?: string;
   promptPackId?: string;
 };

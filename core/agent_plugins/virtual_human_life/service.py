@@ -95,6 +95,9 @@ from .world_model import record_important_item, record_place_visit
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PROACTIVE_DAILY_LIMIT = 10
+DEFAULT_PROACTIVE_MINIMUM_INTERVAL_MINUTES = 60
+
 class VirtualHumanLifeError(RuntimeError):
     """Base virtual human life error."""
 
@@ -2655,7 +2658,10 @@ class VirtualHumanLifeService:
             latest_delivery = self._latest_delivered_attempt(agent_id)
             minimum_interval = timedelta(
                 minutes=_clamp(
-                    binding.get("proactiveMinimumIntervalMinutes"), 1, 1440, 180
+                    binding.get("proactiveMinimumIntervalMinutes"),
+                    1,
+                    1440,
+                    DEFAULT_PROACTIVE_MINIMUM_INTERVAL_MINUTES,
                 )
             )
             if latest_delivery:
@@ -2821,7 +2827,16 @@ class VirtualHumanLifeService:
 
     def proactive_usage(self, agent_id: str, local_date: str) -> dict[str, int]:
         binding = self.binding_for(agent_id)
-        limit = _clamp((binding or {}).get("proactiveDailyLimit"), 0, 20, 2) if binding else 0
+        limit = (
+            _clamp(
+                (binding or {}).get("proactiveDailyLimit"),
+                0,
+                20,
+                DEFAULT_PROACTIVE_DAILY_LIMIT,
+            )
+            if binding
+            else 0
+        )
         delivered_tokens = {
             str(item.get("deliveryToken") or "").strip()
             for item in self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
@@ -3951,8 +3966,8 @@ class VirtualHumanLifeService:
             "heartbeatIntervalSeconds": 60,
             "autonomyLevel": "autonomous",
             "proactiveMessagesEnabled": True,
-            "proactiveDailyLimit": 2,
-            "proactiveMinimumIntervalMinutes": 180,
+            "proactiveDailyLimit": DEFAULT_PROACTIVE_DAILY_LIMIT,
+            "proactiveMinimumIntervalMinutes": DEFAULT_PROACTIVE_MINIMUM_INTERVAL_MINUTES,
             "quietHours": {"start": "23:00", "end": "08:00"},
             "rhythmConfig": {},
             "toolBundleId": TOOL_BUNDLE_ID,
@@ -3988,9 +4003,17 @@ class VirtualHumanLifeService:
             "proactiveMessagesEnabled": bool(
                 config.get("proactiveMessagesEnabled", True)
             ),
-            "proactiveDailyLimit": _clamp(config.get("proactiveDailyLimit"), 0, 20, 2),
+            "proactiveDailyLimit": _clamp(
+                config.get("proactiveDailyLimit"),
+                0,
+                20,
+                DEFAULT_PROACTIVE_DAILY_LIMIT,
+            ),
             "proactiveMinimumIntervalMinutes": _clamp(
-                config.get("proactiveMinimumIntervalMinutes"), 1, 1440, 180
+                config.get("proactiveMinimumIntervalMinutes"),
+                1,
+                1440,
+                DEFAULT_PROACTIVE_MINIMUM_INTERVAL_MINUTES,
             ),
             "quietHours": {
                 "start": self._clock_text(quiet.get("start"), default="23:00"),
