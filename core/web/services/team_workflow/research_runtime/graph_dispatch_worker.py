@@ -520,7 +520,8 @@ class GraphDispatchWorker:
             and dispatch.receipt.outcome == "succeeded"
             and needs_successor
         ):
-            self._commit_upstream_accept(action, dispatch, result)
+            if not self._commit_upstream_accept(action, dispatch, result):
+                return
             readiness_hint = self._precheck_readiness(dispatch, pending)
             try:
                 self._commit_successor_dispatch(
@@ -667,16 +668,26 @@ class GraphDispatchWorker:
         action: Any,
         dispatch: GraphDispatch,
         result: GraphDispatchResult,
-    ) -> None:
+    ) -> bool:
         """Mark attempt succeeded and accept handoff BEFORE successor readiness.
 
         Intentionally does NOT ack the graph outbox yet: if successor commit
         crashes, lease expiry / requeue can recover without a half-advance.
+        Renewing the current lease is the transaction's fencing CAS: a stale
+        worker must not mutate the attempt or handoff after another owner has
+        reclaimed the graph action.
         """
-        _ = (action, result)
+        _ = result
         now_ms = self._now()
 
         def mutate(uow):
+            if not uow.repository.renew_outbox_lease(
+                action.action_id,
+                self._owner,
+                now_ms,
+                self._lease_ms,
+            ):
+                return False
             attempt = uow.repository.get_attempt(dispatch.node_run_id)
             if (
                 attempt is not None
@@ -692,10 +703,10 @@ class GraphDispatchWorker:
                 dispatch.run_id, dispatch.node_run_id
             )
             if handoff is None:
-                return
+                return True
             status = str(handoff[8] or "")
             if status == "accepted":
-                return
+                return True
             if status == "pending":
                 uow.repository.update_handoff_status(handoff[0], "ready", now_ms)
                 status = "ready"
@@ -708,8 +719,9 @@ class GraphDispatchWorker:
                         {"actorType": "system", "actorId": "graph-worker"}
                     ),
                 )
+            return True
 
-        self._submit(mutate, force_flush=True).result(timeout=30)
+        return bool(self._submit(mutate, force_flush=True).result(timeout=30))
 
     def _commit_successor_dispatch(
         self,

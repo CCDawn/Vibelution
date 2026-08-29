@@ -10,12 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Iterator
-
+from typing import Any
 
 CHALLENGE_TURN_WAIT_WINDOW_MS = 120_000
 CHALLENGE_NO_PROGRESS_TIMEOUT_MS = 180_000
@@ -27,6 +26,10 @@ _CHALLENGE_TASK_DEADLINE_AT_MS: ContextVar[int | None] = ContextVar(
 )
 _CHALLENGE_TASK_STARTED_AT_MS: ContextVar[int | None] = ContextVar(
     "vibelution_challenge_task_started_at_ms",
+    default=None,
+)
+_CHALLENGE_TASK_RESUME_PROBLEM: ContextVar[dict[str, Any] | None] = ContextVar(
+    "vibelution_challenge_task_resume_problem",
     default=None,
 )
 
@@ -150,7 +153,11 @@ def decide_live_turn_wait(
 
 
 @contextmanager
-def challenge_task_deadline_scope(created_at_ms: int) -> Iterator[None]:
+def challenge_task_deadline_scope(
+    created_at_ms: int,
+    *,
+    resume_problem: Any = None,
+) -> Iterator[None]:
     """Expose one Ledger-derived absolute deadline to nested completion code."""
 
     normalized_created = _nonnegative_int(created_at_ms)
@@ -160,15 +167,23 @@ def challenge_task_deadline_scope(created_at_ms: int) -> Iterator[None]:
     deadline_token = _CHALLENGE_TASK_DEADLINE_AT_MS.set(
         normalized_created + CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
     )
+    resume_token = _CHALLENGE_TASK_RESUME_PROBLEM.set(
+        _previous_wait_problem(resume_problem) or None
+    )
     try:
         yield
     finally:
+        _CHALLENGE_TASK_RESUME_PROBLEM.reset(resume_token)
         _CHALLENGE_TASK_DEADLINE_AT_MS.reset(deadline_token)
         _CHALLENGE_TASK_STARTED_AT_MS.reset(started_token)
 
 
 def current_challenge_task_started_at_ms() -> int | None:
     return _CHALLENGE_TASK_STARTED_AT_MS.get()
+
+
+def current_challenge_task_resume_problem() -> dict[str, Any]:
+    return dict(_CHALLENGE_TASK_RESUME_PROBLEM.get() or {})
 
 
 def remaining_challenge_task_ms(*, now_ms: int | None = None) -> int | None:

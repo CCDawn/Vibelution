@@ -412,7 +412,8 @@ class AdapterDispatchWorker:
         thread.start()
         deadline_scope = (
             challenge_task_deadline_scope(
-                int(getattr(outbox, "created_at_ms", 0) or self._now())
+                int(getattr(outbox, "created_at_ms", 0) or self._now()),
+                resume_problem=getattr(outbox, "last_problem_json", ""),
             )
             if action.actor_kind == ActorKind.AGENT
             else nullcontext()
@@ -1097,6 +1098,39 @@ class AdapterDispatchWorker:
             previous_problem=previous_problem,
             snapshot=snapshot,
         )
+        continuation_chain = [
+            str(item or "").strip()
+            for item in list(snapshot.get("continuationTurnChain") or [])
+            if str(item or "").strip()
+        ]
+        continuation_root_turn_id = str(
+            snapshot.get("continuationRootTurnId") or ""
+        ).strip()
+        continuation_turn_id = str(
+            snapshot.get("continuationTurnId") or ""
+        ).strip()
+        try:
+            continuations_used = max(
+                0,
+                int(snapshot.get("continuationsUsed") or 0),
+            )
+        except (TypeError, ValueError):
+            continuations_used = 0
+        continuation_problem = {}
+        if (
+            continuation_root_turn_id
+            and continuation_turn_id
+            and continuations_used > 0
+            and len(continuation_chain) == continuations_used + 1
+            and continuation_chain[0] == continuation_root_turn_id
+            and continuation_chain[-1] == continuation_turn_id
+        ):
+            continuation_problem = {
+                "continuationRootTurnId": continuation_root_turn_id,
+                "continuationTurnId": continuation_turn_id,
+                "continuationTurnChain": continuation_chain,
+                "continuationsUsed": continuations_used,
+            }
         if created_at_ms and decision.should_stop:
             self._fail_attempt(
                 outbox,
@@ -1109,6 +1143,7 @@ class AdapterDispatchWorker:
                     "noProgressMs": decision.no_progress_ms,
                     "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
                     "logicalTaskStartedAtMs": decision.started_at_ms,
+                    **continuation_problem,
                 },
             )
             # The abandoned wait previously skipped the domain-task terminal
@@ -1159,6 +1194,7 @@ class AdapterDispatchWorker:
                     "logicalTaskStartedAtMs": decision.started_at_ms,
                     "lastProgressAtMs": decision.last_progress_at_ms,
                     "progressFingerprint": decision.progress_fingerprint,
+                    **continuation_problem,
                 }
             ),
             reset_attempts=True,

@@ -441,6 +441,10 @@ def test_live_turn_wait_heartbeat_does_not_consume_transient_budget(
                 "terminal": False,
                 "completionSource": "running",
                 "challengeTaskStartedAtMs": FIXED_NOW_MS,
+                "continuationRootTurnId": "turn-main",
+                "continuationTurnId": "turn-cont-1",
+                "continuationTurnChain": ["turn-main", "turn-cont-1"],
+                "continuationsUsed": 1,
             },
         )
 
@@ -449,6 +453,10 @@ def test_live_turn_wait_heartbeat_does_not_consume_transient_budget(
         assert row.status == "pending"
         assert row.attempt_count == 0
         problem = json.loads(row.last_problem_json or "{}")
+        assert problem["continuationRootTurnId"] == "turn-main"
+        assert problem["continuationTurnId"] == "turn-cont-1"
+        assert problem["continuationTurnChain"] == ["turn-main", "turn-cont-1"]
+        assert problem["continuationsUsed"] == 1
         assert problem.get("code") == "live_turn_wait"
     finally:
         harness.close()

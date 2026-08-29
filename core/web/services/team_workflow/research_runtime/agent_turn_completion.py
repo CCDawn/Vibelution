@@ -21,6 +21,7 @@ from .challenge_turn_policy import (
     ChallengeTaskDeadlineExceeded,
     challenge_deadline_problem,
     challenge_task_deadline_scope,
+    current_challenge_task_resume_problem,
     current_challenge_task_started_at_ms,
     remaining_challenge_task_ms,
 )
@@ -602,6 +603,43 @@ def _wait_with_bounded_turn_continuation(
     turn_chain: list[str] = [handle.turn_id]
     continuations: list[dict[str, Any]] = []
     turn_id = handle.turn_id
+    resume_problem = current_challenge_task_resume_problem()
+    resume_chain = [
+        str(item or "").strip()
+        for item in list(resume_problem.get("continuationTurnChain") or [])
+        if str(item or "").strip()
+    ]
+    try:
+        resume_used = max(0, int(resume_problem.get("continuationsUsed") or 0))
+    except (TypeError, ValueError):
+        resume_used = 0
+    if (
+        str(resume_problem.get("code") or "").strip() == "live_turn_wait"
+        and resume_used > 0
+        and resume_used <= MAX_AGENT_TURN_CONTINUATIONS
+        and len(resume_chain) == resume_used + 1
+        and resume_chain[0] == handle.turn_id
+        and resume_chain[-1]
+        == str(resume_problem.get("continuationTurnId") or "").strip()
+    ):
+        turn_chain = resume_chain
+        turn_id = resume_chain[-1]
+        continuations = [
+            {
+                "attempt": index,
+                "fromTurnId": resume_chain[index - 1],
+                "toTurnId": resume_chain[index],
+                "pausedStatus": "persisted_live_wait",
+            }
+            for index in range(1, resume_used + 1)
+        ]
+        original_snapshot = {
+            "sessionId": handle.session_id,
+            "turnId": handle.turn_id,
+            "terminal": True,
+            "terminalStatus": "needs_continue",
+            "completionSource": "persisted_continuation_chain",
+        }
 
     def _bounded_wait_timeout_ms() -> tuple[int, bool]:
         remaining_ms = remaining_challenge_task_ms()
@@ -658,6 +696,15 @@ def _wait_with_bounded_turn_continuation(
                 exc.snapshot.setdefault(
                     "challengeTaskStartedAtMs",
                     int(started_at_ms),
+                )
+            if continuations:
+                exc.snapshot.update(
+                    {
+                        "continuationRootTurnId": handle.turn_id,
+                        "continuationTurnId": turn_id,
+                        "continuationTurnChain": list(turn_chain),
+                        "continuationsUsed": len(continuations),
+                    }
                 )
             raise
         except RuntimeError as exc:
@@ -769,7 +816,10 @@ def complete_agent_turn_outputs(
         project_id=str(input_snapshot.get("projectId") or "").strip(),
         adapter_spec=adapter_spec,
     ) or current_challenge_task_started_at_ms() or 0
-    with challenge_task_deadline_scope(task_started_at_ms):
+    with challenge_task_deadline_scope(
+        task_started_at_ms,
+        resume_problem=current_challenge_task_resume_problem(),
+    ):
         snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
             handle,
             action=action,
