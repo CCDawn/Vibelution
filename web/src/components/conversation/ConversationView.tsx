@@ -4281,12 +4281,19 @@ export function ConversationView({
               );
             })}
             {companionTypingMessage ? (
-              <ConversationActiveTurnStatusNote
-                message={companionTypingMessage}
-                lang={lang}
-                statusLabel={lang === "zh" ? "状态" : "Status"}
-                companionMode
-              />
+              <div
+                className={styles.companionTypingTurn}
+                data-companion-typing-rail="assistant"
+              >
+                <div className={styles.companionTypingContent}>
+                  <ConversationActiveTurnStatusNote
+                    message={companionTypingMessage}
+                    lang={lang}
+                    statusLabel={lang === "zh" ? "状态" : "Status"}
+                    companionMode
+                  />
+                </div>
+              </div>
             ) : null}
             {timelineVirtualRange.bottomSpacerPx > 0 ? (
               <div

@@ -99,6 +99,37 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("处理中");
   });
 
+  it("aligns the companion typing status with the assistant message body rail", () => {
+    const html = renderConversation([{
+      id: "assistant-companion-typing-alignment",
+      role: "assistant",
+      timestamp: "2026-08-09T17:14:00Z",
+      turnId: "turn-companion-typing-alignment",
+      status: "running",
+      turnItems: [{
+        id: "companion-typing-alignment-r1",
+        itemId: "companion-typing-alignment",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-companion-typing-alignment",
+        type: "reasoning",
+        status: "running",
+        revision: 1,
+        sequence: 1,
+        terminal: false,
+        text: "这段内部推理仍然隐藏。",
+      }],
+    }], "trace", true);
+
+    expect(html).toContain('data-companion-typing-rail="assistant"');
+    expect(html).toContain(styles.companionTypingTurn);
+    expect(html).toContain(styles.companionTypingContent);
+    expect(styles.companionTypingTurn).toContain("max-w-[830px]");
+    expect(styles.companionTypingTurn).toContain("justify-self-center");
+    expect(styles.companionTypingTurn).toContain("grid-cols-[2rem_minmax(0,1fr)]");
+    expect(styles.companionTypingContent).toContain("col-start-2");
+  });
+
   it("removes the companion typing status as soon as a final answer starts streaming", () => {
     const html = renderConversation([
       {
@@ -184,6 +215,7 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain("普通 Agent 的原生思考轨迹仍然可见。");
     expect(html).not.toContain('data-companion-typing-status="true"');
+    expect(html).not.toContain('data-companion-typing-rail="assistant"');
   });
 
   it("does not render internal pipeline text when native transcripts carry it as assistant markdown", () => {
