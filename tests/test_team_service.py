@@ -22,6 +22,11 @@ from tests.helpers.system_agent_state import (
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
+    # PROJECT_ROOT alone is not a storage isolation boundary: a non-project
+    # temporary directory may legitimately fall back to the operator data
+    # home.  Pin the data home before any AgentDirectory read/write so focused
+    # tests and ad-hoc single-test runs cannot touch real Agent assets.
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_bulk_delete_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)

@@ -24,6 +24,7 @@ from core.web.services import (
 def _use_tmp_project_root(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the contract test isolated from the operator data root."""
 
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_bulk_delete_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
@@ -31,6 +32,15 @@ def _use_tmp_project_root(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+
+
+def test_challenge_cup_ssot_fixture_never_uses_operator_agent_directory(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    assert agent_directory_service.registry_path().is_relative_to(tmp_path)
 
 
 def _seed_challenge_cup_agent_ssot() -> list[dict]:
