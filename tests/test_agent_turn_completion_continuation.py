@@ -96,6 +96,24 @@ def _terminal_failure(turn_id: str, status: str) -> RuntimeError:
     )
 
 
+def _deadline_terminal_failure(turn_id: str = "turn-main") -> RuntimeError:
+    return RuntimeError(
+        json.dumps(
+            {
+                "code": "agent_turn_terminal_failed",
+                "sessionId": "sess-1",
+                "turnId": turn_id,
+                "terminalStatus": "cancelled",
+                "terminalProblemCode": "challenge_logical_task_deadline_exhausted",
+                "terminalReason": "challenge_logical_task_deadline_exhausted",
+                "completionSource": "last_turn_status",
+                "failureClass": "terminal_failure",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 def _wait_waiter(events: list[str], continuations: list[str]):
     """Fake poller: main turn parks needs_continue, each continuation fails."""
 
@@ -210,6 +228,92 @@ def test_continuation_does_not_submit_after_logical_task_deadline(monkeypatch) -
     assert raised.value.problem["code"] == "challenge_logical_task_deadline_exhausted"
     assert raised.value.problem["turnChain"] == ["turn-main"]
     assert events == []
+
+
+def test_deadline_terminal_snapshot_fails_closed_without_continuation(monkeypatch) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        ChallengeTaskDeadlineExceeded,
+    )
+
+    submitted: list[str] = []
+
+    def wait(*_args, **_kwargs):
+        raise _deadline_terminal_failure()
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", wait)
+    monkeypatch.setattr(
+        atc,
+        "_submit_agent_turn_continuation",
+        lambda *_args, **_kwargs: submitted.append("submitted") or "turn-next",
+    )
+
+    with pytest.raises(ChallengeTaskDeadlineExceeded) as raised:
+        atc._wait_with_bounded_turn_continuation(
+            _handle(),
+            action=_action(),
+            input_snapshot=_input_snapshot(),
+            adapter_spec=AgentTaskAdapterSpec(
+                node_id="source_finding",
+                family="source_collection",
+                task_key="finding",
+                role_key="source_finder",
+            ),
+            timeout_ms=1_000,
+            poll_ms=1,
+        )
+
+    assert raised.value.problem["code"] == "challenge_logical_task_deadline_exhausted"
+    assert raised.value.problem["turnChain"] == ["turn-main"]
+    assert submitted == []
+
+
+def test_deadline_continuation_failure_is_not_rescued_by_settled_task(monkeypatch) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        ChallengeTaskDeadlineExceeded,
+    )
+
+    submitted: list[str] = []
+
+    def wait(_session_id, turn_id, **_kwargs):
+        if turn_id == "turn-main":
+            return _snapshot("needs_continue", turn_id)
+        raise _deadline_terminal_failure(turn_id)
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", wait)
+    monkeypatch.setattr(
+        atc,
+        "_submit_agent_turn_continuation",
+        lambda *_args, **_kwargs: submitted.append("submitted") or "turn-cont-1",
+    )
+    # Even if the domain authority says the main work settled after parking,
+    # a deadline problem on the continuation must remain fail-closed.
+    authority_reads = iter((False, True))
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_work_already_complete",
+        lambda **_kwargs: next(authority_reads, True),
+    )
+
+    with pytest.raises(ChallengeTaskDeadlineExceeded) as raised:
+        atc._wait_with_bounded_turn_continuation(
+            _handle(),
+            action=_action(),
+            input_snapshot=_input_snapshot(),
+            adapter_spec=AgentTaskAdapterSpec(
+                node_id="source_finding",
+                family="source_collection",
+                task_key="finding",
+                role_key="source_finder",
+            ),
+            timeout_ms=1_000,
+            poll_ms=1,
+        )
+
+    assert raised.value.problem["code"] == "challenge_logical_task_deadline_exhausted"
+    assert raised.value.problem["turnChain"] == ["turn-main", "turn-cont-1"]
+    assert submitted == ["submitted"]
 
 
 def test_continuation_wait_requeues_with_persisted_chain(monkeypatch) -> None:

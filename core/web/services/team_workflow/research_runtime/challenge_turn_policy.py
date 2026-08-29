@@ -182,6 +182,12 @@ def current_challenge_task_started_at_ms() -> int | None:
     return _CHALLENGE_TASK_STARTED_AT_MS.get()
 
 
+def current_challenge_task_deadline_at_ms() -> int | None:
+    """Return the current absolute deadline without creating a new clock."""
+
+    return _CHALLENGE_TASK_DEADLINE_AT_MS.get()
+
+
 def current_challenge_task_resume_problem() -> dict[str, Any]:
     return dict(_CHALLENGE_TASK_RESUME_PROBLEM.get() or {})
 

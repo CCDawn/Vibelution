@@ -7,6 +7,8 @@ never silently succeed.
 
 from __future__ import annotations
 
+from dataclasses import replace
+import json
 from pathlib import Path
 
 import pytest
@@ -509,4 +511,223 @@ def test_settle_failure_marks_reconciliation_required(tmp_path: Path) -> None:
         assert recovery[1] == "open"
         assert action.node_run_id in str(recovery[2] or "")
     finally:
+        harness.close()
+
+
+def test_read_node_budget_window_uses_ledger_and_validates_binding(
+    tmp_path: Path,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        BudgetAuthorityError,
+        read_node_budget_window,
+        record_budget_usage,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _action()
+        _seed_attempt(harness, action)
+        ports = RealDomainPorts(harness.store)
+        reservation = ports.reserve_budget(action=action, estimate_tokens=25_000)
+
+        before = read_node_budget_window(
+            harness.store,
+            action.run_id,
+            action.node_run_id,
+            reservation["reservationId"],
+        )
+        assert before["reserved"] == 25_000
+        assert before["used"] == 0
+        assert before["remaining"] == 25_000
+        assert before["stageLimit"] == 250_000
+        assert before["status"] == "reserved"
+
+        record_budget_usage(
+            harness.store,
+            run_id=action.run_id,
+            node_run_id=action.node_run_id,
+            reservation_id=reservation["reservationId"],
+            invocation_id="inv-window-1",
+            input_tokens=100,
+            output_tokens=50,
+            reasoning_tokens=20,
+        )
+        after = read_node_budget_window(
+            harness.store,
+            action.run_id,
+            action.node_run_id,
+            reservation["reservationId"],
+        )
+        assert after["used"] == 150
+        assert after["remaining"] == 24_850
+
+        with pytest.raises(BudgetAuthorityError, match="binding"):
+            read_node_budget_window(
+                harness.store,
+                action.run_id,
+                "node-run-does-not-match",
+                reservation["reservationId"],
+            )
+    finally:
+        harness.close()
+
+
+def test_record_budget_usage_is_exactly_once_and_reasoning_is_not_double_counted(
+    tmp_path: Path,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        read_node_budget_window,
+        record_budget_usage,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _action()
+        _seed_attempt(harness, action)
+        ports = RealDomainPorts(harness.store)
+        reservation = ports.reserve_budget(action=action, estimate_tokens=1_000)
+        kwargs = {
+            "run_id": action.run_id,
+            "node_run_id": action.node_run_id,
+            "reservation_id": reservation["reservationId"],
+            "invocation_id": "inv-exactly-once",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "reasoning_tokens": 20,
+        }
+        first = record_budget_usage(harness.store, **kwargs)
+        duplicate = record_budget_usage(harness.store, **kwargs)
+
+        assert first["idempotent"] is False
+        assert duplicate["idempotent"] is True
+        window = read_node_budget_window(
+            harness.store,
+            action.run_id,
+            action.node_run_id,
+            reservation["reservationId"],
+        )
+        assert window["used"] == 150
+        assert window["remaining"] == 850
+        payload = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT settled_json FROM budget_receipts WHERE reservation_id = ?",
+                (reservation["reservationId"],),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert payload is not None
+        settled = json.loads(payload[0])
+        assert settled["usage"]["reasoningTokens"] == 20
+        assert settled["usage"]["tokens"] == 150
+        assert list(settled["invocations"]) == ["inv-exactly-once"]
+    finally:
+        harness.close()
+
+
+def test_settle_merges_accumulated_usage_instead_of_overwriting_with_estimate(
+    tmp_path: Path,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        read_node_budget_window,
+        record_budget_usage,
+        settle_budget_authority,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _action()
+        _seed_attempt(harness, action)
+        ports = RealDomainPorts(harness.store)
+        reservation = ports.reserve_budget(action=action, estimate_tokens=2_000)
+        record_budget_usage(
+            harness.store,
+            run_id=action.run_id,
+            node_run_id=action.node_run_id,
+            reservation_id=reservation["reservationId"],
+            invocation_id="inv-settle-1",
+            input_tokens=300,
+            output_tokens=200,
+            reasoning_tokens=80,
+        )
+
+        settled = settle_budget_authority(
+            harness.store,
+            reservation={
+                "reservationId": reservation["reservationId"],
+                "runId": action.run_id,
+                "nodeRunId": action.node_run_id,
+            },
+            usage={"tokens": 1_900, "usage_estimated": True},
+        )
+        assert settled["status"] == "settled"
+        window = read_node_budget_window(
+            harness.store,
+            action.run_id,
+            action.node_run_id,
+            reservation["reservationId"],
+        )
+        assert window["status"] == "settled"
+        assert window["used"] == 500
+        assert window["remaining"] == 1_500
+    finally:
+        harness.close()
+
+
+def test_reserve_stage_admission_is_atomic_under_concurrency(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        BudgetAuthorityError,
+        reserve_budget_authority,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        first = _action()
+        second = _action("source_extraction")
+        second = replace(
+            second,
+            action_id="act-budget-2",
+            node_run_id="nr-run-test-source_extraction-a2",
+        )
+        _seed_attempt(harness, first)
+        _seed_attempt(harness, second)
+        snapshot = {
+            "budgetPolicy": {
+                "stageBudgets": {"knowledge_collection": {"tokens": 500}}
+            }
+        }
+
+        def reserve(action: PendingAction):
+            return reserve_budget_authority(
+                harness.store,
+                action=action,
+                estimate_tokens=400,
+                input_snapshot=snapshot,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = [pool.submit(reserve, action) for action in (first, second)]
+            results = [future.result() for future in outcomes]
+
+        assert sum(result["status"] == "reserved" for result in results) == 1
+        failures = [result for result in results if isinstance(result, BaseException)]
+        assert not failures
+    except BudgetAuthorityError:
+        # The assertion below inspects the persisted receipt count; one of the
+        # two concurrent reservations must be rejected by stage admission.
+        pass
+    finally:
+        rows = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT COUNT(*) FROM budget_receipts WHERE run_id = ? AND stage_id = ?",
+                ("run-test", "knowledge_collection"),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert rows is not None and rows[0] == 1
         harness.close()
