@@ -1618,12 +1618,61 @@ _QUEUE_COMMAND_TO_DESKTOP_LIFECYCLE = {
     "restart_workbench": "restart",
     "toggle_workbench": "toggle",
 }
+# Window-level close intent for close_workbench without stopManager. Unlike
+# "stop" (app-shell lifecycle) this only asks Electron to run its workbench
+# close transaction; the desktop-side routing is owned by the Electron main
+# owner. Unknown tokens are ignored by the current desktop CLI parser, so the
+# forward stays inert until that routing lands.
+_QUEUE_WINDOW_CLOSE_DESKTOP_LIFECYCLE = "close-window"
+
+
+def _desktop_lifecycle_for_queue_command(command_type: str, args: dict[str, Any] | None) -> str:
+    mapped = _QUEUE_COMMAND_TO_DESKTOP_LIFECYCLE.get(str(command_type or "").strip())
+    if command_type == "close_workbench" and not bool((args or {}).get("stopManager")):
+        return _QUEUE_WINDOW_CLOSE_DESKTOP_LIFECYCLE
+    return mapped
+
+
+def _lifecycle_provenance_argv(args: dict[str, Any] | None) -> list[str]:
+    provenance = args if isinstance(args, dict) else {}
+    tokens: list[str] = []
+    source = str(provenance.get("source") or "").strip()
+    reason = str(provenance.get("reason") or "").strip()
+    if source:
+        tokens.extend(["--lifecycle-source", " ".join(source.split())])
+    if reason:
+        tokens.extend(["--lifecycle-reason", " ".join(reason.split())])
+    if bool(provenance.get("stopManager")):
+        tokens.extend(["--lifecycle-stop-manager", "1"])
+    return tokens
+
+
+def _lifecycle_provenance_env(args: dict[str, Any] | None) -> dict[str, str]:
+    """Shim-process provenance markers.
+
+    The second-instance channel only carries argv to the live Electron shell;
+    these env vars document provenance in the short-lived forwarding process
+    and in child process inventories.
+    """
+
+    provenance = args if isinstance(args, dict) else {}
+    env: dict[str, str] = {}
+    source = str(provenance.get("source") or "").strip()
+    reason = str(provenance.get("reason") or "").strip()
+    if source:
+        env["VIBELUTION_LIFECYCLE_SOURCE"] = " ".join(source.split())
+    if reason:
+        env["VIBELUTION_LIFECYCLE_REASON"] = " ".join(reason.split())
+    if bool(provenance.get("stopManager")):
+        env["VIBELUTION_LIFECYCLE_STOP_MANAGER"] = "1"
+    return env
 
 
 def forward_lifecycle_command_to_electron(
     command_type: str,
     *,
     timeout_seconds: float | None = None,
+    args: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Hand a main-line lifecycle command to the live Electron control plane.
 
@@ -1632,11 +1681,14 @@ def forward_lifecycle_command_to_electron(
     main-line queue (main_line_queue_owner.json), this daemon side must not
     silently drop or locally re-implement workbench lifecycle commands; instead
     it forwards them through the same second-instance channel the native shim
-    uses. The forward itself never opens a console window.
+    uses. close_workbench without stopManager maps to the window-level
+    ``close-window`` intent (never the app-shell "stop"). Callers may pass the
+    queue command ``args`` so source/reason provenance rides the argv channel
+    and the shim-process env. The forward itself never opens a console window.
     """
 
     normalized_type = str(command_type or "").strip()
-    mapped = _QUEUE_COMMAND_TO_DESKTOP_LIFECYCLE.get(normalized_type)
+    mapped = _desktop_lifecycle_for_queue_command(normalized_type, args)
     if not mapped:
         return {
             "ok": False,
@@ -1652,15 +1704,17 @@ def forward_lifecycle_command_to_electron(
         return {"ok": False, "reason": f"desktop shell launch spec unavailable: {exc}"}
     if not isinstance(spec, dict):
         return {"ok": False, "reason": "desktop shell launch spec unavailable"}
-    args = [str(item) for item in (spec.get("args") or [])]
+    launch_args = [str(item) for item in (spec.get("args") or [])]
+    launch_args.extend(_lifecycle_provenance_argv(args))
     cwd = str(spec.get("cwd") or PROJECT_ROOT)
-    if not args:
+    if not launch_args:
         return {"ok": False, "reason": "desktop shell launch spec has no argv"}
     desktop_env = os.environ.copy()
     desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    desktop_env.update(_lifecycle_provenance_env(args))
     try:
         process = subprocess.Popen(
-            args,
+            launch_args,
             cwd=cwd,
             env=desktop_env,
             stdin=subprocess.DEVNULL,
@@ -1671,7 +1725,7 @@ def forward_lifecycle_command_to_electron(
             shell=False,
         )
     except OSError as exc:
-        return {"ok": False, "reason": f"failed to start forwarding process: {exc}", "argvTail": args[-2:]}
+        return {"ok": False, "reason": f"failed to start forwarding process: {exc}", "argvTail": launch_args[-2:]}
     forward_pid = int(getattr(process, "pid", 0) or 0)
     try:
         return_code = int(process.wait(timeout=resolved_timeout))

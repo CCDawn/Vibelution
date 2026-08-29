@@ -15,6 +15,18 @@ def is_daemon_running() -> bool:
     return _is_daemon_running()
 
 
+def electron_owns_main_line_queue() -> bool:
+    """True when Electron main owns the product lifecycle command queue (ADR 0009).
+
+    Web write paths consult this before spawning the daemon or enqueueing
+    product lifecycle commands; see daemon.electron_owns_main_line_queue.
+    """
+
+    from .daemon import electron_owns_main_line_queue as _electron_owns_main_line_queue
+
+    return _electron_owns_main_line_queue()
+
+
 def load_runtime_snapshot() -> dict:
     from .daemon import load_runtime_snapshot as _load_runtime_snapshot
 
