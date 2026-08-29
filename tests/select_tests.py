@@ -726,6 +726,20 @@ def _dedupe_commands(commands: list[str]) -> list[str]:
     return deduped
 
 
+def _override_project_pytest_fail_fast(command: str) -> str:
+    """Make selector-managed pytest batches collect every failure.
+
+    ``pytest.ini`` enables ``-x`` for ad-hoc local invocations.  Selector output
+    is an audit/closeout batch instead, so its later command-line option must
+    explicitly reset pytest's maximum failure count.
+    """
+    if " -m pytest " not in command or re.search(
+        r"(?:^|\s)--maxfail(?:=|\s+)0(?:\s|$)", command
+    ):
+        return command
+    return f"{command} --maxfail=0"
+
+
 def _parallelize_pytest_command(command: str) -> str:
     """Append bounded xdist arguments to a multi-file pytest batch.
 
@@ -914,7 +928,9 @@ def select_tests(
     return {
         "changedFiles": normalized_files,
         "matchedRules": matched_rules,
-        "commands": _dedupe_commands(commands),
+        "commands": _dedupe_commands(
+            [_override_project_pytest_fail_fast(command) for command in commands]
+        ),
         "notes": _dedupe_commands(notes),
         "coverageGaps": python_fallback["coverageGaps"],
         "validationLayers": validation_layers,

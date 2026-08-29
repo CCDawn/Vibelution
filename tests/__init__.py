@@ -9,8 +9,8 @@
 4. conftest.py - pytest 配置和共享 fixtures
 
 运行方式：
-    pytest tests/ -v
-    pytest tests/ -v --tb=short
+    pytest tests/ -v --maxfail=0
+    pytest tests/ -v --tb=short --maxfail=0
 
 只有在所有测试通过后，Agent 才能执行 trigger_self_restart 进行自我进化。
 """

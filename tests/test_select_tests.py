@@ -18,6 +18,44 @@ def test_complete_regression_commands_override_project_fail_fast() -> None:
     assert "--maxfail=0" in select_tests.LOCAL_SERIAL_COMMAND
 
 
+def test_selector_pytest_commands_override_project_fail_fast() -> None:
+    result = select_tests.select_tests(
+        ["core/example.py"],
+        {
+            "rules": [
+                {
+                    "id": "example",
+                    "paths": ["core/example.py"],
+                    "commands": [
+                        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_example.py -q"
+                    ],
+                }
+            ]
+        },
+        include_always=False,
+    )
+
+    pytest_commands = [
+        command for command in result["commands"] if " -m pytest " in command
+    ]
+    assert pytest_commands
+    assert all("--maxfail=0" in command for command in pytest_commands)
+
+
+def test_pytest_regression_documentation_overrides_project_fail_fast() -> None:
+    documentation = (PROJECT_ROOT / "tests" / "README.md").read_text(encoding="utf-8")
+    root_documentation = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    package_documentation = (PROJECT_ROOT / "tests" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "全量回归命令必须显式追加 `--maxfail=0`" in documentation
+    assert "-m pytest tests/ -v -x" not in documentation
+    assert "pytest tests -q --maxfail=0" in root_documentation
+    assert "pytest tests/ -v --maxfail=0" in package_documentation
+    assert "pytest tests/ -v --tb=short --maxfail=0" in package_documentation
+
+
 def test_matrix_loads_with_builtin_subset_parser():
     matrix = select_tests._parse_yaml_subset(select_tests.DEFAULT_MATRIX.read_text(encoding="utf-8"))
 
@@ -250,7 +288,7 @@ def test_selector_scopes_pre_commit_hook_to_hook_contract_tests():
     assert result["commands"] == [
         "git diff --check",
         ".\\.venv\\Scripts\\python.exe -m pytest "
-        "tests/test_local_quality_gate.py -k pre_commit -q",
+        "tests/test_local_quality_gate.py -k pre_commit -q --maxfail=0",
     ]
     assert result["validationLayers"] == ["hygiene", "focused", "local-serial"]
 
@@ -596,7 +634,7 @@ def test_selector_bounds_auto_appended_workers_at_six(tmp_path: Path):
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest "
         + " ".join(f"tests/{name}" for name in names)
-        + ' -q -n 6 --dist loadfile -m "not serial"'
+        + ' -q -n 6 --dist loadfile -m "not serial" --maxfail=0'
     ]
     assert result["validationLayers"] == ["focused", "local-parallel"]
 
@@ -670,7 +708,7 @@ def test_selector_uses_default_when_no_rule_matches():
     assert result["matchedRules"] == []
     assert result["commands"] == [
         "git diff --check",
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q --maxfail=0",
     ]
     assert result["validationLayers"] == ["hygiene", "focused"]
 
@@ -699,7 +737,7 @@ def test_selector_uses_static_python_imports_for_unmapped_product_sources(
     assert fallback["matchedFiles"] == ["core/direct.py", "core/package_child.py"]
     assert fallback["selectedTests"] == ["tests/test_static_imports.py"]
     assert result["commands"] == [
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_static_imports.py -q"
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_static_imports.py -q --maxfail=0"
     ]
     assert result["coverageGaps"] == []
     assert result["validationLayers"] == ["focused"]
@@ -840,7 +878,7 @@ def test_selector_caps_and_ranks_import_fallback_tests_by_direct_boundary(
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest "
         + " ".join(kept)
-        + ' -q -n 6 --dist loadfile -m "not serial"'
+        + ' -q -n 6 --dist loadfile -m "not serial" --maxfail=0'
     ]
     assert result["coverageGaps"] == []
 
@@ -861,7 +899,7 @@ def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):
 
     assert result["matchedRules"][0]["id"] == "changed-python-test-fallback"
     assert result["commands"] == [
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_unmapped.py -q"
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_unmapped.py -q --maxfail=0"
     ]
     assert result["coverageGaps"] == []
 
@@ -883,7 +921,7 @@ def test_selector_parallelizes_multiple_unmapped_changed_python_tests(tmp_path: 
 
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_alpha.py "
-        "tests/test_beta.py tests/test_gamma.py -q -n 3 --dist loadfile -m \"not serial\""
+        "tests/test_beta.py tests/test_gamma.py -q -n 3 --dist loadfile -m \"not serial\" --maxfail=0"
     ]
     assert result["validationLayers"] == ["focused", "local-parallel"]
 
@@ -909,8 +947,8 @@ def test_selector_separates_serial_changed_python_tests(tmp_path: Path):
 
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_alpha.py "
-        "tests/test_beta.py -q -n 2 --dist loadfile -m \"not serial\"",
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q",
+        "tests/test_beta.py -q -n 2 --dist loadfile -m \"not serial\" --maxfail=0",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q --maxfail=0",
     ]
     assert result["validationLayers"] == ["focused", "local-parallel", "local-serial"]
 
@@ -935,7 +973,7 @@ def test_selector_ignores_serial_marker_text_below_module_scope(tmp_path: Path):
 
     assert result["commands"] == [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_alpha.py "
-        "tests/test_beta.py -q -n 2 --dist loadfile -m \"not serial\""
+        "tests/test_beta.py -q -n 2 --dist loadfile -m \"not serial\" --maxfail=0"
     ]
 
 
@@ -960,8 +998,8 @@ def test_selector_separates_serial_static_import_tests(tmp_path: Path):
     )
 
     assert result["commands"] == [
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_parallel.py -q",
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_parallel.py -q --maxfail=0",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_serial.py -q --maxfail=0",
     ]
     assert result["validationLayers"] == ["focused", "local-serial"]
 
