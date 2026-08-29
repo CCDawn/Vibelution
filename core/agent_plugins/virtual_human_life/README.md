@@ -12,6 +12,8 @@
 | 情绪事件、余波恢复和表达档位 | `affect.py` |
 | 关系事件、每日变化上限、阶段迟滞和自然回落 | `relationship_events.py` |
 | 主动候选、未回复降速、未完话题和承诺 | `conversation_continuity.py` |
+| 夜间反思、记忆强化和来源校验 | `reflection.py` |
+| 环境事实 supersession 与位置移动连续性 | `environment.py` |
 | 因果存储路径、schema 和授权复用来源 receipt | `causal_contracts.py` |
 | Agent 私有目录、原子 JSON/JSONL 读写和路径边界 | `storage.py` |
 | 有界 Prompt Pack 文件列表和加载预算 | `prompt_pack.py` + `prompts/*.md` |
@@ -31,6 +33,8 @@
 - 目标、项目、习惯和技能只由具有成功 outcome 的真实完成事件推进；计划、失败、取消、跳过和重复事件不推进。
 - 心情和关系均从 Agent 私有事件账本投影；Prompt 只接收有界摘要，不接收原始互动备注。
 - 主动消息先进入候选池，候选未出队不创建 Turn；未回复、重复主题、免打扰、忙碌和睡眠都有可解释抑制原因。
+- 夜间反思只强化有来源的生活记忆；梦境与仅计划内容不能成为外部事实或自我历史。
+- 环境事实保留来源和 supersession 历史；位置移动必须经过明确耗时后才能到达。
 
 ## 主测试
 
@@ -39,5 +43,7 @@
 - `tests/test_virtual_human_life_api.py`
 - `tests/test_virtual_human_life_tools.py`
 - `tests/test_virtual_human_life_causality.py`
+- `tests/test_virtual_human_life_reflection.py`
+- `tests/test_virtual_human_life_long_horizon.py`
 
 产品契约见 [`docs/prds/2026-08-27-virtual-human-life-plugin.md`](../../../docs/prds/2026-08-27-virtual-human-life-plugin.md)。
