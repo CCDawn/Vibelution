@@ -132,6 +132,7 @@ def upsert_open_loop(
     kind: str,
     summary: str,
     source_turn_id: str,
+    source_event_id: str = "",
     now: datetime,
     expires_at: datetime,
 ) -> list[dict[str, Any]]:
@@ -144,6 +145,10 @@ def upsert_open_loop(
         if source_turn_id and source_turn_id not in source_ids:
             source_ids.append(source_turn_id)
         item["sourceTurnIds"] = source_ids[-16:]
+        event_ids = [str(value) for value in list(item.get("sourceEventIds") or []) if str(value)]
+        if source_event_id and source_event_id not in event_ids:
+            event_ids.append(source_event_id)
+        item["sourceEventIds"] = event_ids[-16:]
         item["repeatCount"] = max(1, int(item.get("repeatCount") or 1)) + 1
         item["summary"] = str(summary or item.get("summary") or "")[:300]
         item["expiresAt"] = _iso(max(expires_at, _parse(item.get("expiresAt")) or expires_at))
@@ -159,6 +164,7 @@ def upsert_open_loop(
             "status": "open",
             "repeatCount": 1,
             "sourceTurnIds": [str(source_turn_id).strip()] if str(source_turn_id).strip() else [],
+            "sourceEventIds": [str(source_event_id).strip()] if str(source_event_id).strip() else [],
             "createdAt": _iso(now),
             "updatedAt": _iso(now),
             "expiresAt": _iso(expires_at),

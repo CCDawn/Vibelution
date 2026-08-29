@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core.agent_plugins.virtual_human_life.manifest import VIRTUAL_HUMAN_TOOL_NAMES
 from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
@@ -259,11 +259,15 @@ def test_proactive_tool_reuses_existing_bundle_for_open_loop_lifecycle(
                 loop_kind="promise",
                 summary="晚点分享歌曲进展",
                 source_turn_id="turn-1",
+                source_event_id="event-song-progress",
                 expires_in_minutes=120,
             )
         )
         assert recorded["ok"] is True
         assert recorded["commandResult"]["result"]["openLoop"]["status"] == "open"
+        assert recorded["commandResult"]["result"]["openLoop"]["sourceEventIds"] == [
+            "event-song-progress"
+        ]
 
         resolved = json.loads(
             virtual_human_proactive_message_tool(
@@ -277,5 +281,107 @@ def test_proactive_tool_reuses_existing_bundle_for_open_loop_lifecycle(
         )
         assert resolved["ok"] is True
         assert resolved["commandResult"]["result"]["openLoop"]["status"] == "resolved"
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_activity_tool_requires_environment_provenance_and_preserves_travel_time(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    agent = {"agentId": "agent-a", "status": "active", "directSessionId": "session-a"}
+    clock = [datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)]
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: clock[0],
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": "agent-a", "sessionId": "session-a"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        service.set_binding("agent-a", enabled=True, expected_version=0)
+        version = service.snapshot("agent-a")["state"]["stateVersion"]
+
+        missing_source = json.loads(
+            virtual_human_activity_tool(
+                action="record_environment",
+                expected_version=version,
+                fact_key="weather.current",
+                fact_value="晴",
+                source_kind="tool",
+                source_ref="",
+                idempotency_key="weather-without-receipt",
+            )
+        )
+        assert missing_source["ok"] is False
+        assert "sourceRef" in missing_source["message"]
+
+        recorded = json.loads(
+            virtual_human_activity_tool(
+                action="record_environment",
+                expected_version=version,
+                fact_key="weather.current",
+                fact_value="晴，28°C",
+                source_kind="tool",
+                source_ref="weather-tool:receipt-1",
+                confidence=96,
+                idempotency_key="weather-with-receipt",
+            )
+        )
+        assert recorded["ok"] is True
+        fact = recorded["commandResult"]["result"]["environmentFact"]
+        assert fact["sourceKind"] == "tool"
+        assert fact["sourceRef"] == "weather-tool:receipt-1"
+
+        started = json.loads(
+            virtual_human_activity_tool(
+                action="start_move",
+                expected_version=recorded["commandResult"]["stateVersion"],
+                movement_id="move-library",
+                destination="library",
+                travel_minutes=30,
+                source_kind="schedule_outcome",
+                source_ref="activity:walk-to-library",
+                idempotency_key="start-library-move",
+            )
+        )
+        assert started["ok"] is True
+        assert service.snapshot("agent-a")["state"]["currentLocation"] == "home"
+        assert service.snapshot("agent-a")["state"]["movingTo"] == "library"
+
+        clock[0] += timedelta(minutes=20)
+        too_early = json.loads(
+            virtual_human_activity_tool(
+                action="complete_move",
+                expected_version=started["commandResult"]["stateVersion"],
+                movement_id="move-library",
+                idempotency_key="complete-library-move-early",
+            )
+        )
+        assert too_early["ok"] is False
+        assert "earliestArrivalAt" in too_early["message"]
+        assert service.snapshot("agent-a")["state"]["currentLocation"] == "home"
+
+        clock[0] += timedelta(minutes=10)
+        arrived = json.loads(
+            virtual_human_activity_tool(
+                action="complete_move",
+                expected_version=started["commandResult"]["stateVersion"],
+                movement_id="move-library",
+                idempotency_key="complete-library-move",
+            )
+        )
+        assert arrived["ok"] is True
+        assert service.snapshot("agent-a")["state"]["currentLocation"] == "library"
     finally:
         set_virtual_human_life_service_for_tests(None)

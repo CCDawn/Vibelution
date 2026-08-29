@@ -128,11 +128,20 @@ def virtual_human_activity_tool(
     reason: str = "",
     outcome_summary: str = "",
     salience_score: int = 0,
+    movement_id: str = "",
+    destination: str = "",
+    travel_minutes: int = 15,
+    fact_key: str = "",
+    fact_value: str = "",
+    source_kind: str = "",
+    source_ref: str = "",
+    confidence: int = 80,
     idempotency_key: str = "",
 ) -> str:
-    """开始、完成、失败、取消、跳过或重排虚拟人的生活活动。
+    """维护生活活动、授权环境事实和有耗时的位置移动。
 
-    action: start | complete | fail | cancel | skip | replan。
+    action: start | complete | fail | cancel | skip | replan |
+    record_environment | start_move | complete_move。
     complete 接收 outcome_summary 记录实际结果；计划文本不会被视为完成结果。
     """
 
@@ -143,10 +152,16 @@ def virtual_human_activity_tool(
         "cancel": "cancelActivity",
         "skip": "skipActivity",
         "replan": "replan",
+        "record_environment": "recordEnvironmentFact",
+        "start_move": "startLocationMove",
+        "complete_move": "completeLocationMove",
     }
     command = command_by_action.get(str(action or "").strip().lower(), "")
     if not command:
-        return _blocked("action 必须是 start/complete/fail/cancel/skip/replan。", error="invalid_action")
+        return _blocked(
+            "action 必须是 start/complete/fail/cancel/skip/replan/record_environment/start_move/complete_move。",
+            error="invalid_action",
+        )
     key = str(idempotency_key or "").strip()
     if not key:
         return _blocked("修改生活活动需要 idempotency_key。", error="idempotency_key_required")
@@ -161,6 +176,28 @@ def virtual_human_activity_tool(
             "summary": str(outcome_summary or "").strip(),
             "salienceScore": int(salience_score or 0),
         }
+    elif command == "recordEnvironmentFact":
+        arguments.update(
+            {
+                "factKey": str(fact_key or "").strip(),
+                "value": str(fact_value or "").strip(),
+                "sourceKind": str(source_kind or "tool").strip(),
+                "sourceRef": str(source_ref or "").strip(),
+                "confidence": int(confidence or 80),
+            }
+        )
+    elif command == "startLocationMove":
+        arguments.update(
+            {
+                "movementId": str(movement_id or "").strip(),
+                "destination": str(destination or "").strip(),
+                "travelMinutes": int(travel_minutes or 15),
+                "sourceKind": str(source_kind or "schedule_outcome").strip(),
+                "sourceRef": str(source_ref or "").strip(),
+            }
+        )
+    elif command == "completeLocationMove":
+        arguments["movementId"] = str(movement_id or "").strip()
     return _invoke(
         lambda agent_id: {
             "status": "applied",
@@ -302,6 +339,7 @@ def virtual_human_proactive_message_tool(
         "kind": str(loop_kind or "topic").strip(),
         "summary": str(summary or "").strip(),
         "sourceTurnId": str(source_turn_id or "").strip(),
+        "sourceEventId": str(source_event_id or "").strip(),
         "expiresInMinutes": int(expires_in_minutes or 10_080),
         "resolution": str(resolution or "").strip(),
     }

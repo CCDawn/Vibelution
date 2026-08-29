@@ -42,6 +42,10 @@ def manifest_projection() -> dict[str, Any]:
             "life.affect_afterglow",
             "life.relationship_ledger",
             "life.open_loops",
+            "life.nightly_reflection",
+            "life.memory_reinforcement",
+            "life.environment_facts",
+            "life.location_continuity",
         ],
         "hooks": [
             "onHostStart",

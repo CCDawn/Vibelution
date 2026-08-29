@@ -82,6 +82,8 @@ def test_agent_plugin_and_virtual_human_routes_are_typed_and_agent_scoped(tmp_pa
             "/api/agents/agent-a/plugins/virtual-human-life/snapshot"
         )
         assert snapshot.status_code == 200
+        assert snapshot.json()["causal"]["schemaVersion"] == 1
+        assert snapshot.json()["state"]["locationStatus"] == "stationary"
         state_version = snapshot.json()["state"]["stateVersion"]
         activity_id = next(
             item["activityId"]

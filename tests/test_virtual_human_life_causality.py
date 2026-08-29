@@ -78,6 +78,10 @@ def test_authorized_reuse_receipt_and_causal_paths_are_explicit() -> None:
         "relationshipProjection": "relationships.json",
         "proactiveCandidates": "proactive/candidates.jsonl",
         "openLoops": "conversation/open_loops.jsonl",
+        "reflectionProposals": "reflections/proposals.jsonl",
+        "memoryReinforcements": "memory/reinforcement_receipts.jsonl",
+        "environmentFacts": "environment/facts.jsonl",
+        "locationMovements": "environment/location_movements.jsonl",
     }
 
 
@@ -291,6 +295,7 @@ def test_open_loops_dedupe_resolve_and_expire_with_accelerated_clock() -> None:
         kind="promise",
         summary="之后告诉你这首歌的进展",
         source_turn_id="turn-1",
+        source_event_id="event-1",
         now=now,
         expires_at=now + timedelta(hours=6),
     )
@@ -301,6 +306,7 @@ def test_open_loops_dedupe_resolve_and_expire_with_accelerated_clock() -> None:
         kind="topic",
         summary="继续聊这首歌",
         source_turn_id="turn-2",
+        source_event_id="event-2",
         now=now + timedelta(minutes=5),
         expires_at=now + timedelta(hours=8),
     )
@@ -308,6 +314,7 @@ def test_open_loops_dedupe_resolve_and_expire_with_accelerated_clock() -> None:
     assert len(rows) == 1
     assert rows[0]["repeatCount"] == 2
     assert rows[0]["sourceTurnIds"] == ["turn-1", "turn-2"]
+    assert rows[0]["sourceEventIds"] == ["event-1", "event-2"]
 
     resolved = resolve_open_loop(
         rows,

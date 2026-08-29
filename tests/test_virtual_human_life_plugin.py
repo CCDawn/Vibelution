@@ -1104,6 +1104,16 @@ def test_memory_projection_reuses_existing_episode_without_duplicate_write(
             "salienceScore": 88,
             "sourceEventIds": ["event-existing"],
             "promotedAt": memories[0]["promotedAt"],
+            "baseSalienceScore": 88,
+            "memoryStrengthScore": 93,
+            "scoreBreakdown": {
+                "importance": 88,
+                "recency": 100,
+                "emotion": 0,
+                "unresolved": 0,
+                "reinforcement": 0,
+            },
+            "reinforcedAt": "",
         }
     ]
 

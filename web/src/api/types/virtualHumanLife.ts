@@ -43,7 +43,15 @@ export type VirtualHumanMood = {
   valence: number;
   arousal: number;
   stability: number;
+  causeEventIds?: string[];
   updatedAt: string;
+};
+
+export type VirtualHumanLocationSource = {
+  movementId?: string;
+  sourceKind?: string;
+  sourceRef?: string;
+  arrivedAt?: string;
 };
 
 export type VirtualHumanLifeState = {
@@ -51,6 +59,10 @@ export type VirtualHumanLifeState = {
   localDate: string;
   timezone: string;
   currentLocation: string;
+  locationStatus?: "stationary" | "moving" | string;
+  activeMovementId?: string;
+  movingTo?: string;
+  locationSource?: VirtualHumanLocationSource;
   currentActivityId: string;
   mood: VirtualHumanMood;
   energy: number;
@@ -65,10 +77,13 @@ export type VirtualHumanActivity = {
   activityId: string;
   title: string;
   kind: string;
+  activityKind?: string;
   startAt: string;
   endAt: string;
   status: string;
   origin: string;
+  driveLinks?: string[];
+  driveReason?: string;
 };
 
 export type VirtualHumanSchedule = {
@@ -126,9 +141,126 @@ export type VirtualHumanRelationship = {
   targetId: string;
   intimacy: number;
   trust: number;
+  relationshipStage?: "getting_to_know" | "friend" | "close" | string;
+  interactionCount?: number;
+  lastInteractionKind?: string;
+  lastInteractionAt?: string;
   updatedAt?: string;
   summary?: string;
   [key: string]: unknown;
+};
+
+export type VirtualHumanDriveItem = {
+  driveId: string;
+  title: string;
+  status?: string;
+  progress?: number;
+  streak?: number;
+  level?: number;
+  experience?: number;
+  updatedAt?: string;
+};
+
+export type VirtualHumanDriveProjection = {
+  goals?: VirtualHumanDriveItem[];
+  projects?: VirtualHumanDriveItem[];
+  habits?: VirtualHumanDriveItem[];
+  skills?: VirtualHumanDriveItem[];
+  processedEventIds?: string[];
+};
+
+export type VirtualHumanAffectProjection = {
+  expressionTier?: string;
+  activeEpisodeIds?: string[];
+  recoveredEpisodeIds?: string[];
+  mood?: VirtualHumanMood;
+};
+
+export type VirtualHumanOpenLoop = {
+  loopId: string;
+  topicKey: string;
+  kind?: string;
+  summary: string;
+  status: string;
+  sourceTurnIds?: string[];
+  sourceEventIds?: string[];
+  expiresAt?: string;
+};
+
+export type VirtualHumanProactiveCandidate = {
+  candidateId: string;
+  sourceEventId?: string;
+  topicKey?: string;
+  reason?: string;
+  score?: number;
+  status?: string;
+  decision?: string;
+  suppressionReason?: string;
+  evaluatedAt?: string;
+  createdAt?: string;
+};
+
+export type VirtualHumanReflection = {
+  proposalId: string;
+  sourceKind: string;
+  targetKind: string;
+  text: string;
+  status: string;
+  validationReason?: string;
+  sourceEventIds?: string[];
+  sourceFactIds?: string[];
+  localDate?: string;
+  createdAt?: string;
+  validatedAt?: string;
+};
+
+export type VirtualHumanEnvironmentFact = {
+  factId: string;
+  factKey: string;
+  value: unknown;
+  sourceKind: string;
+  sourceRef: string;
+  confidence?: number;
+  observedAt?: string;
+  status?: string;
+};
+
+export type VirtualHumanEnvironmentProjection = {
+  currentFacts?: VirtualHumanEnvironmentFact[];
+  history?: VirtualHumanEnvironmentFact[];
+};
+
+export type VirtualHumanLocationMovement = {
+  movementId: string;
+  fromLocation: string;
+  toLocation: string;
+  status: string;
+  sourceKind?: string;
+  sourceRef?: string;
+  startedAt?: string;
+  earliestArrivalAt?: string;
+  arrivedAt?: string;
+};
+
+export type VirtualHumanCausalProjection = {
+  schemaVersion: number;
+  drives?: VirtualHumanDriveProjection;
+  affect?: VirtualHumanAffectProjection;
+  relationships?: VirtualHumanRelationship[];
+  openLoops?: {
+    open?: VirtualHumanOpenLoop[];
+    resolved?: VirtualHumanOpenLoop[];
+    expired?: VirtualHumanOpenLoop[];
+    updatedAt?: string;
+  };
+  proactiveCandidates?: VirtualHumanProactiveCandidate[];
+  reflections?: {
+    recent?: VirtualHumanReflection[];
+    acceptedCount?: number;
+    rejectedCount?: number;
+  };
+  environment?: VirtualHumanEnvironmentProjection;
+  locationMovements?: VirtualHumanLocationMovement[];
 };
 
 /**
@@ -156,8 +288,18 @@ export type VirtualHumanEpisodicMemory = {
   text: string;
   occurredAt?: string | null;
   salienceScore?: number | null;
+  baseSalienceScore?: number | null;
+  memoryStrengthScore?: number | null;
+  scoreBreakdown?: {
+    importance?: number;
+    recency?: number;
+    emotion?: number;
+    unresolved?: number;
+    reinforcement?: number;
+  };
   sourceEventIds?: string[];
   promotedAt?: string | null;
+  reinforcedAt?: string | null;
 };
 
 export type VirtualHumanSnapshot = {
@@ -174,6 +316,7 @@ export type VirtualHumanSnapshot = {
     limit: number;
     remaining: number;
   };
+  causal?: VirtualHumanCausalProjection | null;
   health?: VirtualHumanSnapshotHealth;
 };
 

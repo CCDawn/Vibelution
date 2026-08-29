@@ -20,6 +20,10 @@ CAUSAL_LEDGER_PATHS = {
     "relationshipProjection": "relationships.json",
     "proactiveCandidates": "proactive/candidates.jsonl",
     "openLoops": "conversation/open_loops.jsonl",
+    "reflectionProposals": "reflections/proposals.jsonl",
+    "memoryReinforcements": "memory/reinforcement_receipts.jsonl",
+    "environmentFacts": "environment/facts.jsonl",
+    "locationMovements": "environment/location_movements.jsonl",
 }
 
 _UPSTREAM_REUSE_RECEIPT: dict[str, Any] = {
@@ -82,6 +86,25 @@ _UPSTREAM_REUSE_RECEIPT: dict[str, Any] = {
                 "do not import the upstream user-profile store or self-timeline as memory SSOT."
             ),
             "verification": "outcome gate, dedupe, expiry, and schedule-link tests",
+        },
+        {
+            "sliceId": "reflection-timeline-and-environment",
+            "sourcePaths": [
+                "dreaming.py",
+                "self_timeline.py",
+                "daily_state.py",
+                "tests/test_environment_change_proactive.py",
+                "tests/test_detail_model_location.py",
+            ],
+            "adaptationBoundary": (
+                "Adapt source-backed reflection, history-only timeline disclosure, "
+                "environment provenance, and non-instant location transitions; dream "
+                "material never becomes external fact and elapsed plans never become history."
+            ),
+            "verification": (
+                "reflection rejection, fact supersession, timed movement, memory provenance, "
+                "and injected-clock cross-midnight tests"
+            ),
         },
     ],
 }
