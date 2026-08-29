@@ -8,13 +8,17 @@ from inspect import Parameter, signature
 from typing import Any, Iterable
 
 from core.infrastructure.workspace_manager import get_workspace
+from core.web.services import agent_directory_service
 
-from .agent_runner import LLMResearchAgentRunner, ResearchAgentRunner
-from .agent_templates import RESEARCH_PROMPT_FILES, ensure_research_prompt_defaults, normalize_research_agent_config
+from .agent_runner import (
+    LLMResearchAgentRunner,
+    ResearchAgentRunner,
+    _profile_from_agent_instance,
+    _workspace_project_root,
+)
+from .agent_templates import RESEARCH_PROMPT_FILES, ensure_research_prompt_defaults
 from .knowledge_base import ResearchKnowledgeBase
 from .models import (
-    CandidateTheme,
-    EvidenceRecord,
     ResearchDiscoverySession,
     ResearchSource,
     SearchRun,
@@ -1162,25 +1166,45 @@ class ResearchThemeDiscoveryService:
 
     def _research_agent_template_profile(self) -> dict[str, Any]:
         workspace = get_workspace()
+        project_root = _workspace_project_root(workspace)
+        previous_root = agent_directory_service.PROJECT_ROOT
+        if project_root is not None:
+            agent_directory_service.PROJECT_ROOT = project_root
         try:
-            raw = workspace.read_research_agent_config()
-        except Exception:
-            raw = {}
-        config = normalize_research_agent_config(raw)
-        return {
-            "configPath": str(workspace.get_research_agent_config_path()),
-            "agents": config["agents"],
-        }
+            agents: list[dict[str, Any]] = []
+            seen_keys: set[str] = set()
+            for agent in agent_directory_service.list_agents(
+                include_archived=False,
+                detail="full",
+            ):
+                metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+                if str(metadata.get("challengeCupTeamId") or "").strip():
+                    continue
+                role_key = str(agent.get("roleKey") or "").strip()
+                key = str(metadata.get("researchAgentKey") or "").strip()
+                if not key and role_key.startswith("research_"):
+                    key = role_key.removeprefix("research_")
+                if key:
+                    if key in seen_keys:
+                        raise ValueError(
+                            f"Research AgentDirectory binding is duplicated: {key}"
+                        )
+                    seen_keys.add(key)
+                    agents.append(_profile_from_agent_instance(key, agent))
+            agents.sort(key=lambda item: str(item.get("key") or ""))
+            return {
+                "configPath": str(agent_directory_service.registry_path()),
+                "agents": agents,
+            }
+        finally:
+            agent_directory_service.PROJECT_ROOT = previous_root
 
     def _research_prompt_profile(self) -> dict[str, Any]:
         workspace = get_workspace()
         ensure_research_prompt_defaults(workspace)
-        agent_config = normalize_research_agent_config(workspace.read_research_agent_config())
+        agent_config = self._research_agent_template_profile()
         files = {}
-        deleted_default_agents = set(agent_config.get("deletedDefaultAgents") or [])
-        prompt_files = {
-            key: filename for key, filename in RESEARCH_PROMPT_FILES.items() if key not in deleted_default_agents
-        }
+        prompt_files = dict(RESEARCH_PROMPT_FILES)
         for agent in agent_config["agents"]:
             key = str(agent.get("key") or "").strip()
             filename = str(agent.get("promptFilename") or "").strip()

@@ -17,7 +17,6 @@ from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
 from config.settings import get_config
 from core.web.services import agent_directory_service, agent_mode_binding_service, prompt_template_service
 
-from .agent_templates import normalize_research_agent_config
 from .models import (
     CandidateTheme,
     EvidenceRecord,
@@ -519,17 +518,34 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
     def _agent_profile(self, agent_key: str) -> dict[str, Any]:
         workspace = get_workspace()
         mode_bound_agent = self._mode_bound_agent_profile(agent_key, workspace)
-        config = normalize_research_agent_config(workspace.read_research_agent_config())
         if mode_bound_agent:
-            for item in config["agents"]:
-                if item["key"] == agent_key:
-                    merged = dict(item)
-                    merged.update(mode_bound_agent)
-                    return merged
             return mode_bound_agent
-        for item in config["agents"]:
-            if item["key"] == agent_key:
-                return self._resolve_agent_instance_profile(item)
+        project_root = _workspace_project_root(workspace)
+        previous_agent_root = agent_directory_service.PROJECT_ROOT
+        if project_root is not None:
+            agent_directory_service.PROJECT_ROOT = project_root
+        try:
+            matches: list[dict[str, Any]] = []
+            expected_role = f"research_{agent_key}"
+            for agent in agent_directory_service.list_agents(
+                include_archived=False,
+                detail="full",
+            ):
+                metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+                if str(metadata.get("challengeCupTeamId") or "").strip():
+                    continue
+                research_key = str(metadata.get("researchAgentKey") or "").strip()
+                role_key = str(agent.get("roleKey") or "").strip()
+                if research_key == agent_key or role_key == expected_role:
+                    matches.append(agent)
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Research AgentDirectory binding is duplicated: {agent_key}"
+                )
+            if matches:
+                return _profile_from_agent_instance(agent_key, matches[0])
+        finally:
+            agent_directory_service.PROJECT_ROOT = previous_agent_root
         raise ValueError(f"Unknown research agent: {agent_key}")
 
     def _mode_bound_agent_profile(self, agent_key: str, workspace: Any) -> dict[str, Any] | None:
@@ -660,7 +676,7 @@ def _profile_from_agent_instance(agent_key: str, agent: dict[str, Any]) -> dict[
         "label": str(agent.get("displayName") or normalized_agent_key or "").strip(),
         "promptFilename": prompt_filename,
         "templateId": template_id,
-        "profileId": str(agent.get("profileId") or "").strip() or "primary",
+        "profileId": str(metadata.get("researchProfileId") or "").strip(),
         "enabled": str(agent.get("status") or "active").strip() != "archived",
         "agentId": str(agent.get("agentId") or "").strip(),
         "agentInstanceId": str(agent.get("agentId") or "").strip(),

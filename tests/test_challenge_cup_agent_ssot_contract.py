@@ -44,11 +44,16 @@ def test_challenge_cup_ssot_fixture_never_uses_operator_agent_directory(
     assert agent_directory_service.registry_path().is_relative_to(tmp_path)
 
 
-def _seed_challenge_cup_agent_ssot() -> list[dict]:
+def _seed_challenge_cup_agent_ssot(roles: list[dict] | None = None) -> list[dict]:
     """Create the six existing Agent assets with intentionally custom config."""
 
     agents: list[dict] = []
-    for index, role in enumerate(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES, start=1):
+    seed_roles = (
+        list(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES)
+        if roles is None
+        else list(roles)
+    )
+    for index, role in enumerate(seed_roles, start=1):
         role_key = str(role["role"])
         agent = agent_directory_service.create_agent_instance(
             display_name=f"SSOT {role_key}",
@@ -119,6 +124,16 @@ _AGENT_OWNED_CONFIG_FIELDS = {
     "agentConfig",
 }
 
+_AGENT_PROJECTION_FIELDS = {
+    "agentCode",
+    "agentName",
+    "agentSourceRef",
+    "agentProjectionEdit",
+    "agentProjectionCanWrite",
+}
+
+_MEMBER_BINDING_FIELDS = {"memberId", "role", "agentId"}
+
 
 def _mapping_keys(value) -> set[str]:
     """Return all mapping keys so nested config copies are also rejected."""
@@ -176,11 +191,124 @@ def test_challenge_cup_bootstrap_reuses_existing_agent_ssot_without_config_mutat
         assert _agent_config(agent_directory_service.get_agent(agent_id)) == expected
 
 
+def test_challenge_cup_bootstrap_fails_closed_when_a_role_agent_is_missing(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    roles = list(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES)
+    _seed_challenge_cup_agent_ssot(roles[:-1])
+    calls: list[str] = []
+
+    def record_agent_create(*_args, **_kwargs):
+        calls.append("create")
+        return {}
+
+    def record_agent_update(*_args, **_kwargs):
+        calls.append("update")
+        return {}
+
+    monkeypatch.setattr(agent_directory_service, "create_agent_instance", record_agent_create)
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", record_agent_update)
+
+    with pytest.raises(team_service.TeamServiceError):
+        team_service.bootstrap_challenge_cup_research_team()
+
+    assert calls == []
+    assert team_service.challenge_cup_research_team_missing() is True
+
+
+def test_challenge_cup_bootstrap_fails_closed_when_a_role_agent_is_duplicated(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    seeded = _seed_challenge_cup_agent_ssot()
+    duplicated = seeded[0]
+    agent_directory_service.create_agent_instance(
+        display_name="Duplicate Challenge Cup Agent",
+        llm_bindings={"dialogue": {"modelId": "duplicate-model"}},
+        primary_mode="research",
+        role_key=str(duplicated["roleKey"]),
+        prompt_template_id="prompt-chat-default",
+        direct_session_id="duplicate-session",
+        created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+        metadata=copy.deepcopy(duplicated["metadata"]),
+    )
+    calls: list[str] = []
+
+    def record_agent_create(*_args, **_kwargs):
+        calls.append("create")
+        return {}
+
+    def record_agent_update(*_args, **_kwargs):
+        calls.append("update")
+        return {}
+
+    monkeypatch.setattr(agent_directory_service, "create_agent_instance", record_agent_create)
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", record_agent_update)
+
+    with pytest.raises(team_service.TeamServiceError, match="duplicated"):
+        team_service.bootstrap_challenge_cup_research_team()
+
+    assert calls == []
+    assert team_service.challenge_cup_research_team_missing() is True
+
+
+def test_challenge_cup_raw_team_canvas_projection_keeps_only_ssot_bindings(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_ssot()
+    result = team_service.bootstrap_challenge_cup_research_team()
+
+    raw_team_state = _read_json(team_service._teams_index_path())
+    raw_team = next(
+        team
+        for team in raw_team_state["teams"]
+        if team.get("teamId") == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    )
+    raw_canvas = _read_json(
+        team_service._team_canvas_path(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID)
+    )
+    sources = team_service.list_team_role_binding_sources(
+        team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    )
+
+    raw_members = [item for item in raw_team.get("members", []) if isinstance(item, dict)]
+    source_members = [item for item in sources["members"] if isinstance(item, dict)]
+    assert raw_members
+    assert all(set(member) == _MEMBER_BINDING_FIELDS for member in raw_members)
+    assert all(set(member) == _MEMBER_BINDING_FIELDS for member in source_members)
+    assert source_members == raw_members
+    assert {
+        (str(member.get("role") or "").strip(), str(member.get("agentId") or "").strip())
+        for member in source_members
+    } == {
+        (str(member.get("role") or "").strip(), str(member.get("agentId") or "").strip())
+        for member in result["team"]["members"]
+    }
+
+    canvas_nodes = [node for node in raw_canvas.get("nodes", []) if isinstance(node, dict)]
+    assert canvas_nodes
+    projection_keys = _mapping_keys(raw_team) | _mapping_keys(raw_canvas)
+    assert not {key for key in projection_keys if "legacy" in key.lower()}
+    assert _AGENT_OWNED_CONFIG_FIELDS.isdisjoint(projection_keys)
+    for node in canvas_nodes:
+        assert _AGENT_PROJECTION_FIELDS.isdisjoint(_mapping_keys(node))
+        assert {
+            "agentId",
+            "role",
+        }.issubset(node)
+
+
 def test_challenge_cup_team_binding_projection_contains_no_agent_config_fields(
     tmp_path,
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_ssot()
     team_service.bootstrap_challenge_cup_research_team()
 
     sources = team_service.list_team_role_binding_sources(
@@ -212,6 +340,7 @@ def test_challenge_cup_role_bindings_are_unique_and_raw_projections_have_no_agen
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_ssot()
     result = team_service.bootstrap_challenge_cup_research_team()
 
     expected_roles = {

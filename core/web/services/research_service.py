@@ -16,12 +16,10 @@ from core.research.agent_templates import (
     normalize_research_prompt_filename,
     research_prompt_filename_for_key,
     research_default_prompt,
-    normalize_research_agent_config,
 )
 from core.research import ResearchThemeDiscoveryService
 from core.infrastructure.workspace_manager import get_workspace
 from core.chat.chat_task_types import trim_lines
-from core.ui.chat_state import load_chat_state
 from core.logging import debug as _debug_logger
 from config.public_config import build_effective_config, load_public_config
 from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, research_organization_service, session_service, team_service
@@ -605,13 +603,12 @@ def list_research_prompts() -> dict[str, Any]:
     workspace = get_workspace()
     ensure_research_prompt_defaults(workspace)
     agent_config = _load_research_agent_config()
-    agent_config = _ensure_research_agent_instances(agent_config)
     llm_configs = _list_llm_config_options()
     prompts: list[dict[str, Any]] = []
-    deleted_default_agents = set(agent_config.get("deletedDefaultAgents") or [])
-    prompt_files: dict[str, str] = {
-        key: filename for key, filename in RESEARCH_PROMPT_FILES.items() if key not in deleted_default_agents
-    }
+    # Prompt markdown is a reusable content asset, not an Agent activation
+    # record. Archiving an Agent removes it from the Directory projection but
+    # intentionally does not delete or tombstone the built-in prompt content.
+    prompt_files: dict[str, str] = dict(RESEARCH_PROMPT_FILES)
     for agent in agent_config["agents"]:
         key = str(agent.get("key") or "").strip()
         filename = str(agent.get("promptFilename") or "").strip()
@@ -629,213 +626,12 @@ def list_research_prompts() -> dict[str, Any]:
         )
     return {
         "root": str(workspace.research_prompts_dir()),
-        "agentConfigPath": str(workspace.get_research_agent_config_path()),
+        "agentConfigPath": str(agent_directory_service.registry_path()),
         "prompts": prompts,
         "agentTemplates": RESEARCH_AGENT_TEMPLATES,
         "llmConfigs": llm_configs,
         "agents": agent_config["agents"],
     }
-
-
-def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, Any]:
-    """Ensure enabled research agents point at active Agent Center instances."""
-
-    workspace = get_workspace()
-    project_root = _project_root_for_workspace(workspace)
-    previous_session_root = session_service.PROJECT_ROOT
-    previous_agent_root = agent_directory_service.PROJECT_ROOT
-    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
-    session_service.PROJECT_ROOT = project_root
-    agent_directory_service.PROJECT_ROOT = project_root
-    agent_mode_binding_service.PROJECT_ROOT = project_root
-    agents = [dict(item) for item in list(agent_config.get("agents") or []) if isinstance(item, dict)]
-    changed = False
-    try:
-        for agent in agents:
-            if agent.get("enabled") is False:
-                continue
-            key = str(agent.get("key") or "").strip()
-            if not key:
-                continue
-            label = str(agent.get("label") or key).strip() or key
-            agent_instance_id = str(agent.get("agentInstanceId") or agent.get("agentId") or "").strip()
-            archived_or_missing_agent_id = ""
-            instance = agent_directory_service.get_agent(agent_instance_id, include_archived=False) if agent_instance_id else None
-            if agent_instance_id and not instance:
-                archived_or_missing_agent_id = agent_instance_id
-            profile_id = str((instance or {}).get("profileId") or agent.get("profileId") or agent.get("llmConfigId") or "").strip() or "primary"
-            if archived_or_missing_agent_id:
-                if agent.get("enabled") is not False:
-                    agent["enabled"] = False
-                agent["agentStatus"] = "stale"
-                agent["staleAgentId"] = archived_or_missing_agent_id
-                changed = True
-                _record_research_config_event(
-                    "research.agent_instance.stale_disabled",
-                    phase="agent_template_config",
-                    message="Research agent config referenced a missing or archived AgentInstance; disabling the stale binding.",
-                    fields={
-                        "agentKey": key,
-                        "staleAgentId": archived_or_missing_agent_id,
-                        "profileId": profile_id,
-                    },
-                    agent_key=key,
-                )
-                continue
-            if not instance:
-                try:
-                    session_detail = session_service.create_chat_session(
-                        title=label,
-                        llm_bindings=session_service.llm_bindings_for_profile_id(profile_id),
-                        created_by="research_agent_pool",
-                    )
-                except Exception as exc:
-                    _record_research_config_event(
-                        "research.agent_instance.sync_failed",
-                        phase="agent_template_config",
-                        message="Research agent instance sync failed",
-                        outcome="failed",
-                        level="warning",
-                        fields={
-                            "agentKey": key,
-                            "profileId": profile_id,
-                            "errorType": type(exc).__name__,
-                            "message": str(exc),
-                        },
-                        agent_key=key,
-                    )
-                    continue
-                agent_instance_id = str(session_detail.get("agentId") or "").strip()
-                agent["agentInstanceId"] = agent_instance_id
-                agent["agentId"] = agent_instance_id
-                agent["directSessionId"] = str(session_detail.get("id") or "").strip()
-                changed = True
-            if agent_instance_id:
-                try:
-                    instance = agent_directory_service.get_agent(agent_instance_id, include_archived=False) or instance
-                    profile_id = str(agent.get("profileId") or profile_id).strip() or "primary"
-                    expected_metadata = {
-                        "researchAgentKey": key,
-                        "researchTemplateId": str(agent.get("templateId") or "").strip(),
-                        "researchPromptFilename": str(agent.get("promptFilename") or "").strip(),
-                    }
-                    instance_metadata = dict((instance or {}).get("metadata") or {})
-                    needs_instance_update = (
-                        agent_directory_service.agent_dialogue_model_id(instance) != agent_directory_service.agent_dialogue_model_id({"llmBindings": session_service.llm_bindings_for_profile_id(profile_id)})
-                        or str((instance or {}).get("primaryMode") or "").strip() != "research"
-                        or str((instance or {}).get("roleKey") or "").strip() != f"research_{key}"
-                        or str((instance or {}).get("promptTemplateId") or "").strip() != f"prompt-research-{key}"
-                        or str(instance_metadata.get("functionalDisplayName") or "").strip() != label
-                        or any(instance_metadata.get(field) != value for field, value in expected_metadata.items())
-                    )
-                    updated_instance = (
-                        agent_directory_service.update_agent_instance(
-                            agent_instance_id,
-                            display_name=label,
-                            llm_bindings=session_service.llm_bindings_for_profile_id(profile_id),
-                            primary_mode="research",
-                            role_key=f"research_{key}",
-                            prompt_template_id=f"prompt-research-{key}",
-                            metadata=expected_metadata,
-                            preserve_generated_display_name=True,
-                        )
-                        if needs_instance_update
-                        else (instance or {})
-                    )
-                    if agent.get("agentInstanceId") != agent_instance_id:
-                        agent["agentInstanceId"] = agent_instance_id
-                        changed = True
-                    if agent.get("agentId") != agent_instance_id:
-                        agent["agentId"] = agent_instance_id
-                        changed = True
-                    if str(agent.get("roleKey") or "").strip() != f"research_{key}":
-                        agent["roleKey"] = f"research_{key}"
-                        changed = True
-                    if str(agent.get("promptTemplateId") or "").strip() != f"prompt-research-{key}":
-                        agent["promptTemplateId"] = f"prompt-research-{key}"
-                        changed = True
-                    direct_session_id = str(updated_instance.get("directSessionId") or agent.get("directSessionId") or "").strip()
-                    if direct_session_id:
-                        try:
-                            if not _research_direct_session_is_current(
-                                direct_session_id,
-                                title=label,
-                                profile_id=profile_id,
-                                agent_id=agent_instance_id,
-                                project_root=project_root,
-                            ):
-                                session_service.update_chat_session(
-                                    direct_session_id,
-                                    title=label,
-                                )
-                        except Exception as exc:
-                            _debug_logger.warning(
-                                f"Failed to update direct session title for research agent={label}, direct_session_id={direct_session_id}. error={exc}"
-                            )
-                        if agent.get("directSessionId") != direct_session_id:
-                            agent["directSessionId"] = direct_session_id
-                            changed = True
-                except Exception as exc:
-                    _debug_logger.warning(f"Failed to sync research agent template instances. error={exc}")
-        if changed:
-            next_config = {
-                "schemaVersion": 1,
-                "deletedDefaultAgents": list(agent_config.get("deletedDefaultAgents") or []),
-                "agents": agents,
-            }
-            write_config = getattr(workspace, "write_research_agent_config", None)
-            if callable(write_config):
-                write_config(_research_agent_storage_payload(next_config))
-            _sync_research_mode_binding(agents)
-            _record_research_config_event(
-                "research.agent_instance.synced",
-                phase="agent_template_config",
-                message="Research agent instances synced to conversation registry",
-                fields={"agentCount": len(agents)},
-            )
-            return normalize_research_agent_config(next_config)
-        _sync_research_mode_binding(agents)
-        return {**agent_config, "agents": agents}
-    finally:
-        session_service.PROJECT_ROOT = previous_session_root
-        agent_directory_service.PROJECT_ROOT = previous_agent_root
-        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
-
-
-def _research_direct_session_is_current(
-    session_id: str,
-    *,
-    title: str,
-    profile_id: str,
-    agent_id: str,
-    project_root: Path,
-) -> bool:
-    """Return whether a research direct session already matches the Agent binding."""
-
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return False
-    expected_title = trim_lines(title or "", max_lines=1).strip()
-    expected_profile_id = str(profile_id or "").strip()
-    expected_agent_id = str(agent_id or "").strip()
-    try:
-        payload = load_chat_state(project_root)
-    except Exception:
-        return False
-    conversations = payload.get("conversations")
-    if not isinstance(conversations, list):
-        return False
-    for item in conversations:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("conversation_id") or "").strip() != normalized_session_id:
-            continue
-        current_agent_id = str(item.get("agent_id") or item.get("agentId") or "").strip()
-        return (
-            (not expected_title or str(item.get("title") or "").strip() == expected_title)
-            and (not expected_agent_id or current_agent_id == expected_agent_id)
-        )
-    return False
 
 
 def _sync_research_mode_binding(agents: list[dict[str, Any]]) -> None:
@@ -966,26 +762,6 @@ def _research_mode_binding_payload_is_current(
     )
 
 
-def _research_agent_storage_payload(config: dict[str, Any]) -> dict[str, Any]:
-    """Persist the research Agent index without legacy model-binding names."""
-
-    agents: list[dict[str, Any]] = []
-    for item in list(config.get("agents") or []):
-        if not isinstance(item, dict):
-            continue
-        record = dict(item)
-        profile_id = str(record.get("profileId") or record.get("llmConfigId") or "").strip()
-        record.pop("llmConfigId", None)
-        if profile_id:
-            record["profileId"] = profile_id
-        agents.append(record)
-    return {
-        "schemaVersion": 1,
-        "deletedDefaultAgents": sorted(str(item) for item in list(config.get("deletedDefaultAgents") or [])),
-        "agents": agents,
-    }
-
-
 def save_research_prompt(key: str, content: str) -> dict[str, Any]:
     normalized = str(key or "").strip().lower()
     agent_config = _load_research_agent_config()
@@ -1090,8 +866,6 @@ def save_research_agent_binding(
         raise ValueError(f"Unknown research agent template: {template_id}")
     config = _load_research_agent_config()
     agents = config["agents"]
-    deleted_default_agents = set(config.get("deletedDefaultAgents") or [])
-    deleted_default_agents.discard(normalized)
     existing_agent = next((agent for agent in agents if agent["key"] == normalized), None)
     existing_agent_id = str((existing_agent or {}).get("agentId") or (existing_agent or {}).get("agentInstanceId") or "").strip()
     existing_instance = agent_directory_service.get_agent(existing_agent_id, include_archived=False) if existing_agent_id else None
@@ -1182,6 +956,7 @@ def save_research_agent_binding(
                 "researchAgentKey": normalized,
                 "researchTemplateId": selected_template,
                 "researchPromptFilename": prompt_file,
+                "researchProfileId": selected_profile_id,
                 "agentMode": "research",
                 "configSurface": "agent_config",
             },
@@ -1212,6 +987,7 @@ def save_research_agent_binding(
                     "researchAgentKey": normalized,
                     "researchTemplateId": selected_template,
                     "researchPromptFilename": prompt_file,
+                    "researchProfileId": selected_profile_id,
                     "agentMode": "research",
                     "configSurface": "agent_config",
                 },
@@ -1241,25 +1017,6 @@ def save_research_agent_binding(
     next_agents = [agent for agent in agents if str(agent.get("key") or "").strip() != normalized]
     next_agents.append(research_agent_record)
     next_agents.sort(key=lambda agent: str(agent.get("key") or ""))
-    write_config = getattr(workspace, "write_research_agent_config", None)
-    if callable(write_config):
-        if not write_config(_research_agent_storage_payload({"deletedDefaultAgents": deleted_default_agents, "agents": next_agents})):
-            _record_research_config_event(
-                "research.agent_binding.update_failed",
-                phase="agent_template_config",
-                message="Research agent template binding update failed",
-                outcome="failed",
-                level="error",
-                fields={
-                    "agentKey": normalized,
-                    "templateId": selected_template,
-                    "profileId": selected_profile_id,
-                    "errorType": "ValueError",
-                    "message": "Failed to write research agent config.",
-                },
-                agent_key=normalized,
-            )
-            raise ValueError("Failed to write research agent config.")
     _sync_research_mode_binding(next_agents)
     _record_research_config_event(
         "research.agent_binding.updated",
@@ -1319,12 +1076,6 @@ def delete_research_agent_binding(key: str) -> dict[str, Any]:
             agent_key=normalized,
         )
         raise ValueError(f"Research agent {normalized} is still used by flow nodes: {', '.join(referencing_nodes[:5])}")
-    deleted_default_agents = set(config.get("deletedDefaultAgents") or [])
-    if normalized in RESEARCH_PROMPT_FILES:
-        deleted_default_agents.add(normalized)
-    workspace = get_workspace()
-    if not workspace.write_research_agent_config(_research_agent_storage_payload({"deletedDefaultAgents": deleted_default_agents, "agents": remaining})):
-        raise ValueError("Failed to delete research agent config.")
     _remove_research_agent_from_mode_binding(normalized, agent_instance_id)
     if agent_instance_id:
         try:
@@ -1355,11 +1106,10 @@ def _load_saved_research_flow_canvas_for_binding_guard() -> dict[str, Any]:
     return {"nodes": [node for node in nodes if isinstance(node, dict)]}
 
 
-def _get_saved_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, Any]:
+def _get_saved_research_flow_canvas() -> dict[str, Any]:
     workspace = get_workspace()
     raw = workspace.read_research_flow_canvas()
-    raw_agent_config = _load_research_agent_config()
-    agent_config = _ensure_research_agent_instances(raw_agent_config) if sync_agent_instances else raw_agent_config
+    agent_config = _load_research_agent_config()
     canvas = _normalize_research_flow_canvas(
         _with_research_flow_agent_ids(
             _with_default_research_flow_canvas_migrations(raw or _default_research_flow_canvas()),
@@ -1372,7 +1122,7 @@ def _get_saved_research_flow_canvas(*, sync_agent_instances: bool = True) -> dic
     })
 
 
-def get_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, Any]:
+def get_research_flow_canvas() -> dict[str, Any]:
     workspace = get_workspace()
     canvas = _research_organization_flow_canvas()
     _record_research_config_event(
@@ -1398,14 +1148,12 @@ def save_research_flow_canvas(
     payload: dict[str, Any],
     *,
     record_event: bool = True,
-    sync_agent_instances: bool = True,
 ) -> dict[str, Any]:
     workspace = get_workspace()
     agent_binding_stats: dict[str, int] = {}
     mode_binding_stats: dict[str, int] = {}
     try:
-        raw_agent_config = _load_research_agent_config()
-        agent_config = _ensure_research_agent_instances(raw_agent_config) if sync_agent_instances else raw_agent_config
+        agent_config = _load_research_agent_config()
         if isinstance(payload, dict) and str(payload.get("canvasKind") or "").strip() == _ORGANIZATION_CANVAS_KIND:
             raise ValueError("Research organization graph must be saved through /api/research/organization, not /api/research/flow-canvas.")
         canvas = _normalize_research_flow_canvas(
@@ -1493,7 +1241,7 @@ def _sync_research_flow_canvas_with_session_payload(payload: dict[str, Any]) -> 
     if not isinstance(payload, dict):
         return payload
     try:
-        canvas = _get_saved_research_flow_canvas(sync_agent_instances=False)
+        canvas = _get_saved_research_flow_canvas()
         nodes = [dict(node) for node in canvas["nodes"]]
         edges = [dict(edge) for edge in canvas["edges"]]
         changed: list[dict[str, Any]] = []
@@ -1649,7 +1397,6 @@ def _persist_research_flow_canvas_state(
             "edges": edges,
         },
         record_event=False,
-        sync_agent_instances=False,
     )
 
 
@@ -2527,15 +2274,58 @@ def _project_root_for_workspace(workspace: Any) -> Path:
 
 def _load_research_agent_config() -> dict[str, Any]:
     workspace = get_workspace()
-    read_config = getattr(workspace, "read_research_agent_config", None)
-    raw = read_config() if callable(read_config) else {}
-    config = normalize_research_agent_config(raw)
-    get_config_path = getattr(workspace, "get_research_agent_config_path", None)
-    config_path = get_config_path() if callable(get_config_path) else ""
-    return {
-        **config,
-        "configPath": str(config_path),
-    }
+    project_root = _project_root_for_workspace(workspace)
+    previous_root = agent_directory_service.PROJECT_ROOT
+    agent_directory_service.PROJECT_ROOT = project_root
+    try:
+        records: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for agent in agent_directory_service.list_agents(
+            include_archived=False,
+            detail="full",
+        ):
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            if str(metadata.get("challengeCupTeamId") or "").strip():
+                continue
+            role_key = str(agent.get("roleKey") or "").strip()
+            key = str(metadata.get("researchAgentKey") or "").strip()
+            if not key and role_key.startswith("research_"):
+                key = role_key.removeprefix("research_")
+            if not key:
+                continue
+            if key in seen_keys:
+                raise ValueError(
+                    f"Research AgentDirectory binding is duplicated: {key}"
+                )
+            seen_keys.add(key)
+            prompt_filename = str(metadata.get("researchPromptFilename") or "").strip()
+            records.append(
+                {
+                    "key": key,
+                    "label": str(agent.get("displayName") or key).strip(),
+                    "promptFilename": prompt_filename,
+                    "templateId": str(metadata.get("researchTemplateId") or "").strip(),
+                    "profileId": str(metadata.get("researchProfileId") or "").strip(),
+                    "roleKey": role_key,
+                    "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+                    "enabled": True,
+                    "agentId": str(agent.get("agentId") or "").strip(),
+                    "agentInstanceId": str(agent.get("agentId") or "").strip(),
+                    "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                    "primaryMode": str(agent.get("primaryMode") or "").strip(),
+                    "llmBindings": agent_directory_service.normalize_agent_llm_bindings(
+                        agent.get("llmBindings")
+                    ),
+                }
+            )
+        records.sort(key=lambda item: str(item.get("key") or ""))
+        return {
+            "schemaVersion": 1,
+            "agents": records,
+            "configPath": str(agent_directory_service.registry_path()),
+        }
+    finally:
+        agent_directory_service.PROJECT_ROOT = previous_root
 
 
 def _list_llm_config_options() -> list[dict[str, Any]]:

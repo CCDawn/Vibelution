@@ -95,12 +95,12 @@ def challenge_cup_research_team_missing() -> bool:
 
 
 def bootstrap_challenge_cup_research_team() -> dict[str, Any]:
-    """Materialize the six Challenge Cup Agent assets exactly once.
+    """Materialize the Challenge Cup Team from six existing Agent assets.
 
-    Existing Team and Agent records are configuration authority and are never
-    reconciled here. A present Team therefore ends the bootstrap immediately,
-    even when one of its member Agents is unavailable or differently
-    configured; those conditions belong to the Agent configuration surface.
+    AgentDirectory is the only authority for the assets.  This bootstrap may
+    create the Team projection, but it must never create, repair, reactivate or
+    configure an Agent. Missing or duplicate role assets fail closed so drift
+    is corrected at the Agent configuration surface.
     """
 
     s = _service()
@@ -145,7 +145,6 @@ def bootstrap_challenge_cup_research_team() -> dict[str, Any]:
                         "roleContractVersion": s.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION,
                         "roleContractFingerprint": s.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT,
                         "participantPolicyVersion": s.CHALLENGE_CUP_RESEARCH_TEAM_PARTICIPANT_POLICY_VERSION,
-                        "legacyReadMode": s.CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_READ_MODE,
                     }
                 )
                 state.setdefault("teams", []).append(team)
@@ -156,7 +155,12 @@ def bootstrap_challenge_cup_research_team() -> dict[str, Any]:
         if created:
             canvas_path = s._team_canvas_path(s.CHALLENGE_CUP_RESEARCH_TEAM_ID)
             if not canvas_path.exists():
-                s._write_json(canvas_path, s._default_canvas_for_team(team))
+                s._write_json(
+                    canvas_path,
+                    s._challenge_cup_canvas_storage_projection(
+                        s._default_canvas_for_team(team)
+                    ),
+                )
             agent_refs = s._merged_agent_reference_maps(
                 s._load_lightweight_agent_references(),
                 agents,
@@ -634,86 +638,38 @@ def _ensure_ai_search_system_agents() -> list[dict[str, Any]]:
 
 
 def _materialize_challenge_cup_research_team_agents() -> list[dict[str, Any]]:
-    """Create the six Team-owned Agent assets without reconciling existing ones."""
+    """Resolve exactly one active Directory Agent for every fixed role."""
 
     s = _service()
-    project_root = Path(s.PROJECT_ROOT).resolve()
-    from core.web.services import session_service
-
-    previous_root = session_service.PROJECT_ROOT
-    session_service.PROJECT_ROOT = project_root
-    try:
-        agents: list[dict[str, Any]] = []
-        for role in s.CHALLENGE_CUP_RESEARCH_TEAM_ROLES:
-            agent = _materialize_challenge_cup_research_team_agent(
-                role,
-                session_service=session_service,
+    agents: list[dict[str, Any]] = []
+    for role in s.CHALLENGE_CUP_RESEARCH_TEAM_ROLES:
+        agent = _materialize_challenge_cup_research_team_agent(role)
+        if agent is None:
+            role_name = str(role.get("role") or "").strip()
+            raise s.TeamServiceError(
+                f"Challenge Cup AgentDirectory asset is missing: {role_name}"
             )
-            if agent:
-                agents.append(agent)
-        return agents
-    finally:
-        session_service.PROJECT_ROOT = previous_root
+        agents.append(agent)
+    agent_ids = [str(agent.get("agentId") or "").strip() for agent in agents]
+    if len(agent_ids) != len(set(agent_ids)):
+        raise s.TeamServiceError(
+            "Challenge Cup AgentDirectory roles must reference six unique Agents."
+        )
+    return agents
 
 
 def _materialize_challenge_cup_research_team_agent(
     role: dict[str, Any],
-    *,
-    session_service: Any,
 ) -> dict[str, Any] | None:
-    """Reuse a complete bootstrap asset or create a new Agent once.
-
-    Reuse is read-only. An archived or incomplete historical Agent is not
-    reactivated or rewritten; bootstrap creates a fresh asset instead.
-    """
+    """Resolve one complete Agent SSOT asset without performing any write."""
 
     s = _service()
     role_name = str(role.get("role") or "").strip()
     role_key = str(role.get("roleKey") or role_name).strip()
-    label = str(role.get("label") or role_name).strip() or role_name
     if not role_name or not role_key:
         return None
 
-    existing = s._find_challenge_cup_research_team_agent(role)
-    if existing and str(existing.get("directSessionId") or "").strip():
-        return existing
-
-    prompt_template_id = (
-        agent_directory_service.CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS.get(
-            role_key,
-            "",
-        )
-        or "prompt-chat-default"
-    )
-    agent = agent_directory_service.create_agent_instance(
-        display_name=label,
-        llm_bindings=session_service.default_session_llm_bindings(),
-        primary_mode="research",
-        role_key=role_key,
-        prompt_template_id=prompt_template_id,
-        created_by=s.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
-        metadata=s._challenge_cup_research_team_role_metadata(role),
-    )
-    agent_id = str(agent.get("agentId") or "").strip()
-    if not agent_id:
-        raise s.TeamServiceError(
-            f"Challenge Cup Agent asset was not created for role: {role_name}"
-        )
-    session_service.ensure_agent_direct_session(
-        agent_id=agent_id,
-        title=label,
-        created_by=s.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
-        conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
-    )
-    materialized = agent_directory_service.get_agent(
-        agent_id,
-        include_archived=False,
-    )
-    if not materialized:
-        raise s.TeamServiceError(
-            f"Challenge Cup Agent asset disappeared after creation: {role_name}"
-        )
-    return materialized
+    return s._find_challenge_cup_research_team_agent(role)
 
 
 def _ensure_knowledge_expansion_team_role_agents() -> list[dict[str, Any]]:
@@ -826,6 +782,7 @@ def _agent_direct_session_available(agent: dict[str, Any], *, session_service: A
 def _find_challenge_cup_research_team_agent(
     role: dict[str, Any] | str,
 ) -> dict[str, Any] | None:
+    s = _service()
     role_spec = role if isinstance(role, dict) else {"role": role}
     normalized_role = str(role_spec.get("role") or "").strip()
     if not normalized_role:
@@ -847,6 +804,13 @@ def _find_challenge_cup_research_team_agent(
         candidates.append(agent)
     if not candidates:
         return None
+    if len(candidates) > 1:
+        candidate_ids = ", ".join(
+            sorted(str(item.get("agentId") or "").strip() for item in candidates)
+        )
+        raise s.TeamServiceError(
+            f"Challenge Cup AgentDirectory role is duplicated: {normalized_role} ({candidate_ids})"
+        )
     candidates.sort(
         key=lambda item: (
             str(item.get("createdAt") or ""),
@@ -958,16 +922,7 @@ def _challenge_cup_research_team_members_from_agents(agents: list[dict[str, Any]
             {
                 "memberId": f"challenge-cup-{index:02d}-{role_name}",
                 "agentId": agent_id,
-                "agentCode": str((agent or {}).get("agentCode") or "").strip(),
-                "agentName": str((agent or {}).get("displayName") or role.get("label") or "").strip(),
                 "role": role_name,
-                "purpose": str(role.get("purpose") or role.get("label") or "").strip(),
-                "responsibilities": [
-                    str(item or "").strip()
-                    for item in list(role.get("responsibilities") or [])
-                    if str(item or "").strip()
-                ],
-                "agentStatus": "active",
             }
         )
     return members

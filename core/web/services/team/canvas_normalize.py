@@ -81,8 +81,14 @@ def _team_canvas_with_validation(
                 },
             )
     validation = s._validate_canvas(canvas, team_id=team["teamId"], active_agents_by_id=active_agents_by_id)
-    if raw != canvas:
-        s._write_json(canvas_path, canvas)
+    stored_canvas = (
+        s._challenge_cup_canvas_storage_projection(canvas)
+        if str(team.get("teamId") or "").strip()
+        == s.CHALLENGE_CUP_RESEARCH_TEAM_ID
+        else canvas
+    )
+    if raw != stored_canvas:
+        s._write_json(canvas_path, stored_canvas)
     return {**canvas, "validation": validation}
 
 
@@ -103,7 +109,13 @@ def save_team_canvas(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     with s._TEAM_LOCK:
         state = s._load_index()
         stored = s._find_team(state, team["teamId"])
-        s._write_json(s._team_canvas_path(team["teamId"]), canvas)
+        stored_canvas = (
+            s._challenge_cup_canvas_storage_projection(canvas)
+            if str(team.get("teamId") or "").strip()
+            == s.CHALLENGE_CUP_RESEARCH_TEAM_ID
+            else canvas
+        )
+        s._write_json(s._team_canvas_path(team["teamId"]), stored_canvas)
         if stored is not None:
             stored["updatedAt"] = canvas["updatedAt"]
             stored["canvasPath"] = s._relative_path(s._team_canvas_path(team["teamId"]))
@@ -444,6 +456,36 @@ def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:
         "nodes": nodes,
         "edges": s._default_edges_for_team(team, nodes),
     }
+
+
+def _challenge_cup_canvas_storage_projection(
+    canvas: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist Challenge Cup canvas layout plus role→agentId references only."""
+
+    nodes: list[dict[str, Any]] = []
+    for item in list(canvas.get("nodes") or []):
+        if not isinstance(item, dict):
+            continue
+        nodes.append(
+            {
+                key: value
+                for key, value in item.items()
+                if key
+                not in {
+                    "agentCode",
+                    "agentName",
+                    "agentSourceRef",
+                    "agentProjectionEdit",
+                    "agentProjectionCanWrite",
+                }
+            }
+        )
+    return {
+        key: value
+        for key, value in canvas.items()
+        if key not in {"nodes", "validation"}
+    } | {"nodes": nodes}
 
 
 def _ai_search_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:

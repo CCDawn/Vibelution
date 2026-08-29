@@ -1,6 +1,7 @@
 import pytest
 
 from core.web.services import agent_directory_service, chat_room_service, project_agent_bus_service, session_service, team_service
+from tests.helpers.system_agent_state import _seed_challenge_cup_agent_assets
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
@@ -16,6 +17,7 @@ def test_challenge_cup_bootstrap_leaves_unbound_historical_agent_untouched(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     team_service.bootstrap_challenge_cup_research_team()
     stale = agent_directory_service.create_agent_instance(
         display_name="旧资料发现",

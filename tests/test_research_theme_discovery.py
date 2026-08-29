@@ -649,10 +649,8 @@ def test_research_agent_binding_save_updates_unified_agent_stack(tmp_path, monke
     assert prompt["sourcePath"] == "workspace/prompts/research/paper_reader.md"
     assert created["profileId"] == "research_broad"
     assert "llmConfigId" not in created
-    stored_config = json.loads(workspace.get_research_agent_config_path().read_text(encoding="utf-8"))
-    stored_agent = next(item for item in stored_config["agents"] if item["key"] == "paper_reader")
-    assert stored_agent["profileId"] == "research_broad"
-    assert "llmConfigId" not in stored_agent
+    assert not workspace.get_research_agent_config_path().exists()
+    assert agent["metadata"]["researchProfileId"] == "research_broad"
     assert bindings["flowBindings"]["paper_reader"] == agent["agentId"]
     assert agent["agentId"] in bindings["pool"]
 
@@ -806,33 +804,14 @@ def test_research_agent_instance_sync_skips_current_direct_session_update(tmp_pa
     update_calls = []
     monkeypatch.setattr(session_service, "update_chat_session", lambda *args, **kwargs: update_calls.append((args, kwargs)))
 
-    result = research_service._ensure_research_agent_instances(
-        {
-            "schemaVersion": 1,
-            "agents": [
-                {
-                    "key": "broad",
-                    "label": label,
-                    "enabled": True,
-                    "templateId": "research_broad_explorer",
-                    "profileId": "primary",
-                    "promptFilename": "broad.md",
-                    "agentInstanceId": agent["agentId"],
-                    "agentId": agent["agentId"],
-                    "directSessionId": session_id,
-                    "roleKey": "research_broad",
-                    "promptTemplateId": "prompt-research-broad",
-                }
-            ],
-        }
-    )
+    result = research_service._load_research_agent_config()
 
     assert update_calls == []
     assert result["agents"][0]["directSessionId"] == session_id
     assert workspace.writes == 0
 
 
-def test_research_agent_instance_sync_disables_archived_mode_binding_ref(tmp_path, monkeypatch):
+def test_research_agent_instance_read_does_not_reconcile_archived_mode_binding_ref(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
             self.root = root / "workspace"
@@ -883,43 +862,17 @@ def test_research_agent_instance_sync_disables_archived_mode_binding_ref(tmp_pat
     events = []
     monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: events.append((args, kwargs)))
 
-    result = research_service._ensure_research_agent_instances(
-        {
-            "schemaVersion": 1,
-            "agents": [
-                {
-                    "key": "broad",
-                    "label": "广撒网探索 Agent",
-                    "activationSource": "manual_config",
-                    "enabled": True,
-                    "templateId": "research_broad_explorer",
-                    "profileId": "research_broad",
-                    "promptFilename": "broad.md",
-                    "agentInstanceId": old_agent["agentId"],
-                    "agentId": old_agent["agentId"],
-                    "directSessionId": "session-old-broad",
-                    "roleKey": "research_broad",
-                    "promptTemplateId": "prompt-research-broad",
-                }
-            ],
-        }
-    )
+    result = research_service._load_research_agent_config()
 
-    next_agent_id = result["agents"][0]["agentId"]
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
 
-    assert next_agent_id == old_agent["agentId"]
-    assert result["agents"][0]["enabled"] is False
-    assert result["agents"][0]["agentStatus"] == "stale"
-    assert result["agents"][0]["staleAgentId"] == old_agent["agentId"]
+    assert result["agents"] == []
     assert bindings["defaultAgentId"] == ""
     assert bindings["availableAgentIds"] == []
     assert bindings["pool"] == []
     assert bindings["flowBindings"] == {}
-    assert workspace.written is not None
-    stale_events = [item for item in events if item[0][0] == "research.agent_instance.stale_disabled"]
-    assert stale_events[-1][1]["fields"]["staleAgentId"] == old_agent["agentId"]
-    assert not [item for item in events if item[0][0] == "research.mode_binding.sync_failed"]
+    assert workspace.written is None
+    assert events == []
 
 
 def test_delete_research_agent_binding_blocks_agent_id_canvas_reference(tmp_path, monkeypatch):
@@ -1892,18 +1845,46 @@ def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch
         }
     )
     session_id = created["session"]["sessionId"]
-    canvas_after_create = research_service._get_saved_research_flow_canvas(sync_agent_instances=False)
+    canvas_after_create = research_service._get_saved_research_flow_canvas()
 
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "broad_search")["status"] == "ready"
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "evidence_review")["status"] == "idle"
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "theme_card")["status"] == "idle"
 
     research_service.run_broad_theme_search(session_id)
-    canvas_after_broad = research_service._get_saved_research_flow_canvas(sync_agent_instances=False)
+    canvas_after_broad = research_service._get_saved_research_flow_canvas()
 
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "broad_search")["status"] == "done"
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "deep_search")["status"] == "idle"
     assert any(event[0][0] == "research.flow_canvas.synced" for event in events)
+
+
+def _patch_directory_research_agent(
+    monkeypatch,
+    *,
+    key: str,
+    prompt_filename: str,
+    profile_id: str,
+) -> None:
+    agent = {
+        "agentId": f"agent-{key}",
+        "displayName": f"Research {key}",
+        "status": "active",
+        "primaryMode": "research",
+        "roleKey": f"research_{key}",
+        "promptTemplateId": "",
+        "llmBindings": {},
+        "metadata": {
+            "researchAgentKey": key,
+            "researchPromptFilename": prompt_filename,
+            "researchProfileId": profile_id,
+        },
+    }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "list_agents",
+        lambda **_kwargs: [agent],
+    )
 
 
 def test_llm_research_agent_runner_requires_search_tool_calls(tmp_path, monkeypatch):
@@ -1934,6 +1915,12 @@ def test_llm_research_agent_runner_requires_search_tool_calls(tmp_path, monkeypa
 
     monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
     monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient())
+    _patch_directory_research_agent(
+        monkeypatch,
+        key="broad",
+        prompt_filename="broad.md",
+        profile_id="research_broad",
+    )
     runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
     session = ResearchDiscoverySession(
         session_id=new_id("research-session"),
@@ -1981,6 +1968,12 @@ def test_llm_research_agent_runner_partitions_prompt_cache_by_session_and_stage(
 
     monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
     monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient())
+    _patch_directory_research_agent(
+        monkeypatch,
+        key="broad",
+        prompt_filename="broad.md",
+        profile_id="research_broad",
+    )
     runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
     session = ResearchDiscoverySession(
         session_id="research-session-cache-a",
@@ -2034,6 +2027,12 @@ def test_llm_research_json_agent_partitions_prompt_cache_by_session_and_agent(tm
 
     monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
     monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient())
+    _patch_directory_research_agent(
+        monkeypatch,
+        key="review",
+        prompt_filename="review.md",
+        profile_id="research_review",
+    )
     runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
     session = ResearchDiscoverySession(
         session_id="research-session-cache-b",

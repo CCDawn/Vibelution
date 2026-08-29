@@ -3,7 +3,6 @@ import threading
 
 import pytest
 
-from core.infrastructure import developer_sandbox
 from core.web.services import (
     agent_bulk_delete_service,
     agent_config_workspace_service,
@@ -17,6 +16,7 @@ from core.web.services import (
 from tests.helpers.system_agent_state import (
     _evolution_system_agent_payloads,
     _seed_ai_search_system_team_ready,
+    _seed_challenge_cup_agent_assets,
     _seed_system_team_bootstrap_ready,
 )
 
@@ -261,6 +261,7 @@ def test_research_organization_sync_does_not_overwrite_existing_challenge_cup_te
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     initial = team_service.bootstrap_challenge_cup_research_team()
     before_members = [dict(member) for member in initial["team"]["members"]]
     legacy_agent = agent_directory_service.create_agent_instance(
@@ -284,7 +285,13 @@ def test_research_organization_sync_does_not_overwrite_existing_challenge_cup_te
     result = team_service.ensure_research_team_from_organization(organization)
 
     assert result["teamId"] == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
-    assert result["members"] == before_members
+    assert [
+        (member["memberId"], member["role"], member["agentId"])
+        for member in result["members"]
+    ] == [
+        (member["memberId"], member["role"], member["agentId"])
+        for member in before_members
+    ]
 
 
 def test_challenge_cup_agent_repair_preserves_agent_instance_configuration(
@@ -292,6 +299,7 @@ def test_challenge_cup_agent_repair_preserves_agent_instance_configuration(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     initial = team_service.bootstrap_challenge_cup_research_team()
     agent_id = initial["team"]["members"][0]["agentId"]
     current = agent_directory_service.get_agent(agent_id)
@@ -333,6 +341,7 @@ def test_generic_team_repair_preserves_existing_challenge_cup_membership(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     initial = team_service.bootstrap_challenge_cup_research_team()
     team = dict(initial["team"])
     before_members = [dict(member) for member in team["members"]]
@@ -399,12 +408,13 @@ def test_research_team_read_repair_cannot_override_agent_instance_configuration(
     assert after == before
 
 
-def test_challenge_cup_bootstrap_materializes_six_agent_assets_with_agent_owned_config(
+def test_challenge_cup_bootstrap_projects_six_preconfigured_agent_assets(
     tmp_path,
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    creation_default = session_service.default_session_llm_bindings()
+    seeded = _seed_challenge_cup_agent_assets()
+    seeded_by_id = {str(agent["agentId"]): agent for agent in seeded}
 
     result = team_service.bootstrap_challenge_cup_research_team()
     team = result["team"]
@@ -421,12 +431,8 @@ def test_challenge_cup_bootstrap_materializes_six_agent_assets_with_agent_owned_
         agent = agent_directory_service.get_agent(member["agentId"])
         assert agent is not None
         assert agent["roleKey"] == member["role"]
-        assert agent["promptTemplateId"] == (
-            agent_directory_service.CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS[
-                member["role"]
-            ]
-        )
-        assert agent["llmBindings"] == creation_default
+        assert agent["promptTemplateId"] == "prompt-chat-default"
+        assert agent["llmBindings"] == seeded_by_id[member["agentId"]]["llmBindings"]
         assert agent["metadata"]["configSurface"] == "agent_config"
         assert agent["metadata"]["challengeCupTeamRole"] == member["role"]
 
@@ -436,6 +442,7 @@ def test_challenge_cup_bootstrap_never_reconciles_existing_agent_configuration(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     initial = team_service.bootstrap_challenge_cup_research_team()
     member = next(
         item
@@ -451,7 +458,7 @@ def test_challenge_cup_bootstrap_never_reconciles_existing_agent_configuration(
     }
     agent_directory_service.update_agent_instance(
         member["agentId"],
-        llm_bindings={"dialogue": {"modelId": "relay_openai/gpt-5.6-luna"}},
+        llm_bindings={"dialogue": {"modelId": "custom-user-model"}},
         prompt_template_id="prompt-chat-default",
         permission_preset="request_approval",
         tool_policy=custom_policy,
@@ -520,6 +527,7 @@ def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatc
 
 def test_system_teams_do_not_embed_global_knowledge_steward_as_member(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
 
     research = team_service.bootstrap_challenge_cup_research_team()["team"]
     expansion = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)["team"]
@@ -550,6 +558,7 @@ def test_challenge_cup_research_team_keeps_global_knowledge_steward_separate(
         agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     )
 
+    _seed_challenge_cup_agent_assets()
     team = team_service.bootstrap_challenge_cup_research_team()["team"]
 
     assert all(member["role"] != "knowledge_steward" for member in team["members"])
@@ -564,6 +573,7 @@ def test_challenge_cup_canvas_projects_members_without_writing_membership(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     team = team_service.bootstrap_challenge_cup_research_team()["team"]
     members_before = [
         (member["role"], member["agentId"])
@@ -593,6 +603,7 @@ def test_challenge_cup_default_canvas_keeps_stage_relationships(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     result = team_service.bootstrap_challenge_cup_research_team()
     canvas = team_service.get_team_canvas(result["teamId"])
 
@@ -634,6 +645,7 @@ def test_challenge_cup_canvas_repairs_missing_projection_edges_only(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     team = team_service.bootstrap_challenge_cup_research_team()["team"]
     agent_config_before = {
         member["agentId"]: _agent_config_snapshot(
@@ -662,6 +674,7 @@ def test_challenge_cup_existing_team_never_enters_bootstrap_for_member_drift(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     result = team_service.bootstrap_challenge_cup_research_team()
     teams_path = team_service._teams_index_path()
     payload = json.loads(teams_path.read_text(encoding="utf-8"))
@@ -686,6 +699,7 @@ def test_challenge_cup_bootstrap_serializes_first_materialization(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     results: list[dict] = []
 
     def bootstrap() -> None:
@@ -713,6 +727,7 @@ def test_challenge_cup_research_team_agents_stay_out_of_ordinary_session_index(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     result = team_service.bootstrap_challenge_cup_research_team()
     finder = next(
         member

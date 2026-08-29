@@ -118,7 +118,36 @@ def _create_supervised_role_agent(role: str, label: str) -> dict[str, Any]:
     )
 
 
+def _seed_challenge_cup_agent_assets() -> list[dict[str, Any]]:
+    """Seed the six pre-existing Directory assets required by Team bootstrap."""
+
+    agents: list[dict[str, Any]] = []
+    for index, role in enumerate(
+        team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES,
+        start=1,
+    ):
+        role_key = str(role.get("role") or "").strip()
+        agents.append(
+            agent_directory_service.create_agent_instance(
+                display_name=f"Challenge Cup {role_key}",
+                llm_bindings={
+                    "dialogue": {"modelId": f"challenge-fixture-{index}"}
+                },
+                primary_mode="research",
+                role_key=role_key,
+                prompt_template_id="prompt-chat-default",
+                direct_session_id=f"challenge-session-{index}",
+                created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+                metadata=team_service._challenge_cup_research_team_role_metadata(
+                    role
+                ),
+            )
+        )
+    return agents
+
+
 def _seed_system_team_bootstrap_ready() -> None:
+    _seed_challenge_cup_agent_assets()
     team_service.bootstrap_challenge_cup_research_team()
     team_service.ensure_knowledge_expansion_team_agents(purge_stale=False)
     now = team_service.utc_now_iso()

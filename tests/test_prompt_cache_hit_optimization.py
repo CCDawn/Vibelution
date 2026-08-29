@@ -323,6 +323,26 @@ def test_research_runner_uses_cacheable_system_message_without_changing_partitio
 
     monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
     monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient())
+    monkeypatch.setattr(
+        agent_directory_service,
+        "list_agents",
+        lambda **_kwargs: [
+            {
+                "agentId": "agent-broad",
+                "displayName": "Research broad",
+                "status": "active",
+                "primaryMode": "research",
+                "roleKey": "research_broad",
+                "promptTemplateId": "",
+                "llmBindings": {},
+                "metadata": {
+                    "researchAgentKey": "broad",
+                    "researchPromptFilename": "broad.md",
+                    "researchProfileId": "research_broad",
+                },
+            }
+        ],
+    )
     runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
     session = ResearchDiscoverySession(
         session_id="research-session-cache-a",
