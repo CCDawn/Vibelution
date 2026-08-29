@@ -37,6 +37,22 @@ def _agent_action() -> PendingAction:
     )
 
 
+def _project_agent_action() -> PendingAction:
+    return PendingAction(
+        action_id="act-project-agent",
+        run_id="run-test",
+        node_run_id="nr-run-test-problem_understanding-a1",
+        node_id="problem_understanding",
+        attempt=1,
+        actor_kind=ActorKind.AGENT,
+        action_kind="start_agent_task",
+        input_snapshot_hash="a" * 64,
+        input_artifact_refs=(),
+        binding_snapshot_id=None,
+        budget_policy_hash="p-1",
+    )
+
+
 def _human_action() -> PendingAction:
     return PendingAction(
         action_id="act-human",
@@ -637,7 +653,14 @@ def _stale_outbox(harness, action: PendingAction, worker: AdapterDispatchWorker,
     )
 
 
-def _publish_provisional_anchor(harness, action: PendingAction) -> None:
+def _publish_provisional_anchor(
+    harness,
+    action: PendingAction,
+    *,
+    task_id: str = "stagetask-finding",
+    session_id: str = "session-finding",
+    turn_id: str = "turn-finding",
+) -> None:
     from core.web.services.team_workflow.research_runtime.domain_ports import (
         AgentTaskHandle,
         BindingResolution,
@@ -651,16 +674,16 @@ def _publish_provisional_anchor(harness, action: PendingAction) -> None:
         action=action,
         binding=BindingResolution(agent_id="agent-finder", role_key="source_finder"),
         handle=AgentTaskHandle(
-            session_id="session-finding",
+            session_id=session_id,
             session_attempt=1,
-            task_id="stagetask-finding",
-            turn_id="turn-finding",
+            task_id=task_id,
+            turn_id=turn_id,
         ),
     )
 
 
 def test_live_turn_wait_timeout_reconciles_stage_task(monkeypatch, tmp_path: Path) -> None:
-    """After the 2h wall-clock cap fails the attempt, the abandoned wait must
+    """After the logical wall-clock cap fails the attempt, the abandoned wait must
     still run the pushed-writeback leg: the stage task store is reconciled from
     the anchor identity with interrupted semantics for a non-terminal turn."""
     import core.web.services.session.turn_diagnostics as turn_diagnostics
@@ -715,6 +738,82 @@ def test_live_turn_wait_timeout_reconciles_stage_task(monkeypatch, tmp_path: Pat
         harness.close()
 
 
+def test_live_turn_wait_timeout_closes_running_project_task(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import core.web.services.team_workflow.research_project_agent_tasks as project_tasks
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        project_tasks,
+        "reconcile_research_project_agent_task_statuses",
+        lambda team_id, project_id: calls.append(
+            {"kind": "reconcile", "teamId": team_id, "projectId": project_id}
+        )
+        or {"checked": 1, "reconciled": 0},
+    )
+    monkeypatch.setattr(
+        project_tasks,
+        "_read_research_project_agent_task_record",
+        lambda team_id, project_id, task_id: {
+            "taskId": task_id,
+            "status": "running",
+            "resultRefs": [],
+        },
+    )
+
+    def update_status(team_id, project_id, task_id, **kwargs):
+        calls.append(
+            {
+                "kind": "update",
+                "teamId": team_id,
+                "projectId": project_id,
+                "taskId": task_id,
+                **kwargs,
+            }
+        )
+        return {"taskId": task_id, "status": kwargs["status"]}
+
+    monkeypatch.setattr(
+        project_tasks,
+        "update_research_project_agent_task_status",
+        update_status,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _project_agent_action()
+        _seed(harness, action, "problem_understanding")
+        _publish_provisional_anchor(
+            harness,
+            action,
+            task_id="project-task-1",
+            session_id="session-project",
+            turn_id="turn-project",
+        )
+        worker = _worker(harness)
+        stale = _stale_outbox(harness, action, worker, attempt_count=1)
+
+        worker._requeue_live_turn_wait(stale, action, "turn_not_ready:running")
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None and row.status == "failed"
+        update = next(item for item in calls if item["kind"] == "update")
+        assert update == {
+            "kind": "update",
+            "teamId": "research-team",
+            "projectId": "challenge-sci-096",
+            "taskId": "project-task-1",
+            "status": "timed_out",
+            "result_refs": [],
+            "failure_code": "live_turn_wait_timeout",
+        }
+    finally:
+        harness.close()
+
+
 def test_live_turn_wait_timeout_reconcile_error_is_swallowed(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -761,7 +860,7 @@ def test_live_turn_wait_timeout_reconcile_error_is_swallowed(
 
 def test_live_turn_wait_requeue_records_workflow_heartbeat(tmp_path: Path) -> None:
     """Each live-turn wait requeue appends one structured workflow event so a
-    multi-hour wait is visible in workflow_events (it used to be silent)."""
+    bounded long wait is visible in workflow_events (it used to be silent)."""
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()

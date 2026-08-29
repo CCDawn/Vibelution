@@ -266,7 +266,13 @@ class AdapterDispatchWorker:
                 return
             if isinstance(exc, ChallengeTaskDeadlineExceeded):
                 self._fail_attempt(outbox, action, exc.problem)
-                self._reconcile_stage_task_after_wait_timeout(action)
+                self._reconcile_stage_task_after_wait_timeout(
+                    action,
+                    reason=str(
+                        exc.problem.get("code")
+                        or "challenge_logical_task_deadline_exhausted"
+                    ),
+                )
                 return
             if isinstance(exc, (TurnNotReadyError, HypothesisAuthorityUnavailable)):
                 # Transient turn/authority state — requeue without failing the attempt.
@@ -1105,12 +1111,14 @@ class AdapterDispatchWorker:
                     "logicalTaskStartedAtMs": decision.started_at_ms,
                 },
             )
-            # The abandoned wait previously skipped the pushed-writeback leg
-            # (reconcile_source_collection_stage_session_task_after_turn), so
-            # the stage task stayed "running" in its store while the ledger
-            # attempt was already failed. Best-effort reconcile closes that
-            # state fork; it must never break the dispatch path.
-            self._reconcile_stage_task_after_wait_timeout(action)
+            # The abandoned wait previously skipped the domain-task terminal
+            # leg, so its task stayed "running" while the Ledger attempt was
+            # already failed. Best-effort reconcile closes that state fork;
+            # it must never break the dispatch path.
+            self._reconcile_stage_task_after_wait_timeout(
+                action,
+                reason=decision.stop_code,
+            )
             return
         _record_scene_event(
             "adapter_dispatch.live_turn_wait",
@@ -1217,25 +1225,30 @@ class AdapterDispatchWorker:
                 },
             )
 
-    def _reconcile_stage_task_after_wait_timeout(self, action: PendingAction) -> None:
-        """Close the stage-task writeback window an abandoned live wait left open.
+    def _reconcile_stage_task_after_wait_timeout(
+        self,
+        action: PendingAction,
+        *,
+        reason: str = "live_turn_wait_timeout",
+    ) -> None:
+        """Close the domain-task writeback window an abandoned live wait left open.
 
         After the wall-clock cap fails the attempt, the canonical Agent turn may
-        still be running (or may have finished unnoticed). The stage session
-        task only settles through
-        ``reconcile_source_collection_stage_session_task_after_turn`` — normally
-        invoked by ``complete_agent_turn_outputs`` at turn terminal, which the
-        abandoned wait never reaches. Locate the dispatch anchor (the same
-        taskId/sessionId/turnId the writeback leg would have used), read the
-        current completion snapshot, and reconcile; a non-terminal snapshot
-        reconciles under ``interrupted`` semantics. Idempotent and best-effort:
-        any failure is logged and never blocks the dispatch path.
+        still be running (or may have finished unnoticed). Source-collection
+        tasks settle through their existing stage writeback reconciler.
+        Research-project tasks first run their explicit session reconciler; if
+        the task is still active after the workflow deadline, the trusted
+        task-status API records ``timed_out``. Idempotent and best-effort: any
+        failure is logged and never blocks the dispatch path.
         """
         try:
             from .task_adapter_registry import resolve_agent_task_adapter
 
             adapter_spec = resolve_agent_task_adapter(action.node_id)
-            if adapter_spec is None or adapter_spec.family != "source_collection":
+            if adapter_spec is None or adapter_spec.family not in {
+                "source_collection",
+                "research_project",
+            }:
                 return
 
             anchor = self._store.read(
@@ -1287,7 +1300,56 @@ class AdapterDispatchWorker:
                 or str(action.run_id or "").strip()
             )
             if not team_id:
-                raise RuntimeError("run has no teamId for stage task reconcile")
+                raise RuntimeError("run has no teamId for domain task reconcile")
+
+            normalized_reason = str(reason or "live_turn_wait_timeout").strip()[:120]
+            if adapter_spec.family == "research_project":
+                project_id = str(
+                    (run.project_id if run is not None else "")
+                    or input_snapshot.get("projectId")
+                    or input_snapshot.get("researchProjectId")
+                    or ""
+                ).strip()
+                if not project_id:
+                    raise RuntimeError("run has no projectId for project task reconcile")
+                from core.web.services.team_workflow.research_project_agent_tasks import (
+                    ACTIVE_STATUSES,
+                    _read_research_project_agent_task_record,
+                    reconcile_research_project_agent_task_statuses,
+                    update_research_project_agent_task_status,
+                )
+
+                reconcile_research_project_agent_task_statuses(team_id, project_id)
+                task = _read_research_project_agent_task_record(
+                    team_id,
+                    project_id,
+                    task_id,
+                )
+                if task is None:
+                    raise RuntimeError("project Agent task is missing during timeout reconcile")
+                task_status = str(task.get("status") or "").strip().lower()
+                if task_status in ACTIVE_STATUSES:
+                    result = update_research_project_agent_task_status(
+                        team_id,
+                        project_id,
+                        task_id,
+                        status="timed_out",
+                        result_refs=list(task.get("resultRefs") or []),
+                        failure_code=normalized_reason,
+                    )
+                    task_status = str((result or {}).get("status") or "timed_out")
+                _record_scene_event(
+                    "adapter_dispatch.live_turn_wait_reconciled",
+                    outcome="settled",
+                    fields={
+                        **_action_identity(action),
+                        "taskId": task_id,
+                        "projectId": project_id,
+                        "taskStatus": task_status,
+                        "reason": normalized_reason,
+                    },
+                )
+                return
 
             final_status = ""
             if session_id:
@@ -1314,7 +1376,7 @@ class AdapterDispatchWorker:
                 session_id=session_id,
                 turn_id=turn_id,
                 final_status=final_status,
-                reason="live_turn_wait_timeout",
+                reason=normalized_reason,
             )
             _record_scene_event(
                 "adapter_dispatch.live_turn_wait_reconciled",

@@ -166,6 +166,50 @@ def test_ordinary_session_does_not_write_challenge_receipt_registry(monkeypatch)
     assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is False
 
 
+def test_challenge_receipt_projection_failure_does_not_break_chat(monkeypatch) -> None:
+    diagnostics: list[dict] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("registry unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        lambda component, phase, event_code, **kwargs: diagnostics.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        ),
+    )
+    capture = stream_capture.SessionTurnCapture(
+        session_id="session-1",
+        turn_id="turn-1",
+        model_invocation_receipt_context={
+            "teamId": "team-1",
+            "questionStageBinding": {
+                "questionId": "SCI-096",
+                "workflowRunId": "run-1",
+            },
+        },
+    )
+    outcome = SimpleNamespace(model_invocation_receipt={"receiptId": "receipt-1"})
+
+    assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is False
+    assert diagnostics[0]["eventCode"] == (
+        "challenge_model_invocation_receipt_projection_failed"
+    )
+    assert diagnostics[0]["fields"] == {
+        "teamId": "team-1",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-1",
+        "errorType": "RuntimeError",
+    }
+
+
 def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:
     task = {
         "taskId": "task-1",

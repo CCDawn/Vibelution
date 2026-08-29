@@ -1041,7 +1041,24 @@ def _persist_challenge_model_invocation_receipt(
             workflow_run_id=workflow_run_id,
             receipts=[dict(receipt)],
         )
-    except (OSError, TypeError, ValueError):
+    except Exception as exc:  # noqa: BLE001 - audit projection must never break chat
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "session_service",
+            "stream_capture",
+            "challenge_model_invocation_receipt_projection_failed",
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": team_id,
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+                "errorType": type(exc).__name__,
+            },
+        )
         return False
     return True
 
