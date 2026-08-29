@@ -265,14 +265,15 @@ class AdapterDispatchWorker:
             if isinstance(exc, _OutboxLeaseLost):
                 return
             if isinstance(exc, ChallengeTaskDeadlineExceeded):
-                self._fail_attempt(outbox, action, exc.problem)
-                self._reconcile_stage_task_after_wait_timeout(
-                    action,
-                    reason=str(
-                        exc.problem.get("code")
-                        or "challenge_logical_task_deadline_exhausted"
-                    ),
-                )
+                failed = self._fail_attempt(outbox, action, exc.problem)
+                if failed:
+                    self._reconcile_stage_task_after_wait_timeout(
+                        action,
+                        reason=str(
+                            exc.problem.get("code")
+                            or "challenge_logical_task_deadline_exhausted"
+                        ),
+                    )
                 return
             if isinstance(exc, (TurnNotReadyError, HypothesisAuthorityUnavailable)):
                 # Transient turn/authority state — requeue without failing the attempt.
@@ -992,7 +993,7 @@ class AdapterDispatchWorker:
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
 
-    def _fail_attempt(self, outbox: Any, action: PendingAction, problem: dict) -> None:
+    def _fail_attempt(self, outbox: Any, action: PendingAction, problem: dict) -> bool:
         now_ms = self._now()
         _record_scene_event(
             "adapter_dispatch.attempt_failed",
@@ -1008,7 +1009,7 @@ class AdapterDispatchWorker:
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
             if not failed:
-                return
+                return False
             self._close_execution_anchor(
                 uow,
                 action=action,
@@ -1025,8 +1026,9 @@ class AdapterDispatchWorker:
                 actor_id=self._owner,
                 correlation_id=str(action.action_id or outbox.action_id),
             )
+            return True
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
 
     def _fail_unregistered(self, outbox: Any, action: PendingAction) -> None:
         now_ms = self._now()
@@ -1132,7 +1134,7 @@ class AdapterDispatchWorker:
                 "continuationsUsed": continuations_used,
             }
         if created_at_ms and decision.should_stop:
-            self._fail_attempt(
+            failed = self._fail_attempt(
                 outbox,
                 action,
                 {
@@ -1150,10 +1152,11 @@ class AdapterDispatchWorker:
             # leg, so its task stayed "running" while the Ledger attempt was
             # already failed. Best-effort reconcile closes that state fork;
             # it must never break the dispatch path.
-            self._reconcile_stage_task_after_wait_timeout(
-                action,
-                reason=decision.stop_code,
-            )
+            if failed:
+                self._reconcile_stage_task_after_wait_timeout(
+                    action,
+                    reason=decision.stop_code,
+                )
             return
         _record_scene_event(
             "adapter_dispatch.live_turn_wait",

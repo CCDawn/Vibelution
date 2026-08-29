@@ -746,6 +746,79 @@ def test_live_turn_wait_timeout_reconciles_stage_task(monkeypatch, tmp_path: Pat
         harness.close()
 
 
+def test_live_turn_wait_timeout_stale_owner_does_not_reconcile_stage_task(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A worker that lost its outbox lease must not mutate the new owner's task."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        stale = _stale_outbox(harness, action, worker, attempt_count=1)
+        worker._owner = "stale-adapter-worker"
+        reconciled: list[str] = []
+        monkeypatch.setattr(
+            worker,
+            "_reconcile_stage_task_after_wait_timeout",
+            lambda *_args, **_kwargs: reconciled.append("called"),
+        )
+
+        worker._requeue_live_turn_wait(stale, action, "turn_not_ready:running")
+
+        assert reconciled == []
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "leased"
+        assert row.lease_owner == "adapter-worker"
+    finally:
+        harness.close()
+
+
+def test_logical_task_deadline_stale_owner_does_not_reconcile_stage_task(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """The direct deadline exception path obeys the same outbox ownership fence."""
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        ChallengeTaskDeadlineExceeded,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        outbox = _leased_outbox(harness, action, attempt_count=1)
+        worker._owner = "stale-adapter-worker"
+        reconciled: list[str] = []
+
+        def raise_deadline(*_args, **_kwargs):
+            raise ChallengeTaskDeadlineExceeded(
+                {"code": "challenge_logical_task_deadline_exhausted"}
+            )
+
+        monkeypatch.setattr(worker, "_execute_with_lease_heartbeat", raise_deadline)
+        monkeypatch.setattr(
+            worker,
+            "_reconcile_stage_task_after_wait_timeout",
+            lambda *_args, **_kwargs: reconciled.append("called"),
+        )
+
+        worker._handle(outbox)
+
+        assert reconciled == []
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "leased"
+        assert row.lease_owner == "adapter-worker"
+    finally:
+        harness.close()
+
+
 def test_live_turn_wait_timeout_closes_running_project_task(
     monkeypatch,
     tmp_path: Path,
