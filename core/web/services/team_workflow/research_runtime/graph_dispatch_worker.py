@@ -575,7 +575,11 @@ class GraphDispatchWorker:
             run = self._store.get_run(dispatch.run_id)
 
             def ack_only(uow):
-                uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+                acked = uow.repository.ack_outbox(
+                    action.action_id, self._owner, now_ms
+                )
+                if not acked:
+                    return
                 if run is None:
                     return
                 if not _run_terminal_close_applies(run, dispatch.node_id):
@@ -606,7 +610,10 @@ class GraphDispatchWorker:
             now_ms = self._now()
 
             def ack_only(uow):
-                uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+                if not uow.repository.ack_outbox(
+                    action.action_id, self._owner, now_ms
+                ):
+                    return
 
             self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
@@ -950,7 +957,9 @@ class GraphDispatchWorker:
         }.get(outcome, NodeAttemptStatus.FAILED.value)
 
         def mutate(uow):
-            uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+            acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+            if not acked:
+                return
             uow.repository.update_attempt_status(
                 dispatch.node_run_id,
                 target_status,
@@ -2056,9 +2065,11 @@ class GraphDispatchWorker:
         )
 
         def mutate(uow):
-            uow.repository.fail_outbox(
+            failed = uow.repository.fail_outbox(
                 action.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
+            if not failed:
+                return
             attempt = uow.repository.get_attempt(dispatch.node_run_id)
             if attempt is not None:
                 try:
