@@ -6,8 +6,9 @@ import hashlib
 import json
 import threading
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Callable, Mapping, Sequence
+
+from core.web.services.session.timebase import parse_timestamp_utc
 
 from core.chat.session_catalog import (
     CatalogError,
@@ -518,13 +519,10 @@ def _text(value: Mapping[str, Any], *keys: str) -> str:
 def _timestamp_sort_key(value: Any) -> float:
     """Match the legacy session-query timestamp ordering exactly."""
 
-    text = str(value or "").strip()
-    if not text:
+    parsed = parse_timestamp_utc(value)
+    if parsed is None:
         return 0.0
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return 0.0
+    return parsed.timestamp()
 
 
 def _title_sort_key(value: Any) -> str:

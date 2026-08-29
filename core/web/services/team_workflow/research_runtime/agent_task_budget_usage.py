@@ -5,17 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from core.web.services.session.timebase import parse_timestamp_utc
 from .node_execution_support import NodeExecutionError
 
 
 def parse_task_time(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    # Normalize legacy naive (machine-local) acceptedAt/updatedAt values and
+    # tz-aware UTC values onto one time base before wall-clock diffing.
+    return parse_timestamp_utc(value)
 
 
 def _inferred_task_timezone(

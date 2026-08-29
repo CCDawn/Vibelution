@@ -111,6 +111,19 @@ const NON_DISCUSSION_TEAM_IDS = new Set(["self-evolution-team", "supervised-evol
 const NON_DISCUSSION_TEAM_KINDS = new Set(["self_evolution", "supervised_evolution"]);
 const NON_DISCUSSION_TEAM_SOURCES = new Set(["self_evolution", "supervised_evolution"]);
 
+// Backend now writes tz-aware UTC timestamps, but legacy rows may carry naive
+// machine-local time. Date.parse treats naive date-time strings as local time
+// and offset-carrying strings by their own offset, so both generations sort on
+// one time base instead of drifting by the local UTC offset.
+function conversationUpdatedAtTime(value: string | undefined): number {
+  const text = String(value || "").trim();
+  if (!text) {
+    return 0;
+  }
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 export function isDiscussionTeam(team: Team | undefined | null) {
   if (!team) {
     return false;
@@ -615,8 +628,8 @@ export function mergeVisibleSessionsIntoConversations(
     merged.push(sessionToConversationSummary(session));
     knownSessionIds.add(session.id);
   });
-  return merged.sort((left, right) =>
-    String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")),
+  return merged.sort(
+    (left, right) => conversationUpdatedAtTime(right.updatedAt) - conversationUpdatedAtTime(left.updatedAt),
   );
 }
 
@@ -652,8 +665,8 @@ export function mergeVisibleAgentsIntoConversations(
       knownAgentIds.add(agentId);
     }
   });
-  return merged.sort((left, right) =>
-    String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")),
+  return merged.sort(
+    (left, right) => conversationUpdatedAtTime(right.updatedAt) - conversationUpdatedAtTime(left.updatedAt),
   );
 }
 

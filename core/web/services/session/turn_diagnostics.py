@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.web.services.session.timebase import parse_timestamp_utc
+
 
 def _service():
     from core.web.services import session_service
@@ -699,18 +701,9 @@ _CHAT_TURN_ABSOLUTE_STALE_SECONDS = 30.0 * 60.0
 
 
 def _parse_work_run_timestamp(value: Any) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    # Naive timestamps come from the legacy _now_timestamp() local-time writer;
+    # parse_timestamp_utc treats them as machine-local and converts to UTC.
+    return parse_timestamp_utc(value)
 
 
 def _chat_turn_last_tool_error_timed_out(payload: dict[str, Any]) -> bool:

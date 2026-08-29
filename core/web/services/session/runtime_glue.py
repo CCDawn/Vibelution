@@ -17,7 +17,7 @@ import shutil
 import stat
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -834,7 +834,7 @@ def _create_session_turn_control(session_id: str, *, turn_id: str = "") -> Any:
     with s._SESSION_TURN_CONTROLS_LOCK:
         control = s.SessionTurnControl(
             session_id=session_id,
-            turn_id=str(turn_id or "").strip() or f"{session_id}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+            turn_id=str(turn_id or "").strip() or f"{session_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
         )
         s._SESSION_TURN_CONTROLS[session_id] = control
         return control
@@ -1694,7 +1694,7 @@ def _normalize_string_list(value: Any) -> list[str]:
 
 def _now_timestamp() -> str:
     s = _service()
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _parse_agent_message_tool_result(tool_call: dict[str, Any]) -> dict[str, Any]:
