@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from tests._support.team_workflow.helpers import *  # noqa: F403
+from tests.helpers.system_agent_state import _seed_challenge_cup_agent_assets
 
 def test_challenge_cup_team_bootstrap_does_not_reconcile_unregistered_agents(
     tmp_path, monkeypatch
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
     legacy_agent = agent_directory_service.create_agent_instance(
         display_name="旧资料发现",
         created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
