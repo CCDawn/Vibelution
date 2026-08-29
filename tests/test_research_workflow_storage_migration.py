@@ -285,7 +285,12 @@ def test_preview_reports_manual_scope_stamp_and_manual_replay_as_alias_audit(
                     "sourceCollectionRunId": "dprun-manual",
                     "workflowRunId": "run-manual",
                 },
-            }
+            },
+            {
+                "candidateId": "candidate-without-scope",
+                "candidateType": "source_manifest",
+                "metadata": {},
+            },
         ],
     }
     (candidate_store / "index.json").write_text(
@@ -333,6 +338,8 @@ def test_preview_reports_manual_scope_stamp_and_manual_replay_as_alias_audit(
     items = hygiene["items"]
     by_id = {item["entityId"]: item for item in items}
 
+    assert hygiene["schemaVersion"] == 1
+    assert "candidate-without-scope" not in by_id
     stamped = by_id["candidate-manual-scope"]
     assert stamped["classification"] == "manual_scope_stamp"
     assert stamped["action"] == "canonical_migration"

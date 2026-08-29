@@ -405,7 +405,7 @@ def _source_tree_fingerprint(root: Path) -> str:
         # The inventory and preview contracts deliberately share one exclusion
         # rule.  In particular, a hand-made ``index.json.bak-*`` must never
         # perturb the generation used by apply/verify.
-        if _is_backup_path(rel) or _is_excluded(rel):
+        if _is_excluded(rel):
             continue
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
@@ -437,14 +437,9 @@ def _is_excluded(relative_path: str) -> bool:
 
 
 def _scope_text(value: object) -> str:
-    return str(value).strip()[:160] if isinstance(value, (str, int, float)) and not isinstance(value, bool) else ""
-
-
-def _scope_rel(root: Path, path: Path) -> str:
-    try:
-        return path.relative_to(root).as_posix()
-    except ValueError:
-        return str(path)
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        return str(value).strip()[:160]
+    return ""
 
 
 def _scope_dirs(path: Path) -> tuple[Path, ...]:
@@ -454,8 +449,11 @@ def _scope_dirs(path: Path) -> tuple[Path, ...]:
         return tuple(
             sorted(
                 (
-                    child for child in path.iterdir()
-                    if child.is_dir() and not _is_reparse(child) and not _is_backup_path(child.name)
+                    child
+                    for child in path.iterdir()
+                    if child.is_dir()
+                    and not _is_reparse(child)
+                    and not _is_backup_path(child.name)
                 ),
                 key=lambda child: child.name.lower(),
             )
@@ -464,110 +462,115 @@ def _scope_dirs(path: Path) -> tuple[Path, ...]:
         return ()
 
 
-def _scope_collect_backups(
-    root: Path,
-    workspace_root: Path,
-    excluded: set[str],
-) -> None:
+def _scope_backup_names(root: Path) -> set[str]:
     if not root.is_dir() or _is_reparse(root):
-        return
+        return set()
     try:
-        for path in root.rglob("*"):
-            relative = _scope_rel(workspace_root, path)
-            if _is_reparse(path) or not _is_backup_path(relative):
-                continue
-            excluded.add(path.name)
+        return {
+            path.name
+            for path in root.rglob("*")
+            if not _is_reparse(path) and _is_backup_path(path.name)
+        }
     except OSError:
-        return
+        return set()
 
 
-def _scope_store_items(
+def _scope_store_rows(
     path: Path,
     workspace_root: Path,
-    *,
-    kind: str,
-    file_hash: str,
-) -> list[dict[str, object]]:
+    row_key: str,
+) -> tuple[str, str, list[dict[str, object]]] | None:
+    if not path.is_file() or _is_reparse(path):
+        return None
+    try:
+        file_hash = _sha256_file(path)
+        relative = path.relative_to(workspace_root).as_posix()
+    except (OSError, ValueError):
+        return None
     payload = _read_json_object(path)
-    rows = payload.get("candidates" if kind == "candidate" else "tasks") if payload else None
+    rows = payload.get(row_key) if payload else None
     if not isinstance(rows, list):
-        return []
-    relative = _scope_rel(workspace_root, path)
-    parts = path.relative_to(workspace_root).parts
-    physical = "legacy-default"
-    lowered = [part.lower() for part in parts]
-    if "research_projects" in lowered:
-        physical = parts[lowered.index("research_projects") + 1]
-    items: list[dict[str, object]] = []
-    for raw in rows:
-        if not isinstance(raw, dict):
-            continue
-        if kind == "candidate":
-            entity_id = _scope_text(raw.get("candidateId") or raw.get("id"))
-            metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
-            project_id = _scope_text(raw.get("researchProjectId"))
-            metadata_project_id = _scope_text(metadata.get("researchProjectId"))
-            if (
-                not entity_id
-                or not project_id
-                or not metadata_project_id
-                or project_id != metadata_project_id
-                or project_id == physical
-            ):
-                continue
-            provenance = {
-                "candidateType": _scope_text(raw.get("candidateType")),
-                "researchProjectId": project_id,
-                "metadataResearchProjectId": metadata_project_id,
-            }
-            for key in ("sourceCollectionRunId", "workflowRunId", "recordId"):
-                value = _scope_text(raw.get(key) or metadata.get(key))
-                if value:
-                    provenance[key] = value
-            items.append(
-                {
-                    "entityId": entity_id,
-                    "classification": "manual_scope_stamp",
-                    "action": "canonical_migration",
-                    "owner": project_id,
-                    "path": relative,
-                    "hash": file_hash,
-                    "provenance": provenance,
-                }
-            )
-            continue
+        return None
+    return relative, file_hash, [raw for raw in rows if isinstance(raw, dict)]
 
-        entity_id = _scope_text(raw.get("taskId") or raw.get("id"))
-        project_id = _scope_text(raw.get("researchProjectId"))
-        manual_replay = entity_id == _MANUAL_REPLAY_TASK_ID
-        if not entity_id or (not manual_replay and not (project_id and project_id != physical)):
-            continue
-        turn = raw.get("turn") if isinstance(raw.get("turn"), dict) else {}
-        provenance = {
+
+def _candidate_scope_item(
+    raw: dict[str, object],
+    *,
+    physical_project_id: str,
+    relative: str,
+    file_hash: str,
+) -> dict[str, object] | None:
+    entity_id = _scope_text(raw.get("candidateId") or raw.get("id"))
+    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    owner = _scope_text(raw.get("researchProjectId"))
+    metadata_owner = _scope_text(metadata.get("researchProjectId"))
+    if (
+        not entity_id
+        or not owner
+        or not metadata_owner
+        or owner != metadata_owner
+        or owner == physical_project_id
+    ):
+        return None
+    provenance = {
+        "candidateType": _scope_text(raw.get("candidateType")),
+        "researchProjectId": owner,
+        "metadataResearchProjectId": metadata_owner,
+    }
+    for key in ("sourceCollectionRunId", "workflowRunId", "recordId"):
+        value = _scope_text(raw.get(key) or metadata.get(key))
+        if value:
+            provenance[key] = value
+    return {
+        "entityId": entity_id,
+        "classification": "manual_scope_stamp",
+        "action": "canonical_migration",
+        "owner": owner,
+        "path": relative,
+        "hash": file_hash,
+        "provenance": provenance,
+    }
+
+
+def _stage_scope_item(
+    raw: dict[str, object],
+    *,
+    physical_project_id: str,
+    relative: str,
+    file_hash: str,
+) -> dict[str, object] | None:
+    entity_id = _scope_text(raw.get("taskId") or raw.get("id"))
+    owner = _scope_text(raw.get("researchProjectId"))
+    manual_replay = entity_id == _MANUAL_REPLAY_TASK_ID
+    if not entity_id or not (manual_replay or (owner and owner != physical_project_id)):
+        return None
+    turn = raw.get("turn") if isinstance(raw.get("turn"), dict) else {}
+    item: dict[str, object] = {
+        "entityId": entity_id,
+        "classification": (
+            "manual_replay" if manual_replay else "noncanonical_stage_task"
+        ),
+        "action": "alias/audit",
+        "needsReview": True,
+        "owner": owner,
+        "path": relative,
+        "hash": file_hash,
+        "provenance": {
             key: value
             for key, value in {
                 "runId": _scope_text(raw.get("runId")),
                 "workflowRunId": _scope_text(raw.get("workflowRunId")),
-                "researchProjectId": project_id,
+                "researchProjectId": owner,
                 "sessionId": _scope_text(raw.get("sessionId")),
                 "turnId": _scope_text(turn.get("turnId") or turn.get("id")),
             }.items()
             if value
-        }
-        item: dict[str, object] = {
-            "entityId": entity_id,
-            "classification": "manual_replay" if manual_replay else "noncanonical_stage_task",
-            "action": "alias/audit",
-            "needsReview": True,
-            "owner": project_id,
-            "path": relative,
-            "hash": file_hash,
-            "provenance": provenance,
-        }
-        if manual_replay:
-            item["lineageClassification"] = "partial_noncanonical_lineage"
-        items.append(item)
-    return items
+        },
+    }
+    if manual_replay:
+        item["lineageClassification"] = "partial_noncanonical_lineage"
+    return item
 
 
 def _scope_hygiene(target_root: Path) -> dict[str, object]:
@@ -576,43 +579,51 @@ def _scope_hygiene(target_root: Path) -> dict[str, object]:
     items: list[dict[str, object]] = []
     if workspace_root.is_dir() and not _is_reparse(workspace_root):
         for team in _scope_dirs(workspace_root / "teams"):
-            roots: list[tuple[Path, str]] = [
-                (team / "candidate_store", "candidate"),
-                (team / "source_collection_runs", "stage"),
-            ]
-            for project in _scope_dirs(team / "research_projects"):
-                base = project / "workspace"
-                roots.extend(
-                    (
-                        (base / "candidate_store", "candidate"),
-                        (base / "source_collection_runs", "stage"),
-                    )
+            bases = [(team, "legacy-default")]
+            bases.extend(
+                (project / "workspace", project.name)
+                for project in _scope_dirs(team / "research_projects")
+            )
+            for base, physical_project_id in bases:
+                candidate_root = base / "candidate_store"
+                stage_root = base / "source_collection_runs"
+                excluded.update(_scope_backup_names(candidate_root))
+                excluded.update(_scope_backup_names(stage_root))
+                stores: list[tuple[Path, str]] = [
+                    (candidate_root / "index.json", "candidates")
+                ]
+                stores.extend(
+                    (run / "stage_session_tasks.json", "tasks")
+                    for run in _scope_dirs(stage_root)
                 )
-            for root, kind in roots:
-                _scope_collect_backups(root, workspace_root, excluded)
-                paths = (
-                    (root / "index.json",)
-                    if kind == "candidate"
-                    else tuple(run / "stage_session_tasks.json" for run in _scope_dirs(root))
-                )
-                for path in paths:
-                    if not path.is_file() or _is_reparse(path):
+                for path, row_key in stores:
+                    snapshot = _scope_store_rows(path, workspace_root, row_key)
+                    if snapshot is None:
                         continue
-                    try:
-                        file_hash = _sha256_file(path)
-                    except OSError:
-                        continue
-                    items.extend(
-                        _scope_store_items(
-                            path,
-                            workspace_root,
-                            kind=kind,
+                    relative, file_hash, rows = snapshot
+                    for raw in rows:
+                        builder = (
+                            _candidate_scope_item
+                            if row_key == "candidates"
+                            else _stage_scope_item
+                        )
+                        item = builder(
+                            raw,
+                            physical_project_id=physical_project_id,
+                            relative=relative,
                             file_hash=file_hash,
                         )
-                    )
-    items.sort(key=lambda item: (str(item.get("entityId") or ""), str(item.get("path") or "")))
+                        if item is not None:
+                            items.append(item)
+    items.sort(
+        key=lambda item: (
+            str(item.get("entityId") or ""),
+            str(item.get("path") or ""),
+        )
+    )
     excluded_paths = sorted(excluded, key=str.lower)
     result = {
+        "schemaVersion": _SCOPE_HYGIENE_SCHEMA_VERSION,
         "items": items,
         "excludedPaths": excluded_paths,
         "counts": {
@@ -1470,7 +1481,7 @@ def _enumerate_source(
         if _is_reparse(path):
             blockers.append({"code": "reparse_or_symlink", "relativePath": relative})
             continue
-        if _is_backup_path(relative) or _is_excluded(relative):
+        if _is_excluded(relative):
             excluded.append(relative)
             continue
         if relative == LEGACY_PLACEHOLDER_FILENAME and _legacy_placeholder_is_empty(path):
@@ -1694,7 +1705,7 @@ def _build_preview(
             # the real staging directory is named ``migration`` and is itself
             # excluded from ordinary asset inventory.
             relative = path.relative_to(roots.target).as_posix()
-            if _is_backup_path(relative) or _is_excluded(path.name):
+            if _is_backup_path(relative):
                 continue
             if path.is_file() and ".staging" in path.name and path.name.startswith("."):
                 blockers.append(
@@ -2852,8 +2863,8 @@ def _find_manifest(target_root: Path, manifest_path: Path | None = None) -> Path
 
 def _manifest_order_timestamp(payload: dict[str, object]) -> datetime | None:
     values: list[object] = []
-    for field in ("completedAt", "committedAt", "updatedAt", "createdAt", "timestamp"):
-        values.append(payload.get(field))
+    for field_name in ("completedAt", "committedAt", "updatedAt", "createdAt", "timestamp"):
+        values.append(payload.get(field_name))
     transitions = payload.get("statusTransitions")
     if isinstance(transitions, list):
         for item in transitions:
