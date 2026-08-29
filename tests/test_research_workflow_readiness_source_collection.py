@@ -151,3 +151,150 @@ def test_knowledge_handoff_ready_with_audit_complete() -> None:
     context._knowledge_draft = {"auditComplete": True}
     result = _evaluate(service, context, "knowledge_handoff")
     assert result.ready is True
+
+
+# ---------------------------------------------------------------------------
+# Scoped candidate stats regression (run-16cfab646d08 family root causes).
+# ---------------------------------------------------------------------------
+
+from core.web.services import data_processing_service, team_workflow_orchestration_service
+
+
+def test_scope_candidates_admits_tagged_and_skips_unmarked() -> None:
+    from core.web.services.team_workflow.research_runtime.readiness_providers import (
+        _scope_candidates,
+    )
+
+    tagged = {
+        "candidateId": "c-1",
+        "metadata": {
+            "sourceCollectionRunId": "dprun-x",
+            "researchProjectId": "research-a",
+            "workflowRunId": "run-w",
+        },
+    }
+    unmarked = {"candidateId": "c-2", "metadata": {}}
+    snapshot = {"sourceCollectionRunId": "dprun-x", "projectId": "research-a"}
+    assert _scope_candidates([tagged, unmarked], snapshot, "run-w") == [tagged]
+
+
+def test_scope_candidates_skips_other_run_markers() -> None:
+    from core.web.services.team_workflow.research_runtime.readiness_providers import (
+        _scope_candidates,
+    )
+
+    other_sc_run = {"candidateId": "c-3", "metadata": {"sourceCollectionRunId": "dprun-other"}}
+    other_project = {
+        "candidateId": "c-4",
+        "metadata": {"sourceCollectionRunId": "dprun-x", "researchProjectId": "research-b"},
+    }
+    snapshot = {"sourceCollectionRunId": "dprun-x", "projectId": "research-a"}
+    assert _scope_candidates([other_sc_run, other_project], snapshot, "run-w") == []
+
+
+def test_fetch_candidate_stats_falls_back_to_data_processing_records(tmp_path, monkeypatch) -> None:
+    """根因 C：scoped 候选过滤为空时，兜底 recordCount 读 data_processing 记录权威。
+
+    复现 run-16cfab646d08：活跃项目与 run 属主项目分离后 get_source_collection_summary
+    抛「不属于活跃项目」被吞掉，兜底恒 0。
+    """
+    from core.web.services.team_workflow import research_projects as research_projects_service
+    from core.web.services.team_workflow.research_runtime.readiness_providers import (
+        fetch_candidate_stats,
+    )
+    from tests._support.team_workflow.cases_source_collection import (
+        _finding_close_first_step_task,
+    )
+
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+    workflow_run_id = str(task.get("workflowRunId") or "")
+    assert workflow_run_id
+
+    run_scope = (data_processing_service.get_processing_run(run_id).get("scope") or {})
+    owner_project_id = str(run_scope.get("researchProjectId") or "")
+
+    data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.1038/stats-1",
+            "title": "Fallback record 1",
+            "summary": "data_processing 记录权威回归。",
+            "metadata": {"doi": "10.1038/stats-1"},
+        },
+    )
+    data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.1038/stats-2",
+            "title": "Fallback record 2",
+            "summary": "data_processing 记录权威回归。",
+            "metadata": {"doi": "10.1038/stats-2"},
+        },
+    )
+
+    # 活跃项目与 run 属主项目分离（与实测现象一致）。
+    project_b = research_projects_service.create_research_project(
+        team["teamId"], {"name": "challenge-sci-001-sim"}
+    )["project"]
+    research_projects_service.activate_research_project(team["teamId"], project_b["projectId"])
+
+    stats = fetch_candidate_stats(
+        team["teamId"],
+        workflow_run_id,
+        input_snapshot={"sourceCollectionRunId": run_id, "projectId": owner_project_id},
+    )
+    assert stats is not None
+    assert stats["record_count"] == 2
+
+
+def test_fetch_candidate_stats_unlocks_with_tagged_candidates(tmp_path, monkeypatch) -> None:
+    """根因 B + A 联动：带定界标记的候选在活跃项目漂移后仍解锁 scoped readiness。"""
+    from core.web.services.team_workflow import research_projects as research_projects_service
+    from core.web.services.team_workflow.research_runtime.readiness_providers import (
+        fetch_candidate_stats,
+    )
+    from tests._support.team_workflow.cases_source_collection import (
+        _finding_close_first_step_task,
+    )
+
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+    workflow_run_id = str(task.get("workflowRunId") or "")
+
+    lead = {
+        "leadId": "lead-readiness-unlock",
+        "title": "Predictive coding unlocks readiness",
+        "locator": "https://doi.org/10.1038/unlock",
+        "sourceType": "paper",
+        "query": "predictive coding",
+        "perspective": "mechanism",
+    }
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {"status": "needs_review", "summary": "写回解锁候选。", "result": {"candidateLeads": [lead]}},
+    )
+    assert response["writeback"]["materializedSources"]["importedCandidateCount"] == 1
+
+    run_scope = (data_processing_service.get_processing_run(run_id).get("scope") or {})
+    owner_project_id = str(run_scope.get("researchProjectId") or "")
+
+    project_b = research_projects_service.create_research_project(
+        team["teamId"], {"name": "challenge-sci-001-sim"}
+    )["project"]
+    research_projects_service.activate_research_project(team["teamId"], project_b["projectId"])
+
+    stats = fetch_candidate_stats(
+        team["teamId"],
+        workflow_run_id,
+        input_snapshot={"sourceCollectionRunId": run_id, "projectId": owner_project_id},
+    )
+    assert stats is not None
+    assert stats["record_count"] == 1

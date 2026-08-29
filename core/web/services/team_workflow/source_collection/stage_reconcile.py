@@ -278,10 +278,19 @@ def _normalize_source_collection_stage_session_task_status(value: Any) -> str:
 def _load_source_collection_stage_session_task_store(team_id: str, run_id: str) -> dict[str, Any]:
     s = _service()
     path = s._source_collection_stage_session_task_store_path(team_id, run_id)
-    if path.exists():
-        payload = s._read_json(path)
-        if isinstance(payload.get("tasks"), list):
-            return payload
+    payload = s._read_json(path) if path.exists() else {}
+    if not isinstance(payload.get("tasks"), list):
+        # 兼容读取：修复前账本可能错位落在活跃项目根；属主项目优先，缺失时回查。
+        legacy_path = (
+            s._team_workflow_root(team_id)
+            / "source_collection_runs"
+            / s._safe_token(run_id, default="run", max_length=96)
+            / "stage_session_tasks.json"
+        )
+        if legacy_path != path and legacy_path.exists():
+            payload = s._read_json(legacy_path)
+    if isinstance(payload.get("tasks"), list):
+        return payload
     now = s.utc_now_iso()
     return {
         "schemaVersion": s.SCHEMA_VERSION,
@@ -383,13 +392,13 @@ def _reconcile_source_collection_stage_session_task_retry_coverage(
 
 def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
     s = _service()
-    runs_root = s._team_workflow_root(team_id) / "source_collection_runs"
-    if not runs_root.exists():
-        return False
     changed = False
-    for task_store_path in runs_root.glob("*/stage_session_tasks.json"):
-        run_id = task_store_path.parent.name
-        changed = s._reconcile_source_collection_stage_session_tasks_for_run(team_id, run_id) or changed
+    for runs_root in s._source_collection_task_store_search_roots(team_id):
+        if not runs_root.exists():
+            continue
+        for task_store_path in runs_root.glob("*/stage_session_tasks.json"):
+            run_id = task_store_path.parent.name
+            changed = s._reconcile_source_collection_stage_session_tasks_for_run(team_id, run_id) or changed
     return changed
 
 
@@ -1965,15 +1974,18 @@ def _find_source_collection_stage_session_task(team_id: str, run_id: str, *, ide
 def _find_source_collection_stage_session_task_by_id(team_id: str, task_id: str) -> tuple[dict[str, Any] | None, str]:
     s = _service()
     normalized_task_id = s._trim_text(task_id, max_length=160)
-    runs_root = s._team_workflow_root(team_id) / "source_collection_runs"
-    if not normalized_task_id or not runs_root.exists():
+    if not normalized_task_id:
         return None, ""
-    for path in runs_root.glob("*/stage_session_tasks.json"):
-        run_id = path.parent.name
-        store = s._read_json(path)
-        for item in list(store.get("tasks") or []):
-            if isinstance(item, dict) and s._trim_text(item.get("taskId"), max_length=160) == normalized_task_id:
-                return item, run_id
+    # 跨项目根扫描：账本可能存于任一研究项目的 workspace（含修复前错位落盘）。
+    for runs_root in s._source_collection_task_store_search_roots(team_id):
+        if not runs_root.exists():
+            continue
+        for path in runs_root.glob("*/stage_session_tasks.json"):
+            run_id = path.parent.name
+            store = s._read_json(path)
+            for item in list(store.get("tasks") or []):
+                if isinstance(item, dict) and s._trim_text(item.get("taskId"), max_length=160) == normalized_task_id:
+                    return item, run_id
     return None, ""
 
 

@@ -172,6 +172,20 @@ def get_processing_run(run_id: str) -> dict[str, Any]:
     }
 
 
+def get_processing_run_scope(run_id: str) -> dict[str, Any]:
+    """Lightweight run-scope read (run.json only; no records/status computation).
+
+    Storage-layout callers only need ``scope``/``metadata`` identity fields;
+    routing them through :func:`get_processing_run` would pay a full status
+    recomputation on every path resolution.
+    """
+
+    run = _load_run(run_id)
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    return {"scope": dict(scope), "metadata": dict(metadata)}
+
+
 def delete_processing_run(run_id: str) -> dict[str, Any]:
     """Delete one generic run after its domain owner has applied its guards.
 

@@ -20,6 +20,7 @@ transaction.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -57,6 +58,13 @@ from .human_acceptance_artifact import (
 )
 from .ids import new_id
 from .reconcile_authority import plan_ledger_authority
+
+logger = logging.getLogger(__name__)
+
+# chat_turn snapshot statuses that still represent an in-flight (or possibly
+# in-flight) turn; anything else is already terminal and must not be touched
+# again by cancel_run turn closure.
+_CHAT_TURN_OPEN_STATUSES = frozenset({"", "queued", "running", "stopping", "paused"})
 
 
 def formal_node_order() -> tuple[str, ...]:
@@ -322,7 +330,15 @@ class WorkflowCommandService:
                 lambda uow: handler(uow, request, request_hash),
                 force_flush=True,
             )
-        return future.result(timeout=30)
+        receipt = future.result(timeout=30)
+        if request.command is WorkflowCommandKind.CANCEL_RUN and receipt.status == "accepted":
+            # Post-commit, best-effort: stop the chat turns still in flight
+            # for this run.  Never runs inside the ledger transaction and
+            # never touches the receipt (see _close_cancel_run_inflight_turns).
+            # Replay returns earlier via the idempotency lookup, so a replayed
+            # cancel_run cannot re-run this side effect.
+            self._close_cancel_run_inflight_turns(request.run_id)
+        return receipt
 
     def _authorize_operator(self, request: CommandRequest) -> None:
         """Authorize high-impact commands from server request context only.
@@ -359,6 +375,56 @@ class WorkflowCommandService:
             and not operator_has_privileged_role(context.roles)
         ):
             raise CommandForbiddenError("command_forbidden")
+
+    # ------------------------------------------------ cancel_run turn closure
+
+    def _close_cancel_run_inflight_turns(self, run_id: str) -> None:
+        """Best-effort stop of chat turns still in flight for a cancelled run.
+
+        Runs strictly AFTER the ledger transaction committed: stopping a turn
+        performs chat IO, takes the session chat-state lock and republishes
+        the detail projection, none of which may run inside the single-writer
+        SQLite transaction or under the 30s submit future timeout.
+
+        Failures are logged and swallowed — the cancel command itself must
+        stay successful, and the side effect must never break the caller.
+        Idempotency: replayed cancel_run commands return at the idempotency
+        lookup before this hook, and turns already carrying a terminal
+        snapshot are skipped, so repeats are natural no-ops.
+        """
+        try:
+            pairs = _collect_cancel_run_turn_pairs(run_id)
+        except Exception:  # noqa: BLE001 - side effect must never break the command
+            logger.exception(
+                "cancel_run turn closure could not read the run record: runId=%s",
+                run_id,
+            )
+            return
+        if not pairs:
+            return
+        from core.web.services import session_service
+
+        outcomes: list[dict[str, str]] = []
+        for session_id, turn_id in pairs:
+            try:
+                outcome = _close_cancel_run_turn(session_service, session_id, turn_id)
+            except Exception:  # noqa: BLE001 - per-turn isolation
+                logger.exception(
+                    "cancel_run turn closure failed: runId=%s sessionId=%s turnId=%s",
+                    run_id,
+                    session_id,
+                    turn_id,
+                )
+                continue
+            outcomes.append(
+                {"sessionId": session_id, "turnId": turn_id, "outcome": outcome}
+            )
+        if outcomes:
+            logger.info(
+                "cancel_run closed in-flight turns: runId=%s outcomes=%s",
+                run_id,
+                outcomes,
+            )
 
     # ------------------------------------------------ knowledge sideflow
 
@@ -1925,3 +1991,88 @@ def _knowledge_recovery_actions(
     if not actions:
         actions.append("none")
     return actions
+
+
+def _collect_cancel_run_turn_pairs(run_id: str) -> list[tuple[str, str]]:
+    """Collect non-terminal (sessionId, turnId) pairs bound to a run record.
+
+    Sources (both live in the JSON run record, not the ledger):
+    ``taskBundles[].subtasks[]`` — only entries still in an active status
+    (mirrors ``task_bundle_lifecycle._ACTIVE_SUBTASK_STATUSES`` so already
+    cancelled/failed/succeeded subtasks are never touched) and
+    ``bindingSnapshots[]`` (sessionId+taskId+turnId bindings, filtered again
+    by the chat_turn snapshot status at stop time).
+    """
+    from .store import WorkflowRunStore
+    from .task_bundle_lifecycle import _ACTIVE_SUBTASK_STATUSES
+
+    record = WorkflowRunStore().get_run(run_id)
+    if record is None:
+        return []
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for bundle in record.get("taskBundles") or []:
+        if not isinstance(bundle, Mapping):
+            continue
+        for subtask in bundle.get("subtasks") or []:
+            if not isinstance(subtask, Mapping):
+                continue
+            if str(subtask.get("status") or "") not in _ACTIVE_SUBTASK_STATUSES:
+                continue
+            session_id = str(subtask.get("sessionId") or "").strip()
+            turn_id = str(subtask.get("turnId") or "").strip()
+            if session_id and turn_id and (session_id, turn_id) not in seen:
+                seen.add((session_id, turn_id))
+                pairs.append((session_id, turn_id))
+    for snapshot in record.get("bindingSnapshots") or []:
+        if not isinstance(snapshot, Mapping):
+            continue
+        session_id = str(snapshot.get("sessionId") or "").strip()
+        turn_id = str(snapshot.get("turnId") or "").strip()
+        if session_id and turn_id and (session_id, turn_id) not in seen:
+            seen.add((session_id, turn_id))
+            pairs.append((session_id, turn_id))
+    return pairs
+
+
+def _close_cancel_run_turn(session_service: Any, session_id: str, turn_id: str) -> str:
+    """Stop one in-flight turn or close its stale chat_turn snapshot.
+
+    Returns an outcome label; raises on unexpected failures so the caller can
+    isolate per-turn errors.
+
+    When the in-process running set no longer knows the session,
+    ``request_stop_session_turn`` early-returns WITHOUT persisting any
+    terminal state (control.py early-exit branch).  In that case this writes
+    the terminal snapshot directly through ``_persist_chat_turn_work_run`` —
+    the canonical single writer for chat_turn records, whose terminal status
+    also clears the work-run index activeRunId.  Chosen over
+    ``_settle_stale_chat_turn_work_run`` because the latter additionally
+    rewrites conversation state, appends runtime notices and clears turn
+    control — recovery side effects owned by the stale-run reconciler, not
+    needed to close a cancelled run's turn.
+    """
+    store = getattr(session_service, "_WORK_RUN_STORE", None)
+    snapshot = store.load_snapshot("chat_turn", turn_id) if store is not None else None
+    if snapshot is not None:
+        status = str(
+            snapshot.get("status") or snapshot.get("currentPhase") or ""
+        ).strip().lower()
+        if status not in _CHAT_TURN_OPEN_STATUSES:
+            return "already_terminal"
+    if session_service._is_session_running(session_id):
+        session_service.request_stop_session_turn(session_id, expected_turn_id=turn_id)
+        return "stop_requested"
+    session_service._persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=turn_id,
+        status="stopped",
+        summary=session_service.text_for(
+            session_service.get_web_language(),
+            zh="研究工作流已取消，本轮已停止。",
+            en="The research workflow was cancelled; this turn was stopped.",
+        ),
+        finished_at=session_service._now_timestamp(),
+        updated_at=session_service._now_timestamp(),
+    )
+    return "snapshot_closed"
