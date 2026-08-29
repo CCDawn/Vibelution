@@ -27,6 +27,25 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
 
     s = _service()
     team_id = "research-team"
+    # ``research-team`` is also the durable Challenge Cup asset Team. Once it
+    # exists, the legacy organization projection must not replace its canonical
+    # ``role -> agentId`` membership or regenerate its Canvas from old state.
+    with s._TEAM_LOCK:
+        existing_state = s._load_index()
+        existing_team = s._find_team(existing_state, team_id)
+        if existing_team is not None:
+            # Preserve the existing roster/Canvas while retaining the narrow
+            # chat-room link maintenance this legacy entrypoint historically
+            # provided. Chat-room projection reads Team.members and never
+            # writes Agent configuration.
+            s._ensure_team_chat_room_link(existing_team)
+            existing_state["updatedAt"] = str(
+                existing_team.get("updatedAt") or existing_state.get("updatedAt") or ""
+            )
+            s._save_index(existing_state)
+    if existing_team is not None:
+        return s.get_team(team_id)
+
     now = s.utc_now_iso()
     members = s._members_from_research_organization(organization)
     with s._TEAM_LOCK:

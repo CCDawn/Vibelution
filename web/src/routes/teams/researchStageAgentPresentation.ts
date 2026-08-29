@@ -18,8 +18,10 @@ export function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanva
   return agentIds;
 }
 
-export function sourceCollectionAgentIdsFromTeam(team: Team | null | undefined, canvas: TeamOrganizationCanvas | null) {
-  const agentIds = sourceCollectionAgentIdsFromCanvas(canvas);
+export function sourceCollectionAgentIdsFromTeam(team: Team | null | undefined, _canvas: TeamOrganizationCanvas | null) {
+  // Team.members is canonical configuration. Canvas remains a read-only
+  // projection and must not become a second role-binding source.
+  const agentIds: Record<string, string> = {};
   const roleSet = new Set(SOURCE_COLLECTION_TEAM_AGENT_ROLES);
   for (const member of team?.members ?? []) {
     const role = normalizeAgentRoleKey(member.role);
@@ -41,11 +43,8 @@ export function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationC
   return "";
 }
 
-export function sourceCollectionOwnerAgentIdFromTeam(team: Team | null | undefined, canvas: TeamOrganizationCanvas | null) {
-  const canvasOwnerAgentId = sourceCollectionOwnerAgentIdFromCanvas(canvas);
-  if (canvasOwnerAgentId) {
-    return canvasOwnerAgentId;
-  }
+export function sourceCollectionOwnerAgentIdFromTeam(team: Team | null | undefined, _canvas: TeamOrganizationCanvas | null) {
+  // Owner routing follows the same Team.members SSOT as stage bindings.
   const preferredRoles = ["research_coordination", "data_intake_coordinator", "source_finder", "source_ingestor", "ceo", "organization_coordinator"];
   for (const role of preferredRoles) {
     const member = (team?.members ?? []).find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);

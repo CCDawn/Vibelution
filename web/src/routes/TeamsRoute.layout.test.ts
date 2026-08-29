@@ -251,7 +251,7 @@ describe("research project workspace", () => {
   it("never routes an active source-collection batch to a legacy direct Agent session", () => {
     // R2-j: stage agent chat helpers live in createSourceCollectionStageAgentHelpers.
     expect(createSourceCollectionStageAgentHelpersSource).toContain(
-      "const route = currentTaskSessionRoute;",
+      'const route = binding?.agent ? currentTaskSessionRoute : "";',
     );
     expect(createSourceCollectionStageAgentHelpersSource).toContain("projectRunAvailable: Boolean(selectedSourceCollectionRunEffectiveId)");
     expect(createSourceCollectionStageAgentHelpersSource).not.toContain("currentTaskSessionRoute || researchStageAgentDirectChatRoute(");
@@ -275,7 +275,7 @@ describe("research project workspace", () => {
       "isChallengeCupResearchWorkflowTeam(selectedTeam)",
     );
     expect(createSourceCollectionStageAgentHelpersSource).toContain(
-      "researchStageAgentManagementRoute(agentId)",
+      "researchStageAgentManagementRoute(boundAgentId)",
     );
     expect(createSourceCollectionStageAgentHelpersSource).toContain('"/agents?pane=config"');
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain(

@@ -251,6 +251,108 @@ def test_research_team_sync_preserves_agent_instance_configuration(tmp_path, mon
         assert _agent_config_snapshot(agent_directory_service.get_agent(agent_id)) == expected
 
 
+def test_research_organization_sync_does_not_overwrite_existing_challenge_cup_team(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    initial = team_service.bootstrap_challenge_cup_research_team()
+    before_members = [dict(member) for member in initial["team"]["members"]]
+    legacy_agent = agent_directory_service.create_agent_instance(
+        display_name="Legacy organization agent",
+        direct_session_id="session-legacy-organization",
+    )
+    organization = {
+        "updatedAt": "2026-05-29T00:00:00Z",
+        "agents": [
+            {
+                "nodeId": "legacy",
+                "agentId": legacy_agent["agentId"],
+                "displayName": "Legacy organization agent",
+                "role": "legacy_research_role",
+                "status": "active",
+            }
+        ],
+        "edges": [],
+    }
+
+    result = team_service.ensure_research_team_from_organization(organization)
+
+    assert result["teamId"] == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    assert result["members"] == before_members
+
+
+def test_challenge_cup_agent_repair_preserves_agent_instance_configuration(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    initial = team_service.bootstrap_challenge_cup_research_team()
+    agent_id = initial["team"]["members"][0]["agentId"]
+    current = agent_directory_service.get_agent(agent_id)
+    assert current is not None
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        display_name="User-owned Challenge Cup name",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="research",
+        role_key="user_owned_challenge_role",
+        prompt_template_id="prompt-chat-default",
+        permission_preset="request_approval",
+        tool_policy={**current["toolPolicy"], "maxCallsPerTurn": 5},
+        persona_profile={"personality": "user-owned persona"},
+        task_profile={"mission": "user-owned task"},
+    )
+    before = _agent_config_snapshot(agent_directory_service.get_agent(agent_id))
+    original_model_ref_repair = agent_directory_service._repair_agent_llm_binding_model_refs
+
+    def reject_challenge_cup_model_repair(agent, **kwargs):
+        if str(agent.get("agentId") or "").strip() == agent_id:
+            raise AssertionError("generic model repair must not inspect Challenge Cup Agent config")
+        return original_model_ref_repair(agent, **kwargs)
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_repair_agent_llm_binding_model_refs",
+        reject_challenge_cup_model_repair,
+    )
+
+    agent_directory_service.repair_agent_directory()
+
+    after = _agent_config_snapshot(agent_directory_service.get_agent(agent_id))
+    assert after == before
+
+
+def test_generic_team_repair_preserves_existing_challenge_cup_membership(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    initial = team_service.bootstrap_challenge_cup_research_team()
+    team = dict(initial["team"])
+    before_members = [dict(member) for member in team["members"]]
+    team["members"] = [
+        {**member, "agentStatus": "stale"}
+        for member in team["members"]
+    ]
+    state = {
+        "schemaVersion": team_service.SCHEMA_VERSION,
+        "updatedAt": team.get("updatedAt") or "",
+        "teams": [team],
+    }
+
+    changed = team_service._repair_index_state(
+        state,
+        agent_refs={"by_id": {}, "active_by_id": {}},
+    )
+
+    assert isinstance(changed, bool)
+    assert state["teams"][0]["members"] == [
+        {**member, "agentStatus": "stale"}
+        for member in before_members
+    ]
+
+
 def test_research_team_read_repair_cannot_override_agent_instance_configuration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     finder = agent_directory_service.create_agent_instance(display_name="Finder", direct_session_id="session-finder")

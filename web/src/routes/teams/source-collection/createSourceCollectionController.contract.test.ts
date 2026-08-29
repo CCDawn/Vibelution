@@ -31,4 +31,19 @@ describe("Clarity P5/F1 SourceCollectionController", () => {
     // ①: standalone chrome via SourceCollectionComposer (panel lives inside composer)
     expect(controllerSource).toContain("SourceCollectionComposer");
   });
+
+  it("never falls back to a stale member id for Challenge Cup stage launch", () => {
+    expect(controllerSource).toContain(
+      'const agentId = String(binding?.agent?.agentId || "").trim();',
+    );
+    expect(controllerSource).not.toContain(
+      'binding?.agent?.agentId || binding?.agentId',
+    );
+    expect(controllerSource).toContain("isChallengeCupResearchWorkflowTeam(selectedTeam)");
+    expect(controllerSource).toContain('"/agents?pane=config"');
+    expect(controllerSource).toContain("配置对应 Agent");
+    expect(controllerSource).not.toContain("修复团队绑定");
+    expect(controllerSource.indexOf("const initialChatState = sourceCollectionStageAgentChatState(stageId);"))
+      .toBeLessThan(controllerSource.indexOf("const preflight = preflightSourceCollectionStageAdvance({"));
+  });
 });

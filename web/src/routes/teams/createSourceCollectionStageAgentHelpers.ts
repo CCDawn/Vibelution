@@ -116,9 +116,11 @@ export function createSourceCollectionStageAgentHelpers(
     );
     const canCreateProjectSession = Boolean(
       selectedSourceCollectionRunEffectiveId
-      && String(binding?.agent?.agentId || binding?.agentId || "").trim(),
+      && String(binding?.agent?.agentId || "").trim(),
     );
-    const route = currentTaskSessionRoute;
+    // A task route is usable only after the AgentDirectory object is present.
+    // A Team member id without its Agent SSOT record is stale, not chat-ready.
+    const route = binding?.agent ? currentTaskSessionRoute : "";
     return resolveSourceCollectionStageAgentChatState({
       binding,
       route,
@@ -146,7 +148,13 @@ export function createSourceCollectionStageAgentHelpers(
     const binding = chatState.binding;
     const teamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
     const runId = selectedSourceCollectionRunEffectiveId;
-    const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
+    const agentId = String(binding?.agent?.agentId || "").trim();
+    const boundAgentId = String(binding?.agentId || "").trim();
+    const challengeCupAgentUnavailable = Boolean(
+      selectedTeam
+      && isChallengeCupResearchWorkflowTeam(selectedTeam)
+      && !agentId,
+    );
     if (teamId && runId && agentId) {
       try {
         const payload = await seedSourceCollectionAgentSessionContextMutation.mutateAsync({
@@ -164,11 +172,19 @@ export function createSourceCollectionStageAgentHelpers(
       }
       return;
     }
-    if (chatState.status === "repair") {
+    if (challengeCupAgentUnavailable && chatState.status !== "loading") {
+      navigate(
+        boundAgentId
+          ? researchStageAgentManagementRoute(boundAgentId)
+          : "/agents?pane=config",
+      );
+      return;
+    }
+    if (chatState.status === "repair" || chatState.status === "error") {
       if (selectedTeam && isChallengeCupResearchWorkflowTeam(selectedTeam)) {
         navigate(
-          agentId
-            ? researchStageAgentManagementRoute(agentId)
+          boundAgentId
+            ? researchStageAgentManagementRoute(boundAgentId)
             : "/agents?pane=config",
         );
         return;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentConfigWorkspaceAgent, TeamOrganizationCanvas } from "../../api/types";
+import type { AgentConfigWorkspaceAgent, Team, TeamOrganizationCanvas } from "../../api/types";
 
 import {
   researchStageAgentConfigStatusLabel,
@@ -9,7 +9,9 @@ import {
   researchStageAgentManagementRoute,
   researchStageSessionChatRoute,
   sourceCollectionAgentIdsFromCanvas,
+  sourceCollectionAgentIdsFromTeam,
   sourceCollectionOwnerAgentIdFromCanvas,
+  sourceCollectionOwnerAgentIdFromTeam,
 } from "./researchStageAgentPresentation";
 
 describe("researchStageAgentPresentation", () => {
@@ -27,6 +29,27 @@ describe("researchStageAgentPresentation", () => {
     expect(sourceCollectionOwnerAgentIdFromCanvas(canvas)).toBe("a-finder");
   });
 
+  it("uses Team.members instead of Canvas for source-collection ids and owner", () => {
+    const canvas = {
+      nodes: [
+        { id: "1", role: "source_finder", agentId: "stale-canvas-finder", label: "Stale" },
+        { id: "2", role: "source_ingestor", agentId: "stale-canvas-ingestor", label: "Stale" },
+      ],
+    } as TeamOrganizationCanvas;
+    const team = {
+      members: [
+        { agentId: "ssot-finder", role: "source_finder", agentName: "SSOT Finder" },
+        { agentId: "ssot-ingestor", role: "source_ingestor", agentName: "SSOT Ingestor" },
+      ],
+    } as Team;
+
+    expect(sourceCollectionAgentIdsFromTeam(team, canvas)).toEqual({
+      source_finder: "ssot-finder",
+      source_ingestor: "ssot-ingestor",
+    });
+    expect(sourceCollectionOwnerAgentIdFromTeam(team, canvas)).toBe("ssot-finder");
+  });
+
   it("labels agent config readiness from health", () => {
     const blocked = {
       health: [{ severity: "blocking", code: "x", title: "t", message: "m" }],
@@ -38,6 +61,7 @@ describe("researchStageAgentPresentation", () => {
 
   it("builds management and direct-chat routes", () => {
     expect(researchStageAgentManagementRoute("agent-1")).toContain("agent=agent-1");
+    expect(researchStageAgentManagementRoute("")).toBe("/agents?pane=config");
     expect(
       researchStageAgentDirectChatRoute(
         { directSessionId: "sess-1" } as AgentConfigWorkspaceAgent,
