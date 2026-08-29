@@ -43,6 +43,17 @@ def test_gate_definition_includes_reuse_research_contract() -> None:
     )
 
 
+def test_gate_self_test_pytest_commands_override_project_fail_fast() -> None:
+    pytest_commands = [
+        command
+        for command in gate.GATE_SELF_TEST_COMMANDS
+        if " -m pytest " in command
+    ]
+
+    assert pytest_commands
+    assert all("--maxfail=0" in command for command in pytest_commands)
+
+
 def test_commit_gate_blocks_direct_writes_on_main(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
     (git_repo / "direct-main-change.txt").write_text("blocked\n", encoding="utf-8")
@@ -603,7 +614,7 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
     specs = [gate.parse_allowed_command(command, git_repo) for command in rule["commands"]]
     assert all(spec.kind == "pytest" for spec in specs)
     assert all(spec.cwd == git_repo for spec in specs)
-    assert specs[0].argv[-7:] == [
+    assert specs[0].argv[-8:] == [
         "-n",
         "4",
         "--dist",
@@ -611,6 +622,7 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
         "-m",
         "not serial",
         "-q",
+        "--maxfail=0",
     ]
     assert specs[1].argv == [
         str(gate.PROJECT_PYTHON_NAME),
@@ -620,6 +632,7 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
         "-m",
         "serial",
         "-q",
+        "--maxfail=0",
     ]
 
 

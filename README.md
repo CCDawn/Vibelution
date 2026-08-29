@@ -333,7 +333,7 @@ python agent.py --supervised-dashboard
 Python：
 
 ```bash
-pytest tests -q
+pytest tests -q --maxfail=0
 ```
 
 常用局部验证：
