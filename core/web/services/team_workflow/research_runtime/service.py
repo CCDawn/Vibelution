@@ -657,14 +657,19 @@ class ResearchWorkflowRuntimeService:
         if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
             raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
         current = self._binding_config.load(workflow_id, team_id)
+        team_scoped = bool(str(team_id or "").strip())
         # Replace-whole-layer semantics: a layer present in the payload fully
         # replaces its persisted value (an empty dict clears it); absent
         # layers keep their persisted values.
         update = {
             "workflowDefaults": (
-                {str(k): str(v) for k, v in (payload.get("workflowDefaults") or {}).items()}
-                if "workflowDefaults" in payload
-                else current.workflowDefaults
+                {}
+                if team_scoped
+                else (
+                    {str(k): str(v) for k, v in (payload.get("workflowDefaults") or {}).items()}
+                    if "workflowDefaults" in payload
+                    else current.workflowDefaults
+                )
             ),
             "stageOverrides": (
                 {
@@ -693,10 +698,15 @@ class ResearchWorkflowRuntimeService:
                 nodeOverrides=update["nodeOverrides"],
             ),
         )
+        effective = effective_binding_layers(team_id, AgentBindingLayers(
+            workflowDefaults=saved["workflowDefaults"],
+            stageOverrides=saved["stageOverrides"],
+            nodeOverrides=saved["nodeOverrides"],
+        ))
         return {
             "workflowId": workflow_id,
             "teamId": saved["teamId"],
-            "workflowDefaults": saved["workflowDefaults"],
+            "workflowDefaults": effective.workflowDefaults,
             "stageOverrides": saved["stageOverrides"],
             "nodeOverrides": saved["nodeOverrides"],
             "updatedAt": saved["updatedAt"],
@@ -788,19 +798,20 @@ class ResearchWorkflowRuntimeService:
                 return existing
             thread_id = f"thread-{run_id}"
             team_id = str(run_input.get("teamId") or "").strip()
-            # Binding resolution: explicit layers > non-empty service-level
-            # config > team-role default mapping (per teamId, never random).
+            # Team members always provide workflow defaults. Explicit and
+            # service-level layers may add stage/node overrides only.
             service_config = self._bindings
             has_service_config = bool(
                 service_config.workflowDefaults
                 or service_config.stageOverrides
                 or service_config.nodeOverrides
             )
-            layers = (
+            selected_layers = (
                 binding_layers
                 or (service_config if has_service_config else None)
-                or self._effective_binding_layers(workflow_id, team_id)
+                or self._binding_config.load(workflow_id, team_id)
             )
+            layers = effective_binding_layers(team_id, selected_layers)
             snapshots = build_run_binding_snapshots(
                 run_id=run_id,
                 workflow_version_id=creation_identity.workflowVersionId,

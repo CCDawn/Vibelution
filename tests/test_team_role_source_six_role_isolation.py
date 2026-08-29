@@ -9,6 +9,7 @@ def _set_team_sources(monkeypatch, *, canvas_nodes=(), members=()) -> None:
     monkeypatch.setattr(
         "core.web.services.team_service.list_team_role_binding_sources",
         lambda _team_id: {
+            "team_exists": True,
             "canvas_nodes": list(canvas_nodes),
             "members": list(members),
         },
@@ -66,16 +67,15 @@ def test_canonical_product_agents_project_aliases_and_drop_non_product_sources(
     assert "agent-legacy-search" not in resolved.values()
 
 
-def test_same_layer_exact_role_ambiguity_is_unbound_without_member_fallback(
+def test_member_exact_role_ambiguity_is_unbound(
     monkeypatch,
 ) -> None:
     _set_team_sources(
         monkeypatch,
-        canvas_nodes=(
+        members=(
             {"role": "source_finder", "agentId": "agent-search-a"},
             {"role": "source_finder", "agentId": "agent-search-b"},
         ),
-        members=({"role": "source_finder", "agentId": "agent-member"},),
     )
 
     assert "source_finder" not in team_role_source.resolve_team_role_bindings(
@@ -85,7 +85,7 @@ def test_same_layer_exact_role_ambiguity_is_unbound_without_member_fallback(
 
 def test_duplicate_records_for_one_agent_are_not_ambiguous(monkeypatch) -> None:
     duplicate = {"role": "source_finder", "agentId": "agent-search"}
-    _set_team_sources(monkeypatch, canvas_nodes=(duplicate, dict(duplicate)))
+    _set_team_sources(monkeypatch, members=(duplicate, dict(duplicate)))
 
     assert (
         team_role_source.resolve_team_role_bindings("research-team")["source_finder"]
@@ -96,11 +96,11 @@ def test_duplicate_records_for_one_agent_are_not_ambiguous(monkeypatch) -> None:
 def test_canonical_ambiguity_blocks_alias_projection(monkeypatch) -> None:
     _set_team_sources(
         monkeypatch,
-        canvas_nodes=(
+        members=(
             {"role": "challenge_cup_search", "agentId": "agent-search-a"},
             {"role": "challenge_cup_search", "agentId": "agent-search-b"},
+            {"role": "source_finder", "agentId": "agent-legacy"},
         ),
-        members=({"role": "source_finder", "agentId": "agent-legacy"},),
     )
 
     resolved = team_role_source.resolve_team_role_bindings("research-team")
@@ -113,7 +113,7 @@ def test_legacy_exact_roles_remain_independent_without_canonical_binding(
 ) -> None:
     _set_team_sources(
         monkeypatch,
-        canvas_nodes=(
+        members=(
             {"role": "experiment_planner", "agentId": "agent-plan"},
             {"role": "iteration_planner", "agentId": "agent-iterate"},
         ),
@@ -188,7 +188,7 @@ def test_persisted_stage_overrides_drop_unknown_workflow_stage_ids() -> None:
     }
 
 
-def test_valid_persisted_binding_keeps_priority_over_team_default(monkeypatch) -> None:
+def test_team_members_override_retired_persisted_workflow_defaults(monkeypatch) -> None:
     _set_team_sources(
         monkeypatch,
         members=({"role": "challenge_cup_search", "agentId": "agent-team-search"},),
@@ -200,7 +200,54 @@ def test_valid_persisted_binding_keeps_priority_over_team_default(monkeypatch) -
     )
 
     assert layers.workflowDefaults["challenge_cup_search"] == "agent-team-search"
-    assert layers.workflowDefaults["source_finder"] == "agent-config-search"
+    assert layers.workflowDefaults["source_finder"] == "agent-team-search"
+
+
+def test_team_lookup_failure_does_not_revive_persisted_workflow_defaults(
+    monkeypatch,
+) -> None:
+    def unavailable(_team_id):
+        raise RuntimeError("team source unavailable")
+
+    monkeypatch.setattr(
+        "core.web.services.team_service.list_team_role_binding_sources",
+        unavailable,
+    )
+
+    layers = team_role_source.effective_binding_layers(
+        "research-team",
+        AgentBindingLayers(
+            workflowDefaults={"source_finder": "stale-config-search"},
+            stageOverrides={
+                "knowledge_collection": {"source_finder": "stage-search"}
+            },
+            nodeOverrides={"hypothesis_design": "node-revision"},
+        ),
+    )
+
+    assert layers.workflowDefaults == {}
+    assert layers.stageOverrides == {
+        "knowledge_collection": {"source_finder": "stage-search"}
+    }
+    assert layers.nodeOverrides == {"hypothesis_design": "node-revision"}
+
+
+def test_missing_team_does_not_revive_persisted_workflow_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core.web.services.team_service.list_team_role_binding_sources",
+        lambda _team_id: {
+            "team_exists": False,
+            "canvas_nodes": [],
+            "members": [],
+        },
+    )
+
+    layers = team_role_source.effective_binding_layers(
+        "missing-team",
+        AgentBindingLayers(workflowDefaults={"source_finder": "stale-config-search"}),
+    )
+
+    assert layers.workflowDefaults == {}
 
 
 def test_live_healing_uses_contract_aliases_without_team_constants(

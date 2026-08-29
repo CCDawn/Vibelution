@@ -11,6 +11,7 @@ import { isChallengeCupResearchWorkflowTeam } from "./teamKindModel";
 import type { ResearchStageAgentBinding } from "./researchStageAgentBindings";
 import {
   researchStageAgentDirectChatRoute,
+  researchStageAgentManagementRoute,
   researchStageSessionChatRoute,
 } from "./researchStageAgentPresentation";
 import { researchSourceCollectionRoute } from "./researchWorkspaceModel";
@@ -50,10 +51,6 @@ export type CreateSourceCollectionStageAgentHelpersOptions = {
     isPending: boolean;
     mutate: (teamId: string) => void;
   };
-  repairChallengeCupTeamAgentsMutation: {
-    isPending: boolean;
-    mutate: (teamId: string) => void;
-  };
   navigate: NavigateFunction;
 };
 
@@ -70,7 +67,6 @@ export function createSourceCollectionStageAgentHelpers(
     agentSummaryQuery,
     seedSourceCollectionAgentSessionContextMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
-    repairChallengeCupTeamAgentsMutation,
     navigate,
   } = options;
 
@@ -143,9 +139,6 @@ export function createSourceCollectionStageAgentHelpers(
       repairKnowledgeExpansionTeamAgentsMutation.mutate(selectedTeam.teamId);
       return;
     }
-    if (isChallengeCupResearchWorkflowTeam(selectedTeam) && !repairChallengeCupTeamAgentsMutation.isPending) {
-      repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
-    }
   }
 
   async function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
@@ -172,6 +165,14 @@ export function createSourceCollectionStageAgentHelpers(
       return;
     }
     if (chatState.status === "repair") {
+      if (selectedTeam && isChallengeCupResearchWorkflowTeam(selectedTeam)) {
+        navigate(
+          agentId
+            ? researchStageAgentManagementRoute(agentId)
+            : "/agents?pane=config",
+        );
+        return;
+      }
       repairSelectedWorkflowTeamAgentsIfNeeded();
     }
   }

@@ -1,13 +1,13 @@
 """Team-role binding source for research workflow runs.
 
-Resolves a team's organization canvas / member roles into the workflow's
-roleKey -> agentId default map. This is the CURRENT-CONFIGURATION source
+Resolves a team's member roles into the workflow's roleKey -> agentId default
+map. This is the CURRENT-CONFIGURATION source
 only: run creation freezes the resolved result into an immutable
 RunAgentBindingSnapshot, so history never re-reads live team config.
 
 Rules enforced here:
 - no random fallback to arbitrary agents (a missing role is simply unbound);
-- canvas nodes win over team members for the same exact role;
+- Team ``members`` is the only role-binding source; canvas is a projection;
 - only product-Agent owners may enter binding layers or healing;
 - canonical product roles project onto legacy lookup aliases, while a
   legacy-only Team keeps exact aliases independent;
@@ -18,7 +18,7 @@ Rules enforced here:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from core.research.workflow.contracts.research_team_role_contract import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
@@ -26,6 +26,7 @@ from core.research.workflow.contracts.research_team_role_contract import (
 from core.research.workflow.models import AgentBindingLayers
 
 RoleOwner = tuple[str, str]
+TeamMemberSourceStatus = Literal["unscoped", "found", "missing", "error"]
 
 
 def normalize_role_key(value: str | None) -> str:
@@ -134,27 +135,34 @@ def _agent_id_for_product_role(
     return next(iter(candidates)) if len(candidates) == 1 else ""
 
 
-def resolve_team_role_bindings(team_id: str) -> dict[str, str]:
-    """Return roleKey -> agentId for a team (canvas nodes, then members).
-
-    Empty result means no usable role mapping — callers treat every role as
-    unbound (never fall back to a random agent).
-    """
+def _team_member_source(team_id: str) -> tuple[TeamMemberSourceStatus, Any]:
     if not str(team_id or "").strip():
-        return {}
+        return "unscoped", []
     try:
         from core.web.services.team_service import list_team_role_binding_sources
 
         sources = list_team_role_binding_sources(team_id)
     except Exception:  # noqa: BLE001 - source failure must fail closed
-        return {}
+        return "error", []
 
     if not isinstance(sources, Mapping):
-        return {}
-    layers = (
-        _layer_role_agents(sources.get("canvas_nodes")),
-        _layer_role_agents(sources.get("members")),
-    )
+        return "error", []
+    team_exists = bool(sources.get("team_exists", "members" in sources))
+    return ("found" if team_exists else "missing"), sources.get("members")
+
+
+def resolve_team_role_bindings(team_id: str) -> dict[str, str]:
+    """Return roleKey -> agentId from the Team's canonical members.
+
+    Empty result means no usable role mapping — callers treat every role as
+    unbound (never fall back to a random agent).
+    """
+    _source_status, members = _team_member_source(team_id)
+    return _resolve_member_role_bindings(members)
+
+
+def _resolve_member_role_bindings(members: Any) -> dict[str, str]:
+    layers = (_layer_role_agents(members),)
     bindings: dict[str, str] = {}
     for product_role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
         owner_id = product_role.product_role_id
@@ -186,9 +194,9 @@ def heal_agent_binding_for_node(
 ) -> dict[str, str] | None:
     """Fill an empty frozen snapshot slot from the team's current role map.
 
-    Canvas overlays live ``effectiveBindings``, so the node can show
-    Agent bound while readiness still reads an empty freeze. History
-    stays authoritative when the freeze already named an agentId.
+    Team membership may become available after an incomplete snapshot was
+    created. History stays authoritative when the freeze already named an
+    agentId.
     """
     from core.research.workflow.definition import node_by_id
     from core.research.workflow.models import ActorKind
@@ -276,12 +284,15 @@ def effective_binding_layers(
     team_id: str,
     config: AgentBindingLayers,
 ) -> AgentBindingLayers:
-    """Merge the persisted (controlled-write) config with team-role defaults.
+    """Build effective layers with Team members as the default authority.
 
     Priority order (kept by resolve_effective_agent_id in core/research):
       node override > stage override > workflow default > unbound.
-    The controlled config wins over team roles for the same roleKey; team
-    roles fill every gap. Team roles only ever populate workflowDefaults.
+    For a Team-scoped workflow, persisted ``workflowDefaults`` are ignored:
+    they are a retired second membership source. Stage and node overrides are
+    still allowed because they select an Agent for one execution scope and do
+    not redefine Team membership. A workflow without a Team keeps its
+    persisted defaults for backwards-compatible non-Team use.
     """
     from core.research.workflow.definition import (
         build_challenge_cup_workflow_definition,
@@ -291,11 +302,20 @@ def effective_binding_layers(
 
     definition = build_challenge_cup_workflow_definition()
     valid_stage_ids = {stage.stageId.value for stage in definition.stages}
+    source_status, members = _team_member_source(team_id)
     team_defaults = (
-        resolve_team_role_bindings(team_id) if str(team_id or "").strip() else {}
+        _resolve_member_role_bindings(members)
+        if source_status == "found"
+        else {}
     )
     persisted_defaults = _filtered_product_role_bindings(config.workflowDefaults)
-    merged_defaults = {**team_defaults, **persisted_defaults}
+    if source_status == "unscoped":
+        merged_defaults = persisted_defaults
+    else:
+        # A Team-scoped workflow is fail-closed when the canonical Team source
+        # is missing or unavailable. Never revive retired workflowDefaults on
+        # a lookup failure; doing so would make a stale layer a second SSOT.
+        merged_defaults = team_defaults
     stage_overrides: dict[str, dict[str, str]] = {}
     for raw_stage_id, values in config.stageOverrides.items():
         if not isinstance(values, Mapping):

@@ -358,21 +358,6 @@ export function observeHypothesisLegacyFallback(input: {
   );
 }
 
-export function observeChallengeTeamAgentsAutoRepair(input: {
-  teamId: string;
-  error?: unknown;
-}): void {
-  postUserActionObservation(
-    "challenge_team_agents_auto_repair",
-    {
-      teamId: input.teamId,
-      outcome: input.error ? "failed" : "repaired",
-      ...errorSummaryFields(input.error),
-    },
-    { level: input.error ? "warning" : "info", forceTimeline: true },
-  );
-}
-
 export function observeSubmissionReadinessChanged(input: {
   teamId: string;
   previousStatus: string;

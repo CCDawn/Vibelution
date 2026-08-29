@@ -310,8 +310,6 @@ def _repair_team(
         changed = True
         for removed_agent_id in removed_agent_ids:
             s._remove_agent_from_team_canvas(team, removed_agent_id)
-    if s._infer_team_kind(team) == "research":
-        s._sync_research_team_member_agent_roles(team.get("members") or [])
     if removed_agent_ids or s._team_chat_room_needs_sync(team, agent_refs=agent_refs):
         s._ensure_team_chat_room_link(team, agent_refs=agent_refs)
         changed = True

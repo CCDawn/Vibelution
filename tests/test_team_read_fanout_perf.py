@@ -2,9 +2,6 @@
 
 Covers:
 - ``get_team`` runs ``_repair_team`` exactly once per call (no projection re-repair).
-- ``_sync_research_team_member_agent_roles`` keeps its write semantics while
-  reading the repaired registry snapshot instead of per-member ``get_agent``
-  hydration.
 - Read-only progress endpoints validate Team existence via ``assert_team_exists``
   instead of full ``get_team`` hydration.
 """
@@ -60,52 +57,6 @@ def test_get_team_runs_repair_exactly_once(tmp_path, monkeypatch):
     assert detail["memberCount"] == 1
     assert "canvas" in detail
     assert "conversation" in detail
-
-
-def test_research_member_role_sync_avoids_full_agent_hydration(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="Source Finder")
-    members = [{"agentId": agent["agentId"], "role": "source_finder"}]
-
-    def _forbidden_hydration(*args, **kwargs):
-        raise AssertionError("full Agent hydration must not run on the team read path")
-
-    monkeypatch.setattr(agent_directory_service, "get_agent", _forbidden_hydration)
-    monkeypatch.setattr(agent_directory_service, "resolve_tool_policy_for_agent", _forbidden_hydration)
-
-    assert team_service._sync_research_team_member_agent_roles(members) is True
-
-    state = agent_directory_service.load_state()
-    stored = next(item for item in state["agents"] if item.get("agentId") == agent["agentId"])
-    assert stored.get("primaryMode") == "research"
-    assert stored.get("roleKey") == "source_finder"
-    metadata = stored.get("metadata") or {}
-    assert metadata.get("agentMode") == "research"
-    assert metadata.get("configSurface") == "team"
-    assert metadata.get("researchTeamRole") == "source_finder"
-    assert metadata.get("researchTeamRoleKey") == "source_finder"
-
-    # Second pass observes no drift and must not write again.
-    assert team_service._sync_research_team_member_agent_roles(members) is False
-
-
-def test_research_member_role_sync_repairs_tool_policy_drift(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="Experiment Planner")
-    members = [{"agentId": agent["agentId"], "role": "experiment_planner"}]
-
-    assert team_service._sync_research_team_member_agent_roles(members) is True
-    assert team_service._sync_research_team_member_agent_roles(members) is False
-
-    current = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
-    tampered = {**current, "allowedTools": ["some_unexpected_tool_xyz"]}
-    agent_directory_service.update_agent_instance(agent["agentId"], tool_policy=tampered)
-
-    assert team_service._sync_research_team_member_agent_roles(members) is True
-    restored = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
-    assert list(restored.get("allowedTools") or []) == list(current.get("allowedTools") or [])
-
-    assert team_service._sync_research_team_member_agent_roles(members) is False
 
 
 def test_question_run_status_uses_light_team_existence_check(tmp_path, monkeypatch):

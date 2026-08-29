@@ -29,8 +29,6 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
     team_id = "research-team"
     now = s.utc_now_iso()
     members = s._members_from_research_organization(organization)
-    if s._sync_research_team_member_agent_roles(members):
-        agent_directory_service.repair_agent_directory()
     with s._TEAM_LOCK:
         state = s._load_index()
         if s._repair_index_state(state):
@@ -112,117 +110,6 @@ def _members_from_research_organization(organization: dict[str, Any]) -> list[di
             }
         )
     return members
-
-
-def _resolved_tool_policy_from_agent_record(agent: dict[str, Any]) -> dict[str, Any]:
-    """Mirror ``resolve_tool_policy_for_agent`` for an already-loaded repaired record.
-
-    Temporary tool grants are session-scoped and therefore a no-op here; the
-    caller passes a record from the repaired registry snapshot, which matches
-    what ``get_agent`` + ``resolve_tool_policy_for_agent`` would observe.
-    """
-
-    policy_id = (
-        str(agent.get("toolPolicyId") or agent_directory_service.DEFAULT_TOOL_POLICY_ID).strip()
-        or agent_directory_service.DEFAULT_TOOL_POLICY_ID
-    )
-    policy = agent.get("toolPolicy")
-    if not isinstance(policy, dict):
-        policy = agent_directory_service.default_tool_policy(policy_id)
-    normalized = agent_directory_service._with_session_terminal_protocol_defaults(
-        agent,
-        agent_directory_service.normalize_tool_policy(policy, policy_id),
-    )
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    return agent_directory_service._effective_agent_tool_policy(
-        normalized,
-        metadata.get("delegationPolicy") if isinstance(metadata, dict) else {},
-    )
-
-
-def _sync_research_team_member_agent_roles(members: list[dict[str, Any]]) -> bool:
-    s = _service()
-    targets: list[tuple[str, str, str]] = []
-    for member in members:
-        if not isinstance(member, dict):
-            continue
-        agent_id = str(member.get("agentId") or "").strip()
-        role = s._safe_token(member.get("role"), default="", max_length=96)
-        role_key = s.RESEARCH_TEAM_MEMBER_ROLE_KEYS.get(role)
-        if not agent_id or not role_key:
-            continue
-        targets.append((agent_id, role, role_key))
-    if not targets:
-        return False
-    # Load the repaired registry snapshot once instead of hydrating every member
-    # Agent via ``get_agent`` (full ``_agent_to_api`` incl. activity reads).
-    with agent_directory_service._STATE_LOCK:
-        state, _cache_hit = agent_directory_service._load_repaired_state_for_read()
-        agents_by_id = {
-            str(item.get("agentId") or "").strip(): item
-            for item in list(state.get("agents") or [])
-            if isinstance(item, dict) and str(item.get("agentId") or "").strip()
-        }
-        current_policies = {
-            agent_id: _resolved_tool_policy_from_agent_record(agents_by_id[agent_id])
-            for agent_id, _role, _role_key in targets
-            if agent_id in agents_by_id
-        }
-    changed = False
-    for agent_id, role, role_key in targets:
-        agent = agents_by_id.get(agent_id)
-        if not agent or str(agent.get("status") or "") == "archived":
-            continue
-        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-        expected_metadata = {
-            "agentMode": "research",
-            "configSurface": "team",
-            "researchTeamRole": role,
-            "researchTeamRoleKey": role_key,
-        }
-        current_policy = current_policies[agent_id]
-        tool_policy_id = (
-            str(agent.get("toolPolicyId") or agent_directory_service.DEFAULT_TOOL_POLICY_ID).strip()
-            or agent_directory_service.DEFAULT_TOOL_POLICY_ID
-        )
-        if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
-            expected_policy = agent_directory_service._knowledge_steward_tool_policy()
-        elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS:
-            expected_policy = agent_directory_service.default_research_source_tool_policy(
-                str(tool_policy_id or f"tool-{agent_id}"),
-                role_key=role_key,
-            )
-        else:
-            expected_policy = agent_directory_service.default_research_role_tool_policy(
-                str(tool_policy_id or f"tool-{agent_id}"),
-                role_key=role_key,
-            )
-        primary_mode = agent_directory_service._normalize_primary_mode(
-            agent.get("primaryMode") or agent_directory_service._infer_agent_primary_mode(agent)
-        )
-        current_role_key = agent_directory_service._normalize_role_key(
-            agent.get("roleKey") or agent_directory_service._infer_agent_role_key(agent)
-        )
-        needs_update = (
-            str(primary_mode or "").strip() != "research"
-            or str(current_role_key or "").strip() != role_key
-            or any(metadata.get(key) != value for key, value in expected_metadata.items())
-            or list(current_policy.get("allowedTools") or []) != list(expected_policy.get("allowedTools") or [])
-            or current_policy.get("mutationAccess") != expected_policy.get("mutationAccess")
-            or list(current_policy.get("writeScopes") or []) != list(expected_policy.get("writeScopes") or [])
-        )
-        if not needs_update:
-            continue
-        agent_directory_service.update_agent_instance(
-            agent_id,
-            primary_mode="research",
-            role_key=role_key,
-            tool_policy=expected_policy,
-            metadata=expected_metadata,
-            status="active",
-        )
-        changed = True
-    return changed
 
 
 def _canvas_from_research_organization(organization: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:

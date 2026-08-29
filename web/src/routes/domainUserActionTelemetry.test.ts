@@ -54,7 +54,14 @@ describe("domain user-action telemetry contract", () => {
     expect(teamShellSource).toContain('startUserAction("team_canvas_save"');
     expect(teamShellSource).toContain('startUserAction("team_message_send"');
     expect(teamShellSource).toContain('startUserAction("team_message_revoke"');
-    expect(teamShellSource).toContain("observeChallengeTeamAgentsAutoRepair(");
+    expect(teamShellSource).not.toContain("observeChallengeTeamAgentsAutoRepair(");
+  });
+
+  it("does not auto-repair or override Challenge Cup Agent configuration", () => {
+    expect(teamShellSource).not.toContain("repairChallengeCupTeamAgents");
+    expect(teamShellSource).not.toContain("challenge_team_agents_auto_repair");
+    expect(challengeCupTelemetrySource).not.toContain("observeChallengeTeamAgentsAutoRepair");
+    expect(challengeCupTelemetrySource).not.toContain('"challenge_team_agents_auto_repair"');
   });
 
   it("tracks tier-2 knowledge and research project mutations", () => {
@@ -115,7 +122,6 @@ describe("domain user-action telemetry contract", () => {
       "challenge_real_batch_phase_changed",
       "challenge_catalog_active_work_changed",
       "challenge_hypothesis_legacy_fallback",
-      "challenge_team_agents_auto_repair",
       "challenge_submission_readiness_changed",
     ];
     for (const code of observations) {

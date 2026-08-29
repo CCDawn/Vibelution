@@ -18,7 +18,7 @@ def test_challenge_cup_team_agents_preserve_unregistered_source_role_agents_as_l
         },
     )
 
-    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    result = team_service.bootstrap_challenge_cup_research_team()
     roles = {member["role"] for member in result["team"]["members"]}
 
     assert result["purgedAgentIds"] == []

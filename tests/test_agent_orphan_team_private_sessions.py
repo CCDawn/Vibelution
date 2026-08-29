@@ -11,9 +11,12 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
 
 
-def test_challenge_cup_repair_preserves_orphan_identity_as_legacy(tmp_path, monkeypatch):
+def test_challenge_cup_bootstrap_leaves_unbound_historical_agent_untouched(
+    tmp_path,
+    monkeypatch,
+):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team_service.bootstrap_challenge_cup_research_team()
     stale = agent_directory_service.create_agent_instance(
         display_name="旧资料发现",
         direct_session_id="session-old-discovery",
@@ -25,36 +28,23 @@ def test_challenge_cup_repair_preserves_orphan_identity_as_legacy(tmp_path, monk
             "challengeCupTeamId": team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID,
             "challengeCupTeamManagedVersion": 1,
             "challengeCupTeamRole": "data_discovery",
-            "challengeCupTeamRoleKey": "challenge_cup_data_discovery",
-            "researchAgentKey": "challenge_cup_data_discovery",
-            "researchTeamRole": "data_discovery",
-            "researchTeamRoleKey": "challenge_cup_data_discovery",
             "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
             "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
             "showInSessionIndex": False,
-            "directSessionVisibility": "active_session",
         },
     )
+    before = agent_directory_service.get_agent(stale["agentId"], include_archived=True)
 
-    assert team_service.challenge_cup_research_team_agents_need_repair() is True
-    with pytest.raises(agent_directory_service.AgentDirectoryError, match="Protected core Agent"):
-        agent_directory_service.archive_agent_instance(stale["agentId"])
+    second = team_service.bootstrap_challenge_cup_research_team()
+    after = agent_directory_service.get_agent(stale["agentId"], include_archived=True)
 
-    repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
-
-    assert repaired["purgedAgentIds"] == []
-    preserved = agent_directory_service.get_agent(stale["agentId"], include_archived=True)
-    assert preserved is not None
-    assert preserved["directSessionId"] == "session-old-discovery"
-    assert preserved["metadata"]["challengeCupTeamActiveBinding"] is False
-    assert preserved["metadata"]["challengeCupTeamBindingStatus"] == "legacy"
-    assert preserved["metadata"]["challengeCupTeamAliasResolution"] == {
-        "sourceRole": "data_discovery",
-        "ownerType": "unmapped_legacy",
-        "ownerId": "",
-        "aliasPriority": -1,
+    assert second["created"] is False
+    assert after == before
+    assert stale["agentId"] not in {
+        member["agentId"] for member in second["team"]["members"]
     }
-    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
 def test_knowledge_expansion_repair_detects_orphan_active_team_private_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)

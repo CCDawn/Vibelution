@@ -1,10 +1,10 @@
 """Controlled-write binding configuration store for research workflows.
 
-Config layers are persisted per (workflowId, teamId) so multiple teams stay
-isolated. Writing is "controlled": every payload is validated against the
-workflow definition (roleKeys / stageIds / nodeIds must exist and target
-agent nodes) before it is persisted. History is never affected — run
-snapshots are the only per-run authority.
+Stage/node override layers are persisted per (workflowId, teamId) so multiple
+teams stay isolated. Team workflow defaults come only from Team members.
+Legacy workflowDefaults remain readable for non-Team scopes, but a Team-scoped
+write clears them. History is never affected — run snapshots are the only
+per-run authority.
 """
 
 from __future__ import annotations

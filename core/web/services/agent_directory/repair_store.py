@@ -498,6 +498,8 @@ def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> P
 def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
     s = _service()
     metadata = dict(agent.get("metadata") or {})
+    if str(metadata.get("challengeCupTeamId") or "").strip():
+        return False
     defaults = s._fixed_role_profile_defaults(agent, metadata)
     if not defaults:
         return False
@@ -2001,9 +2003,20 @@ def repair_agent_directory() -> dict[str, Any]:
                 if agent.get("roleKey") != normalized_role_key:
                     agent["roleKey"] = normalized_role_key
                     changed = True
+            agent_metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            challenge_cup_agent = bool(
+                str(agent_metadata.get("challengeCupTeamId") or "").strip()
+            )
             prompt_template_id = s._infer_agent_prompt_template_id(agent)
             current_prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-            if prompt_template_id and s._should_repair_agent_prompt_template_id(current_prompt_template_id, prompt_template_id):
+            if (
+                not challenge_cup_agent
+                and prompt_template_id
+                and s._should_repair_agent_prompt_template_id(
+                    current_prompt_template_id,
+                    prompt_template_id,
+                )
+            ):
                 agent["promptTemplateId"] = prompt_template_id
                 changed = True
             elif current_prompt_template_id:
