@@ -1,8 +1,13 @@
-"""T0 迁移基线审计：只读盘点旧 JSON writer 的 Run 数据面与旧代码面。
+"""挑战杯科研工作流只读审计：优先 canonical Ledger，兼容旧 JSON。
 
 只读工具。不修改任何 Run、checkpoint、index 或领域数据。
 
-分类语义（每个旧 Run 恰好一类，顺序优先）：
+默认 ``--source auto``：存在 ``workflow-ledger.sqlite`` 时审计 canonical
+SQLite Ledger 的完整性、schema、Run、授权、预算收据和关键引用计数；仅在
+Ledger 不存在时回退 T0 旧 JSON writer 迁移基线。可用 ``--source`` 显式
+选择，避免把兼容数据面误当作当前事实源。
+
+旧 JSON 分类语义（每个旧 Run 恰好一类，顺序优先）：
   corrupt                JSON 无法解析或违反 schema（必需字段、事件序列、身份重复）
   duplicate_identity     重复 Handoff 业务身份或同一 runId 的多份文件
   scope_mismatch         teamId 缺失/为空/与 inputSnapshot 不一致
@@ -29,6 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts import research_workflow_ledger_audit as ledger_audit
 from vibelution_storage import resolve_project_data_home
 
 HARD_CATEGORIES = ("corrupt", "identity", "scope", "reconciliation")
@@ -645,6 +651,7 @@ def run_audit(
     return {
         "schemaVersion": 1,
         "generatedAtMs": 0,
+        "source": "legacy-json",
         "dataRoot": str(data_root),
         "passed": passed,
         "runs": entries,
@@ -664,17 +671,41 @@ def _utc_now_ms() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="挑战杯科研工作流 T0 基线审计（只读）")
+    parser = argparse.ArgumentParser(description="挑战杯科研工作流 canonical Ledger 审计（只读）")
     parser.add_argument("--data-root", type=Path, default=None, help="research_workflows 数据根")
+    parser.add_argument("--ledger-path", type=Path, default=None, help="canonical workflow-ledger.sqlite 路径")
+    parser.add_argument(
+        "--source",
+        choices=("auto", "ledger", "legacy-json"),
+        default="auto",
+        help="审计源；auto 优先 canonical Ledger，仅在 Ledger 不存在时回退旧 JSON",
+    )
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT, help="仓库根（旧代码面清单）")
     parser.add_argument("--workspace-root", type=Path, default=None, help="workspace 根（领域 read-back，默认 data-root/../workspace）")
     parser.add_argument("--output", type=Path, default=None, help="审计报告 JSON 输出路径")
     args = parser.parse_args(argv)
     data_root = args.data_root or default_data_root(args.project_root)
+    ledger_path = args.ledger_path or ledger_audit.default_ledger_path(data_root)
 
     try:
         workspace_root = args.workspace_root or (data_root.parent / "workspace")
-        report = run_audit(data_root, project_root=args.project_root, workspace_root=workspace_root)
+        use_ledger = args.source == "ledger" or (
+            args.source == "auto" and ledger_path.is_file()
+        )
+        if use_ledger:
+            report = ledger_audit.audit_ledger(
+                ledger_path,
+                data_root=data_root,
+            )
+            report["legacySurfaceInventory"] = inventory_legacy_surface(
+                args.project_root
+            )
+        else:
+            report = run_audit(
+                data_root,
+                project_root=args.project_root,
+                workspace_root=workspace_root,
+            )
     except FileNotFoundError as exc:
         print(f"audit failed: {exc}", file=sys.stderr)
         return 2
@@ -686,6 +717,28 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     summary = report["summary"]
+    if report["source"] == "workflow-ledger":
+        print(
+            f"source=workflow-ledger integrity={report['ledger']['integrity']} "
+            f"schema={report['ledger']['migration']['actualVersion']}/"
+            f"{report['ledger']['migration']['expectedVersion']} "
+            f"runs={summary['runCount']} succeeded={summary['successfulRunCount']} "
+            f"authorizations={summary['catalogRunAuthorizationCount']} "
+            f"reservedBudgets={summary['reservedBudgetReceiptCount']} "
+            f"statuses={json.dumps(summary['statusCounts'], ensure_ascii=False)}"
+        )
+        for entry in report["runs"]:
+            if entry["findings"]:
+                codes = ",".join(
+                    sorted({finding["code"] for finding in entry["findings"]})
+                )
+                print(f"  {entry['runId']}: {entry['status']} [{codes}]")
+        print(
+            "legacySurfaceInventory: "
+            f"{json.dumps(report['legacySurfaceInventory'])}"
+        )
+        return 0 if report["passed"] else 1
+
     print(
         f"runs={summary['runCount']} events={summary['eventCount']} "
         f"handoffs={summary['handoffCount']} humanTasks={summary['humanTaskCount']} "
