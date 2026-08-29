@@ -259,6 +259,105 @@ def test_submit_scheduled_context_carries_trace_context_carrier(
         _reset_seeded_session_runtime(session_id)
 
 
+def test_initial_source_stage_submit_carries_only_ephemeral_challenge_deadline(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_task_deadline_scope,
+    )
+    from core.web.services.team_workflow.source_collection import stage_session
+
+    session_id = "session-source-stage-deadline"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+    monkeypatch.setattr(
+        stage_session,
+        "_read_source_collection_stage_session_task_record",
+        lambda team_id, task_id: {
+            "taskId": task_id,
+            "teamId": team_id,
+            "challengeTaskContract": {
+                "workflowRunId": "workflow-1",
+                "nodeRunId": "node-1",
+            },
+        },
+    )
+
+    try:
+        with challenge_task_deadline_scope(1_000):
+            result = submit.submit_session_message(
+                session_id,
+                "start formal source stage",
+                client_submission_id="submission-source-stage-deadline",
+                mental_model_enabled=False,
+                message_source="agent_inbox",
+                message_metadata={
+                    "kind": "source_collection_stage_session_task",
+                    "teamId": "team-1",
+                    "sourceCollectionStageTaskId": "stage-task-1",
+                },
+                include_started_turn_id=True,
+                lightweight_response=True,
+            )
+
+        assert result["accepted"] is True
+        assert scheduled_contexts[0]["_challenge_task_deadline_at_ms"] == 301_000
+        assert "_challenge_task_deadline_at_ms" not in scheduled_contexts[0]["message_metadata"]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_continuation_submit_carries_same_ephemeral_challenge_deadline(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_task_deadline_scope,
+    )
+
+    session_id = "session-continuation-deadline"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+
+    try:
+        with challenge_task_deadline_scope(2_000):
+            result = submit.submit_session_message(
+                session_id,
+                "继续",
+                client_submission_id="submission-continuation-deadline",
+                mental_model_enabled=False,
+                message_source="agent_inbox",
+                message_metadata={
+                    "sourceSurface": "team_workflow_agent_turn_continuation",
+                    "workflowRunId": "workflow-1",
+                    "nodeRunId": "node-1",
+                },
+                include_started_turn_id=True,
+                lightweight_response=True,
+            )
+
+        assert result["accepted"] is True
+        assert scheduled_contexts[0]["_challenge_task_deadline_at_ms"] == 302_000
+        assert "_challenge_task_deadline_at_ms" not in scheduled_contexts[0]["message_metadata"]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
 def test_session_lifecycle_event_prefers_explicit_trace_carrier(monkeypatch) -> None:
     current_context = new_trace_context(request_id="current-request")
     carrier_context = new_trace_context(request_id="carrier-request")

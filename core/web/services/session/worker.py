@@ -10,6 +10,7 @@ persist, capture, live_output) remain effective.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,58 @@ _STRICT_RESEARCH_TASK_KINDS = frozenset(
 # terminal state remains the authoritative accounting; this constant only
 # stops live overspend early.
 DEFAULT_SESSION_TOKEN_BUDGET = 2_000_000
+
+
+def _challenge_deadline_stop_reason(
+    deadline_at_ms: Any,
+    *,
+    turn_id: str = "",
+    now_ms: int | None = None,
+) -> str:
+    """Return a stop code only for an expired executor-carried deadline."""
+
+    if not (
+        isinstance(deadline_at_ms, int)
+        and not isinstance(deadline_at_ms, bool)
+        and deadline_at_ms > 0
+    ):
+        return ""
+    effective_now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    remaining_ms = deadline_at_ms - effective_now_ms
+    if remaining_ms > 0:
+        return ""
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_deadline_problem,
+    )
+
+    return str(
+        challenge_deadline_problem(
+            waited_ms=max(0, -remaining_ms),
+            turn_chain=[turn_id],
+        ).get("code")
+        or "challenge_logical_task_deadline_exhausted"
+    )
+
+
+def _is_challenge_deadline_cancelled(
+    context: dict[str, Any],
+    exc: Exception,
+    *,
+    turn_id: str,
+) -> bool:
+    """Recognize only provider cancellation caused by an expired Challenge deadline."""
+
+    if not context.get("_challenge_task_deadline_at_ms"):
+        return False
+    category = str(getattr(exc, "category", "") or "").strip().lower()
+    if category != "cancelled":
+        return False
+    return bool(
+        _challenge_deadline_stop_reason(
+            context.get("_challenge_task_deadline_at_ms"),
+            turn_id=turn_id,
+        )
+    )
 
 
 def _research_task_structured_output_contract(
@@ -659,8 +712,22 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         if isinstance(context.get("agent_prompt_snapshot"), dict)
         else None
     )
+    challenge_deadline_at_ms = context.get("_challenge_task_deadline_at_ms")
+
     def interrupt_checker() -> str:
-        return s._get_turn_control_stop_reason(turn_control)
+        manual_reason = s._get_turn_control_stop_reason(turn_control)
+        if manual_reason:
+            return manual_reason
+        return _challenge_deadline_stop_reason(
+            challenge_deadline_at_ms,
+            turn_id=turn_id,
+        )
+
+    # The LLM adapter receives a bound ``current_stop_reason`` method, so the
+    # capability marker must live on the session-owned checker before the
+    # Agent wraps it. This keeps provider HTTP abort opt-in to Challenge turns
+    # while ordinary turns retain cooperative stop checks without a watcher.
+    interrupt_checker._vibelution_chat_provider_abort_enabled = bool(challenge_deadline_at_ms)
     try:
         agent_prompt_snapshot = (
             s._ensure_session_agent_prompt_snapshot(
@@ -1198,7 +1265,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 volatile_runtime_context_seed = getattr(runtime_agent, "seed_volatile_runtime_context", None)
                 stop_configurer = getattr(runtime_agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
-                    stop_configurer(lambda: s._get_turn_control_stop_reason(turn_control))
+                    stop_configurer(interrupt_checker)
                 history_assembly_started_at = s._perf_counter()
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = s._history_messages_for_agent_seed(
@@ -1637,19 +1704,41 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             if agent_id and s._is_session_turn_current(session_id, turn_id):
                 s.record_agent_turn_result(agent_id, session_id, result if isinstance(result, dict) else {}, run_id=turn_id)
     except Exception as exc:
+        deadline_cancelled = _is_challenge_deadline_cancelled(
+            context,
+            exc,
+            turn_id=turn_id,
+        )
         s._record_session_turn_lifecycle_event(
             session_id,
             "exception",
             turn_id=turn_id,
-            level="error",
-            outcome="failed",
+            level="warning" if deadline_cancelled else "error",
+            outcome="stopped" if deadline_cancelled else "failed",
             fields={
                 "exceptionType": type(exc).__name__,
                 "errorPreview": trim_lines(str(exc), max_lines=2),
+                "reasonCode": (
+                    "challenge_logical_task_deadline_exhausted"
+                    if deadline_cancelled
+                    else ""
+                ),
             },
         )
         if s._is_session_turn_current(session_id, turn_id):
-            s._persist_session_turn_failure(session_id, context, exc)
+            if deadline_cancelled:
+                s._persist_session_turn_result(
+                    session_id,
+                    s._build_stopped_turn_result(
+                        "challenge_logical_task_deadline_exhausted"
+                    ),
+                    mental_model_enabled=mental_model_enabled,
+                    active_task_hint=context.get("active_task"),
+                    user_message_source=str(context.get("user_message_source") or "").strip(),
+                    turn_id=turn_id,
+                )
+            else:
+                s._persist_session_turn_failure(session_id, context, exc)
     finally:
         if str(context.get("origin") or "") == "proactive_plugin":
             from core.web.services.session.proactive import (
