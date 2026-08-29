@@ -15,6 +15,19 @@ Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Rea
 - **运行时组装**：`runtime_factory.py`（composition root）——Ledger + coordinator +
   readiness + real ports/context + graph/adapter worker 一次性组装。
 
+### Agent 配置与绑定权威
+
+- `Team.members` 只保存 `role -> agentId`，是团队成员关系的唯一来源。
+- `AgentInstance` 是 model、Prompt、ToolPolicy、permission、Persona、TaskProfile、
+  memory 等 Agent 配置的唯一 SSOT；本运行时只能读取，不能通过 bootstrap、
+  repair、reconcile、Canvas 或 `workflowDefaults` 回写覆盖。
+- Team-scoped `workflowDefaults` 由 `Team.members` 实时派生，不是第二份持久配置；
+  历史残留值不得覆盖 Team 成员关系。
+- stage/node override 只允许在本次执行中选择 `agentId`，不得携带或覆盖 Agent 配置。
+- Run/Turn 中的 binding、model、Prompt/system segments、history、ToolPolicy 与权限
+  仅是创建时冻结的不可变历史快照，用于复现和审计，不是回写来源。
+- Canvas 仅投影 Team 成员。Canvas 保存不能反向修改 `Team.members` 或 Agent 配置。
+
 ## 核心流程
 
 ```text

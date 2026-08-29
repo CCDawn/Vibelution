@@ -587,10 +587,7 @@ def create_run(
     team_id = str(run_input.get("teamId") or "").strip()
     binding_root = research_workflow_data_root() / "runs"
     layers = binding_layers or WorkflowBindingConfigStore(binding_root).load(workflow_id, team_id)
-    if not (
-        layers.workflowDefaults or layers.stageOverrides or layers.nodeOverrides
-    ):
-        layers = effective_binding_layers(team_id, layers)
+    layers = effective_binding_layers(team_id, layers)
     created_at = _utc_now()
     snapshots = build_run_binding_snapshots(
         run_id=run_id,

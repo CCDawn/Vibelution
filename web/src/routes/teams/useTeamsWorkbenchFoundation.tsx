@@ -536,7 +536,6 @@ export function useTeamsWorkbenchFoundation({
     sendTeamMessageMutation,
     revokeTeamMessageMutation,
     syncTeamChatRoomMutation,
-    repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,
     stopTeamRoundMutation,
@@ -705,7 +704,6 @@ export function useTeamsWorkbenchFoundation({
     agentSummaryQuery,
     seedSourceCollectionAgentSessionContextMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
-    repairChallengeCupTeamAgentsMutation,
     navigate,
   });
 
@@ -1272,7 +1270,6 @@ export function useTeamsWorkbenchFoundation({
     sendTeamMessageMutation,
     revokeTeamMessageMutation,
     syncTeamChatRoomMutation,
-    repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,
     stopTeamRoundMutation,

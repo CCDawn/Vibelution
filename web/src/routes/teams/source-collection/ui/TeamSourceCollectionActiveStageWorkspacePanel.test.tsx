@@ -39,7 +39,6 @@ function baseProps(overrides: Partial<Props> = {}): Props {
     sourceCollectionStageModules: [stageModule()],
     selectedSourceCollectionStageId: "finding",
     sourceCollectionStageAgentChatState: (() => ({ status: "ready", route: "/chat/agent-1" })) as unknown as Props["sourceCollectionStageAgentChatState"],
-    repairChallengeCupTeamAgentsMutation: { isPending: false } as unknown as Props["repairChallengeCupTeamAgentsMutation"],
     sourceCollectionActionDisabledTitle: () => undefined,
     sourceCollectionStageActionReadinessFor: (() => ({ disabled: false })) as unknown as Props["sourceCollectionStageActionReadinessFor"],
     sourceCollectionStagePrimaryAgentBinding: (() => null) as unknown as Props["sourceCollectionStagePrimaryAgentBinding"],

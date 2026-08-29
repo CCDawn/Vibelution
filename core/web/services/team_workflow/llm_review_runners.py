@@ -28,7 +28,7 @@ from typing import Any
 from config import get_config
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
-from core.llm.agent_runtime import config_for_agent_llm_model
+from core.llm.agent_runtime import agent_dialogue_model_id, config_for_agent_llm_model
 from core.llm.client import model_invocation_receipt_context_scope
 from core.llm.invocation import invoke_llm_outcome
 from core.llm.types import LLMError
@@ -38,9 +38,7 @@ from core.research.workflow.contracts.hypothesis_quality import (
     HYPOTHESIS_SCORE_DIMENSIONS,
     canonical_hypothesis_score_rubric,
 )
-from core.web.services.team.team_constants import (
-    CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
-)
+from core.web.services.team.team_constants import CHALLENGE_CUP_RESEARCH_TEAM_ID
 from core.web.services.team_workflow.hypothesis_review_executor import (
     ProviderBoundReviewResult,
 )
@@ -143,21 +141,44 @@ def _invoke_llm_with_timeout(
 def resolve_review_llm() -> dict[str, Any] | None:
     """Resolve the Challenge Cup team LLM for review calls.
 
-    Review and digest generation belong to the Challenge Cup workflow, so
-    they must use the same canonical model binding as its managed team
-    agents.  The global ``primary`` profile belongs to the operator and may
-    point at an unrelated or unavailable provider.  The selected team model
-    is projected onto an isolated runtime config; no operator config is
-    mutated.
+    Review and digest generation are executed by the Team's evaluator Agent.
+    The Team owns only ``role -> agentId`` membership; model selection comes
+    from that AgentInstance's ``llmBindings``. The selected Agent model is
+    projected onto an isolated runtime config; no operator config is mutated.
 
     A provider without usable credentials is treated as unavailable and the
     deterministic DEV fixtures stay in charge.
     """
 
     try:
+        from core.web.services import agent_directory_service, team_service
+
+        team = team_service.get_team_light(CHALLENGE_CUP_RESEARCH_TEAM_ID)
+        evaluator_agent_id = next(
+            (
+                str(member.get("agentId") or "").strip()
+                for member in list(team.get("members") or [])
+                if isinstance(member, dict)
+                and str(member.get("role") or "").strip()
+                == "challenge_cup_evaluator"
+                and str(member.get("agentId") or "").strip()
+            ),
+            "",
+        )
+        evaluator = (
+            agent_directory_service.get_agent(
+                evaluator_agent_id,
+                include_archived=False,
+            )
+            if evaluator_agent_id
+            else None
+        )
+        model_ref = agent_dialogue_model_id(evaluator)
+        if not evaluator or not model_ref:
+            return None
         runtime_config = config_for_agent_llm_model(
             get_config(),
-            model_id=CHALLENGE_CUP_RESEARCH_TEAM_DIALOGUE_MODEL_REF,
+            model_id=model_ref,
             runtime_profile_id=REVIEW_LLM_PROFILE_ID,
             slot="dialogue",
         )
@@ -181,6 +202,7 @@ def resolve_review_llm() -> dict[str, Any] | None:
         "profileId": REVIEW_LLM_PROFILE_ID,
         "modelId": model_id,
         "providerId": str(getattr(provider, "provider_id", "") or "").strip(),
+        "agentId": evaluator_agent_id,
         "modelRef": (
             f"{str(getattr(provider, 'provider_id', '') or '').strip()}/{model_id}"
         ),
@@ -390,7 +412,7 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
             )
         produced = _invoke_review_llm(
             resolved,
-            agent_id="coordinator",
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="meeting_digest",
             system_prompt=_DIGEST_SYSTEM_PROMPT,
             user_payload={
@@ -563,7 +585,7 @@ def build_hypothesis_review_runners(
         ]
         produced = _invoke_review_llm(
             resolved,
-            agent_id="research_evidence_reviewer",
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_reflection",
             system_prompt=_REFLECTION_SYSTEM_PROMPT,
             user_payload={
@@ -606,7 +628,7 @@ def build_hypothesis_review_runners(
     ):
         return _invoke_review_llm(
             resolved,
-            agent_id="research_theme_synthesizer",
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_pairwise",
             system_prompt=_PAIRWISE_SYSTEM_PROMPT,
             user_payload={
@@ -632,7 +654,7 @@ def build_hypothesis_review_runners(
     def pareto_runner(scores_by_candidate: dict[str, dict[str, float]], context: dict[str, Any]):
         return _invoke_review_llm(
             resolved,
-            agent_id="research_theme_synthesizer",
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_pareto",
             system_prompt=_PARETO_SYSTEM_PROMPT,
             user_payload={
@@ -659,7 +681,7 @@ def build_hypothesis_review_runners(
     ):
         produced = _invoke_review_llm(
             resolved,
-            agent_id="coordinator",
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_metareview",
             system_prompt=_METAREVIEW_SYSTEM_PROMPT,
             user_payload={

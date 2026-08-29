@@ -478,6 +478,25 @@ def _display_name_needs_responsibility_repair(display_name: str, agent: dict[str
     return not normalized or _service()._AGENT_ID_LIKE_PATTERN.match(normalized) is not None
 
 
+def _is_challenge_cup_agent_config_authority(agent: dict[str, Any]) -> bool:
+    """Return whether an Agent record is a Challenge Cup config SSOT asset.
+
+    Current and legacy assets are recognized from durable Agent-owned metadata,
+    not from their mutable roleKey/displayName. These records are intentionally
+    opaque to generic registry repair: an incomplete value is surfaced to the
+    Agent configuration UI instead of being overwritten from role defaults.
+    """
+
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return bool(
+        str(metadata.get("challengeCupTeamId") or "").strip() == "research-team"
+        or str(metadata.get("challengeCupTeamRole") or "").strip()
+        or str(metadata.get("managedDomain") or "").strip()
+        == "challenge_cup_neuro_algorithm"
+        or str(agent.get("createdBy") or "").strip() == "challenge_cup_team"
+    )
+
+
 def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> Path:
     s = _service()
     path = s._resolve_project_path(path_value)
@@ -498,6 +517,8 @@ def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> P
 def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
     s = _service()
     metadata = dict(agent.get("metadata") or {})
+    if str(metadata.get("challengeCupTeamId") or "").strip():
+        return False
     defaults = s._fixed_role_profile_defaults(agent, metadata)
     if not defaults:
         return False
@@ -1948,6 +1969,14 @@ def repair_agent_directory() -> dict[str, Any]:
         for agent in state.get("agents") or []:
             if not isinstance(agent, dict):
                 continue
+            if _is_challenge_cup_agent_config_authority(agent):
+                # Preserve every Agent-owned configuration field exactly as
+                # stored. Keep its existing code reserved only to avoid giving
+                # the same code to another Agent later in this repair pass.
+                protected_code = s._normalize_agent_code(agent.get("agentCode"))
+                if protected_code:
+                    used_agent_codes.add(protected_code)
+                continue
             llm_migration = s._migrate_agent_llm_bindings_to_new_design(agent)
             if llm_migration.get("changed"):
                 llm_binding_migrated_agents.append(
@@ -2001,9 +2030,20 @@ def repair_agent_directory() -> dict[str, Any]:
                 if agent.get("roleKey") != normalized_role_key:
                     agent["roleKey"] = normalized_role_key
                     changed = True
+            agent_metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            challenge_cup_agent = bool(
+                str(agent_metadata.get("challengeCupTeamId") or "").strip()
+            )
             prompt_template_id = s._infer_agent_prompt_template_id(agent)
             current_prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-            if prompt_template_id and s._should_repair_agent_prompt_template_id(current_prompt_template_id, prompt_template_id):
+            if (
+                not challenge_cup_agent
+                and prompt_template_id
+                and s._should_repair_agent_prompt_template_id(
+                    current_prompt_template_id,
+                    prompt_template_id,
+                )
+            ):
                 agent["promptTemplateId"] = prompt_template_id
                 changed = True
             elif current_prompt_template_id:

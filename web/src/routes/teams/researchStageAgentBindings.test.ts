@@ -8,7 +8,7 @@ function agent(id: string, name = id): AgentConfigWorkspaceAgent {
 }
 
 describe("buildResearchStageAgentBindingsByStage", () => {
-  it("prefers canvas role bindings over members and fallbacks", () => {
+  it("uses Team.members as the only binding source when Canvas has a stale identity", () => {
     const canvas = {
       nodes: [
         { agentId: "finder-canvas", role: "source_finder", label: "Canvas Finder" },
@@ -31,9 +31,26 @@ describe("buildResearchStageAgentBindingsByStage", () => {
       knowledgeExpansionWorkflowTeamSelected: false,
     });
     const finder = bindings.knowledge_collection.find((item) => item.key === "source_finder");
-    expect(finder?.agentId).toBe("finder-canvas");
-    expect(finder?.bindingSource).toBe("canvas");
-    expect(finder?.bindingLabel).toBe("Canvas Finder");
+    expect(finder?.agentId).toBe("finder-member");
+    expect(finder?.bindingSource).toBe("member");
+    expect(finder?.bindingLabel).toBe("Member Finder");
+  });
+
+  it("does not use the built-in fallback for a missing Challenge Cup member", () => {
+    const activeAgentsById = new Map([
+      ["agent-knowledge-steward", agent("agent-knowledge-steward")],
+    ]);
+    const bindings = buildResearchStageAgentBindingsByStage({
+      canvas: null,
+      selectedTeam: { members: [] } as Team,
+      activeAgentsById,
+      knowledgeExpansionWorkflowTeamSelected: false,
+    });
+
+    const steward = bindings.iteration.find((item) => item.key === "knowledge_steward");
+    expect(steward?.agentId).toBe("");
+    expect(steward?.bindingSource).toBe("");
+    expect(steward?.agent).toBeNull();
   });
 
   it("falls back to member role when canvas is unbound", () => {

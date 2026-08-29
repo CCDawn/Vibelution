@@ -20,7 +20,6 @@ import {
 } from "../stageModulesModel";
 import type { SourceCollectionActionReadiness, SourceCollectionStageModuleId } from "../stageProjection";
 import type { createSourceCollectionStageAgentHelpers } from "../../createSourceCollectionStageAgentHelpers";
-import type { useTeamShellMutations } from "../../useTeamShellMutations";
 import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
 import { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel";
 import { TeamSourceCollectionStageActionIcon } from "./TeamSourceCollectionStandaloneStagePanel";
@@ -40,7 +39,6 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   sourceCollectionStageModules: SourceCollectionStageModule[];
   selectedSourceCollectionStageId: SourceCollectionStageModuleId | string;
   sourceCollectionStageAgentChatState: SourceCollectionStageAgentHelpers["sourceCollectionStageAgentChatState"];
-  repairChallengeCupTeamAgentsMutation: ReturnType<typeof useTeamShellMutations>["repairChallengeCupTeamAgentsMutation"];
   sourceCollectionActionDisabledTitle: (readiness: SourceCollectionActionReadiness, label: string) => string | undefined;
   sourceCollectionStageActionReadinessFor: (stageId: SourceCollectionStageModuleId) => SourceCollectionActionReadiness;
   sourceCollectionStagePrimaryAgentBinding: SourceCollectionStageAgentHelpers["sourceCollectionStagePrimaryAgentBinding"];
@@ -85,7 +83,6 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     sourceCollectionStageModules,
     selectedSourceCollectionStageId,
     sourceCollectionStageAgentChatState,
-    repairChallengeCupTeamAgentsMutation,
     sourceCollectionActionDisabledTitle,
     sourceCollectionStageActionReadinessFor,
     sourceCollectionStagePrimaryAgentBinding,
@@ -124,8 +121,6 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     && activeModule.id === "finding"
     && !sourceCollectionRunAvailable;
   const primaryStageAgentBlockedByCollectionStart = primaryStageAgentChatState.status === "blocked";
-  const primaryStageAgentRepairPending =
-    primaryStageAgentChatState.status === "repair" && repairChallengeCupTeamAgentsMutation.isPending;
   const primaryStageAgentFallbackTitle = primaryStageAgentChatLoading
     ? (lang === "zh" ? "正在加载本轮 Agent 会话，请稍候" : "Loading the Agent session for this run")
     : primaryStageAgentChatError
@@ -136,7 +131,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           ? (lang === "zh" ? "请先完成资料发现，再进入该阶段的 Agent 会话" : "Complete source finding before opening this stage's Agent session")
       : primaryStageAgentSessionCreateReady
         ? (lang === "zh" ? "为当前研究项目创建并打开此 Agent 的平级实验会话" : "Create and open this Agent's peer experiment session for the current research project")
-        : (lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step");
+        : (lang === "zh" ? "当前步骤缺少可用私聊，请配置对应 Agent" : "Configure the Agent for this step");
   const primaryStageAgentFallbackLabel = primaryStageAgentChatLoading
     ? (lang === "zh" ? "加载本轮会话..." : "Loading session...")
     : primaryStageAgentChatError
@@ -147,9 +142,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           ? (lang === "zh" ? "请先开始资料搜集" : "Start source collection first")
       : primaryStageAgentSessionCreateReady
         ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")
-        : primaryStageAgentRepairPending
-          ? (lang === "zh" ? "修复中" : "Repairing")
-          : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents");
+        : (lang === "zh" ? "配置 Agent" : "Configure Agent");
   const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
   const primaryStageAgentConfigRoute = primaryStageAgentBinding?.agentId
     ? researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)
@@ -523,7 +516,6 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           disabled={
             primaryStageAgentChatLoading
             || primaryStageAgentChatError
-            || primaryStageAgentRepairPending
             || primaryStageAgentBlockedByCollectionStart
             || primaryStageAgentNeedsCollectionStart
           }
@@ -551,9 +543,6 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
             >
               {advanceFailureText}
             </div>
-          ) : null}
-          {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
-            <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
           ) : null}
           {selectedTeamStartSourceCollectionStageTaskError ? (
             <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>

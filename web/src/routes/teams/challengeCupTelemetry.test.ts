@@ -18,7 +18,6 @@ import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { resetUserActionTelemetryForTests, type UserActionTracker } from "../../app/userActionTelemetry";
 import {
   observeCatalogActiveWorkChanged,
-  observeChallengeTeamAgentsAutoRepair,
   observeHypothesisLegacyFallback,
   observeQuestionOutputSchemaRejected,
   observeRealBatchAuthorizeShapeInvalid,
@@ -316,17 +315,6 @@ describe("challengeCupTelemetry round-2 observations", () => {
     expect(payloads[0].eventCode).toBe("browser.user_action.challenge_hypothesis_legacy_fallback_observed");
     expect(payloads[0]).toMatchObject({ level: "warning" });
     expect(payloads[0].fields).toMatchObject({ questionId: "Q010" });
-  });
-
-  it("reports challenge team agents auto-repair outcomes", () => {
-    observeChallengeTeamAgentsAutoRepair({ teamId: "research-team" });
-    observeChallengeTeamAgentsAutoRepair({ teamId: "research-team", error: new Error("repair rejected") });
-    const payloads = postedPayloads();
-    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_team_agents_auto_repair_observed");
-    expect(payloads[0]).toMatchObject({ level: "info" });
-    expect(payloads[0].fields).toMatchObject({ outcome: "repaired" });
-    expect(payloads[1]).toMatchObject({ level: "warning" });
-    expect(payloads[1].fields).toMatchObject({ outcome: "failed", errorName: "Error" });
   });
 
   it("reports submission readiness transitions with bounded blocker codes", () => {

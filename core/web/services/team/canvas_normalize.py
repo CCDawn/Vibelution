@@ -8,7 +8,6 @@ recording. Pure edge normalize remains in canvas_primitives.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +34,11 @@ def get_team_canvas(team_id: str) -> dict[str, Any]:
     )
 
 
-def list_team_role_binding_sources(team_id: str) -> dict[str, list[dict[str, Any]]]:
-    """Return canvas nodes and members for role→agent mapping.
+def list_team_role_binding_sources(team_id: str) -> dict[str, Any]:
+    """Return Team members as the sole role→Agent mapping source.
 
-    Read-only: no canvas validation, default-edge repair, or full Team hydration.
+    ``canvas_nodes`` remains as an empty compatibility field for older callers;
+    organization canvas data is a projection and never a binding authority.
     """
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -46,18 +46,9 @@ def list_team_role_binding_sources(team_id: str) -> dict[str, list[dict[str, Any
         state = s._load_index()
         team = s._find_team(state, normalized_team_id)
         if team is None:
-            return {"canvas_nodes": [], "members": []}
+            return {"team_exists": False, "canvas_nodes": [], "members": []}
         members = [dict(item) for item in list(team.get("members") or []) if isinstance(item, dict)]
-        canvas_path = s._team_canvas_path(str(team.get("teamId") or normalized_team_id))
-    nodes: list[dict[str, Any]] = []
-    if canvas_path.exists():
-        try:
-            raw = s._read_json(canvas_path)
-        except (OSError, json.JSONDecodeError):
-            raw = {}
-        raw_nodes = raw.get("nodes") if isinstance(raw, dict) else []
-        nodes = [dict(item) for item in list(raw_nodes or []) if isinstance(item, dict)]
-    return {"canvas_nodes": nodes, "members": members}
+    return {"team_exists": True, "canvas_nodes": [], "members": members}
 
 
 def _team_canvas_with_validation(
@@ -112,14 +103,10 @@ def save_team_canvas(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     with s._TEAM_LOCK:
         state = s._load_index()
         stored = s._find_team(state, team["teamId"])
-        current_members = stored.get("members") if isinstance(stored, dict) and isinstance(stored.get("members"), list) else team.get("members") or []
-        next_members = s._sync_members_from_canvas(current_members, canvas)
-        s._ensure_members_can_join_team(next_members, state, team["teamId"])
         s._write_json(s._team_canvas_path(team["teamId"]), canvas)
         if stored is not None:
             stored["updatedAt"] = canvas["updatedAt"]
             stored["canvasPath"] = s._relative_path(s._team_canvas_path(team["teamId"]))
-            stored["members"] = next_members
             s._ensure_team_chat_room_link(stored, agent_refs=agent_refs)
             state["updatedAt"] = canvas["updatedAt"]
             s._save_index(state)
@@ -145,6 +132,7 @@ def _normalize_canvas(
     edges = raw.get("edges") if isinstance(raw.get("edges"), list) else []
     if not nodes:
         nodes = s._default_nodes_for_members(team.get("members") or [])
+    nodes = _project_member_bindings_onto_nodes(nodes, team.get("members") or [])
     normalized_nodes = [
         s._normalize_node(
             item,
@@ -177,6 +165,46 @@ def _normalize_canvas(
         "nodes": normalized_nodes,
         "edges": normalized_edges,
     }
+
+
+def _project_member_bindings_onto_nodes(
+    nodes: list[Any],
+    members: list[Any],
+) -> list[Any]:
+    """Project canonical Team membership onto editable canvas layout nodes."""
+
+    member_rows = [item for item in members if isinstance(item, dict)]
+    by_agent_id = {
+        str(item.get("agentId") or "").strip(): item
+        for item in member_rows
+        if str(item.get("agentId") or "").strip()
+    }
+    role_candidates: dict[str, list[dict[str, Any]]] = {}
+    for member in member_rows:
+        role = str(member.get("role") or "").strip()
+        if role:
+            role_candidates.setdefault(role, []).append(member)
+    by_role = {
+        role: rows[0]
+        for role, rows in role_candidates.items()
+        if len(rows) == 1
+    }
+    projected: list[Any] = []
+    for item in nodes:
+        if not isinstance(item, dict):
+            projected.append(item)
+            continue
+        row = dict(item)
+        role = str(row.get("role") or "").strip()
+        agent_id = str(row.get("agentId") or "").strip()
+        member = by_role.get(role) or by_agent_id.get(agent_id)
+        if member is None:
+            row["agentId"] = ""
+        else:
+            row["agentId"] = str(member.get("agentId") or "").strip()
+            row["role"] = str(member.get("role") or role).strip()
+        projected.append(row)
+    return projected
 
 
 def _normalize_node(
@@ -401,40 +429,6 @@ def _remove_agent_from_team_canvas(team: dict[str, Any], agent_id: str) -> None:
         "edges": edges,
     }
     s._write_json(canvas_path, canvas)
-
-
-def _sync_members_from_canvas(current_members: list[dict[str, Any]], canvas: dict[str, Any]) -> list[dict[str, Any]]:
-    s = _service()
-    by_agent = {
-        str(member.get("agentId") or "").strip(): dict(member)
-        for member in current_members
-        if isinstance(member, dict) and str(member.get("agentId") or "").strip()
-    }
-    for index, node in enumerate(canvas.get("nodes") or []):
-        agent_id = str(node.get("agentId") or "").strip()
-        if not agent_id:
-            continue
-        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
-        if not agent:
-            continue
-        member = by_agent.get(agent_id) or {"memberId": f"member-{index + 1}", "agentId": agent_id}
-        member.update(
-            {
-                "agentCode": str(agent.get("agentCode") or "").strip(),
-                "agentName": str(agent.get("displayName") or "").strip(),
-                "role": str(node.get("role") or member.get("role") or "").strip(),
-                "purpose": str(node.get("purpose") or member.get("purpose") or "").strip(),
-                "agentStatus": "active" if str(agent.get("status") or "active") != "archived" else "stale",
-            }
-        )
-        if isinstance(node.get("responsibilities"), list):
-            member["responsibilities"] = [
-                trim_lines(value, max_lines=2).strip()
-                for value in list(node.get("responsibilities") or [])[:8]
-                if str(value or "").strip()
-            ]
-        by_agent[agent_id] = member
-    return list(by_agent.values())
 
 
 def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:

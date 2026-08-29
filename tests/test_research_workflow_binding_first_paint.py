@@ -34,7 +34,7 @@ def test_display_name_lookup_skips_full_agent_api() -> None:
     assert "from core.web.services.agent_directory_service import get_agent" not in query
 
 
-def test_resolve_team_role_bindings_prefers_canvas_without_full_hydration(monkeypatch) -> None:
+def test_resolve_team_role_bindings_ignores_canvas_without_full_hydration(monkeypatch) -> None:
     def boom(*_args, **_kwargs):
         raise AssertionError("full team/canvas hydration must not run")
 
@@ -52,7 +52,7 @@ def test_resolve_team_role_bindings_prefers_canvas_without_full_hydration(monkey
     )
 
     assert resolve_team_role_bindings("research-team") == {
-        "source_finder": "agent-canvas",
+        "source_finder": "agent-member",
         "source_extractor": "agent-extract",
     }
 

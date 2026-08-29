@@ -97,7 +97,6 @@ def test_team_write_routes_use_typed_models_without_default_injection() -> None:
     expected_models = {
         "team_ai_search_run_start": TeamAiSearchRunResponse,
         "team_message_create": TeamMessageResponse,
-        "team_challenge_cup_agents_repair": TeamRepairResponse,
         "team_knowledge_expansion_agents_repair": TeamRepairResponse,
     }
     routes = {
@@ -110,3 +109,5 @@ def test_team_write_routes_use_typed_models_without_default_injection() -> None:
         route = routes[route_name]
         assert route.response_model is response_model
         assert route.response_model_exclude_unset is True
+
+    assert "team_challenge_cup_agents_repair" not in routes

@@ -124,13 +124,6 @@ export type TeamRepairResult = {
   teamId?: string;
 };
 
-export function repairChallengeCupTeamAgents(teamId: string): Promise<TeamRepairResult> {
-  return writeJson<TeamRepairResult>(
-    `/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`,
-    "POST",
-  );
-}
-
 export function repairKnowledgeExpansionTeamAgents(teamId: string): Promise<TeamRepairResult> {
   return writeJson<TeamRepairResult>(
     `/api/teams/${encodeURIComponent(teamId)}/knowledge-expansion-agents/repair`,

@@ -13,7 +13,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Team kind / template / chat-room purpose pure maps | `kind_helpers.py` | Agent mutations |
 | AI search page link ranking pure | `ai_search_ranking.py` | HTTP fetch / disk scope files |
 | AI search runs / source-scope IO | `ai_search.py` | system team materialize; pure ranking |
-| Research organization team sync | `research_organization.py` | generic CRUD |
+| Research organization membership/canvas projection | `research_organization.py` | Agent configuration writes; generic CRUD |
 | Canvas node/member normalize (Agent lookup) | `canvas_normalize.py` | pure edge normalize (`canvas_primitives`) |
 | Team CRUD list/get/create/archive | `team_crud.py` | repair index internals; pure ranking |
 | Team index / membership repair | `team_repair.py` | public CRUD entrypoints |
@@ -31,8 +31,20 @@ Prefer slice modules over growing `team_service.py` when possible.
 ## Sole-owner rules
 
 1. Pure canvas primitives stay free of Agent registry writes.
-2. Membership conflict checks that need full team state stay on the facade.
-3. Re-export public symbols from `team_service` for route stability.
+2. For the Challenge Cup research Team, `Team.members` owns only the
+   `role -> agentId` relationship. Its bootstrap, read path, organization sync
+   and chat-room sync must not rewrite an Agent's model, Prompt, ToolPolicy,
+   permission, Persona, TaskProfile or memory config.
+3. Each Challenge Cup `AgentInstance` in the Agent directory is the sole
+   configuration authority. When Team membership and Agent configuration
+   disagree, the Team remains a membership projection and the Agent record
+   wins; no Challenge Cup reconcile/repair path may copy Team defaults back
+   into the Agent.
+4. Challenge Cup Canvas Agent nodes are derived from `Team.members`. Saving
+   that Canvas cannot add/remove Team members and cannot update any Agent
+   configuration.
+5. Membership conflict checks that need full team state stay on the facade.
+6. Re-export public symbols from `team_service` for route stability.
 
 ## Extraction progress
 
@@ -47,7 +59,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | system teams materialize pack | **done** | ensure_*/need_repair probes late-bind facade index helpers |
 | chat-room link pack | **done** | sync/repair/historical link helpers late-bind facade index locks |
 | AI search runs pack | **done** | list/start/scope/page-fallback late-binds facade ensure/constants |
-| research organization pack | **done** | ensure/canvas/role sync late-binds facade index/contract helpers |
+| research organization pack | **done** | ensure membership + canvas projection; never syncs role config into AgentInstance |
 | team CRUD pack | **done** | list/create/update/archive/membership/message late-binds facade |
 | team repair pack | **done** | index/member/archive cascade repair late-binds facade helpers |
 | team projection pack | **done** | to_api / agent reference maps late-bind facade helpers |
