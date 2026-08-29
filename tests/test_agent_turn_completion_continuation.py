@@ -112,6 +112,110 @@ def _wait_waiter(events: list[str], continuations: list[str]):
     return _wait, _submit
 
 
+def test_completion_projects_registered_receipt_without_journal(monkeypatch) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+    )
+
+    receipt = {"receiptId": "receipt-1", "scope": {"turnId": "turn-main"}}
+    observed: dict[str, str] = {}
+
+    def read_receipts(team_id: str, **kwargs):
+        observed.update({"teamId": team_id, **kwargs})
+        return [receipt]
+
+    monkeypatch.setattr(registry, "question_model_invocation_receipts", read_receipts)
+
+    projected = atc._attach_registered_model_invocation_receipts(
+        _snapshot("completed", "turn-main"),
+        team_id="team-1",
+        question_id="SCI-096",
+        workflow_run_id="run-test",
+        session_id="sess-1",
+        turn_id="turn-main",
+    )
+
+    assert projected["modelInvocationReceipts"] == [receipt]
+    assert projected["modelInvocationReceipt"] == receipt
+    assert observed == {
+        "teamId": "team-1",
+        "question_id": "SCI-096",
+        "workflow_run_id": "run-test",
+        "session_id": "sess-1",
+        "turn_id": "turn-main",
+    }
+
+
+def test_continuation_does_not_submit_after_logical_task_deadline(monkeypatch) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        ChallengeTaskDeadlineExceeded,
+        challenge_task_deadline_scope,
+    )
+
+    events: list[str] = []
+    monkeypatch.setattr(atc, "remaining_challenge_task_ms", lambda: 0)
+    monkeypatch.setattr(
+        atc,
+        "_submit_agent_turn_continuation",
+        lambda *_args, **_kwargs: events.append("submitted") or "turn-next",
+    )
+
+    with challenge_task_deadline_scope(1):
+        with pytest.raises(ChallengeTaskDeadlineExceeded) as raised:
+            atc._wait_with_bounded_turn_continuation(
+                atc.AgentTaskHandle(
+                    session_id="session-1",
+                    session_attempt=1,
+                    task_id="task-1",
+                    turn_id="turn-main",
+                ),
+                action=_action(),
+                input_snapshot={"teamId": "team-1"},
+                adapter_spec=None,
+                timeout_ms=1_000,
+                poll_ms=1,
+            )
+
+    assert raised.value.problem["code"] == "challenge_logical_task_deadline_exhausted"
+    assert raised.value.problem["turnChain"] == ["turn-main"]
+    assert events == []
+
+
+def test_challenge_deadline_uses_canonical_task_created_at(monkeypatch) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.task_adapter_registry import (
+        AgentTaskAdapterSpec,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_task_query.get_source_collection_stage_session_task",
+        lambda _team_id, _task_id: {
+            "task": {
+                "taskId": "task-1",
+                "createdAt": "2026-08-29T01:00:00Z",
+                "turn": {"acceptedAt": "2026-08-29T01:01:00Z"},
+            }
+        },
+    )
+    spec = AgentTaskAdapterSpec(
+        node_id="source_finding",
+        family="source_collection",
+        task_key="finding",
+        role_key="source_finder",
+    )
+
+    started_at_ms = atc._canonical_agent_task_started_at_ms(
+        team_id="team-1",
+        task_id="task-1",
+        project_id="project-1",
+        adapter_spec=spec,
+    )
+
+    assert started_at_ms == 1_787_965_200_000
+
+
 def test_parked_turn_with_settled_stage_task_is_not_continued(monkeypatch):
     """Main turn parked needs_continue, stage task already completed (gate
     passed): no "继续" round-trip; verdict is the parked main snapshot."""

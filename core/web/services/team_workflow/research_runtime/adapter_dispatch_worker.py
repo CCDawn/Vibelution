@@ -17,6 +17,7 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import Any
 
@@ -34,6 +35,13 @@ from .block_projection import (
     sync_run_blocked,
     sync_run_succeeded,
     terminal_facts_for_run,
+)
+from .challenge_turn_policy import (
+    CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+    CHALLENGE_NO_PROGRESS_TIMEOUT_MS,
+    ChallengeTaskDeadlineExceeded,
+    challenge_task_deadline_scope,
+    decide_live_turn_wait,
 )
 from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
@@ -256,6 +264,10 @@ class AdapterDispatchWorker:
 
             if isinstance(exc, _OutboxLeaseLost):
                 return
+            if isinstance(exc, ChallengeTaskDeadlineExceeded):
+                self._fail_attempt(outbox, action, exc.problem)
+                self._reconcile_stage_task_after_wait_timeout(action)
+                return
             if isinstance(exc, (TurnNotReadyError, HypothesisAuthorityUnavailable)):
                 # Transient turn/authority state — requeue without failing the attempt.
                 if isinstance(exc, TurnNotReadyError) and _turn_alive_progressing(exc):
@@ -263,7 +275,12 @@ class AdapterDispatchWorker:
                     # collection stage legitimately runs past one wait window.
                     # Keep waiting (heartbeat) without consuming the transient
                     # budget; wall-clock bounds the wait.
-                    self._requeue_live_turn_wait(outbox, action, str(exc))
+                    self._requeue_live_turn_wait(
+                        outbox,
+                        action,
+                        str(exc),
+                        snapshot=dict(getattr(exc, "snapshot", None) or {}),
+                    )
                     return
                 prefix = (
                     "turn_not_ready"
@@ -387,8 +404,16 @@ class AdapterDispatchWorker:
             daemon=True,
         )
         thread.start()
+        deadline_scope = (
+            challenge_task_deadline_scope(
+                int(getattr(outbox, "created_at_ms", 0) or self._now())
+            )
+            if action.actor_kind == ActorKind.AGENT
+            else nullcontext()
+        )
         try:
-            result = adapter.execute(action)
+            with deadline_scope:
+                result = adapter.execute(action)
         except Exception as exc:
             if lost.is_set():
                 raise _OutboxLeaseLost("adapter outbox lease was lost") from exc
@@ -1027,21 +1052,58 @@ class AdapterDispatchWorker:
 
     _MAX_TRANSIENT_ATTEMPTS = 5
 
-    # Live-turn heartbeats are bounded by wall clock, not by the transient
-    # budget: healthy collection turns run 10+ minutes (one wait window is
-    # 120s), so counting them as transient failures exhausted real work at
-    # attempt 5. Two hours still terminates a wedged "running" session.
-    _MAX_LIVE_TURN_WAIT_MS = 7_200_000
+    # Challenge Cup live waits are bounded independently from the provider's
+    # 600s transport insurance.  The outbox created_at clock persists across
+    # worker requeues, and unchanged state does not get extended by heartbeat.
+    _MAX_LIVE_TURN_WAIT_MS = CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
+    _MAX_LIVE_TURN_NO_PROGRESS_MS = CHALLENGE_NO_PROGRESS_TIMEOUT_MS
 
-    def _requeue_live_turn_wait(self, outbox: Any, action: PendingAction, detail: str) -> None:
+    def _requeue_live_turn_wait(
+        self,
+        outbox: Any,
+        action: PendingAction,
+        detail: str,
+        *,
+        snapshot: dict[str, Any] | None = None,
+    ) -> None:
         now_ms = self._now()
-        created_at_ms = int(getattr(outbox, "created_at_ms", 0) or 0)
-        waited_ms = now_ms - created_at_ms if created_at_ms else 0
-        if created_at_ms and waited_ms > self._MAX_LIVE_TURN_WAIT_MS:
+        snapshot = dict(snapshot or {})
+        try:
+            previous_problem = json.loads(
+                str(getattr(outbox, "last_problem_json", "") or "{}")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            previous_problem = {}
+        if not isinstance(previous_problem, dict):
+            previous_problem = {}
+        start_candidates = (
+            int(previous_problem.get("logicalTaskStartedAtMs") or 0),
+            int(getattr(outbox, "created_at_ms", 0) or 0),
+            int(snapshot.get("challengeTaskStartedAtMs") or 0),
+        )
+        created_at_ms = min(
+            (value for value in start_candidates if value > 0),
+            default=now_ms,
+        )
+        decision = decide_live_turn_wait(
+            now_ms=now_ms,
+            created_at_ms=created_at_ms,
+            previous_problem=previous_problem,
+            snapshot=snapshot,
+        )
+        if created_at_ms and decision.should_stop:
             self._fail_attempt(
                 outbox,
                 action,
-                {"code": "live_turn_wait_timeout", "detail": str(detail)[:400]},
+                {
+                    "code": decision.stop_code,
+                    "detail": str(detail)[:400],
+                    "waitedMs": decision.waited_ms,
+                    "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+                    "noProgressMs": decision.no_progress_ms,
+                    "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
+                    "logicalTaskStartedAtMs": decision.started_at_ms,
+                },
             )
             # The abandoned wait previously skipped the pushed-writeback leg
             # (reconcile_source_collection_stage_session_task_after_turn), so
@@ -1056,7 +1118,9 @@ class AdapterDispatchWorker:
             fields={
                 **_action_identity(action),
                 "attemptCount": int(getattr(outbox, "attempt_count", 0) or 0),
-                "waitedMs": waited_ms,
+                "waitedMs": decision.waited_ms,
+                "noProgressMs": decision.no_progress_ms,
+                "progressAdvanced": decision.progress_advanced,
                 "detail": str(detail)[:160],
             },
         )
@@ -1066,7 +1130,9 @@ class AdapterDispatchWorker:
         self._record_live_turn_wait_heartbeat(
             action,
             attempt_count=int(getattr(outbox, "attempt_count", 0) or 0),
-            waited_ms=waited_ms,
+            waited_ms=decision.waited_ms,
+            no_progress_ms=decision.no_progress_ms,
+            progress_advanced=decision.progress_advanced,
         )
         outbox_api.requeue_action(
             self._store,
@@ -1075,13 +1141,29 @@ class AdapterDispatchWorker:
             now_ms,
             retry_at_ms=now_ms + 5_000,
             problem_json=json.dumps(
-                {"code": "live_turn_wait", "detail": str(detail)[:400]}
+                {
+                    "code": "live_turn_wait",
+                    "detail": str(detail)[:400],
+                    "waitedMs": decision.waited_ms,
+                    "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+                    "noProgressMs": decision.no_progress_ms,
+                    "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
+                    "logicalTaskStartedAtMs": decision.started_at_ms,
+                    "lastProgressAtMs": decision.last_progress_at_ms,
+                    "progressFingerprint": decision.progress_fingerprint,
+                }
             ),
             reset_attempts=True,
         )
 
     def _record_live_turn_wait_heartbeat(
-        self, action: PendingAction, *, attempt_count: int, waited_ms: int
+        self,
+        action: PendingAction,
+        *,
+        attempt_count: int,
+        waited_ms: int,
+        no_progress_ms: int,
+        progress_advanced: bool,
     ) -> None:
         """Append one workflow event per live-turn wait requeue (observability).
 
@@ -1095,6 +1177,9 @@ class AdapterDispatchWorker:
             "attemptCount": int(attempt_count or 0),
             "waitedMs": int(waited_ms or 0),
             "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+            "noProgressMs": int(no_progress_ms or 0),
+            "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
+            "progressAdvanced": bool(progress_advanced),
         }
 
         def mutate(uow):

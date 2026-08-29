@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -58,6 +59,11 @@ class SessionTurnCapture:
     mental_state: dict[str, str] = field(default_factory=dict)
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     feedback_events: list[dict[str, Any]] = field(default_factory=list)
+    model_invocation_receipt_context: dict[str, Any] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     _next_feedback_sequence: int = 1
     _latest_thought_sequence: int = 0
     _latest_thought_text: str = ""
@@ -999,6 +1005,47 @@ def _commit_session_capture_assistant_segment(
         feedback_events=capture.feedback_events,
     )
 
+
+def _persist_challenge_model_invocation_receipt(
+    capture: SessionTurnCapture,
+    outcome: Any,
+) -> bool:
+    """Persist formal Challenge Cup evidence outside conversation state.
+
+    The binding is server-created by the session worker after re-reading the
+    canonical research task. Ordinary sessions have no binding and are a
+    no-op. Registry failures remain fail-soft for chat; the formal workflow
+    subsequently sees a missing receipt and stays ineligible.
+    """
+
+    context = capture.model_invocation_receipt_context
+    receipt = getattr(outcome, "model_invocation_receipt", None)
+    if not isinstance(context, dict) or not isinstance(receipt, Mapping):
+        return False
+    binding = context.get("questionStageBinding")
+    if not isinstance(binding, Mapping):
+        return False
+    team_id = str(context.get("teamId") or "").strip()
+    question_id = str(binding.get("questionId") or "").strip().upper()
+    workflow_run_id = str(binding.get("workflowRunId") or "").strip()
+    if not team_id or not question_id or not workflow_run_id:
+        return False
+    try:
+        from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+            register_question_model_invocation_receipts,
+        )
+
+        register_question_model_invocation_receipts(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+            receipts=[dict(receipt)],
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
+
+
 @contextmanager
 def _capture_session_ui_stream(
     session_id: str,
@@ -1279,6 +1326,7 @@ def _capture_session_ui_stream(
             turn_id=capture.turn_id,
             feedback_events=capture.feedback_events,
         )
+        _persist_challenge_model_invocation_receipt(capture, outcome)
         s.append_conversation_turn_outcome(s.PROJECT_ROOT, session_id, capture.turn_id, outcome)
         s._invalidate_session_conversation_events_cache(session_id)
         capture.mark_content_committed()

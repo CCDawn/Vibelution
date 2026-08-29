@@ -243,6 +243,7 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
                 "prompt_tokens": 13,
                 "completion_tokens": 8,
                 "total_tokens": 21,
+                "completion_tokens_details": {"reasoning_tokens": 5},
             },
         }
 
@@ -271,6 +272,7 @@ def test_stream_receipt_uses_bounded_canonical_summary_without_provider_capture(
         "outputTokens": 8,
         "totalTokens": 21,
         "cachedInputTokens": 0,
+        "reasoningTokens": 5,
     }
     assert receipt["receiptId"].endswith("-attempt-1")
     assert receipt["evidenceLocator"]["attempt"] == 1
@@ -340,13 +342,14 @@ def test_non_stream_receipt_uses_provider_usage_and_server_binding(monkeypatch):
         "outputTokens": 3,
         "totalTokens": 10,
         "cachedInputTokens": 0,
+        "reasoningTokens": 0,
     }
     assert receipt["receiptId"] == "model-receipt-invocation-1-0-attempt-1"
     assert receipt["evidenceLocator"]["attempt"] == 1
     assert receipt["provider"] == "default"
     assert receipt["model"] == "qwen-plus"
     assert receipt["evidenceLocator"]["outputRef"] == (
-        "turn-journal://session-1/workflow-run-1/task-1/turn-1"
+        "challenge-receipt://SCI-001/workflow-run-1/task-1/turn-1"
     )
 
 

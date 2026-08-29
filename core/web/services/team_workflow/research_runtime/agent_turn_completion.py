@@ -15,6 +15,15 @@ from typing import Any
 
 from core.research.workflow.contracts import PendingAction
 
+from .challenge_turn_policy import (
+    CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+    CHALLENGE_TURN_WAIT_WINDOW_MS,
+    ChallengeTaskDeadlineExceeded,
+    challenge_deadline_problem,
+    challenge_task_deadline_scope,
+    current_challenge_task_started_at_ms,
+    remaining_challenge_task_ms,
+)
 from .domain_ports import AgentTaskHandle
 
 _SUCCESS_TERMINAL_STATUSES = frozenset({"ready", "completed", "done", "success"})
@@ -67,7 +76,7 @@ MAX_AGENT_TURN_CONTINUATIONS = 3
 # a structured warning scene event.
 _STAGE_TASK_SETTLED_COMPLETED_STATUS = "completed"
 
-DEFAULT_AGENT_TURN_TIMEOUT_MS = 120_000
+DEFAULT_AGENT_TURN_TIMEOUT_MS = CHALLENGE_TURN_WAIT_WINDOW_MS
 
 
 def _stage_task_work_already_complete(*, team_id: str, task_id: str) -> bool:
@@ -96,6 +105,57 @@ def _stage_task_work_already_complete(*, team_id: str, task_id: str) -> bool:
     )
 
 
+def _canonical_agent_task_started_at_ms(
+    *,
+    team_id: str,
+    task_id: str,
+    project_id: str,
+    adapter_spec: Any | None,
+) -> int:
+    """Read the logical-task clock from its existing domain authority."""
+
+    normalized_team = str(team_id or "").strip()
+    normalized_task = str(task_id or "").strip()
+    if not normalized_team or not normalized_task or adapter_spec is None:
+        return 0
+    try:
+        if adapter_spec.family == "source_collection":
+            from core.web.services.team_workflow.source_collection.stage_task_query import (
+                get_source_collection_stage_session_task,
+            )
+
+            response = get_source_collection_stage_session_task(
+                normalized_team,
+                normalized_task,
+            )
+            task = response.get("task") if isinstance(response, dict) else None
+        elif adapter_spec.family == "research_project":
+            from core.web.services.team_workflow.research_project_agent_tasks import (
+                _read_research_project_agent_task_record,
+            )
+
+            task = _read_research_project_agent_task_record(
+                normalized_team,
+                str(project_id or "").strip(),
+                normalized_task,
+            )
+        else:
+            task = None
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return 0
+    if not isinstance(task, dict):
+        return 0
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    from core.web.services.session.timebase import parse_timestamp_utc
+
+    started = parse_timestamp_utc(
+        task.get("createdAt")
+        or task.get("startedAt")
+        or turn.get("acceptedAt")
+    )
+    return int(started.timestamp() * 1000) if started is not None else 0
+
+
 def _persist_question_model_invocation_receipts(
     snapshot: dict[str, Any],
     *,
@@ -120,6 +180,38 @@ def _persist_question_model_invocation_receipts(
         workflow_run_id=workflow_run_id,
         receipts=receipts,
     )
+
+
+def _attach_registered_model_invocation_receipts(
+    snapshot: dict[str, Any],
+    *,
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any]:
+    """Project Challenge Cup audit receipts without reading conversation JSONL."""
+
+    if snapshot.get("modelInvocationReceipts") or snapshot.get("modelInvocationReceipt"):
+        return snapshot
+    from .model_invocation_receipt_registry import (
+        question_model_invocation_receipts,
+    )
+
+    receipts = question_model_invocation_receipts(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+    if not receipts:
+        return snapshot
+    projected = dict(snapshot)
+    projected["modelInvocationReceipts"] = receipts
+    projected["modelInvocationReceipt"] = receipts[-1]
+    return projected
 
 
 def _formal_receipt_writeback_context(
@@ -511,6 +603,20 @@ def _wait_with_bounded_turn_continuation(
     continuations: list[dict[str, Any]] = []
     turn_id = handle.turn_id
 
+    def _bounded_wait_timeout_ms() -> tuple[int, bool]:
+        remaining_ms = remaining_challenge_task_ms()
+        if remaining_ms is None:
+            return max(0, int(timeout_ms)), False
+        if remaining_ms <= 0:
+            raise ChallengeTaskDeadlineExceeded(
+                challenge_deadline_problem(
+                    waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                    turn_chain=turn_chain,
+                )
+            )
+        requested_ms = max(0, int(timeout_ms))
+        return min(requested_ms, remaining_ms), remaining_ms < requested_ms
+
     def _rescue_settled_main_turn(failed_turn_id: str, status: str) -> None:
         _record_turn_continuation_scene_event(
             "agent_turn.continuation_failed_work_complete",
@@ -530,15 +636,29 @@ def _wait_with_bounded_turn_continuation(
         )
 
     while True:
+        effective_timeout_ms, logical_deadline_bounded = _bounded_wait_timeout_ms()
         try:
             snapshot = wait_for_agent_turn_terminal(
                 handle.session_id,
                 turn_id,
-                timeout_ms=timeout_ms,
+                timeout_ms=effective_timeout_ms,
                 poll_ms=poll_ms,
                 reconcilable_terminal_statuses=reconcilable,
             )
-        except TurnNotReadyError:
+        except TurnNotReadyError as exc:
+            if logical_deadline_bounded:
+                raise ChallengeTaskDeadlineExceeded(
+                    challenge_deadline_problem(
+                        waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                        turn_chain=turn_chain,
+                    )
+                ) from exc
+            started_at_ms = current_challenge_task_started_at_ms()
+            if started_at_ms:
+                exc.snapshot.setdefault(
+                    "challengeTaskStartedAtMs",
+                    int(started_at_ms),
+                )
             raise
         except RuntimeError as exc:
             failure_detail = _turn_terminal_failure_detail(exc)
@@ -602,6 +722,7 @@ def _wait_with_bounded_turn_continuation(
                     ensure_ascii=False,
                 )
             )
+        _bounded_wait_timeout_ms()
         next_turn_id = _submit_agent_turn_continuation(
             handle,
             action=action,
@@ -642,26 +763,43 @@ def complete_agent_turn_outputs(
     )
 
     adapter_spec = resolve_agent_task_adapter(action.node_id)
-    snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
-        handle,
-        action=action,
-        input_snapshot=input_snapshot,
+    task_started_at_ms = _canonical_agent_task_started_at_ms(
+        team_id=team_id,
+        task_id=handle.task_id,
+        project_id=str(input_snapshot.get("projectId") or "").strip(),
         adapter_spec=adapter_spec,
-        timeout_ms=timeout_ms,
-        poll_ms=poll_ms,
-    )
+    ) or current_challenge_task_started_at_ms() or 0
+    with challenge_task_deadline_scope(task_started_at_ms):
+        snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
+            handle,
+            action=action,
+            input_snapshot=input_snapshot,
+            adapter_spec=adapter_spec,
+            timeout_ms=timeout_ms,
+            poll_ms=poll_ms,
+        )
     if continuations:
         # Downstream reconciliation must reference the final continuation
         # turn, not the originally parked one.
         handle = replace(handle, turn_id=final_turn_id)
+    question_id = str(input_snapshot.get("questionId") or "").strip().upper()
+    workflow_run_id = str(action.run_id or "").strip()
+    snapshot = _attach_registered_model_invocation_receipts(
+        snapshot,
+        team_id=team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+        session_id=handle.session_id,
+        turn_id=handle.turn_id,
+    )
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
     )
     _persist_question_model_invocation_receipts(
         snapshot,
         team_id=team_id,
-        question_id=str(input_snapshot.get("questionId") or "").strip().upper(),
-        workflow_run_id=str(action.run_id or "").strip(),
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
     )
 
     task_id = str(handle.task_id or "").strip()
