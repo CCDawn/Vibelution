@@ -50,6 +50,121 @@ def _default_proactive_submitter(**payload: Any) -> dict[str, Any]:
     return submit_session_proactive_turn(**payload)
 
 
+def _default_conversation_submitter(**payload: Any) -> dict[str, Any]:
+    """Companion-only adapter into the unchanged native Session submit path."""
+
+    if not _RUNTIME_ACCEPTING.is_set():
+        raise RuntimeError("Virtual human life runtime is not accepting conversation turns.")
+    from .session_service import SessionBusyError, submit_session_message_lightweight
+
+    try:
+        return submit_session_message_lightweight(
+            str(payload.get("session_id") or ""),
+            str(payload.get("content") or ""),
+            client_submission_id=str(payload.get("client_submission_id") or ""),
+            content_utf8_base64=str(payload.get("content_utf8_base64") or ""),
+            attachment_ids=[
+                str(item)
+                for item in payload.get("attachment_ids") or []
+                if str(item).strip()
+            ],
+            references=[
+                dict(item)
+                for item in payload.get("references") or []
+                if isinstance(item, dict)
+            ],
+            mental_model_enabled=payload.get("mental_model_enabled"),
+            runtime_status_enabled=payload.get("runtime_status_enabled"),
+            turn_status_tail=(
+                dict(payload["turn_status_tail"])
+                if isinstance(payload.get("turn_status_tail"), dict)
+                else None
+            ),
+        )
+    except SessionBusyError:
+        return {"accepted": False, "busy": True}
+
+
+def _default_conversation_busy_provider(session_id: str) -> bool:
+    """Read the native Session busy bit without changing its admission contract."""
+
+    from . import session_service
+
+    return bool(session_service._is_session_running(str(session_id or "").strip()))
+
+
+def _default_conversation_receipt_resolver(
+    session_id: str,
+    entry: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read an existing native user-message receipt before retrying a lease."""
+
+    command = entry.get("command") if isinstance(entry.get("command"), dict) else {}
+    submission_id = str(command.get("clientSubmissionId") or "").strip()
+    if not session_id or not submission_id:
+        return None
+    from core.chat.turn_journal import EVENT_USER_MESSAGE
+
+    from .session.journal_bridge import load_session_conversation_events_snapshot
+
+    event = next(
+        (
+            item
+            for item in reversed(load_session_conversation_events_snapshot(session_id))
+            if str(getattr(item, "correlation_id", "") or "").strip()
+            == submission_id
+            and str(getattr(item, "event_type", "") or "") == EVENT_USER_MESSAGE
+        ),
+        None,
+    )
+    if event is None:
+        return None
+    return {
+        "turnId": str(getattr(event, "turn_id", "") or "").strip(),
+        "acceptedAt": str(getattr(event, "timestamp", "") or "").strip(),
+        "receiptEventId": str(getattr(event, "event_id", "") or "").strip(),
+    }
+
+
+def _default_proactive_admission_resolver(
+    _agent_id: str,
+    entry: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read the native turn-start event that proves proactive admission."""
+
+    session_id = str(entry.get("sessionId") or "").strip()
+    command = entry.get("command") if isinstance(entry.get("command"), dict) else {}
+    attempt = (
+        command.get("proactiveAttempt")
+        if isinstance(command.get("proactiveAttempt"), dict)
+        else {}
+    )
+    delivery_token = str(attempt.get("delivery_token") or "").strip()
+    if not session_id or not delivery_token:
+        return None
+    from core.chat.turn_journal import EVENT_TURN_STARTED
+
+    from .session.journal_bridge import load_session_conversation_events_snapshot
+
+    event = next(
+        (
+            item
+            for item in reversed(load_session_conversation_events_snapshot(session_id))
+            if str(getattr(item, "correlation_id", "") or "").strip()
+            == delivery_token
+            and str(getattr(item, "event_type", "") or "") == EVENT_TURN_STARTED
+        ),
+        None,
+    )
+    if event is None:
+        return None
+    return {
+        "turnId": str(getattr(event, "turn_id", "") or "").strip(),
+        "admittedAt": str(getattr(event, "timestamp", "") or "").strip(),
+        "receiptEventId": str(getattr(event, "event_id", "") or "").strip(),
+    }
+
+
 def _default_delivery_receipt_resolver(
     _agent_id: str,
     attempt: dict[str, Any],
@@ -349,6 +464,10 @@ def get_virtual_human_life_service() -> VirtualHumanLifeService:
                 agent_loader=_default_agent_loader,
                 agent_lister=_default_agent_lister,
                 proactive_submitter=_default_proactive_submitter,
+                conversation_submitter=_default_conversation_submitter,
+                conversation_busy_provider=_default_conversation_busy_provider,
+                conversation_receipt_resolver=_default_conversation_receipt_resolver,
+                proactive_admission_resolver=_default_proactive_admission_resolver,
                 delivery_receipt_resolver=_default_delivery_receipt_resolver,
                 episodic_writer=_default_episodic_writer,
                 episodic_lister=_default_episodic_lister,
@@ -368,6 +487,33 @@ def set_virtual_human_life_service_for_tests(service: VirtualHumanLifeService | 
 
 def virtual_human_binding(agent_id: str) -> dict[str, Any] | None:
     return get_virtual_human_life_service().binding_for(agent_id)
+
+
+def queue_virtual_human_conversation_message(
+    agent_id: str,
+    *,
+    session_id: str,
+    client_submission_id: str,
+    content: str,
+    content_utf8_base64: str = "",
+    attachment_ids: list[str] | None = None,
+    references: list[dict[str, Any]] | None = None,
+    mental_model_enabled: bool | None = None,
+    runtime_status_enabled: bool | None = None,
+    turn_status_tail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return get_virtual_human_life_service().queue_conversation_message(
+        agent_id,
+        session_id=session_id,
+        client_submission_id=client_submission_id,
+        content=content,
+        content_utf8_base64=content_utf8_base64,
+        attachment_ids=attachment_ids,
+        references=references,
+        mental_model_enabled=mental_model_enabled,
+        runtime_status_enabled=runtime_status_enabled,
+        turn_status_tail=turn_status_tail,
+    )
 
 
 def update_virtual_human_binding(
@@ -586,6 +732,14 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, A
                     type(exc).__name__,
                 )
             result = service.heartbeat_agent(agent_id, coalesced=coalesced)
+            direct_session_id = str(
+                agent.get("directSessionId") or agent.get("direct_session_id") or ""
+            ).strip()
+            if direct_session_id:
+                service.ensure_conversation_mailbox_dispatcher(
+                    agent_id,
+                    session_id=direct_session_id,
+                )
         except Exception as exc:  # noqa: BLE001 - isolate one Agent heartbeat failure
             _record_scene(
                 "heartbeat_failed",
@@ -795,6 +949,7 @@ __all__ = [
     "prepare_virtual_human_agent_archive",
     "preview_legacy_pet_import",
     "proactive_context_is_current",
+    "queue_virtual_human_conversation_message",
     "rollback_virtual_human_agent_archive",
     "run_virtual_human_life_runtime",
     "set_virtual_human_life_service_for_tests",

@@ -15,6 +15,13 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("requestedSessionId");
     expect(chatSource).toContain('get("companion")');
     expect(chatSource).toContain("companion.directSessionId === requestedSessionId");
+    expect(chatSource).toContain("const companionTransportAgentId = activeCompanion?.agentId;");
+    expect(chatSource).toContain("const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);");
+    expect(chatSource).toContain("companionAgentId: companionTransportAgentId");
+    expect(chatSource).toContain("composerDisabled: companionComposerDisabled");
+    expect(chatSource).toContain('actionMode: "send" as const');
+    expect(chatSource).toContain("attachmentInputDisabled: companionComposerDisabled");
+    expect(chatSource).not.toContain("companionAgentId: companionMode ? requestedCompanionId : undefined");
     expect(chatSource).toContain("companionMode,");
     expect(chatSource).toContain("<ChatCenterSessionSurface");
     expect(chatSource).toContain("<CompanionPersonRail");

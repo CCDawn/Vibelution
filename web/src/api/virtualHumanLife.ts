@@ -3,12 +3,29 @@ import type {
   VirtualHumanEpisodicMemory,
   VirtualHumanCommandRequest,
   VirtualHumanCommandResponse,
+  VirtualHumanConversationMessageRequest,
+  VirtualHumanConversationMessageResponse,
   VirtualHumanDiaryEntry,
   VirtualHumanLifeEvent,
   VirtualHumanRelationship,
   VirtualHumanScheduleBundle,
   VirtualHumanSnapshot,
 } from "./types";
+
+export function submitVirtualHumanConversationMessage(
+  agentId: string,
+  sessionId: string,
+  payload: VirtualHumanConversationMessageRequest,
+): Promise<VirtualHumanConversationMessageResponse> {
+  return fetchJson<VirtualHumanConversationMessageResponse>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Prefer: "respond-async" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
 
 export function executeVirtualHumanCommand(
   agentId: string,

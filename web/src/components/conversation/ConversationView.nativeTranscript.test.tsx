@@ -31,6 +31,9 @@ function renderConversation(
         showComposer={false}
         processDisplayMode={processDisplayMode}
         companionMode={companionMode}
+        assistantDisplayName="洛天依"
+        assistantAvatarImageUrl="/avatars/luotianyi.png"
+        assistantAvatarFallback="洛"
         composerValue=""
         composerPlaceholder="Type"
         composerDisabled={false}
@@ -122,6 +125,8 @@ describe("ConversationView native Codex transcript surface", () => {
     }], "trace", true);
 
     expect(html).toContain('data-companion-typing-rail="assistant"');
+    expect(html).toContain('src="/avatars/luotianyi.png"');
+    expect(html).toContain('data-companion-typing-avatar="true"');
     expect(html).toContain(styles.companionTypingTurn);
     expect(html).toContain(styles.companionTypingContent);
     expect(styles.companionTypingTurn).toContain("max-w-[830px]");

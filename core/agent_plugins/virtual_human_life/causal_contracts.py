@@ -20,6 +20,7 @@ CAUSAL_LEDGER_PATHS = {
     "relationshipProjection": "relationships.json",
     "proactiveCandidates": "proactive/candidates.jsonl",
     "openLoops": "conversation/open_loops.jsonl",
+    "conversationMailbox": "conversation/mailbox.json",
     "reflectionProposals": "reflections/proposals.jsonl",
     "memoryReinforcements": "memory/reinforcement_receipts.jsonl",
     "memoryReconciliations": "memory/reconciliation_receipts.jsonl",
@@ -59,6 +60,23 @@ _UPSTREAM_REUSE_RECEIPT: dict[str, Any] = {
                 "Vibelution proactive Turn transaction."
             ),
             "verification": "deterministic candidate-policy and delivery-boundary tests",
+        },
+        {
+            "sliceId": "conversation-arrival-fence",
+            "sourcePaths": [
+                "busy_reply_gate.py",
+                "segmented_message.py",
+                "proactive.py",
+            ],
+            "adaptationBoundary": (
+                "Adapt monotonic inbound generations and send-time proactive fences into "
+                "a plugin-local command mailbox; reject passive-reply sleeps, AstrBot "
+                "conversation storage, and any change to ordinary Vibelution Session admission."
+            ),
+            "verification": (
+                "strict cross-source FIFO, idempotent retry, lease recovery, user-interjection "
+                "cancellation, plugin-route isolation, and ordinary Session regression tests"
+            ),
         },
         {
             "sliceId": "affect-afterglow",
