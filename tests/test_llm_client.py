@@ -3431,6 +3431,177 @@ def test_stream_cancellation_closes_provider_iterator():
     assert cancelled["closed"] is True
 
 
+def test_chat_completion_non_stream_cancellation_interrupts_blocked_backend_request(monkeypatch):
+    import litellm
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-5.3-flash",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    entered = threading.Event()
+    released = threading.Event()
+    cancelled = {"reason": ""}
+    observed = {"calls": 0, "error": None, "closed": False}
+
+    class FakeHTTPHandler:
+        def close(self):
+            observed["closed"] = True
+            released.set()
+
+    handler = FakeHTTPHandler()
+
+    def completion(**kwargs):
+        observed["calls"] += 1
+        assert kwargs["client"] is handler
+        entered.set()
+        assert released.wait(2.0)
+        raise OSError("provider request interrupted")
+
+    monkeypatch.setattr(litellm, "completion", completion, raising=False)
+    monkeypatch.setattr(
+        "core.llm.client._new_cancellable_completion_http_handler",
+        lambda _payload: handler,
+    )
+
+    def run_request():
+        try:
+            client = LLMClient(config=config)
+            with llm_cancel_context(lambda: cancelled["reason"]):
+                client._invoke_backend_with_retry(
+                    {
+                        "model": "glm-5.3-flash",
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "stream": False,
+                        "base_url": "https://pixel.try-chatapi.com/v1",
+                    },
+                    phase="completion",
+                    event_code="test.completion",
+                    message_count=1,
+                    tool_count=0,
+                )
+        except Exception as exc:
+            observed["error"] = exc
+
+    thread = threading.Thread(target=run_request)
+    thread.start()
+    try:
+        assert entered.wait(1.0)
+        cancelled["reason"] = "挑战杯逻辑任务已达到截止时间。"
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
+    finally:
+        released.set()
+        thread.join(timeout=2.0)
+
+    assert isinstance(observed["error"], LLMError)
+    assert observed["error"].category == "cancelled"
+    assert observed["calls"] == 1
+    assert observed["closed"] is True
+
+
+def test_chat_completion_without_cancel_checker_does_not_inject_client(monkeypatch):
+    import litellm
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-5.3-flash",
+        }
+    )
+    observed = {}
+
+    def completion(**kwargs):
+        observed.update(kwargs)
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    monkeypatch.setattr(litellm, "completion", completion, raising=False)
+    client = LLMClient(config=config)
+    client._invoke_payload_once(
+        {
+            "model": "glm-5.3-flash",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": False,
+            "base_url": "https://pixel.try-chatapi.com/v1",
+        }
+    )
+
+    assert "client" not in observed
+
+
+def test_chat_completion_stream_cancellation_interrupts_blocked_backend_request(monkeypatch):
+    import litellm
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-5.3-flash",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    entered = threading.Event()
+    released = threading.Event()
+    cancelled = {"reason": ""}
+    observed = {"calls": 0, "error": None, "closed": False}
+
+    class FakeHTTPHandler:
+        def close(self):
+            observed["closed"] = True
+            released.set()
+
+    handler = FakeHTTPHandler()
+
+    def completion(**kwargs):
+        observed["calls"] += 1
+        assert kwargs["client"] is handler
+        entered.set()
+        assert released.wait(2.0)
+        raise OSError("provider request interrupted")
+
+    monkeypatch.setattr(litellm, "completion", completion, raising=False)
+    monkeypatch.setattr(
+        "core.llm.client._new_cancellable_completion_http_handler",
+        lambda _payload: handler,
+    )
+
+    def run_request():
+        try:
+            client = LLMClient(config=config)
+            with llm_cancel_context(lambda: cancelled["reason"]):
+                list(client.stream_events([{"role": "user", "content": "ping"}]))
+        except Exception as exc:
+            observed["error"] = exc
+
+    thread = threading.Thread(target=run_request)
+    thread.start()
+    try:
+        assert entered.wait(1.0)
+        cancelled["reason"] = "挑战杯逻辑任务已达到截止时间。"
+        thread.join(timeout=1.0)
+    finally:
+        released.set()
+        thread.join(timeout=2.0)
+
+    assert isinstance(observed["error"], LLMError)
+    assert observed["error"].category == "cancelled"
+    assert observed["calls"] == 1
+    assert observed["closed"] is True
+
+
 def test_responses_stream_cancellation_interrupts_blocked_backend_request(monkeypatch):
     import litellm
 

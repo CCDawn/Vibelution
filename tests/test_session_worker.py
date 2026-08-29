@@ -14,7 +14,7 @@ from core.logging.trace_context import (
     new_trace_context,
 )
 from core.web.services import session_service
-from core.web.services.session import stream_capture, worker
+from core.web.services.session import stream_capture, submit, worker
 
 
 def test_facade_reexports_worker_entrypoints() -> None:
@@ -61,6 +61,46 @@ def test_ordinary_agent_inbox_does_not_gain_internal_continuation() -> None:
         worker._session_context_internal_auto_continue_max_turns(context)
         == session_service.INTERNAL_AUTO_CONTINUE_MAX_TURNS
     )
+
+
+def test_challenge_deadline_is_executor_ephemeral_and_continuation_safe() -> None:
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_task_deadline_scope,
+    )
+
+    continuation_metadata = {
+        "sourceSurface": "team_workflow_agent_turn_continuation",
+        "workflowRunId": "run-1",
+        "nodeRunId": "node-1",
+    }
+    with challenge_task_deadline_scope(1_000):
+        assert submit._challenge_deadline_at_ms_for_submit(continuation_metadata) == 301_000
+        assert submit._challenge_deadline_at_ms_for_submit(
+            {"kind": "research_project_agent_task", **continuation_metadata}
+        ) == 301_000
+
+    assert submit._challenge_deadline_at_ms_for_submit(continuation_metadata) is None
+    assert submit._challenge_deadline_at_ms_for_submit(
+        {"kind": "research_project_agent_task"}
+    ) is None
+
+
+def test_challenge_deadline_checker_isolated_from_ordinary_chat() -> None:
+    assert worker._challenge_deadline_stop_reason(
+        300_000,
+        turn_id="turn-1",
+        now_ms=299_999,
+    ) == ""
+    assert worker._challenge_deadline_stop_reason(
+        300_000,
+        turn_id="turn-1",
+        now_ms=300_001,
+    ) == "challenge_logical_task_deadline_exhausted"
+    assert worker._challenge_deadline_stop_reason(
+        None,
+        turn_id="ordinary-chat",
+        now_ms=999_999,
+    ) == ""
 
 
 def test_receipt_context_accepts_binding_without_research_project_id(

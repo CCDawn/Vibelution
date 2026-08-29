@@ -10,6 +10,7 @@ persist, capture, live_output) remain effective.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,37 @@ _STRICT_RESEARCH_TASK_KINDS = frozenset(
 # terminal state remains the authoritative accounting; this constant only
 # stops live overspend early.
 DEFAULT_SESSION_TOKEN_BUDGET = 2_000_000
+
+
+def _challenge_deadline_stop_reason(
+    deadline_at_ms: Any,
+    *,
+    turn_id: str = "",
+    now_ms: int | None = None,
+) -> str:
+    """Return a stop code only for an expired executor-carried deadline."""
+
+    if not (
+        isinstance(deadline_at_ms, int)
+        and not isinstance(deadline_at_ms, bool)
+        and deadline_at_ms > 0
+    ):
+        return ""
+    effective_now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    remaining_ms = deadline_at_ms - effective_now_ms
+    if remaining_ms > 0:
+        return ""
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_deadline_problem,
+    )
+
+    return str(
+        challenge_deadline_problem(
+            waited_ms=max(0, -remaining_ms),
+            turn_chain=[turn_id],
+        ).get("code")
+        or "challenge_logical_task_deadline_exhausted"
+    )
 
 
 def _research_task_structured_output_contract(
@@ -659,8 +691,16 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         if isinstance(context.get("agent_prompt_snapshot"), dict)
         else None
     )
+    challenge_deadline_at_ms = context.get("_challenge_task_deadline_at_ms")
+
     def interrupt_checker() -> str:
-        return s._get_turn_control_stop_reason(turn_control)
+        manual_reason = s._get_turn_control_stop_reason(turn_control)
+        if manual_reason:
+            return manual_reason
+        return _challenge_deadline_stop_reason(
+            challenge_deadline_at_ms,
+            turn_id=turn_id,
+        )
     try:
         agent_prompt_snapshot = (
             s._ensure_session_agent_prompt_snapshot(
@@ -1198,7 +1238,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 volatile_runtime_context_seed = getattr(runtime_agent, "seed_volatile_runtime_context", None)
                 stop_configurer = getattr(runtime_agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
-                    stop_configurer(lambda: s._get_turn_control_stop_reason(turn_control))
+                    stop_configurer(interrupt_checker)
                 history_assembly_started_at = s._perf_counter()
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = s._history_messages_for_agent_seed(
