@@ -600,6 +600,12 @@ class VirtualHumanLifeService:
                     self._deterministic_schedule(agent_id, tomorrow, binding),
                 )
             state["currentActivityId"] = current_activity_id
+            state["sleepState"] = self._derive_sleep_state(
+                local_now=local_now,
+                binding=binding,
+                schedule=schedule,
+                current_activity_id=current_activity_id,
+            )
             state["lastHeartbeatAt"] = _iso(current)
             state["updatedAt"] = _iso(current)
             self.store.write_json(agent_id, "state.json", state)
@@ -2173,6 +2179,12 @@ class VirtualHumanLifeService:
     def _default_state(self, agent_id: str, binding: dict[str, Any]) -> dict[str, Any]:
         now = self._now()
         local_now = now.astimezone(self._zone(binding))
+        sleep_state = self._derive_sleep_state(
+            local_now=local_now,
+            binding=binding,
+            schedule=None,
+            current_activity_id="",
+        )
         return {
             "schemaVersion": STORAGE_SCHEMA_VERSION,
             "agentId": str(agent_id).strip(),
@@ -2190,7 +2202,7 @@ class VirtualHumanLifeService:
                 "updatedAt": _iso(now),
             },
             "energy": 76,
-            "sleepState": "awake",
+            "sleepState": sleep_state,
             "socialNeed": 42,
             "processedEventIds": [],
             "processedInteractionIds": [],
@@ -2552,6 +2564,28 @@ class VirtualHumanLifeService:
         if start < end:
             return start <= current < end
         return current >= start or current < end
+
+    def _derive_sleep_state(
+        self,
+        *,
+        local_now: datetime,
+        binding: dict[str, Any],
+        schedule: dict[str, Any] | None,
+        current_activity_id: str,
+    ) -> str:
+        if str(current_activity_id or "").strip():
+            return "awake"
+        if self._inside_quiet_hours(local_now, binding.get("quietHours")):
+            return "sleeping"
+        activity_end_times = [
+            parsed
+            for activity in list((schedule or {}).get("activities") or [])
+            if isinstance(activity, dict)
+            if (parsed := _parse_datetime(activity.get("endAt"))) is not None
+        ]
+        if activity_end_times and max(activity_end_times) <= local_now.astimezone(timezone.utc):
+            return "resting"
+        return "awake"
 
     def _update_attempt(
         self,

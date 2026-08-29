@@ -20,6 +20,7 @@ import { usePageVisibility } from "../../app/pollingPolicy";
 import { VStateSurface, VStatusChip, VTabs } from "../../components/vui";
 import {
   currentLifeActivity,
+  currentLifeActivityLabel,
   formatLifeTime,
   lifeMoodLabel,
   upcomingLifeActivities,
@@ -193,6 +194,7 @@ export function CompanionLifeRail({
   const [activeTab, setActiveTab] = useState("now");
   const pageVisible = usePageVisibility();
   const activity = companion ? currentLifeActivity(companion.snapshot) : null;
+  const activityLabel = companion ? currentLifeActivityLabel(companion.snapshot, lang) : "";
   const upcoming = companion ? upcomingLifeActivities(companion.snapshot, 3) : [];
   const today = companion?.snapshot.todaySchedule?.activities ?? [];
   const memoryQueriesEnabled = state === "ready" && Boolean(companion) && activeTab === "memory";
@@ -290,7 +292,7 @@ export function CompanionLifeRail({
             <>
               <section className={styles.lifeCardAccent}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "现在" : "Now"}</p>
-                <h3 className={styles.cardTitle}>{activity?.title || (lang === "zh" ? "自由活动" : "Unscheduled time")}</h3>
+                <h3 className={styles.cardTitle}>{activityLabel}</h3>
                 {activity ? (
                   <span className={styles.cardMeta}>
                     {formatLifeTime(activity.startAt, lang)}–{formatLifeTime(activity.endAt, lang)}

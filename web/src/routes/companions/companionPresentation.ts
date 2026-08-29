@@ -75,6 +75,18 @@ export function currentLifeActivity(snapshot: VirtualHumanSnapshot): VirtualHuma
   );
 }
 
+export function currentLifeActivityLabel(
+  snapshot: VirtualHumanSnapshot,
+  lang: "zh" | "en",
+): string {
+  const activity = currentLifeActivity(snapshot);
+  if (activity?.title) return activity.title;
+  const sleepState = String(snapshot.state?.sleepState || "awake").trim().toLowerCase();
+  if (sleepState === "sleeping") return lang === "zh" ? "正在睡觉" : "Sleeping";
+  if (sleepState === "resting") return lang === "zh" ? "正在放松休息" : "Taking a break";
+  return lang === "zh" ? "自由活动" : "Unscheduled time";
+}
+
 export function upcomingLifeActivities(snapshot: VirtualHumanSnapshot, limit = 3): VirtualHumanActivity[] {
   return (snapshot.todaySchedule?.activities ?? [])
     .filter((activity) => ["planned", "in_progress"].includes(String(activity.status || "").toLowerCase()))
