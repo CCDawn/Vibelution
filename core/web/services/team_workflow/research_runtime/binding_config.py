@@ -60,8 +60,16 @@ class WorkflowBindingConfigStore:
             return AgentBindingLayers()
         if not isinstance(data, dict):
             return AgentBindingLayers()
+        # Team membership is the only workflow-default authority for a scoped
+        # run.  Drop any legacy value at the storage boundary so direct store
+        # callers cannot revive a retired second binding source.
+        workflow_defaults = (
+            {}
+            if str(team_id or "").strip()
+            else {str(k): str(v) for k, v in (data.get("workflowDefaults") or {}).items()}
+        )
         return AgentBindingLayers(
-            workflowDefaults={str(k): str(v) for k, v in (data.get("workflowDefaults") or {}).items()},
+            workflowDefaults=workflow_defaults,
             stageOverrides={
                 str(k): {str(rk): str(av) for rk, av in v.items()}
                 for k, v in (data.get("stageOverrides") or {}).items()
@@ -71,10 +79,15 @@ class WorkflowBindingConfigStore:
 
     def save(self, workflow_id: str, team_id: str, layers: AgentBindingLayers) -> dict[str, Any]:
         with self._lock:
+            workflow_defaults = (
+                {}
+                if str(team_id or "").strip()
+                else dict(layers.workflowDefaults)
+            )
             payload = {
                 "workflowId": workflow_id,
                 "teamId": str(team_id or "").strip(),
-                "workflowDefaults": dict(layers.workflowDefaults),
+                "workflowDefaults": workflow_defaults,
                 "stageOverrides": {k: dict(v) for k, v in layers.stageOverrides.items()},
                 "nodeOverrides": dict(layers.nodeOverrides),
                 "updatedAt": _utc_now(),
