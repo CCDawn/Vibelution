@@ -33,6 +33,31 @@ class BindingConfigValidationError(Exception):
         self.code = code
 
 
+def _require_mapping(value: Any, *, field: str) -> dict[Any, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise BindingConfigValidationError(
+            f"{field} must be an object mapping to agentId strings",
+            code="invalid_binding_shape",
+        )
+    return value
+
+
+def _require_agent_id(value: Any, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise BindingConfigValidationError(
+            f"{field} must be a string agentId",
+            code="invalid_agent_id_type",
+        )
+    if not value.strip():
+        raise BindingConfigValidationError(
+            f"{field} requires a non-empty agentId",
+            code="empty_agent",
+        )
+    return value
+
+
 class WorkflowBindingConfigStore:
     """Persists AgentBindingLayers under <root>/binding_config/{wf}--{team}.json.
 
@@ -63,33 +88,48 @@ class WorkflowBindingConfigStore:
         # Team membership is the only workflow-default authority for a scoped
         # run.  Drop any legacy value at the storage boundary so direct store
         # callers cannot revive a retired second binding source.
-        workflow_defaults = (
+        raw_workflow_defaults = (
             {}
             if str(team_id or "").strip()
-            else {str(k): str(v) for k, v in (data.get("workflowDefaults") or {}).items()}
+            else data.get("workflowDefaults") or {}
         )
+        candidate = {
+            "workflowDefaults": raw_workflow_defaults,
+            "stageOverrides": data.get("stageOverrides") or {},
+            "nodeOverrides": data.get("nodeOverrides") or {},
+        }
+        try:
+            self.validate_payload(candidate)
+        except BindingConfigValidationError:
+            return AgentBindingLayers()
         return AgentBindingLayers(
-            workflowDefaults=workflow_defaults,
+            workflowDefaults={str(k): v for k, v in raw_workflow_defaults.items()},
             stageOverrides={
-                str(k): {str(rk): str(av) for rk, av in v.items()}
-                for k, v in (data.get("stageOverrides") or {}).items()
+                str(k): {str(rk): av for rk, av in v.items()}
+                for k, v in candidate["stageOverrides"].items()
             },
-            nodeOverrides={str(k): str(v) for k, v in (data.get("nodeOverrides") or {}).items()},
+            nodeOverrides={str(k): v for k, v in candidate["nodeOverrides"].items()},
         )
 
     def save(self, workflow_id: str, team_id: str, layers: AgentBindingLayers) -> dict[str, Any]:
         with self._lock:
+            candidate = {
+                "workflowDefaults": dict(layers.workflowDefaults),
+                "stageOverrides": {k: dict(v) for k, v in layers.stageOverrides.items()},
+                "nodeOverrides": dict(layers.nodeOverrides),
+            }
+            self.validate_payload(candidate)
             workflow_defaults = (
                 {}
                 if str(team_id or "").strip()
-                else dict(layers.workflowDefaults)
+                else candidate["workflowDefaults"]
             )
             payload = {
                 "workflowId": workflow_id,
                 "teamId": str(team_id or "").strip(),
                 "workflowDefaults": workflow_defaults,
-                "stageOverrides": {k: dict(v) for k, v in layers.stageOverrides.items()},
-                "nodeOverrides": dict(layers.nodeOverrides),
+                "stageOverrides": candidate["stageOverrides"],
+                "nodeOverrides": candidate["nodeOverrides"],
                 "updatedAt": _utc_now(),
             }
             atomic_write_text(self._path(workflow_id, team_id), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -97,33 +137,54 @@ class WorkflowBindingConfigStore:
 
     def validate_payload(self, payload: dict[str, Any]) -> None:
         """Controlled-write validation against the workflow definition."""
+        if not isinstance(payload, dict):
+            raise BindingConfigValidationError(
+                "binding payload must be an object",
+                code="invalid_binding_shape",
+            )
         definition = build_challenge_cup_workflow_definition()
         agent_nodes = [n for n in definition.nodes if n.actorKind is ActorKind.AGENT]
         role_keys = {n.primaryRoleKey for n in agent_nodes}
         stage_ids = {s.stageId.value for s in definition.stages}
-        node_ids = {n.nodeId for n in agent_nodes}
 
-        for role, agent_id in (payload.get("workflowDefaults") or {}).items():
+        workflow_defaults = _require_mapping(
+            payload.get("workflowDefaults"),
+            field="workflowDefaults",
+        )
+        stage_overrides = _require_mapping(
+            payload.get("stageOverrides"),
+            field="stageOverrides",
+        )
+        node_overrides = _require_mapping(
+            payload.get("nodeOverrides"),
+            field="nodeOverrides",
+        )
+
+        for role, agent_id in workflow_defaults.items():
             if str(role) not in role_keys:
                 raise BindingConfigValidationError(f"Unknown roleKey: {role}", code="unknown_role")
-            if not str(agent_id or "").strip():
-                raise BindingConfigValidationError(f"workflowDefault {role} requires a non-empty agentId", code="empty_agent")
+            _require_agent_id(agent_id, field=f"workflowDefault {role}")
 
-        for stage_id, roles in (payload.get("stageOverrides") or {}).items():
+        for stage_id, roles in stage_overrides.items():
             if str(stage_id) not in stage_ids:
                 raise BindingConfigValidationError(f"Unknown stageId: {stage_id}", code="unknown_stage")
-            for role, agent_id in roles.items():
+            stage_roles = _require_mapping(
+                roles,
+                field=f"stageOverride {stage_id}",
+            )
+            for role, agent_id in stage_roles.items():
                 if str(role) not in role_keys:
                     raise BindingConfigValidationError(f"Unknown roleKey: {role}", code="unknown_role")
-                if not str(agent_id or "").strip():
-                    raise BindingConfigValidationError(f"stageOverride {stage_id}/{role} requires a non-empty agentId", code="empty_agent")
+                _require_agent_id(
+                    agent_id,
+                    field=f"stageOverride {stage_id}/{role}",
+                )
 
-        for node_id, agent_id in (payload.get("nodeOverrides") or {}).items():
+        for node_id, agent_id in node_overrides.items():
             spec = node_spec(str(node_id))
             if spec is None or spec.actorKind is not ActorKind.AGENT:
                 raise BindingConfigValidationError(f"Unknown or non-agent nodeId: {node_id}", code="unknown_node")
-            if not str(agent_id or "").strip():
-                raise BindingConfigValidationError(f"nodeOverride {node_id} requires a non-empty agentId", code="empty_agent")
+            _require_agent_id(agent_id, field=f"nodeOverride {node_id}")
 
 
 def default_binding_config_store() -> WorkflowBindingConfigStore:

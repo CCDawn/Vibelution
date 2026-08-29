@@ -658,6 +658,29 @@ class ResearchWorkflowRuntimeService:
             raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
         current = self._binding_config.load(workflow_id, team_id)
         team_scoped = bool(str(team_id or "").strip())
+        try:
+            if not isinstance(payload, dict):
+                self._binding_config.validate_payload(payload)
+            raw_update = {
+                "workflowDefaults": (
+                    payload.get("workflowDefaults") or {}
+                    if "workflowDefaults" in payload
+                    else current.workflowDefaults
+                ),
+                "stageOverrides": (
+                    payload.get("stageOverrides") or {}
+                    if "stageOverrides" in payload
+                    else current.stageOverrides
+                ),
+                "nodeOverrides": (
+                    payload.get("nodeOverrides") or {}
+                    if "nodeOverrides" in payload
+                    else current.nodeOverrides
+                ),
+            }
+            self._binding_config.validate_payload(raw_update)
+        except BindingConfigValidationError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
         # Replace-whole-layer semantics: a layer present in the payload fully
         # replaces its persisted value (an empty dict clears it); absent
         # layers keep their persisted values.
@@ -665,30 +688,16 @@ class ResearchWorkflowRuntimeService:
             "workflowDefaults": (
                 {}
                 if team_scoped
-                else (
-                    {str(k): str(v) for k, v in (payload.get("workflowDefaults") or {}).items()}
-                    if "workflowDefaults" in payload
-                    else current.workflowDefaults
-                )
+                else {str(k): v for k, v in raw_update["workflowDefaults"].items()}
             ),
-            "stageOverrides": (
-                {
-                    str(k): {str(rk): str(av) for rk, av in v.items()}
-                    for k, v in (payload.get("stageOverrides") or {}).items()
-                }
-                if "stageOverrides" in payload
-                else current.stageOverrides
-            ),
-            "nodeOverrides": (
-                {str(k): str(v) for k, v in (payload.get("nodeOverrides") or {}).items()}
-                if "nodeOverrides" in payload
-                else current.nodeOverrides
-            ),
+            "stageOverrides": {
+                str(k): {str(rk): av for rk, av in v.items()}
+                for k, v in raw_update["stageOverrides"].items()
+            },
+            "nodeOverrides": {
+                str(k): v for k, v in raw_update["nodeOverrides"].items()
+            },
         }
-        try:
-            self._binding_config.validate_payload(update)
-        except BindingConfigValidationError as exc:
-            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
         saved = self._binding_config.save(
             workflow_id,
             team_id,
