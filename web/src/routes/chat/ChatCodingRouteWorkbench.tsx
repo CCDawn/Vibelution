@@ -794,6 +794,7 @@ export function ChatCodingRoute() {
       && companion.directSessionId === requestedSessionId
     )) ?? null;
   }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
+  const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
     : companionsQuery.isError && !companionsQuery.data
@@ -1293,6 +1294,7 @@ export function ChatCodingRoute() {
     setSessionImageAttachments,
     setSessionReferenceAttachments,
     setSessionEditTargets,
+    companionAgentId: companionTransportAgentId,
   });
 
   const {
@@ -2097,6 +2099,21 @@ export function ChatCodingRoute() {
     sessionGuidanceMutation,
     activeTurnSettledByDetail,
   });
+  const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);
+  const companionConversationComposer = companionMode
+    ? {
+      ...conversationComposer,
+      actionDisabled: companionComposerDisabled
+        || submitPending
+        || !conversationComposer.value.trim(),
+      actionMode: "send" as const,
+      attachmentInputDisabled: companionComposerDisabled
+        || sessionBusy
+        || conversationComposer.attachmentInputDisabled,
+      disabled: companionComposerDisabled,
+      pending: submitPending,
+    }
+    : conversationComposer;
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
@@ -2201,7 +2218,7 @@ export function ChatCodingRoute() {
     runtimeStatusEnabledForNextTurn,
     resolvedEditTarget,
     activeEditTarget,
-    composerDisabled,
+    composerDisabled: companionComposerDisabled,
     sessionBusy,
     sessionStopping,
     activePhase: detail?.currentPhase,
@@ -2212,6 +2229,7 @@ export function ChatCodingRoute() {
     detail,
     setMentalModelEnabledForNextTurn,
     setRuntimeStatusEnabledForNextTurn,
+    companionAgentId: companionTransportAgentId,
   });
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
@@ -3110,11 +3128,11 @@ export function ChatCodingRoute() {
                     ? composerFocusRequest.signal
                     : "",
                 onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
-                composer: conversationComposer,
+                composer: companionConversationComposer,
                 composerLeadingControl: (
                   <ChatComposerPlusMenu
                     lang={lang}
-                    attachmentDisabled={conversationComposer.attachmentInputDisabled}
+                    attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
                     onAddAttachments={handleAddComposerAttachments}
                     sessionReferences={composerSessionReferenceOptions}
                     onAddSessionReference={handleAddComposerReference}

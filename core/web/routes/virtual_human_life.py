@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 from core.agent_plugins.virtual_human_life.service import (
     AgentUnavailableError,
@@ -17,6 +17,8 @@ from core.web.routes.virtual_human_life_models import (
     LegacyPetImportResponse,
     VirtualHumanCommandRequest,
     VirtualHumanCommandResponse,
+    VirtualHumanConversationMessageRequest,
+    VirtualHumanConversationMessageResponse,
     VirtualHumanDiaryEntryResponse,
     VirtualHumanEventResponse,
     VirtualHumanMemoryResponse,
@@ -28,6 +30,7 @@ from core.web.services.virtual_human_life_service import (
     execute_virtual_human_command,
     import_legacy_pet,
     preview_legacy_pet_import,
+    queue_virtual_human_conversation_message,
     virtual_human_diary,
     virtual_human_events,
     virtual_human_memories,
@@ -136,6 +139,39 @@ def life_memories(
 ) -> list[dict]:
     try:
         return virtual_human_memories(agent_id, limit=limit)
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.post(
+    "/agents/{agent_id}/plugins/virtual-human-life/sessions/{session_id}/messages",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=VirtualHumanConversationMessageResponse,
+    response_model_exclude_unset=True,
+)
+def life_conversation_message(
+    agent_id: str,
+    session_id: str,
+    payload: VirtualHumanConversationMessageRequest,
+) -> dict:
+    try:
+        return queue_virtual_human_conversation_message(
+            agent_id,
+            session_id=session_id,
+            client_submission_id=payload.clientSubmissionId,
+            content=payload.content,
+            content_utf8_base64=payload.contentUtf8Base64,
+            attachment_ids=list(payload.attachmentIds),
+            references=[dict(item) for item in payload.references],
+            mental_model_enabled=payload.mentalModelEnabled,
+            runtime_status_enabled=payload.runtimeStatusEnabled,
+            turn_status_tail=(
+                dict(payload.turnStatusTail)
+                if isinstance(payload.turnStatusTail, dict)
+                else None
+            ),
+        )
     except Exception as exc:
         _raise_life_http_error(exc)
         raise

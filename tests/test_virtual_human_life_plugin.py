@@ -8,6 +8,7 @@ import pytest
 
 from core.agent_plugins.virtual_human_life.service import (
     BindingConflictError,
+    BindingDisabledError,
     VirtualHumanLifeError,
     VirtualHumanLifeService,
 )
@@ -48,6 +49,375 @@ def test_unbound_agent_has_zero_plugin_effect_and_no_storage(service: VirtualHum
         ["virtual_human_status_tool", "grep_search_tool"],
     ) == ["grep_search_tool"]
     assert root.exists() is False
+
+
+def test_companion_mailbox_is_plugin_scoped_and_reuses_native_submit_only_after_fifo_claim(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    busy = [True]
+    submitted: list[str] = []
+
+    def submitter(**payload):
+        if busy[0]:
+            return {"accepted": False, "busy": True}
+        submitted.append(str(payload.get("content") or ""))
+        return {
+            "accepted": True,
+            "turnId": f"turn-{len(submitted)}",
+            "acceptedAt": "2026-08-30T00:00:00+00:00",
+        }
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=submitter,
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={"timezone": "Asia/Shanghai"},
+    )
+
+    first = service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-a",
+        content="first",
+    )
+    second = service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-b",
+        content="second",
+    )
+
+    assert first["accepted"] is False
+    assert first["queued"] is True
+    assert second["queueSequence"] == 2
+    assert submitted == []
+    mailbox_path = service.plugin_root("agent-a") / "conversation" / "mailbox.json"
+    assert mailbox_path.is_file()
+    assert not (tmp_path / "workspace" / "chat" / "conversations.sqlite3").exists()
+
+    busy[0] = False
+    retried_second = service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-b",
+        content="second",
+    )
+    accepted_second = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+
+    assert retried_second["accepted"] is False
+    assert retried_second["queued"] is True
+    assert retried_second["queueSequence"] == 2
+    assert submitted == ["first", "second"]
+    assert accepted_second["turnId"] == "turn-2"
+
+
+def test_companion_mailbox_orders_proactive_and_user_messages_by_arrival(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    busy = [True]
+    submitted: list[str] = []
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        proactive_submitter=lambda **_payload: submitted.append("proactive")
+        or {"accepted": True, "turnId": "turn-proactive"},
+        conversation_submitter=lambda **payload: submitted.append(
+            f"user:{payload.get('content')}"
+        )
+        or {"accepted": True, "turnId": "turn-user"},
+        conversation_busy_provider=lambda _session_id: busy[0],
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={"timezone": "Asia/Shanghai"},
+    )
+
+    proactive = service.request_proactive_message(
+        "agent-a",
+        reason="先到达的主动问候",
+        idempotency_key="proactive-first",
+    )
+    user = service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="user-second",
+        content="后到达的用户消息",
+    )
+
+    assert proactive["status"] == "reserved"
+    assert proactive["mailboxSequence"] == 1
+    assert user["accepted"] is False
+    assert user["queueSequence"] == 2
+    assert submitted == []
+
+    busy[0] = False
+    first = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+    second = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+
+    assert first["sourceKind"] == "proactive"
+    assert first["turnId"] == "turn-proactive"
+    assert second["sourceKind"] == "user"
+    assert second["turnId"] == "turn-user"
+    assert submitted == ["proactive", "user:后到达的用户消息"]
+
+
+def test_unbound_agent_cannot_create_companion_mailbox(service: VirtualHumanLifeService) -> None:
+    with pytest.raises(BindingDisabledError):
+        service.queue_conversation_message(
+            "agent-a",
+            session_id="session-agent-a",
+            client_submission_id="submission-a",
+            content="must not enter normal chat",
+        )
+
+    assert not (service.plugin_root("agent-a") / "conversation" / "mailbox.json").exists()
+
+
+def test_disabling_binding_cancels_unsent_companion_messages_before_reenable(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    busy = [True]
+    submitted: list[str] = []
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=lambda **payload: submitted.append(
+            str(payload.get("content") or "")
+        )
+        or {"accepted": True, "turnId": "turn-stale"},
+        conversation_busy_provider=lambda _session_id: busy[0],
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0, config={})
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-before-disable",
+        content="禁用后不能补发",
+    )
+
+    service.set_binding("agent-a", enabled=False, expected_version=1, config={})
+    service.set_binding("agent-a", enabled=True, expected_version=2, config={})
+    busy[0] = False
+    result = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+    mailbox = service.store.read_json("agent-a", "conversation/mailbox.json") or {}
+
+    assert result["accepted"] is False
+    assert result["queued"] is False
+    assert submitted == []
+    assert mailbox["entries"][0]["state"] == "cancelled"
+    assert mailbox["entries"][0]["cancelReason"] == "binding_disabled"
+
+
+def test_native_submit_exception_keeps_the_companion_command_durable_for_retry(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+
+    def submitter(**_payload):
+        raise RuntimeError("runtime restarting")
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=submitter,
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0, config={})
+
+    queued = service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-retry",
+        content="重启后继续发送",
+    )
+    mailbox = service.store.read_json("agent-a", "conversation/mailbox.json") or {}
+
+    assert queued["accepted"] is False
+    assert queued["queued"] is True
+    assert queued["queueSequence"] == 1
+    assert mailbox["entries"][0]["state"] == "queued"
+    assert mailbox["entries"][0]["lastReleaseReason"] == "RuntimeError"
+
+
+def test_recovered_native_receipt_completes_expired_dispatch_without_resubmitting(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    now = [datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc)]
+    busy = [True]
+    submitted: list[str] = []
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=lambda **payload: submitted.append(
+            str(payload.get("content") or "")
+        )
+        or {"accepted": True, "turnId": "turn-duplicate"},
+        conversation_receipt_resolver=lambda _session_id, entry: {
+            "turnId": "turn-already-accepted",
+            "acceptedAt": "2026-08-30T00:00:01+00:00",
+        }
+        if str((entry.get("command") or {}).get("clientSubmissionId") or "")
+        == "submission-crash"
+        else None,
+        conversation_busy_provider=lambda _session_id: busy[0],
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: now[0],
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0, config={})
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-crash",
+        content="只能进入原生 Session 一次",
+    )
+    mailbox = service.store.read_json("agent-a", "conversation/mailbox.json") or {}
+    entry = mailbox["entries"][0]
+    entry.update(
+        {
+            "state": "dispatching",
+            "leaseToken": "lease-from-dead-process",
+            "leaseOwner": "dead-process",
+            "leaseExpiresAt": "2026-08-30T00:00:10+00:00",
+            "leaseAttempt": 1,
+        }
+    )
+    service.store.write_json("agent-a", "conversation/mailbox.json", mailbox)
+
+    busy[0] = False
+    now[0] = datetime(2026, 8, 30, 0, 1, tzinfo=timezone.utc)
+    recovered = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+    persisted = service.store.read_json("agent-a", "conversation/mailbox.json") or {}
+
+    assert recovered["accepted"] is True
+    assert recovered["turnId"] == "turn-already-accepted"
+    assert recovered["recoveredFromNativeReceipt"] is True
+    assert submitted == []
+    assert persisted["entries"][0]["state"] == "completed"
+    assert persisted["entries"][0]["command"] == {}
+
+
+def test_native_queued_proactive_keeps_fifo_closed_until_admission_receipt(
+    tmp_path: Path,
+) -> None:
+    agent = _active_agent("agent-a")
+    admitted = [False]
+    submitted: list[str] = []
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        proactive_submitter=lambda **_payload: submitted.append("proactive")
+        or {
+            "accepted": True,
+            "turnId": "turn-proactive-queued",
+            "status": "queued",
+        },
+        proactive_admission_resolver=lambda _agent_id, _entry: {
+            "turnId": "turn-proactive-queued",
+            "admittedAt": "2026-08-30T00:00:02+00:00",
+        }
+        if admitted[0]
+        else None,
+        conversation_submitter=lambda **payload: submitted.append(
+            f"user:{payload.get('content')}"
+        )
+        or {"accepted": True, "turnId": "turn-user-after-proactive"},
+        conversation_busy_provider=lambda _session_id: False,
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0, config={})
+
+    service.request_proactive_message(
+        "agent-a",
+        reason="先到达但仍在原生调度队列",
+        idempotency_key="queued-proactive-first",
+    )
+    queued_user = service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="user-after-proactive",
+        content="后到达的用户消息",
+    )
+
+    assert queued_user["queued"] is True
+    assert submitted == ["proactive"]
+
+    admitted[0] = True
+    reconciled = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+    delivered_user = service.dispatch_conversation_mailbox_once(
+        "agent-a", session_id="session-agent-a"
+    )
+
+    assert reconciled["nativeAdmissionReconciled"] is True
+    assert delivered_user["turnId"] == "turn-user-after-proactive"
+    assert submitted == ["proactive", "user:后到达的用户消息"]
 
 
 def test_enable_is_per_agent_autonomous_and_optimistically_versioned(

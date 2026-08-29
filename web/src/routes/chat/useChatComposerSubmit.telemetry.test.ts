@@ -21,4 +21,10 @@ describe("chat composer user-action telemetry contract", () => {
     expect(composerSource).toContain('.blocked("image_input_unsupported"');
     expect(composerSource).toContain(".blocked(guardReason");
   });
+
+  it("keeps the native Session submit as the ordinary fallback and gates the plugin transport", () => {
+    expect(composerSource).toMatch(
+      /if \(companionAgentId\) \{[\s\S]*submitVirtualHumanConversationMessage\(companionAgentId, sessionId, payload\)[\s\S]*\}\s*return submitSessionMessage\(sessionId,/,
+    );
+  });
 });

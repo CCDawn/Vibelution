@@ -491,6 +491,28 @@ export type VirtualHumanCommandResponse = {
   result: Record<string, unknown>;
 };
 
+export type VirtualHumanConversationMessageRequest = {
+  clientSubmissionId: string;
+  content: string;
+  contentUtf8Base64?: string;
+  attachmentIds?: string[];
+  references?: unknown[];
+  mentalModelEnabled?: boolean;
+  runtimeStatusEnabled?: boolean;
+  turnStatusTail?: unknown;
+};
+
+export type VirtualHumanConversationMessageResponse = {
+  accepted: boolean;
+  queued: boolean;
+  sessionId: string;
+  turnId: string;
+  clientSubmissionId: string;
+  status: string;
+  acceptedAt: string;
+  queueSequence: number;
+};
+
 export type VirtualHumanCompanion = {
   agentId: string;
   agentCode: string;

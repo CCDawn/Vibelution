@@ -13,6 +13,7 @@ import queue
 import shutil
 import tempfile
 import threading
+import time as time_module
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
@@ -62,6 +63,17 @@ from .environment import (
 from .expression_policy import project_expression_rules
 from .interests import project_interests
 from .life_feed import build_life_feed
+from .mailbox import (
+    await_mailbox_entry_native_admission,
+    cancel_mailbox_entry,
+    cancel_unsent_followups,
+    claim_next_mailbox_entry,
+    complete_awaiting_mailbox_entry,
+    complete_mailbox_entry,
+    enqueue_mailbox_entry,
+    normalize_mailbox,
+    release_mailbox_entry,
+)
 from .manifest import (
     PLUGIN_ID,
     PROMPT_PACK_FILES,
@@ -184,6 +196,17 @@ class VirtualHumanLifeService:
         agent_lister: Callable[[], list[dict[str, Any]]],
         plugin_root_resolver: Callable[[str], Path] | None = None,
         proactive_submitter: Callable[..., dict[str, Any]] | None = None,
+        conversation_submitter: Callable[..., dict[str, Any]] | None = None,
+        conversation_busy_provider: Callable[[str], bool] | None = None,
+        conversation_receipt_resolver: Callable[
+            [str, dict[str, Any]], dict[str, Any] | None
+        ]
+        | None = None,
+        proactive_admission_resolver: Callable[
+            [str, dict[str, Any]], dict[str, Any] | None
+        ]
+        | None = None,
+        auto_mailbox_dispatch: bool = True,
         delivery_receipt_resolver: Callable[[str, dict[str, Any]], dict[str, Any] | None]
         | None = None,
         episodic_writer: Callable[..., dict[str, Any]] | None = None,
@@ -203,6 +226,11 @@ class VirtualHumanLifeService:
         self.agent_loader = agent_loader
         self.agent_lister = agent_lister
         self.proactive_submitter = proactive_submitter
+        self.conversation_submitter = conversation_submitter
+        self.conversation_busy_provider = conversation_busy_provider
+        self.conversation_receipt_resolver = conversation_receipt_resolver
+        self.proactive_admission_resolver = proactive_admission_resolver
+        self.auto_mailbox_dispatch = bool(auto_mailbox_dispatch)
         self.delivery_receipt_resolver = delivery_receipt_resolver
         self.episodic_writer = episodic_writer
         self.episodic_lister = episodic_lister
@@ -216,9 +244,749 @@ class VirtualHumanLifeService:
         self.runtime_acceptance_provider = runtime_acceptance_provider
         self._agent_locks_guard = threading.Lock()
         self._agent_locks: dict[str, threading.RLock] = {}
+        self._mailbox_dispatch_threads_guard = threading.Lock()
+        self._mailbox_dispatch_threads: dict[str, threading.Thread] = {}
 
     def plugin_root(self, agent_id: str) -> Path:
         return self.store.plugin_root(agent_id)
+
+    def queue_conversation_message(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        client_submission_id: str,
+        content: str,
+        content_utf8_base64: str = "",
+        attachment_ids: list[str] | None = None,
+        references: list[dict[str, Any]] | None = None,
+        mental_model_enabled: bool | None = None,
+        runtime_status_enabled: bool | None = None,
+        turn_status_tail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist one Companion-only command, then try the native Session path."""
+
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
+        normalized_submission_id = str(client_submission_id or "").strip()
+        normalized_content = str(content or "").strip()
+        if not normalized_session_id or not normalized_submission_id or not normalized_content:
+            raise VirtualHumanLifeError(
+                "Companion message requires Session, submission id, and content."
+            )
+        with self._lock_for(normalized_agent_id):
+            self._require_enabled_binding(normalized_agent_id)
+            agent = self._agent(normalized_agent_id, include_archived=False) or {}
+            direct_session_id = str(
+                agent.get("directSessionId") or agent.get("direct_session_id") or ""
+            ).strip()
+            if not direct_session_id or direct_session_id != normalized_session_id:
+                raise VirtualHumanLifeError(
+                    "Companion mailbox can only target the bound Agent direct Session."
+                )
+            now = self._now()
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            entry_id = f"user:{normalized_submission_id}"
+            entry = next(
+                (
+                    deepcopy(item)
+                    for item in mailbox["entries"]
+                    if str(item.get("entryId") or "") == entry_id
+                ),
+                None,
+            )
+            command: dict[str, Any] = {
+                "content": normalized_content,
+                "clientSubmissionId": normalized_submission_id,
+            }
+            if str(content_utf8_base64 or "").strip():
+                command["contentUtf8Base64"] = str(content_utf8_base64).strip()
+            if attachment_ids:
+                command["attachmentIds"] = [
+                    str(item).strip() for item in attachment_ids if str(item).strip()
+                ]
+            if references:
+                command["references"] = [
+                    deepcopy(item) for item in references if isinstance(item, dict)
+                ]
+            if mental_model_enabled is not None:
+                command["mentalModelEnabled"] = bool(mental_model_enabled)
+            if runtime_status_enabled is not None:
+                command["runtimeStatusEnabled"] = bool(runtime_status_enabled)
+            if isinstance(turn_status_tail, dict):
+                command["turnStatusTail"] = deepcopy(turn_status_tail)
+            if entry is None:
+                generations = [
+                    int(item.get("generation") or 0)
+                    for item in mailbox["entries"]
+                    if str(item.get("sessionId") or "") == normalized_session_id
+                ]
+                generation = max(generations, default=0) + 1
+                mailbox, _cancelled = cancel_unsent_followups(
+                    mailbox,
+                    session_id=normalized_session_id,
+                    before_generation=generation,
+                    reason="user_interjected",
+                    now=now,
+                )
+            else:
+                generation = int(entry.get("generation") or 0)
+            mailbox, entry = enqueue_mailbox_entry(
+                mailbox,
+                entry_id=entry_id,
+                session_id=normalized_session_id,
+                source_kind="user",
+                command=command,
+                generation=generation,
+                now=now,
+            )
+            self.store.write_json(
+                normalized_agent_id, "conversation/mailbox.json", mailbox
+            )
+        self.dispatch_conversation_mailbox_once(
+            normalized_agent_id,
+            session_id=normalized_session_id,
+        )
+        with self._lock_for(normalized_agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            current_entry = next(
+                (
+                    deepcopy(item)
+                    for item in mailbox["entries"]
+                    if str(item.get("entryId") or "") == entry_id
+                ),
+                entry,
+            )
+        if str(current_entry.get("state") or "") == "completed":
+            return {
+                "accepted": True,
+                "queued": False,
+                "sessionId": normalized_session_id,
+                "turnId": str(current_entry.get("turnId") or ""),
+                "status": "running",
+                "acceptedAt": str(current_entry.get("completedAt") or ""),
+                "clientSubmissionId": normalized_submission_id,
+                "queueSequence": int(current_entry.get("arrivalSequence") or 0),
+            }
+        self.ensure_conversation_mailbox_dispatcher(
+            normalized_agent_id,
+            session_id=normalized_session_id,
+        )
+        return {
+            "accepted": False,
+            "queued": True,
+            "sessionId": normalized_session_id,
+            "turnId": "",
+            "status": "queued",
+            "acceptedAt": "",
+            "clientSubmissionId": normalized_submission_id,
+            "queueSequence": int(current_entry.get("arrivalSequence") or 0),
+        }
+
+    def ensure_conversation_mailbox_dispatcher(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+    ) -> None:
+        if not self.auto_mailbox_dispatch or (
+            self.conversation_submitter is None and self.proactive_submitter is None
+        ):
+            return
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_agent_id or not normalized_session_id:
+            return
+        with self._lock_for(normalized_agent_id):
+            stored = self.store.read_json(
+                normalized_agent_id, "conversation/mailbox.json"
+            )
+            if stored is None:
+                return
+            mailbox = normalize_mailbox(stored)
+            if not any(
+                str(item.get("sessionId") or "") == normalized_session_id
+                and str(item.get("state") or "")
+                in {"queued", "dispatching", "awaiting_native_admission"}
+                for item in mailbox["entries"]
+            ):
+                return
+        key = f"{normalized_agent_id}:{normalized_session_id}"
+        with self._mailbox_dispatch_threads_guard:
+            current = self._mailbox_dispatch_threads.get(key)
+            if current is not None and current.is_alive():
+                return
+            worker = threading.Thread(
+                target=self._conversation_mailbox_dispatch_loop,
+                kwargs={
+                    "agent_id": normalized_agent_id,
+                    "session_id": normalized_session_id,
+                    "dispatch_key": key,
+                },
+                name=f"virtual-human-mailbox-{normalized_agent_id[:24]}",
+                daemon=True,
+            )
+            self._mailbox_dispatch_threads[key] = worker
+            worker.start()
+
+    def _conversation_mailbox_dispatch_loop(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        dispatch_key: str,
+    ) -> None:
+        try:
+            while self.runtime_acceptance_provider is None or bool(
+                self.runtime_acceptance_provider()
+            ):
+                try:
+                    result = self.dispatch_conversation_mailbox_once(
+                        agent_id,
+                        session_id=session_id,
+                    )
+                except (AgentUnavailableError, BindingDisabledError):
+                    return
+                except Exception as exc:  # noqa: BLE001 - durable entry remains queued
+                    logger.warning(
+                        "Virtual human mailbox dispatch paused for agent=%s (%s).",
+                        agent_id,
+                        type(exc).__name__,
+                    )
+                    return
+                if bool(result.get("retryDeferred")):
+                    return
+                if bool(result.get("accepted")):
+                    time_module.sleep(0.05)
+                    continue
+                if bool(result.get("queued")):
+                    time_module.sleep(0.5)
+                    continue
+                return
+        finally:
+            with self._mailbox_dispatch_threads_guard:
+                current = self._mailbox_dispatch_threads.get(dispatch_key)
+                if current is threading.current_thread():
+                    self._mailbox_dispatch_threads.pop(dispatch_key, None)
+
+    def dispatch_conversation_mailbox_once(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Try one FIFO command without changing the ordinary Session contract."""
+
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
+        with self._lock_for(normalized_agent_id):
+            self._require_enabled_binding(normalized_agent_id)
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            awaiting_entry = next(
+                (
+                    deepcopy(item)
+                    for item in mailbox["entries"]
+                    if str(item.get("sessionId") or "") == normalized_session_id
+                    and str(item.get("state") or "")
+                    == "awaiting_native_admission"
+                ),
+                None,
+            )
+            queued = any(
+                str(item.get("sessionId") or "") == normalized_session_id
+                and str(item.get("state") or "")
+                in {"queued", "dispatching", "awaiting_native_admission"}
+                for item in mailbox["entries"]
+            )
+        if awaiting_entry is not None:
+            return self._reconcile_awaiting_proactive_admission(
+                normalized_agent_id,
+                session_id=normalized_session_id,
+                entry=awaiting_entry,
+            )
+        if not queued:
+            return {"accepted": False, "queued": False, "reason": "empty"}
+        if self.conversation_busy_provider is not None and bool(
+            self.conversation_busy_provider(normalized_session_id)
+        ):
+            return {
+                "accepted": False,
+                "queued": True,
+                "reason": "native_session_busy",
+            }
+        with self._lock_for(normalized_agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            mailbox, entry = claim_next_mailbox_entry(
+                mailbox,
+                session_id=normalized_session_id,
+                lease_owner=f"virtual-human:{normalized_agent_id}",
+                now=self._now(),
+                lease_seconds=30,
+            )
+            self.store.write_json(
+                normalized_agent_id, "conversation/mailbox.json", mailbox
+            )
+        if entry is None:
+            return {"accepted": False, "queued": False, "reason": "empty_or_claimed"}
+        if str(entry.get("sourceKind") or "") == "proactive":
+            return self._dispatch_proactive_mailbox_entry(
+                normalized_agent_id,
+                session_id=normalized_session_id,
+                entry=entry,
+            )
+        recovered = self._recover_claimed_conversation_entry(
+            normalized_agent_id,
+            session_id=normalized_session_id,
+            entry=entry,
+        )
+        if recovered is not None:
+            return recovered
+        if self.conversation_submitter is None:
+            released = self._release_conversation_mailbox_entry(
+                normalized_agent_id,
+                entry=entry,
+                reason="conversation_submitter_unavailable",
+            )
+            return {**released, "accepted": False, "queued": True}
+        command = dict(entry.get("command") or {})
+        try:
+            accepted = self.conversation_submitter(
+                session_id=normalized_session_id,
+                content=str(command.get("content") or ""),
+                client_submission_id=str(command.get("clientSubmissionId") or ""),
+                content_utf8_base64=str(command.get("contentUtf8Base64") or ""),
+                attachment_ids=[
+                    str(item)
+                    for item in command.get("attachmentIds") or []
+                    if str(item).strip()
+                ],
+                references=[
+                    dict(item)
+                    for item in command.get("references") or []
+                    if isinstance(item, dict)
+                ],
+                mental_model_enabled=command.get("mentalModelEnabled"),
+                runtime_status_enabled=command.get("runtimeStatusEnabled"),
+                turn_status_tail=(
+                    dict(command["turnStatusTail"])
+                    if isinstance(command.get("turnStatusTail"), dict)
+                    else None
+                ),
+            )
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:
+            released = self._release_conversation_mailbox_entry(
+                normalized_agent_id,
+                entry=entry,
+                reason=type(exc).__name__,
+            )
+            return {
+                **released,
+                "accepted": False,
+                "queued": True,
+                "sessionId": normalized_session_id,
+                "turnId": "",
+                "status": "queued",
+                "acceptedAt": "",
+                "retryDeferred": True,
+                "reason": "native_submit_exception",
+            }
+        if not bool((accepted or {}).get("accepted")):
+            released = self._release_conversation_mailbox_entry(
+                normalized_agent_id,
+                entry=entry,
+                reason=(
+                    "native_session_busy"
+                    if bool((accepted or {}).get("busy"))
+                    else "native_session_not_accepted"
+                ),
+            )
+            return {
+                **released,
+                "accepted": False,
+                "queued": True,
+                "sessionId": normalized_session_id,
+                "turnId": "",
+                "status": "queued",
+                "acceptedAt": "",
+            }
+        turn_id = str((accepted or {}).get("turnId") or "").strip()
+        if not turn_id:
+            self._release_conversation_mailbox_entry(
+                normalized_agent_id,
+                entry=entry,
+                reason="native_session_missing_turn_id",
+            )
+            raise VirtualHumanLifeError("Native Session accepted without a turn id.")
+        with self._lock_for(normalized_agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            mailbox, completed = complete_mailbox_entry(
+                mailbox,
+                entry_id=str(entry["entryId"]),
+                lease_token=str(entry["leaseToken"]),
+                turn_id=turn_id,
+                now=self._now(),
+            )
+            self.store.write_json(
+                normalized_agent_id, "conversation/mailbox.json", mailbox
+            )
+        return {
+            **dict(accepted or {}),
+            "entryId": str(completed.get("entryId") or ""),
+            "sourceKind": str(completed.get("sourceKind") or ""),
+            "accepted": True,
+            "queued": False,
+            "sessionId": normalized_session_id,
+            "status": str((accepted or {}).get("status") or "running"),
+            "clientSubmissionId": str(command.get("clientSubmissionId") or ""),
+            "queueSequence": int(completed.get("arrivalSequence") or 0),
+        }
+
+    def _recover_claimed_conversation_entry(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        entry: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Resolve an expired lease from the native journal before any replay."""
+
+        if (
+            int(entry.get("leaseAttempt") or 0) <= 1
+            or self.conversation_receipt_resolver is None
+        ):
+            return None
+        try:
+            candidate = self.conversation_receipt_resolver(
+                session_id,
+                deepcopy(entry),
+            )
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:
+            released = self._release_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason=f"receipt_{type(exc).__name__}",
+            )
+            return {
+                **released,
+                "accepted": False,
+                "queued": True,
+                "retryDeferred": True,
+                "reason": "native_receipt_lookup_failed",
+            }
+        receipt = candidate if isinstance(candidate, dict) else {}
+        turn_id = str(receipt.get("turnId") or "").strip()
+        if not turn_id:
+            return None
+        command = dict(entry.get("command") or {})
+        with self._lock_for(agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(agent_id, "conversation/mailbox.json")
+            )
+            mailbox, completed = complete_mailbox_entry(
+                mailbox,
+                entry_id=str(entry.get("entryId") or ""),
+                lease_token=str(entry.get("leaseToken") or ""),
+                turn_id=turn_id,
+                now=self._now(),
+            )
+            self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+        return {
+            "entryId": str(completed.get("entryId") or ""),
+            "sourceKind": str(completed.get("sourceKind") or ""),
+            "accepted": True,
+            "queued": False,
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "status": "running",
+            "acceptedAt": str(receipt.get("acceptedAt") or ""),
+            "clientSubmissionId": str(command.get("clientSubmissionId") or ""),
+            "queueSequence": int(completed.get("arrivalSequence") or 0),
+            "recoveredFromNativeReceipt": True,
+        }
+
+    def _reconcile_awaiting_proactive_admission(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Keep later Companion commands behind a natively queued proactive Turn."""
+
+        command = dict(entry.get("command") or {})
+        payload = (
+            dict(command["proactiveAttempt"])
+            if isinstance(command.get("proactiveAttempt"), dict)
+            else {}
+        )
+        delivery_token = str(payload.get("delivery_token") or "").strip()
+        attempt = self.proactive_attempt(agent_id, delivery_token) or {}
+        if str(attempt.get("status") or "") in {"cancelled", "failed", "expired"}:
+            cancelled = self._cancel_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason="native_proactive_not_admitted",
+            )
+            return {
+                **cancelled,
+                "accepted": False,
+                "queued": False,
+                "reason": "native_proactive_not_admitted",
+            }
+        if self.proactive_admission_resolver is None:
+            return {
+                "accepted": False,
+                "queued": True,
+                "reason": "native_proactive_admission_pending",
+            }
+        try:
+            candidate = self.proactive_admission_resolver(agent_id, deepcopy(entry))
+        except (RuntimeError, ValueError, OSError, TypeError):
+            return {
+                "accepted": False,
+                "queued": True,
+                "retryDeferred": True,
+                "reason": "native_proactive_admission_lookup_failed",
+            }
+        receipt = candidate if isinstance(candidate, dict) else {}
+        turn_id = str(receipt.get("turnId") or "").strip()
+        if not turn_id:
+            return {
+                "accepted": False,
+                "queued": True,
+                "reason": "native_proactive_admission_pending",
+            }
+        if turn_id != str(entry.get("turnId") or "").strip():
+            raise VirtualHumanLifeError(
+                "Native proactive admission receipt belongs to another turn."
+            )
+        with self._lock_for(agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(agent_id, "conversation/mailbox.json")
+            )
+            mailbox, completed = complete_awaiting_mailbox_entry(
+                mailbox,
+                entry_id=str(entry.get("entryId") or ""),
+                turn_id=turn_id,
+                now=self._now(),
+            )
+            self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+        return {
+            "entryId": str(completed.get("entryId") or ""),
+            "sourceKind": "proactive",
+            "accepted": True,
+            "queued": False,
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "status": "running",
+            "queueSequence": int(completed.get("arrivalSequence") or 0),
+            "deliveryToken": delivery_token,
+            "nativeAdmissionReconciled": True,
+        }
+
+    def _dispatch_proactive_mailbox_entry(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        command = dict(entry.get("command") or {})
+        payload = (
+            dict(command["proactiveAttempt"])
+            if isinstance(command.get("proactiveAttempt"), dict)
+            else {}
+        )
+        delivery_token = str(payload.get("delivery_token") or "").strip()
+        binding_revision = int(payload.get("binding_revision") or 0)
+        if not delivery_token or not self.proactive_turn_is_current(
+            agent_id=agent_id,
+            binding_revision=binding_revision,
+            delivery_token=delivery_token,
+        ):
+            cancelled = self._cancel_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason="proactive_attempt_stale",
+            )
+            self.cancel_proactive_attempt(
+                agent_id,
+                delivery_token,
+                reason="mailbox_dispatch_fence",
+            )
+            return {
+                **cancelled,
+                "accepted": False,
+                "queued": False,
+                "reason": "proactive_attempt_stale",
+            }
+        if self.proactive_submitter is None:
+            released = self._release_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason="proactive_submitter_unavailable",
+            )
+            return {**released, "accepted": False, "queued": True}
+        try:
+            accepted = self.proactive_submitter(**payload)
+        except Exception as exc:  # noqa: BLE001 - native proactive adapter boundary
+            cancelled = self._cancel_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason=type(exc).__name__,
+            )
+            self._update_attempt(
+                agent_id,
+                delivery_token,
+                status="failed",
+                failedAt=_iso(self._now()),
+                failureType=type(exc).__name__,
+            )
+            return {
+                **cancelled,
+                "accepted": False,
+                "queued": False,
+                "reason": "proactive_submit_failed",
+            }
+        if not bool((accepted or {}).get("accepted")):
+            if bool((accepted or {}).get("busy")):
+                released = self._release_conversation_mailbox_entry(
+                    agent_id,
+                    entry=entry,
+                    reason="native_session_busy",
+                )
+                return {**released, "accepted": False, "queued": True}
+            cancelled = self._cancel_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason="native_session_not_accepted",
+            )
+            self._update_attempt(
+                agent_id,
+                delivery_token,
+                status="failed",
+                failedAt=_iso(self._now()),
+                failureType="session_not_accepted",
+            )
+            return {**cancelled, "accepted": False, "queued": False}
+        turn_id = str((accepted or {}).get("turnId") or "").strip()
+        if not turn_id:
+            self._cancel_conversation_mailbox_entry(
+                agent_id,
+                entry=entry,
+                reason="native_session_missing_turn_id",
+            )
+            self._update_attempt(
+                agent_id,
+                delivery_token,
+                status="failed",
+                failedAt=_iso(self._now()),
+                failureType="native_session_missing_turn_id",
+            )
+            raise VirtualHumanLifeError("Native Session accepted without a turn id.")
+        native_status = str((accepted or {}).get("status") or "running").strip().lower()
+        with self._lock_for(agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(agent_id, "conversation/mailbox.json")
+            )
+            if native_status == "queued":
+                mailbox, completed = await_mailbox_entry_native_admission(
+                    mailbox,
+                    entry_id=str(entry.get("entryId") or ""),
+                    lease_token=str(entry.get("leaseToken") or ""),
+                    turn_id=turn_id,
+                    now=self._now(),
+                )
+            else:
+                mailbox, completed = complete_mailbox_entry(
+                    mailbox,
+                    entry_id=str(entry.get("entryId") or ""),
+                    lease_token=str(entry.get("leaseToken") or ""),
+                    turn_id=turn_id,
+                    now=self._now(),
+                )
+            self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+            attempt = self._update_attempt(
+                agent_id,
+                delivery_token,
+                status="delivering",
+                turnId=turn_id,
+                deliveryStartedAt=_iso(self._now()),
+            )
+        return {
+            **dict(accepted or {}),
+            "entryId": str(completed.get("entryId") or ""),
+            "sourceKind": "proactive",
+            "accepted": True,
+            "queued": native_status == "queued",
+            "sessionId": session_id,
+            "status": native_status,
+            "queueSequence": int(completed.get("arrivalSequence") or 0),
+            "deliveryToken": delivery_token,
+            "proactiveAttempt": attempt,
+        }
+
+    def _release_conversation_mailbox_entry(
+        self,
+        agent_id: str,
+        *,
+        entry: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(agent_id, "conversation/mailbox.json")
+            )
+            mailbox, released = release_mailbox_entry(
+                mailbox,
+                entry_id=str(entry.get("entryId") or ""),
+                lease_token=str(entry.get("leaseToken") or ""),
+                reason=reason,
+                now=self._now(),
+            )
+            self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+            return {
+                "entryId": str(released.get("entryId") or ""),
+                "sourceKind": str(released.get("sourceKind") or ""),
+                "queueSequence": int(released.get("arrivalSequence") or 0),
+                "releaseReason": str(released.get("lastReleaseReason") or ""),
+            }
+
+    def _cancel_conversation_mailbox_entry(
+        self,
+        agent_id: str,
+        *,
+        entry: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            mailbox = normalize_mailbox(
+                self.store.read_json(agent_id, "conversation/mailbox.json")
+            )
+            mailbox, cancelled = cancel_mailbox_entry(
+                mailbox,
+                entry_id=str(entry.get("entryId") or ""),
+                lease_token=str(entry.get("leaseToken") or ""),
+                reason=reason,
+                now=self._now(),
+            )
+            self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+            return {
+                "entryId": str(cancelled.get("entryId") or ""),
+                "sourceKind": str(cancelled.get("sourceKind") or ""),
+                "queueSequence": int(cancelled.get("arrivalSequence") or 0),
+                "cancelReason": str(cancelled.get("cancelReason") or ""),
+            }
 
     def require_agent(
         self,
@@ -341,6 +1109,10 @@ class VirtualHumanLifeService:
             if enabled:
                 self._ensure_initialized(agent_id, next_binding)
             else:
+                self.cancel_queued_conversation_mailbox_entries(
+                    agent_id,
+                    reason="binding_disabled",
+                )
                 self.cancel_open_proactive_attempts(
                     agent_id,
                     reason="binding_disabled",
@@ -2694,51 +3466,62 @@ class VirtualHumanLifeService:
                     status="cancelled",
                     cancellationReason="binding_revision_changed_before_delivery",
                 )
-            try:
-                accepted = self.proactive_submitter(
-                    session_id=session_id,
-                    agent_id=str(agent_id).strip(),
-                    origin="proactive_plugin",
-                    source_kind=PLUGIN_ID,
-                    plugin_id=PLUGIN_ID,
-                    trigger_id=trigger_id,
-                    delivery_token=delivery_token,
-                    binding_revision=int(attempt["bindingRevision"]),
-                    trigger={
-                        "reason": attempt["reason"],
-                        "sourceEventId": attempt["sourceEventId"],
-                        "idempotencyKey": attempt["idempotencyKey"],
-                        "validUntil": attempt["validUntil"],
-                        **(
-                            {"toolActivity": dict(attempt["toolActivity"])}
-                            if isinstance(attempt.get("toolActivity"), dict)
-                            else {}
-                        ),
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001 - Session submitter adapter boundary
-                return self._update_attempt(
-                    agent_id,
-                    delivery_token,
-                    status="failed",
-                    failedAt=_iso(self._now()),
-                    failureType=type(exc).__name__,
-                )
-            if not bool((accepted or {}).get("accepted")):
-                return self._update_attempt(
-                    agent_id,
-                    delivery_token,
-                    status="failed",
-                    failedAt=_iso(self._now()),
-                    failureType="session_not_accepted",
-                )
-            return self._update_attempt(
+            proactive_payload = {
+                "session_id": session_id,
+                "agent_id": str(agent_id).strip(),
+                "origin": "proactive_plugin",
+                "source_kind": PLUGIN_ID,
+                "plugin_id": PLUGIN_ID,
+                "trigger_id": trigger_id,
+                "delivery_token": delivery_token,
+                "binding_revision": int(attempt["bindingRevision"]),
+                "trigger": {
+                    "reason": attempt["reason"],
+                    "sourceEventId": attempt["sourceEventId"],
+                    "idempotencyKey": attempt["idempotencyKey"],
+                    "validUntil": attempt["validUntil"],
+                    **(
+                        {"toolActivity": dict(attempt["toolActivity"])}
+                        if isinstance(attempt.get("toolActivity"), dict)
+                        else {}
+                    ),
+                },
+            }
+            mailbox = normalize_mailbox(
+                self.store.read_json(agent_id, "conversation/mailbox.json")
+            )
+            generation = max(
+                (
+                    int(item.get("generation") or 0)
+                    for item in mailbox["entries"]
+                    if str(item.get("sessionId") or "") == session_id
+                ),
+                default=0,
+            )
+            mailbox, mailbox_entry = enqueue_mailbox_entry(
+                mailbox,
+                entry_id=f"proactive:{delivery_token}",
+                session_id=session_id,
+                source_kind="proactive",
+                command={
+                    "proactiveAttempt": proactive_payload,
+                    "idempotencyKey": normalized_idempotency_key,
+                },
+                generation=generation,
+                now=self._now(),
+            )
+            self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+            self._update_attempt(
                 agent_id,
                 delivery_token,
-                status="delivering",
-                turnId=str(accepted.get("turnId") or "").strip(),
-                deliveryStartedAt=_iso(self._now()),
+                mailboxSequence=int(mailbox_entry.get("arrivalSequence") or 0),
             )
+            self.dispatch_conversation_mailbox_once(agent_id, session_id=session_id)
+            self.ensure_conversation_mailbox_dispatcher(
+                agent_id,
+                session_id=session_id,
+            )
+            return self.proactive_attempt(agent_id, delivery_token) or attempt
 
     def reconcile_proactive_attempts(
         self,
@@ -2978,6 +3761,38 @@ class VirtualHumanLifeService:
                 self.store.write_jsonl(agent_id, "proactive/deliveries.jsonl", rows)
             self._sync_proactive_trigger_ledger(agent_id, rows)
             return changed_tokens
+
+    def cancel_queued_conversation_mailbox_entries(
+        self,
+        agent_id: str,
+        *,
+        reason: str,
+    ) -> list[str]:
+        """Cancel only unsent plugin commands when an operator disables the binding."""
+
+        with self._lock_for(agent_id):
+            stored = self.store.read_json(agent_id, "conversation/mailbox.json")
+            if stored is None:
+                return []
+            mailbox = normalize_mailbox(stored)
+            cancelled_ids: list[str] = []
+            for entry in list(mailbox["entries"]):
+                if str(entry.get("state") or "") != "queued":
+                    continue
+                mailbox, cancelled = cancel_mailbox_entry(
+                    mailbox,
+                    entry_id=str(entry.get("entryId") or ""),
+                    reason=reason,
+                    now=self._now(),
+                )
+                cancelled_ids.append(str(cancelled.get("entryId") or ""))
+            if cancelled_ids:
+                self.store.write_json(
+                    agent_id,
+                    "conversation/mailbox.json",
+                    mailbox,
+                )
+            return cancelled_ids
 
     def cancel_proactive_attempt(
         self,
