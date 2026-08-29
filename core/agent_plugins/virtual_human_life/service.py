@@ -14,20 +14,26 @@ import shutil
 import tempfile
 import threading
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .manifest import (
-    PLUGIN_ID,
-    PROMPT_PACK_ID,
-    PROMPT_PACK_FILES,
-    STORAGE_SCHEMA_VERSION,
-    TOOL_BUNDLE_ID,
-    VIRTUAL_HUMAN_TOOL_NAMES,
+from .affect import (
+    BASELINE_MOOD,
+    episode_from_life_event,
+    episode_from_relationship_event,
+    project_affect,
+)
+from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
+from .conversation_continuity import (
+    build_proactive_candidate,
+    evaluate_proactive_candidate,
+    project_open_loops,
+    resolve_open_loop,
+    upsert_open_loop,
 )
 from .domain import (
     apply_completed_event_to_state,
@@ -35,12 +41,38 @@ from .domain import (
     compute_event_salience,
     evolve_state_for_time,
 )
+from .drives import (
+    apply_completed_event_to_drives,
+    default_drive_projection,
+    link_schedule_to_drives,
+    prompt_drive_summary,
+)
+from .environment import (
+    append_environment_fact,
+    complete_location_movement,
+    project_environment,
+    start_location_movement,
+)
+from .manifest import (
+    PLUGIN_ID,
+    PROMPT_PACK_FILES,
+    PROMPT_PACK_ID,
+    STORAGE_SCHEMA_VERSION,
+    TOOL_BUNDLE_ID,
+    VIRTUAL_HUMAN_TOOL_NAMES,
+)
 from .planning import (
     PLANNER_ACTIVITY_KINDS,
     build_deterministic_schedule,
     validate_schedule_proposal,
 )
 from .prompt_pack import load_prompt_pack
+from .relationship_events import make_relationship_event, project_relationships
+from .reflection import (
+    build_nightly_reflection_proposals,
+    project_memory_strength,
+    validate_reflection_proposal,
+)
 from .storage import VirtualHumanLifeStorageError, VirtualHumanLifeStore
 
 logger = logging.getLogger(__name__)
@@ -280,6 +312,7 @@ class VirtualHumanLifeService:
                 "todaySchedule": None,
                 "tomorrowSchedule": None,
                 "proactiveUsage": {"delivered": 0, "limit": 0, "remaining": 0},
+                "causal": None,
                 "health": self._health_projection(agent_id, binding=None),
             }
         local_now = self._local_now(binding)
@@ -289,6 +322,7 @@ class VirtualHumanLifeService:
         today_schedule = self.store.read_json(agent_id, f"schedules/{today}.json")
         tomorrow_schedule = self.store.read_json(agent_id, f"schedules/{tomorrow}.json")
         usage = self.proactive_usage(agent_id, today)
+        causal = self._causal_projection(agent_id, now=local_now)
         return {
             "pluginId": PLUGIN_ID,
             "agentId": str(agent_id or "").strip(),
@@ -299,6 +333,7 @@ class VirtualHumanLifeService:
             "todaySchedule": today_schedule,
             "tomorrowSchedule": tomorrow_schedule,
             "proactiveUsage": usage,
+            "causal": causal,
             "storageSchemaVersion": STORAGE_SCHEMA_VERSION,
             "toolBundleId": TOOL_BUNDLE_ID,
             "promptPackId": PROMPT_PACK_ID,
@@ -333,6 +368,11 @@ class VirtualHumanLifeService:
         normalized["localDate"] = local_date
         normalized["scheduleVersion"] = max(1, int(normalized.get("scheduleVersion") or 1))
         normalized["updatedAt"] = _iso(self._now())
+        normalized = link_schedule_to_drives(
+            normalized,
+            self.store.read_json(agent_id, "drives/state.json")
+            or default_drive_projection(now=self._now()),
+        )
         self.store.write_json(agent_id, f"schedules/{local_date}.json", normalized)
         return deepcopy(normalized)
 
@@ -364,6 +404,10 @@ class VirtualHumanLifeService:
             if isinstance(snapshot.get("tomorrowSchedule"), dict)
             else {}
         )
+        causal = snapshot.get("causal") if isinstance(snapshot.get("causal"), dict) else {}
+        open_loop_projection = (
+            causal.get("openLoops") if isinstance(causal.get("openLoops"), dict) else {}
+        )
         trigger = self._attempt_for_turn(agent_id, run_id)
         rules = load_prompt_pack()
         remaining = [
@@ -383,6 +427,11 @@ class VirtualHumanLifeService:
             }
             for item in list(tomorrow_schedule.get("activities") or [])[:5]
         ]
+        location_source = (
+            state.get("locationSource")
+            if isinstance(state.get("locationSource"), dict)
+            else {}
+        )
         dynamic_payload = {
             "mood": state.get("mood") or {},
             "energy": state.get("energy"),
@@ -390,6 +439,61 @@ class VirtualHumanLifeService:
             "todayRemaining": remaining,
             "tomorrowSummary": tomorrow,
             "relationshipSummary": state.get("relationshipSummary") or "",
+            "lifeDrives": prompt_drive_summary(
+                causal.get("drives") if isinstance(causal.get("drives"), dict) else {}
+            ),
+            "affect": {
+                "expressionTier": str(
+                    (causal.get("affect") or {}).get("expressionTier") or "natural"
+                ),
+                "activeEpisodeIds": list(
+                    (causal.get("affect") or {}).get("activeEpisodeIds") or []
+                )[:8],
+            },
+            "location": {
+                "current": str(state.get("currentLocation") or "home")[:160],
+                "status": str(state.get("locationStatus") or "stationary")[:40],
+                "movingTo": str(state.get("movingTo") or "")[:160],
+                "source": {
+                    "sourceKind": str(location_source.get("sourceKind") or "")[:40],
+                    "arrivedAt": str(location_source.get("arrivedAt") or ""),
+                },
+            },
+            "environmentFacts": [
+                {
+                    "factKey": str(item.get("factKey") or "")[:160],
+                    "value": deepcopy(item.get("value")),
+                    "sourceKind": str(item.get("sourceKind") or "")[:40],
+                    "observedAt": str(item.get("observedAt") or ""),
+                }
+                for item in list(
+                    ((causal.get("environment") or {}).get("currentFacts") or [])
+                )[:8]
+                if isinstance(item, dict)
+            ],
+            "recentReflections": [
+                {
+                    "targetKind": str(item.get("targetKind") or "")[:60],
+                    "text": str(item.get("text") or "")[:240],
+                    "sourceEventIds": list(item.get("sourceEventIds") or [])[:8],
+                }
+                for item in list(
+                    ((causal.get("reflections") or {}).get("recent") or [])
+                )[-4:]
+                if isinstance(item, dict)
+                and str(item.get("status") or "") == "accepted"
+                and str(item.get("sourceKind") or "") != "dream"
+            ],
+            "openLoops": [
+                {
+                    "topicKey": str(item.get("topicKey") or ""),
+                    "kind": str(item.get("kind") or "topic"),
+                    "summary": str(item.get("summary") or "")[:160],
+                    "expiresAt": str(item.get("expiresAt") or ""),
+                }
+                for item in list(open_loop_projection.get("open") or [])[:6]
+                if isinstance(item, dict)
+            ],
             "proactiveTrigger": (
                 {
                     "triggerId": trigger.get("triggerId"),
@@ -507,9 +611,23 @@ class VirtualHumanLifeService:
                     ),
                     "heartbeatAt": _iso(current),
                 }
-            evolved_state = evolve_state_for_time(state, now=local_now)
+            affect_baseline = self._affect_baseline(agent_id, state=state)
+            evolved_state = evolve_state_for_time(
+                state,
+                now=local_now,
+                baseline_valence=_clamp(
+                    affect_baseline.get("valence"), -100, 100, 12
+                ),
+            )
             state.clear()
             state.update(evolved_state)
+            affect_projection = project_affect(
+                self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
+                now=current,
+                baseline_mood=affect_baseline,
+            )
+            self.store.write_json(agent_id, "affect/state.json", affect_projection)
+            state["mood"] = deepcopy(affect_projection["mood"])
             completed_events: list[dict[str, Any]] = []
             tool_activities_to_dispatch: list[tuple[str, dict[str, Any]]] = []
             current_activity_id = ""
@@ -636,17 +754,46 @@ class VirtualHumanLifeService:
                     continue
                 diary_created += int(review.get("createdDiaryCount") or 0)
                 memory_promoted += int(review.get("promotedMemoryCount") or 0)
-            if completed_events and not coalesced and self.proactive_submitter is not None:
-                latest = completed_events[-1]
+            accepted_reflections = 0
+            reinforced_memories = 0
+            reflection_dates = {
+                review_date
+                for review_date in review_dates
+                if review_date < local_date
+                or local_now.time().replace(tzinfo=None) >= planning_time
+            }
+            for reflection_date in sorted(reflection_dates):
                 try:
-                    self.request_proactive_message(
+                    reflection_review = self._review_reflections_locked(
                         agent_id,
-                        reason=f"刚刚{latest['outcome']['summary']}想自然地分享一下。",
-                        source_event_id=str(latest.get("eventId") or ""),
-                        valid_for_minutes=45,
+                        local_date=reflection_date,
                     )
-                except VirtualHumanLifeError:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - reflection never rolls back life facts
+                    logger.warning(
+                        "Virtual human nightly reflection failed for agent=%s date=%s (%s).",
+                        str(agent_id).strip(),
+                        reflection_date,
+                        type(exc).__name__,
+                    )
+                    continue
+                accepted_reflections += int(
+                    reflection_review.get("acceptedProposalCount") or 0
+                )
+                reinforced_memories += int(
+                    reflection_review.get("reinforcedMemoryCount") or 0
+                )
+            candidate_result = {
+                "evaluatedCandidateCount": 0,
+                "selectedCandidateId": "",
+            }
+            if not coalesced:
+                candidate_result = self._evaluate_proactive_candidates(
+                    agent_id,
+                    now=current,
+                    binding=binding,
+                    state=state,
+                    dispatch=self.proactive_submitter is not None,
+                )
             return {
                 "agentId": str(agent_id).strip(),
                 "bindingRevision": int(binding.get("bindingRevision") or 0),
@@ -661,7 +808,10 @@ class VirtualHumanLifeService:
                 ),
                 "createdDiaryCount": diary_created,
                 "promotedMemoryCount": memory_promoted,
+                "acceptedReflectionCount": accepted_reflections,
+                "reinforcedMemoryCount": reinforced_memories,
                 "dispatchedToolActivityCount": dispatched_tool_activity_count,
+                **candidate_result,
                 "heartbeatAt": _iso(current),
             }
 
@@ -710,6 +860,397 @@ class VirtualHumanLifeService:
         rows.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
         return deepcopy(rows)
 
+    def list_open_loops(self, agent_id: str) -> dict[str, Any]:
+        self.require_agent(agent_id)
+        return project_open_loops(
+            self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"),
+            now=self._now(),
+        )
+
+    def list_proactive_candidates(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        self.require_agent(agent_id)
+        bounded = max(1, min(100, int(limit or 20)))
+        return deepcopy(
+            self.store.read_jsonl(agent_id, "proactive/candidates.jsonl")[-bounded:]
+        )
+
+    def list_reflection_proposals(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        self.require_agent(agent_id)
+        bounded = max(1, min(500, int(limit or 100)))
+        return deepcopy(
+            self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")[-bounded:]
+        )
+
+    def list_environment_facts(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 128,
+    ) -> dict[str, Any]:
+        self.require_agent(agent_id)
+        bounded = max(1, min(512, int(limit or 128)))
+        projection = project_environment(
+            self.store.read_jsonl(agent_id, "environment/facts.jsonl")
+        )
+        projection["history"] = list(projection.get("history") or [])[-bounded:]
+        return deepcopy(projection)
+
+    def list_location_movements(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 64,
+    ) -> list[dict[str, Any]]:
+        self.require_agent(agent_id)
+        bounded = max(1, min(256, int(limit or 64)))
+        return deepcopy(
+            self.store.read_jsonl(agent_id, "environment/location_movements.jsonl")[-bounded:]
+        )
+
+    def _all_lived_event_ids(self, agent_id: str) -> set[str]:
+        events_root = self.plugin_root(agent_id) / "events"
+        event_ids: set[str] = set()
+        if not events_root.is_dir():
+            return event_ids
+        for path in sorted(events_root.glob("*.jsonl")):
+            for item in self.store.read_jsonl(agent_id, f"events/{path.name}"):
+                outcome = (
+                    item.get("outcome")
+                    if isinstance(item.get("outcome"), Mapping)
+                    else {}
+                )
+                if (
+                    str(item.get("kind") or "") != "activity_completed"
+                    or str(outcome.get("status") or "") != "succeeded"
+                ):
+                    continue
+                event_id = str(item.get("eventId") or "").strip()
+                if event_id:
+                    event_ids.add(event_id)
+        return event_ids
+
+    def record_reflection_proposal(
+        self,
+        agent_id: str,
+        *,
+        proposal_id: str,
+        source_kind: str,
+        target_kind: str,
+        text: str,
+        source_event_ids: list[str] | None = None,
+        source_fact_ids: list[str] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            self._require_enabled_binding(agent_id)
+            current = (now or self._now()).astimezone(timezone.utc)
+            rows = self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+            normalized_id = str(proposal_id or "").strip()[:200]
+            existing = next(
+                (
+                    item
+                    for item in rows
+                    if str(item.get("proposalId") or "") == normalized_id
+                ),
+                None,
+            )
+            if existing is not None:
+                return deepcopy(existing)
+            fact_ids = {
+                str(item.get("factId") or "").strip()
+                for item in self.store.read_jsonl(agent_id, "environment/facts.jsonl")
+                if str(item.get("factId") or "").strip()
+            }
+            proposal = validate_reflection_proposal(
+                {
+                    "proposalId": normalized_id,
+                    "sourceKind": source_kind,
+                    "targetKind": target_kind,
+                    "text": text,
+                    "sourceEventIds": list(source_event_ids or []),
+                    "sourceFactIds": list(source_fact_ids or []),
+                    "createdAt": _iso(current),
+                },
+                valid_event_ids=self._all_lived_event_ids(agent_id),
+                valid_fact_ids=fact_ids,
+                now=current,
+            )
+            rows.append(proposal)
+            self.store.write_jsonl(agent_id, "reflections/proposals.jsonl", rows[-512:])
+            return deepcopy(proposal)
+
+    def review_reflections(self, agent_id: str, *, local_date: str) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            return self._review_reflections_locked(agent_id, local_date=local_date)
+
+    def _review_reflections_locked(
+        self,
+        agent_id: str,
+        *,
+        local_date: str,
+    ) -> dict[str, Any]:
+        self._require_enabled_binding(agent_id)
+        normalized_date = _local_date_text(local_date)
+        current = self._now()
+        events = self.list_events(agent_id, date=normalized_date, limit=500)
+        promotion_receipts = self.store.read_jsonl(
+            agent_id, "memory/promotion_receipts.jsonl"
+        )
+        promoted_source_ids = {
+            str(source_id).strip()
+            for receipt in promotion_receipts
+            for source_id in list(receipt.get("sourceEventIds") or [])
+            if str(source_id).strip()
+        }
+        rows = self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+        existing_ids = {
+            str(item.get("proposalId") or "").strip()
+            for item in rows
+            if str(item.get("proposalId") or "").strip()
+        }
+        proposals = build_nightly_reflection_proposals(
+            events,
+            promoted_source_ids=promoted_source_ids,
+            existing_proposal_ids=existing_ids,
+            local_date=normalized_date,
+            now=current,
+        )
+        valid_event_ids = {str(item.get("eventId") or "").strip() for item in events}
+        valid_fact_ids = {
+            str(item.get("factId") or "").strip()
+            for item in self.store.read_jsonl(agent_id, "environment/facts.jsonl")
+            if str(item.get("factId") or "").strip()
+        }
+        accepted: list[dict[str, Any]] = []
+        reinforcements = self.store.read_jsonl(
+            agent_id, "memory/reinforcement_receipts.jsonl"
+        )
+        reinforced_ids = {
+            str(item.get("proposalId") or "").strip()
+            for item in reinforcements
+            if str(item.get("proposalId") or "").strip()
+        }
+        event_by_id = {
+            str(item.get("eventId") or "").strip(): item for item in events
+        }
+        created_reinforcements: list[dict[str, Any]] = []
+        for raw in proposals:
+            proposal = validate_reflection_proposal(
+                raw,
+                valid_event_ids=valid_event_ids,
+                valid_fact_ids=valid_fact_ids,
+                now=current,
+            )
+            rows.append(proposal)
+            if str(proposal.get("status") or "") != "accepted":
+                continue
+            accepted.append(proposal)
+            proposal_id = str(proposal.get("proposalId") or "")
+            if (
+                str(proposal.get("targetKind") or "") != "memory_reinforcement"
+                or proposal_id in reinforced_ids
+            ):
+                continue
+            source_ids = [
+                str(item).strip()
+                for item in list(proposal.get("sourceEventIds") or [])
+                if str(item).strip()
+            ]
+            salience = max(
+                (
+                    compute_event_salience(event_by_id[source_id])
+                    for source_id in source_ids
+                    if source_id in event_by_id
+                ),
+                default=0,
+            )
+            receipt = {
+                "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                "reinforcementId": f"reinforcement:{proposal_id}",
+                "proposalId": proposal_id,
+                "sourceEventIds": source_ids,
+                "reinforcementAmount": max(4, min(12, salience // 10)),
+                "reinforcedAt": _iso(current),
+            }
+            reinforcements.append(receipt)
+            reinforced_ids.add(proposal_id)
+            created_reinforcements.append(receipt)
+        if proposals:
+            self.store.write_jsonl(agent_id, "reflections/proposals.jsonl", rows[-512:])
+        if created_reinforcements:
+            self.store.write_jsonl(
+                agent_id,
+                "memory/reinforcement_receipts.jsonl",
+                reinforcements[-512:],
+            )
+        return {
+            "localDate": normalized_date,
+            "acceptedProposalCount": len(accepted),
+            "reinforcedMemoryCount": len(created_reinforcements),
+            "reflectionProposals": deepcopy(accepted),
+            "reinforcementReceipts": deepcopy(created_reinforcements),
+        }
+
+    def record_environment_fact(
+        self,
+        agent_id: str,
+        *,
+        fact_id: str,
+        fact_key: str,
+        value: Any,
+        source_kind: str,
+        source_ref: str,
+        confidence: int = 80,
+        observed_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            self._require_enabled_binding(agent_id)
+            current = (observed_at or self._now()).astimezone(timezone.utc)
+            rows = self.store.read_jsonl(agent_id, "environment/facts.jsonl")
+            try:
+                rows, fact = append_environment_fact(
+                    rows,
+                    fact_id=fact_id,
+                    fact_key=fact_key,
+                    value=value,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    confidence=confidence,
+                    observed_at=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_jsonl(agent_id, "environment/facts.jsonl", rows)
+            return deepcopy(fact)
+
+    def start_location_move(
+        self,
+        agent_id: str,
+        *,
+        movement_id: str,
+        destination: str,
+        source_kind: str,
+        source_ref: str,
+        travel_minutes: int,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            binding = self._require_enabled_binding(agent_id)
+            current = (now or self._now()).astimezone(timezone.utc)
+            state = self.store.read_json(agent_id, "state.json") or self._default_state(
+                agent_id, binding
+            )
+            rows = self.store.read_jsonl(
+                agent_id, "environment/location_movements.jsonl"
+            )
+            try:
+                next_state, rows, movement = start_location_movement(
+                    state,
+                    rows,
+                    movement_id=movement_id,
+                    destination=destination,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    travel_minutes=travel_minutes,
+                    now=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            if next_state != state:
+                next_state["stateVersion"] = max(1, int(state.get("stateVersion") or 1)) + 1
+                next_state["updatedAt"] = _iso(current)
+                self.store.write_json(agent_id, "state.json", next_state)
+                self.store.write_jsonl(
+                    agent_id, "environment/location_movements.jsonl", rows
+                )
+            return deepcopy(movement)
+
+    def complete_location_move(
+        self,
+        agent_id: str,
+        *,
+        movement_id: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            binding = self._require_enabled_binding(agent_id)
+            current = (now or self._now()).astimezone(timezone.utc)
+            state = self.store.read_json(agent_id, "state.json") or self._default_state(
+                agent_id, binding
+            )
+            rows = self.store.read_jsonl(
+                agent_id, "environment/location_movements.jsonl"
+            )
+            try:
+                next_state, rows, movement = complete_location_movement(
+                    state,
+                    rows,
+                    movement_id=movement_id,
+                    now=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            if next_state != state:
+                next_state["stateVersion"] = max(1, int(state.get("stateVersion") or 1)) + 1
+                next_state["updatedAt"] = _iso(current)
+                self.store.write_json(agent_id, "state.json", next_state)
+                self.store.write_jsonl(
+                    agent_id, "environment/location_movements.jsonl", rows
+                )
+            return deepcopy(movement)
+
+    def _causal_projection(
+        self,
+        agent_id: str,
+        *,
+        now: datetime,
+    ) -> dict[str, Any]:
+        drives = self.store.read_json(agent_id, "drives/state.json") or default_drive_projection(
+            now=now
+        )
+        affect = project_affect(
+            self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
+            now=now,
+            baseline_mood=self._affect_baseline(agent_id),
+        )
+        open_loops = project_open_loops(
+            self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"),
+            now=now,
+        )
+        reflections = self.list_reflection_proposals(agent_id, limit=24)
+        environment = self.list_environment_facts(agent_id, limit=64)
+        movements = self.list_location_movements(agent_id, limit=24)
+        return {
+            "schemaVersion": CAUSAL_SCHEMA_VERSION,
+            "drives": drives,
+            "affect": affect,
+            "relationships": self.list_relationships(agent_id),
+            "openLoops": open_loops,
+            "proactiveCandidates": self.list_proactive_candidates(agent_id),
+            "reflections": {
+                "recent": reflections,
+                "acceptedCount": sum(
+                    1 for item in reflections if str(item.get("status") or "") == "accepted"
+                ),
+                "rejectedCount": sum(
+                    1 for item in reflections if str(item.get("status") or "") == "rejected"
+                ),
+            },
+            "environment": environment,
+            "locationMovements": movements,
+            "reuseReceipt": authorized_reuse_receipt(),
+        }
+
     def list_memory_promotion_receipts(
         self,
         agent_id: str,
@@ -740,6 +1281,17 @@ class VirtualHumanLifeService:
         bounded = max(1, min(500, int(limit or 100)))
         receipts = self.store.read_jsonl(agent_id, "memory/promotion_receipts.jsonl")
         episodes = self._list_current_episodic_events(agent_id)
+        reinforcements = self.store.read_jsonl(
+            agent_id, "memory/reinforcement_receipts.jsonl"
+        )
+        affect_episodes = self.store.read_jsonl(agent_id, "affect/episodes.jsonl")
+        open_loops = list(
+            project_open_loops(
+                self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"),
+                now=self._now(),
+            ).get("open")
+            or []
+        )
         episodes_by_id = {
             str(item.get("episodeId") or item.get("eventId") or "").strip(): item
             for item in episodes
@@ -768,6 +1320,13 @@ class VirtualHumanLifeService:
                 for item in list(receipt.get("sourceEventIds") or [])
                 if str(item).strip()
             ]
+            strength = project_memory_strength(
+                receipt,
+                reinforcements=reinforcements,
+                affect_episodes=affect_episodes,
+                open_loops=open_loops,
+                now=self._now(),
+            )
             projected.append(
                 {
                     "agentId": str(agent_id).strip(),
@@ -786,6 +1345,7 @@ class VirtualHumanLifeService:
                         or receipt.get("createdAt")
                         or ""
                     ).strip(),
+                    **strength,
                 }
             )
             if len(projected) >= bounded:
@@ -1154,6 +1714,14 @@ class VirtualHumanLifeService:
             state["legacyPetImportedAt"] = _iso(self._now())
             state["updatedAt"] = _iso(self._now())
             self.store.write_json(agent_id, "state.json", state)
+            affect_projection = project_affect(
+                self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
+                now=self._now(),
+                baseline_mood=mood,
+            )
+            self.store.write_json(agent_id, "affect/state.json", affect_projection)
+            state["mood"] = deepcopy(affect_projection["mood"])
+            self.store.write_json(agent_id, "state.json", state)
             relationships = self.list_relationships(agent_id)
             relationship_by_target = {
                 str(item.get("targetId") or ""): item for item in relationships
@@ -1189,6 +1757,16 @@ class VirtualHumanLifeService:
                 agent_id,
                 "relationships.json",
                 {"relationships": list(relationship_by_target.values()), "updatedAt": _iso(self._now())},
+            )
+            self.store.write_json(
+                agent_id,
+                "relationships/base.json",
+                {
+                    "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                    "relationships": list(relationship_by_target.values()),
+                    "createdAt": _iso(self._now()),
+                    "source": "legacy_pet_import",
+                },
             )
             diary = payload.get("diary") if isinstance(payload.get("diary"), dict) else {}
             imported_diary = 0
@@ -1228,6 +1806,93 @@ class VirtualHumanLifeService:
             }
             self.store.write_json(agent_id, receipt_path, receipt)
             return deepcopy(receipt)
+
+    def _evaluate_proactive_candidates(
+        self,
+        agent_id: str,
+        *,
+        now: datetime,
+        binding: dict[str, Any],
+        state: dict[str, Any],
+        dispatch: bool,
+    ) -> dict[str, Any]:
+        rows = self.store.read_jsonl(agent_id, "proactive/candidates.jsonl")
+        recent_cutoff = now.astimezone(timezone.utc) - timedelta(hours=24)
+        recent_topic_keys = {
+            str(item.get("topicKey") or "")
+            for item in rows
+            if str(item.get("status") or "") in {"selected", "delivered"}
+            and (_parse_datetime(item.get("selectedAt")) or now) >= recent_cutoff
+            and str(item.get("topicKey") or "")
+        }
+        unanswered_count = sum(
+            1
+            for item in rows
+            if str(item.get("status") or "") in {"selected", "delivered"}
+            and not str(item.get("userRepliedAt") or "")
+            and (_parse_datetime(item.get("selectedAt")) or now) >= now - timedelta(days=3)
+        )
+        evaluated = 0
+        eligible_indices: list[int] = []
+        local_now = now.astimezone(self._zone(binding))
+        for index, item in enumerate(rows):
+            if str(item.get("status") or "") not in {
+                "pending",
+                "eligible",
+                "suppressed",
+            }:
+                continue
+            evaluated += 1
+            decision = evaluate_proactive_candidate(
+                item,
+                now=now,
+                quiet_hours=self._inside_quiet_hours(
+                    local_now, binding.get("quietHours")
+                ),
+                sleep_state=str(state.get("sleepState") or ""),
+                busy=bool(str(state.get("currentActivityId") or "")),
+                recent_topic_keys=recent_topic_keys,
+                unanswered_count=unanswered_count,
+            )
+            rows[index] = decision
+            if str(decision.get("decision") or "") == "eligible":
+                eligible_indices.append(index)
+        selected_candidate_id = ""
+        if eligible_indices:
+            selected_index = max(
+                eligible_indices,
+                key=lambda index: int(rows[index].get("score") or 0),
+            )
+            selected = rows[selected_index]
+            selected_candidate_id = str(selected.get("candidateId") or "")
+            if dispatch:
+                try:
+                    attempt = self.request_proactive_message(
+                        agent_id,
+                        reason=str(selected.get("reason") or "")[:600],
+                        source_event_id=str(selected.get("sourceEventId") or "")[:200],
+                        valid_for_minutes=45,
+                        idempotency_key=f"candidate:{selected_candidate_id}",
+                    )
+                except VirtualHumanLifeError as exc:
+                    selected["status"] = "suppressed"
+                    selected["decision"] = "suppress"
+                    selected["suppressionReason"] = type(exc).__name__
+                    selected["suppressionDetail"] = str(exc)[:200]
+                    selected["evaluatedAt"] = _iso(now)
+                else:
+                    selected["status"] = "selected"
+                    selected["decision"] = "selected"
+                    selected["selectedAt"] = _iso(now)
+                    selected["deliveryToken"] = str(
+                        attempt.get("deliveryToken") or ""
+                    )
+                    selected["triggerId"] = str(attempt.get("triggerId") or "")
+        self.store.write_jsonl(agent_id, "proactive/candidates.jsonl", rows[-512:])
+        return {
+            "evaluatedCandidateCount": evaluated,
+            "selectedCandidateId": selected_candidate_id,
+        }
 
     def request_proactive_message(
         self,
@@ -1613,13 +2278,32 @@ class VirtualHumanLifeService:
                 raise VirtualHumanLifeError(
                     "Delivery receipt is stale and has no authoritative persisted event."
                 )
-            return self._update_attempt(
+            delivered = self._update_attempt(
                 agent_id,
                 delivery_token,
                 status="delivered",
                 deliveredAt=_iso(self._now()),
                 receiptEventId=normalized_receipt_event_id,
             )
+            candidates = self.store.read_jsonl(
+                agent_id, "proactive/candidates.jsonl"
+            )
+            changed = False
+            for candidate in candidates:
+                if str(candidate.get("deliveryToken") or "") != str(
+                    delivery_token or ""
+                ):
+                    continue
+                candidate["status"] = "delivered"
+                candidate["decision"] = "delivered"
+                candidate["deliveredAt"] = str(delivered.get("deliveredAt") or "")
+                candidate["receiptEventId"] = normalized_receipt_event_id
+                changed = True
+            if changed:
+                self.store.write_jsonl(
+                    agent_id, "proactive/candidates.jsonl", candidates
+                )
+            return delivered
 
     def proactive_turn_is_current(
         self,
@@ -1818,71 +2502,254 @@ class VirtualHumanLifeService:
             return {"schedule": deepcopy(existing), "created": created}
         if command == "triggerDiaryReview":
             return self.review_diary(agent_id, local_date=local_date)
+        if command == "recordEnvironmentFact":
+            current = self._now()
+            fact_id = str(arguments.get("factId") or f"environment:{command_id}").strip()[:200]
+            rows = self.store.read_jsonl(agent_id, "environment/facts.jsonl")
+            try:
+                rows, fact = append_environment_fact(
+                    rows,
+                    fact_id=fact_id,
+                    fact_key=str(arguments.get("factKey") or "")[:160],
+                    value=deepcopy(arguments.get("value")),
+                    source_kind=str(arguments.get("sourceKind") or "tool")[:40],
+                    source_ref=str(arguments.get("sourceRef") or "")[:300],
+                    confidence=_clamp(arguments.get("confidence"), 0, 100, 80),
+                    observed_at=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_jsonl(agent_id, "environment/facts.jsonl", rows)
+            return {"environmentFact": deepcopy(fact)}
+        if command == "startLocationMove":
+            current = self._now()
+            rows = self.store.read_jsonl(
+                agent_id, "environment/location_movements.jsonl"
+            )
+            try:
+                next_state, rows, movement = start_location_movement(
+                    state,
+                    rows,
+                    movement_id=str(
+                        arguments.get("movementId") or f"movement:{command_id}"
+                    )[:200],
+                    destination=str(arguments.get("destination") or "")[:160],
+                    source_kind=str(
+                        arguments.get("sourceKind") or "schedule_outcome"
+                    )[:40],
+                    source_ref=str(arguments.get("sourceRef") or "")[:300],
+                    travel_minutes=_clamp(
+                        arguments.get("travelMinutes"), 1, 1_440, 15
+                    ),
+                    now=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            state.clear()
+            state.update(next_state)
+            self.store.write_jsonl(
+                agent_id, "environment/location_movements.jsonl", rows
+            )
+            return {"locationMovement": deepcopy(movement)}
+        if command == "completeLocationMove":
+            current = self._now()
+            rows = self.store.read_jsonl(
+                agent_id, "environment/location_movements.jsonl"
+            )
+            try:
+                next_state, rows, movement = complete_location_movement(
+                    state,
+                    rows,
+                    movement_id=str(arguments.get("movementId") or "")[:200],
+                    now=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            state.clear()
+            state.update(next_state)
+            self.store.write_jsonl(
+                agent_id, "environment/location_movements.jsonl", rows
+            )
+            return {"locationMovement": deepcopy(movement)}
         if command == "recordRelationshipInteraction":
             target_id = str(arguments.get("targetId") or "").strip()
             if not target_id or len(target_id) > 160:
                 raise VirtualHumanLifeError("Relationship targetId is required.")
-            rows = self.list_relationships(agent_id)
-            relationship = next(
-                (item for item in rows if str(item.get("targetId") or "") == target_id),
-                {
-                    "targetId": target_id,
-                    "kind": str(arguments.get("targetKind") or "person")[:80],
-                    "intimacy": 50,
-                    "trust": 50,
-                    "interactionCount": 0,
-                },
+            current = self._now()
+            interaction_id = (
+                f"relationship:{command_id}"
+                if command_id
+                else f"relationship:{target_id}:{current.isoformat()}"
             )
-            relationship["intimacy"] = _clamp(
-                int(relationship.get("intimacy") or 50)
-                + _clamp(arguments.get("intimacyDelta"), -20, 20, 0),
-                0,
-                100,
-                50,
+            relationship_event = make_relationship_event(
+                event_id=interaction_id,
+                target_id=target_id,
+                kind=str(arguments.get("kind") or "interaction")[:120],
+                intimacy_delta=_clamp(arguments.get("intimacyDelta"), -20, 20, 0),
+                trust_delta=_clamp(arguments.get("trustDelta"), -20, 20, 0),
+                occurred_at=current,
+                source_turn_id=str(arguments.get("sourceTurnId") or "")[:200],
             )
-            relationship["trust"] = _clamp(
-                int(relationship.get("trust") or 50)
-                + _clamp(arguments.get("trustDelta"), -20, 20, 0),
-                0,
-                100,
-                50,
-            )
-            relationship["interactionCount"] = int(
-                relationship.get("interactionCount") or 0
-            ) + 1
-            relationship["lastInteractionKind"] = str(
-                arguments.get("kind") or "interaction"
-            )[:120]
-            relationship["lastInteractionNote"] = str(arguments.get("note") or "")[:600]
-            relationship["lastInteractionAt"] = _iso(self._now())
-            relationship["updatedAt"] = _iso(self._now())
-            by_target = {str(item.get("targetId") or ""): item for item in rows}
-            by_target[target_id] = relationship
+            events = self.store.read_jsonl(agent_id, "relationships/events.jsonl")
+            if not any(
+                str(item.get("eventId") or "") == interaction_id for item in events
+            ):
+                events.append(relationship_event)
+                self.store.write_jsonl(
+                    agent_id,
+                    "relationships/events.jsonl",
+                    events[-1024:],
+                )
+            base_payload = self.store.read_json(agent_id, "relationships/base.json") or {}
+            base_rows = [
+                item
+                for item in list(base_payload.get("relationships") or [])
+                if isinstance(item, dict)
+            ]
+            relationships = project_relationships(base_rows, events, now=current)
             self.store.write_json(
                 agent_id,
                 "relationships.json",
-                {"relationships": list(by_target.values()), "updatedAt": _iso(self._now())},
+                {"relationships": relationships, "updatedAt": _iso(current)},
+            )
+            relationship = next(
+                item
+                for item in relationships
+                if str(item.get("targetId") or "") == target_id
             )
             evolved_state = apply_relationship_interaction_to_state(
                 state,
-                interaction_id=(
-                    f"relationship:{command_id}"
-                    if command_id
-                    else f"relationship:{target_id}:{self._now().isoformat()}"
-                ),
-                intimacy_delta=_clamp(arguments.get("intimacyDelta"), -20, 20, 0),
-                trust_delta=_clamp(arguments.get("trustDelta"), -20, 20, 0),
-                kind=str(arguments.get("kind") or "interaction")[:120],
-                now=self._now(),
+                interaction_id=interaction_id,
+                intimacy_delta=int(relationship_event["intimacyDelta"]),
+                trust_delta=int(relationship_event["trustDelta"]),
+                kind=str(relationship_event["kind"]),
+                now=current,
             )
             state.clear()
             state.update(evolved_state)
+            affect = self._record_affect_episode(
+                agent_id,
+                episode_from_relationship_event(relationship_event, now=current),
+                now=current,
+            )
+            state["mood"] = deepcopy(affect["mood"])
             if target_id == "user":
+                stage_text = {
+                    "getting_to_know": "正在逐渐熟悉彼此",
+                    "friend": "已经形成稳定而自然的朋友关系",
+                    "close": "彼此信任并保持亲近",
+                }.get(str(relationship.get("relationshipStage") or ""), "正在相处")
                 state["relationshipSummary"] = (
-                    f"与用户的关系：亲近度 {relationship['intimacy']}/100，"
-                    f"信任度 {relationship['trust']}/100。"
+                    f"与用户{stage_text}；最近一次互动是"
+                    f"{relationship.get('lastInteractionKind') or '日常交流'!s}。"
                 )
-            return {"relationship": deepcopy(relationship)}
+            return {
+                "relationship": deepcopy(relationship),
+                "relationshipEventId": interaction_id,
+            }
+        if command == "recordOpenLoop":
+            topic_key = str(arguments.get("topicKey") or "").strip()[:120]
+            summary = str(arguments.get("summary") or "").strip()[:300]
+            if not topic_key or not summary:
+                raise VirtualHumanLifeError("Open loop topicKey and summary are required.")
+            current = self._now()
+            rows = upsert_open_loop(
+                self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"),
+                loop_id=f"open-loop:{command_id}",
+                topic_key=topic_key,
+                kind=str(arguments.get("kind") or "topic")[:40],
+                summary=summary,
+                source_turn_id=str(arguments.get("sourceTurnId") or "")[:200],
+                source_event_id=str(arguments.get("sourceEventId") or "")[:200],
+                now=current,
+                expires_at=current
+                + timedelta(
+                    minutes=_clamp(
+                        arguments.get("expiresInMinutes"),
+                        5,
+                        43_200,
+                        10_080,
+                    )
+                ),
+            )
+            self.store.write_jsonl(agent_id, "conversation/open_loops.jsonl", rows)
+            open_loop = next(
+                item
+                for item in reversed(rows)
+                if str(item.get("topicKey") or "") == topic_key
+                and str(item.get("status") or "") == "open"
+            )
+            return {"openLoop": deepcopy(open_loop)}
+        if command == "resolveOpenLoop":
+            topic_key = str(arguments.get("topicKey") or "").strip()[:120]
+            if not topic_key:
+                raise VirtualHumanLifeError("Open loop topicKey is required.")
+            rows = resolve_open_loop(
+                self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"),
+                topic_key=topic_key,
+                resolution=str(arguments.get("resolution") or "")[:300],
+                source_turn_id=str(arguments.get("sourceTurnId") or "")[:200],
+                now=self._now(),
+            )
+            self.store.write_jsonl(agent_id, "conversation/open_loops.jsonl", rows)
+            open_loop = next(
+                (
+                    item
+                    for item in reversed(rows)
+                    if str(item.get("topicKey") or "") == topic_key
+                ),
+                None,
+            )
+            if open_loop is None:
+                raise VirtualHumanLifeError("Open loop was not found.")
+            return {"openLoop": deepcopy(open_loop)}
+        if command == "recordConversationReply":
+            source_turn_id = str(arguments.get("sourceTurnId") or "").strip()[:200]
+            if not source_turn_id:
+                raise VirtualHumanLifeError("Conversation reply sourceTurnId is required.")
+            current = self._now()
+            candidates = self.store.read_jsonl(
+                agent_id, "proactive/candidates.jsonl"
+            )
+            acknowledged: list[str] = []
+            for candidate in candidates:
+                if str(candidate.get("status") or "") not in {
+                    "selected",
+                    "delivered",
+                } or str(candidate.get("userRepliedAt") or ""):
+                    continue
+                candidate["userRepliedAt"] = _iso(current)
+                candidate["userReplyTurnId"] = source_turn_id
+                acknowledged.append(str(candidate.get("candidateId") or ""))
+            if acknowledged:
+                self.store.write_jsonl(
+                    agent_id, "proactive/candidates.jsonl", candidates
+                )
+            topic_key = str(arguments.get("topicKey") or "").strip()[:120]
+            resolved_count = 0
+            if topic_key:
+                loops = resolve_open_loop(
+                    self.store.read_jsonl(
+                        agent_id, "conversation/open_loops.jsonl"
+                    ),
+                    topic_key=topic_key,
+                    resolution=str(arguments.get("resolution") or "用户已经回应")[:300],
+                    source_turn_id=source_turn_id,
+                    now=current,
+                )
+                resolved_count = sum(
+                    1
+                    for item in loops
+                    if str(item.get("topicKey") or "") == topic_key
+                    and str(item.get("status") or "") == "resolved"
+                )
+                self.store.write_jsonl(
+                    agent_id, "conversation/open_loops.jsonl", loops
+                )
+            return {
+                "acknowledgedCandidateIds": acknowledged,
+                "resolvedOpenLoopCount": resolved_count,
+            }
         if command == "proposeToolActivity":
             schedule = self.schedule_for(agent_id, local_date)
             title = str(arguments.get("title") or "").strip()[:160]
@@ -2045,6 +2912,10 @@ class VirtualHumanLifeService:
                     activity.get("activityKind") or activity.get("kind") or "simulated"
                 ).strip().lower(),
                 "title": str(activity.get("title") or "计划活动"),
+                "localDate": local_date,
+                "driveRefs": deepcopy(
+                    list(activity.get("driveLinks") or outcome.get("driveRefs") or [])
+                )[:8],
                 "startedAt": str(activity.get("startedAt") or activity.get("startAt") or ""),
                 "occurredAt": _iso(now),
                 "outcome": normalized_outcome,
@@ -2055,7 +2926,7 @@ class VirtualHumanLifeService:
             activity["outcome"] = normalized_outcome
             activity["actualEventId"] = event["eventId"]
             self.store.append_jsonl(agent_id, f"events/{local_date}.jsonl", event)
-            self._apply_completed_event_to_state(state, event, now)
+            self._apply_completed_event_to_state(agent_id, state, event, now)
             result = {"activity": deepcopy(activity), "eventId": event["eventId"]}
         schedule["scheduleVersion"] = int(schedule.get("scheduleVersion") or 1) + 1
         schedule["updatedAt"] = _iso(now)
@@ -2086,8 +2957,32 @@ class VirtualHumanLifeService:
         return source, payload, hashlib.sha256(raw).hexdigest()
 
     def _ensure_initialized(self, agent_id: str, binding: dict[str, Any]) -> None:
-        if self.store.read_json(agent_id, "state.json") is None:
+        existing_state = self.store.read_json(agent_id, "state.json")
+        if existing_state is None:
             self.store.write_json(agent_id, "state.json", self._default_state(agent_id, binding))
+        else:
+            changed = False
+            for key, value in {
+                "locationStatus": "stationary",
+                "activeMovementId": "",
+                "movingTo": "",
+                "locationSource": {
+                    "sourceKind": "initial_state",
+                    "sourceRef": "binding-enable",
+                    "arrivedAt": str(existing_state.get("updatedAt") or ""),
+                },
+            }.items():
+                if key not in existing_state:
+                    existing_state[key] = deepcopy(value)
+                    changed = True
+            if changed:
+                self.store.write_json(agent_id, "state.json", existing_state)
+        if self.store.read_json(agent_id, "drives/state.json") is None:
+            self.store.write_json(
+                agent_id,
+                "drives/state.json",
+                default_drive_projection(now=self._now()),
+            )
         if self.store.read_json(agent_id, "relationships.json") is None:
             now = _iso(self._now())
             self.store.write_json(
@@ -2107,6 +3002,28 @@ class VirtualHumanLifeService:
                     ],
                     "updatedAt": now,
                 },
+            )
+        if self.store.read_json(agent_id, "relationships/base.json") is None:
+            relationships = self.store.read_json(agent_id, "relationships.json") or {}
+            self.store.write_json(
+                agent_id,
+                "relationships/base.json",
+                {
+                    "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                    "relationships": deepcopy(list(relationships.get("relationships") or [])),
+                    "createdAt": _iso(self._now()),
+                },
+            )
+        affect_state = self.store.read_json(agent_id, "affect/state.json")
+        if affect_state is None or not isinstance(affect_state.get("baselineMood"), dict):
+            episodes = self.store.read_jsonl(agent_id, "affect/episodes.jsonl")
+            state = self.store.read_json(agent_id, "state.json") or {}
+            state_mood = state.get("mood") if isinstance(state.get("mood"), dict) else None
+            baseline = state_mood if not episodes else BASELINE_MOOD
+            self.store.write_json(
+                agent_id,
+                "affect/state.json",
+                project_affect(episodes, now=self._now(), baseline_mood=baseline),
             )
         local_today = self._local_now(binding).date()
         for target_date in (local_today, local_today + timedelta(days=1)):
@@ -2192,6 +3109,14 @@ class VirtualHumanLifeService:
             "localDate": local_now.date().isoformat(),
             "timezone": str(binding.get("timezone") or "Asia/Shanghai"),
             "currentLocation": "home",
+            "locationStatus": "stationary",
+            "activeMovementId": "",
+            "movingTo": "",
+            "locationSource": {
+                "sourceKind": "initial_state",
+                "sourceRef": "binding-enable",
+                "arrivedAt": _iso(now),
+            },
             "currentActivityId": "",
             "mood": {
                 "label": "calm",
@@ -2234,13 +3159,13 @@ class VirtualHumanLifeService:
             zone=self._zone(binding),
         )
         if activities:
-            return {
+            return link_schedule_to_drives({
                 **fallback,
                 "activities": activities,
                 "planningMode": "agent_proposed",
                 "plannerStatus": "accepted",
                 "plannerFallbackReason": "",
-            }
+            }, self.store.read_json(agent_id, "drives/state.json") or default_drive_projection(now=self._now()))
         fallback["plannerStatus"] = "fallback"
         fallback["plannerFallbackReason"] = (
             validation_reason or failure_reason or "invalid_proposal"
@@ -2253,12 +3178,16 @@ class VirtualHumanLifeService:
         local_date: date,
         binding: dict[str, Any],
     ) -> dict[str, Any]:
-        return build_deterministic_schedule(
-            agent_id,
-            local_date,
-            timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
-            zone=self._zone(binding),
-            now=self._now(),
+        return link_schedule_to_drives(
+            build_deterministic_schedule(
+                agent_id,
+                local_date,
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                zone=self._zone(binding),
+                now=self._now(),
+            ),
+            self.store.read_json(agent_id, "drives/state.json")
+            or default_drive_projection(now=self._now()),
         )
 
     def _invoke_schedule_planner(
@@ -2282,6 +3211,10 @@ class VirtualHumanLifeService:
                 "allowedActivityKinds": list(PLANNER_ACTIVITY_KINDS),
             },
             "state": self.store.read_json(agent_id, "state.json") or {},
+            "lifeDrives": prompt_drive_summary(
+                self.store.read_json(agent_id, "drives/state.json")
+                or default_drive_projection(now=self._now())
+            ),
             # The requested date is tomorrow, so filtering the diary by that
             # date would always hide the recent experiences that should guide
             # planning.  Keep the input bounded but use the latest entries
@@ -2375,6 +3308,7 @@ class VirtualHumanLifeService:
                 ).strip().lower(),
                 "title": str(activity.get("title") or "计划活动"),
                 "localDate": event_local_date,
+                "driveRefs": deepcopy(list(activity.get("driveLinks") or []))[:8],
                 "occurredAt": _iso(current),
                 "outcome": outcome,
                 "simulatedAfterRestart": bool(coalesced),
@@ -2391,7 +3325,7 @@ class VirtualHumanLifeService:
             )
             completed_events.append(event)
             changed = True
-            self._apply_completed_event_to_state(state, event, current)
+            self._apply_completed_event_to_state(agent_id, state, event, current)
         return {
             "changed": changed,
             "currentActivityId": current_activity_id,
@@ -2481,6 +3415,7 @@ class VirtualHumanLifeService:
 
     def _apply_completed_event_to_state(
         self,
+        agent_id: str,
         state: dict[str, Any],
         event: dict[str, Any],
         now: datetime,
@@ -2489,6 +3424,91 @@ class VirtualHumanLifeService:
         state.clear()
         state.update(evolved_state)
 
+        drives = self.store.read_json(agent_id, "drives/state.json") or default_drive_projection(
+            now=now
+        )
+        drive_result = apply_completed_event_to_drives(drives, event, now=now)
+        self.store.write_json(agent_id, "drives/state.json", drive_result["projection"])
+        if isinstance(drive_result.get("change"), dict):
+            self.store.append_jsonl(
+                agent_id,
+                "drives/events.jsonl",
+                drive_result["change"],
+            )
+
+        episode = episode_from_life_event(event, now=now)
+        affect = self._record_affect_episode(agent_id, episode, now=now)
+        state["mood"] = deepcopy(affect["mood"])
+
+        if not bool(event.get("simulatedAfterRestart")):
+            relationships = self.list_relationships(agent_id)
+            relationship = next(
+                (
+                    item
+                    for item in relationships
+                    if str(item.get("targetId") or "") == "user"
+                ),
+                {},
+            )
+            candidate = build_proactive_candidate(
+                event,
+                drive_projection=drive_result["projection"],
+                affect_projection=affect,
+                relationship=relationship,
+                now=now,
+            )
+            rows = self.store.read_jsonl(agent_id, "proactive/candidates.jsonl")
+            if not any(
+                str(item.get("candidateId") or "")
+                == str(candidate.get("candidateId") or "")
+                for item in rows
+            ):
+                self.store.append_jsonl(
+                    agent_id,
+                    "proactive/candidates.jsonl",
+                    candidate,
+                )
+
+    def _record_affect_episode(
+        self,
+        agent_id: str,
+        episode: dict[str, Any] | None,
+        *,
+        now: datetime,
+    ) -> dict[str, Any]:
+        episodes = self.store.read_jsonl(agent_id, "affect/episodes.jsonl")
+        episode_id = str((episode or {}).get("episodeId") or "")
+        if episode_id and not any(
+            str(item.get("episodeId") or "") == episode_id for item in episodes
+        ):
+            episodes.append(deepcopy(episode or {}))
+            self.store.write_jsonl(agent_id, "affect/episodes.jsonl", episodes[-512:])
+        projection = project_affect(
+            episodes,
+            now=now,
+            baseline_mood=self._affect_baseline(agent_id),
+        )
+        self.store.write_json(agent_id, "affect/state.json", projection)
+        return projection
+
+    def _affect_baseline(
+        self,
+        agent_id: str,
+        *,
+        state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        affect_state = self.store.read_json(agent_id, "affect/state.json") or {}
+        baseline = affect_state.get("baselineMood")
+        if isinstance(baseline, dict):
+            return deepcopy(baseline)
+        source_state = state if isinstance(state, dict) else (
+            self.store.read_json(agent_id, "state.json") or {}
+        )
+        mood = source_state.get("mood")
+        if isinstance(mood, dict):
+            return deepcopy(mood)
+        return deepcopy(BASELINE_MOOD)
+
     def _require_enabled_binding(self, agent_id: str) -> dict[str, Any]:
         binding = self.binding_for(agent_id)
         agent = self._agent(agent_id, include_archived=False)
@@ -2496,6 +3516,7 @@ class VirtualHumanLifeService:
             raise BindingDisabledError("virtual-human-life is not enabled for this Agent.")
         if not agent:
             raise AgentUnavailableError("The bound Agent is not active.")
+        self._ensure_initialized(agent_id, binding)
         return binding
 
     def _agent(self, agent_id: str, *, include_archived: bool) -> dict[str, Any] | None:

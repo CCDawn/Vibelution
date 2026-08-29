@@ -12,8 +12,25 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("memory.salienceScore");
     expect(railSource).toContain("memory.sourceEventIds");
     expect(railSource).toContain("memory.promotedAt");
+    expect(railSource).toContain("memory.memoryStrengthScore");
+    expect(railSource).toContain("memory.scoreBreakdown");
+    expect(railSource).toContain("memory.reinforcedAt");
     expect(railSource).toContain("sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left))");
     expect(railSource).toContain("只展示从真实生活经历晋升的记忆");
+  });
+
+  it("projects causal life continuity without adding another chat or data route", () => {
+    expect(railSource).toContain("snapshot.causal");
+    expect(railSource).toContain("locationStatus");
+    expect(railSource).toContain("environment.currentFacts");
+    expect(railSource).toContain("recentReflections");
+    expect(railSource).toContain('item.sourceKind !== "dream"');
+    expect(railSource).toContain("proactiveCandidates");
+    expect(railSource).toContain("个人目标");
+    expect(railSource).toContain("自我人生线");
+    expect(railSource).toContain("夜间回想");
+    expect(railSource).toContain("想说的话");
+    expect(railSource).not.toContain("fetchVirtualHumanTimeline");
   });
 
   it("keeps legacy backends usable when the memories endpoint is unavailable", () => {

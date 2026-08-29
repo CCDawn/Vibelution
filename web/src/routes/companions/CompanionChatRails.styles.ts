@@ -38,11 +38,22 @@ const memoryMeta = "font-mono text-[0.6rem] text-[var(--accent-cool)]";
 const memoryText = "m-0 line-clamp-3 [font-size:var(--vui-font-xs)] leading-[1.55] text-vui-fg-secondary";
 const memoryMetaRow = "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 [font-size:0.6rem] leading-[1.4] text-vui-fg-tertiary [&>span]:truncate";
 const memoryOverview = "flex min-w-0 items-center justify-between gap-2 [&>strong]:font-mono [&>strong]:text-[0.72rem] [&>strong]:text-vui-fg-primary";
-const relationshipGrid = "grid grid-cols-2 gap-1.5";
-const relationshipItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary";
+const relationshipGrid = "grid gap-1.5";
+const relationshipItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:leading-[1.45] [&>strong]:text-vui-fg-secondary [&>small]:line-clamp-2 [&>small]:text-[0.6rem] [&>small]:leading-[1.4] [&>small]:text-vui-fg-tertiary";
 const moodRow = "flex items-center justify-between gap-2 [&>strong]:text-[0.82rem] [&>span]:font-mono [&>span]:text-[0.62rem] [&>span]:text-vui-fg-tertiary";
 const facts = "grid grid-cols-2 gap-1.5";
 const fact = "grid gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary [&>strong]:font-mono [&>strong]:text-[0.72rem] [&>strong]:text-vui-fg-primary";
+const locationRow = "flex min-w-0 items-center justify-between gap-2 border-t border-vui-border-subtle pt-1.5 [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[0.68rem] [&>strong]:text-vui-fg-secondary";
+const sourceCopy = "line-clamp-2 text-[0.6rem] leading-[1.4] text-vui-fg-tertiary";
+const compactList = "grid gap-1.5";
+const compactItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>strong]:line-clamp-2 [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:leading-[1.45] [&>small]:line-clamp-2 [&>small]:text-[0.6rem] [&>small]:leading-[1.4] [&>small]:text-vui-fg-tertiary";
+const compactItemHeader = "flex min-w-0 items-baseline justify-between gap-2 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:shrink-0 [&>span]:font-mono [&>span]:text-[0.62rem] [&>span]:text-vui-fg-secondary";
+const progressItem = "grid gap-1 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5";
+const progressHeader = "flex min-w-0 items-baseline justify-between gap-2 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:[font-size:0.6rem] [&>span]:text-vui-fg-tertiary [&>strong:last-child]:font-mono [&>strong:last-child]:text-[0.62rem] [&>strong:last-child]:text-vui-fg-secondary";
+const progressTrack = "h-1 overflow-hidden rounded-full bg-vui-surface-overlay";
+const progressFill = "block h-full rounded-full bg-[var(--accent-cool)] transition-[width] duration-300";
+const timelineList = "grid gap-0.5";
+const timelineItem = "grid min-w-0 grid-cols-[8px_minmax(0,1fr)] gap-2 [&>span]:mt-1.5 [&>span]:size-1.5 [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>div]:grid [&>div]:gap-0.5 [&>div]:border-l [&>div]:border-vui-border-subtle [&>div]:pb-2 [&>div]:pl-2 [&>div>time]:font-mono [&>div>time]:text-[0.6rem] [&>div>time]:text-vui-fg-tertiary [&>div>p]:m-0 [&>div>p]:line-clamp-3 [&>div>p]:[font-size:var(--vui-font-xs)] [&>div>p]:leading-[1.5] [&>div>p]:text-vui-fg-secondary [&>div>small]:text-[0.6rem] [&>div>small]:text-vui-fg-tertiary";
 const state = "m-3";
 
 export default {
@@ -90,5 +101,16 @@ export default {
   moodRow,
   facts,
   fact,
+  locationRow,
+  sourceCopy,
+  compactList,
+  compactItem,
+  compactItemHeader,
+  progressItem,
+  progressHeader,
+  progressTrack,
+  progressFill,
+  timelineList,
+  timelineItem,
   state,
 } as const;
