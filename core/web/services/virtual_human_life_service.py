@@ -97,6 +97,21 @@ def _default_episodic_lister(
     return list_current_episodic_events(agent_id, limit=limit)
 
 
+def _default_episodic_superseder(
+    agent_id: str,
+    episode_id: str,
+    *,
+    successor_episode_id: str = "",
+) -> dict[str, Any]:
+    from .agent_directory_service import supersede_episodic_event
+
+    return supersede_episodic_event(
+        agent_id,
+        episode_id,
+        successor_episode_id=successor_episode_id,
+    )
+
+
 def _extract_schedule_json(value: Any) -> dict[str, Any]:
     """Extract the first bounded JSON object from a model response."""
 
@@ -337,6 +352,7 @@ def get_virtual_human_life_service() -> VirtualHumanLifeService:
                 delivery_receipt_resolver=_default_delivery_receipt_resolver,
                 episodic_writer=_default_episodic_writer,
                 episodic_lister=_default_episodic_lister,
+                episodic_superseder=_default_episodic_superseder,
                 schedule_planner=_default_schedule_planner,
                 schedule_planner_timeout_seconds=25.0,
                 runtime_acceptance_provider=_runtime_acceptance_allowed,

@@ -68,12 +68,23 @@ def virtual_human_schedule_tool(
     start_at: str = "",
     end_at: str = "",
     required_tool_names: list[str] | None = None,
+    event_id: str = "",
+    calendar_kind: str = "one_off",
+    recurrence: dict[str, Any] | None = None,
+    occurrence_date: str = "",
+    replacement_title: str = "",
+    replacement_start_at: str = "",
+    replacement_end_at: str = "",
+    source_kind: str = "agent",
+    source_ref: str = "",
+    reason: str = "",
     idempotency_key: str = "",
 ) -> str:
-    """查询日程，或提出一个受当前 Agent ToolPolicy 约束的工具型活动。
+    """查询日程、维护长期日历，或提出受 ToolPolicy 约束的工具型活动。
 
-    action: view | propose_tool_activity。提出活动只登记计划；到达时间后仍通过
-    原生 proactive turn 和实际工具授权执行，不能因为计划存在就宣称完成。
+    action: view | propose_tool_activity | upsert_calendar | cancel_calendar |
+    set_calendar_exception。日历只负责长期约定和重复安排，活动执行仍由每日
+    schedule 与原生 proactive turn 负责，不能因为日历存在就宣称完成。
     """
 
     def operation(agent_id: str) -> dict[str, Any]:
@@ -102,11 +113,68 @@ def virtual_human_schedule_tool(
                     },
                 ),
             }
+        calendar_commands = {
+            "upsert_calendar": "upsertCalendarEvent",
+            "cancel_calendar": "cancelCalendarEvent",
+            "set_calendar_exception": "setCalendarException",
+        }
+        calendar_command = calendar_commands.get(normalized_action, "")
+        if calendar_command:
+            key = str(idempotency_key or "").strip()
+            if not key:
+                return {
+                    "status": "blocked",
+                    "error": "idempotency_key_required",
+                    "message": "修改长期日历需要 idempotency_key。",
+                }
+            arguments: dict[str, Any] = {
+                "eventId": str(event_id or "").strip(),
+                "localDate": str(local_date or "").strip(),
+                "reason": str(reason or "").strip(),
+            }
+            if calendar_command == "upsertCalendarEvent":
+                arguments.update(
+                    {
+                        "title": str(title or "").strip(),
+                        "kind": str(calendar_kind or "one_off").strip(),
+                        "startAt": str(start_at or "").strip(),
+                        "endAt": str(end_at or "").strip(),
+                        "recurrence": dict(recurrence or {}),
+                        "sourceKind": str(source_kind or "agent").strip(),
+                        "sourceRef": str(source_ref or "").strip(),
+                    }
+                )
+            elif calendar_command == "setCalendarException":
+                replacement = {
+                    "title": str(replacement_title or "").strip(),
+                    "startAt": str(replacement_start_at or "").strip(),
+                    "endAt": str(replacement_end_at or "").strip(),
+                }
+                arguments.update(
+                    {
+                        "occurrenceDate": str(occurrence_date or local_date or "").strip(),
+                        **(
+                            {"replacement": replacement}
+                            if replacement["startAt"] and replacement["endAt"]
+                            else {}
+                        ),
+                    }
+                )
+            return {
+                "status": "applied",
+                "commandResult": _service().execute_command(
+                    agent_id,
+                    command=calendar_command,
+                    expected_version=expected_version,
+                    idempotency_key=key,
+                    arguments=arguments,
+                ),
+            }
         if normalized_action != "view":
             return {
                 "status": "blocked",
                 "error": "invalid_action",
-                "message": "action 必须是 view 或 propose_tool_activity。",
+                "message": "action 必须是 view/propose_tool_activity/upsert_calendar/cancel_calendar/set_calendar_exception。",
             }
         if local_date:
             return {"status": "ready", "schedule": _service().schedule_for(agent_id, local_date)}
@@ -136,12 +204,27 @@ def virtual_human_activity_tool(
     source_kind: str = "",
     source_ref: str = "",
     confidence: int = 80,
+    place_id: str = "",
+    place_label: str = "",
+    route_from: str = "",
+    route_minutes: int = 0,
+    living_space: bool = False,
+    item_id: str = "",
+    item_label: str = "",
+    significance: str = "",
+    artifact_id: str = "",
+    artifact_kind: str = "artifact",
+    artifact_title: str = "",
+    artifact_summary: str = "",
+    source_event_ids: list[str] | None = None,
+    local_ref: str = "",
     idempotency_key: str = "",
 ) -> str:
-    """维护生活活动、授权环境事实和有耗时的位置移动。
+    """维护生活活动、环境/位置，以及由真实结果支撑的世界和作品记录。
 
     action: start | complete | fail | cancel | skip | replan |
-    record_environment | start_move | complete_move。
+    record_environment | start_move | complete_move | record_place_visit |
+    record_important_item | record_artifact_receipt。
     complete 接收 outcome_summary 记录实际结果；计划文本不会被视为完成结果。
     """
 
@@ -155,11 +238,14 @@ def virtual_human_activity_tool(
         "record_environment": "recordEnvironmentFact",
         "start_move": "startLocationMove",
         "complete_move": "completeLocationMove",
+        "record_place_visit": "recordPlaceVisit",
+        "record_important_item": "recordImportantItem",
+        "record_artifact_receipt": "recordArtifactReceipt",
     }
     command = command_by_action.get(str(action or "").strip().lower(), "")
     if not command:
         return _blocked(
-            "action 必须是 start/complete/fail/cancel/skip/replan/record_environment/start_move/complete_move。",
+            "action 必须是 start/complete/fail/cancel/skip/replan/record_environment/start_move/complete_move/record_place_visit/record_important_item/record_artifact_receipt。",
             error="invalid_action",
         )
     key = str(idempotency_key or "").strip()
@@ -173,6 +259,7 @@ def virtual_human_activity_tool(
     if command == "completeActivity":
         arguments["outcome"] = {
             "status": "succeeded",
+            "kind": "verified_tool_outcome",
             "summary": str(outcome_summary or "").strip(),
             "salienceScore": int(salience_score or 0),
         }
@@ -198,6 +285,40 @@ def virtual_human_activity_tool(
         )
     elif command == "completeLocationMove":
         arguments["movementId"] = str(movement_id or "").strip()
+    elif command == "recordPlaceVisit":
+        arguments.update(
+            {
+                "placeId": str(place_id or "").strip(),
+                "label": str(place_label or "").strip(),
+                "sourceEventId": str(source_ref or "").strip(),
+                "routeFrom": str(route_from or "").strip(),
+                "routeMinutes": int(route_minutes or 0),
+                "livingSpace": bool(living_space),
+            }
+        )
+    elif command == "recordImportantItem":
+        arguments.update(
+            {
+                "itemId": str(item_id or "").strip(),
+                "label": str(item_label or "").strip(),
+                "placeId": str(place_id or "").strip(),
+                "sourceKind": str(source_kind or "activity_outcome").strip(),
+                "sourceRef": str(source_ref or "").strip(),
+                "significance": str(significance or "").strip(),
+            }
+        )
+    elif command == "recordArtifactReceipt":
+        arguments.update(
+            {
+                "artifactId": str(artifact_id or "").strip(),
+                "kind": str(artifact_kind or "artifact").strip(),
+                "title": str(artifact_title or "").strip(),
+                "summary": str(artifact_summary or "").strip(),
+                "status": "succeeded",
+                "sourceEventIds": list(source_event_ids or []),
+                "localRef": str(local_ref or "").strip(),
+            }
+        )
     return _invoke(
         lambda agent_id: {
             "status": "applied",
@@ -245,23 +366,57 @@ def virtual_human_diary_tool(
 
 
 def virtual_human_relationship_tool(
+    action: str = "interact",
     target_id: str = "",
     interaction_kind: str = "",
     note: str = "",
     intimacy_delta: int = 0,
     trust_delta: int = 0,
+    npc_id: str = "",
+    display_name: str = "",
+    role: str = "",
+    traits: list[str] | None = None,
+    source_kind: str = "lived_event",
+    source_ref: str = "",
     expected_version: int = 0,
     idempotency_key: str = "",
 ) -> str:
-    """查询关系；提供 target_id 时记录一次有界关系互动并更新数值投影。"""
+    """查询关系，记录有界互动，或维护人物生活里的轻量 NPC 档案。
 
+    action: list | interact | upsert_npc。NPC 不是 Agent，不拥有 Session、工具或权限。
+    """
+
+    normalized_action = str(action or "interact").strip().lower()
+    if normalized_action not in {"list", "interact", "upsert_npc"}:
+        return _blocked("action 必须是 list/interact/upsert_npc。", error="invalid_action")
     key = str(idempotency_key or "").strip()
-    if str(target_id or "").strip() and not key:
+    is_read = normalized_action == "list" or (
+        normalized_action == "interact" and not str(target_id or "").strip()
+    )
+    if not is_read and not key:
         return _blocked("记录关系互动需要 idempotency_key。", error="idempotency_key_required")
 
     def operation(agent_id: str) -> dict[str, Any]:
-        if not str(target_id or "").strip():
+        if is_read:
             return {"status": "ready", "relationships": _service().list_relationships(agent_id)}
+        if normalized_action == "upsert_npc":
+            return {
+                "status": "recorded",
+                "commandResult": _service().execute_command(
+                    agent_id,
+                    command="upsertNpc",
+                    expected_version=expected_version,
+                    idempotency_key=key,
+                    arguments={
+                        "npcId": str(npc_id or "").strip(),
+                        "displayName": str(display_name or "").strip(),
+                        "role": str(role or "").strip(),
+                        "traits": list(traits or []),
+                        "sourceKind": str(source_kind or "lived_event").strip(),
+                        "sourceRef": str(source_ref or "").strip(),
+                    },
+                ),
+            }
         return {
             "status": "recorded",
             "commandResult": _service().execute_command(
@@ -280,6 +435,64 @@ def virtual_human_relationship_tool(
         }
 
     return _invoke(operation)
+
+
+def virtual_human_reflection_tool(
+    action: str = "list",
+    proposal_id: str = "",
+    source_kind: str = "lived_event",
+    target_kind: str = "self_narrative",
+    text: str = "",
+    source_event_ids: list[str] | None = None,
+    source_fact_ids: list[str] | None = None,
+    supersedes_episode_id: str = "",
+    supersedes_proposal_id: str = "",
+    expected_version: int = 0,
+    idempotency_key: str = "",
+) -> str:
+    """列出或提出自我反思；本工具不能批准、拒绝或替换审核结果。
+
+    action: list | propose。propose 只生成 pending 提案，审核前不会进入 Prompt、
+    Persona 或原生 episodic memory。
+    """
+
+    normalized_action = str(action or "list").strip().lower()
+    if normalized_action == "list":
+        return _invoke(
+            lambda agent_id: {
+                "status": "ready",
+                "proposals": _service().list_reflection_proposals(agent_id, limit=50),
+            }
+        )
+    if normalized_action != "propose":
+        return _blocked(
+            "action 必须是 list 或 propose；审核不开放给 Agent 工具。",
+            error="invalid_action",
+        )
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return _blocked("提出反思需要 idempotency_key。", error="idempotency_key_required")
+    return _invoke(
+        lambda agent_id: {
+            "status": "proposed",
+            "commandResult": _service().execute_command(
+                agent_id,
+                command="recordReflectionProposal",
+                expected_version=expected_version,
+                idempotency_key=key,
+                arguments={
+                    "proposalId": str(proposal_id or "").strip(),
+                    "sourceKind": str(source_kind or "lived_event").strip(),
+                    "targetKind": str(target_kind or "self_narrative").strip(),
+                    "text": str(text or "").strip(),
+                    "sourceEventIds": list(source_event_ids or []),
+                    "sourceFactIds": list(source_fact_ids or []),
+                    "supersedesEpisodeId": str(supersedes_episode_id or "").strip(),
+                    "supersedesProposalId": str(supersedes_proposal_id or "").strip(),
+                },
+            ),
+        }
+    )
 
 
 def virtual_human_proactive_message_tool(
@@ -362,6 +575,7 @@ __all__ = [
     "virtual_human_activity_tool",
     "virtual_human_diary_tool",
     "virtual_human_proactive_message_tool",
+    "virtual_human_reflection_tool",
     "virtual_human_relationship_tool",
     "virtual_human_schedule_tool",
     "virtual_human_status_tool",

@@ -148,6 +148,7 @@ from tools.virtual_human_life_tools import (
     virtual_human_activity_tool as _virtual_human_activity_impl,
     virtual_human_diary_tool as _virtual_human_diary_impl,
     virtual_human_proactive_message_tool as _virtual_human_proactive_message_impl,
+    virtual_human_reflection_tool as _virtual_human_reflection_impl,
     virtual_human_relationship_tool as _virtual_human_relationship_impl,
     virtual_human_schedule_tool as _virtual_human_schedule_impl,
     virtual_human_status_tool as _virtual_human_status_impl,
@@ -280,6 +281,9 @@ def _build_key_tools() -> List[BaseTool]:
     virtual_human_diary_tool = StructuredTool.from_function(_virtual_human_diary_impl)
     virtual_human_relationship_tool = StructuredTool.from_function(
         _virtual_human_relationship_impl
+    )
+    virtual_human_reflection_tool = StructuredTool.from_function(
+        _virtual_human_reflection_impl
     )
     virtual_human_proactive_message_tool = StructuredTool.from_function(
         _virtual_human_proactive_message_impl
@@ -3120,6 +3124,7 @@ def _build_key_tools() -> List[BaseTool]:
         virtual_human_activity_tool,
         virtual_human_diary_tool,
         virtual_human_relationship_tool,
+        virtual_human_reflection_tool,
         virtual_human_proactive_message_tool,
         # 学习卸载 (P2)
         record_learning_tool,

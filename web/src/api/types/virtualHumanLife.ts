@@ -103,6 +103,57 @@ export type VirtualHumanScheduleBundle = {
   tomorrow: VirtualHumanSchedule | null;
 };
 
+export type VirtualHumanCalendarOccurrence = {
+  calendarEventId: string;
+  calendarOccurrenceId: string;
+  occurrenceDate: string;
+  title: string;
+  kind: string;
+  startAt: string;
+  endAt: string;
+  timezone?: string;
+};
+
+export type VirtualHumanCalendarProjection = {
+  localDate: string;
+  timezone?: string;
+  occurrences: VirtualHumanCalendarOccurrence[];
+  conflicts: Array<{
+    conflictId: string;
+    eventIds?: string[];
+    startAt?: string;
+    endAt?: string;
+    status?: string;
+  }>;
+  eventCount: number;
+  conflictCount: number;
+};
+
+export type VirtualHumanRhythmNeed = {
+  level: number;
+  ratePerHour?: number;
+  recoveryPerActivity?: number;
+};
+
+export type VirtualHumanRhythmProjection = {
+  timezone?: string;
+  chronotype?: {
+    label?: string;
+    evidenceCount?: number;
+    confidence?: number;
+    adaptationStatus?: string;
+  };
+  circadian?: {
+    localHour?: number;
+    phase?: string;
+    energyFactor?: number;
+    preferredSleepStart?: string;
+    preferredWakeTime?: string;
+  };
+  needs?: Record<string, VirtualHumanRhythmNeed>;
+  updatedAt?: string;
+};
+
 export type VirtualHumanLifeEventOutcome = {
   status?: string;
   kind?: string;
@@ -212,6 +263,91 @@ export type VirtualHumanReflection = {
   localDate?: string;
   createdAt?: string;
   validatedAt?: string;
+  reviewedAt?: string;
+  reviewerKind?: string;
+  reviewNote?: string;
+  supersededByProposalId?: string;
+};
+
+export type VirtualHumanInterest = {
+  interestKey: string;
+  label: string;
+  experience: number;
+  level: number;
+  completedCount: number;
+  lastOutcomeSummary?: string;
+  lastPracticedAt?: string;
+  sourceEventIds?: string[];
+};
+
+export type VirtualHumanWorldPlace = {
+  placeId: string;
+  label: string;
+  livingSpace?: boolean;
+  visitCount?: number;
+  lastVisitedAt?: string;
+  sourceEventIds?: string[];
+};
+
+export type VirtualHumanImportantItem = {
+  itemId: string;
+  label: string;
+  placeId?: string;
+  significance?: string;
+  sourceKind?: string;
+  sourceRef?: string;
+  recordedAt?: string;
+};
+
+export type VirtualHumanWorldProjection = {
+  places?: VirtualHumanWorldPlace[];
+  routes?: Array<{
+    routeId: string;
+    fromPlaceId: string;
+    toPlaceId: string;
+    typicalMinutes?: number;
+  }>;
+  importantItems?: VirtualHumanImportantItem[];
+  updatedAt?: string;
+};
+
+export type VirtualHumanNpc = {
+  npcId: string;
+  kind: "npc" | string;
+  displayName: string;
+  role?: string;
+  traits?: string[];
+  sourceRefs?: string[];
+  updatedAt?: string;
+};
+
+export type VirtualHumanLifeFeedItem = {
+  feedId: string;
+  kind: "life_event" | "diary" | "artifact" | string;
+  title: string;
+  summary?: string;
+  occurredAt?: string;
+  sourceEventIds?: string[];
+  artifactKind?: string;
+  localRef?: string;
+};
+
+export type VirtualHumanExpressionRule = {
+  ruleId: string;
+  scope: string;
+  priority?: number;
+  action?: Record<string, unknown>;
+  explanation?: string;
+};
+
+export type VirtualHumanEmbodiment = {
+  enabled?: boolean;
+  requestedMode?: string;
+  activeMode?: string;
+  providerId?: string;
+  assetRef?: string;
+  fallbackReason?: string;
+  textChatUnaffected?: boolean;
 };
 
 export type VirtualHumanEnvironmentFact = {
@@ -257,10 +393,25 @@ export type VirtualHumanCausalProjection = {
   reflections?: {
     recent?: VirtualHumanReflection[];
     acceptedCount?: number;
+    approvedCount?: number;
+    pendingCount?: number;
     rejectedCount?: number;
+    supersededCount?: number;
   };
   environment?: VirtualHumanEnvironmentProjection;
   locationMovements?: VirtualHumanLocationMovement[];
+  interests?: {
+    items?: VirtualHumanInterest[];
+    processedEventIds?: string[];
+  };
+  world?: VirtualHumanWorldProjection;
+  socialCircle?: { npcs?: VirtualHumanNpc[]; updatedAt?: string };
+  lifeFeed?: VirtualHumanLifeFeedItem[];
+  expression?: {
+    applied?: VirtualHumanExpressionRule[];
+    trace?: Array<{ ruleId?: string; matched?: boolean; reason?: string }>;
+  };
+  embodiment?: VirtualHumanEmbodiment;
 };
 
 /**
@@ -311,6 +462,9 @@ export type VirtualHumanSnapshot = {
   state: VirtualHumanLifeState | null;
   todaySchedule: VirtualHumanSchedule | null;
   tomorrowSchedule: VirtualHumanSchedule | null;
+  todayCalendar?: VirtualHumanCalendarProjection | null;
+  tomorrowCalendar?: VirtualHumanCalendarProjection | null;
+  rhythms?: VirtualHumanRhythmProjection | null;
   proactiveUsage: {
     delivered: number;
     limit: number;
@@ -318,6 +472,22 @@ export type VirtualHumanSnapshot = {
   };
   causal?: VirtualHumanCausalProjection | null;
   health?: VirtualHumanSnapshotHealth;
+};
+
+export type VirtualHumanCommandRequest = {
+  agentId: string;
+  command: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+  arguments: Record<string, unknown>;
+};
+
+export type VirtualHumanCommandResponse = {
+  agentId: string;
+  command: string;
+  idempotencyKey: string;
+  stateVersion: number;
+  result: Record<string, unknown>;
 };
 
 export type VirtualHumanCompanion = {

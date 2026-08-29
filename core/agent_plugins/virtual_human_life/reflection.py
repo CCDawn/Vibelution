@@ -10,6 +10,20 @@ from typing import Any
 
 from .causal_contracts import CAUSAL_SCHEMA_VERSION
 
+REFLECTION_TARGET_KINDS = {
+    "memory_reinforcement",
+    "preference",
+    "habit",
+    "skill",
+    "self_narrative",
+    "episodic_insert",
+    "episodic_supersede",
+    "environment_fact",
+    "external_fact",
+    "location_fact",
+}
+REFLECTION_TERMINAL_STATUSES = {"approved", "rejected", "superseded"}
+
 
 def _iso(value: datetime) -> str:
     normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
@@ -62,6 +76,12 @@ def validate_reflection_proposal(
             if str(item).strip()
         )
     )[:16]
+    supersedes_episode_id = str(
+        result.get("supersedesEpisodeId") or ""
+    ).strip()[:200]
+    supersedes_proposal_id = str(
+        result.get("supersedesProposalId") or ""
+    ).strip()[:200]
     result.update(
         {
             "schemaVersion": CAUSAL_SCHEMA_VERSION,
@@ -71,12 +91,16 @@ def validate_reflection_proposal(
             "text": text,
             "sourceEventIds": event_ids,
             "sourceFactIds": fact_ids,
+            "supersedesEpisodeId": supersedes_episode_id,
+            "supersedesProposalId": supersedes_proposal_id,
             "validatedAt": _iso(now),
         }
     )
     reason = ""
     if not proposal_id or not text:
         reason = "proposal_identity_or_text_missing"
+    elif target_kind not in REFLECTION_TARGET_KINDS:
+        reason = "target_kind_not_allowed"
     elif source_kind == "dream" and target_kind in {
         "environment_fact",
         "external_fact",
@@ -95,6 +119,19 @@ def validate_reflection_proposal(
         not event_ids or any(item not in valid_event_ids for item in event_ids)
     ):
         reason = "memory_source_missing"
+    elif target_kind in {
+        "preference",
+        "habit",
+        "skill",
+        "self_narrative",
+        "episodic_insert",
+        "episodic_supersede",
+    } and (
+        not event_ids or any(item not in valid_event_ids for item in event_ids)
+    ):
+        reason = "source_event_missing"
+    elif target_kind == "episodic_supersede" and not supersedes_episode_id:
+        reason = "superseded_episode_missing"
     elif source_kind not in {
         "lived_event",
         "activity_outcome",
@@ -109,8 +146,44 @@ def validate_reflection_proposal(
         and source_kind != "dream"
         and target_kind in {"environment_fact", "external_fact", "location_fact"}
     )
-    result["status"] = "rejected" if reason else "accepted"
+    result["status"] = "rejected" if reason else "pending"
     result["validationReason"] = reason or "source_boundary_passed"
+    return result
+
+
+def transition_reflection_proposal(
+    proposal: Mapping[str, Any],
+    *,
+    decision: str,
+    reviewer_kind: str,
+    review_note: str,
+    now: datetime,
+    successor_proposal_id: str = "",
+) -> dict[str, Any]:
+    """Apply one auditable lifecycle transition without changing source facts."""
+
+    result = deepcopy(dict(proposal))
+    current_status = str(result.get("status") or "").strip().lower()
+    if current_status in REFLECTION_TERMINAL_STATUSES:
+        return result
+    if current_status != "pending":
+        raise ValueError("Reflection proposal is not pending review.")
+    normalized = str(decision or "").strip().lower()
+    if normalized not in {"approve", "reject", "supersede"}:
+        raise ValueError("Reflection decision must be approve, reject, or supersede.")
+    successor = str(successor_proposal_id or "").strip()[:200]
+    if normalized == "supersede" and not successor:
+        raise ValueError("Superseding a reflection proposal requires a successor proposal id.")
+    result["status"] = {
+        "approve": "approved",
+        "reject": "rejected",
+        "supersede": "superseded",
+    }[normalized]
+    result["reviewerKind"] = str(reviewer_kind or "operator").strip()[:40] or "operator"
+    result["reviewNote"] = str(review_note or "").strip()[:600]
+    result["reviewedAt"] = _iso(now)
+    if successor:
+        result["supersededByProposalId"] = successor
     return result
 
 
@@ -135,7 +208,7 @@ def build_nightly_reflection_proposals(
             or str(outcome.get("status") or "") != "succeeded"
         ):
             continue
-        digest = hashlib.sha256(f"{local_date}:{event_id}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha256(f"{local_date}:{event_id}".encode()).hexdigest()[:20]
         proposal_id = f"reflection-{digest}"
         if proposal_id in existing_proposal_ids:
             continue
@@ -242,7 +315,9 @@ def project_memory_strength(
 
 
 __all__ = [
+    "REFLECTION_TARGET_KINDS",
     "build_nightly_reflection_proposals",
     "project_memory_strength",
+    "transition_reflection_proposal",
     "validate_reflection_proposal",
 ]

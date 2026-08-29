@@ -871,6 +871,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_write"],
         "permissionTier": MEDIUM_PERMISSION_TIER,
     },
+    "virtual_human_reflection_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "life_reflection", "proposal_write", "structured_result"],
+        "riskTags": ["memory_proposal"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
     "virtual_human_proactive_message_tool": {
         "category": "virtual_life",
         "capabilityTags": ["virtual_life", "proactive_message", "structured_result"],
@@ -891,6 +897,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "virtual_human_activity_tool",
             "virtual_human_diary_tool",
             "virtual_human_relationship_tool",
+            "virtual_human_reflection_tool",
             "virtual_human_proactive_message_tool",
         ],
         "preferredToolNames": [
@@ -899,6 +906,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "virtual_human_activity_tool",
             "virtual_human_diary_tool",
             "virtual_human_relationship_tool",
+            "virtual_human_reflection_tool",
             "virtual_human_proactive_message_tool",
         ],
     },

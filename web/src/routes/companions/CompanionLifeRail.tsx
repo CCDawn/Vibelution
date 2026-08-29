@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchVirtualHumanDiary,
   fetchVirtualHumanEvents,
   fetchVirtualHumanMemories,
   fetchVirtualHumanRelationships,
+  executeVirtualHumanCommand,
 } from "../../api/virtualHumanLife";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -15,14 +16,20 @@ import type {
   VirtualHumanDriveItem,
   VirtualHumanEnvironmentFact,
   VirtualHumanEpisodicMemory,
+  VirtualHumanCalendarProjection,
+  VirtualHumanInterest,
+  VirtualHumanLifeFeedItem,
   VirtualHumanLifeEvent,
+  VirtualHumanNpc,
   VirtualHumanOpenLoop,
   VirtualHumanProactiveCandidate,
   VirtualHumanReflection,
   VirtualHumanRelationship,
+  VirtualHumanRhythmProjection,
+  VirtualHumanWorldProjection,
 } from "../../api/types";
 import { usePageVisibility } from "../../app/pollingPolicy";
-import { VStateSurface, VStatusChip, VTabs } from "../../components/vui";
+import { VButton, VStateSurface, VStatusChip, VTabs } from "../../components/vui";
 import {
   currentLifeActivity,
   currentLifeActivityLabel,
@@ -194,16 +201,16 @@ function DriveRows({ drives, lang }: { drives: VirtualHumanDriveItem[]; lang: "z
 }
 
 function ReflectionRows({ reflections, lang }: { reflections: VirtualHumanReflection[]; lang: "zh" | "en" }) {
-  const accepted = reflections
-    .filter((item) => item.status === "accepted" && item.sourceKind !== "dream")
+  const approved = reflections
+    .filter((item) => item.status === "approved" && item.sourceKind !== "dream")
     .slice(-4)
     .reverse();
-  if (!accepted.length) {
+  if (!approved.length) {
     return <p className={styles.cardCopy}>{lang === "zh" ? "今晚还没有需要留下的回想。" : "No reflection needs to be kept tonight."}</p>;
   }
   return (
     <div className={styles.timelineList}>
-      {accepted.map((reflection) => (
+      {approved.map((reflection) => (
         <article key={reflection.proposalId} className={styles.timelineItem}>
           <span aria-hidden="true" />
           <div>
@@ -212,6 +219,226 @@ function ReflectionRows({ reflections, lang }: { reflections: VirtualHumanReflec
             <small>{lang === "zh" ? `来自 ${reflection.sourceEventIds?.length ?? 0} 段真实经历` : `From ${reflection.sourceEventIds?.length ?? 0} lived event(s)`}</small>
           </div>
         </article>
+      ))}
+    </div>
+  );
+}
+
+function CalendarRows({ calendar, lang }: { calendar: VirtualHumanCalendarProjection | null | undefined; lang: "zh" | "en" }) {
+  const occurrences = calendar?.occurrences ?? [];
+  if (!occurrences.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "日历里还没有长期约定或纪念日。" : "No recurring commitment or anniversary is on the calendar yet."}</p>;
+  }
+  return (
+    <div className={styles.scheduleList}>
+      {occurrences.slice(0, 5).map((item) => (
+        <div key={item.calendarOccurrenceId} className={styles.scheduleItem}>
+          <time>{formatLifeTime(item.startAt, lang)}</time>
+          <div>
+            <strong>{item.title}</strong>
+            <span>{formatLifeTime(item.startAt, lang)}–{formatLifeTime(item.endAt, lang)} · {item.kind}</span>
+          </div>
+        </div>
+      ))}
+      {(calendar?.conflictCount ?? 0) > 0 ? (
+        <small className={styles.sourceCopy}>
+          {lang === "zh" ? `${calendar?.conflictCount} 个时间冲突，暂不自动覆盖` : `${calendar?.conflictCount} time conflict(s); none are overwritten automatically`}
+        </small>
+      ) : null}
+    </div>
+  );
+}
+
+function rhythmNeedLabel(name: string, lang: "zh" | "en"): string {
+  const labels: Record<string, [string, string]> = {
+    sleep: ["睡眠", "Sleep"],
+    rest: ["休息", "Rest"],
+    nourishment: ["饮食", "Nourishment"],
+    social: ["社交", "Social"],
+    movement: ["活动", "Movement"],
+    focus: ["专注", "Focus"],
+  };
+  const pair = labels[name] ?? [name, name];
+  return lang === "zh" ? pair[0] : pair[1];
+}
+
+function RhythmRows({ rhythms, lang }: { rhythms: VirtualHumanRhythmProjection | null | undefined; lang: "zh" | "en" }) {
+  const needs = Object.entries(rhythms?.needs ?? {}).sort((left, right) => (right[1]?.level ?? 0) - (left[1]?.level ?? 0));
+  if (!rhythms || !needs.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "生活节律正在从日常里形成。" : "Her rhythm is still taking shape from lived days."}</p>;
+  }
+  const chronotype = rhythms.chronotype?.label || "balanced";
+  const phase = rhythms.circadian?.phase || "day";
+  return (
+    <div className={styles.compactList}>
+      <div className={styles.compactItem}>
+        <div className={styles.compactItemHeader}>
+          <strong>{lang === "zh" ? "作息倾向" : "Rhythm"}</strong>
+          <span>{chronotype} · {phase}</span>
+        </div>
+        <small>{lang === "zh" ? `偏好 ${rhythms.circadian?.preferredSleepStart || "--"} 入睡，${rhythms.circadian?.preferredWakeTime || "--"} 起床` : `Prefers ${rhythms.circadian?.preferredSleepStart || "--"} sleep and ${rhythms.circadian?.preferredWakeTime || "--"} wake`}</small>
+      </div>
+      {needs.slice(0, 4).map(([name, need]) => (
+        <div key={name} className={styles.progressItem}>
+          <div className={styles.progressHeader}>
+            <strong>{rhythmNeedLabel(name, lang)}</strong>
+            <span>{boundedPercent(need.level)}%</span>
+          </div>
+          <div className={styles.progressTrack} aria-label={`${rhythmNeedLabel(name, lang)} ${boundedPercent(need.level)}%`}>
+            <span className={styles.progressFill} style={{ width: `${boundedPercent(need.level)}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InterestRows({ interests, lang }: { interests: VirtualHumanInterest[]; lang: "zh" | "en" }) {
+  if (!interests.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有从真实完成的活动里形成稳定兴趣。" : "No stable interest has grown from completed activities yet."}</p>;
+  }
+  return (
+    <div className={styles.compactList}>
+      {interests.slice(0, 4).map((interest) => (
+        <div key={interest.interestKey} className={styles.compactItem}>
+          <div className={styles.compactItemHeader}>
+            <strong>{interest.label}</strong>
+            <span>{lang === "zh" ? `等级 ${interest.level}` : `Level ${interest.level}`}</span>
+          </div>
+          <small>{interest.lastOutcomeSummary || (lang === "zh" ? `已完成 ${interest.completedCount} 次` : `${interest.completedCount} completion(s)`)}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LifeFeedRows({ items, lang }: { items: VirtualHumanLifeFeedItem[]; lang: "zh" | "en" }) {
+  if (!items.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有可发布到本地生活动态的真实片段。" : "No source-backed moment is ready for the local life feed yet."}</p>;
+  }
+  return (
+    <div className={styles.eventList}>
+      {items.slice(0, 4).map((item) => (
+        <article key={item.feedId} className={styles.eventItem}>
+          <time className={styles.eventTime}>{formatLifeTime(item.occurredAt || "", lang)}</time>
+          <div className={styles.eventCopy}>
+            <strong>{item.title}</strong>
+            <span>{item.summary || item.kind}</span>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+type ReflectionReviewDecision = "approve" | "reject";
+
+type ReflectionReviewRequest = {
+  agentId: string;
+  proposalId: string;
+  decision: ReflectionReviewDecision;
+  expectedVersion: number;
+};
+
+function reflectionReviewIdempotencyKey(request: ReflectionReviewRequest): string {
+  const material = `${request.agentId}:${request.proposalId}`;
+  let hash = 2166136261;
+  for (let index = 0; index < material.length; index += 1) {
+    hash ^= material.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `companion-reflection-review:${(hash >>> 0).toString(16)}:${request.decision}:v${request.expectedVersion}`;
+}
+
+function PendingReflectionRows({
+  reflections,
+  lang,
+  pendingReview,
+  reviewDisabled,
+  onReview,
+}: {
+  reflections: VirtualHumanReflection[];
+  lang: "zh" | "en";
+  pendingReview: ReflectionReviewRequest | null;
+  reviewDisabled: boolean;
+  onReview: (proposalId: string, decision: ReflectionReviewDecision) => void;
+}) {
+  const pending = reflections.filter((item) => item.status === "pending").slice(-4).reverse();
+  if (!pending.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "没有等待审核的自我变化。" : "No self-change is waiting for review."}</p>;
+  }
+  return (
+    <div className={styles.compactList}>
+      {pending.map((item) => (
+        <div key={item.proposalId} className={styles.compactItem}>
+          <strong>{item.text}</strong>
+          <small>{lang === "zh" ? "仅为提案，审核前不会改变人格或记忆" : "Proposal only; persona and memory stay unchanged until review"}</small>
+          <div className={styles.compactActions}>
+            <VButton
+              type="button"
+              density="compact"
+              variant="secondary"
+              isDisabled={reviewDisabled || Boolean(pendingReview)}
+              isPending={pendingReview?.proposalId === item.proposalId && pendingReview.decision === "approve"}
+              onPress={() => onReview(item.proposalId, "approve")}
+            >
+              {lang === "zh" ? "批准变化" : "Approve"}
+            </VButton>
+            <VButton
+              type="button"
+              density="compact"
+              variant="ghost"
+              isDisabled={reviewDisabled || Boolean(pendingReview)}
+              isPending={pendingReview?.proposalId === item.proposalId && pendingReview.decision === "reject"}
+              onPress={() => onReview(item.proposalId, "reject")}
+            >
+              {lang === "zh" ? "拒绝" : "Reject"}
+            </VButton>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SocialCircleRows({ npcs, lang }: { npcs: VirtualHumanNpc[]; lang: "zh" | "en" }) {
+  if (!npcs.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "她的生活里还没有形成稳定的熟人。" : "No recurring acquaintance has formed in her life yet."}</p>;
+  }
+  return (
+    <div className={styles.compactList}>
+      {npcs.slice(0, 4).map((npc) => (
+        <div key={npc.npcId} className={styles.compactItem}>
+          <div className={styles.compactItemHeader}>
+            <strong>{npc.displayName}</strong>
+            <span>{npc.role || (lang === "zh" ? "生活中的熟人" : "Acquaintance")}</span>
+          </div>
+          <small>{(npc.traits ?? []).join(" · ") || (lang === "zh" ? "相处细节仍在形成" : "Shared details are still forming")}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WorldRows({ world, lang }: { world: VirtualHumanWorldProjection | undefined; lang: "zh" | "en" }) {
+  const places = world?.places ?? [];
+  const items = world?.importantItems ?? [];
+  if (!places.length && !items.length) {
+    return <p className={styles.cardCopy}>{lang === "zh" ? "地点和重要物品会从真实经历里逐渐留下来。" : "Places and meaningful belongings will emerge from lived events."}</p>;
+  }
+  return (
+    <div className={styles.compactList}>
+      {places.slice(0, 3).map((place) => (
+        <div key={place.placeId} className={styles.compactItem}>
+          <strong>{place.label}</strong>
+          <small>{lang === "zh" ? `去过 ${place.visitCount ?? 0} 次` : `Visited ${place.visitCount ?? 0} time(s)`}</small>
+        </div>
+      ))}
+      {items.slice(0, 3).map((item) => (
+        <div key={item.itemId} className={styles.compactItem}>
+          <strong>{item.label}</strong>
+          <small>{item.significance || (lang === "zh" ? "一件有来源的重要物品" : "A source-backed meaningful belonging")}</small>
+        </div>
       ))}
     </div>
   );
@@ -383,7 +610,53 @@ export function CompanionLifeRail({
   lang: "zh" | "en";
 }) {
   const [activeTab, setActiveTab] = useState("now");
+  const [reviewFeedback, setReviewFeedback] = useState("");
+  const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
+  useEffect(() => {
+    setReviewFeedback("");
+  }, [companion?.agentId]);
+  const reflectionReviewMutation = useMutation({
+    mutationFn: (request: ReflectionReviewRequest) => (
+      executeVirtualHumanCommand(request.agentId, {
+        agentId: request.agentId,
+        command: "reviewReflectionProposal",
+        expectedVersion: request.expectedVersion,
+        idempotencyKey: reflectionReviewIdempotencyKey(request),
+        arguments: {
+          proposalId: request.proposalId,
+          decision: request.decision,
+          reviewerKind: "operator",
+          reviewNote: "Reviewed by the operator from the companion life rail.",
+        },
+      })
+    ),
+    onMutate: () => {
+      setReviewFeedback("");
+    },
+    onSuccess: async (_result, request) => {
+      setReviewFeedback(
+        request.decision === "approve"
+          ? (lang === "zh" ? "已批准，这段变化现在可以进入人物的长期连续性。" : "Approved. This change may now enter the character's long-term continuity.")
+          : (lang === "zh" ? "已拒绝，这段提案不会改变人物。" : "Rejected. This proposal will not change the character."),
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanCompanions() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanSnapshot(request.agentId) }),
+      ]);
+    },
+    onError: async (error, request) => {
+      setReviewFeedback(
+        error instanceof Error
+          ? error.message
+          : (lang === "zh" ? "审核没有完成，请刷新后重试。" : "Review did not complete. Refresh and try again."),
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanCompanions() });
+      if (request.agentId) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.virtualHumanSnapshot(request.agentId) });
+      }
+    },
+  });
   const activity = companion ? currentLifeActivity(companion.snapshot) : null;
   const activityLabel = companion ? currentLifeActivityLabel(companion.snapshot, lang) : "";
   const upcoming = companion ? upcomingLifeActivities(companion.snapshot, 3) : [];
@@ -399,6 +672,11 @@ export function CompanionLifeRail({
     ...(causal?.drives?.goals ?? []),
     ...(causal?.drives?.projects ?? []),
   ];
+  const interests = causal?.interests?.items ?? [];
+  const lifeFeed = causal?.lifeFeed ?? [];
+  const socialCircle = causal?.socialCircle?.npcs ?? [];
+  const embodiment = causal?.embodiment;
+  const expressionRules = causal?.expression?.applied ?? [];
   const activeAffectCount = causal?.affect?.activeEpisodeIds?.length ?? 0;
   const locationStatus = companion?.snapshot.state?.locationStatus ?? "stationary";
   const locationLabel = locationStatus === "moving" && companion?.snapshot.state?.movingTo
@@ -537,6 +815,29 @@ export function CompanionLifeRail({
                 </div>
               </section>
               <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "生活节律" : "Life rhythm"}</p>
+                <RhythmRows rhythms={companion.snapshot.rhythms} lang={lang} />
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "呈现方式" : "Embodiment"}</p>
+                <p className={styles.cardCopy}>
+                  {embodiment?.activeMode && embodiment.activeMode !== "portrait"
+                    ? (lang === "zh" ? `正在使用 ${embodiment.activeMode} 形态；文字对话保持原生链路。` : `Using ${embodiment.activeMode}; text chat stays on the native session path.`)
+                    : (lang === "zh" ? "当前使用人物立绘；语音或 Live2D 不可用时不会影响文字聊天。" : "Using the portrait; optional voice or Live2D never blocks text chat.")}
+                </p>
+                {embodiment?.fallbackReason && embodiment.fallbackReason !== "disabled" ? (
+                  <small className={styles.sourceCopy}>{lang === "zh" ? `安全回退：${embodiment.fallbackReason}` : `Safe fallback: ${embodiment.fallbackReason}`}</small>
+                ) : null}
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "表达习惯" : "Expression habits"}</p>
+                <p className={styles.cardCopy}>
+                  {expressionRules.length
+                    ? (lang === "zh" ? `当前有 ${expressionRules.length} 条可解释的表达规则生效。` : `${expressionRules.length} explainable expression rule(s) are active.`)
+                    : (lang === "zh" ? "当前保持人物自己的基础说话方式。" : "Using the character's baseline voice right now.")}
+                </p>
+              </section>
+              <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "身边环境" : "Around her"}</p>
                 <EnvironmentRows facts={environmentFacts} lang={lang} />
               </section>
@@ -569,6 +870,14 @@ export function CompanionLifeRail({
                 <ScheduleRows activities={today} lang={lang} />
               </section>
               <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "长期日历" : "Long-term calendar"}</p>
+                <CalendarRows calendar={companion.snapshot.todayCalendar} lang={lang} />
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "兴趣成长" : "Growing interests"}</p>
+                <InterestRows interests={interests} lang={lang} />
+              </section>
+              <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "实际经历" : "Lived events"}</p>
                 {todayEventsQuery.isPending ? (
                   <VStateSurface density="compact" title={lang === "zh" ? "正在读取经历" : "Loading lived events"} tone="loading" busy skeletonLines={2} />
@@ -583,6 +892,10 @@ export function CompanionLifeRail({
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "未完话题" : "Open topics"}</p>
                 <OpenLoopRows loops={openLoops} lang={lang} />
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "生活动态" : "Life feed"}</p>
+                <LifeFeedRows items={lifeFeed} lang={lang} />
               </section>
             </>
           ) : null}
@@ -618,6 +931,36 @@ export function CompanionLifeRail({
                 <ReflectionRows reflections={recentReflections} lang={lang} />
               </section>
               <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "待审核的变化" : "Changes awaiting review"}</p>
+                <PendingReflectionRows
+                  reflections={recentReflections}
+                  lang={lang}
+                  pendingReview={reflectionReviewMutation.isPending ? reflectionReviewMutation.variables : null}
+                  reviewDisabled={!companion.snapshot.state?.stateVersion}
+                  onReview={(proposalId, decision) => {
+                    const expectedVersion = companion.snapshot.state?.stateVersion;
+                    if (!expectedVersion) {
+                      setReviewFeedback(lang === "zh" ? "生活状态版本尚未就绪，请稍后重试。" : "Life state version is not ready yet. Try again shortly.");
+                      return;
+                    }
+                    reflectionReviewMutation.mutate({
+                      agentId: companion.agentId,
+                      proposalId,
+                      decision,
+                      expectedVersion,
+                    });
+                  }}
+                />
+                {reviewFeedback ? (
+                  <p
+                    className={styles.reviewNotice}
+                    role={reflectionReviewMutation.isError ? "alert" : "status"}
+                  >
+                    {reviewFeedback}
+                  </p>
+                ) : null}
+              </section>
+              <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "共同记忆" : "Shared memory"}</p>
                 <p className={styles.cardCopy}>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "暂时还没有形成稳定的关系摘要。" : "No stable relationship summary yet.")}</p>
               </section>
@@ -632,6 +975,14 @@ export function CompanionLifeRail({
                 ) : (
                   <RelationshipRows relationships={relationshipsQuery.data ?? []} lang={lang} />
                 )}
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "她的社会圈" : "Her social circle"}</p>
+                <SocialCircleRows npcs={socialCircle} lang={lang} />
+              </section>
+              <section className={styles.lifeCard}>
+                <p className={styles.cardLabel}>{lang === "zh" ? "熟悉的地点与物品" : "Familiar places and belongings"}</p>
+                <WorldRows world={causal?.world} lang={lang} />
               </section>
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "日记" : "Diary"}</p>

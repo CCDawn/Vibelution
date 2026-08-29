@@ -18,6 +18,10 @@ class VirtualHumanSnapshotResponse(BaseModel):
     state: dict[str, Any] | None = None
     todaySchedule: dict[str, Any] | None = None
     tomorrowSchedule: dict[str, Any] | None = None
+    todayCalendar: dict[str, Any] | None = None
+    tomorrowCalendar: dict[str, Any] | None = None
+    rhythms: dict[str, Any] | None = None
+    causal: dict[str, Any] | None = None
     proactiveUsage: dict[str, int] = Field(default_factory=dict)
     health: dict[str, Any] | None = None
 

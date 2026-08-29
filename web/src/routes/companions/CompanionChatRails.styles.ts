@@ -48,6 +48,8 @@ const sourceCopy = "line-clamp-2 text-[0.6rem] leading-[1.4] text-vui-fg-tertiar
 const compactList = "grid gap-1.5";
 const compactItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>strong]:line-clamp-2 [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:leading-[1.45] [&>small]:line-clamp-2 [&>small]:text-[0.6rem] [&>small]:leading-[1.4] [&>small]:text-vui-fg-tertiary";
 const compactItemHeader = "flex min-w-0 items-baseline justify-between gap-2 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:shrink-0 [&>span]:font-mono [&>span]:text-[0.62rem] [&>span]:text-vui-fg-secondary";
+const compactActions = "mt-1 flex flex-wrap items-center gap-1.5";
+const reviewNotice = "m-0 [font-size:0.62rem] leading-[1.45] text-vui-fg-secondary";
 const progressItem = "grid gap-1 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5";
 const progressHeader = "flex min-w-0 items-baseline justify-between gap-2 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>span]:[font-size:0.6rem] [&>span]:text-vui-fg-tertiary [&>strong:last-child]:font-mono [&>strong:last-child]:text-[0.62rem] [&>strong:last-child]:text-vui-fg-secondary";
 const progressTrack = "h-1 overflow-hidden rounded-full bg-vui-surface-overlay";
@@ -106,6 +108,8 @@ export default {
   compactList,
   compactItem,
   compactItemHeader,
+  compactActions,
+  reviewNotice,
   progressItem,
   progressHeader,
   progressTrack,
