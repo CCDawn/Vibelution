@@ -246,20 +246,75 @@ def virtual_human_relationship_tool(
 
 
 def virtual_human_proactive_message_tool(
-    reason: str,
+    reason: str = "",
     source_event_id: str = "",
     valid_for_minutes: int = 30,
+    action: str = "request",
+    expected_version: int = 0,
+    idempotency_key: str = "",
+    topic_key: str = "",
+    loop_kind: str = "topic",
+    summary: str = "",
+    source_turn_id: str = "",
+    expires_in_minutes: int = 10_080,
+    resolution: str = "",
 ) -> str:
-    """基于真实生活事件申请一次主动消息；仍受额度、间隔、免打扰和绑定栅栏约束。"""
+    """申请主动消息，或维护未完话题、承诺和回应状态。
+
+    action: request | record_open_loop | resolve_open_loop | record_reply。
+    request 仍受候选价值、额度、间隔、免打扰和 binding revision 约束；
+    其他动作只更新 Agent 私有的连续性账本，不直接创建会话 Turn。
+    """
+
+    normalized_action = str(action or "request").strip().lower()
+    if normalized_action == "request":
+        return _invoke(
+            lambda agent_id: {
+                "status": "requested",
+                "attempt": _service().request_proactive_message(
+                    agent_id,
+                    reason=reason,
+                    source_event_id=source_event_id,
+                    valid_for_minutes=valid_for_minutes,
+                ),
+            }
+        )
+
+    command_by_action = {
+        "record_open_loop": "recordOpenLoop",
+        "resolve_open_loop": "resolveOpenLoop",
+        "record_reply": "recordConversationReply",
+    }
+    command = command_by_action.get(normalized_action, "")
+    if not command:
+        return _blocked(
+            "action 必须是 request/record_open_loop/resolve_open_loop/record_reply。",
+            error="invalid_action",
+        )
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return _blocked(
+            "维护会话连续性需要 idempotency_key。",
+            error="idempotency_key_required",
+        )
+    arguments = {
+        "topicKey": str(topic_key or "").strip(),
+        "kind": str(loop_kind or "topic").strip(),
+        "summary": str(summary or "").strip(),
+        "sourceTurnId": str(source_turn_id or "").strip(),
+        "expiresInMinutes": int(expires_in_minutes or 10_080),
+        "resolution": str(resolution or "").strip(),
+    }
 
     return _invoke(
         lambda agent_id: {
-            "status": "requested",
-            "attempt": _service().request_proactive_message(
+            "status": "recorded",
+            "commandResult": _service().execute_command(
                 agent_id,
-                reason=reason,
-                source_event_id=source_event_id,
-                valid_for_minutes=valid_for_minutes,
+                command=command,
+                expected_version=expected_version,
+                idempotency_key=key,
+                arguments=arguments,
             ),
         }
     )
