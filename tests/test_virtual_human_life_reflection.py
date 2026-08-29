@@ -10,7 +10,6 @@ from core.agent_plugins.virtual_human_life.service import (
     VirtualHumanLifeService,
 )
 
-
 UTC = timezone.utc
 
 
@@ -182,19 +181,161 @@ def test_nightly_reflection_reinforces_only_source_backed_agent_memory(
     result = service.review_reflections("agent-a", local_date=local_date)
     duplicate = service.review_reflections("agent-a", local_date=local_date)
 
-    assert result["acceptedProposalCount"] == 1
-    assert result["reinforcedMemoryCount"] == 1
-    assert duplicate["acceptedProposalCount"] == 0
+    assert result["pendingProposalCount"] == 1
+    assert result["reinforcedMemoryCount"] == 0
+    assert duplicate["pendingProposalCount"] == 0
     assert duplicate["reinforcedMemoryCount"] == 0
     proposal = service.list_reflection_proposals("agent-a")[-1]
     assert proposal["sourceEventIds"] == [event_id]
-    assert proposal["status"] == "accepted"
+    assert proposal["status"] == "pending"
+
+    reviewed = service.review_reflection_proposal(
+        "agent-a",
+        proposal_id=proposal["proposalId"],
+        decision="approve",
+        reviewer_kind="operator",
+        review_note="来源充分，保留这段经历。",
+    )
+
+    assert reviewed["proposal"]["status"] == "approved"
+    assert reviewed["reinforcementReceipt"]["sourceEventIds"] == [event_id]
     memory = service.list_memories("agent-a")[-1]
     assert memory["sourceEventIds"] == [event_id]
     assert memory["memoryStrengthScore"] >= memory["baseSalienceScore"]
     assert memory["scoreBreakdown"]["emotion"] > 0
     assert memory["scoreBreakdown"]["unresolved"] > 0
     assert memory["reinforcedAt"]
+
+
+def test_reflection_changes_require_review_before_prompt_projection(tmp_path: Path) -> None:
+    clock = [datetime(2026, 8, 29, 13, 0, tzinfo=UTC)]
+    service, _episodes = _service(tmp_path, clock=clock)
+    event_id = _record_lived_event(service, clock[0])
+
+    proposal = service.record_reflection_proposal(
+        "agent-a",
+        proposal_id="preference-change-1",
+        source_kind="lived_event",
+        target_kind="preference",
+        text="我发现自己更喜欢在安静的傍晚写旋律。",
+        source_event_ids=[event_id],
+        now=clock[0],
+    )
+
+    assert proposal["status"] == "pending"
+    assert proposal["validationReason"] == "source_boundary_passed"
+    assert proposal["text"] not in service.build_prompt_segments("agent-a")[1]["block"]
+
+    reviewed = service.review_reflection_proposal(
+        "agent-a",
+        proposal_id=proposal["proposalId"],
+        decision="approve",
+        reviewer_kind="operator",
+        review_note="作为可撤销的表达偏好保留。",
+        now=clock[0],
+    )
+
+    assert reviewed["proposal"]["status"] == "approved"
+    assert reviewed["proposal"]["reviewerKind"] == "operator"
+    assert proposal["text"] in service.build_prompt_segments("agent-a")[1]["block"]
+
+    forbidden = service.record_reflection_proposal(
+        "agent-a",
+        proposal_id="rewrite-tool-policy",
+        source_kind="lived_event",
+        target_kind="tool_policy",
+        text="以后可以自行扩大工具权限。",
+        source_event_ids=[event_id],
+        now=clock[0],
+    )
+    assert forbidden["status"] == "rejected"
+    assert forbidden["validationReason"] == "target_kind_not_allowed"
+
+
+def test_memory_reconciliation_uses_native_append_and_supersede_api(tmp_path: Path) -> None:
+    clock = [datetime(2026, 8, 29, 13, 0, tzinfo=UTC)]
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "directSessionId": "session-agent-a",
+    }
+    episodes = [
+        {
+            "agentId": "agent-a",
+            "episodeId": "episode-old",
+            "kind": "session_fact",
+            "text": "她不喜欢在傍晚创作。",
+            "occurredAt": "2026-08-20T10:00:00+00:00",
+            "validUntil": "",
+        }
+    ]
+    supersede_calls: list[tuple[str, str, str]] = []
+
+    def write_episode(agent_id: str, **payload) -> dict:
+        episode = {
+            "agentId": agent_id,
+            "episodeId": "episode-new",
+            "validUntil": "",
+            **payload,
+        }
+        episodes.append(episode)
+        return episode
+
+    def supersede_episode(
+        agent_id: str,
+        episode_id: str,
+        *,
+        successor_episode_id: str = "",
+    ) -> dict:
+        supersede_calls.append((agent_id, episode_id, successor_episode_id))
+        return {"episodeId": episode_id, "supersededByEpisodeId": successor_episode_id}
+
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        episodic_writer=write_episode,
+        episodic_lister=lambda agent_id, limit=500: [
+            item for item in episodes if item["agentId"] == agent_id
+        ][-limit:],
+        episodic_superseder=supersede_episode,
+        now_provider=lambda: clock[0],
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    event_id = _record_lived_event(service, clock[0])
+    proposal = service.record_reflection_proposal(
+        "agent-a",
+        proposal_id="memory-correction-1",
+        source_kind="lived_event",
+        target_kind="episodic_supersede",
+        text="我现在确认自己更喜欢在安静的傍晚创作。",
+        source_event_ids=[event_id],
+        supersedes_episode_id="episode-old",
+        now=clock[0],
+    )
+
+    assert proposal["status"] == "pending"
+    applied = service.review_reflection_proposal(
+        "agent-a",
+        proposal_id=proposal["proposalId"],
+        decision="approve",
+        reviewer_kind="operator",
+        now=clock[0],
+    )
+
+    assert applied["proposal"]["status"] == "approved"
+    assert applied["memoryReconciliationReceipt"]["episodeId"] == "episode-new"
+    assert supersede_calls == [("agent-a", "episode-old", "episode-new")]
+    receipt = service.store.read_jsonl(
+        "agent-a", "memory/reconciliation_receipts.jsonl"
+    )[-1]
+    assert receipt["supersededEpisodeId"] == "episode-old"
+    assert receipt["episodeId"] == "episode-new"
 
 
 def test_environment_supersession_preserves_history_and_location_requires_travel_time(
@@ -285,3 +426,29 @@ def test_environment_supersession_preserves_history_and_location_requires_travel
     prompt_payload = service.build_prompt_segments("agent-a")[1]["block"]
     assert "weather-tool:receipt-2" not in prompt_payload
     assert "activity:walk-to-library" not in prompt_payload
+
+
+def test_legacy_accepted_reflection_requires_fresh_review_before_use(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 8, 29, 12, 0, tzinfo=UTC)]
+    service, _episodes = _service(tmp_path, clock=clock)
+    event_id = _record_lived_event(service, clock[0])
+    service.store.append_jsonl(
+        "agent-a",
+        "reflections/proposals.jsonl",
+        {
+            "proposalId": "legacy-accepted",
+            "sourceKind": "lived_event",
+            "targetKind": "self_narrative",
+            "text": "旧版本曾自动接受的自我判断。",
+            "status": "accepted",
+            "sourceEventIds": [event_id],
+        },
+    )
+
+    proposal = service.list_reflection_proposals("agent-a")[0]
+
+    assert proposal["status"] == "pending"
+    assert proposal["validationReason"] == "legacy_accepted_requires_review"
+    assert proposal["text"] not in service.build_prompt_segments("agent-a")[1]["block"]

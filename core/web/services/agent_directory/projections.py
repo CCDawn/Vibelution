@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import copy
 import time
+from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ..agent_config_authority import (
     normalize_permission_preset,
@@ -617,8 +618,7 @@ def agent_conversation_index_classification(
     )
     looks_team_owned = (
         has_team_marker
-        or role_key.startswith("challenge_cup_")
-        or role_key.startswith("knowledge_expansion_")
+        or role_key.startswith(("challenge_cup_", "knowledge_expansion_"))
         or created_by in s.TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY
     )
     if not explicit_kind and looks_team_owned:
@@ -715,10 +715,11 @@ def active_agent_runtime(
     )
     externally_blocked_tools: list[str] = []
     if agent_id:
+        from core.agent_plugins.virtual_human_life.manifest import (
+            VIRTUAL_HUMAN_TOOL_NAMES,
+        )
+
         try:
-            from core.agent_plugins.virtual_human_life.manifest import (
-                VIRTUAL_HUMAN_TOOL_NAMES,
-            )
             from core.web.services.virtual_human_life_service import (
                 virtual_human_binding,
             )
@@ -726,18 +727,11 @@ def active_agent_runtime(
             plugin_binding = virtual_human_binding(agent_id)
             if not plugin_binding or not bool(plugin_binding.get("enabled")):
                 externally_blocked_tools = list(VIRTUAL_HUMAN_TOOL_NAMES)
-        except Exception:
+        except Exception:  # noqa: BLE001 - deny-first if plugin binding lookup fails
             # Plugin visibility is a deny-first boundary. If its binding cannot be
             # resolved, keep the normal Agent surface intact but hide this plugin's
             # tools until the binding can be read again.
-            externally_blocked_tools = [
-                "virtual_human_status_tool",
-                "virtual_human_schedule_tool",
-                "virtual_human_activity_tool",
-                "virtual_human_diary_tool",
-                "virtual_human_relationship_tool",
-                "virtual_human_proactive_message_tool",
-            ]
+            externally_blocked_tools = list(VIRTUAL_HUMAN_TOOL_NAMES)
     context = {
         "agentId": str(agent_id or "").strip(),
         "sessionId": str(session_id or "").strip(),

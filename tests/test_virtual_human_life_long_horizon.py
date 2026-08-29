@@ -3,10 +3,141 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from core.agent_plugins.virtual_human_life.calendar import (
+    append_calendar_change,
+    project_calendar_for_date,
+)
+from core.agent_plugins.virtual_human_life.rhythms import (
+    apply_completed_activity_to_rhythm,
+    default_rhythm_projection,
+    project_rhythm_state,
+)
 from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
 
-
 UTC = timezone.utc
+
+
+def test_calendar_expands_recurrence_exception_cancellation_and_conflicts() -> None:
+    events: list[dict] = []
+    events = append_calendar_change(
+        events,
+        {
+            "operation": "upsert",
+            "eventId": "calendar-weekly-creative",
+            "title": "每周创作",
+            "kind": "recurring",
+            "startAt": "2026-09-01T19:00:00+08:00",
+            "endAt": "2026-09-01T20:30:00+08:00",
+            "timezone": "Asia/Shanghai",
+            "recurrence": {"frequency": "weekly", "byWeekday": [1]},
+        },
+    )
+    events = append_calendar_change(
+        events,
+        {
+            "operation": "upsert",
+            "eventId": "calendar-anniversary",
+            "title": "重要纪念日",
+            "kind": "anniversary",
+            "startAt": "2026-09-08T19:30:00+08:00",
+            "endAt": "2026-09-08T20:30:00+08:00",
+            "timezone": "Asia/Shanghai",
+            "recurrence": {"frequency": "yearly", "month": 9, "day": 8},
+        },
+    )
+    events = append_calendar_change(
+        events,
+        {
+            "operation": "exception",
+            "eventId": "calendar-weekly-creative",
+            "occurrenceDate": "2026-09-08",
+            "reason": "旅行取消本次活动",
+        },
+    )
+    events = append_calendar_change(
+        events,
+        {
+            "operation": "upsert",
+            "eventId": "calendar-conflict",
+            "title": "冲突安排",
+            "kind": "one_off",
+            "startAt": "2026-09-08T19:45:00+08:00",
+            "endAt": "2026-09-08T20:15:00+08:00",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+    projected = project_calendar_for_date(events, "2026-09-08", timezone_name="Asia/Shanghai")
+    assert [item["calendarEventId"] for item in projected["occurrences"]] == [
+        "calendar-anniversary",
+        "calendar-conflict",
+    ]
+    assert projected["conflicts"][0]["eventIds"] == [
+        "calendar-anniversary",
+        "calendar-conflict",
+    ]
+
+    cancelled = append_calendar_change(
+        events,
+        {
+            "operation": "cancel",
+            "eventId": "calendar-conflict",
+            "reason": "改期",
+        },
+    )
+    after_cancel = project_calendar_for_date(
+        cancelled, "2026-09-08", timezone_name="Asia/Shanghai"
+    )
+    assert [item["calendarEventId"] for item in after_cancel["occurrences"]] == [
+        "calendar-anniversary",
+    ]
+    assert after_cancel["conflicts"] == []
+
+
+def test_rhythm_needs_recover_and_single_late_sleep_does_not_change_chronotype() -> None:
+    initial = default_rhythm_projection(
+        now=datetime(2026, 9, 1, 12, tzinfo=UTC), timezone_name="Asia/Shanghai"
+    )
+    late_sleep = {
+        "eventId": "event-late-sleep",
+        "kind": "activity_completed",
+        "activityKind": "sleep",
+        "occurredAt": "2026-08-31T22:00:00+00:00",
+        "outcome": {"status": "succeeded", "summary": "临时熬夜后补觉"},
+    }
+    after_one = apply_completed_activity_to_rhythm(
+        initial, late_sleep, now=datetime(2026, 8, 31, 22, tzinfo=UTC)
+    )
+    assert after_one["chronotype"]["label"] == "balanced"
+    assert after_one["chronotype"]["evidenceCount"] == 1
+    assert after_one["chronotype"]["adaptationStatus"] == "stable"
+
+    repeated = [
+        {
+            **late_sleep,
+            "eventId": f"event-late-sleep-{index}",
+            "occurredAt": f"2026-09-0{index - 1}T22:00:00+00:00",
+        }
+        for index in (2, 3)
+    ]
+    adapted = after_one
+    for event in repeated:
+        adapted = apply_completed_activity_to_rhythm(
+            adapted,
+            event,
+            now=datetime.fromisoformat(event["occurredAt"]),
+        )
+    assert adapted["chronotype"]["evidenceCount"] == 3
+    assert adapted["chronotype"]["label"] == "evening"
+    assert adapted["chronotype"]["adaptationStatus"] == "adapted"
+
+    projected = project_rhythm_state(
+        adapted,
+        now=datetime(2026, 9, 4, 1, tzinfo=UTC),
+        timezone_name="Asia/Shanghai",
+    )
+    assert after_one["needs"]["sleep"]["level"] < initial["needs"]["sleep"]["level"]
+    assert projected["needs"]["sleep"]["level"] > adapted["needs"]["sleep"]["level"]
+    assert projected["circadian"]["localHour"] == 9
 
 
 def test_injected_clock_crosses_midnight_without_waiting_days_and_keeps_agents_isolated(
@@ -171,8 +302,26 @@ def test_injected_clock_crosses_midnight_without_waiting_days_and_keeps_agents_i
     # The deterministic day may contain other already elapsed simulated
     # activities.  The contract is that the source-backed event participates
     # once, not that it is the only lived event reviewed that night.
-    assert nightly["acceptedReflectionCount"] >= 1
-    assert nightly["reinforcedMemoryCount"] >= 1
+    assert nightly["pendingReflectionCount"] >= 1
+    assert nightly["acceptedReflectionCount"] == 0
+    assert nightly["reinforcedMemoryCount"] == 0
+    pending = next(
+        item
+        for item in service.list_reflection_proposals("agent-a")
+        if event_id in item.get("sourceEventIds", [])
+        and item["status"] == "pending"
+    )
+    approved = service.review_reflection_proposal(
+        "agent-a",
+        proposal_id=pending["proposalId"],
+        decision="approve",
+        reviewer_kind="operator",
+        review_note="加速场景中完成来源审核。",
+        now=clock[0],
+    )
+    assert approved["proposal"]["status"] == "approved"
+    assert approved["reinforcementReceipt"]["sourceEventIds"] == [event_id]
+    nighttime = service.snapshot("agent-a")
     assert nighttime["causal"]["proactiveCandidates"][-1][
         "suppressionReason"
     ] == "quiet_hours"

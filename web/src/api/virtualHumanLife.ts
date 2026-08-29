@@ -1,12 +1,30 @@
 import { fetchJson } from "./client";
 import type {
   VirtualHumanEpisodicMemory,
+  VirtualHumanCommandRequest,
+  VirtualHumanCommandResponse,
   VirtualHumanDiaryEntry,
   VirtualHumanLifeEvent,
   VirtualHumanRelationship,
   VirtualHumanScheduleBundle,
   VirtualHumanSnapshot,
 } from "./types";
+
+export function executeVirtualHumanCommand(
+  agentId: string,
+  payload: VirtualHumanCommandRequest,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanCommandResponse> {
+  return fetchJson<VirtualHumanCommandResponse>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/commands`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    },
+  );
+}
 
 export function fetchVirtualHumanSnapshot(
   agentId: string,

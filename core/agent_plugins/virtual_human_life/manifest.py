@@ -9,7 +9,7 @@ from .prompt_pack import PROMPT_PACK_FILES
 PLUGIN_ID = "virtual-human-life"
 TOOL_BUNDLE_ID = "virtual_human_life"
 PROMPT_PACK_ID = "virtual_human_life_v1"
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.2.0"
 STORAGE_SCHEMA_VERSION = 1
 
 VIRTUAL_HUMAN_TOOL_NAMES = (
@@ -18,6 +18,7 @@ VIRTUAL_HUMAN_TOOL_NAMES = (
     "virtual_human_activity_tool",
     "virtual_human_diary_tool",
     "virtual_human_relationship_tool",
+    "virtual_human_reflection_tool",
     "virtual_human_proactive_message_tool",
 )
 
@@ -46,6 +47,15 @@ def manifest_projection() -> dict[str, Any]:
             "life.memory_reinforcement",
             "life.environment_facts",
             "life.location_continuity",
+            "life.long_term_calendar",
+            "life.rhythms",
+            "life.interests",
+            "life.world_model",
+            "life.social_circle",
+            "life.local_feed",
+            "life.expression_policy",
+            "life.optional_embodiment",
+            "life.reflection_review_queue",
         ],
         "hooks": [
             "onHostStart",

@@ -13,6 +13,14 @@
 | 关系事件、每日变化上限、阶段迟滞和自然回落 | `relationship_events.py` |
 | 主动候选、未回复降速、未完话题和承诺 | `conversation_continuity.py` |
 | 夜间反思、记忆强化和来源校验 | `reflection.py` |
+| 长期日历、周期事件、例外和冲突 | `calendar.py` |
+| 昼夜节律与非医疗生活需要 | `rhythms.py` |
+| 阅读、新闻、创作和练习兴趣投影 | `interests.py` |
+| 熟悉地点、路线和重要物品 | `world_model.py` |
+| 稳定 NPC 社会圈 | `social_circle.py` |
+| 本地生活动态、日记和作品聚合 | `life_feed.py` |
+| 有条件、可排序、可解释的表达规则 | `expression_policy.py` |
+| 可选语音/3D/Live2D provider 回退 | `embodiment.py` |
 | 环境事实 supersession 与位置移动连续性 | `environment.py` |
 | 因果存储路径、schema 和授权复用来源 receipt | `causal_contracts.py` |
 | Agent 私有目录、原子 JSON/JSONL 读写和路径边界 | `storage.py` |
@@ -35,6 +43,11 @@
 - 主动消息先进入候选池，候选未出队不创建 Turn；未回复、重复主题、免打扰、忙碌和睡眠都有可解释抑制原因。
 - 夜间反思只强化有来源的生活记忆；梦境与仅计划内容不能成为外部事实或自我历史。
 - 环境事实保留来源和 supersession 历史；位置移动必须经过明确耗时后才能到达。
+- 长期日历只提供跨日约束；每日 Schedule 仍是当天活动执行状态的唯一权威。
+- 作息画像只由明确配置或重复可信经历改变；睡眠和忙碌不延迟用户实时消息。
+- 偏好、习惯、技能、自我叙事和记忆纠错提案未经审核不得进入 Prompt；Persona 核心与 ToolPolicy 不可由提案改写。
+- 兴趣只从可验证的成功 outcome 成长；NPC 不是 Agent，生活动态也不反向写入生活经历。
+- 具身化 provider 和资产均为可选；没有授权资产或 provider 不健康时回退现有立绘，文本会话不受影响。
 
 ## 主测试
 
@@ -45,5 +58,6 @@
 - `tests/test_virtual_human_life_causality.py`
 - `tests/test_virtual_human_life_reflection.py`
 - `tests/test_virtual_human_life_long_horizon.py`
+- `tests/test_virtual_human_life_continuity.py`
 
 产品契约见 [`docs/prds/2026-08-27-virtual-human-life-plugin.md`](../../../docs/prds/2026-08-27-virtual-human-life-plugin.md)。

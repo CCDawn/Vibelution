@@ -83,6 +83,16 @@ def test_agent_plugin_and_virtual_human_routes_are_typed_and_agent_scoped(tmp_pa
         )
         assert snapshot.status_code == 200
         assert snapshot.json()["causal"]["schemaVersion"] == 1
+        assert snapshot.json()["todayCalendar"]["localDate"] == "2026-08-27"
+        assert snapshot.json()["tomorrowCalendar"]["localDate"] == "2026-08-28"
+        assert snapshot.json()["rhythms"]["chronotype"]["label"] == "balanced"
+        assert snapshot.json()["causal"]["socialCircle"]["npcs"] == []
+        assert isinstance(snapshot.json()["causal"]["lifeFeed"], list)
+        assert all(
+            item["sourceEventIds"]
+            for item in snapshot.json()["causal"]["lifeFeed"]
+        )
+        assert snapshot.json()["causal"]["embodiment"]["activeMode"] == "portrait"
         assert snapshot.json()["state"]["locationStatus"] == "stationary"
         state_version = snapshot.json()["state"]["stateVersion"]
         activity_id = next(
@@ -245,6 +255,70 @@ def test_virtual_human_command_rejects_agent_id_mismatch_and_stale_version(tmp_p
             },
         )
         assert stale.status_code == 409
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_operator_can_review_reflection_through_agent_scoped_command(tmp_path) -> None:
+    client, service = _client(tmp_path)
+    try:
+        enabled = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={"enabled": True, "expectedVersion": 0, "config": {}},
+        )
+        assert enabled.status_code == 200, enabled.text
+        service.store.append_jsonl(
+            "agent-a",
+            "events/2026-08-27.jsonl",
+            {
+                "eventId": "event-review-api",
+                "agentId": "agent-a",
+                "kind": "activity_completed",
+                "activityKind": "creative",
+                "title": "完成一段独立创作",
+                "localDate": "2026-08-27",
+                "occurredAt": "2026-08-27T09:00:00+00:00",
+                "outcome": {"status": "succeeded", "summary": "完成并保存了作品。"},
+            },
+        )
+        proposal = service.record_reflection_proposal(
+            "agent-a",
+            proposal_id="reflection-review-api",
+            source_kind="lived_event",
+            target_kind="self_narrative",
+            text="我开始相信自己能独立完成创作。",
+            source_event_ids=["event-review-api"],
+        )
+        assert proposal["status"] == "pending"
+        expected_version = service.snapshot("agent-a")["state"]["stateVersion"]
+        payload = {
+            "agentId": "agent-a",
+            "command": "reviewReflectionProposal",
+            "expectedVersion": expected_version,
+            "idempotencyKey": "operator-review-api-v1",
+            "arguments": {
+                "proposalId": proposal["proposalId"],
+                "decision": "approve",
+                "reviewerKind": "operator",
+            },
+        }
+
+        reviewed = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/commands",
+            json=payload,
+        )
+        duplicate = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/commands",
+            json=payload,
+        )
+
+        assert reviewed.status_code == 200, reviewed.text
+        assert duplicate.status_code == 200, duplicate.text
+        assert duplicate.json() == reviewed.json()
+        assert reviewed.json()["result"]["proposal"]["status"] == "approved"
+        causal = service.snapshot("agent-a")["causal"]["reflections"]
+        assert causal["pendingCount"] == 0
+        assert causal["approvedCount"] == 1
     finally:
         set_virtual_human_life_service_for_tests(None)
 
@@ -491,10 +565,10 @@ def test_virtual_human_persona_initializer_preserves_user_authored_or_cleared_pr
 def test_default_schedule_planner_reuses_agent_dialogue_route_without_tools(
     monkeypatch,
 ) -> None:
-    from core.web.services import agent_directory_service
+    import config.settings as settings_module
     import core.llm as llm_module
     import core.llm.agent_runtime as agent_runtime_module
-    import config.settings as settings_module
+    from core.web.services import agent_directory_service
 
     agent = {
         "agentId": "agent-a",

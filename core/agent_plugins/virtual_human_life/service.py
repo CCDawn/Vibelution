@@ -27,6 +27,11 @@ from .affect import (
     episode_from_relationship_event,
     project_affect,
 )
+from .calendar import (
+    append_calendar_change,
+    merge_calendar_into_schedule,
+    project_calendar_for_date,
+)
 from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
 from .conversation_continuity import (
     build_proactive_candidate,
@@ -47,12 +52,16 @@ from .drives import (
     link_schedule_to_drives,
     prompt_drive_summary,
 )
+from .embodiment import resolve_embodiment
 from .environment import (
     append_environment_fact,
     complete_location_movement,
     project_environment,
     start_location_movement,
 )
+from .expression_policy import project_expression_rules
+from .interests import project_interests
+from .life_feed import build_life_feed
 from .manifest import (
     PLUGIN_ID,
     PROMPT_PACK_FILES,
@@ -67,13 +76,22 @@ from .planning import (
     validate_schedule_proposal,
 )
 from .prompt_pack import load_prompt_pack
-from .relationship_events import make_relationship_event, project_relationships
 from .reflection import (
     build_nightly_reflection_proposals,
     project_memory_strength,
+    transition_reflection_proposal,
     validate_reflection_proposal,
 )
+from .relationship_events import make_relationship_event, project_relationships
+from .rhythms import (
+    apply_completed_activity_to_rhythm,
+    default_rhythm_projection,
+    project_rhythm_state,
+    rhythm_constraints,
+)
+from .social_circle import upsert_npc
 from .storage import VirtualHumanLifeStorageError, VirtualHumanLifeStore
+from .world_model import record_important_item, record_place_visit
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +141,31 @@ def _clamp(value: object, minimum: int, maximum: int, default: int) -> int:
     return max(minimum, min(maximum, parsed))
 
 
+def _string_list(value: object, *, limit: int = 32, item_limit: int = 240) -> list[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return list(
+        dict.fromkeys(
+            str(item).strip()[:item_limit]
+            for item in value
+            if str(item).strip()
+        )
+    )[:limit]
+
+
+def _normalize_reflection_rows(rows: object) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for raw in rows if isinstance(rows, list) else []:
+        if not isinstance(raw, Mapping):
+            continue
+        item = deepcopy(dict(raw))
+        if str(item.get("status") or "").strip().lower() == "accepted":
+            item["status"] = "pending"
+            item["validationReason"] = "legacy_accepted_requires_review"
+        normalized.append(item)
+    return normalized
+
+
 def _local_date_text(value: object) -> str:
     normalized = str(value or "").strip()
     date.fromisoformat(normalized)
@@ -142,6 +185,8 @@ class VirtualHumanLifeService:
         | None = None,
         episodic_writer: Callable[..., dict[str, Any]] | None = None,
         episodic_lister: Callable[..., list[dict[str, Any]]] | None = None,
+        episodic_superseder: Callable[..., dict[str, Any]] | None = None,
+        embodiment_health_provider: Callable[[str], dict[str, Any]] | None = None,
         schedule_planner: Callable[[dict[str, Any]], Any] | None = None,
         schedule_planner_timeout_seconds: float = 2.0,
         now_provider: Callable[[], datetime] = _utc_now,
@@ -158,6 +203,8 @@ class VirtualHumanLifeService:
         self.delivery_receipt_resolver = delivery_receipt_resolver
         self.episodic_writer = episodic_writer
         self.episodic_lister = episodic_lister
+        self.episodic_superseder = episodic_superseder
+        self.embodiment_health_provider = embodiment_health_provider
         self.schedule_planner = schedule_planner
         self.schedule_planner_timeout_seconds = max(
             0.2, min(30.0, float(schedule_planner_timeout_seconds or 2.0))
@@ -321,8 +368,37 @@ class VirtualHumanLifeService:
         state = self.store.read_json(agent_id, "state.json")
         today_schedule = self.store.read_json(agent_id, f"schedules/{today}.json")
         tomorrow_schedule = self.store.read_json(agent_id, f"schedules/{tomorrow}.json")
+        if isinstance(binding, dict) and bool(binding.get("enabled")):
+            if isinstance(today_schedule, dict):
+                today_schedule = self._sync_calendar_schedule(
+                    agent_id, today_schedule, binding=binding
+                )
+            if isinstance(tomorrow_schedule, dict):
+                tomorrow_schedule = self._sync_calendar_schedule(
+                    agent_id, tomorrow_schedule, binding=binding
+                )
         usage = self.proactive_usage(agent_id, today)
         causal = self._causal_projection(agent_id, now=local_now)
+        rhythm = self.rhythm_for(agent_id)
+        today_calendar = project_calendar_for_date(
+            self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+            today,
+            timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+        )
+        tomorrow_calendar = project_calendar_for_date(
+            self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+            tomorrow,
+            timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+        )
+        self._record_calendar_conflicts(
+            agent_id,
+            start_date=today,
+            end_date=tomorrow,
+            conflicts=[
+                *list(today_calendar.get("conflicts") or []),
+                *list(tomorrow_calendar.get("conflicts") or []),
+            ],
+        )
         return {
             "pluginId": PLUGIN_ID,
             "agentId": str(agent_id or "").strip(),
@@ -332,6 +408,9 @@ class VirtualHumanLifeService:
             "state": state,
             "todaySchedule": today_schedule,
             "tomorrowSchedule": tomorrow_schedule,
+            "todayCalendar": today_calendar,
+            "tomorrowCalendar": tomorrow_calendar,
+            "rhythms": rhythm,
             "proactiveUsage": usage,
             "causal": causal,
             "storageSchemaVersion": STORAGE_SCHEMA_VERSION,
@@ -355,6 +434,9 @@ class VirtualHumanLifeService:
                 agent_id, date.fromisoformat(local_date), binding
             )
             self.store.write_json(agent_id, f"schedules/{local_date}.json", payload)
+        binding = self.binding_for(agent_id)
+        if isinstance(binding, dict) and bool(binding.get("enabled")):
+            payload = self._sync_calendar_schedule(agent_id, payload, binding=binding)
         return deepcopy(payload)
 
     def save_schedule(self, agent_id: str, schedule: dict[str, Any]) -> dict[str, Any]:
@@ -374,7 +456,225 @@ class VirtualHumanLifeService:
             or default_drive_projection(now=self._now()),
         )
         self.store.write_json(agent_id, f"schedules/{local_date}.json", normalized)
+        normalized = self._sync_calendar_schedule(
+            agent_id, normalized, binding=binding, now=self._now()
+        )
         return deepcopy(normalized)
+
+    def calendar_events(self, agent_id: str) -> list[dict[str, Any]]:
+        """Return the effective calendar definitions for one bound Agent."""
+
+        self.require_agent(agent_id)
+        from .calendar import effective_calendar_events
+
+        return effective_calendar_events(
+            self.store.read_jsonl(agent_id, "calendar/events.jsonl")
+        )
+
+    def calendar_for(
+        self,
+        agent_id: str,
+        local_date: str | None = None,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Project calendar occurrences and conflicts for a bounded date range."""
+
+        self.require_agent(agent_id)
+        binding = self.binding_for(agent_id)
+        if binding is None:
+            return {
+                "agentId": str(agent_id).strip(),
+                "timezone": "Asia/Shanghai",
+                "startDate": str(local_date or start_date or ""),
+                "endDate": str(local_date or end_date or ""),
+                "days": [],
+                "occurrences": [],
+                "conflicts": [],
+            }
+        chosen_start = local_date or start_date or self._local_now(binding).date().isoformat()
+        chosen_end = local_date or end_date or chosen_start
+        start = date.fromisoformat(_local_date_text(chosen_start))
+        end = date.fromisoformat(_local_date_text(chosen_end))
+        if end < start:
+            raise VirtualHumanLifeError("calendar endDate must not precede startDate")
+        if end - start > timedelta(days=31):
+            raise VirtualHumanLifeError("calendar projection range must not exceed 31 days")
+        ledger = self.store.read_jsonl(agent_id, "calendar/events.jsonl")
+        days: list[dict[str, Any]] = []
+        all_occurrences: list[dict[str, Any]] = []
+        all_conflicts: list[dict[str, Any]] = []
+        cursor = start
+        while cursor <= end:
+            projection = project_calendar_for_date(
+                ledger,
+                cursor,
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+            )
+            days.append(projection)
+            all_occurrences.extend(projection["occurrences"])
+            all_conflicts.extend(projection["conflicts"])
+            cursor += timedelta(days=1)
+        self._record_calendar_conflicts(
+            agent_id,
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+            conflicts=all_conflicts,
+        )
+        return {
+            "agentId": str(agent_id).strip(),
+            "timezone": str(binding.get("timezone") or "Asia/Shanghai"),
+            "startDate": start.isoformat(),
+            "endDate": end.isoformat(),
+            "days": days,
+            "occurrences": all_occurrences,
+            "conflicts": all_conflicts,
+        }
+
+    def rhythm_for(self, agent_id: str) -> dict[str, Any] | None:
+        """Return the latest independent rhythm projection without mutating it."""
+
+        self.require_agent(agent_id)
+        binding = self.binding_for(agent_id)
+        if binding is None:
+            return None
+        projection = self.store.read_json(agent_id, "rhythms/state.json")
+        if projection is None:
+            projection = default_rhythm_projection(
+                now=self._now(),
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                config=binding.get("rhythmConfig")
+                if isinstance(binding.get("rhythmConfig"), dict)
+                else None,
+            )
+        return project_rhythm_state(
+            projection,
+            now=self._now(),
+            timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+            config=binding.get("rhythmConfig")
+            if isinstance(binding.get("rhythmConfig"), dict)
+            else None,
+        )
+
+    def _record_calendar_conflicts(
+        self,
+        agent_id: str,
+        *,
+        start_date: str,
+        end_date: str,
+        conflicts: list[dict[str, Any]],
+    ) -> None:
+        """Persist the current conflict status as an auditable projection ledger."""
+
+        rows = self.store.read_jsonl(agent_id, "calendar/conflicts.jsonl")
+        now = _iso(self._now())
+        active_keys = {
+            (str(item.get("localDate") or ""), str(item.get("conflictId") or ""))
+            for item in conflicts
+            if isinstance(item, dict)
+        }
+        changed = False
+        for conflict in conflicts:
+            if not isinstance(conflict, dict):
+                continue
+            conflict_id = str(conflict.get("conflictId") or "").strip()
+            if not conflict_id:
+                continue
+            local_date = str(conflict.get("localDate") or start_date)
+            # A conflict is projected for a date range; callers normally pass a
+            # single day, while range projections remain grouped by their first
+            # requested date.  Preserve the occurrence date when available.
+            existing = next(
+                (
+                    row
+                    for row in rows
+                    if str(row.get("conflictId") or "") == conflict_id
+                    and str(row.get("localDate") or "") == local_date
+                ),
+                None,
+            )
+            payload = {
+                **deepcopy(conflict),
+                "localDate": local_date,
+                "status": "unresolved",
+                "updatedAt": now,
+            }
+            if existing is None:
+                payload["firstSeenAt"] = now
+                rows.append(payload)
+                changed = True
+            else:
+                for key, value in payload.items():
+                    if existing.get(key) != value and key != "updatedAt":
+                        existing[key] = value
+                        changed = True
+                if existing.get("status") != "unresolved":
+                    existing["status"] = "unresolved"
+                    changed = True
+                existing["updatedAt"] = now
+        for row in rows:
+            local_date = str(row.get("localDate") or "")
+            if not local_date or not (start_date <= local_date <= end_date):
+                continue
+            key = (local_date, str(row.get("conflictId") or ""))
+            if key not in active_keys and str(row.get("status") or "") == "unresolved":
+                row["status"] = "resolved"
+                row["resolvedAt"] = now
+                row["updatedAt"] = now
+                changed = True
+        if changed:
+            self.store.write_jsonl(agent_id, "calendar/conflicts.jsonl", rows[-2048:])
+
+    def _sync_calendar_schedule(
+        self,
+        agent_id: str,
+        schedule: dict[str, Any],
+        *,
+        binding: dict[str, Any],
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        local_date = str(schedule.get("localDate") or "").strip()
+        if not local_date:
+            return schedule
+        projection = project_calendar_for_date(
+            self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+            local_date,
+            timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+        )
+        self._record_calendar_conflicts(
+            agent_id,
+            start_date=local_date,
+            end_date=local_date,
+            conflicts=projection.get("conflicts") or [],
+        )
+        synced, changed = merge_calendar_into_schedule(
+            schedule,
+            projection,
+            now=now or self._now(),
+        )
+        if changed:
+            self.store.write_json(agent_id, f"schedules/{local_date}.json", synced)
+        return synced
+
+    def _sync_calendar_schedules_for_dates(
+        self,
+        agent_id: str,
+        *,
+        binding: dict[str, Any],
+        local_dates: Iterable[str],
+    ) -> None:
+        for local_date in sorted({str(item).strip() for item in local_dates if str(item).strip()}):
+            try:
+                date.fromisoformat(local_date)
+            except ValueError:
+                continue
+            path = f"schedules/{local_date}.json"
+            schedule = self.store.read_json(agent_id, path)
+            if isinstance(schedule, dict):
+                self._sync_calendar_schedule(
+                    agent_id, schedule, binding=binding, now=self._now()
+                )
 
     def build_prompt_segments(
         self,
@@ -405,6 +705,7 @@ class VirtualHumanLifeService:
             else {}
         )
         causal = snapshot.get("causal") if isinstance(snapshot.get("causal"), dict) else {}
+        rhythm_projection = snapshot.get("rhythms") if isinstance(snapshot.get("rhythms"), dict) else {}
         open_loop_projection = (
             causal.get("openLoops") if isinstance(causal.get("openLoops"), dict) else {}
         )
@@ -467,7 +768,7 @@ class VirtualHumanLifeService:
                     "observedAt": str(item.get("observedAt") or ""),
                 }
                 for item in list(
-                    ((causal.get("environment") or {}).get("currentFacts") or [])
+                    (causal.get("environment") or {}).get("currentFacts") or []
                 )[:8]
                 if isinstance(item, dict)
             ],
@@ -475,13 +776,13 @@ class VirtualHumanLifeService:
                 {
                     "targetKind": str(item.get("targetKind") or "")[:60],
                     "text": str(item.get("text") or "")[:240],
-                    "sourceEventIds": list(item.get("sourceEventIds") or [])[:8],
+                    "sourceEventIds": _string_list(item.get("sourceEventIds"), limit=8, item_limit=200),
                 }
                 for item in list(
-                    ((causal.get("reflections") or {}).get("recent") or [])
+                    (causal.get("reflections") or {}).get("recent") or []
                 )[-4:]
                 if isinstance(item, dict)
-                and str(item.get("status") or "") == "accepted"
+                and str(item.get("status") or "") == "approved"
                 and str(item.get("sourceKind") or "") != "dream"
             ],
             "openLoops": [
@@ -493,6 +794,53 @@ class VirtualHumanLifeService:
                 }
                 for item in list(open_loop_projection.get("open") or [])[:6]
                 if isinstance(item, dict)
+            ],
+            "rhythmConstraints": rhythm_constraints(rhythm_projection),
+            "calendarConstraints": [
+                {
+                    "calendarEventId": str(item.get("calendarEventId") or "")[:160],
+                    "title": str(item.get("title") or "")[:160],
+                    "startAt": str(item.get("startAt") or ""),
+                    "endAt": str(item.get("endAt") or ""),
+                }
+                for item in list((snapshot.get("todayCalendar") or {}).get("occurrences") or [])[:8]
+                if isinstance(item, Mapping)
+            ],
+            "interests": [
+                {
+                    "label": str(item.get("label") or "")[:80],
+                    "level": int(item.get("level") or 1),
+                    "lastOutcomeSummary": str(item.get("lastOutcomeSummary") or "")[:180],
+                }
+                for item in list((causal.get("interests") or {}).get("items") or [])[:8]
+                if isinstance(item, Mapping)
+            ],
+            "familiarPlaces": [
+                {
+                    "label": str(item.get("label") or "")[:120],
+                    "visitCount": int(item.get("visitCount") or 0),
+                    "livingSpace": bool(item.get("livingSpace")),
+                }
+                for item in list((causal.get("world") or {}).get("places") or [])[:8]
+                if isinstance(item, Mapping)
+            ],
+            "socialCircle": [
+                {
+                    "displayName": str(item.get("displayName") or "")[:120],
+                    "role": str(item.get("role") or "")[:160],
+                    "traits": _string_list(item.get("traits"), limit=6, item_limit=80),
+                }
+                for item in list((causal.get("socialCircle") or {}).get("npcs") or [])[:8]
+                if isinstance(item, Mapping)
+            ],
+            "expressionRules": [
+                {
+                    "scope": str(item.get("scope") or "")[:60],
+                    "action": deepcopy(item.get("action") or {}),
+                    "explanation": str(item.get("explanation") or "")[:200],
+                }
+                for item in list((causal.get("expression") or {}).get("applied") or [])[:8]
+                if isinstance(item, Mapping)
             ],
             "proactiveTrigger": (
                 {
@@ -587,6 +935,24 @@ class VirtualHumanLifeService:
             state = self.store.read_json(agent_id, "state.json") or self._default_state(
                 agent_id, binding
             )
+            rhythm_projection = self.store.read_json(agent_id, "rhythms/state.json")
+            if rhythm_projection is None:
+                rhythm_projection = default_rhythm_projection(
+                    now=current,
+                    timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                    config=binding.get("rhythmConfig")
+                    if isinstance(binding.get("rhythmConfig"), dict)
+                    else None,
+                )
+            rhythm_projection = project_rhythm_state(
+                rhythm_projection,
+                now=current,
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                config=binding.get("rhythmConfig")
+                if isinstance(binding.get("rhythmConfig"), dict)
+                else None,
+            )
+            self.store.write_json(agent_id, "rhythms/state.json", rhythm_projection)
             # ``localDate`` is a runtime projection, not an enable-time constant.  Keep
             # it aligned with the binding timezone even when the only thing that
             # happened since the previous heartbeat was crossing local midnight.
@@ -708,6 +1074,9 @@ class VirtualHumanLifeService:
                         tomorrow_path,
                         generated_tomorrow,
                     )
+                    self._sync_calendar_schedule(
+                        agent_id, generated_tomorrow, binding=binding, now=current
+                    )
             elif self.store.read_json(agent_id, f"schedules/{tomorrow.isoformat()}.json") is None:
                 # Keep startup/pre-night behavior deterministic and cheap.  The
                 # nightly pass above is the only point that asks an injected
@@ -716,6 +1085,15 @@ class VirtualHumanLifeService:
                     agent_id,
                     f"schedules/{tomorrow.isoformat()}.json",
                     self._deterministic_schedule(agent_id, tomorrow, binding),
+                )
+                self._sync_calendar_schedule(
+                    agent_id,
+                    self.store.read_json(
+                        agent_id, f"schedules/{tomorrow.isoformat()}.json"
+                    )
+                    or {},
+                    binding=binding,
+                    now=current,
                 )
             state["currentActivityId"] = current_activity_id
             state["sleepState"] = self._derive_sleep_state(
@@ -754,7 +1132,7 @@ class VirtualHumanLifeService:
                     continue
                 diary_created += int(review.get("createdDiaryCount") or 0)
                 memory_promoted += int(review.get("promotedMemoryCount") or 0)
-            accepted_reflections = 0
+            pending_reflections = 0
             reinforced_memories = 0
             reflection_dates = {
                 review_date
@@ -776,8 +1154,8 @@ class VirtualHumanLifeService:
                         type(exc).__name__,
                     )
                     continue
-                accepted_reflections += int(
-                    reflection_review.get("acceptedProposalCount") or 0
+                pending_reflections += int(
+                    reflection_review.get("pendingProposalCount") or 0
                 )
                 reinforced_memories += int(
                     reflection_review.get("reinforcedMemoryCount") or 0
@@ -808,7 +1186,8 @@ class VirtualHumanLifeService:
                 ),
                 "createdDiaryCount": diary_created,
                 "promotedMemoryCount": memory_promoted,
-                "acceptedReflectionCount": accepted_reflections,
+                "pendingReflectionCount": pending_reflections,
+                "acceptedReflectionCount": 0,
                 "reinforcedMemoryCount": reinforced_memories,
                 "dispatchedToolActivityCount": dispatched_tool_activity_count,
                 **candidate_result,
@@ -888,7 +1267,9 @@ class VirtualHumanLifeService:
         self.require_agent(agent_id)
         bounded = max(1, min(500, int(limit or 100)))
         return deepcopy(
-            self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")[-bounded:]
+            _normalize_reflection_rows(
+                self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+            )[-bounded:]
         )
 
     def list_environment_facts(
@@ -918,10 +1299,17 @@ class VirtualHumanLifeService:
         )
 
     def _all_lived_event_ids(self, agent_id: str) -> set[str]:
+        return {
+            str(item.get("eventId") or "").strip()
+            for item in self._all_lived_events(agent_id)
+            if str(item.get("eventId") or "").strip()
+        }
+
+    def _all_lived_events(self, agent_id: str) -> list[dict[str, Any]]:
         events_root = self.plugin_root(agent_id) / "events"
-        event_ids: set[str] = set()
+        events: list[dict[str, Any]] = []
         if not events_root.is_dir():
-            return event_ids
+            return events
         for path in sorted(events_root.glob("*.jsonl")):
             for item in self.store.read_jsonl(agent_id, f"events/{path.name}"):
                 outcome = (
@@ -934,10 +1322,9 @@ class VirtualHumanLifeService:
                     or str(outcome.get("status") or "") != "succeeded"
                 ):
                     continue
-                event_id = str(item.get("eventId") or "").strip()
-                if event_id:
-                    event_ids.add(event_id)
-        return event_ids
+                if str(item.get("eventId") or "").strip():
+                    events.append(item)
+        return events
 
     def record_reflection_proposal(
         self,
@@ -949,12 +1336,16 @@ class VirtualHumanLifeService:
         text: str,
         source_event_ids: list[str] | None = None,
         source_fact_ids: list[str] | None = None,
+        supersedes_episode_id: str = "",
+        supersedes_proposal_id: str = "",
         now: datetime | None = None,
     ) -> dict[str, Any]:
         with self._lock_for(agent_id):
             self._require_enabled_binding(agent_id)
             current = (now or self._now()).astimezone(timezone.utc)
-            rows = self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+            rows = _normalize_reflection_rows(
+                self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+            )
             normalized_id = str(proposal_id or "").strip()[:200]
             existing = next(
                 (
@@ -977,8 +1368,10 @@ class VirtualHumanLifeService:
                     "sourceKind": source_kind,
                     "targetKind": target_kind,
                     "text": text,
-                    "sourceEventIds": list(source_event_ids or []),
-                    "sourceFactIds": list(source_fact_ids or []),
+                    "sourceEventIds": _string_list(source_event_ids, limit=16, item_limit=200),
+                    "sourceFactIds": _string_list(source_fact_ids, limit=16, item_limit=200),
+                    "supersedesEpisodeId": str(supersedes_episode_id or ""),
+                    "supersedesProposalId": str(supersedes_proposal_id or ""),
                     "createdAt": _iso(current),
                 },
                 valid_event_ids=self._all_lived_event_ids(agent_id),
@@ -988,6 +1381,183 @@ class VirtualHumanLifeService:
             rows.append(proposal)
             self.store.write_jsonl(agent_id, "reflections/proposals.jsonl", rows[-512:])
             return deepcopy(proposal)
+
+    def review_reflection_proposal(
+        self,
+        agent_id: str,
+        *,
+        proposal_id: str,
+        decision: str,
+        reviewer_kind: str = "operator",
+        review_note: str = "",
+        successor_proposal_id: str = "",
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Review one proposal and apply approved memory changes through Agent Memory."""
+
+        with self._lock_for(agent_id):
+            self._require_enabled_binding(agent_id)
+            current = (now or self._now()).astimezone(timezone.utc)
+            rows = _normalize_reflection_rows(
+                self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+            )
+            normalized_id = str(proposal_id or "").strip()[:200]
+            index = next(
+                (
+                    position
+                    for position, item in enumerate(rows)
+                    if str(item.get("proposalId") or "") == normalized_id
+                ),
+                -1,
+            )
+            if index < 0:
+                raise VirtualHumanLifeError("Reflection proposal was not found.")
+            existing = rows[index]
+            if str(existing.get("status") or "") in {
+                "approved",
+                "rejected",
+                "superseded",
+            }:
+                return {"proposal": deepcopy(existing)}
+            normalized_decision = str(decision or "").strip().lower()
+            result: dict[str, Any] = {}
+            if normalized_decision == "approve":
+                target_kind = str(existing.get("targetKind") or "")
+                if target_kind == "memory_reinforcement":
+                    result["reinforcementReceipt"] = self._approve_memory_reinforcement(
+                        agent_id, existing, now=current
+                    )
+                elif target_kind in {"episodic_insert", "episodic_supersede"}:
+                    result["memoryReconciliationReceipt"] = (
+                        self._approve_memory_reconciliation(agent_id, existing, now=current)
+                    )
+            try:
+                reviewed = transition_reflection_proposal(
+                    existing,
+                    decision=normalized_decision,
+                    reviewer_kind=reviewer_kind,
+                    review_note=review_note,
+                    successor_proposal_id=successor_proposal_id,
+                    now=current,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            rows[index] = reviewed
+            self.store.write_jsonl(agent_id, "reflections/proposals.jsonl", rows[-512:])
+            return {"proposal": deepcopy(reviewed), **result}
+
+    def _approve_memory_reinforcement(
+        self,
+        agent_id: str,
+        proposal: Mapping[str, Any],
+        *,
+        now: datetime,
+    ) -> dict[str, Any]:
+        proposal_id = str(proposal.get("proposalId") or "")
+        rows = self.store.read_jsonl(agent_id, "memory/reinforcement_receipts.jsonl")
+        existing = next(
+            (item for item in rows if str(item.get("proposalId") or "") == proposal_id),
+            None,
+        )
+        if existing is not None:
+            return deepcopy(existing)
+        source_ids = [
+            str(item).strip()
+            for item in list(proposal.get("sourceEventIds") or [])
+            if str(item).strip()
+        ]
+        events = {
+            str(item.get("eventId") or ""): item
+            for item in self._all_lived_events(agent_id)
+        }
+        salience = max(
+            (
+                compute_event_salience(events[source_id])
+                for source_id in source_ids
+                if source_id in events
+            ),
+            default=0,
+        )
+        receipt = {
+            "schemaVersion": CAUSAL_SCHEMA_VERSION,
+            "reinforcementId": f"reinforcement:{proposal_id}",
+            "proposalId": proposal_id,
+            "sourceEventIds": source_ids,
+            "reinforcementAmount": max(4, min(12, salience // 10)),
+            "reinforcedAt": _iso(now),
+        }
+        rows.append(receipt)
+        self.store.write_jsonl(
+            agent_id, "memory/reinforcement_receipts.jsonl", rows[-512:]
+        )
+        return deepcopy(receipt)
+
+    def _approve_memory_reconciliation(
+        self,
+        agent_id: str,
+        proposal: Mapping[str, Any],
+        *,
+        now: datetime,
+    ) -> dict[str, Any]:
+        if self.episodic_writer is None:
+            raise VirtualHumanLifeError("Agent episodic memory writer is unavailable.")
+        proposal_id = str(proposal.get("proposalId") or "")
+        rows = self.store.read_jsonl(agent_id, "memory/reconciliation_receipts.jsonl")
+        receipt = next(
+            (item for item in rows if str(item.get("proposalId") or "") == proposal_id),
+            None,
+        )
+        target_kind = str(proposal.get("targetKind") or "")
+        superseded_episode_id = str(proposal.get("supersedesEpisodeId") or "").strip()
+        if target_kind == "episodic_supersede":
+            current_ids = {
+                str(item.get("episodeId") or item.get("eventId") or "").strip()
+                for item in self._list_current_episodic_events(agent_id)
+            }
+            if receipt is None and superseded_episode_id not in current_ids:
+                raise VirtualHumanLifeError("Superseded episodic memory was not found.")
+            if self.episodic_superseder is None:
+                raise VirtualHumanLifeError("Agent episodic supersede API is unavailable.")
+        if receipt is None:
+            source_ids = [
+                str(item).strip()
+                for item in list(proposal.get("sourceEventIds") or [])
+                if str(item).strip()
+            ]
+            episode = self.episodic_writer(
+                agent_id,
+                kind="preference" if target_kind == "episodic_supersede" else "note",
+                text=str(proposal.get("text") or "").strip(),
+                refs=[{"type": "item", "id": item} for item in source_ids],
+                occurred_at=_iso(now),
+            )
+            receipt = {
+                "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                "reconciliationId": f"reconciliation:{proposal_id}",
+                "proposalId": proposal_id,
+                "targetKind": target_kind,
+                "episodeId": str(episode.get("episodeId") or episode.get("eventId") or ""),
+                "supersededEpisodeId": superseded_episode_id,
+                "sourceEventIds": source_ids,
+                "status": "successor_appended",
+                "createdAt": _iso(now),
+            }
+            rows.append(receipt)
+            self.store.write_jsonl(
+                agent_id, "memory/reconciliation_receipts.jsonl", rows[-512:]
+            )
+        if target_kind == "episodic_supersede" and receipt.get("status") != "applied":
+            self.episodic_superseder(
+                agent_id,
+                superseded_episode_id,
+                successor_episode_id=str(receipt.get("episodeId") or ""),
+            )
+        receipt["status"] = "applied"
+        receipt["appliedAt"] = _iso(now)
+        self.store.write_jsonl(
+            agent_id, "memory/reconciliation_receipts.jsonl", rows[-512:]
+        )
+        return deepcopy(receipt)
 
     def review_reflections(self, agent_id: str, *, local_date: str) -> dict[str, Any]:
         with self._lock_for(agent_id):
@@ -1012,7 +1582,9 @@ class VirtualHumanLifeService:
             for source_id in list(receipt.get("sourceEventIds") or [])
             if str(source_id).strip()
         }
-        rows = self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+        rows = _normalize_reflection_rows(
+            self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+        )
         existing_ids = {
             str(item.get("proposalId") or "").strip()
             for item in rows
@@ -1031,19 +1603,7 @@ class VirtualHumanLifeService:
             for item in self.store.read_jsonl(agent_id, "environment/facts.jsonl")
             if str(item.get("factId") or "").strip()
         }
-        accepted: list[dict[str, Any]] = []
-        reinforcements = self.store.read_jsonl(
-            agent_id, "memory/reinforcement_receipts.jsonl"
-        )
-        reinforced_ids = {
-            str(item.get("proposalId") or "").strip()
-            for item in reinforcements
-            if str(item.get("proposalId") or "").strip()
-        }
-        event_by_id = {
-            str(item.get("eventId") or "").strip(): item for item in events
-        }
-        created_reinforcements: list[dict[str, Any]] = []
+        pending: list[dict[str, Any]] = []
         for raw in proposals:
             proposal = validate_reflection_proposal(
                 raw,
@@ -1052,53 +1612,17 @@ class VirtualHumanLifeService:
                 now=current,
             )
             rows.append(proposal)
-            if str(proposal.get("status") or "") != "accepted":
-                continue
-            accepted.append(proposal)
-            proposal_id = str(proposal.get("proposalId") or "")
-            if (
-                str(proposal.get("targetKind") or "") != "memory_reinforcement"
-                or proposal_id in reinforced_ids
-            ):
-                continue
-            source_ids = [
-                str(item).strip()
-                for item in list(proposal.get("sourceEventIds") or [])
-                if str(item).strip()
-            ]
-            salience = max(
-                (
-                    compute_event_salience(event_by_id[source_id])
-                    for source_id in source_ids
-                    if source_id in event_by_id
-                ),
-                default=0,
-            )
-            receipt = {
-                "schemaVersion": CAUSAL_SCHEMA_VERSION,
-                "reinforcementId": f"reinforcement:{proposal_id}",
-                "proposalId": proposal_id,
-                "sourceEventIds": source_ids,
-                "reinforcementAmount": max(4, min(12, salience // 10)),
-                "reinforcedAt": _iso(current),
-            }
-            reinforcements.append(receipt)
-            reinforced_ids.add(proposal_id)
-            created_reinforcements.append(receipt)
+            if str(proposal.get("status") or "") == "pending":
+                pending.append(proposal)
         if proposals:
             self.store.write_jsonl(agent_id, "reflections/proposals.jsonl", rows[-512:])
-        if created_reinforcements:
-            self.store.write_jsonl(
-                agent_id,
-                "memory/reinforcement_receipts.jsonl",
-                reinforcements[-512:],
-            )
         return {
             "localDate": normalized_date,
-            "acceptedProposalCount": len(accepted),
-            "reinforcedMemoryCount": len(created_reinforcements),
-            "reflectionProposals": deepcopy(accepted),
-            "reinforcementReceipts": deepcopy(created_reinforcements),
+            "pendingProposalCount": len(pending),
+            "acceptedProposalCount": 0,
+            "reinforcedMemoryCount": 0,
+            "reflectionProposals": deepcopy(pending),
+            "reinforcementReceipts": [],
         }
 
     def record_environment_fact(
@@ -1230,26 +1754,111 @@ class VirtualHumanLifeService:
         reflections = self.list_reflection_proposals(agent_id, limit=24)
         environment = self.list_environment_facts(agent_id, limit=64)
         movements = self.list_location_movements(agent_id, limit=24)
+        lived_events = self._all_lived_events(agent_id)
+        interests = project_interests(lived_events)
+        world = self.store.read_json(agent_id, "world/catalog.json") or {
+            "schemaVersion": CAUSAL_SCHEMA_VERSION,
+            "places": [],
+            "routes": [],
+            "importantItems": [],
+        }
+        social_circle = self.store.read_json(agent_id, "social/npcs.json") or {
+            "schemaVersion": CAUSAL_SCHEMA_VERSION,
+            "npcs": [],
+        }
+        life_feed = build_life_feed(
+            events=lived_events,
+            diary_entries=self.list_diary(agent_id, limit=100),
+            artifact_receipts=self.store.read_jsonl(agent_id, "artifacts/receipts.jsonl"),
+        )
+        relationships = self.list_relationships(agent_id)
+        expression_payload = self.store.read_json(agent_id, "expression/rules.json") or {}
+        expression = project_expression_rules(
+            [
+                item
+                for item in list(expression_payload.get("rules") or [])
+                if isinstance(item, Mapping)
+            ],
+            context={
+                "mood": str((affect.get("mood") or {}).get("label") or ""),
+                "relationshipStage": str(
+                    next(
+                        (
+                            item.get("relationshipStage")
+                            for item in relationships
+                            if str(item.get("targetId") or "") == "user"
+                        ),
+                        "",
+                    )
+                ),
+                "sensitiveRequest": False,
+            },
+        )
+        embodiment_config = self.store.read_json(agent_id, "embodiment/config.json") or {}
+        authorized_assets = self.store.read_json(agent_id, "embodiment/assets.json") or {}
+        provider_health = self._embodiment_provider_health(agent_id)
+        embodiment = resolve_embodiment(
+            embodiment_config,
+            authorized_assets=[
+                item
+                for item in list(authorized_assets.get("assets") or [])
+                if isinstance(item, Mapping)
+            ],
+            provider_health={
+                str(key): value
+                for key, value in provider_health.items()
+                if isinstance(value, Mapping)
+            },
+        )
         return {
             "schemaVersion": CAUSAL_SCHEMA_VERSION,
             "drives": drives,
             "affect": affect,
-            "relationships": self.list_relationships(agent_id),
+            "relationships": relationships,
             "openLoops": open_loops,
             "proactiveCandidates": self.list_proactive_candidates(agent_id),
             "reflections": {
                 "recent": reflections,
                 "acceptedCount": sum(
-                    1 for item in reflections if str(item.get("status") or "") == "accepted"
+                    1 for item in reflections if str(item.get("status") or "") == "approved"
+                ),
+                "approvedCount": sum(
+                    1 for item in reflections if str(item.get("status") or "") == "approved"
+                ),
+                "pendingCount": sum(
+                    1 for item in reflections if str(item.get("status") or "") == "pending"
                 ),
                 "rejectedCount": sum(
                     1 for item in reflections if str(item.get("status") or "") == "rejected"
                 ),
+                "supersededCount": sum(
+                    1 for item in reflections if str(item.get("status") or "") == "superseded"
+                ),
             },
             "environment": environment,
             "locationMovements": movements,
+            "interests": interests,
+            "world": world,
+            "socialCircle": social_circle,
+            "lifeFeed": life_feed,
+            "expression": expression,
+            "embodiment": embodiment,
             "reuseReceipt": authorized_reuse_receipt(),
         }
+
+    def _embodiment_provider_health(self, agent_id: str) -> dict[str, Any]:
+        if self.embodiment_health_provider is None:
+            return {}
+        try:
+            payload = self.embodiment_health_provider(str(agent_id).strip())
+        except Exception as exc:  # noqa: BLE001 - optional presentation must fail closed
+            logger.warning(
+                "Virtual human embodiment provider health failed for agent=%s (%s).",
+                str(agent_id).strip(),
+                type(exc).__name__,
+            )
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def list_memory_promotion_receipts(
         self,
@@ -1470,7 +2079,9 @@ class VirtualHumanLifeService:
             raise VirtualHumanLifeError("Command is required.")
         if not normalized_key or len(normalized_key) > 200:
             raise VirtualHumanLifeError("A bounded idempotencyKey is required.")
-        normalized_arguments = deepcopy(arguments or {})
+        if arguments is not None and not isinstance(arguments, Mapping):
+            raise VirtualHumanLifeError("Command arguments must be an object.")
+        normalized_arguments = deepcopy(dict(arguments or {}))
         fingerprint = hashlib.sha256(
             json.dumps(
                 {
@@ -2484,6 +3095,98 @@ class VirtualHumanLifeService:
                 str(arguments.get("reason") or "").strip()[:300] if paused else ""
             )
             return {"paused": paused}
+        if command in {"createCalendarEvent", "upsertCalendarEvent"}:
+            event_payload = deepcopy(arguments)
+            event_payload["operation"] = "upsert"
+            event_payload["eventId"] = str(
+                event_payload.get("eventId") or f"calendar:{command_id}"
+            ).strip()
+            try:
+                rows = append_calendar_change(
+                    self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+                    event_payload,
+                    agent_id=agent_id,
+                    now=self._now(),
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_jsonl(agent_id, "calendar/events.jsonl", rows)
+            event_id = str(event_payload.get("eventId") or "")
+            effective = next(
+                (
+                    item
+                    for item in reversed(rows)
+                    if str(item.get("eventId") or "") == event_id
+                    and str(item.get("operation") or "") == "upsert"
+                ),
+                {},
+            )
+            projection = project_calendar_for_date(
+                rows,
+                local_date,
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+            )
+            self._sync_calendar_schedules_for_dates(
+                agent_id,
+                binding=binding,
+                local_dates={local_date, (date.fromisoformat(local_date) + timedelta(days=1)).isoformat()},
+            )
+            return {"calendarEvent": deepcopy(effective), "calendar": projection}
+        if command in {"cancelCalendarEvent", "deleteCalendarEvent"}:
+            event_id = str(arguments.get("eventId") or "").strip()
+            if not event_id:
+                raise VirtualHumanLifeError("Calendar eventId is required.")
+            event_payload = {
+                "operation": "cancel" if command == "cancelCalendarEvent" else "delete",
+                "eventId": event_id,
+                "reason": str(arguments.get("reason") or "")[:300],
+            }
+            rows = append_calendar_change(
+                self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+                event_payload,
+                agent_id=agent_id,
+                now=self._now(),
+            )
+            self.store.write_jsonl(agent_id, "calendar/events.jsonl", rows)
+            self._sync_calendar_schedules_for_dates(
+                agent_id,
+                binding=binding,
+                local_dates={local_date, (date.fromisoformat(local_date) + timedelta(days=1)).isoformat()},
+            )
+            return {"eventId": event_id, "cancelled": True, "reason": event_payload["reason"]}
+        if command in {"setCalendarException", "skipCalendarOccurrence"}:
+            event_id = str(arguments.get("eventId") or "").strip()
+            occurrence_date = str(
+                arguments.get("occurrenceDate") or arguments.get("date") or local_date
+            ).strip()
+            if not event_id:
+                raise VirtualHumanLifeError("Calendar eventId is required.")
+            try:
+                date.fromisoformat(occurrence_date)
+                rows = append_calendar_change(
+                    self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+                    {
+                        **deepcopy(arguments),
+                        "operation": "exception",
+                        "eventId": event_id,
+                        "occurrenceDate": occurrence_date,
+                    },
+                    agent_id=agent_id,
+                    now=self._now(),
+                )
+            except (TypeError, ValueError) as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_jsonl(agent_id, "calendar/events.jsonl", rows)
+            self._sync_calendar_schedules_for_dates(
+                agent_id,
+                binding=binding,
+                local_dates={occurrence_date, local_date},
+            )
+            return {
+                "eventId": event_id,
+                "occurrenceDate": occurrence_date,
+                "exception": True,
+            }
         if command == "planTomorrow":
             target_date = (local_now.date() + timedelta(days=1)).isoformat()
             existing = self.store.read_json(agent_id, f"schedules/{target_date}.json")
@@ -2499,9 +3202,190 @@ class VirtualHumanLifeService:
                 if should_refresh:
                     existing["scheduleVersion"] = int(existing.get("scheduleVersion") or 1) + 1
                 self.store.write_json(agent_id, f"schedules/{target_date}.json", existing)
+                existing = self._sync_calendar_schedule(
+                    agent_id, existing, binding=binding, now=self._now()
+                )
             return {"schedule": deepcopy(existing), "created": created}
         if command == "triggerDiaryReview":
             return self.review_diary(agent_id, local_date=local_date)
+        if command == "recordReflectionProposal":
+            return {
+                "reflectionProposal": self.record_reflection_proposal(
+                    agent_id,
+                    proposal_id=str(arguments.get("proposalId") or f"reflection:{command_id}"),
+                    source_kind=str(arguments.get("sourceKind") or "lived_event"),
+                    target_kind=str(arguments.get("targetKind") or "self_narrative"),
+                    text=str(arguments.get("text") or ""),
+                    source_event_ids=_string_list(arguments.get("sourceEventIds"), limit=16, item_limit=200),
+                    source_fact_ids=_string_list(arguments.get("sourceFactIds"), limit=16, item_limit=200),
+                    supersedes_episode_id=str(arguments.get("supersedesEpisodeId") or ""),
+                    supersedes_proposal_id=str(arguments.get("supersedesProposalId") or ""),
+                    now=self._now(),
+                )
+            }
+        if command == "reviewReflectionProposal":
+            return self.review_reflection_proposal(
+                agent_id,
+                proposal_id=str(arguments.get("proposalId") or ""),
+                decision=str(arguments.get("decision") or ""),
+                reviewer_kind=str(arguments.get("reviewerKind") or "operator"),
+                review_note=str(arguments.get("reviewNote") or ""),
+                successor_proposal_id=str(arguments.get("successorProposalId") or ""),
+                now=self._now(),
+            )
+        if command == "recordPlaceVisit":
+            source_event_id = str(arguments.get("sourceEventId") or "").strip()
+            if source_event_id not in self._all_lived_event_ids(agent_id):
+                raise VirtualHumanLifeError("Place visit requires a lived source event.")
+            try:
+                catalog = record_place_visit(
+                    self.store.read_json(agent_id, "world/catalog.json") or {},
+                    place_id=str(arguments.get("placeId") or ""),
+                    label=str(arguments.get("label") or ""),
+                    source_event_id=source_event_id,
+                    occurred_at=self._now(),
+                    route_from=str(arguments.get("routeFrom") or ""),
+                    route_minutes=_clamp(arguments.get("routeMinutes"), 1, 1_440, 15),
+                    living_space=bool(arguments.get("livingSpace")),
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_json(agent_id, "world/catalog.json", catalog)
+            return {"world": deepcopy(catalog)}
+        if command == "recordImportantItem":
+            source_ref = str(arguments.get("sourceRef") or "").strip()
+            source_kind = str(arguments.get("sourceKind") or "activity_outcome")
+            if source_kind == "activity_outcome" and source_ref not in self._all_lived_event_ids(agent_id):
+                raise VirtualHumanLifeError("Important item requires a lived source event.")
+            try:
+                catalog = record_important_item(
+                    self.store.read_json(agent_id, "world/catalog.json") or {},
+                    item_id=str(arguments.get("itemId") or ""),
+                    label=str(arguments.get("label") or ""),
+                    place_id=str(arguments.get("placeId") or ""),
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    significance=str(arguments.get("significance") or ""),
+                    recorded_at=self._now(),
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_json(agent_id, "world/catalog.json", catalog)
+            return {"world": deepcopy(catalog)}
+        if command == "upsertNpc":
+            source_kind = str(arguments.get("sourceKind") or "lived_event")
+            source_ref = str(arguments.get("sourceRef") or "").strip()
+            if source_kind == "lived_event" and source_ref not in self._all_lived_event_ids(agent_id):
+                raise VirtualHumanLifeError("NPC profile requires a lived source event.")
+            try:
+                social = upsert_npc(
+                    self.store.read_json(agent_id, "social/npcs.json") or {},
+                    npc_id=str(arguments.get("npcId") or ""),
+                    display_name=str(arguments.get("displayName") or ""),
+                    role=str(arguments.get("role") or ""),
+                    traits=_string_list(arguments.get("traits"), limit=16, item_limit=80),
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    now=self._now(),
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.write_json(agent_id, "social/npcs.json", social)
+            return {"socialCircle": deepcopy(social)}
+        if command == "recordArtifactReceipt":
+            source_ids = _string_list(
+                arguments.get("sourceEventIds"), limit=16, item_limit=200
+            )
+            if not source_ids or any(
+                item not in self._all_lived_event_ids(agent_id) for item in source_ids
+            ):
+                raise VirtualHumanLifeError("Artifact receipt requires lived source events.")
+            if str(arguments.get("status") or "") != "succeeded":
+                raise VirtualHumanLifeError("Only successful artifacts can enter the life feed.")
+            artifact_id = str(arguments.get("artifactId") or f"artifact:{command_id}").strip()[:200]
+            receipts = self.store.read_jsonl(agent_id, "artifacts/receipts.jsonl")
+            existing = next(
+                (item for item in receipts if str(item.get("artifactId") or "") == artifact_id),
+                None,
+            )
+            if existing is None:
+                existing = {
+                    "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                    "artifactId": artifact_id,
+                    "kind": str(arguments.get("kind") or "artifact")[:40],
+                    "title": str(arguments.get("title") or "生活作品")[:160],
+                    "summary": str(arguments.get("summary") or "")[:600],
+                    "status": "succeeded",
+                    "sourceEventIds": source_ids[:16],
+                    "localRef": str(arguments.get("localRef") or "")[:400],
+                    "createdAt": _iso(self._now()),
+                }
+                receipts.append(existing)
+                self.store.write_jsonl(agent_id, "artifacts/receipts.jsonl", receipts[-512:])
+            return {"artifactReceipt": deepcopy(existing)}
+        if command == "setExpressionRules":
+            raw_rule_values = arguments.get("rules")
+            raw_rules = [
+                item
+                for item in (raw_rule_values if isinstance(raw_rule_values, list) else [])
+                if isinstance(item, Mapping)
+            ][:32]
+            rules = []
+            for item in raw_rules:
+                rule_id = str(item.get("ruleId") or "").strip()[:160]
+                scope = str(item.get("scope") or "").strip()[:60]
+                action = item.get("action") if isinstance(item.get("action"), Mapping) else {}
+                if not rule_id or scope not in {
+                    "identity_safety",
+                    "current_request",
+                    "relationship_boundary",
+                    "mood",
+                    "habit",
+                } or not action:
+                    raise VirtualHumanLifeError("Expression rule is invalid.")
+                rules.append(
+                    {
+                        "ruleId": rule_id,
+                        "scope": scope,
+                        "priority": _clamp(item.get("priority"), -10_000, 10_000, 0),
+                        "condition": deepcopy(item.get("condition") or {}),
+                        "action": deepcopy(dict(action)),
+                        "dependsOn": _string_list(item.get("dependsOn"), limit=16, item_limit=160),
+                    }
+                )
+            payload = {
+                "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                "rules": rules,
+                "updatedAt": _iso(self._now()),
+            }
+            self.store.write_json(agent_id, "expression/rules.json", payload)
+            return {"expressionRules": deepcopy(payload)}
+        if command == "setEmbodimentConfig":
+            config = {
+                "schemaVersion": CAUSAL_SCHEMA_VERSION,
+                "enabled": bool(arguments.get("enabled")),
+                "providerId": str(arguments.get("providerId") or "")[:160],
+                "mode": str(arguments.get("mode") or "portrait")[:40],
+                "assetRef": str(arguments.get("assetRef") or "")[:400],
+                "updatedAt": _iso(self._now()),
+            }
+            self.store.write_json(agent_id, "embodiment/config.json", config)
+            license_receipt = str(arguments.get("assetLicenseReceipt") or "").strip()[:240]
+            if config["assetRef"] and license_receipt:
+                assets = self.store.read_json(agent_id, "embodiment/assets.json") or {"assets": []}
+                rows = [item for item in list(assets.get("assets") or []) if isinstance(item, dict)]
+                rows = [item for item in rows if str(item.get("assetRef") or "") != config["assetRef"]]
+                rows.append({"assetRef": config["assetRef"], "licenseReceipt": license_receipt})
+                self.store.write_json(agent_id, "embodiment/assets.json", {"assets": rows[-32:]})
+            resolved = resolve_embodiment(
+                config,
+                authorized_assets=list(
+                    (self.store.read_json(agent_id, "embodiment/assets.json") or {}).get("assets")
+                    or []
+                ),
+                provider_health=self._embodiment_provider_health(agent_id),
+            )
+            return {"embodiment": resolved}
         if command == "recordEnvironmentFact":
             current = self._now()
             fact_id = str(arguments.get("factId") or f"environment:{command_id}").strip()[:200]
@@ -2848,6 +3732,9 @@ class VirtualHumanLifeService:
             generated["replanReason"] = str(arguments.get("reason") or "")[:300]
             generated["replanRequestedAt"] = _iso(self._now())
             self.store.write_json(agent_id, f"schedules/{local_date}.json", generated)
+            generated = self._sync_calendar_schedule(
+                agent_id, generated, binding=binding, now=self._now()
+            )
             return {"schedule": deepcopy(generated)}
         if command not in {
             "startActivity",
@@ -3025,6 +3912,18 @@ class VirtualHumanLifeService:
                 "affect/state.json",
                 project_affect(episodes, now=self._now(), baseline_mood=baseline),
             )
+        if self.store.read_json(agent_id, "rhythms/state.json") is None:
+            self.store.write_json(
+                agent_id,
+                "rhythms/state.json",
+                default_rhythm_projection(
+                    now=self._now(),
+                    timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                    config=binding.get("rhythmConfig")
+                    if isinstance(binding.get("rhythmConfig"), dict)
+                    else None,
+                ),
+            )
         local_today = self._local_now(binding).date()
         for target_date in (local_today, local_today + timedelta(days=1)):
             path = f"schedules/{target_date.isoformat()}.json"
@@ -3033,6 +3932,11 @@ class VirtualHumanLifeService:
                     agent_id,
                     path,
                     self._deterministic_schedule(agent_id, target_date, binding),
+                )
+            existing_schedule = self.store.read_json(agent_id, path)
+            if isinstance(existing_schedule, dict):
+                self._sync_calendar_schedule(
+                    agent_id, existing_schedule, binding=binding, now=self._now()
                 )
 
     def _default_binding(self, agent_id: str) -> dict[str, Any]:
@@ -3050,6 +3954,7 @@ class VirtualHumanLifeService:
             "proactiveDailyLimit": 2,
             "proactiveMinimumIntervalMinutes": 180,
             "quietHours": {"start": "23:00", "end": "08:00"},
+            "rhythmConfig": {},
             "toolBundleId": TOOL_BUNDLE_ID,
             "promptPackId": PROMPT_PACK_ID,
             "storageSchemaVersion": STORAGE_SCHEMA_VERSION,
@@ -3091,7 +3996,42 @@ class VirtualHumanLifeService:
                 "start": self._clock_text(quiet.get("start"), default="23:00"),
                 "end": self._clock_text(quiet.get("end"), default="08:00"),
             },
+            "rhythmConfig": self._normalized_rhythm_config(
+                config.get("rhythmConfig")
+                if isinstance(config.get("rhythmConfig"), dict)
+                else config.get("rhythm")
+            ),
         }
+
+    @staticmethod
+    def _normalized_rhythm_config(value: object) -> dict[str, Any]:
+        """Keep operator rhythm settings bounded and separate from experiences."""
+
+        if not isinstance(value, dict):
+            return {}
+        normalized: dict[str, Any] = {}
+        chronotype = value.get("chronotype")
+        label = (
+            chronotype.get("label")
+            if isinstance(chronotype, dict)
+            else chronotype
+        )
+        if str(label or "").strip().lower() in {"morning", "balanced", "evening"}:
+            normalized["chronotype"] = str(label).strip().lower()
+        sleep_window = value.get("sleepWindow")
+        if isinstance(sleep_window, dict):
+            normalized_window = {}
+            for key in ("start", "end"):
+                raw = str(sleep_window.get(key) or "").strip()
+                if raw:
+                    try:
+                        hour, minute = raw.split(":", maxsplit=1)
+                        normalized_window[key] = f"{_clamp(hour, 0, 23, 0):02d}:{_clamp(minute, 0, 59, 0):02d}"
+                    except (TypeError, ValueError):
+                        continue
+            if normalized_window:
+                normalized["sleepWindow"] = normalized_window
+        return normalized
 
     def _default_state(self, agent_id: str, binding: dict[str, Any]) -> dict[str, Any]:
         now = self._now()
@@ -3209,6 +4149,17 @@ class VirtualHumanLifeService:
                 "sameLocalDate": True,
                 "allowedKinds": ["simulated", "tool"],
                 "allowedActivityKinds": list(PLANNER_ACTIVITY_KINDS),
+                "calendar": project_calendar_for_date(
+                    self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+                    local_date,
+                    timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                ),
+                "rhythms": rhythm_constraints(
+                    self.rhythm_for(agent_id) or default_rhythm_projection(
+                        now=self._now(),
+                        timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                    )
+                ),
             },
             "state": self.store.read_json(agent_id, "state.json") or {},
             "lifeDrives": prompt_drive_summary(
@@ -3423,6 +4374,23 @@ class VirtualHumanLifeService:
         evolved_state = apply_completed_event_to_state(state, event, now=now)
         state.clear()
         state.update(evolved_state)
+
+        rhythm_projection = self.store.read_json(agent_id, "rhythms/state.json")
+        if rhythm_projection is None:
+            binding = self.binding_for(agent_id) or self._default_binding(agent_id)
+            rhythm_projection = default_rhythm_projection(
+                now=now,
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                config=binding.get("rhythmConfig")
+                if isinstance(binding.get("rhythmConfig"), dict)
+                else None,
+            )
+        rhythm_projection = apply_completed_activity_to_rhythm(
+            rhythm_projection,
+            event,
+            now=now,
+        )
+        self.store.write_json(agent_id, "rhythms/state.json", rhythm_projection)
 
         drives = self.store.read_json(agent_id, "drives/state.json") or default_drive_projection(
             now=now

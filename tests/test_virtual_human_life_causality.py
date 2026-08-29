@@ -68,6 +68,17 @@ def test_authorized_reuse_receipt_and_causal_paths_are_explicit() -> None:
         "affect-afterglow",
         "relationship-ledger",
         "life-drives-and-open-loops",
+        "calendar-and-chronotype",
+        "interests-world-and-local-feed",
+        "expression-and-embodiment-boundaries",
+    }
+    assert {item["name"] for item in receipt["referenceOnlySources"]} == {
+        "Graphiti",
+        "LangMem",
+        "Parlant",
+        "Voyager",
+        "SOTOPIA",
+        "TalkingHead",
     }
     assert CAUSAL_LEDGER_PATHS == {
         "drives": "drives/state.json",
@@ -80,8 +91,16 @@ def test_authorized_reuse_receipt_and_causal_paths_are_explicit() -> None:
         "openLoops": "conversation/open_loops.jsonl",
         "reflectionProposals": "reflections/proposals.jsonl",
         "memoryReinforcements": "memory/reinforcement_receipts.jsonl",
+        "memoryReconciliations": "memory/reconciliation_receipts.jsonl",
         "environmentFacts": "environment/facts.jsonl",
         "locationMovements": "environment/location_movements.jsonl",
+        "calendarEvents": "calendar/events.jsonl",
+        "rhythmProfile": "rhythms/state.json",
+        "worldCatalog": "world/catalog.json",
+        "artifactReceipts": "artifacts/receipts.jsonl",
+        "socialCircle": "social/npcs.json",
+        "expressionRules": "expression/rules.json",
+        "embodimentConfig": "embodiment/config.json",
     }
 
 

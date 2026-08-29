@@ -1217,3 +1217,92 @@ Critical Path：
 用户已明确批准按本方案实施，并授权在独立 `codex/*` 分支连续开发至完成；批准范围包含 `proactive_turn` 非用户消息语义、送达后计数、共享 ToolPolicy 不自动修改、重启不补发过期消息和 Agent 生命周期栅栏。桌面端隔离预览已获批准，批准对象为 `/companions` 人物大厅、左侧当前人物栏、中间原生 Chat、右侧生活信息栏以及“切换人物必须返回大厅”的交互。
 
 2026-08-29，用户进一步批准拟人化第二阶段的长期目标/项目/习惯/技能、事件化情绪余波、关系事件账本、主动候选、未完话题/承诺、夜间反思和因果展示；默认对话仍为实时。用户同时确认已与 AstrBot Private Companion 上游沟通，允许 Vibelution 选择性复用和改造其代码；该许可不自动授权远端 push、公开发布、越过署名/分发条款或整仓引入 AstrBot 运行时。若后续修改主动消息、自主边界、第三方插件范围、旧数据迁移、API、移动端范围或上述 UI 结果，应更新本文档并重新检查任务图后再实施。
+
+## 29. 第三阶段：完整生活连续性复用
+
+2026-08-29，用户批准将调研确认的十项拟人化能力全部纳入，并要求优先采用复用。这里的“复用”固定解释为：AstrBot Private Companion 在用户确认的单独许可范围内选择性复用和改造代码；Graphiti、LangMem、Parlant、Voyager、SOTOPIA 和 TalkingHead 只复用与 Vibelution 架构兼容的机制、契约或可选适配器，不引入第二套 Agent、Session、Memory、ToolPolicy、会话引擎或图数据库。
+
+### 29.1 可观察结果
+
+1. 人物拥有跨日、周期和纪念日级长期日历，能在次日日程生成前处理证据、确认、冲突、取消和例外；每日 Schedule 继续拥有当天执行状态。
+2. 人物拥有独立昼夜节律和非医疗生活需要；一次异常作息不会改写长期习惯，忙碌和睡眠不人为延迟用户实时消息。
+3. 夜间反思能提出偏好、习惯、技能和自我叙事变化；提案未经审核不进入 Prompt、Persona 或行为投影，Persona 核心不变量和 ToolPolicy 永远不能由反思改写。
+4. 新旧记忆自动形成来源可追溯的插入/替代/失效建议，最终复用 Agent Directory 的 episodic append/supersede API，不创建图数据库或第二记忆库。
+5. 人物能把阅读、新闻探索、创作和技能练习安排为受 ToolPolicy 约束的工具型活动；只有可验证 outcome 才进入经历、兴趣和技能成长。
+6. 人物拥有熟悉地点、访问次数、路线、生活空间和重要物品；当前位置仍由现有状态与移动账本拥有。
+7. `/companions` 提供从真实 Life Event、日记、照片和作品里派生的本地生活动态；不默认发布到外部平台。
+8. 表达规则采用有条件、可排序、可解释的投影；身份/安全 > 用户当前请求 > 关系边界 > 心情 > 习惯表达，不替换原生会话链路。
+9. 人物拥有轻量稳定社会圈；NPC 不是 Agent，不持有 Session、ToolPolicy 或独立运行时，完整多 Agent 社交继续复用 ChatRoom 的后续边界。
+10. 桌面端提供可选具身化适配器；无第三方人物/声音资产时继续使用现有立绘，语音和 3D/Live2D 资源必须单独配置并保留授权来源。
+
+### 29.2 数据权威与复用边界
+
+| 能力 | 唯一写入权威 | 派生或引用 |
+| --- | --- | --- |
+| 长期日历 | Agent-scoped calendar event ledger | 日程只引用 `calendarEventId` 并拥有执行状态 |
+| 昼夜节律/需要 | plugin rhythm projection + 已完成活动事件 | binding 只保存 operator 配置，不成为经历 |
+| 自我变化 | reflection proposal ledger；审核后写目标 projection | Persona 不变量仍由 Agent Directory 拥有 |
+| 长期记忆 | Agent Directory episodic memory | plugin 只保存 promotion/reconciliation receipt |
+| 兴趣/创作 | 工具 outcome + drive projection | 外部网页内容保持 untrusted 来源 |
+| 地点/物品 | plugin world catalog；当前位置仍在 `state.json` | movement ledger 记录移动历史 |
+| 生活动态 | Life Event、日记、图片/作品 receipt 的只读聚合 | feed 不反向写经历 |
+| 表达规则 | 已审核的 contextual expression projection | Prompt Pack 只接收有界摘要 |
+| 社会圈 | plugin NPC catalog + relationship event ledger | NPC 不注册为 Agent |
+| 具身化 | plugin embodiment config + 授权资产引用 | 原生消息文本仍为对话事实 |
+
+### 29.3 复用来源
+
+- AstrBot Private Companion `85cc366ee6e1ccf08b357e8b9e396c3abb842ff4`：`calendar_contracts.py`、`calendar_observer.py`、`chronotype.py`、`daily_review.py`、`place_cognitive_map.py`、`photo_reference_catalog.py`、`photo_wardrobe_decision.py`、`reading_archive.py`、`news_exploration.py`、`creative.py`、`busy_reply_gate.py`、`segmented_message.py`、`reaction_expression.py`。忙碌回复延迟、AstrBot 平台身份、AstrBot 会话/存储和 QQ 空间发布运行时不复用。
+- Graphiti `c18d6778184c55e3be28f5ae3e5821930b361d47`：只借事实有效期、来源 episode 和旧事实失效模型；不引入 Graphiti、Neo4j、FalkorDB 或第二检索权威。
+- LangMem `29cbe41e58528f92e9efa773c12e15c47be3808c`：只借 semantic/episodic/procedural 分类和 insert/update/delete 提案生命周期；不引入 LangGraph memory runtime。
+- Parlant `ea737442b8ae65854a842542e544fbe7e6144bad`：只借 condition/action、priority/dependency 和可解释匹配；不引入 Parlant 会话引擎。
+- Voyager `55e45a880755d0c8c66ca7fb5fe7962ac8974f89`：只借自主课程、完成/失败任务和技能复用概念；不复用 Minecraft 执行层或 Chroma 权威。
+- SOTOPIA `a0aaafb440e570e5e61b7c44a44e5e417c545383`：只借社会人物资料和 believability/relationship/social-rules/goal 评价维度。
+- TalkingHead `eed58d198076a7e1e825f804802921c4d3804d46`：作为可选桌面具身化 provider；库许可证不覆盖用户选择的 GLB、Live2D、声音或角色形象资产。
+
+### 29.4 任务图
+
+#### Task 17：长期日历、节律与生活需要
+
+- Owner/Boundary: `calendar.py`、`rhythms.py`、daily planning constraint；不改原生 Session。
+- Dependency: Task 16 已合入。
+- Mode: BDD/TDD。
+- Verification/Stop: 周期、例外、冲突、取消、跨午夜、单次异常作息、需要恢复及默认实时回复均有确定性测试。
+
+#### Task 18：自我变化审核与原生记忆纠错
+
+- Owner/Boundary: reflection proposal lifecycle、episodic reconciliation receipt、审核 API；不直接重写 Persona 或 ToolPolicy。
+- Dependency: Task 17。
+- Mode: BDD/TDD。
+- Verification/Stop: 无来源、冲突、重复、跨 Agent 或未经审核的提案不能生效；替代旧记忆必须调用原生 supersede API 并保留历史。
+
+#### Task 19：兴趣活动、认知地图、社会圈和生活动态
+
+- Owner/Boundary: `interests.py`、`world_model.py`、`social_circle.py`、`life_feed.py`；外部工具仍由 Agent ToolPolicy 最终授权。
+- Dependency: Task 17 和 Task 18。
+- Mode: BDD/TDD。
+- Verification/Stop: 计划或失败活动不增长兴趣；地点和 NPC 跨天稳定；feed 只从可信 receipt 派生且不反向写事件；NPC 不进入 Agent Directory。
+
+#### Task 20：情境表达和桌面具身化
+
+- Owner/Boundary: `expression_policy.py`、`embodiment.py`、Prompt 投影、`/companions` VUI；保持单一“正在输入”和原生 Chat。
+- Dependency: Task 18 和 Task 19。
+- Mode: BDD/TDD + frontend contract。
+- Verification/Stop: 规则优先级可解释；无资产时立绘回退；具身化失败不影响文本回复；不出现第二 composer、第二 SSE 或原生文件控件。
+
+#### Task 21：全量收口
+
+- Owner/Boundary: DTO、工具/API、来源 receipt、迁移兼容、运行时场景和桌面验收。
+- Dependency: Task 17—20。
+- Mode: BDD/TDD + production build + desktop browser acceptance。
+- Verification/Stop: 普通 Agent 零变化，启用 Agent 十项能力均有可观察投影；后端 selector、前端 contracts、`tsc -b`、production build 和一次加速长程场景通过，不等待真实 7 天，不 push/发布。
+
+### 29.5 实施状态
+
+Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持插件隔离和桌面端范围：
+
+- `calendar.py`、`rhythms.py`、`interests.py`、`world_model.py`、`social_circle.py`、`life_feed.py`、`expression_policy.py` 与 `embodiment.py` 分别拥有可独立测试的领域计算；`service.py` 只负责编排既有 Agent-scoped 存储、命令和投影。
+- 自我变化统一使用 `pending → approved/rejected/superseded`；旧 `accepted` 兼容数据重新进入 `pending`，不会直接进入 Prompt。原生 episodic memory 插入/替代保留 receipt，并由 Agent Directory API 完成最终写入。
+- Agent 专属工具包已补长期日历、地点/物品、作品 receipt、NPC 和反思提案；反思工具只能 `list/propose`，操作员在 `/companions` 右侧“待审核的变化”中通过现有 `/commands` 链路批准或拒绝。
+- 前端继续复用人物大厅、当前人物栏、原生 Direct Session Chat 和右侧“现在 / 今天 / 记忆”；没有新增 Session、SSE、Composer、记忆库或权限系统。
+- 自动验证使用注入时钟覆盖跨日和长期场景，不等待真实 7 天；桌面运行态验收仍按本章目标视口和原生会话边界在本地集成后执行，push/发布不属于本轮。
