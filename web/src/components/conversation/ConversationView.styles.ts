@@ -27,6 +27,7 @@ const readableMessageText = "min-w-0 [font-size:var(--vui-font-sm)] leading-[var
 const readableMarkdownMeasure = "max-w-full";
 const assistantMessageMeasure = "w-full max-w-full";
 const transcriptTurnRail = "w-full max-w-[830px] justify-self-center";
+const assistantTranscriptGrid = `grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 max-[719px]:gap-x-2`;
 const assistantResponseSection = cv(
   "responseSection",
   "min-w-0 grid",
@@ -200,9 +201,13 @@ const styles: Record<string, string> = {
   assistantCard:
     "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_72%,transparent)] bg-[var(--vui-surface-chat-panel)] p-2 shadow-none",
   assistantTurn:
-    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 [&_.turnAvatar]:col-start-1 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0 max-[719px]:gap-x-2`,
+    `vui-components-conversationview assistantTurn ${assistantTranscriptGrid} [&_.turnAvatar]:col-start-1 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   assistantTurnContinuation:
     "vui-components-conversationview assistantTurnContinuation min-w-0 [&_.turnContent]:w-full [&_.turnContent]:gap-1",
+  companionTypingTurn:
+    `vui-components-conversationview companionTypingTurn ${assistantTranscriptGrid}`,
+  companionTypingContent:
+    "vui-components-conversationview companionTypingContent col-start-2 row-start-1 min-w-0 justify-self-start",
   attachButton:
     cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState),
   auxiliaryBlock:
