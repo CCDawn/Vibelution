@@ -264,6 +264,41 @@ def _formal_receipt_writeback_context(
     return receipt.to_dict(), stage_id, policy_sha256, usage
 
 
+def _require_formal_model_invocation_receipt(
+    snapshot: dict[str, Any],
+    *,
+    input_snapshot: dict[str, Any],
+    task_started_at_ms: int,
+    formal_receipt: dict[str, Any] | None = None,
+) -> None:
+    """Keep a formal task retryable until its durable receipt is visible."""
+
+    routing = input_snapshot.get("modelRoutingPolicy")
+    receipt_required = isinstance(routing, dict) and all(
+        (
+            isinstance(routing.get("requiredModelPolicy"), dict),
+            bool(str(routing.get("modelPolicySha256") or "").strip()),
+            isinstance(routing.get("routes"), dict),
+        )
+    )
+    if not receipt_required or formal_receipt is not None:
+        return
+    raise TurnNotReadyError(
+        "model invocation receipt persistence is pending",
+        snapshot={
+            **snapshot,
+            "terminal": False,
+            "terminalStatus": "",
+            "completionSource": "receipt_registry_pending",
+            "turnTerminal": bool(snapshot.get("terminal")),
+            "turnTerminalStatus": str(snapshot.get("terminalStatus") or ""),
+            "turnCompletionSource": str(snapshot.get("completionSource") or ""),
+            "receiptPersistencePending": True,
+            "challengeTaskStartedAtMs": int(task_started_at_ms or 0),
+        },
+    )
+
+
 class TurnNotReadyError(RuntimeError):
     """Turn is still running; adapter should requeue rather than fail permanently."""
 
@@ -844,6 +879,12 @@ def complete_agent_turn_outputs(
     )
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
+    )
+    _require_formal_model_invocation_receipt(
+        snapshot,
+        input_snapshot=input_snapshot,
+        task_started_at_ms=task_started_at_ms,
+        formal_receipt=formal_receipt,
     )
     _persist_question_model_invocation_receipts(
         snapshot,

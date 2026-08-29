@@ -119,6 +119,7 @@ def test_composition_root_wires_full_runtime(tmp_path: Path) -> None:
         assert runtime.command_service is not None
         assert runtime.graph_worker is not None
         assert runtime.adapter_worker is not None
+        assert runtime.receipt_persistence_worker is not None
         # registry 覆盖全部 16 节点 adapter kind。
         from core.research.workflow.definition import (
             build_challenge_cup_workflow_definition,

@@ -23,7 +23,6 @@ from core.web.services.session.research_thinking_budget import (
     build_research_thinking_budget_segment,
 )
 
-
 _STRICT_RESEARCH_TASK_KINDS = frozenset(
     {"hypothesis_design", "protocol_review", "result_evaluation"}
 )
@@ -254,6 +253,16 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+def _raise_for_challenge_receipt_failure(
+    turn_capture: Any,
+) -> None:
+    failure_code = str(
+        getattr(turn_capture, "challenge_receipt_failure_code", "") or ""
+    ).strip()
+    if failure_code:
+        raise RuntimeError(failure_code)
 
 
 def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> bool:
@@ -1989,6 +1998,10 @@ def _run_session_continuation_loop(
                 chat_history=iteration_chat_history,
                 chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
             )
+            # The LLM response callback cannot raise through EventBus. Convert
+            # its fail-closed marker into the normal worker exception path
+            # before any continuation or success persist.
+            _raise_for_challenge_receipt_failure(turn_capture)
         result = s._attach_session_prompt_cache_metadata(
             result,
             prompt_cache_scope=prompt_cache_scope,

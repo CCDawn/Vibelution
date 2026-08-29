@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
+
+from core.infrastructure.event_bus import EventBus, EventNames
 from core.logging.trace_context import (
     bind_trace_context,
     get_current_trace_context,
@@ -123,11 +127,21 @@ def test_receipt_context_accepts_binding_without_research_project_id(
     assert context["expectedModelRoute"]["modelRef"] == "default/qwen-alias"
 
 
-def test_challenge_receipt_sink_uses_existing_registry_only(monkeypatch) -> None:
+def test_challenge_receipt_sink_enqueues_durable_registry_intent(monkeypatch) -> None:
     recorded: list[dict] = []
+    runtime = SimpleNamespace(store=object())
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
-        lambda team_id, **kwargs: recorded.append({"teamId": team_id, **kwargs}) or [],
+        "core.web.services.team_workflow.research_runtime.runtime_factory.production_workflow_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.runtime_factory.wake_production_workflow_runtime",
+        lambda: recorded.append({"woke": True}) or True,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.receipt_persistence.enqueue_question_model_invocation_receipt",
+        lambda store, **kwargs: recorded.append({"store": store, **kwargs})
+        or {"created": True},
     )
     capture = stream_capture.SessionTurnCapture(
         session_id="session-1",
@@ -145,19 +159,21 @@ def test_challenge_receipt_sink_uses_existing_registry_only(monkeypatch) -> None
     assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is True
     assert recorded == [
         {
-            "teamId": "team-1",
+            "store": runtime.store,
+            "team_id": "team-1",
             "question_id": "SCI-096",
             "workflow_run_id": "run-1",
-            "receipts": [{"receiptId": "receipt-1"}],
-        }
+            "receipt": {"receiptId": "receipt-1"},
+        },
+        {"woke": True},
     ]
 
 
-def test_ordinary_session_does_not_write_challenge_receipt_registry(monkeypatch) -> None:
+def test_ordinary_session_does_not_enqueue_challenge_receipt(monkeypatch) -> None:
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
+        "core.web.services.team_workflow.research_runtime.receipt_persistence.enqueue_question_model_invocation_receipt",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("ordinary chat must not write challenge receipts")
+            AssertionError("ordinary chat must not enqueue challenge receipts")
         ),
     )
     capture = stream_capture.SessionTurnCapture(session_id="session-chat", turn_id="turn-chat")
@@ -166,12 +182,18 @@ def test_ordinary_session_does_not_write_challenge_receipt_registry(monkeypatch)
     assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is False
 
 
-def test_challenge_receipt_projection_failure_does_not_break_chat(monkeypatch) -> None:
+def test_challenge_receipt_durable_enqueue_failure_marks_formal_turn_fail_closed(
+    monkeypatch,
+) -> None:
     diagnostics: list[dict] = []
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry.register_question_model_invocation_receipts",
+        "core.web.services.team_workflow.research_runtime.runtime_factory.production_workflow_runtime",
+        lambda: SimpleNamespace(store=object()),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.receipt_persistence.enqueue_question_model_invocation_receipt",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("registry unavailable")
+            OSError("ledger unavailable")
         ),
     )
     monkeypatch.setattr(
@@ -199,15 +221,87 @@ def test_challenge_receipt_projection_failure_does_not_break_chat(monkeypatch) -
     outcome = SimpleNamespace(model_invocation_receipt={"receiptId": "receipt-1"})
 
     assert stream_capture._persist_challenge_model_invocation_receipt(capture, outcome) is False
+    assert (
+        capture.challenge_receipt_failure_code
+        == "challenge_receipt_durable_enqueue_failed"
+    )
     assert diagnostics[0]["eventCode"] == (
-        "challenge_model_invocation_receipt_projection_failed"
+        "challenge_model_invocation_receipt_durable_enqueue_failed"
     )
     assert diagnostics[0]["fields"] == {
         "teamId": "team-1",
         "questionId": "SCI-096",
         "workflowRunId": "run-1",
-        "errorType": "RuntimeError",
+        "errorType": "OSError",
     }
+
+
+def test_challenge_receipt_enqueue_failure_never_commits_success_outcome(
+    monkeypatch,
+) -> None:
+    event_bus = EventBus()
+    committed: list[object] = []
+    monkeypatch.setattr("core.ui.get_ui", lambda: object())
+    monkeypatch.setattr(stream_capture, "_ensure_session_ui_capture_hooks", lambda _ui: None)
+    monkeypatch.setattr(
+        stream_capture,
+        "_seed_capture_from_live_feedback_events",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        stream_capture,
+        "_commit_session_capture_reasoning_segments",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        stream_capture,
+        "_commit_session_capture_assistant_segment",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(session_service, "get_event_bus", lambda: event_bus)
+    monkeypatch.setattr(session_service, "llm_status_context", lambda **_kwargs: nullcontext())
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        session_service,
+        "append_conversation_turn_outcome",
+        lambda *_args, **_kwargs: committed.append(_args[-1]),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_invalidate_session_conversation_events_cache",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.runtime_factory.production_workflow_runtime",
+        lambda: SimpleNamespace(store=object()),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.receipt_persistence.enqueue_question_model_invocation_receipt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("ledger unavailable")),
+    )
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        lambda *_args, **_kwargs: None,
+    )
+    capture = stream_capture.SessionTurnCapture(
+        session_id="session-1",
+        turn_id="turn-1",
+        model_invocation_receipt_context={
+            "teamId": "team-1",
+            "questionStageBinding": {
+                "questionId": "SCI-096",
+                "workflowRunId": "run-1",
+            },
+        },
+    )
+    outcome = SimpleNamespace(model_invocation_receipt={"receiptId": "receipt-1"})
+
+    with stream_capture._capture_session_ui_stream("session-1", capture):
+        event_bus.publish(EventNames.LLM_RESPONSE, {"turn_outcome": outcome})
+
+    assert committed == []
+    with pytest.raises(RuntimeError, match="challenge_receipt_durable_enqueue_failed"):
+        worker._raise_for_challenge_receipt_failure(capture)
 
 
 def test_receipt_context_rejects_mismatched_project_metadata(monkeypatch) -> None:

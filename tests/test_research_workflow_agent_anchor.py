@@ -998,6 +998,13 @@ def test_turn_alive_progressing_requires_running_source() -> None:
         "wait",
         snapshot={"terminal": False, "completionSource": "running"},
     )
+    receipt_pending = TurnNotReadyError(
+        "wait",
+        snapshot={
+            "terminal": False,
+            "completionSource": "receipt_registry_pending",
+        },
+    )
     terminal = TurnNotReadyError(
         "wait", snapshot={"terminal": True, "completionSource": "last_turn_status"}
     )
@@ -1005,6 +1012,7 @@ def test_turn_alive_progressing_requires_running_source() -> None:
     empty = TurnNotReadyError("wait")
 
     assert _turn_alive_progressing(live) is True
+    assert _turn_alive_progressing(receipt_pending) is True
     assert _turn_alive_progressing(terminal) is False
     assert _turn_alive_progressing(ambiguous) is False
     assert _turn_alive_progressing(empty) is False
