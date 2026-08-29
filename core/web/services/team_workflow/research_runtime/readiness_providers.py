@@ -25,7 +25,10 @@ def fetch_candidate_stats(
             list_candidate_store,
         )
 
-        payload = list_candidate_store(team_id, limit=500)
+        sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+        # Scoped runs must also see candidates stored under the SC run owner
+        # project, not only the active project store.
+        payload = list_candidate_store(team_id, limit=500, run_id=sc_run_id)
         candidates = [
             item
             for item in list(payload.get("candidates") or [])
@@ -33,21 +36,17 @@ def fetch_candidate_stats(
         ]
         scoped = _scope_candidates(candidates, snapshot, run_id)
         record_count = len(scoped)
-        if record_count <= 0:
-            # Fall back to SC summary when a sourceCollectionRunId is frozen.
-            sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
-            if sc_run_id:
-                from core.web.services.team_workflow.source_collection.runs import (
-                    get_source_collection_summary,
-                )
+        if record_count <= 0 and sc_run_id:
+            # Fall back to the data_processing record authority for the frozen
+            # sourceCollectionRunId. get_source_collection_summary is gated on
+            # the *active* research project and raises when the run owner
+            # project differs, which silently zeroed scoped runs; the global
+            # data_processing run store is the record-count authority.
+            from core.web.services import data_processing_service
 
-                summary = get_source_collection_summary(team_id, run_id=sc_run_id)
-                run_summary = summary.get("runSummary") or summary.get("summary") or {}
-                record_count = int(
-                    run_summary.get("recordCount")
-                    or run_summary.get("candidateCount")
-                    or 0
-                )
+            status = data_processing_service.get_processing_status(sc_run_id)
+            status_summary = status.get("summary") if isinstance(status.get("summary"), dict) else {}
+            record_count = int(status_summary.get("recordCount") or 0)
         if record_count <= 0:
             return None
         return {
@@ -202,8 +201,9 @@ def build_domain_revision_vector(
             list_candidate_store,
         )
 
-        # Match fetch_candidate_stats: load broadly, then scope to SC/workflow run.
-        payload = list_candidate_store(team_id, limit=500)
+        # Match fetch_candidate_stats: load broadly (including the SC run
+        # owner-project store), then scope to SC/workflow run.
+        payload = list_candidate_store(team_id, limit=500, run_id=sc_run_id)
         candidates = [
             item
             for item in list(payload.get("candidates") or [])

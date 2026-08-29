@@ -20,7 +20,13 @@ def _service():
     return team_workflow_orchestration_service
 
 
-def register_candidate_source(team_id: str, payload: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
+def register_candidate_source(
+    team_id: str,
+    payload: dict[str, Any],
+    *,
+    strict: bool = False,
+    run_id: str = "",
+) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     s.team_service.get_team(normalized_team_id)
@@ -33,7 +39,7 @@ def register_candidate_source(team_id: str, payload: dict[str, Any], *, strict: 
     now = s.utc_now_iso()
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = s._load_candidate_store(normalized_team_id, run_id=run_id)
         source_kind = s._trim_text(payload.get("sourceKind"), max_length=80) or "unknown"
         metadata = s._normalize_metadata(payload.get("metadata"))
         candidate = {
@@ -76,7 +82,7 @@ def register_candidate_source(team_id: str, payload: dict[str, Any], *, strict: 
             candidate["qualityStatus"] = "source_manifest_invalid"
         candidate_store.setdefault("candidates", []).append(candidate)
         candidate_store["updatedAt"] = now
-        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._candidate_store_path(normalized_team_id, run_id), candidate_store)
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -131,7 +137,7 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
         raise s.TeamWorkflowOrchestrationError("Data processing record is excluded from this source collection topic.")
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
         existing = s._find_candidate_imported_from_data_record(candidate_store, normalized_run_id, normalized_record_id)
         if existing is not None:
             s._record_workflow_event(
@@ -181,7 +187,7 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
                 "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store),
             }
     candidate_payload = s._source_candidate_payload_from_data_record(run, record, import_payload)
-    response = register_candidate_source(normalized_team_id, candidate_payload)
+    response = register_candidate_source(normalized_team_id, candidate_payload, run_id=normalized_run_id)
     candidate = response["candidate"]
     s._record_workflow_event(
         "candidate.imported_from_data_record",
@@ -231,7 +237,7 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
     assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
     storage_artifacts = s._source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     with s._WORKFLOW_LOCK:
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
     existing_by_record_id: dict[str, dict[str, Any]] = {}
     for candidate in list(candidate_store.get("candidates") or []):
         if not isinstance(candidate, dict) or candidate.get("candidateType") != "source_manifest":
@@ -402,7 +408,7 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
     final_status["summary"] = final_status_summary
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        final_candidate_store = s._load_candidate_store(normalized_team_id)
+        final_candidate_store = s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
         workflow_api = s._workflow_to_api(normalized_team_id, workflow, final_candidate_store)
     final_records = [item for item in list(final_records_payload.get("records") or []) if isinstance(item, dict)]
     final_source_candidates = [
@@ -499,6 +505,7 @@ def list_candidate_store(
     limit: int = 100,
     include_validation: bool = False,
     include_store: bool = False,
+    run_id: str = "",
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -511,7 +518,7 @@ def list_candidate_store(
     normalized_limit = max(1, min(int(limit or 100), 500))
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = s._load_candidate_store(normalized_team_id, run_id=run_id)
         all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
         projected_candidates, _all_source_family_summary = project_source_version_families(all_candidates)
         projected_store = {**candidate_store, "candidates": projected_candidates}
