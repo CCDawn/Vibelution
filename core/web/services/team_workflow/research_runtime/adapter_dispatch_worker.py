@@ -1474,11 +1474,11 @@ class AdapterDispatchWorker:
 
 
 def _turn_alive_progressing(exc: Exception) -> bool:
-    """True only when the wait timed out while the turn was still running.
+    """True while the logical task has a healthy, bounded wait authority.
 
-    Anything else (missing anchor, unknown session, ambiguous completion
-    source) stays on the transient path so genuinely broken dispatches keep
-    the bounded retry budget.
+    A terminal turn whose durable receipt projection is pending remains live
+    work too: re-running its idempotent task must wait for the receipt worker,
+    not consume the five-attempt transient budget or rerun the LLM.
     """
 
     snapshot = dict(getattr(exc, "snapshot", None) or {})
@@ -1486,7 +1486,10 @@ def _turn_alive_progressing(exc: Exception) -> bool:
         return False
     if bool(snapshot.get("terminal")):
         return False
-    return str(snapshot.get("completionSource") or "").strip() == "running"
+    return str(snapshot.get("completionSource") or "").strip() in {
+        "running",
+        "receipt_registry_pending",
+    }
 
 
 def _heal_pending_action_identity(outbox: Any, action: PendingAction) -> PendingAction:

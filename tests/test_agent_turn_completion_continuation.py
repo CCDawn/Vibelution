@@ -148,6 +148,32 @@ def test_completion_projects_registered_receipt_without_journal(monkeypatch) -> 
     }
 
 
+def test_formal_completion_waits_for_durable_receipt_projection() -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    snapshot = _snapshot("completed", "turn-main")
+    input_snapshot = {
+        "questionId": "SCI-096",
+        "modelRoutingPolicy": {
+            "requiredModelPolicy": {"provider": "relay_autodl"},
+            "modelPolicySha256": "a" * 64,
+            "routes": {"source_finding": "relay_autodl/GLM-5.3-flash"},
+        },
+    }
+
+    with pytest.raises(atc.TurnNotReadyError) as raised:
+        atc._require_formal_model_invocation_receipt(
+            snapshot,
+            input_snapshot=input_snapshot,
+            task_started_at_ms=123,
+        )
+
+    assert raised.value.snapshot["terminal"] is False
+    assert raised.value.snapshot["completionSource"] == "receipt_registry_pending"
+    assert raised.value.snapshot["turnTerminalStatus"] == "completed"
+    assert raised.value.snapshot["challengeTaskStartedAtMs"] == 123
+
+
 def test_continuation_does_not_submit_after_logical_task_deadline(monkeypatch) -> None:
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
     from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (

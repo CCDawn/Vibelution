@@ -37,6 +37,7 @@ from .readiness.common import RunSnapshot
 from .readiness.knowledge_recheck import build_knowledge_readiness_recheck
 from .real_domain_ports import RealDomainPorts
 from .real_readiness_context import RealDomainReadinessContext
+from .receipt_persistence import ReceiptPersistenceWorker
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +55,14 @@ class WorkflowRuntime:
     adapter_worker: AdapterDispatchWorker
     fork_worker: CheckpointForkWorker
     cancel_run_cleanup_worker: CancelRunCleanupWorker
+    receipt_persistence_worker: ReceiptPersistenceWorker
     delivery_worker: DeliveryOrchestrationWorker
     event_publish_worker: EventPublishWorker
 
     def run_workers_once(self, limit: int = 4) -> int:
         handled = self.fork_worker.run_once(limit=limit)
         handled += self.cancel_run_cleanup_worker.run_once(limit=limit)
+        handled += self.receipt_persistence_worker.run_once(limit=limit)
         handled += self.graph_worker.run_once(limit=limit)
         handled += self.adapter_worker.run_once(limit=limit)
         handled += self.event_publish_worker.run_once(limit=limit)
@@ -212,6 +215,11 @@ def build_workflow_runtime(
         owner_id="cancel-run-cleanup-worker",
         now_provider=clock,
     )
+    receipt_persistence_worker = ReceiptPersistenceWorker(
+        store=store,
+        owner_id="receipt-persistence-worker",
+        now_provider=clock,
+    )
     delivery_worker = DeliveryOrchestrationWorker(
         store=store,
         owner_id="delivery-worker",
@@ -240,6 +248,7 @@ def build_workflow_runtime(
         adapter_worker=adapter_worker,
         fork_worker=fork_worker,
         cancel_run_cleanup_worker=cancel_run_cleanup_worker,
+        receipt_persistence_worker=receipt_persistence_worker,
         delivery_worker=delivery_worker,
         event_publish_worker=event_publish_worker,
     )
@@ -251,6 +260,14 @@ _PUMP: WorkflowOutboxPump | None = None
 
 def production_workflow_runtime() -> WorkflowRuntime | None:
     return _PRODUCTION
+
+
+def wake_production_workflow_runtime() -> bool:
+    pump = _PUMP
+    if pump is None:
+        return False
+    pump.wake()
+    return True
 
 
 def start_production_workflow_runtime() -> str:

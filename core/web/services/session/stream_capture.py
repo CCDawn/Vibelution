@@ -64,6 +64,11 @@ class SessionTurnCapture:
         repr=False,
         compare=False,
     )
+    challenge_receipt_failure_code: str = field(
+        default="",
+        repr=False,
+        compare=False,
+    )
     _next_feedback_sequence: int = 1
     _latest_thought_sequence: int = 0
     _latest_thought_text: str = ""
@@ -1014,34 +1019,51 @@ def _persist_challenge_model_invocation_receipt(
 
     The binding is server-created by the session worker after re-reading the
     canonical research task. Ordinary sessions have no binding and are a
-    no-op. Registry failures remain fail-soft for chat; the formal workflow
-    subsequently sees a missing receipt and stays ineligible.
+    no-op. The existing Workflow Ledger outbox owns restart-safe delivery;
+    the conversation journal is not a receipt retry source.
     """
 
     context = capture.model_invocation_receipt_context
+    if not isinstance(context, dict):
+        return False
     receipt = getattr(outcome, "model_invocation_receipt", None)
-    if not isinstance(context, dict) or not isinstance(receipt, Mapping):
+    if not isinstance(receipt, Mapping):
+        capture.challenge_receipt_failure_code = (
+            "challenge_model_invocation_receipt_missing"
+        )
         return False
     binding = context.get("questionStageBinding")
     if not isinstance(binding, Mapping):
+        capture.challenge_receipt_failure_code = "challenge_receipt_context_invalid"
         return False
     team_id = str(context.get("teamId") or "").strip()
     question_id = str(binding.get("questionId") or "").strip().upper()
     workflow_run_id = str(binding.get("workflowRunId") or "").strip()
     if not team_id or not question_id or not workflow_run_id:
+        capture.challenge_receipt_failure_code = "challenge_receipt_context_invalid"
         return False
     try:
-        from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
-            register_question_model_invocation_receipts,
+        from core.web.services.team_workflow.research_runtime.receipt_persistence import (
+            enqueue_question_model_invocation_receipt,
+        )
+        from core.web.services.team_workflow.research_runtime.runtime_factory import (
+            production_workflow_runtime,
         )
 
-        register_question_model_invocation_receipts(
-            team_id,
+        runtime = production_workflow_runtime()
+        if runtime is None:
+            raise RuntimeError("research workflow runtime is unavailable")
+        enqueue_question_model_invocation_receipt(
+            runtime.store,
+            team_id=team_id,
             question_id=question_id,
             workflow_run_id=workflow_run_id,
-            receipts=[dict(receipt)],
+            receipt=dict(receipt),
         )
-    except Exception as exc:  # noqa: BLE001 - audit projection must never break chat
+    except Exception as exc:  # noqa: BLE001 - formal evidence must fail closed
+        capture.challenge_receipt_failure_code = (
+            "challenge_receipt_durable_enqueue_failed"
+        )
         from core.web.services.runtime_scene_service import (
             record_runtime_scene_event_quietly,
         )
@@ -1049,8 +1071,8 @@ def _persist_challenge_model_invocation_receipt(
         record_runtime_scene_event_quietly(
             "session_service",
             "stream_capture",
-            "challenge_model_invocation_receipt_projection_failed",
-            level="warning",
+            "challenge_model_invocation_receipt_durable_enqueue_failed",
+            level="error",
             outcome="failed",
             fields={
                 "teamId": team_id,
@@ -1060,6 +1082,30 @@ def _persist_challenge_model_invocation_receipt(
             },
         )
         return False
+    try:
+        from core.web.services.team_workflow.research_runtime.runtime_factory import (
+            wake_production_workflow_runtime,
+        )
+
+        wake_production_workflow_runtime()
+    except Exception as exc:  # noqa: BLE001 - the durable intent remains replayable
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "session_service",
+            "stream_capture",
+            "challenge_model_invocation_receipt_pump_wake_failed",
+            level="warning",
+            outcome="deferred",
+            fields={
+                "teamId": team_id,
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+                "errorType": type(exc).__name__,
+            },
+        )
     return True
 
 
@@ -1343,7 +1389,15 @@ def _capture_session_ui_stream(
             turn_id=capture.turn_id,
             feedback_events=capture.feedback_events,
         )
-        _persist_challenge_model_invocation_receipt(capture, outcome)
+        if not _persist_challenge_model_invocation_receipt(capture, outcome) and isinstance(
+            capture.model_invocation_receipt_context,
+            dict,
+        ):
+            # EventBus isolates handler exceptions, so record the failure on
+            # the in-memory capture and let the worker enter the canonical
+            # failed_runtime persistence path.  Never commit a success outcome
+            # that has no durable receipt intent.
+            return
         s.append_conversation_turn_outcome(s.PROJECT_ROOT, session_id, capture.turn_id, outcome)
         s._invalidate_session_conversation_events_cache(session_id)
         capture.mark_content_committed()

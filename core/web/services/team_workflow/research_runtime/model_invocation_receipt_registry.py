@@ -17,6 +17,7 @@ from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationStatus,
 )
 from core.web.services.team_workflow.research_projects import resolve_team_program_root
+from core.web.services.team_workflow.storage_durability import inter_process_lock
 
 STORE_SCHEMA_VERSION = 1
 STORE_KIND = "challenge_question_model_invocation_receipts"
@@ -130,11 +131,24 @@ def _write(path: Path, payload: Mapping[str, Any]) -> None:
     # can exceed the legacy Windows MAX_PATH boundary even when the final file
     # itself is valid.
     temporary = io_path.with_name(f".tmp-{uuid4().hex[:12]}")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(temporary, io_path)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, io_path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if os.name != "nt":
+        directory_fd = os.open(str(io_path.parent), os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
 
 def _outcome_kinds(receipt: ModelInvocationReceipt) -> tuple[str, ...]:
@@ -286,7 +300,11 @@ def register_question_model_invocation_receipts(
             )
         )
     path = _path(normalized_team, normalized_question, normalized_run)
-    with _LOCK:
+    # Atomic replace protects readers from torn files, while the dedicated
+    # cross-process lock protects the complete read-modify-write sequence from
+    # lost updates.  Do not borrow the Workflow Ledger SQLite writer for this
+    # file-store serialization.
+    with _LOCK, inter_process_lock(_io_path(path)):
         stored = _load(path)
         existing_values = _validate_store_payload(
             stored,
@@ -325,6 +343,21 @@ def register_question_model_invocation_receipts(
         question_id=normalized_question,
         workflow_run_id=normalized_run,
     )
+
+
+def validate_question_model_invocation_receipt(
+    value: Mapping[str, Any],
+    *,
+    question_id: str,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    """Return the canonical validated payload without mutating the registry."""
+
+    return _validate_receipt(
+        value,
+        question_id=str(question_id or "").strip().upper(),
+        workflow_run_id=str(workflow_run_id or "").strip(),
+    ).to_dict()
 
 
 def question_model_invocation_receipts(
