@@ -122,6 +122,7 @@ SUPPORTED_RECORDED_COMMAND_KINDS = frozenset(
         "changed-python-ruff",
         "diff-check",
         "electron-test",
+        "electron-vitest",
         "prompt-debugger",
         "pytest",
         "selector",
@@ -256,6 +257,14 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
             [argv[0], "node_modules/vitest/vitest.mjs", *argv[2:]],
             root / "web",
         )
+    if normalized[:3] == ["node", "desktop/electron/node_modules/vitest/vitest.mjs", "run"]:
+        # The electron-main-shell selector pins the Electron project root
+        # explicitly, so the command is self-contained at the repository root
+        # (mirrors the root-bound web vitest branch above). Only the pinned
+        # spelling is allowlisted; anything else stays unsupported.
+        if normalized[-2:] == ["--root", "desktop/electron"]:
+            return CommandSpec("electron-vitest", argv, root)
+        raise UnsupportedValidationCommand(command)
     if normalized == ["node", "挑战杯/build_research_flow_site.mjs"]:
         return CommandSpec("challenge-cup-build", argv, root)
     raise UnsupportedValidationCommand(command)

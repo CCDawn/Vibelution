@@ -494,6 +494,12 @@ def test_commit_gate_defers_behavior_tests_to_closeout(
             "",
         ),
         (
+            "node desktop/electron/node_modules/vitest/vitest.mjs run tests/example.test.ts --root desktop/electron",
+            "electron-vitest",
+            ["node", "desktop/electron/node_modules/vitest/vitest.mjs", "run"],
+            "",
+        ),
+        (
             "node 挑战杯/build_research_flow_site.mjs",
             "challenge-cup-build",
             ["node", "挑战杯/build_research_flow_site.mjs"],
@@ -650,6 +656,8 @@ def test_selected_validation_loads_from_isolated_script_execution(
         "npm --prefix web run test | more",
         "node -e process.exit(0)",
         "pwsh -Command Get-ChildItem",
+        "node desktop/electron/node_modules/vitest/vitest.mjs run tests/example.test.ts",
+        "node desktop/electron/node_modules/vitest/vitest.mjs run tests/example.test.ts --root web",
     ],
 )
 def test_parse_allowed_command_rejects_arbitrary_or_shell_commands(
@@ -658,6 +666,19 @@ def test_parse_allowed_command_rejects_arbitrary_or_shell_commands(
 ) -> None:
     with pytest.raises(gate.UnsupportedValidationCommand):
         gate.parse_allowed_command(command, git_repo)
+
+
+def test_electron_main_shell_matrix_commands_stay_allowlisted(git_repo: Path) -> None:
+    # Every command the selector can emit for desktop/electron/src/main.ts
+    # changes must parse; an unpinned electron vitest spelling stays rejected.
+    matrix = select_tests.load_matrix()
+    rule = next(rule for rule in matrix["rules"] if rule["id"] == "electron-main-shell")
+
+    assert rule["commands"]
+    for command in rule["commands"]:
+        spec = gate.parse_allowed_command(command, git_repo)
+        assert spec.kind == "electron-vitest"
+        assert spec.cwd == git_repo
 
 
 def test_execute_command_runs_allowed_argv_without_a_shell(git_repo: Path) -> None:
