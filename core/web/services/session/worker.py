@@ -1544,6 +1544,18 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                             max_internal_auto_continue_turns=internal_auto_continue_max_turns,
                             require_tool_progress=bool(source_collection_stage_task_auto_continue),
                             required_tool_names=source_collection_stage_task_required_tools,
+                            static_runtime_context_block=(
+                                static_runtime_context_block if host_seeded_agent_context else ""
+                            ),
+                            volatile_runtime_context_block="\n\n".join(
+                                part
+                                for part in (
+                                    dynamic_runtime_context_block if dynamic_runtime_context_included else "",
+                                    skill_runtime_context_block if skill_runtime_context_included else "",
+                                    active_skill_context_block if active_skill_context_included else "",
+                                )
+                                if str(part or "").strip()
+                            ),
                         )
                     finally:
                         _wait_for_tool_execution_quiescence(tool_scope)
@@ -1651,6 +1663,50 @@ def _turn_llm_usage_tokens(result: Any) -> int:
     return _usage_int("total_tokens", "totalTokens")
 
 
+def _agent_active_turn_context_lost(agent: Any) -> bool:
+    """True when the agent no longer holds same-turn conversation context.
+
+    A chat agent that ends an iteration through its terminal lifecycle
+    (``turn_complete`` carryover) wipes ``_active_turn_messages`` before the
+    worker dispatches the next internal continuation prompt. That follow-up
+    carryover must then be re-seeded from the unified ledger assembly;
+    dispatching it while the agent context is gone sends a bare prompt
+    (isolated message, no history/system context — amnesia-style replies).
+    Agents without the export protocol keep the legacy in-memory behavior.
+    """
+
+    export = getattr(agent, "export_turn_carryover", None)
+    if not callable(export):
+        return False
+    try:
+        payload = export()
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return True
+    if payload.get("terminal") is True:
+        return True
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return True
+    return not messages
+
+
+def _reseed_agent_turn_context_blocks(agent: Any, *, static_block: str, volatile_block: str) -> None:
+    """Re-apply the host runtime context seeds lost with a terminal wipe."""
+
+    static_block = str(static_block or "").strip()
+    volatile_block = str(volatile_block or "").strip()
+    if static_block:
+        static_seed = getattr(agent, "seed_static_runtime_context", None)
+        if callable(static_seed):
+            static_seed(static_block)
+    if volatile_block:
+        volatile_seed = getattr(agent, "seed_volatile_runtime_context", None)
+        if callable(volatile_seed):
+            volatile_seed(volatile_block)
+
+
 def _session_turn_token_budget_line(context: dict[str, Any]) -> tuple[int, str]:
     """Resolve the real-time token circuit-breaker line for one session turn.
 
@@ -1728,6 +1784,8 @@ def _run_session_continuation_loop(
     max_internal_auto_continue_turns: int = 3,
     require_tool_progress: bool = False,
     required_tool_names: list[str] | None = None,
+    static_runtime_context_block: str = "",
+    volatile_runtime_context_block: str = "",
 ) -> Any:
     s = _service()
     prompt = str(initial_prompt or "").strip()
@@ -1874,7 +1932,25 @@ def _run_session_continuation_loop(
         )
         with model_invocation_receipt_context_scope(receipt_context):
             chat_history_ledger_fingerprint = ""
-            if turn_index == 1 and history_messages:
+            iteration_chat_history = history_messages if turn_index == 1 else None
+            if (
+                iteration_chat_history is None
+                and history_messages
+                and _agent_active_turn_context_lost(agent)
+            ):
+                # The previous iteration ended through the agent's terminal
+                # lifecycle, which wiped its in-memory conversation. The
+                # follow-up carryover must go out through the same unified
+                # ledger assembly as the first iteration instead of a bare
+                # prompt; the host runtime context lost with the wipe is
+                # re-seeded alongside the history.
+                iteration_chat_history = history_messages
+                _reseed_agent_turn_context_blocks(
+                    agent,
+                    static_block=static_runtime_context_block,
+                    volatile_block=volatile_runtime_context_block,
+                )
+            if iteration_chat_history:
                 from core.orchestration.turn_message_assembly import (
                     ledger_seeded_history_fingerprint,
                 )
@@ -1893,7 +1969,7 @@ def _run_session_continuation_loop(
                 disable_tools=disable_tools,
                 prompt_cache_partition=prompt_cache_partition,
                 turn_identity=canonical_turn_id,
-                chat_history=history_messages if turn_index == 1 else None,
+                chat_history=iteration_chat_history,
                 chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
             )
         result = s._attach_session_prompt_cache_metadata(

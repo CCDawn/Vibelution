@@ -570,3 +570,174 @@ def test_continuation_loop_unaffected_below_token_budget(tmp_path, monkeypatch) 
     assert result["status"] == "completed"
     assert result["metadata"].get("continuation_pause_reason") is None
     assert result["metadata"].get("continuation_limit_reached") is None
+
+
+_UNIFIED_HISTORY = [
+    {"role": "user", "content": "任务背景：搜集量子纠错方向的近期文献"},
+    {"role": "assistant", "content": "已记录任务背景，等待执行。"},
+]
+
+
+class _TerminalLifecycleWipeAgent:
+    """Mimic the real chat agent protocol, including the terminal wipe.
+
+    A real chat agent that ends an iteration through its terminal lifecycle
+    (``turn_complete`` carryover) clears ``_active_turn_messages`` before the
+    session worker dispatches the next internal continuation iteration.
+    """
+
+    def __init__(self, *, wipe_after_first_run: bool = True) -> None:
+        self.wipe_after_first_run = wipe_after_first_run
+        self.seed_calls: list[list[dict]] = []
+        self.fingerprints: list[str] = []
+        self.static_seeds: list[str] = []
+        self.volatile_seeds: list[str] = []
+        self.context_present_at_run: list[bool] = []
+        self.run_calls = 0
+        self._active_messages: list[dict] = []
+        self._wiped = False
+
+    def set_turn_identity(self, turn_identity: str) -> None:
+        return None
+
+    def seed_chat_history(self, messages) -> None:
+        self.seed_calls.append(list(messages or []))
+        self._active_messages = list(messages or [])
+        self._wiped = False
+
+    def seed_chat_history_ledger_fingerprint(self, fingerprint: str) -> None:
+        self.fingerprints.append(str(fingerprint or ""))
+
+    def seed_static_runtime_context(self, block: str) -> None:
+        self.static_seeds.append(str(block or ""))
+
+    def seed_volatile_runtime_context(self, block: str) -> None:
+        self.volatile_seeds.append(str(block or ""))
+
+    def export_turn_carryover(self) -> dict:
+        if self._wiped:
+            return {
+                "messages": [],
+                "goal": "",
+                "turnIdentity": "turn-wiped",
+                "terminal": True,
+            }
+        if not self._active_messages:
+            return {}
+        return {
+            "messages": list(self._active_messages),
+            "goal": "任务背景",
+            "turnIdentity": "turn-live",
+            "terminal": False,
+        }
+
+    def run_single_turn(self, initial_prompt=None, **_kwargs):
+        self.run_calls += 1
+        self.context_present_at_run.append(bool(self._active_messages))
+        if self.run_calls == 1:
+            if self.wipe_after_first_run:
+                # Terminal lifecycle: the conversation context is dropped.
+                self._wiped = True
+                self._active_messages = []
+            return {
+                "status": "completed",
+                "summary": "仍在推进，尚未收口。",
+                "raw_output": "仍在推进，尚未收口。",
+                "outcome": "progress",
+                "tool_call_count": 1,
+                "tool_trace": [{"name": "task_update_tool", "status": "done", "summary": "progress"}],
+            }
+        return {
+            "status": "completed",
+            "summary": "结论：任务已完成。",
+            "raw_output": "结论：任务已完成。",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        }
+
+
+def _run_two_iteration_continuation_loop(agent, tmp_path, monkeypatch, **loop_kwargs):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    monkeypatch.setattr(
+        worker, "_session_turn_token_budget_line", lambda _context: (10_000_000, "session_default")
+    )
+    turn_control = session_service._create_session_turn_control("session-terminal-carryover")
+    try:
+        return worker._run_session_continuation_loop(
+            agent,
+            context={},
+            session_id="session-terminal-carryover",
+            turn_control=turn_control,
+            initial_prompt="开始资料搜集阶段任务",
+            history_messages=list(_UNIFIED_HISTORY),
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=3,
+            **loop_kwargs,
+        )
+    finally:
+        session_service._clear_session_turn_control(
+            "session-terminal-carryover", turn_id=turn_control.turn_id
+        )
+
+
+def test_continuation_loop_reseeds_unified_history_after_terminal_context_wipe(
+    tmp_path, monkeypatch
+) -> None:
+    """A follow-up carryover after a terminal context wipe must not go out bare.
+
+    The real chat agent clears its in-memory conversation when an iteration
+    ends through the terminal lifecycle. The next internal continuation
+    iteration must then be re-seeded through the same unified ledger assembly
+    (history + provenance stamp) instead of dispatching an isolated prompt.
+    """
+
+    agent = _TerminalLifecycleWipeAgent(wipe_after_first_run=True)
+    result = _run_two_iteration_continuation_loop(agent, tmp_path, monkeypatch)
+
+    assert agent.run_calls == 2
+    assert agent.context_present_at_run == [True, True]
+    assert len(agent.seed_calls) == 2
+    assert agent.seed_calls[0] == _UNIFIED_HISTORY
+    assert agent.seed_calls[1] == _UNIFIED_HISTORY
+    assert len(agent.fingerprints) == 2
+    assert agent.fingerprints[0]
+    assert agent.fingerprints[0] == agent.fingerprints[1]
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+
+
+def test_continuation_loop_keeps_in_memory_context_without_reseed(tmp_path, monkeypatch) -> None:
+    """When the agent still holds same-turn context, the loop must not re-seed.
+
+    Re-seeding a live in-memory continuation would replace it with the pre-turn
+    ledger view and drop the in-flight run, so the loop must keep passing no
+    chat history while the agent context stays present.
+    """
+
+    agent = _TerminalLifecycleWipeAgent(wipe_after_first_run=False)
+    result = _run_two_iteration_continuation_loop(agent, tmp_path, monkeypatch)
+
+    assert agent.run_calls == 2
+    assert agent.context_present_at_run == [True, True]
+    assert len(agent.seed_calls) == 1
+    assert len(agent.fingerprints) == 1
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+
+
+def test_continuation_loop_reseeds_runtime_context_blocks_with_history(tmp_path, monkeypatch) -> None:
+    """The re-seed must restore the host runtime context lost with the wipe."""
+
+    agent = _TerminalLifecycleWipeAgent(wipe_after_first_run=True)
+    _run_two_iteration_continuation_loop(
+        agent,
+        tmp_path,
+        monkeypatch,
+        static_runtime_context_block="## 静态运行上下文",
+        volatile_runtime_context_block="## 本轮易变上下文",
+    )
+
+    assert agent.static_seeds == ["## 静态运行上下文"]
+    assert agent.volatile_seeds == ["## 本轮易变上下文"]
