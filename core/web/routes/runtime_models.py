@@ -27,6 +27,21 @@ class RuntimeLifecycleCancelPayload(BaseModel):
     source: str = "web_ui"
 
 
+class RuntimeShutdownPayload(BaseModel):
+    """Optional shutdown request classification.
+
+    A POST without a body stays the Electron graceful-retire contract
+    (workbenchBackendRetire.ts): the backend schedules its own exit. A JSON
+    body lets the caller declare window-level close versus operator stop.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    source: str = ""
+    reason: str = ""
+    stopManager: bool = False
+
+
 class RuntimeSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

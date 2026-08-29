@@ -15,8 +15,9 @@ import hashlib
 import os
 import re
 import time
-from datetime import datetime
 from typing import Any, Mapping
+
+from core.web.services.session.timebase import parse_timestamp_utc
 
 # Local default for signature evaluation (facade remains SSOT via s.SESSION_LLM_SLOT_DIALOGUE).
 SESSION_LLM_SLOT_DIALOGUE = "dialogue"
@@ -936,12 +937,12 @@ def _stale_running_work_run_age_seconds(payload: dict[str, Any], *, now_ts: floa
         text = str(payload.get(key) or "").strip()
         if not text:
             continue
-        try:
-            parsed = datetime.fromisoformat(text)
-        except ValueError:
+        # Naive timestamps were written by _now_timestamp() in machine-local
+        # time; parse_timestamp_utc normalizes both legacy and aware values
+        # onto the UTC time base before diffing against now.
+        parsed = parse_timestamp_utc(text)
+        if parsed is None:
             continue
-        # Naive timestamps are written by _now_timestamp() in local time; .timestamp()
-        # interprets them back as local. Aware timestamps carry their own offset.
         return max(0.0, now_ts - parsed.timestamp())
     return None
 

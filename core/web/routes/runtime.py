@@ -18,6 +18,7 @@ from core.web.routes.runtime_models import (
     RuntimeLifecycleCancelPayload,
     RuntimeLifecycleCancelResponse,
     RuntimeLifecycleResponse,
+    RuntimeShutdownPayload,
     RuntimeSummaryResponse,
 )
 from core.web.services.code_freshness import resolve_code_freshness
@@ -58,9 +59,14 @@ def runtime_code_freshness() -> dict:
     response_model=RuntimeLifecycleResponse,
     response_model_exclude_unset=True,
 )
-def runtime_shutdown() -> dict:
+def runtime_shutdown(payload: RuntimeShutdownPayload | None = None) -> dict:
     try:
-        return request_runtime_shutdown()
+        return request_runtime_shutdown(
+            body_present=payload is not None,
+            source=str(payload.source or "") if payload else "",
+            reason=str(payload.reason or "") if payload else "",
+            stop_manager=bool(payload.stopManager) if payload else False,
+        )
     except RuntimeRestartActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,

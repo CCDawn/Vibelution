@@ -8825,3 +8825,102 @@ def test_extraction_stage_pagination_and_invite_regression_unchanged(tmp_path, m
     assert "补读必要页" in submitted[0]["content"]
     assert "分页覆盖本阶段输入" in submitted[0]["content"]
     assert "写回预算" not in submitted[0]["content"]
+
+
+def test_stage_task_store_follows_run_owner_project_after_active_project_switch(tmp_path, monkeypatch):
+    """根因 A：stage 任务账本与 run 产物路径按 run 属主项目解析，不随活跃项目漂移。
+
+    复现 run-16cfab646d08：run 属主 challenge-sci-003，账本却落/读在 challenge-sci-001。
+    """
+    from core.web.services.team_workflow import research_projects as research_projects_service
+
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+
+    run_scope = (data_processing_service.get_processing_run(run_id).get("scope") or {})
+    owner_project_id = str(run_scope.get("researchProjectId") or "")
+    assert owner_project_id
+
+    owner_store_path = (
+        Path(
+            team_workflow_orchestration_service._source_collection_storage_artifact_paths(
+                team["teamId"], run_id
+            )["runDirectory"]
+        )
+        / "stage_session_tasks.json"
+    )
+    assert owner_store_path.exists()
+
+    project_b = research_projects_service.create_research_project(
+        team["teamId"], {"name": "challenge-sci-001-sim"}
+    )["project"]
+    research_projects_service.activate_research_project(team["teamId"], project_b["projectId"])
+
+    # 读：切换活跃项目后，属主项目下的账本仍然可见（优先生主项目）。
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(
+        team["teamId"], run_id
+    )
+    assert [item["taskId"] for item in store["tasks"]] == [task["taskId"]]
+
+    # 写：账本更新归一到属主项目，不再落到活跃项目 B。
+    store["tasks"][0]["status"] = "completed"
+    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(
+        team["teamId"], run_id, store
+    )
+    active_project_root = research_projects_service.resolve_research_project_workspace_root(
+        team["teamId"], project_b["projectId"]
+    )
+    assert not (active_project_root / "source_collection_runs" / run_id / "stage_session_tasks.json").exists()
+
+    # 兼容读取：修复前错位落在活跃项目根的存量账本也能被读到。
+    misplaced_directory = active_project_root / "source_collection_runs" / run_id
+    misplaced_directory.mkdir(parents=True, exist_ok=True)
+    owner_store_path.rename(misplaced_directory / "stage_session_tasks.json")
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(
+        team["teamId"], run_id
+    )
+    assert [item["taskId"] for item in store["tasks"]] == [task["taskId"]]
+
+    # run 产物路径权威同样按属主项目解析。
+    paths = team_workflow_orchestration_service._source_collection_storage_artifact_paths(
+        team["teamId"], run_id
+    )
+    owner_root = research_projects_service.resolve_research_project_workspace_root(
+        team["teamId"], owner_project_id
+    )
+    assert Path(paths["runDirectory"]).is_relative_to(owner_root)
+
+
+def test_finding_writeback_candidates_carry_scope_markers(tmp_path, monkeypatch):
+    """根因 B：finding 写回物化创建的候选带 SC run / workflow run / 研究项目三类定界标记。"""
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+
+    lead = {
+        "leadId": "lead-scope-marker",
+        "title": "Predictive coding with scope markers",
+        "locator": "https://doi.org/10.1038/scope",
+        "sourceType": "paper",
+        "query": "predictive coding",
+        "perspective": "mechanism",
+    }
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {"status": "needs_review", "summary": "写回一条带标记候选。", "result": {"candidateLeads": [lead]}},
+    )
+    assert response["writeback"]["materializedSources"]["importedCandidateCount"] == 1
+
+    run_scope = (data_processing_service.get_processing_run(run_id).get("scope") or {})
+    candidates = team_workflow_orchestration_service._source_collection_candidates_for_run(
+        team["teamId"], run_id
+    )
+    assert len(candidates) == 1
+    metadata = candidates[0].get("metadata") if isinstance(candidates[0].get("metadata"), dict) else {}
+    assert metadata.get("sourceCollectionRunId") == run_id
+    assert metadata.get("researchProjectId") == str(run_scope.get("researchProjectId") or "")
+    assert metadata.get("workflowRunId") == str(run_scope.get("workflowRunId") or "")

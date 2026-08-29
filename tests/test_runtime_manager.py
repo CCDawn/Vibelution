@@ -11890,3 +11890,108 @@ def test_forward_lifecycle_command_surfaces_nonzero_exit(monkeypatch):
     assert result["ok"] is False
     assert result["exitCode"] == 3
     assert "rejected" in result["reason"]
+
+
+def test_forward_close_workbench_without_stop_manager_maps_to_window_intent(monkeypatch):
+    """close_workbench without stopManager forwards a window-level close intent.
+
+    Mapping it to the app-shell "stop" made every queued web window-close
+    abort in-flight restarts; the window-level intent plus provenance argv is
+    the python-side contract the Electron owner routes to its close
+    transaction. The forward itself stays a hidden, console-free spawn.
+    """
+
+    popen_calls: list[dict] = []
+
+    class FakeProcess:
+        pid = 77
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(args, **kwargs):
+        popen_calls.append({"args": [str(item) for item in args], **kwargs})
+        return FakeProcess()
+
+    import core.launcher.desktop_shell as desktop_shell
+
+    monkeypatch.setattr(
+        desktop_shell,
+        "resolve_desktop_shell_launch",
+        lambda project_root, *, then_lifecycle="": {
+            "args": ["C:/fake/electron.exe", "--workspace", str(project_root), then_lifecycle],
+            "cwd": str(project_root),
+        },
+    )
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", fake_popen)
+
+    result = workbench_controller.forward_lifecycle_command_to_electron(
+        "close_workbench",
+        args={"reason": "web_close_button", "source": "web_ui", "stopManager": False},
+    )
+
+    assert result["ok"] is True
+    assert result["desktopLifecycle"] == "close-window"
+    call = popen_calls[-1]
+    assert call["args"][-5:] == [
+        "close-window",
+        "--lifecycle-source",
+        "web_ui",
+        "--lifecycle-reason",
+        "web_close_button",
+    ]
+    assert call["env"]["VIBELUTION_LIFECYCLE_SOURCE"] == "web_ui"
+    assert call["env"]["VIBELUTION_LIFECYCLE_REASON"] == "web_close_button"
+    assert "VIBELUTION_LIFECYCLE_STOP_MANAGER" not in call["env"]
+    creation_flags_value = call["creationflags"]
+    hidden = call["startupinfo"]
+    assert os.name != "nt" or (creation_flags_value and hidden is not None)
+    assert call["stdin"] == subprocess.DEVNULL
+    assert call["stdout"] == subprocess.DEVNULL
+    assert call["stderr"] == subprocess.DEVNULL
+    assert call["shell"] is False
+
+
+def test_forward_close_workbench_with_stop_manager_maps_to_stop(monkeypatch):
+    popen_calls: list[dict] = []
+
+    class FakeProcess:
+        pid = 78
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(args, **kwargs):
+        popen_calls.append({"args": [str(item) for item in args], **kwargs})
+        return FakeProcess()
+
+    import core.launcher.desktop_shell as desktop_shell
+
+    monkeypatch.setattr(
+        desktop_shell,
+        "resolve_desktop_shell_launch",
+        lambda project_root, *, then_lifecycle="": {
+            "args": ["C:/fake/electron.exe", "--workspace", str(project_root), then_lifecycle],
+            "cwd": str(project_root),
+        },
+    )
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", fake_popen)
+
+    result = workbench_controller.forward_lifecycle_command_to_electron(
+        "close_workbench",
+        args={"reason": "operator_stop", "source": "operator", "stopManager": True},
+    )
+
+    assert result["ok"] is True
+    assert result["desktopLifecycle"] == "stop"
+    call = popen_calls[-1]
+    assert call["args"][-7:] == [
+        "stop",
+        "--lifecycle-source",
+        "operator",
+        "--lifecycle-reason",
+        "operator_stop",
+        "--lifecycle-stop-manager",
+        "1",
+    ]
+    assert call["env"]["VIBELUTION_LIFECYCLE_STOP_MANAGER"] == "1"

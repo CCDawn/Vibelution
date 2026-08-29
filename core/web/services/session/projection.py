@@ -10,9 +10,10 @@ their own packs. Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+
+from core.web.services.session.timebase import parse_timestamp_utc
 
 
 _SESSION_SUMMARY_MESSAGE_SCAN_LIMIT = 12
@@ -4645,13 +4646,10 @@ def _with_direct_session_agent_for_summary(
 
 
 def _timestamp_sort_key(value: str) -> float:
-    text = str(value or "").strip()
-    if not text:
+    parsed = parse_timestamp_utc(value)
+    if parsed is None:
         return 0.0
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return 0.0
+    return parsed.timestamp()
 
 
 def _is_default_empty_session_title(title: str) -> bool:

@@ -20,7 +20,8 @@ from core.launcher import desktop_session_store, lifecycle_intent_store
 from core.infrastructure import developer_sandbox
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
-from core.runtime_manager import ensure_daemon_running, submit_command
+from core.runtime_manager import electron_owns_main_line_queue, ensure_daemon_running, submit_command
+from core.runtime_manager.command_queue import has_recent_lifecycle_command
 from core.runtime_manager import work_run_store
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_evolution_active_run_snapshot,
@@ -302,16 +303,76 @@ def get_runtime_summary() -> dict:
     }
 
 
-def request_runtime_shutdown() -> dict[str, object]:
-    """Request the local workbench backend to stop."""
+# Window-level close requests declare one of these sources with stopManager
+# falsy. When Electron owns the main-line queue they are short-circuited: the
+# close belongs to the Electron close transaction, not to the daemon queue.
+_WEB_WINDOW_CLOSE_SOURCES = {"web_ui", "web_close_button"}
+# Collapse browser-driven close retries (e.g. an unload handler re-POSTing
+# every ~1.5s) onto the first idempotent delegated response.
+_WINDOW_CLOSE_DEDUPE_TTL_SECONDS = 30.0
+# An operator stop identical to one still being processed is answered
+# idempotently instead of spawning the daemon / handing off a second time.
+_OPERATOR_STOP_IN_FLIGHT_GRACE_SECONDS = 8.0
+_WINDOW_CLOSE_DEDUPE_LOCK = threading.Lock()
+_WINDOW_CLOSE_DEDUPE: dict[str, tuple[float, dict[str, object]]] = {}
+
+
+def _shutdown_request_fields(
+    *,
+    source: str,
+    reason: str,
+    stop_manager: bool,
+    body_present: bool,
+) -> dict[str, object]:
+    return {
+        "source": source,
+        "reason": reason,
+        "stopManager": stop_manager,
+        "bodyPresent": body_present,
+    }
+
+
+def request_runtime_shutdown(
+    *,
+    body_present: bool,
+    source: str = "",
+    reason: str = "",
+    stop_manager: bool = False,
+) -> dict[str, object]:
+    """Request the local workbench backend to stop.
+
+    Request classes (ADR 0009: product lifecycle writes live in Electron main):
+
+    - No body (Electron graceful retire, workbenchBackendRetire.ts): the backend
+      schedules its own local exit after stopping in-flight work. Never spawns
+      the daemon and never enqueues close_workbench; the retire poller waits for
+      process-gone + port-gone.
+    - Window-level web close (source=web_ui/web_close_button, stopManager
+      falsy): when Electron owns the main-line queue this returns an idempotent
+      202 stating the close belongs to the Electron close transaction; repeated
+      requests within the dedupe window reuse the same response. Without an
+      Electron queue owner the legacy managed path still applies.
+    - Operator stop (stopManager=true or a non-web source): legacy managed
+      queue path, skipped when an equivalent lifecycle intent is already in
+      flight.
+    """
 
     lang = get_web_language()
+    normalized_source = str(source or "").strip().lower()
+    normalized_reason = str(reason or "").strip()
+    requested_by = normalized_source or ("electron_retire" if not body_present else "web_ui")
+    classification = _shutdown_request_fields(
+        source=normalized_source or "electron_retire",
+        reason=normalized_reason or ("electron_graceful_retire" if not body_present else ""),
+        stop_manager=stop_manager,
+        body_present=body_present,
+    )
     active_work_runs = _restart_guard_active_work_runs()
     _record_shutdown_event(
         "runtime.shutdown.requested",
-        message="Runtime shutdown requested from web UI.",
-        fields={
-            "source": "web_ui",
+        message="Runtime shutdown requested.",
+        fields=classification
+        | {
             "activeWorkCount": len(active_work_runs),
             "activeWorkKinds": _active_work_kinds(active_work_runs),
         },
@@ -323,24 +384,72 @@ def request_runtime_shutdown() -> dict[str, object]:
             message="Runtime shutdown blocked by active work.",
             outcome="blocked",
             level="warning",
-            fields={
-                "source": "web_ui",
+            fields=classification
+            | {
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkKinds": _active_work_kinds(active_work_runs),
                 "activeWorkRuns": active_work_runs[:8],
             },
         )
         raise RuntimeRestartActiveWorkBlocked(message, active_work_runs[:8])
+
+    if not body_present:
+        return _electron_retire_local_shutdown(lang)
+
+    if (
+        normalized_source in _WEB_WINDOW_CLOSE_SOURCES
+        and not stop_manager
+        and electron_owns_main_line_queue()
+    ):
+        return _delegated_window_close_response(lang=lang, source=normalized_source)
+
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
+
+    if normalized_source not in _WEB_WINDOW_CLOSE_SOURCES or stop_manager:
+        # Operator-class stop: an equivalent intent already being processed is
+        # answered idempotently instead of re-spawning the daemon for a second
+        # hand-off of the same lifecycle write.
+        try:
+            already_in_flight = has_recent_lifecycle_command(
+                grace_seconds=_OPERATOR_STOP_IN_FLIGHT_GRACE_SECONDS,
+            )
+        except Exception:
+            already_in_flight = False
+        if already_in_flight:
+            _record_shutdown_event(
+                "runtime.shutdown.deduped_in_flight",
+                message="Runtime shutdown joined an in-flight lifecycle intent.",
+                outcome="accepted",
+                fields=_shutdown_event_fields(
+                    mode="runtime_manager",
+                    source=normalized_source,
+                    stopped_chat_room_rounds=stopped_chat_room_rounds,
+                    stopped_chat_turns=stopped_chat_turns,
+                    stopped_evolution_runs=stopped_evolution_runs,
+                ),
+            )
+            return {
+                "accepted": True,
+                "mode": "runtime_manager",
+                "message": text_for(
+                    lang,
+                    zh="已有同类的停止请求在处理中，本次请求并入该流程。",
+                    en="An equivalent stop request is already in progress; this request joined it.",
+                ),
+                "chatTurns": stopped_chat_turns,
+                "chatRoomRounds": stopped_chat_room_rounds,
+                "evolutionRuns": stopped_evolution_runs,
+            }
+
     if _can_use_managed_launcher_shutdown():
         try:
             ensure_daemon_running()
             submit_command(
                 "close_workbench",
-                args={"reason": "web_close_button", "source": "web_ui", "stopManager": False},
-                requested_by="web_ui",
+                args={"reason": normalized_reason or "web_close_button", "source": normalized_source or "web_ui", "stopManager": stop_manager},
+                requested_by=requested_by,
             )
             _record_shutdown_event(
                 "runtime.shutdown.accepted",
@@ -348,6 +457,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                 outcome="accepted",
                 fields=_shutdown_event_fields(
                     mode="runtime_manager",
+                    source=normalized_source,
                     stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
                     stopped_evolution_runs=stopped_evolution_runs,
@@ -373,6 +483,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                 outcome="accepted",
                 fields=_shutdown_event_fields(
                     mode="managed_fallback",
+                    source=normalized_source,
                     stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
                     stopped_evolution_runs=stopped_evolution_runs,
@@ -398,6 +509,7 @@ def request_runtime_shutdown() -> dict[str, object]:
         outcome="accepted",
         fields=_shutdown_event_fields(
             mode="local",
+            source=normalized_source,
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
             stopped_evolution_runs=stopped_evolution_runs,
@@ -417,8 +529,92 @@ def request_runtime_shutdown() -> dict[str, object]:
     }
 
 
+def _electron_retire_local_shutdown(lang: str) -> dict[str, object]:
+    """Graceful self-exit for the Electron retire contract.
+
+    workbenchBackendRetire.ts POSTs without a body and then polls for
+    process-gone + port-gone. The queue round-trip used to forward a desktop
+    "stop" back into Electron, aborting in-flight restarts; scheduling the
+    local exit here keeps the retire contract without touching the daemon.
+    """
+
+    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
+    stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
+    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
+    _schedule_local_backend_exit()
+    _record_shutdown_event(
+        "runtime.shutdown.accepted",
+        message="Electron retire accepted; local backend exit scheduled.",
+        outcome="accepted",
+        fields=_shutdown_event_fields(
+            mode="local_retire",
+            source="electron_retire",
+            stopped_chat_room_rounds=stopped_chat_room_rounds,
+            stopped_chat_turns=stopped_chat_turns,
+            stopped_evolution_runs=stopped_evolution_runs,
+        ),
+    )
+    return {
+        "accepted": True,
+        "mode": "local_retire",
+        "message": text_for(
+            lang,
+            zh="正在关闭本地后端服务。",
+            en="Shutting down the local backend service.",
+        ),
+        "chatTurns": stopped_chat_turns,
+        "chatRoomRounds": stopped_chat_room_rounds,
+        "evolutionRuns": stopped_evolution_runs,
+    }
+
+
+def _delegated_window_close_response(*, lang: str, source: str) -> dict[str, object]:
+    """Idempotent answer for a window-level close under an Electron-owned queue.
+
+    The Electron close transaction owns the actual window close; the backend
+    neither spawns the daemon nor enqueues close_workbench. Responses within
+    the dedupe TTL are reused verbatim so retry storms stay cheap.
+    """
+
+    dedupe_key = f"{source}:0"
+    now_monotonic = time.monotonic()
+    with _WINDOW_CLOSE_DEDUPE_LOCK:
+        cached = _WINDOW_CLOSE_DEDUPE.get(dedupe_key)
+        if cached is not None and now_monotonic - cached[0] <= _WINDOW_CLOSE_DEDUPE_TTL_SECONDS:
+            return dict(cached[1])
+    response = {
+        "accepted": True,
+        "mode": "electron_window_close",
+        "delegatedTo": "electron_close_transaction",
+        "message": text_for(
+            lang,
+            zh="窗口关闭由桌面端关闭事务负责，本次请求无需重复处理。",
+            en="Window close is owned by the desktop close transaction; no further action is needed here.",
+        ),
+        "chatTurns": [],
+        "chatRoomRounds": [],
+        "evolutionRuns": [],
+    }
+    _record_shutdown_event(
+        "runtime.shutdown.window_close_delegated",
+        message="Window-level close delegated to the Electron close transaction.",
+        outcome="accepted",
+        fields={"source": source, "mode": "electron_window_close"},
+    )
+    with _WINDOW_CLOSE_DEDUPE_LOCK:
+        _WINDOW_CLOSE_DEDUPE[dedupe_key] = (now_monotonic, dict(response))
+    return response
+
+
 def request_runtime_restart() -> dict[str, object]:
-    """Request a managed workbench restart through the runtime manager."""
+    """Request a managed workbench restart through the runtime manager.
+
+    When Electron owns the main-line queue the desktop control plane owns
+    restart writes (ADR 0009). Spawning the daemon and enqueueing
+    restart_workbench here would double-write against the CLI/desktop restart
+    path, so the request is answered with an idempotent delegation result
+    instead; the legacy managed path still applies without an Electron owner.
+    """
 
     lang = get_web_language()
     active_work_runs = _restart_guard_active_work_runs()
@@ -445,6 +641,28 @@ def request_runtime_restart() -> dict[str, object]:
             },
         )
         raise RuntimeRestartActiveWorkBlocked(_lifecycle_active_work_block_message("restart", lang), active_work_runs[:8])
+
+    if electron_owns_main_line_queue():
+        _record_restart_event(
+            "runtime.restart.delegated_to_electron",
+            message="Runtime restart delegated to the Electron control plane.",
+            outcome="accepted",
+            fields={"source": "web_ui", "mode": "electron_restart_delegated"},
+        )
+        return {
+            "accepted": True,
+            "mode": "electron_restart_delegated",
+            "commandId": "",
+            "message": text_for(
+                lang,
+                zh="工作台重启由桌面控制台负责，请使用桌面托盘或 Launcher 的重启入口。",
+                en="Workbench restart is owned by the desktop control plane. Use the desktop tray or the Launcher restart control.",
+            ),
+            "chatTurns": [],
+            "chatRoomRounds": [],
+            "evolutionRuns": [],
+        }
+
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
@@ -577,9 +795,10 @@ def _shutdown_event_fields(
     stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
+    source: str = "web_ui",
 ) -> dict[str, object]:
     return {
-        "source": "web_ui",
+        "source": source or "web_ui",
         "mode": mode,
         "chatRoomRoundCount": len(stopped_chat_room_rounds),
         "chatTurnCount": len(stopped_chat_turns),

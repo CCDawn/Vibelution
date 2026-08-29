@@ -2669,7 +2669,7 @@ class RuntimeManagerDaemon:
                 "stopManager": True,
             }
         try:
-            return forward_lifecycle_command_to_electron(command_type)
+            return forward_lifecycle_command_to_electron(command_type, args=args)
         except Exception as exc:
             _append_event(
                 "command.electron_handoff_forward_error",

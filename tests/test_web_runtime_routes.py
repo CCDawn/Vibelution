@@ -2059,8 +2059,8 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
     monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
-    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
         runtime_service,
@@ -2068,7 +2068,7 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
         lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
     )
 
-    response = client.post("/api/runtime/shutdown")
+    response = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
 
     assert response.status_code == 202
     assert response.json()["accepted"] is True
@@ -2089,6 +2089,139 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     assert accepted_event[3]["fields"]["mode"] == "runtime_manager"
     assert accepted_event[3]["fields"]["chatTurnCount"] == 0
 
+def test_runtime_shutdown_electron_retire_schedules_local_exit_without_daemon(tmp_path, monkeypatch):
+    """The body-less Electron retire contract exits the backend itself.
+
+    workbenchBackendRetire.ts POSTs /api/runtime/shutdown with no body and then
+    polls for process-gone + port-gone. This path must never spawn the runtime
+    manager daemon or enqueue close_workbench (the old queue round-trip
+    forwarded a destructive desktop "stop" back into Electron and aborted
+    in-flight restarts).
+    """
+
+    calls: list[object] = []
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    # Even a canary claiming Electron ownership must not matter: the retire
+    # path never consults the queue at all.
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: True)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_schedule_local_backend_exit",
+        lambda delay_seconds=0.35: calls.append("local_exit"),
+    )
+
+    response = client.post("/api/runtime/shutdown")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["mode"] == "local_retire"
+    assert calls == ["local_exit"]
+
+def test_runtime_shutdown_window_close_delegates_to_electron_and_dedupes(monkeypatch):
+    """Window-level web close under an Electron-owned queue is idempotent.
+
+    No daemon spawn, no close_workbench enqueue, and retries within the dedupe
+    window reuse the first response instead of amplifying the retry storm.
+    """
+
+    runtime_service._WINDOW_CLOSE_DEDUPE.clear()
+    calls: list[object] = []
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: True)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+
+    try:
+        first = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
+        second = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
+    finally:
+        runtime_service._WINDOW_CLOSE_DEDUPE.clear()
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    first_payload = first.json()
+    assert first_payload["accepted"] is True
+    assert first_payload["mode"] == "electron_window_close"
+    assert first_payload["delegatedTo"] == "electron_close_transaction"
+    assert second.json() == first_payload
+    assert calls == []
+    delegated_events = [item for item in scene_events if item[2] == "runtime.shutdown.window_close_delegated"]
+    assert len(delegated_events) == 1
+
+def test_runtime_shutdown_operator_stop_dedupes_when_intent_in_flight(monkeypatch):
+    """An operator stop identical to an in-flight intent never re-spawns the daemon."""
+
+    calls: list[object] = []
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: True)
+    monkeypatch.setattr(runtime_service, "has_recent_lifecycle_command", lambda *, grace_seconds: grace_seconds > 0)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+
+    response = client.post("/api/runtime/shutdown", json={"source": "operator", "reason": "cli_stop", "stopManager": True})
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["mode"] == "runtime_manager"
+    assert calls == []
+
+def test_runtime_shutdown_operator_stop_queues_manager_with_stop_manager_args(tmp_path, monkeypatch):
+    script_path = tmp_path / "vibelution_launcher.ps1"
+    script_path.write_text("Write-Host managed\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", script_path)
+    monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: True)
+    monkeypatch.setattr(runtime_service, "has_recent_lifecycle_command", lambda *, grace_seconds: False)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+
+    response = client.post("/api/runtime/shutdown", json={"source": "operator", "reason": "cli_stop", "stopManager": True})
+
+    assert response.status_code == 202
+    assert response.json()["mode"] == "runtime_manager"
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "close_workbench",
+        {"reason": "cli_stop", "source": "operator", "stopManager": True},
+        "operator",
+    )
+
 def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatch):
     calls: list[object] = []
     scene_events: list[tuple[str, str, str, dict]] = []
@@ -2100,6 +2233,7 @@ def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatc
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
     monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
         runtime_service,
@@ -2132,6 +2266,33 @@ def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatc
     assert accepted_event[3]["lifecycle"] is True
     assert accepted_event[3]["fields"]["mode"] == "runtime_manager"
     assert accepted_event[3]["fields"]["commandId"] == "cmd-restart-web"
+
+def test_runtime_restart_delegates_to_electron_control_plane(monkeypatch):
+    """With Electron owning the main-line queue, restart never spawns the daemon.
+
+    Enqueueing restart_workbench here would double-write against the desktop
+    CLI restart path, so the request is answered with a delegation result.
+    """
+
+    calls: list[object] = []
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: True)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+
+    response = client.post("/api/runtime/restart")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["mode"] == "electron_restart_delegated"
+    assert payload["commandId"] == ""
+    assert calls == []
 
 def test_launcher_status_exposes_project_bundle(tmp_path, monkeypatch):
     monkeypatch.setattr(standalone_launcher_service, "LAUNCHER_STATE_PATH", tmp_path / "missing-launcher-state.json")
@@ -3149,10 +3310,11 @@ def test_runtime_shutdown_falls_back_to_launcher_stop_when_manager_queue_fails(t
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
     monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr(runtime_service, "_spawn_managed_launcher_shutdown", lambda: calls.append("fallback"))
 
-    response = client.post("/api/runtime/shutdown")
+    response = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
 
     assert response.status_code == 202
     assert response.json()["accepted"] is True
@@ -3168,9 +3330,10 @@ def test_runtime_shutdown_falls_back_to_local_exit_when_not_managed(monkeypatch)
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
     monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda delay_seconds=0.35: calls.append("local"))
 
-    response = client.post("/api/runtime/shutdown")
+    response = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
 
     assert response.status_code == 202
     assert response.json()["accepted"] is True

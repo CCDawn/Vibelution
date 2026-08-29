@@ -288,6 +288,31 @@ describe("conversationIndexModel", () => {
     expect(merged.map((item) => item.conversationId)).toEqual(["new", "old"]);
   });
 
+  it("sorts mixed legacy naive-local and aware-UTC updatedAt values on one time base", () => {
+    const tzOffsetMs = new Date().getTimezoneOffset() * 60_000;
+    const localWallIso = (utcMs: number) => new Date(utcMs - tzOffsetMs).toISOString().replace("Z", "");
+
+    // Legacy row: naive machine-local wall time, one hour old. Fresh row:
+    // tz-aware UTC now. On a UTC+8 machine the naive string sorts above the
+    // aware string lexicographically even though it is older by one hour.
+    const legacyNaive = localWallIso(Date.now() - 3_600_000);
+    const freshAware = new Date().toISOString();
+    const merged = mergeVisibleSessionsIntoConversations(
+      [conversation({ conversationId: "legacy-naive", directSessionId: "legacy-naive", updatedAt: legacyNaive })],
+      [session({ id: "fresh-aware", title: "新会话", updatedAt: freshAware })],
+    );
+    expect(merged.map((item) => item.conversationId)).toEqual(["fresh-aware", "legacy-naive"]);
+
+    // Reverse direction: aware one hour ago must still sort after naive now.
+    const awareOld = new Date(Date.now() - 3_600_000).toISOString();
+    const naiveNow = localWallIso(Date.now());
+    const mergedReversed = mergeVisibleSessionsIntoConversations(
+      [conversation({ conversationId: "aware-old", directSessionId: "aware-old", updatedAt: awareOld })],
+      [session({ id: "naive-now", title: "新会话", updatedAt: naiveNow })],
+    );
+    expect(mergedReversed.map((item) => item.conversationId)).toEqual(["naive-now", "aware-old"]);
+  });
+
   it("hydrates existing direct conversations from the session index before classification", () => {
     const merged = mergeVisibleSessionsIntoConversations(
       [

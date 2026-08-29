@@ -522,10 +522,25 @@ def _import_source_collection_local_workspace_sources(
     return summary
 
 
-def _load_candidate_store(team_id: str) -> dict[str, Any]:
+def _load_candidate_store(team_id: str, *, run_id: str = "") -> dict[str, Any]:
+    """Load the team candidate store, optionally scoped to a source-collection run.
+
+    With ``run_id`` the owner-project store is authoritative; the active-project
+    store is merged in as a read-compat fallback for candidates materialized
+    under a pre-fix wrong project (owner entries win, dedup by candidateId).
+    Writes stay normalized to the owner-project path.
+    """
+
     s = _service()
-    path = s._candidate_store_path(team_id)
-    if path.exists():
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    path = s._candidate_store_path(team_id, normalized_run_id)
+    legacy_fallback_path = s._candidate_store_path(team_id) if normalized_run_id else None
+    if legacy_fallback_path and str(legacy_fallback_path) != str(path):
+        merged = s._merge_candidate_store_payloads(path, legacy_fallback_path)
+        if merged is not None:
+            return merged
+        # Neither store exists yet: seed the owner-project store below.
+    elif path.exists():
         payload = s._read_json(path)
         if isinstance(payload.get("candidates"), list):
             return payload
@@ -538,7 +553,44 @@ def _load_candidate_store(team_id: str) -> dict[str, Any]:
         "createdAt": now,
         "updatedAt": now,
     }
+    if normalized_run_id:
+        payload["sourceCollectionRunId"] = normalized_run_id
     s._write_json(path, payload)
+    return payload
+
+
+def _merge_candidate_store_payloads(primary_path: Path, fallback_path: Path) -> dict[str, Any] | None:
+    """Owner-first merged candidate store read (compat for misplaced stores)."""
+
+    s = _service()
+    primary_payload = s._read_json(primary_path) if primary_path.exists() else {}
+    fallback_payload = s._read_json(fallback_path) if fallback_path.exists() else {}
+    primary_candidates = (
+        list(primary_payload.get("candidates"))
+        if isinstance(primary_payload.get("candidates"), list)
+        else None
+    )
+    fallback_candidates = (
+        list(fallback_payload.get("candidates"))
+        if isinstance(fallback_payload.get("candidates"), list)
+        else None
+    )
+    if primary_candidates is None and fallback_candidates is None:
+        return None
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in (primary_candidates or [], fallback_candidates or []):
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = s._trim_text(item.get("candidateId"), max_length=160)
+            if candidate_id and candidate_id in seen:
+                continue
+            if candidate_id:
+                seen.add(candidate_id)
+            merged.append(item)
+    payload = dict(primary_payload if primary_candidates is not None else fallback_payload)
+    payload["candidates"] = merged
     return payload
 
 
@@ -1472,6 +1524,8 @@ def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict
         raise s.TeamWorkflowOrchestrationError("Data processing record cannot be imported without title, sourceRef, or rawLocation.")
     metadata = s._normalize_metadata(payload.get("metadata"))
     record_metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
     quality_signals = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
     collection_trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
     source_trace = record_metadata.get("sourceCollectionTrace") if isinstance(record_metadata.get("sourceCollectionTrace"), dict) else collection_trace
@@ -1493,6 +1547,19 @@ def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict
             "sourceCollectionTrace": s._normalize_metadata(source_trace),
             "sourceRunId": imported_from["runId"],
             "sourceRecordId": imported_from["recordId"],
+            # 定界标记（readiness scoped 过滤的命中键）：SC run、工作流 run 与
+            # 研究项目三者取 run 记录权威（任务可得时 workflowRunId 以任务为准）。
+            "sourceCollectionRunId": imported_from["runId"],
+            "workflowRunId": s._trim_text(
+                metadata.get("workflowRunId")
+                or run_scope.get("workflowRunId")
+                or run_metadata.get("workflowRunId"),
+                max_length=160,
+            ),
+            "researchProjectId": s._trim_text(
+                run_scope.get("researchProjectId") or run_metadata.get("researchProjectId"),
+                max_length=160,
+            ),
             "sourceCategory": source_category,
             "sourceRef": source_ref or raw_location,
             "sourceUrl": source_url,
@@ -1838,7 +1905,7 @@ def _source_collection_candidates_for_run(team_id: str, run_id: str) -> list[dic
     s = _service()
     normalized_run_id = s._trim_text(run_id, max_length=128)
     with s._WORKFLOW_LOCK:
-        candidate_store = s._load_candidate_store(team_id)
+        candidate_store = s._load_candidate_store(team_id, run_id=normalized_run_id)
     candidates: list[dict[str, Any]] = []
     for item in list(candidate_store.get("candidates") or []):
         if not isinstance(item, dict) or item.get("candidateType") != "source_manifest":
@@ -3371,11 +3438,94 @@ def _source_collection_stage_task_has_evidence_gaps(task: dict[str, Any] | None)
     )
 
 
+def _source_collection_run_owner_research_project_id(team_id: str, run_id: str) -> str:
+    """Resolve the owning research project of a source-collection run.
+
+    Authority: the data_processing run record (scope/metadata.researchProjectId)
+    frozen at run start. Returns "" when the run record is unavailable so
+    callers keep the historical active-project behavior.
+    """
+
+    s = _service()
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return ""
+    try:
+        # 轻量读取 run.json 的 scope/metadata，不触发 records/status 重算。
+        run_identity = s.data_processing_service.get_processing_run_scope(normalized_run_id)
+    except Exception:  # noqa: BLE001 - missing/unreadable run keeps active-project behavior
+        return ""
+    scope = run_identity.get("scope") if isinstance(run_identity.get("scope"), dict) else {}
+    metadata = run_identity.get("metadata") if isinstance(run_identity.get("metadata"), dict) else {}
+    return s._trim_text(
+        scope.get("researchProjectId") or metadata.get("researchProjectId"),
+        max_length=160,
+    )
+
+
+def _source_collection_run_workflow_root(team_id: str, run_id: str) -> Path:
+    """Workflow root resolved by the run owner project (fallback: active project).
+
+    Stage task ledgers, candidate stores, and run artifact directories must all
+    live under the run owner project; the team's *active* project drifts when
+    another experiment is activated while an older run is still being written.
+    """
+
+    s = _service()
+    owner_project_id = s._source_collection_run_owner_research_project_id(team_id, run_id)
+    if owner_project_id:
+        try:
+            from core.web.services.team_workflow.research_projects import (
+                resolve_research_project_workspace_root,
+            )
+
+            return resolve_research_project_workspace_root(team_id, owner_project_id)
+        except Exception:  # noqa: BLE001 - unknown project id falls back to active root
+            pass
+    return s._team_workflow_root(team_id)
+
+
+def _source_collection_task_store_search_roots(team_id: str) -> list[Path]:
+    """All plausible ``source_collection_runs`` roots for cross-run lookups.
+
+    Covers the active project root (historical default), every isolated
+    research-project root, and the legacy base root, so tasks stored under a
+    pre-fix wrong project stay discoverable.
+    """
+
+    s = _service()
+    roots: list[Path] = [s._team_workflow_root(team_id) / "source_collection_runs"]
+    try:
+        from core.web.services.team_workflow.research_projects import (
+            formal_team_workspace_root,
+        )
+
+        base_root = formal_team_workspace_root(team_id)
+    except Exception:  # noqa: BLE001 - unknown team keeps the active root only
+        return roots
+    candidates = [
+        base_root / "source_collection_runs",
+        *sorted(
+            (child / "workspace" / "source_collection_runs")
+            for child in (base_root / "research_projects").glob("*")
+            if (child / "workspace" / "source_collection_runs").is_dir()
+        ),
+    ]
+    for candidate in candidates:
+        if candidate not in roots:
+            roots.append(candidate)
+    return roots
+
+
 def _source_collection_storage_artifact_paths(team_id: str, run_id: str) -> dict[str, Path]:
     s = _service()
     normalized_team_id = s._safe_token(team_id, default="team", max_length=96)
     normalized_run_id = s._safe_token(run_id, default="run", max_length=96)
-    run_directory = s._team_workflow_root(normalized_team_id) / "source_collection_runs" / normalized_run_id
+    run_directory = (
+        s._source_collection_run_workflow_root(team_id, run_id)
+        / "source_collection_runs"
+        / normalized_run_id
+    )
     data_processing_directory = s.developer_sandbox.seeded_sandbox_workspace_path(
         s._project_root(),
         "data_processing",
@@ -3389,7 +3539,7 @@ def _source_collection_storage_artifact_paths(team_id: str, run_id: str) -> dict
         "searchEventsPath": run_directory / "search_events.jsonl",
         "recordsPath": run_directory / "records.jsonl",
         "candidatesPath": run_directory / "candidates.jsonl",
-        "candidateStorePath": s._candidate_store_path(normalized_team_id),
+        "candidateStorePath": s._candidate_store_path(team_id, run_id),
         "dataProcessingRunPath": data_processing_directory / "run.json",
         "dataProcessingRecordsPath": data_processing_directory / "records.jsonl",
     }
@@ -3656,13 +3806,15 @@ def _update_source_candidate_content_extraction(
     team_id: str,
     candidate_id: str,
     content_extraction: dict[str, Any],
+    *,
+    run_id: str = "",
 ) -> None:
     s = _service()
     normalized_candidate_id = s._trim_text(candidate_id, max_length=160)
     if not normalized_candidate_id:
         return
     with s._WORKFLOW_LOCK:
-        candidate_store = s._load_candidate_store(team_id)
+        candidate_store = s._load_candidate_store(team_id, run_id=run_id)
         candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
         changed = False
         for candidate in candidates:
@@ -3676,7 +3828,7 @@ def _update_source_candidate_content_extraction(
             break
         if changed:
             candidate_store["updatedAt"] = s.utc_now_iso()
-            s._write_json(s._candidate_store_path(team_id), candidate_store)
+            s._write_json(s._candidate_store_path(team_id, run_id), candidate_store)
 
 
 def _validate_source_manifest(candidate: dict[str, Any]) -> list[dict[str, str]]:

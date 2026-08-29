@@ -509,7 +509,7 @@ def _materialize_source_collection_stage_writeback_content_extraction(
     seen: set[str] = set()
     now = s.utc_now_iso()
     with s._WORKFLOW_LOCK:
-        candidate_store = s._load_candidate_store(team_id)
+        candidate_store = s._load_candidate_store(team_id, run_id=run_id)
         candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
         candidate_by_id = {
             s._trim_text(item.get("candidateId"), max_length=160): item
@@ -580,7 +580,7 @@ def _materialize_source_collection_stage_writeback_content_extraction(
             changed = True
         if changed:
             candidate_store["updatedAt"] = now
-            s._write_json(s._candidate_store_path(team_id), candidate_store)
+            s._write_json(s._candidate_store_path(team_id, run_id), candidate_store)
     summary = s._source_collection_stage_writeback_content_extraction_summary(
         status="completed" if extracted else "no_valid_candidate_extractions",
         extracted=extracted,
@@ -719,6 +719,7 @@ def _materialize_source_collection_stage_writeback_record_extractions(
                         "sourceCollectionStageId": stage_id,
                         "sourceCollectionStageAgentId": agent_id,
                         "sourceCollectionStageAgentRole": agent_role,
+                        "workflowRunId": s._trim_text(task.get("workflowRunId"), max_length=160),
                         "contentExtraction": content_extraction,
                     },
                     "evidenceRefs": content_extraction.get("evidenceRefs"),
@@ -730,7 +731,7 @@ def _materialize_source_collection_stage_writeback_record_extractions(
         candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
         candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
         if candidate_id:
-            s._update_source_candidate_content_extraction(team_id, candidate_id, content_extraction)
+            s._update_source_candidate_content_extraction(team_id, candidate_id, content_extraction, run_id=run_id)
         imported_candidates.append(
             {
                 "candidateId": candidate_id,
@@ -880,6 +881,7 @@ def _materialize_source_collection_stage_writeback_sources(
                         "sourceCollectionStageAgentId": agent_id,
                         "sourceCollectionStageAgentRole": agent_role,
                         "sourceCollectionLeadId": s._trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+                        "workflowRunId": s._trim_text(task.get("workflowRunId"), max_length=160),
                     },
                 },
             )
@@ -1461,7 +1463,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             source_candidate_ids = set(source_candidates_by_id.keys())
             with s._WORKFLOW_LOCK:
                 workflow = s._load_or_create_workflow(team_id)
-                candidate_store = s._load_candidate_store(team_id)
+                candidate_store = s._load_candidate_store(team_id, run_id=run_id)
                 stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
                 graph_candidates = [
                     item
@@ -2147,7 +2149,7 @@ def _source_collection_stage_writeback_standardize_steward_pack_output(
     source_candidate_ids = set(source_candidates_by_id.keys())
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(team_id)
-        candidate_store = s._load_candidate_store(team_id)
+        candidate_store = s._load_candidate_store(team_id, run_id=run_id)
         stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
         graph_candidates = [
             item

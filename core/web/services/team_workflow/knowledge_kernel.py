@@ -4180,8 +4180,12 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _candidate_store_path(team_id: str) -> Path:
+def _candidate_store_path(team_id: str, run_id: str = "") -> Path:
     s = _service()
+    if s._trim_text(run_id, max_length=160):
+        # Source-collection scoped writes resolve by the run owner project so
+        # candidates never drift to whichever project happens to be active.
+        return s._source_collection_run_workflow_root(team_id, run_id) / "candidate_store" / "index.json"
     return s._team_workflow_root(team_id) / "candidate_store" / "index.json"
 
 
