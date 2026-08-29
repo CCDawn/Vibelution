@@ -1033,6 +1033,34 @@ Avoid:
 
 Validation anchor: lifecycle work should include focused service or route tests for the state transition, plus cache invalidation or optimistic rollback coverage when the UI changes.
 
+#### Companion / Virtual-Human Chat Isolation
+
+Trigger this constraint for every Companion or virtual-human change that sends, schedules, queues, projects, or displays conversation activity, including user messages, proactive messages, multi-bubble follow-ups, typing state, and Session recovery.
+
+Default rule: Companion behavior is an Agent-scoped adapter around the native Session boundary, not a variant of the ordinary chat runtime. The native Session Journal, worker, persistence path, projection, and SSE stream remain the sole authorities for Turn identity, transcript history, ordering after admission, terminal state, and live output.
+
+Allowed Companion-owned surfaces include:
+
+- `core/agent_plugins/virtual_human_life/**` for the plugin-local mailbox, autonomous policy, persona/life state, and read-only native-admission receipts;
+- Companion-specific API adapters and `/companions` UI routes;
+- identity-gated presentation adapters that activate only after the requested Companion, Agent, and `directSessionId` are verified as one binding;
+- a plugin-local FIFO mailbox that orders arrival before native Session admission and stores commands or receipts only, never transcript messages.
+
+Forbidden for a Companion-only task:
+
+- changing ordinary Agent Session admission, Journal, worker, persistence, projection, SSE, `ConversationStore`, composer, attachment, retry, cancel, or follow-up semantics to accommodate Companion behavior;
+- using `companionMode`, a URL query, or unverified client state to alter transport behavior before the Companion-to-Agent-to-Session identity binding succeeds;
+- introducing a second transcript, Turn state machine, SSE owner, or final-answer authority in the plugin, Companion API, or frontend;
+- making the ordinary follow-up queue or Session scheduler understand Companion mailbox policy;
+- mixing a newly discovered ordinary-chat repair into a Companion task. Open a separately scoped ordinary Session task when the shared chain itself is defective.
+
+Required evidence for every Companion chat change:
+
+1. The task diff is empty for ordinary chat runtime cores unless the user separately authorized an ordinary-chat task; at minimum inspect `core/web/services/session/**`, `core/web/routes/sessions.py`, and `core/chat/**`.
+2. The Companion route proves the verified Agent and `directSessionId` binding, one native SSE owner, and Companion-only presentation behavior. Keep `web/src/routes/companions/CompanionChatReuse.contract.test.ts` passing and extend it when the boundary changes.
+3. Run the focused ordinary Session regressions selected for the touched boundary, including `tests/test_session_submit.py` when admission or enqueue integration is involved. A Companion-only test suite is not sufficient evidence of isolation.
+4. When frontend files change, also run the applicable VUI route/component contracts and the required TypeScript build gate from §9.1.
+
 ### 23.3 Runtime Scene Evidence Chain
 
 Trigger this constraint when changing runtime execution, workbench activity, task orchestration, tool execution, error handling, repair flows, Launcher integration, or any path where future debugging depends on evidence.

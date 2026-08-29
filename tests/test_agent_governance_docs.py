@@ -192,6 +192,22 @@ def test_research_before_write_scales_external_work_by_risk():
     assert "不评估本地复用" in route
 
 
+def test_companion_chat_isolation_is_a_normative_red_line() -> None:
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    standard = (PROJECT_ROOT / "docs" / "standards" / "development-standard.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Companion / 虚拟人会话隔离红线" in agents
+    assert "不得因虚拟人需求修改普通 Agent" in agents
+    assert "Companion mailbox 只负责到达顺序，不得成为第二套 transcript" in agents
+    assert "#### Companion / Virtual-Human Chat Isolation" in standard
+    assert "not a variant of the ordinary chat runtime" in standard
+    assert "The task diff is empty for ordinary chat runtime cores" in standard
+    assert "tests/test_session_submit.py" in standard
+    assert "CompanionChatReuse.contract.test.ts" in standard
+
+
 def test_governance_entry_links_resolve():
     _assert_local_links_resolve(PROJECT_ROOT / "AGENTS.md")
     _assert_local_links_resolve(PROJECT_ROOT / "docs" / "README.md")
