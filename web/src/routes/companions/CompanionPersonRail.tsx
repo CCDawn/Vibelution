@@ -8,7 +8,7 @@ import {
   companionAbout,
   companionIdentity,
   companionReturnTarget,
-  currentLifeActivity,
+  currentLifeActivityLabel,
   lifeMoodLabel,
 } from "./companionPresentation";
 import styles from "./CompanionChatRails.styles";
@@ -37,7 +37,7 @@ export function CompanionPersonRail({
     : state === "error"
       ? (lang === "zh" ? "人物状态载入失败" : "Failed to load person")
       : (lang === "zh" ? "这个人物当前不可进入" : "This person is unavailable");
-  const activity = companion ? currentLifeActivity(companion.snapshot) : null;
+  const activityLabel = companion ? currentLifeActivityLabel(companion.snapshot, lang) : "";
   return (
     <aside
       className={`${className} ${styles.personRail}`}
@@ -97,7 +97,7 @@ export function CompanionPersonRail({
             <div className={styles.personFacts}>
               <span><small>{lang === "zh" ? "心情" : "Mood"}</small><strong>{lifeMoodLabel(companion.snapshot, lang)}</strong></span>
               <span><small>{lang === "zh" ? "关系" : "Relationship"}</small><strong>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "慢慢熟悉中" : "Getting acquainted")}</strong></span>
-              <span><small>{lang === "zh" ? "此刻" : "Now"}</small><strong>{activity?.title || (lang === "zh" ? "按自己的节奏生活" : "Living at her own pace")}</strong></span>
+              <span><small>{lang === "zh" ? "此刻" : "Now"}</small><strong>{activityLabel}</strong></span>
             </div>
             <VRouteLinkButton
               to={agentCenterConfigRoute({

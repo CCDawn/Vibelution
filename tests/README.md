@@ -95,7 +95,9 @@ HTTP routes 现位于 `core/web/routes/team_workflows/` 包（不再是单文件
 
 推荐顺序：
 
-1. 先跑 selector 输出的 focused 命令；纯 `local-parallel` 规则中包含至少两个测试文件的 pytest 命令会自动带 `--dist loadfile -m "not serial"`，worker 数不超过文件数且最多为 4；单文件命令保持串行。小改动不要因为迭代次数多而重复跑无关重量测试。
+`pytest.ini` 为临时定位默认配置了 `-x`。全量回归命令必须显式追加 `--maxfail=0`；selector 输出的 pytest 命令和 `test_runner.py` 启动的实际 pytest 子进程也遵守同一约束，避免健康审计在首个失败处提前截断。
+
+1. 先跑 selector 输出的 focused 命令；所有 pytest 命令都会显式带 `--maxfail=0`。纯 `local-parallel` 规则中包含至少两个测试文件的 pytest 命令还会自动带 `--dist loadfile -m "not serial"`，worker 数不超过文件数且最多为 6；单文件命令保持串行。小改动不要因为迭代次数多而重复跑无关重量测试。
 2. 如果输出 `local-parallel` 且需要扩大到 Python 全量回归，再跑本地 `pytest-xdist` 的完整 `not serial` 并发层。
 3. 如果输出 `local-serial`，必须在本机串行补跑对应 Launcher、端口、真实进程、Git、config 或共享 workspace 测试。
 4. 如果输出 `remote-distributed`，可以用服务器/Docker 分片加速 Python `not serial` 回归，但它不是完整 gate。
@@ -129,8 +131,8 @@ npm --prefix web run build
 # 查看当前 pytest 文件数量
 .\.venv\Scripts\python.exe -c "from pathlib import Path; print(len(list(Path('tests').glob('test_*.py'))))"
 
-# 遇错即停
-.\.venv\Scripts\python.exe -m pytest tests/ -v -x
+# 仅在聚焦定位单个模块时遇错即停，不作为全量回归命令
+.\.venv\Scripts\python.exe -m pytest tests/test_memory.py -v -x
 ```
 
 ### 3.3 使用 test_runner.py
@@ -158,7 +160,7 @@ npm --prefix web run build
 .\.venv\Scripts\python.exe tests/test_runner.py --per-file
 ```
 
-`test_runner.py` 面向健康审计，会在构造 pytest 命令时显式覆盖项目默认的遇错即停设置，尽量收集同一批次里的多个失败；需要快速停在首个失败时，直接使用 `pytest ... -x`。
+`test_runner.py` 面向健康审计，会在构造实际 pytest 子进程命令时显式追加 `--maxfail=0`，覆盖项目默认的遇错即停设置并收集同一批次里的多个失败；需要快速停在首个失败时，只对聚焦命令直接使用 `pytest ... -x`。
 
 ### 3.4 进程级并行策略
 

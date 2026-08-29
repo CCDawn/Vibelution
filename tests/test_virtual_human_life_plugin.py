@@ -107,6 +107,98 @@ def test_default_timezone_has_a_bounded_fallback_when_iana_data_is_missing(
         service._timezone_for_name("Europe/Paris")
 
 
+def test_sleep_state_uses_quiet_hours_unless_a_scheduled_activity_is_active(
+    tmp_path: Path,
+) -> None:
+    now = [datetime(2026, 8, 28, 18, 28, tzinfo=timezone.utc)]
+    agent = _active_agent("agent-a")
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: now[0],
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={
+            "timezone": "Asia/Shanghai",
+            "quietHours": {"start": "23:00", "end": "08:00"},
+        },
+    )
+
+    assert service.snapshot("agent-a")["state"]["sleepState"] == "sleeping"
+
+    state = service.snapshot("agent-a")["state"]
+    state["sleepState"] = "awake"
+    service.store.write_json("agent-a", "state.json", state)
+    service.heartbeat_agent("agent-a", now=now[0], allow_planner=False)
+
+    assert service.snapshot("agent-a")["state"]["sleepState"] == "sleeping"
+
+    schedule = service.schedule_for("agent-a", "2026-08-29")
+    schedule["activities"] = [
+        {
+            "activityId": "night-writing",
+            "title": "深夜写作",
+            "kind": "simulated",
+            "startAt": "2026-08-29T02:00:00+08:00",
+            "endAt": "2026-08-29T03:00:00+08:00",
+            "status": "planned",
+        }
+    ]
+    service.save_schedule("agent-a", schedule)
+
+    service.heartbeat_agent("agent-a", now=now[0], allow_planner=False)
+
+    active_state = service.snapshot("agent-a")["state"]
+    assert active_state["currentActivityId"] == "night-writing"
+    assert active_state["sleepState"] == "awake"
+
+
+def test_sleep_state_rests_after_the_final_activity_before_quiet_hours(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 28, 14, 0, tzinfo=timezone.utc)
+    agent = _active_agent("agent-a")
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: now,
+    )
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    schedule = service.schedule_for("agent-a", "2026-08-28")
+    schedule["activities"] = [
+        {
+            "activityId": "evening-reading",
+            "title": "晚间阅读",
+            "kind": "simulated",
+            "startAt": "2026-08-28T20:00:00+08:00",
+            "endAt": "2026-08-28T21:00:00+08:00",
+            "status": "completed",
+        }
+    ]
+    service.save_schedule("agent-a", schedule)
+
+    service.heartbeat_agent("agent-a", now=now, allow_planner=False)
+
+    state = service.snapshot("agent-a")["state"]
+    assert state["currentActivityId"] == ""
+    assert state["sleepState"] == "resting"
+
+
 def test_disable_invalidates_revision_without_deleting_life_data(
     service: VirtualHumanLifeService,
 ) -> None:

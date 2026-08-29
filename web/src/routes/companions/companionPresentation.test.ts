@@ -5,6 +5,7 @@ import {
   companionReturnTarget,
   companionIdentity,
   currentLifeActivity,
+  currentLifeActivityLabel,
   formatCompanionLocalTime,
   upcomingLifeActivities,
 } from "./companionPresentation";
@@ -65,6 +66,30 @@ describe("companion presentation", () => {
 
   it("formats the person's real timezone without persisting a second clock", () => {
     expect(formatCompanionLocalTime(companion.snapshot, "zh", new Date("2026-08-28T00:42:00Z"))).toBe("08:42");
+  });
+
+  it("uses one human-readable fallback for sleeping, resting, and unscheduled time", () => {
+    expect(currentLifeActivityLabel(companion.snapshot, "zh")).toBe("阅读");
+
+    const withoutActivity = {
+      ...companion.snapshot,
+      todaySchedule: { ...companion.snapshot.todaySchedule!, activities: [] },
+      state: { ...companion.snapshot.state!, currentActivityId: "", sleepState: "sleeping" },
+    };
+    expect(currentLifeActivityLabel(withoutActivity, "zh")).toBe("正在睡觉");
+    expect(currentLifeActivityLabel(withoutActivity, "en")).toBe("Sleeping");
+
+    const resting = {
+      ...withoutActivity,
+      state: { ...withoutActivity.state!, sleepState: "resting" },
+    };
+    expect(currentLifeActivityLabel(resting, "zh")).toBe("正在放松休息");
+
+    const awake = {
+      ...withoutActivity,
+      state: { ...withoutActivity.state!, sleepState: "awake" },
+    };
+    expect(currentLifeActivityLabel(awake, "zh")).toBe("自由活动");
   });
 
 });
