@@ -22,8 +22,9 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 import apsw
@@ -50,6 +51,8 @@ _BACKUP_DIRNAME = ".rwm-b"
 _BACKUP_BEFORE_DIRNAME = "b"
 _PROMOTION_JOURNAL_FILENAME = ".rwm-j.json"
 _PROMOTION_JOURNAL_SCHEMA_VERSION = 1
+_SCOPE_HYGIENE_SCHEMA_VERSION = 1
+_MANUAL_REPLAY_TASK_ID = "stagetask-20260829040433-1b95a996"
 
 _SQLITE_SUFFIXES = frozenset({".sqlite", ".sqlite3", ".db"})
 _ALLOWED_ASSETS = (CHECKPOINT_FILENAME, "runs", LEDGER_FILENAME)
@@ -166,6 +169,7 @@ class ResearchWorkflowMigrationResult:
     marker_path: Path | None = None
     active_root: Path | None = None
     status: str = "preview"
+    scope_hygiene: dict[str, object] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
@@ -186,6 +190,7 @@ class ResearchWorkflowMigrationResult:
             "targetFingerprint": self.target_fingerprint,
             "markerPath": str(self.marker_path) if self.marker_path else "",
             "activeRoot": str(self.active_root) if self.active_root else "",
+            "scopeHygiene": dict(self.scope_hygiene),
         }
 
 
@@ -397,6 +402,11 @@ def _source_tree_fingerprint(root: Path) -> str:
         if not path.is_file() or _is_reparse(path):
             continue
         rel = path.relative_to(root).as_posix()
+        # The inventory and preview contracts deliberately share one exclusion
+        # rule.  In particular, a hand-made ``index.json.bak-*`` must never
+        # perturb the generation used by apply/verify.
+        if _is_backup_path(rel) or _is_excluded(rel):
+            continue
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
         digest.update(str(path.stat().st_size).encode("ascii"))
@@ -406,8 +416,17 @@ def _source_tree_fingerprint(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _is_backup_path(relative_path: str) -> bool:
+    return any(
+        fnmatchcase(part, "*.bak-*")
+        for part in (component.lower() for component in Path(relative_path).parts)
+    )
+
+
 def _is_excluded(relative_path: str) -> bool:
     parts = [part.lower() for part in Path(relative_path).parts]
+    if _is_backup_path(relative_path):
+        return True
     if any(part in _EXCLUDED_NAMES for part in parts):
         return True
     return any(
@@ -415,6 +434,194 @@ def _is_excluded(relative_path: str) -> bool:
         for part in parts
         for prefix in _EXCLUDED_PREFIXES
     )
+
+
+def _scope_text(value: object) -> str:
+    return str(value).strip()[:160] if isinstance(value, (str, int, float)) and not isinstance(value, bool) else ""
+
+
+def _scope_rel(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _scope_dirs(path: Path) -> tuple[Path, ...]:
+    if not path.is_dir() or _is_reparse(path):
+        return ()
+    try:
+        return tuple(
+            sorted(
+                (
+                    child for child in path.iterdir()
+                    if child.is_dir() and not _is_reparse(child) and not _is_backup_path(child.name)
+                ),
+                key=lambda child: child.name.lower(),
+            )
+        )
+    except OSError:
+        return ()
+
+
+def _scope_collect_backups(
+    root: Path,
+    workspace_root: Path,
+    excluded: set[str],
+) -> None:
+    if not root.is_dir() or _is_reparse(root):
+        return
+    try:
+        for path in root.rglob("*"):
+            relative = _scope_rel(workspace_root, path)
+            if _is_reparse(path) or not _is_backup_path(relative):
+                continue
+            excluded.add(path.name)
+    except OSError:
+        return
+
+
+def _scope_store_items(
+    path: Path,
+    workspace_root: Path,
+    *,
+    kind: str,
+    file_hash: str,
+) -> list[dict[str, object]]:
+    payload = _read_json_object(path)
+    rows = payload.get("candidates" if kind == "candidate" else "tasks") if payload else None
+    if not isinstance(rows, list):
+        return []
+    relative = _scope_rel(workspace_root, path)
+    parts = path.relative_to(workspace_root).parts
+    physical = "legacy-default"
+    lowered = [part.lower() for part in parts]
+    if "research_projects" in lowered:
+        physical = parts[lowered.index("research_projects") + 1]
+    items: list[dict[str, object]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        if kind == "candidate":
+            entity_id = _scope_text(raw.get("candidateId") or raw.get("id"))
+            metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+            project_id = _scope_text(raw.get("researchProjectId"))
+            metadata_project_id = _scope_text(metadata.get("researchProjectId"))
+            if (
+                not entity_id
+                or not project_id
+                or not metadata_project_id
+                or project_id != metadata_project_id
+                or project_id == physical
+            ):
+                continue
+            provenance = {
+                "candidateType": _scope_text(raw.get("candidateType")),
+                "researchProjectId": project_id,
+                "metadataResearchProjectId": metadata_project_id,
+            }
+            for key in ("sourceCollectionRunId", "workflowRunId", "recordId"):
+                value = _scope_text(raw.get(key) or metadata.get(key))
+                if value:
+                    provenance[key] = value
+            items.append(
+                {
+                    "entityId": entity_id,
+                    "classification": "manual_scope_stamp",
+                    "action": "canonical_migration",
+                    "owner": project_id,
+                    "path": relative,
+                    "hash": file_hash,
+                    "provenance": provenance,
+                }
+            )
+            continue
+
+        entity_id = _scope_text(raw.get("taskId") or raw.get("id"))
+        project_id = _scope_text(raw.get("researchProjectId"))
+        manual_replay = entity_id == _MANUAL_REPLAY_TASK_ID
+        if not entity_id or (not manual_replay and not (project_id and project_id != physical)):
+            continue
+        turn = raw.get("turn") if isinstance(raw.get("turn"), dict) else {}
+        provenance = {
+            key: value
+            for key, value in {
+                "runId": _scope_text(raw.get("runId")),
+                "workflowRunId": _scope_text(raw.get("workflowRunId")),
+                "researchProjectId": project_id,
+                "sessionId": _scope_text(raw.get("sessionId")),
+                "turnId": _scope_text(turn.get("turnId") or turn.get("id")),
+            }.items()
+            if value
+        }
+        item: dict[str, object] = {
+            "entityId": entity_id,
+            "classification": "manual_replay" if manual_replay else "noncanonical_stage_task",
+            "action": "alias/audit",
+            "needsReview": True,
+            "owner": project_id,
+            "path": relative,
+            "hash": file_hash,
+            "provenance": provenance,
+        }
+        if manual_replay:
+            item["lineageClassification"] = "partial_noncanonical_lineage"
+        items.append(item)
+    return items
+
+
+def _scope_hygiene(target_root: Path) -> dict[str, object]:
+    workspace_root = target_root.parent / "workspace"
+    excluded: set[str] = set()
+    items: list[dict[str, object]] = []
+    if workspace_root.is_dir() and not _is_reparse(workspace_root):
+        for team in _scope_dirs(workspace_root / "teams"):
+            roots: list[tuple[Path, str]] = [
+                (team / "candidate_store", "candidate"),
+                (team / "source_collection_runs", "stage"),
+            ]
+            for project in _scope_dirs(team / "research_projects"):
+                base = project / "workspace"
+                roots.extend(
+                    (
+                        (base / "candidate_store", "candidate"),
+                        (base / "source_collection_runs", "stage"),
+                    )
+                )
+            for root, kind in roots:
+                _scope_collect_backups(root, workspace_root, excluded)
+                paths = (
+                    (root / "index.json",)
+                    if kind == "candidate"
+                    else tuple(run / "stage_session_tasks.json" for run in _scope_dirs(root))
+                )
+                for path in paths:
+                    if not path.is_file() or _is_reparse(path):
+                        continue
+                    try:
+                        file_hash = _sha256_file(path)
+                    except OSError:
+                        continue
+                    items.extend(
+                        _scope_store_items(
+                            path,
+                            workspace_root,
+                            kind=kind,
+                            file_hash=file_hash,
+                        )
+                    )
+    items.sort(key=lambda item: (str(item.get("entityId") or ""), str(item.get("path") or "")))
+    excluded_paths = sorted(excluded, key=str.lower)
+    result = {
+        "items": items,
+        "excludedPaths": excluded_paths,
+        "counts": {
+            "items": len(items),
+            "needsReview": sum(1 for item in items if item.get("needsReview") is True),
+            "excludedPaths": len(excluded_paths),
+        },
+    }
+    return result
 
 
 def _allowed_kind(relative_path: str) -> str | None:
@@ -1263,7 +1470,7 @@ def _enumerate_source(
         if _is_reparse(path):
             blockers.append({"code": "reparse_or_symlink", "relativePath": relative})
             continue
-        if _is_excluded(relative):
+        if _is_backup_path(relative) or _is_excluded(relative):
             excluded.append(relative)
             continue
         if relative == LEGACY_PLACEHOLDER_FILENAME and _legacy_placeholder_is_empty(path):
@@ -1481,6 +1688,14 @@ def _build_preview(
     )
     if roots.target.is_dir():
         for path in roots.target.rglob("*"):
+            # Keep the stale-stage guard for real migration leftovers, while
+            # applying the same backup exclusion contract to hand-made
+            # ``*.bak-*`` copies.  Checking only the filename is intentional:
+            # the real staging directory is named ``migration`` and is itself
+            # excluded from ordinary asset inventory.
+            relative = path.relative_to(roots.target).as_posix()
+            if _is_backup_path(relative) or _is_excluded(path.name):
+                continue
             if path.is_file() and ".staging" in path.name and path.name.startswith("."):
                 blockers.append(
                     {
@@ -1522,6 +1737,7 @@ def _build_preview(
     before, after, stable = _observe_source_stability(roots, delay_seconds=sample_delay_seconds)
     if not stable:
         blockers.append({"code": "source_changed_during_sampling", "before": before, "after": after})
+    scope_hygiene = _scope_hygiene(roots.target)
     return ResearchWorkflowMigrationResult(
         source_root=roots.source,
         target_root=roots.target,
@@ -1534,6 +1750,7 @@ def _build_preview(
         target_fingerprint=_source_tree_fingerprint(roots.target),
         marker_path=marker,
         active_root=active_root,
+        scope_hygiene=scope_hygiene,
     )
 
 
