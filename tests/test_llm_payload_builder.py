@@ -251,7 +251,7 @@ def test_deepseek_reasoning_protocol_preserves_assistant_reasoning_roundtrip():
     assert payload["messages"][0]["reasoning_content"] == "先读文件再决定"
 
 
-def test_payload_protocol_error_includes_safe_message_snapshot():
+def test_payload_protocol_error_after_duplicate_id_normalization_includes_safe_snapshot():
     config = make_config(
         **{
             "llm.providers.default.kind": "openai_compatible",
@@ -280,7 +280,11 @@ def test_payload_protocol_error_includes_safe_message_snapshot():
 
     details = exc_info.value.details
     assert exc_info.value.category == "payload_protocol_error"
-    assert details["payloadValidationErrorType"] == "duplicate_tool_call_id"
+    # Duplicate ids are normalized deterministically before validation.  The
+    # single result can only close one of the two calls, so the remaining
+    # fail-closed protocol error is the unresolved call, not the historical
+    # duplicate-id classification.
+    assert details["payloadValidationErrorType"] == "unresolved_tool_call"
     assert details["payloadMessageAssistantToolCallCount"] == 2
     assert details["payloadMessageToolResultCount"] == 1
     assert details["payloadMessageShapeHash"]

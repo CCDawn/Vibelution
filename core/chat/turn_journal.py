@@ -845,12 +845,11 @@ def _canonical_item_payload(protocol_event: Any, *, outcome: Any) -> dict[str, A
         "toolName": tool_name,
         "diagnosticSummary": diagnostic_summary,
     }
-    # The provider-bound receipt is an audit fact for the canonical final
-    # answer, not model-visible content.  Keep it on the immutable item event
-    # so later projections and writeback can recover it after a process restart.
-    receipt = getattr(outcome, "model_invocation_receipt", None)
-    if isinstance(receipt, Mapping):
-        payload["modelInvocationReceipt"] = dict(receipt)
+    # Provider receipts are audit/business evidence, not conversation state.
+    # Challenge-scoped callers persist them through the existing receipt
+    # registry before this canonical conversation item is appended.  Legacy
+    # journals remain readable through the compatibility helpers below, but
+    # new journal items must never embed receipt payloads or their excerpts.
     return payload
 
 
@@ -1097,12 +1096,11 @@ def read_model_invocation_receipts_from_events(
     *,
     turn_id: str = "",
 ) -> list[dict[str, Any]]:
-    """Read every provider-bound receipt committed for one canonical turn.
+    """Read legacy provider receipts without extending the journal schema.
 
-    Receipts are deliberately not part of the model-visible projection.  This
-    readback is the dedicated restart-safe audit path.  Receipt ids are
-    de-duplicated in journal order so an idempotent replay is a no-op while a
-    conflicting duplicate is rejected by the downstream registry.
+    New turns persist Challenge Cup receipts in the existing formal receipt
+    registry and never add them to conversation events.  This compatibility
+    reader remains only so historical journal data stays readable.
     """
 
     normalized_turn_id = str(turn_id or "").strip()

@@ -3,8 +3,9 @@
 GraphState only carries control references. Node functions are replayable:
 they derive a deterministic actionId from (runId, nodeId, attempt), build a
 typed PendingAction, and interrupt with it. resume only consumes a typed
-ExecutionReceipt whose identity must match the frozen action. Business
-advancement never uses update_state(..., as_node=...) in this module.
+ExecutionReceipt whose identity must match the frozen action. Re-entry uses an
+explicit predecessor only to schedule a graph task; it never marks a business
+node complete through update_state(..., as_node=...).
 
 Thread identity: thread_id == runId (spec 7.3 step 2).
 """
@@ -480,6 +481,37 @@ def _fork_predecessor_for(node_id: str, workflow_version_id: str = "") -> str | 
     return None
 
 
+def _retry_predecessor_for(node_id: str, workflow_version_id: str = "") -> str | None:
+    """Return the graph source that schedules ``node_id`` on a retry.
+
+    ``graph.invoke(Command(goto=...))`` is a valid LangGraph input shape, but
+    it does not seed a new task when the thread has already reached ``END``.
+    Retrying a terminal checkpoint therefore uses the documented
+    ``update_state(..., as_node=...)`` + ``invoke(None, ...)`` time-travel
+    sequence.  The fixed linear graph has one static predecessor for every
+    ordinary node; the two conditional sources are also unambiguous for their
+    destinations.  The entry node is scheduled from ``START``.
+    """
+
+    order = _node_order(workflow_version_id)
+    if node_id not in order:
+        return None
+    if node_id == order[0]:
+        return START
+    predecessor = _fork_predecessor_for(node_id, workflow_version_id)
+    if predecessor is not None:
+        return predecessor
+    definition = resolve_definition_for_version(workflow_version_id)
+    conditional_predecessors = [
+        source
+        for source in ("iteration_decision", "version_governance")
+        if node_id in graph_conditional_targets(source, definition)
+    ]
+    if len(conditional_predecessors) == 1:
+        return conditional_predecessors[0]
+    return None
+
+
 def _make_node_fn(node_id: str) -> Callable[[ChallengeCupGraphState], ChallengeCupGraphState]:
     def run_node(state: ChallengeCupGraphState) -> ChallengeCupGraphState:
         pending = build_pending_action(state, node_id)
@@ -648,7 +680,7 @@ def _is_concurrent_update_error(exc: BaseException) -> bool:
 
 
 def _retry_update(dispatch: GraphDispatch) -> dict[str, Any]:
-    """Command.update for retry while an interrupt is still on the thread.
+    """State values for retry while an interrupt is still on the thread.
 
     The current interrupt keeps the destination node from running in the
     same superstep, so last-value keys here only split ``active_node_id``
@@ -673,7 +705,7 @@ def _retry_update(dispatch: GraphDispatch) -> dict[str, Any]:
 
 
 def _enter_update(dispatch: GraphDispatch) -> dict[str, Any]:
-    """Values for a prior ``update_state`` superstep before Command.goto.
+    """Values for the checkpoint scheduling superstep before ``invoke(None)``.
 
     ``run_id`` is last-value and already on the thread. Putting it in the
     same superstep as the destination node's ``return {**state}`` raises
@@ -777,12 +809,13 @@ class ChallengeCupGraphCoordinator:
             return graph.get_state(thread)
 
     def _goto_node(self, graph: Any, dispatch: GraphDispatch) -> GraphDispatchResult:
-        """Re-enter a node without writing last-value keys in the goto step.
+        """Re-enter a node by scheduling it from its graph predecessor.
 
         Sequence: copy-away colliding writes, clear leftover tasks with
         ``as_node=END`` (checkpoint hygiene, not a workflow node), write
-        routing fields in their own superstep, then invoke with thread_id
-        only. Command.goto must not share a superstep with ``run_id``.
+        routing fields attributed to the predecessor, then invoke the new
+        checkpoint with ``None``. This avoids an inert ``Command(goto=...)``
+        input after a terminal checkpoint.
         """
         thread = self._config(dispatch.run_id)
         self._ensure_readable(graph, dispatch.run_id)
@@ -796,37 +829,63 @@ class ChallengeCupGraphCoordinator:
             graph.update_state(thread, None, as_node="__copy__")
             graph.update_state(thread, None, as_node=END)
         values = _enter_update(dispatch)
-        try:
-            graph.update_state(thread, values)
-        except Exception:
-            pass
-        state = graph.get_state(thread)
+        values["blocked_outcome"] = None
+        predecessor = _retry_predecessor_for(
+            dispatch.node_id, dispatch.workflow_version_id
+        )
+        if predecessor is None:
+            raise RuntimeError(
+                "cannot schedule graph entry without a unique predecessor: "
+                f"{dispatch.node_id}"
+            )
+        retry_config = graph.update_state(
+            thread,
+            values,
+            as_node=predecessor,
+        )
+        state = graph.get_state(retry_config)
         next_ids = {str(node_id) for node_id in (state.next or ())}
-        pending = _pending_from_state(state)
-        if dispatch.node_id in next_ids or (
-            pending is not None and pending.node_id == dispatch.node_id
-        ):
-            result = graph.invoke(None, thread)
-        else:
-            result = graph.invoke(Command(goto=dispatch.node_id), thread)
+        if dispatch.node_id not in next_ids:
+            raise RuntimeError(
+                "graph re-entry scheduled an unexpected node: "
+                f"expected {dispatch.node_id}, found {sorted(next_ids)}"
+            )
+        result = graph.invoke(None, retry_config)
         return self._dispatch_result(dispatch, result, graph)
 
     def retry_attempt(self, dispatch: GraphDispatch) -> GraphDispatchResult:
-        """Retry: re-enter the target node via input Command(goto=...) with a
-        new frozen attempt (never update_state(as_node))."""
+        """Retry a terminal checkpoint with one fresh interrupt.
+
+        A ``Command(goto=...)`` input is accepted by LangGraph, but a thread
+        whose previous superstep already routed to ``END`` has no runnable
+        task for that command.  Fork the current checkpoint at the target's
+        predecessor, clear the prior failure marker, and invoke the scheduled
+        task with ``None`` instead.
+        """
         graph, stack = self._compile(dispatch.workflow_version_id)
         try:
-            _validate_state_scope_binding(
-                dict(self._read_state(graph, self._config(dispatch.run_id), heal=True).values or {}),
-                dispatch,
+            state = self._read_state(
+                graph, self._config(dispatch.run_id), heal=True
             )
-            result = graph.invoke(
-                Command(
-                    goto=dispatch.node_id,
-                    update=_retry_update(dispatch),
-                ),
-                self._config(dispatch.run_id),
+            _validate_state_scope_binding(dict(state.values or {}), dispatch)
+            predecessor = _retry_predecessor_for(
+                dispatch.node_id, dispatch.workflow_version_id
             )
+            if predecessor is None:
+                raise RuntimeError(
+                    "cannot schedule retry for node without a unique predecessor: "
+                    f"{dispatch.node_id}"
+                )
+            update = _retry_update(dispatch)
+            # A failed attempt routes the previous graph to END.  It is a
+            # terminal marker, not durable business state for the new attempt.
+            update["blocked_outcome"] = None
+            retry_config = graph.update_state(
+                state.config,
+                update,
+                as_node=predecessor,
+            )
+            result = graph.invoke(None, retry_config)
             return self._dispatch_result(dispatch, result, graph)
         finally:
             stack.close()

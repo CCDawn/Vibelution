@@ -247,7 +247,7 @@ def build_speaker_receipt_context(
         "outcomeKinds": [outcome_kind],
         "expectedModelRoute": expected_route,
         "evidenceLocator": {
-            "kind": "turn_journal",
+            "kind": "challenge_model_invocation_receipt_registry",
             "executionKind": "chat_room_meeting",
             "meetingRoundId": meeting_round_id,
             "chatRoomRoundId": chat_room_round_id,
@@ -368,21 +368,39 @@ def register_speaker_receipts(
     workflow_run_id: str,
     session_id: str,
     turn_identity: str,
+    receipts: Sequence[Mapping[str, Any]] = (),
 ) -> None:
-    """Read back provider receipts and register them before content can land."""
+    """Register current receipts without making conversation state an audit store.
 
-    from core.chat.conversation_ledger import load_conversation_events
-    from core.chat.turn_journal import read_model_invocation_receipts_from_events
+    Formal meeting turns bypass the session UI stream, so their caller passes
+    captured canonical receipts directly. The existing Challenge Cup registry
+    is the current read authority. Journal readback remains only for historical
+    turns written before receipt isolation.
+    """
 
     from .model_invocation_receipt_registry import (
+        question_model_invocation_receipts,
         register_question_model_invocation_receipts,
     )
 
-    receipts = read_model_invocation_receipts_from_events(
-        load_conversation_events(project_root, session_id),
-        turn_id=turn_identity,
-    )
-    if not receipts:
+    selected = [dict(item) for item in receipts if isinstance(item, Mapping)]
+    if not selected:
+        selected = question_model_invocation_receipts(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+            session_id=session_id,
+            turn_id=turn_identity,
+        )
+    if not selected:
+        from core.chat.conversation_ledger import load_conversation_events
+        from core.chat.turn_journal import read_model_invocation_receipts_from_events
+
+        selected = read_model_invocation_receipts_from_events(
+            load_conversation_events(project_root, session_id),
+            turn_id=turn_identity,
+        )
+    if not selected:
         raise MeetingReceiptAuthorityError(
             "formal meeting model call completed without a verifiable invocation receipt"
         )
@@ -390,7 +408,7 @@ def register_speaker_receipts(
         team_id,
         question_id=question_id,
         workflow_run_id=workflow_run_id,
-        receipts=receipts,
+        receipts=selected,
     )
     if not refs:
         raise MeetingReceiptAuthorityError(

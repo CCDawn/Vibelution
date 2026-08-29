@@ -17,6 +17,7 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import Any
 
@@ -34,6 +35,13 @@ from .block_projection import (
     sync_run_blocked,
     sync_run_succeeded,
     terminal_facts_for_run,
+)
+from .challenge_turn_policy import (
+    CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+    CHALLENGE_NO_PROGRESS_TIMEOUT_MS,
+    ChallengeTaskDeadlineExceeded,
+    challenge_task_deadline_scope,
+    decide_live_turn_wait,
 )
 from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
@@ -256,6 +264,16 @@ class AdapterDispatchWorker:
 
             if isinstance(exc, _OutboxLeaseLost):
                 return
+            if isinstance(exc, ChallengeTaskDeadlineExceeded):
+                self._fail_attempt(outbox, action, exc.problem)
+                self._reconcile_stage_task_after_wait_timeout(
+                    action,
+                    reason=str(
+                        exc.problem.get("code")
+                        or "challenge_logical_task_deadline_exhausted"
+                    ),
+                )
+                return
             if isinstance(exc, (TurnNotReadyError, HypothesisAuthorityUnavailable)):
                 # Transient turn/authority state — requeue without failing the attempt.
                 if isinstance(exc, TurnNotReadyError) and _turn_alive_progressing(exc):
@@ -263,7 +281,12 @@ class AdapterDispatchWorker:
                     # collection stage legitimately runs past one wait window.
                     # Keep waiting (heartbeat) without consuming the transient
                     # budget; wall-clock bounds the wait.
-                    self._requeue_live_turn_wait(outbox, action, str(exc))
+                    self._requeue_live_turn_wait(
+                        outbox,
+                        action,
+                        str(exc),
+                        snapshot=dict(getattr(exc, "snapshot", None) or {}),
+                    )
                     return
                 prefix = (
                     "turn_not_ready"
@@ -387,8 +410,17 @@ class AdapterDispatchWorker:
             daemon=True,
         )
         thread.start()
+        deadline_scope = (
+            challenge_task_deadline_scope(
+                int(getattr(outbox, "created_at_ms", 0) or self._now()),
+                resume_problem=getattr(outbox, "last_problem_json", ""),
+            )
+            if action.actor_kind == ActorKind.AGENT
+            else nullcontext()
+        )
         try:
-            result = adapter.execute(action)
+            with deadline_scope:
+                result = adapter.execute(action)
         except Exception as exc:
             if lost.is_set():
                 raise _OutboxLeaseLost("adapter outbox lease was lost") from exc
@@ -1027,28 +1059,101 @@ class AdapterDispatchWorker:
 
     _MAX_TRANSIENT_ATTEMPTS = 5
 
-    # Live-turn heartbeats are bounded by wall clock, not by the transient
-    # budget: healthy collection turns run 10+ minutes (one wait window is
-    # 120s), so counting them as transient failures exhausted real work at
-    # attempt 5. Two hours still terminates a wedged "running" session.
-    _MAX_LIVE_TURN_WAIT_MS = 7_200_000
+    # Challenge Cup live waits are bounded independently from the provider's
+    # 600s transport insurance.  The outbox created_at clock persists across
+    # worker requeues, and unchanged state does not get extended by heartbeat.
+    _MAX_LIVE_TURN_WAIT_MS = CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
+    _MAX_LIVE_TURN_NO_PROGRESS_MS = CHALLENGE_NO_PROGRESS_TIMEOUT_MS
 
-    def _requeue_live_turn_wait(self, outbox: Any, action: PendingAction, detail: str) -> None:
+    def _requeue_live_turn_wait(
+        self,
+        outbox: Any,
+        action: PendingAction,
+        detail: str,
+        *,
+        snapshot: dict[str, Any] | None = None,
+    ) -> None:
         now_ms = self._now()
-        created_at_ms = int(getattr(outbox, "created_at_ms", 0) or 0)
-        waited_ms = now_ms - created_at_ms if created_at_ms else 0
-        if created_at_ms and waited_ms > self._MAX_LIVE_TURN_WAIT_MS:
+        snapshot = dict(snapshot or {})
+        try:
+            previous_problem = json.loads(
+                str(getattr(outbox, "last_problem_json", "") or "{}")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            previous_problem = {}
+        if not isinstance(previous_problem, dict):
+            previous_problem = {}
+        start_candidates = (
+            int(previous_problem.get("logicalTaskStartedAtMs") or 0),
+            int(getattr(outbox, "created_at_ms", 0) or 0),
+            int(snapshot.get("challengeTaskStartedAtMs") or 0),
+        )
+        created_at_ms = min(
+            (value for value in start_candidates if value > 0),
+            default=now_ms,
+        )
+        decision = decide_live_turn_wait(
+            now_ms=now_ms,
+            created_at_ms=created_at_ms,
+            previous_problem=previous_problem,
+            snapshot=snapshot,
+        )
+        continuation_chain = [
+            str(item or "").strip()
+            for item in list(snapshot.get("continuationTurnChain") or [])
+            if str(item or "").strip()
+        ]
+        continuation_root_turn_id = str(
+            snapshot.get("continuationRootTurnId") or ""
+        ).strip()
+        continuation_turn_id = str(
+            snapshot.get("continuationTurnId") or ""
+        ).strip()
+        try:
+            continuations_used = max(
+                0,
+                int(snapshot.get("continuationsUsed") or 0),
+            )
+        except (TypeError, ValueError):
+            continuations_used = 0
+        continuation_problem = {}
+        if (
+            continuation_root_turn_id
+            and continuation_turn_id
+            and continuations_used > 0
+            and len(continuation_chain) == continuations_used + 1
+            and continuation_chain[0] == continuation_root_turn_id
+            and continuation_chain[-1] == continuation_turn_id
+        ):
+            continuation_problem = {
+                "continuationRootTurnId": continuation_root_turn_id,
+                "continuationTurnId": continuation_turn_id,
+                "continuationTurnChain": continuation_chain,
+                "continuationsUsed": continuations_used,
+            }
+        if created_at_ms and decision.should_stop:
             self._fail_attempt(
                 outbox,
                 action,
-                {"code": "live_turn_wait_timeout", "detail": str(detail)[:400]},
+                {
+                    "code": decision.stop_code,
+                    "detail": str(detail)[:400],
+                    "waitedMs": decision.waited_ms,
+                    "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+                    "noProgressMs": decision.no_progress_ms,
+                    "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
+                    "logicalTaskStartedAtMs": decision.started_at_ms,
+                    **continuation_problem,
+                },
             )
-            # The abandoned wait previously skipped the pushed-writeback leg
-            # (reconcile_source_collection_stage_session_task_after_turn), so
-            # the stage task stayed "running" in its store while the ledger
-            # attempt was already failed. Best-effort reconcile closes that
-            # state fork; it must never break the dispatch path.
-            self._reconcile_stage_task_after_wait_timeout(action)
+            # The abandoned wait previously skipped the domain-task terminal
+            # leg, so its task stayed "running" while the Ledger attempt was
+            # already failed. Best-effort reconcile closes that state fork;
+            # it must never break the dispatch path.
+            self._reconcile_stage_task_after_wait_timeout(
+                action,
+                reason=decision.stop_code,
+            )
             return
         _record_scene_event(
             "adapter_dispatch.live_turn_wait",
@@ -1056,7 +1161,9 @@ class AdapterDispatchWorker:
             fields={
                 **_action_identity(action),
                 "attemptCount": int(getattr(outbox, "attempt_count", 0) or 0),
-                "waitedMs": waited_ms,
+                "waitedMs": decision.waited_ms,
+                "noProgressMs": decision.no_progress_ms,
+                "progressAdvanced": decision.progress_advanced,
                 "detail": str(detail)[:160],
             },
         )
@@ -1066,7 +1173,9 @@ class AdapterDispatchWorker:
         self._record_live_turn_wait_heartbeat(
             action,
             attempt_count=int(getattr(outbox, "attempt_count", 0) or 0),
-            waited_ms=waited_ms,
+            waited_ms=decision.waited_ms,
+            no_progress_ms=decision.no_progress_ms,
+            progress_advanced=decision.progress_advanced,
         )
         outbox_api.requeue_action(
             self._store,
@@ -1075,13 +1184,30 @@ class AdapterDispatchWorker:
             now_ms,
             retry_at_ms=now_ms + 5_000,
             problem_json=json.dumps(
-                {"code": "live_turn_wait", "detail": str(detail)[:400]}
+                {
+                    "code": "live_turn_wait",
+                    "detail": str(detail)[:400],
+                    "waitedMs": decision.waited_ms,
+                    "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+                    "noProgressMs": decision.no_progress_ms,
+                    "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
+                    "logicalTaskStartedAtMs": decision.started_at_ms,
+                    "lastProgressAtMs": decision.last_progress_at_ms,
+                    "progressFingerprint": decision.progress_fingerprint,
+                    **continuation_problem,
+                }
             ),
             reset_attempts=True,
         )
 
     def _record_live_turn_wait_heartbeat(
-        self, action: PendingAction, *, attempt_count: int, waited_ms: int
+        self,
+        action: PendingAction,
+        *,
+        attempt_count: int,
+        waited_ms: int,
+        no_progress_ms: int,
+        progress_advanced: bool,
     ) -> None:
         """Append one workflow event per live-turn wait requeue (observability).
 
@@ -1095,6 +1221,9 @@ class AdapterDispatchWorker:
             "attemptCount": int(attempt_count or 0),
             "waitedMs": int(waited_ms or 0),
             "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+            "noProgressMs": int(no_progress_ms or 0),
+            "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
+            "progressAdvanced": bool(progress_advanced),
         }
 
         def mutate(uow):
@@ -1132,25 +1261,30 @@ class AdapterDispatchWorker:
                 },
             )
 
-    def _reconcile_stage_task_after_wait_timeout(self, action: PendingAction) -> None:
-        """Close the stage-task writeback window an abandoned live wait left open.
+    def _reconcile_stage_task_after_wait_timeout(
+        self,
+        action: PendingAction,
+        *,
+        reason: str = "live_turn_wait_timeout",
+    ) -> None:
+        """Close the domain-task writeback window an abandoned live wait left open.
 
         After the wall-clock cap fails the attempt, the canonical Agent turn may
-        still be running (or may have finished unnoticed). The stage session
-        task only settles through
-        ``reconcile_source_collection_stage_session_task_after_turn`` — normally
-        invoked by ``complete_agent_turn_outputs`` at turn terminal, which the
-        abandoned wait never reaches. Locate the dispatch anchor (the same
-        taskId/sessionId/turnId the writeback leg would have used), read the
-        current completion snapshot, and reconcile; a non-terminal snapshot
-        reconciles under ``interrupted`` semantics. Idempotent and best-effort:
-        any failure is logged and never blocks the dispatch path.
+        still be running (or may have finished unnoticed). Source-collection
+        tasks settle through their existing stage writeback reconciler.
+        Research-project tasks first run their explicit session reconciler; if
+        the task is still active after the workflow deadline, the trusted
+        task-status API records ``timed_out``. Idempotent and best-effort: any
+        failure is logged and never blocks the dispatch path.
         """
         try:
             from .task_adapter_registry import resolve_agent_task_adapter
 
             adapter_spec = resolve_agent_task_adapter(action.node_id)
-            if adapter_spec is None or adapter_spec.family != "source_collection":
+            if adapter_spec is None or adapter_spec.family not in {
+                "source_collection",
+                "research_project",
+            }:
                 return
 
             anchor = self._store.read(
@@ -1202,7 +1336,56 @@ class AdapterDispatchWorker:
                 or str(action.run_id or "").strip()
             )
             if not team_id:
-                raise RuntimeError("run has no teamId for stage task reconcile")
+                raise RuntimeError("run has no teamId for domain task reconcile")
+
+            normalized_reason = str(reason or "live_turn_wait_timeout").strip()[:120]
+            if adapter_spec.family == "research_project":
+                project_id = str(
+                    (run.project_id if run is not None else "")
+                    or input_snapshot.get("projectId")
+                    or input_snapshot.get("researchProjectId")
+                    or ""
+                ).strip()
+                if not project_id:
+                    raise RuntimeError("run has no projectId for project task reconcile")
+                from core.web.services.team_workflow.research_project_agent_tasks import (
+                    ACTIVE_STATUSES,
+                    _read_research_project_agent_task_record,
+                    reconcile_research_project_agent_task_statuses,
+                    update_research_project_agent_task_status,
+                )
+
+                reconcile_research_project_agent_task_statuses(team_id, project_id)
+                task = _read_research_project_agent_task_record(
+                    team_id,
+                    project_id,
+                    task_id,
+                )
+                if task is None:
+                    raise RuntimeError("project Agent task is missing during timeout reconcile")
+                task_status = str(task.get("status") or "").strip().lower()
+                if task_status in ACTIVE_STATUSES:
+                    result = update_research_project_agent_task_status(
+                        team_id,
+                        project_id,
+                        task_id,
+                        status="timed_out",
+                        result_refs=list(task.get("resultRefs") or []),
+                        failure_code=normalized_reason,
+                    )
+                    task_status = str((result or {}).get("status") or "timed_out")
+                _record_scene_event(
+                    "adapter_dispatch.live_turn_wait_reconciled",
+                    outcome="settled",
+                    fields={
+                        **_action_identity(action),
+                        "taskId": task_id,
+                        "projectId": project_id,
+                        "taskStatus": task_status,
+                        "reason": normalized_reason,
+                    },
+                )
+                return
 
             final_status = ""
             if session_id:
@@ -1229,7 +1412,7 @@ class AdapterDispatchWorker:
                 session_id=session_id,
                 turn_id=turn_id,
                 final_status=final_status,
-                reason="live_turn_wait_timeout",
+                reason=normalized_reason,
             )
             _record_scene_event(
                 "adapter_dispatch.live_turn_wait_reconciled",

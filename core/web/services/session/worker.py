@@ -240,6 +240,7 @@ def _model_invocation_receipt_context(
     return {
         "receiptRunAuthority": "workflow_run",
         "receiptRunId": run_id,
+        "teamId": team_id,
         "modelPolicySha256": policy_sha256,
         "questionStageBinding": stage_binding,
         "outcomeKinds": list(binding.get("outcomeKinds") or []),
@@ -1545,6 +1546,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                             initial_prompt=user_message,
                             history_messages=history_messages,
                             attachments=llm_attachments,
+                            turn_capture=turn_capture,
                             user_message_source=str(context.get("user_message_source") or "").strip(),
                             prompt_cache_partition=prompt_cache_partition,
                             prompt_cache_scope=prompt_cache_scope,
@@ -1785,6 +1787,7 @@ def _run_session_continuation_loop(
     initial_prompt: str,
     history_messages: list[dict[str, Any]],
     attachments: list[dict[str, Any]] | None = None,
+    turn_capture: Any = None,
     user_message_source: str = "",
     prompt_cache_partition: str = "",
     prompt_cache_scope: str = "chat_session",
@@ -1942,6 +1945,8 @@ def _run_session_continuation_loop(
             session_id=session_id,
             turn_id=canonical_turn_id,
         )
+        if turn_capture is not None:
+            turn_capture.model_invocation_receipt_context = receipt_context
         with model_invocation_receipt_context_scope(receipt_context):
             chat_history_ledger_fingerprint = ""
             iteration_chat_history = history_messages if turn_index == 1 else None

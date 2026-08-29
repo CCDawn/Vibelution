@@ -88,6 +88,35 @@ def test_receipt_store_survives_windows_max_path_overflow(tmp_path, monkeypatch)
     ]
 
 
+def test_receipt_readback_filters_by_session_and_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(registry, "resolve_team_program_root", lambda _team_id: tmp_path)
+    receipts = [_receipt(kind) for kind in ("candidate", "review")]
+    registry.register_question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-096",
+        receipts=receipts,
+    )
+
+    selected = registry.question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-096",
+        session_id="session-review",
+        turn_id="turn-review",
+    )
+
+    assert [item["receiptId"] for item in selected] == ["receipt-review"]
+    selected[0]["receiptId"] = "caller-mutation"
+    assert registry.question_model_invocation_receipts(
+        "research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-096",
+        session_id="session-review",
+        turn_id="turn-review",
+    )[0]["receiptId"] == "receipt-review"
+
+
 def test_full_trace_is_idempotent_and_immutable_projection_detects_tamper(
     tmp_path, monkeypatch
 ) -> None:

@@ -152,7 +152,7 @@ def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_pa
     assert "opaque" not in str(items).lower()
 
 
-def test_canonical_receipt_is_audit_only_and_readable_from_final_answer_item(tmp_path):
+def test_new_canonical_item_omits_receipt_but_legacy_receipt_remains_readable(tmp_path):
     identity = CanonicalItemIdentity("session-a", "turn-receipt", "inv-1", 0, "answer-1")
     receipt = {
         "receiptId": "receipt-1",
@@ -196,10 +196,20 @@ def test_canonical_receipt_is_audit_only_and_readable_from_final_answer_item(tmp
     visible = model_visible_messages_from_events(events)
     assistant = next(message for message in visible if message.get("role") == "assistant")
     assert "modelInvocationReceipt" not in assistant.get("metadata", {})
-    assert read_model_invocation_receipt_from_events(events, turn_id="turn-receipt") == receipt
+    canonical_items = [
+        event
+        for event in events
+        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED
+        and event.payload.get("phase") == "final_answer"
+    ]
+    assert len(canonical_items) == 1
+    assert "modelInvocationReceipt" not in canonical_items[0].payload
+    assert "requestExcerpt" not in str(canonical_items[0].payload)
+    assert "responseExcerpt" not in str(canonical_items[0].payload)
+    assert read_model_invocation_receipt_from_events(events, turn_id="turn-receipt") == earlier_receipt
     assert read_model_invocation_receipts_from_events(
         events, turn_id="turn-receipt"
-    ) == [earlier_receipt, receipt]
+    ) == [earlier_receipt]
     assert read_model_invocation_receipt_from_events(events, turn_id="other-turn") is None
 
 
