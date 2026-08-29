@@ -1374,28 +1374,24 @@ async function stopWorkbenchBackend(
   void paths;
   void bootstrap;
   const operation = transaction.mode === "force" ? "force-stop" : "stop";
-  const result = await orchestrateLauncherLifecycle(
-    operation,
-    {
-      schemaVersion: 1,
-      path: operation,
-      init: {
-        method: "POST",
-        body: {
-          requestId: transaction.requestId,
-          closeId: transaction.closeId,
-          deferWindowClose: true,
-          confirmed: transaction.mode === "force",
-          operatorIntent: transaction.mode === "force" ? "force_close" : "close",
-          activeWorkState: transaction.activeWorkState
-        }
+  const result = await orchestrateLauncherLifecycle(operation, {
+    schemaVersion: 1,
+    path: operation,
+    init: {
+      method: "POST",
+      body: {
+        requestId: transaction.requestId,
+        closeId: transaction.closeId,
+        deferWindowClose: true,
+        confirmed: transaction.mode === "force",
+        operatorIntent: transaction.mode === "force" ? "force_close" : "close",
+        activeWorkState: transaction.activeWorkState
       }
-    },
+    }
     // A force close is an explicitly confirmed destructive operator intent and
     // keeps the original supersede semantics; a normal window close must not
     // abort an in-flight restart.
-    transaction.mode === "force" ? "operator" : "window-close"
-  );
+  }, transaction.mode === "force" ? "operator" : "window-close");
   if (!result.accepted) {
     throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
   }
