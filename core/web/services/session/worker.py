@@ -19,6 +19,9 @@ from core.infrastructure.tool_execution_scope import (
     tool_execution_scope,
 )
 from core.orchestration.context_engine import AgentContextInterrupted
+from core.web.services.session.research_thinking_budget import (
+    build_research_thinking_budget_segment,
+)
 
 
 _STRICT_RESEARCH_TASK_KINDS = frozenset(
@@ -1228,6 +1231,15 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 prompt_snapshot_segment = s._prompt_snapshot_context_segment(agent_prompt_snapshot_block, agent_prompt_snapshot)
                 if prompt_snapshot_segment:
                     runtime_context_segments.insert(0, prompt_snapshot_segment)
+                research_thinking_budget_segment = build_research_thinking_budget_segment(
+                    session_id,
+                    project_root=s.PROJECT_ROOT,
+                    load_chat_state=s.load_session_chat_state,
+                )
+                if research_thinking_budget_segment:
+                    # Appended last so the hard budget line sits at the tail of
+                    # the static system context (recency advantage).
+                    runtime_context_segments.append(research_thinking_budget_segment)
                 static_runtime_context_block = s._session_context_segments_block(runtime_context_segments, "cache_prefix")
                 dynamic_runtime_context_block = s._session_context_segments_block(runtime_context_segments, "volatile_turn")
                 runtime_context_block = (
