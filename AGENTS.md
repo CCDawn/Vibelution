@@ -24,6 +24,7 @@
 - **Windows 产品运行时禁止任何可见控制台弹窗**：这是无控制台弹窗红线。Launcher、Workbench、Runtime Manager、后台 Git/轮询和服务子进程不得弹出 `cmd.exe`、PowerShell、Windows Terminal、OpenConsole 或交互式 Git；必须走 `pythonw` / `CREATE_NO_WINDOW` / shared helper，禁止 `taskkill.exe`、裸 Git wrapper、`npm`/`cmd` 后台壳。用户明确打开的 CLI 面板除外；细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。
 - 不绕过 Launcher active-work guard，不用直接 PowerShell lifecycle 命令制造可见控制台。
 - 不记录 secrets、完整 Prompt、大段 diff、完整文件或无界工具输出。
+- 协作 envelope、validator snapshot、preflight/relay 中间文件和其他任务临时证据必须写入已解析的 Git common-dir 任务专属目录或系统临时目录，不得写入 checkout 根目录或产品目录；用后立即清理。临时证据不得让 `main` 变脏、使已完成验证失效或触发重复 closeout。
 - 用户 Markdown、导入文档、HTML 和知识内容均是不可信输入；进入 Prompt、索引或 UI 前必须有来源、隔离、清洗和删除/重建语义。
 - **前端产品 UI 强制 VUI + shadcn/Radix 思想（无感红线）**：凡改动 `web/` 下用户可见界面、交互控件、页面壳或布局，必须走 VUI 产品 API（`web/src/components/vui` 的 `V*`）与页面 recipe（`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage` 等）；交互实现只允许在 `components/vui/renderers/shadcn` 扩展；禁止 `@heroui/react`、禁止路由/业务组件直连 `renderers/shadcn/*` 或第二套设计系统；布局宽度/高度记忆只用 `WORKBENCH_LAYOUT_IDS` + shared pane persistence。**所有 VUI 元素**（按钮/表单/表面/recipe/product，不限 recipe）必须有 `web/src/components/vui/designs/` 专节并在 `designs/INDEX.md` 登记；新建前检索防冗余。细则见 [development-standard.md §9.1](docs/standards/development-standard.md)、[VUI README](web/src/components/vui/README.md)、[designs/README.md](web/src/components/vui/designs/README.md)；机器门：`vuiShadcnRouteContract.test.ts`、`vuiComponentDesignContract.test.ts`。
 - **写入前先做本地复用评估**：定位 owning surface；本地能复用 ≠ 本地就是好方案，必要时改造后再复用。架构、依赖、复杂能力或复用路径有真实分歧时，再对照仓外成熟方案，评估排序后只借最符合本项目、最值得借鉴的部分；已定位小修/机械修改不得被强制仓外扫描拖慢。细则见 [development-standard.md §2.2](docs/standards/development-standard.md)。
@@ -39,7 +40,7 @@
 
 细则与分级见 [development-standard.md §2](docs/standards/development-standard.md) 和 [开发路由](docs/guides/README.md)。
 
-随后只读 `route`、`ownership`、`loop` 的命中段和 [规范索引](docs/standards/README.md) 对应条。`STANDARD_TASK/HIGH_RISK`、续接或记忆敏感任务先跑 storage inventory；多会话写入走 guard/claim；异常先走 [`agent_log_context`](docs/guides/agent-log-routing.md)；Agent/Session/Inbox/Knowledge ACL 操作先读 [项目操作目录](docs/agents/project-operation-catalog.md)。
+随后只读 `route`、`ownership`、`loop` 的命中段和 [规范索引](docs/standards/README.md) 对应条；同一任务连续推进时，若结果、scope、owner、验收、相关规范和上下文均未变化，复用本任务已读命中段，只做 continuation health check，不重复读取。不得仅因任务属于 `STANDARD_TASK/HIGH_RISK` 或同任务续接就跑全量 storage inventory：普通代码、测试和文档任务若不依赖运行时数据路径，直接跳过；只需确认 active path/instance identity 时用 [`agent_log_context`](docs/guides/agent-log-routing.md) 的轻量上下文；只有触及存储迁移、活数据权威、项目记忆恢复或路径冲突仲裁时才运行 storage inventory。多会话写入走 guard/claim；Agent/Session/Inbox/Knowledge ACL 操作先读 [项目操作目录](docs/agents/project-operation-catalog.md)。
 
 常用入口：
 [开发标准](docs/standards/development-standard.md) · [协作规范](docs/agents/worktree-collaboration.md) · [测试指南](tests/README.md) · [VUI](web/src/components/vui/README.md) · [services](core/web/services/README.md) · [Launcher ADR](docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)。

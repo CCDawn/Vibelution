@@ -137,7 +137,6 @@ _CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhauste
 _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX = "challenge_workflow_run_"
 _CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS = 0.5
 _CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS = 30.0
-_CHALLENGE_MEETING_SPEAKER_MAX_OUTPUT_TOKENS = 1024
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -2536,31 +2535,6 @@ def _supervision_decision_to_message(decision: Any) -> dict[str, Any]:
     }
 
 
-def _apply_challenge_speaker_output_cap(
-    agent_config: Any,
-    *,
-    profile_id: str,
-    context: Mapping[str, Any],
-) -> bool:
-    """Clamp only formal candidate-generation speaker output in memory."""
-
-    if (
-        agent_config is None
-        or _positive_int(context.get("challengeDeadlineAtMs")) is None
-        or str(context.get("meetingType") or "").strip()
-        != "hypothesis_candidate_generation"
-    ):
-        return False
-    profile = agent_config.llm.get_profile(profile_id=profile_id)
-    configured_limit = int(getattr(profile, "max_output_tokens", 0) or 0)
-    if 0 < configured_limit <= _CHALLENGE_MEETING_SPEAKER_MAX_OUTPUT_TOKENS:
-        return False
-    agent_config.llm.profiles[profile_id] = profile.model_copy(
-        update={"max_output_tokens": _CHALLENGE_MEETING_SPEAKER_MAX_OUTPUT_TOKENS}
-    )
-    return True
-
-
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     prepare_started_at = _perf_counter()
     timings: dict[str, Any] = {}
@@ -2636,11 +2610,6 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         stage_started_at = _perf_counter()
         resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
         agent_config = resolved_agent_llm.config
-        _apply_challenge_speaker_output_cap(
-            agent_config,
-            profile_id=str(resolved_agent_llm.runtime_profile_id or "primary"),
-            context=context,
-        )
         receipt_context = build_speaker_receipt_context(
             participant,
             context,
