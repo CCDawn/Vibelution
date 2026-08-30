@@ -48,7 +48,7 @@ describe("ResearchWorkflowToolbar", () => {
       runtimeCurrentNodeIds: ["protocol_design"],
       onNavigateCurrent: vi.fn(),
       onOpenTeamCommunication: vi.fn(),
-      onResetExperiment: vi.fn(),
+      experimentActions: <button type="button">更多操作</button>,
     });
 
     expect(markup).toContain("切换实验");
@@ -81,7 +81,7 @@ describe("ResearchWorkflowToolbar", () => {
       identity: null,
       runId: "",
       experimentOptions: [],
-      onResetExperiment: vi.fn(),
+      experimentActions: <button type="button">更多操作</button>,
     });
 
     expect(markup).not.toContain("更多操作");
