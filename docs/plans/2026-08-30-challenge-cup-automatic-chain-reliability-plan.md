@@ -4,7 +4,9 @@
 >
 > 状态：`USER-REQUESTED / ACTIVE PLAN / IMPLEMENTATION NOT STARTED`
 >
-> 代码审查基线：本地 `main@927ca48586492fc351d307dc160acb0dfbe8d6d3`；实施前必须重新读取最新 main、active claim 与运行指纹
+> 权威路径：根 `main` 的 `docs/plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md`；任务 worktree 只用于隔离编辑，不作为交付路径
+>
+> 证据复核基线：本地 `main@9ea07665d302a01748a178a25a753f86ad35c451`，复核时间 `2026-08-30 22:49 +08:00`；原计划基线 `927ca4858` 已被后续 `77f3dab5a`、`9ea07665d` 等修复推进，实施前仍须重新读取最新 main、active claim 与运行指纹
 >
 > 适用范围：挑战杯假说生成、群聊评审、摘要、LangGraph/Workflow Ledger 调度、恢复与自动推进
 >
@@ -14,31 +16,46 @@
 
 本轮不改造普通对话链路。推荐路径是：继续复用原生 Session/Agent/LLM 执行链，在挑战杯 `team_workflow/research_runtime` 内补一层 **Challenge-only durable meeting driver**，把群聊续轮、摘要、评审调用、deadline、父 run 停止和恢复都变成服务端持久化状态机；LangGraph、Workflow Ledger/outbox、MeetingRound 与既有 challenge receipt registry 继续作为事实源，不引入第二个 workflow engine、第二套 transcript 或第二套 receipt 账本。
 
-修复优先级固定为：
+本版先完成证据缩表，不把旧计划的 11 项判断整体当作开工事实。当前修复优先级为：
 
-1. 先消除无 deadline、无 owner 的 `running`、`summarizing` 永久悬挂和失败 outbox 活锁；
+1. 先消除无 deadline、无 owner 的 `running`、`summarizing` 永久悬挂和 reconcile zero-work 死态；attempt/exhaustion 活锁先证伪，不预设为已确认事实；
 2. 再闭合重启恢复、跨 run 隔离和上下文污染；
 3. 最后才把 shadow/preview 自动策略升级为 authoritative 自动推进。
 
 “链路稳定可推进”和“零人工运行”是两项不同验收。前者完成前不得开启自动批准；后者未完成时不得宣称 zero-click。
 
-## 2. 已确认问题与判定
+## 2. 当前问题缩表与证据锚点
 
-| 优先级 | 问题 | 当前影响 | 修复判定 |
+状态含义：`OPEN` 才进入代码修复；`PARTIAL` 只修剩余缺口；`CLOSED_REGRESSION` 不重写实现，只补生产形状回归；`VERIFY_FIRST` 必须先复现，未复现不得预授权修改业务代码。
+
+| 原问题 | 当前状态 | 当前证据锚点 | 下一动作 |
 | --- | --- | --- | --- |
-| P1 | preformal Challenge 会议未进入 challenge deadline | 群聊可运行 20 分钟以上，续轮仍无 `challengeDeadlineAtMs` | preformal 与 formal 一律使用服务端会议 deadline |
-| P1 | 会议续轮依赖进程内 executor/job set | 重启后无 durable owner；新 room round 可能先运行、后绑定 MeetingRound | 新 round 必须先持久绑定再派发；启动 sweep 可恢复 |
-| P1 | `summarizing` 无 durable invocation intent | 进程退出、timeout 或 hook 异常后永久悬挂，generation attempt 仍显示 running | 摘要/评审调用改为租约化 durable work |
-| P1 | reconcile 在 `revived=0` 时仍可写 `RUNNING` | 出现 `running + zero active outbox`，不会自动推进 | 无可恢复 work 时落精确 `blocked/reconciliation_required` |
-| P1 | review LLM 独立 600 秒 daemon timeout | provider 超时后继续消耗连接、Token 和费用，重试可叠加孤儿调用 | 使用共享取消链和剩余绝对 deadline，禁止 daemon orphan |
-| P1 | 会议/候选/selection 的 run authority 曾不完整 | 新 run 可能读旧 meeting/candidate/receipt authority | 所有读写以 server-owned `workflowRunId + attemptId` fencing |
-| P1 | 停止/失败会议仍可能被 heal、promote 或 reuse | 旧部分消息可污染新 attempt，旧 receipt authority 可阻塞新 run | stopped/failed/legacy meeting 只读审计，不参与新执行 |
-| P1 | 父 run `blocked/cancelled` 后子会议仍可继续 | 后台 speaker/续轮继续调用模型，active-work 不释放 | speaker、续轮、summary 前重读父 run execution-active 状态 |
-| P2 | lease attempt exhausted 可被 repair sweep 重新复活 | 可能形成 failed↔pending tight loop | exhaustion 必须终态化；显式人工 reconcile 才可审计重置 |
-| P2 | preformal 长期 direct Session 累积整轮 transcript | 跨题历史膨胀、缓存前缀不稳定、模型每次读取大量旧对话 | 改用 meeting/attempt-scoped Child Session 或等价有界投影 |
-| P2 | 自动策略仍为 preview/shadow | 修好 bug 后仍会停在候选选择、digest 批准等人工门 | 稳定性闭合后单独启用 authoritative policy |
+| preformal Challenge 会议无 deadline | `OPEN / P1` | `chat_room_service.py:3738-3748,4627-4651` 只承认 `workflow_discussion_scope.v1 + receipt authority`；`meeting_rounds.py:296-307` 也只在存在 receipt authority 时写 `challengeDeadlineAtMs`。生产记录 `hf-review-hsel-6468d71e0875691a-c627a33139-r2`、`...-8f951e6d11-r3` 的 deadline 均为空 | T1 让 preformal/formal 都进入服务端派生 deadline，不再用 receipt 是否存在判定 Challenge 身份 |
+| 会议续轮依赖进程内 executor/job set | `OPEN / P1` | `meeting_runtime.py:132-137,1643-1729` 的 `_MEETING_DISCUSSION_EXECUTOR/_MEETING_DISCUSSION_JOBS` 是唯一调度 owner | T2 新增 durable work/lease，先绑定 round 再派发，启动时可恢复 |
+| `summarizing` 无 durable invocation intent | `OPEN / P1` | `meeting_runtime.py:2365-2435` 先写 `summarizing` 后同步调用；`chat_room_service.py:2004-2009` 会吞 completion hook 异常。生产记录 `hf-candgen-10931892161cf654`、`...-8f951e6d11-r3` 停在 `summarizing` | T3 把 digest/review 变成有 lease、deadline、sourceHash 的 durable work；hook 失败必须留可恢复事实 |
+| reconcile zero-work 死态 | `PARTIAL / P1` | `command_service.py:1306-1308` 已做到 `revived > 0` 才 wake；但 `1240-1243` 仍先写 `RUNNING`。Canonical Ledger 中 `run-16cfab646d08` 仍为 `running/knowledge_ingestion`，最新 attempt 与 adapter outbox 已 failed，且无 pending/leased outbox | T4 只修 `revived=0 + zero active work` 的精确落点，不重写已闭合 wake 分支 |
+| review LLM 600 秒 daemon timeout | `OPEN / P1` | `llm_review_runners.py:56-67,104-136` 明确 timeout 后 daemon/provider 继续。当前 receipt 221 条成功调用：p50=`28,801ms`、p95=`359,704ms`、max=`506,392ms`；`relay_autodl/GLM-5.3-flash` 73 条 p95=`477,878ms` | T1 复用 provider cancel bridge，并按实测调用延迟派生预算，禁止 orphan daemon |
+| workflowRunId 跨 run 隔离 | `CLOSED_REGRESSION` | `hypothesis_first_chain.py:3936-3955,4518-4552` 已按 run 过滤；测试 `test_question_run_scopes_candidate_generation_before_receipt_resolution`、`test_chain_state_ignores_review_artifacts_from_other_workflow_runs` 已覆盖 | T6 只保留生产形状回归，不再把它列为待实现功能 |
+| stopped/failed meeting 被 heal/promote/reuse | `CLOSED_REGRESSION` | 测试 `test_stopped_generation_does_not_heal_or_reuse_for_a_new_run`、`test_active_generation_from_cancelled_run_does_not_block_new_run` 已锁定新 run 不复用旧停止会议 | T6 只验证旧 meeting 含部分候选标记、新 authority 变化的生产形状 |
+| parent `blocked/cancelled` 未传播 | `CLOSED_REGRESSION` | `meeting_receipt_authority.py:18-21` 已把 `blocked/reconciliation_required` 纳入 execution-inactive；`77f3dab5a` 增加精确人工会议 gate 例外；`test_research_workflow_meeting_runtime.py` 已覆盖 `challenge_workflow_run_blocked` | T6 只补 Session→meeting→active-work 的端到端回归；不重写父 run 权威合同 |
+| attempt exhaustion 自动复活/活锁 | `VERIFY_FIRST / P2` | `ledger/repository.py:889-919` 已能把 lease exhaustion 标为 failed；当前没有可复核的 failed↔pending 时间线证明自动 repair sweep 会复活它 | T5 先做时间推进与事件增长测试；只有复现 tight loop 才授权最小代码修复 |
+| preformal 长期使用 direct Session | `OPEN / P2` | formal 在 `meeting_runtime.py:458-482` 解析 hidden Child Session；preformal 在 `505-614` 直接用 Agent roster 创建房间，而 `chat_room_service.py:3577-3610` 会解析为 Agent `directSessionId` | T7 改为 meeting/attempt-scoped Child Session 或等价有界 Challenge 投影，普通 Session 零差异 |
+| 自动策略仍为 preview/shadow | `OPEN / P2 / DEFERRED` | `automation_policy_service.py:1-6,159-182` 明确 preview-only、`executed=False`；`test_research_workflow_policy_shadow_evaluator.py` 明确 shadow 不发命令 | 稳定性任务全部闭合后再做 T8 authoritative 升级 |
 
-已有修复必须保留：正式会议的持久 deadline、外层/会议 deadline 取最早值、晚到结果隔离、stopped meeting 终态、receipt durability、provider cancellation、Ledger 调用前预算预检和 workflowRunId 已覆盖部分读写面。实施者必须在最新 main 上逐项复核，已闭合项只补缺失的生产形状回归，不重复重写。
+以上结论只代表 `main@9ea07665d` 与 `2026-08-30 22:49 +08:00` 的快照。当前 registry 另有 active writer 占用 `chat_room_service.py`、`meeting_runtime.py`、`hypothesis_first_chain.py`；T0 必须在真正开工时重新读取最新 main/claim/diff，并再次缩表。已有修复必须保留：正式会议持久 deadline、外层/会议 deadline 取最早值、晚到结果隔离、stopped meeting 终态、receipt durability、provider cancellation、Ledger 调用前预算预检和 run-scoped 读写。
+
+### 2.1 开工串行闸门
+
+- T0 的只读复核和 fixture 设计可以先做；任何 T1–T8 代码写入前，必须先确认热文件 active claim 已释放或得到显式交接。
+- `run-16cfab646d08` 当前仍停在 `knowledge_ingestion` 的 `running + zero active outbox` 形状。不得停止未知 owner 的 run；必须由其 owner 明确收口，或以可审计方式正式搁置后，才允许进行会触及 Launcher、Ledger worker、meeting runtime 的实现/迁移/运行验收。
+- 代码开发、数据 preview/apply、Launcher refresh、DEV/G1 各自串行。运行时有 active work 时不得刷新；迁移只在 Launcher 停止且无 live writer 时执行。
+
+### 2.2 本次生产形状来源
+
+- 路径先由 `scripts/migrate_project_storage.py inventory --project <root>` 解析，不硬编码用户名或旧 Documents 数据根。
+- run/outbox/attempt：`<activePaths.data>/research_workflows/workflow-ledger.sqlite`，只读查询 `run-16cfab646d08`。
+- meeting：`<activePaths.workspace>/teams/research-team/research_workflow/meeting_rounds.jsonl`，只投影 ID、run、status、deadline、bound round count 与 problem code，不复制 transcript。
+- latency：`<activePaths.workspace>/teams/research-team/challenge_program/model_invocation_receipts/`，按唯一 `receiptId` 去重，只统计 `status=succeeded` 的 `latencyMs`；不把 request/response excerpt 写入 fixture 或本文。
 
 ## 3. 保护边界
 
@@ -111,7 +128,7 @@ stopped|failed|completed
 
 强制不变量：
 
-- meeting 创建时由服务端写 `meetingAttemptId`、`workflowRunId`、`challengeDeadlineAtMs`；
+- meeting 创建时由服务端写 `meetingAttemptId`、`workflowRunId`、`deadlinePolicyVersion`、`plannedSerialCallCount`、`perCallBudgetMs`、`meetingBudgetMs` 与 `challengeDeadlineAtMs`；
 - room round 必须先追加到 `chatRoomRoundIds`，再允许 worker claim；
 - 每个 speaker、follow-up round、summary/review 调用前重读 meeting 和 parent run；
 - deadline/parent inactive 已成立时，不得写入晚到 `completed` 消息，只写 `stopped/cancelled` 审计证据；
@@ -145,19 +162,37 @@ sourceHash, lastProblem, createdAtMs, updatedAtMs
 
 worker 顺序固定为：claim lease → 重读 authority/deadline → 执行一次副作用 → 先持久化结果/receipt → CAS 完成 work → 派发唯一后继。CAS false 时不得产生 reconciliation 或领域写回。
 
-## 6. Deadline 与取消合同
+## 6. Deadline、进度与取消合同
 
-1. node/task deadline 继续服从显式任务合同；不在本轮把所有研究节点强行改为统一时长。
-2. 每个 Challenge meeting 在服务端创建时获得独立 `300000ms` 绝对 deadline。
-3. preformal 与 formal meeting 都受该 deadline；不能用是否存在正式 receipt authority 判断是否属于 Challenge。
-4. 同一 meeting 的 speaker、follow-up round、重试和 summary 共享同一 deadline，不得重置。
-5. 不同下游 meeting 使用自己的新 300 秒窗口，不继承 workflow run 创建时间。
-6. 外层 Challenge task deadline 与 meeting deadline 取所有正值的最早值。
-7. 每次 provider 请求使用 `remaining_ms`；`remaining_ms<=0` 时禁止发起请求。
-8. deadline 到达后调用既有 active-request abort；取消分类为非重试 `cancelled/deadline_exceeded`，不得走普通 provider retry。
-9. 无法确认 transport 已停止时，meeting 仍立即终态化并 fencing 晚到结果；同一 idempotency key 不得自动再发一次。
+### 6.1 为什么删除整场固定 300 秒
 
-用户可见时间目标：首次进度 `<=5s`，最大静默 `<=30s`，一个 meeting 的硬上限 `<=300s`。G1 只验证单样本时间线；p50/p95 在 G5/G12 后按节点、provider、角色分桶计算，空桶不得写 0。
+当前 221 条成功 receipt 的全局 p95 已是 `359,704ms`；`relay_autodl/GLM-5.3-flash` 的 73 条成功调用 p95 为 `477,878ms`、max 为 `506,392ms`。单次合法调用已经可能超过 300 秒；一个 meeting 又可能包含多个串行 speaker、follow-up、digest/review。继续让整场共享固定 `300000ms` 会把正常慢调用系统性误判为超时，无法完成多轮链路。
+
+### 6.2 派生预算
+
+1. node/task deadline 继续服从显式任务合同；不把所有研究节点强行改为统一时长。
+2. 单次调用预算按 binding 分桶：
+
+   ```text
+   perCallBudgetMs = clamp(ceil(bindingP95Ms * 1.25), 300000, 600000)
+   ```
+
+   分桶至少包含 provider、model、角色/调用类型；样本数不少于 20 才使用 binding p95。样本不足时依次回退 provider-class p95、全局 p95，仍不足时使用审计默认值 `450000ms`。按本次样本，`relay_autodl/GLM-5.3-flash` 应接近 `600000ms` 上限，而不是 300 秒。
+3. meeting 创建时根据实际执行计划计算 `plannedSerialCallCount`；最长串行路径上的每次调用预算相加，再加每次状态转移/持久化开销，得到 `meetingBudgetMs`。并行 speaker 只取该并行段最大预算，不能虚增为总和；digest/review 若串行发生必须计入。
+4. 启动前做可行性预检：若外层 task 的剩余绝对窗口小于派生 `meetingBudgetMs`，不得启动一个注定超时的 meeting。只能按已授权 policy 减少轮数/串行调用、切换到已授权的更快 binding，或持久化 `deadline_budget_insufficient` 并进入可恢复阻塞；不得静默缩短预算后让 provider 半途被杀。
+5. 服务端持久化绝对 `challengeDeadlineAtMs = meetingCreatedAtMs + meetingBudgetMs`，并同时保存 `deadlinePolicyVersion`、分桶来源、样本数与 policy hash。不得从 workflow run 创建时间起算。
+6. preformal 与 formal meeting 都受该合同；不能用是否存在正式 receipt authority 判断是否属于 Challenge。
+7. 同一 meeting 的 speaker、follow-up round、重试和 summary 共享同一持久化 deadline，不得续轮重置；不同下游 meeting 按自己的执行计划获得新窗口。
+8. 每次 provider 请求的 effective deadline 取三者最早值：外层 Challenge task 绝对 deadline、meeting 绝对 deadline、`callStartedAtMs + perCallBudgetMs`。`remaining_ms<=0` 时禁止发起请求。
+9. 允许 operator/env 做有界覆盖以便 DEV 校准，但覆盖值必须通过服务端校验、写入 deadline policy hash/receipt，并保留来源；不得让未审计环境变量静默改变正式 G1 合同。
+10. deadline 到达后调用既有 active-request abort；取消分类为非重试 `cancelled/deadline_exceeded`，不得走普通 provider retry。
+11. 无法确认 transport 已停止时，meeting 仍立即终态化并 fencing 晚到结果；同一 idempotency key 不得自动再发一次。
+
+### 6.3 用户可见延迟目标
+
+- 接收请求后首次状态/receipt `<=5s`；运行中的最大静默时间 `<=30s`，以 durable heartbeat/阶段投影实现，不靠伪造模型文本。
+- 单次调用和整场 meeting 的墙钟必须分别记录 `actualLatencyMs / perCallBudgetMs / meetingBudgetMs`；超预算要有明确 stop reason。
+- G1 只验证一条实际时间线和取消语义；G5/G12 后再按节点、provider、model、角色/调用类型计算 p50/p95。空桶不得写 0，也不得用快模型桶覆盖慢 binding。
 
 ## 7. 上下文、缓存、receipt 与预算边界
 
@@ -190,13 +225,13 @@ preformal meeting 改用 `meeting/attempt-scoped Child Session` 或同等的 Cha
 
 ```mermaid
 flowchart TD
-  T0["T0 冻结合同与生产形状 fixture"]
-  T1["T1 Challenge deadline 与 provider 取消"]
+  T0["T0 逐项复核缩表与证据 fixture"]
+  T1["T1 派生 deadline 与 provider 取消"]
   T2["T2 Durable meeting driver 与启动恢复"]
   T3["T3 Durable summary/review 与 attempt 收敛"]
   T4["T4 reconcile 零 work 死态"]
-  T5["T5 outbox exhaustion 与 pump 活锁"]
-  T6["T6 workflowRunId/attempt 全链隔离"]
+  T5["T5 exhaustion/活锁 test-first 证伪"]
+  T6["T6 已闭合隔离合同的生产回归"]
   T7["T7 Child Session 与有界上下文"]
   T8["T8 authoritative 自动推进策略"]
   T9["T9 统一验收与一次受控 G1"]
@@ -212,6 +247,7 @@ flowchart TD
   T2 --> T7
   T6 --> T7
   T1 --> T8
+  T2 --> T8
   T3 --> T8
   T4 --> T8
   T5 --> T8
@@ -220,23 +256,23 @@ flowchart TD
   T8 --> T9
 ```
 
-关键路径：`T0 → T1 → T2 → T3 → T6 → T7 → T8 → T9`。T1/T4/T5 可以并行；T6 可先做独立读写面，但必须与 T2/T3 做一次集成验收；T8 之前必须完成 T1–T7。
+关键路径：`T0 → T1 → T2 → T3 → T7 → T8 → T9`。T1/T4 与 T5 的 test-first 复核可并行；T6 是已闭合合同的生产回归，可与 T2/T3 的实现验证并行，但必须在 T8 前完成。T8 之前要求 T1–T7 全绿，其中 T5 未复现时以“风险证伪测试通过”视为完成，不产生业务代码 diff。
 
-### Task T0：冻结合同与生产形状 fixture
+### Task T0：逐项证据复核、缩表与生产形状 fixture
 
 - **Owner/Boundary**：contract/tests；不改运行数据。
-- **Dependency**：最新 main、active claim 和已通过的 52 个相关测试结果；相同 HEAD 不重复跑。
+- **Dependency**：最新 main、active claim、canonical Ledger/MeetingRound/receipt 只读快照；相同 HEAD/命令/fixture 不重复跑。
 - **Mode**：BDD_TDD。
-- **产出**：本文状态机、problem code、deadline、authority、late-result fencing 的失败 fixture；固化 SCI-002/003/004/091 的脱敏生产形状。
-- **Verification/Stop**：旧测试若锁定错误语义，先改断言；发现新产品分歧或 active writer 重叠即停止该文件面。
+- **产出**：把本表每项重新标成 `OPEN/PARTIAL/CLOSED_REGRESSION/VERIFY_FIRST`；每项至少保留一个 SHA、代码行、测试名、run/meeting ID 或 canonical Ledger locator；只为仍开放项建立失败 fixture，已闭合项建立生产形状回归。
+- **Verification/Stop**：问题无证据锚点不得进入修复；旧测试若锁定错误语义，先说明合同差异；发现最新 main 已闭合或 active writer 正在修改同一事实源，立即缩表/串行等待，不重复实现。
 
-### Task T1：统一 Challenge meeting deadline 与 provider cancellation
+### Task T1：统一派生 deadline、heartbeat 与 provider cancellation
 
 - **Owner/Boundary**：`chat_room_service.py`、`meeting_receipt_authority.py`、`meeting_rounds.py`、`llm_review_runners.py`、既有 LLM cancel bridge；普通 chat 无 Challenge scope 时零差异。
 - **Dependency**：T0。
 - **Mode**：BDD_TDD。
-- **产出**：preformal/formal 都有服务端 300 秒 meeting clock；外层/meeting 取 min；review/digest 不再使用孤儿 daemon timeout。
-- **Verification/Stop**：provider abort、canonical cancelled、无晚到 completed、无重复调用；若某 provider transport 不可取消，必须 fail closed 并记录精确残余风险。
+- **产出**：preformal/formal 都使用 §6 的派生 per-call/meeting clock；持久化 deadline policy；外层/meeting/call 取最早值；30 秒内有 durable heartbeat；review/digest 不再使用孤儿 daemon timeout。
+- **Verification/Stop**：快/慢 binding、串行两调用、并行 speaker、续轮不重置、新 meeting 新窗口、operator override 审计、provider abort、canonical cancelled、无晚到 completed、无重复调用；若某 provider transport 不可取消，必须 fail closed 并记录精确残余风险。
 
 ### Task T2：Durable meeting driver、先绑定后执行与 startup recovery
 
@@ -262,21 +298,21 @@ flowchart TD
 - **产出**：`revived=0` 且无 active attempt/outbox 时落 `blocked/reconciliation_required`；只有确实复活 work 才 wake worker。
 - **Verification/Stop**：生产形状 fixture 不再出现 `running + zero active outbox`；重复 reconcile 幂等。
 
-### Task T5：attempt gate、repair sweep 与 pump 活锁
+### Task T5：attempt exhaustion、repair sweep 与 pump 活锁的 test-first 证伪
 
 - **Owner/Boundary**：Ledger outbox repository、`graph_dispatch_worker.py`、`adapter_dispatch_worker.py`、`outbox_pump.py`；不修改业务研究方法。
 - **Dependency**：T0；可与 T1/T4 并行。
 - **Mode**：BDD_TDD。
-- **产出**：`lease_attempt_exhausted` 不被自动 sweep 复活；人工 reconcile 若重置 attempts，在同一事务记录 actor/reason/previous count；pump 对同一 action 每轮最多处理一次。
-- **Verification/Stop**：时间推进 fixture 证明没有 failed↔pending tight loop、CPU busy loop或无界事件增长。
+- **产出**：先用时间推进 fixture 同时驱动 lease exhaustion、repair sweep、pump 与显式 reconcile，记录状态/attempt/event 数量；只有复现自动 failed↔pending 才添加最小终态化修复。人工 reconcile 若重置 attempts，必须在同一事务记录 actor/reason/previous count；pump 对同一 action 每轮最多处理一次。
+- **Verification/Stop**：未复现时以“现有防线成立 + 回归测试锁定”收口，不改实现；复现时必须证明修复后无 tight loop、CPU busy loop 或无界事件增长。
 
-### Task T6：workflowRunId/attempt authority 全链隔离
+### Task T6：workflowRunId/attempt、stopped meeting 与 parent inactive 的生产回归
 
-- **Owner/Boundary**：MeetingRound、generation attempt、candidate、selection、review link/read model、state V2；legacy 只读兼容。
+- **Owner/Boundary**：现有 MeetingRound、generation attempt、candidate、selection、review link/read model、state V2 合同；默认只增测试/fixture，发现新缺口才领取精确实现文件。
 - **Dependency**：T0；最终集成依赖 T2/T3。
 - **Mode**：BDD_TDD。
-- **产出**：所有读取和写入携带 server-owned `workflowRunId + attemptId/resetId/selectionId`；stopped/failed/old-authority meeting 不参与 heal/reuse/promote。
-- **Verification/Stop**：旧 workflow run 有两个完成消息也不能污染新 run；新 authority 必须创建全新 attempt，不被旧 receipt 阻塞。
+- **产出**：生产形状回归锁定 server-owned `workflowRunId + attemptId/resetId/selectionId`、stopped/failed/old-authority 不参与 heal/reuse/promote，以及 parent blocked/cancelled 后不派发 speaker/续轮/summary。
+- **Verification/Stop**：旧 workflow run 即使有两个完成候选标记也不能污染新 run；新 authority 必须创建全新 attempt且不被旧 receipt 阻塞；父 run inactive 后 active-work 释放。若现有合同已通过，不产生实现 diff。
 
 ### Task T7：Challenge-only Child Session 与上下文隔离
 
@@ -306,10 +342,10 @@ flowchart TD
 
 | 责任面 | 主要文件 | 约束 |
 | --- | --- | --- |
-| meeting deadline/stop | `core/web/services/chat_room_service.py`、`team_workflow/meeting_rounds.py`、`research_runtime/meeting_receipt_authority.py` | ordinary room 零差异 |
+| meeting deadline/stop | `core/web/services/chat_room_service.py`、`team_workflow/meeting_rounds.py`、`research_runtime/meeting_receipt_authority.py`、deadline policy/calibration helper | ordinary room 零差异；预算来源和 override 必须可审计 |
 | durable meeting/summary | `team_workflow/meeting_runtime.py`、`llm_review_runners.py`、新增 meeting work/outbox pack | 不写 turn journal，不复制 receipt |
-| generation/read model | `research_runtime/hypothesis_first_chain.py`、`hypothesis_first_state_v2.py` | run/attempt fencing，legacy 只读 |
-| Ledger reconcile/outbox | `research_runtime/command_service.py`、`reconcile_authority.py`、`graph_dispatch_worker.py`、`adapter_dispatch_worker.py`、`outbox_pump.py`、`core/research/workflow/ledger/*` | 单一 writer；显式 attempt reset 审计 |
+| generation/read model | 默认仅改对应测试 fixture；只有 T0/T6 复现新缺口才触及 `research_runtime/hypothesis_first_chain.py`、`hypothesis_first_state_v2.py` | 已闭合 run/attempt fencing 不重写，legacy 只读 |
+| Ledger reconcile/outbox | T4 精确触及 `research_runtime/command_service.py`、`reconcile_authority.py`；T5 仅在复现后触及 `graph_dispatch_worker.py`、`adapter_dispatch_worker.py`、`outbox_pump.py`、`core/research/workflow/ledger/*` | 单一 writer；未复现不产生实现 diff；显式 attempt reset 审计 |
 | context/session adapter | `research_runtime/real_domain_ports.py`、Challenge context builder、Child Session 创建入口 | 普通 Session 核心不改 |
 | automation | `research_runtime/automation_policy_service.py`、`policy_shadow_evaluator.py`、canonical command/projector | T1–T7 之前不 authoritative |
 | tests | chat room、meeting runtime/rounds/summary、hypothesis chain/state V2、Ledger attempt gate、session isolation | 使用 production-shaped fixtures |
@@ -346,7 +382,10 @@ flowchart TD
 
 | 场景 | 必须证明 |
 | --- | --- |
-| preformal/formal deadline | 均有服务端 300 秒 clock；外层更早时取外层；续轮不重置；新 meeting 获得新窗口 |
+| preformal/formal deadline | 均有服务端派生 clock；binding p95/回退/override 可审计；外层/meeting/call 取最早；续轮不重置；新 meeting 按新计划获得窗口 |
+| deadline 尺度 | 单次 240–506 秒合法慢调用不会被整场 300 秒误杀；两次串行调用的 meeting budget 等于最长串行路径预算之和；并行段只计 max |
+| deadline 可行性 | 外层剩余窗口不足时不启动注定超时的 meeting；只有已授权的降轮数/更快 binding 可以改变计划，否则持久化可恢复 blocker |
+| 可见进度 | 首次状态不超过 5 秒；运行期间每 30 秒内有 heartbeat/阶段更新；heartbeat 不延长 deadline |
 | provider abort | deadline 到达关闭实际 request，canonical cancelled，取消不 retry，无晚到 completed/副作用 |
 | round durability | 新 round 先绑定；进程在绑定前后、speaker 前后重启均可恢复 |
 | parent inactive | run 变 blocked/cancelled 后不再调用下一 speaker、不再开续轮/summary，active work 释放 |
@@ -365,7 +404,8 @@ flowchart TD
 ## 12. 生产验收顺序
 
 ```text
-最新 clean main + 所有修复已合入
+最新 clean main + T0 已按最新 SHA 再次缩表 + 所有仍开放修复已合入
+-> `run-16cfab646d08` 或届时等价的在途验收 run 已由 owner 收口/正式搁置
 -> active claim/work/runtime guard 清空
 -> 当前 DEV readiness 通过
 -> durable catalog authorization 重新绑定当前 policy/readiness hash
@@ -376,7 +416,7 @@ flowchart TD
 -> 人工复核后决定是否进入 G5
 ```
 
-G1 必须证明：模型路由符合本次正式授权；meeting 300 秒 deadline 和 provider abort 生效；父 run 停止可传播；无重复 LLM；receipt 可重放且不重跑；Ledger 预算不被最终 estimate 覆盖；writeback/terminal/active-work exactly-once；无并发 DEV 或第二 G1。单次 G1 不能计算 p50/p95，也不能直接授权 G125。
+G1 必须证明：模型路由符合本次正式授权；meeting 使用已持久化的派生 deadline policy，调用/会议实际墙钟不超过各自预算，provider abort 生效；父 run 停止可传播；无重复 LLM；receipt 可重放且不重跑；Ledger 预算不被最终 estimate 覆盖；writeback/terminal/active-work exactly-once；无并发 DEV 或第二 G1。单次 G1 不能计算 p50/p95，也不能直接授权 G125。
 
 ## 13. 停止条件与完成定义
 
@@ -392,6 +432,6 @@ G1 必须证明：模型路由符合本次正式授权；meeting 300 秒 deadlin
 - ordinary chat/Session/Companion 回归；
 - Launcher active-work guard、模型授权或 runtime SHA 不满足。
 
-只有 T1–T7 通过，才能说“链路稳定可推进”；只有 T8 通过，才能说“正常路径可零人工推进”；只有 T9 的受控 G1 通过，才能说“生产形状闭环已验证”。任何计划、fixture、mock 或单元测试都不能替代真实运行证据。
+只有 T0 缩表新鲜、T1–T7 通过，才能说“链路稳定可推进”；其中 `CLOSED_REGRESSION` 项以生产形状回归为验收，不要求重复改代码，`VERIFY_FIRST` 项未复现时以证伪回归收口。只有 T8 通过，才能说“正常路径可零人工推进”；只有 T9 的受控 G1 通过，才能说“生产形状闭环已验证”。任何计划、fixture、mock 或单元测试都不能替代真实运行证据。
 
-下一步建议：按 `T0 → {T1,T4,T5} → T2 → T3 → T6 → T7` 开始实现，T8/T9 保持后置闸门。
+下一步建议：先完成 T0 的最新 main 缩表和串行开工闸门，再按 `{T1,T4,T5-test-first} → T2 → T3 → {T6-regression,T7}` 推进；T8/T9 保持后置闸门。
