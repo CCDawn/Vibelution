@@ -92,6 +92,11 @@ class WorkflowRuntime:
             logger.exception("task bundle deadline reconciliation failed")
 
     def close(self) -> None:
+        from .budget_window_resolver import (
+            release_budget_window_resolver_for_store,
+        )
+
+        release_budget_window_resolver_for_store(self.store)
         self.store.close()
 
 
@@ -158,6 +163,26 @@ def build_workflow_runtime(
         budget_policy_hash="",
     )
     register_default_adapters(registry, ports)
+    # Dependency inversion for the session-side budget preflight: inject a
+    # resolver bound to THIS runtime's Ledger store so embedded runtimes
+    # (tests, tooling) resolve the budget authority without registering the
+    # production singleton. The production startup path also assembles through
+    # this function, so the injection covers both. The most recently assembled
+    # runtime wins; close() releases the injection when it is still current.
+    from .budget_authority_adapter import read_node_budget_window
+    from .budget_window_resolver import configure_budget_window_resolver
+
+    def owned_budget_window_resolver(
+        run_id: str, node_run_id: str, reservation_id: str
+    ) -> dict[str, Any]:
+        return read_node_budget_window(
+            store, run_id, node_run_id, reservation_id
+        )
+
+    configure_budget_window_resolver(
+        owned_budget_window_resolver,
+        store=store,
+    )
     readiness_context = RealDomainReadinessContext(
         store,
         adapter_registry=registry,

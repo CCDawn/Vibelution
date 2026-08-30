@@ -1043,18 +1043,27 @@ def _persist_challenge_model_invocation_receipt(
         capture.challenge_receipt_failure_code = "challenge_receipt_context_invalid"
         return False
     try:
+        from core.web.services.team_workflow.research_runtime.budget_window_resolver import (
+            injected_research_runtime_store,
+        )
         from core.web.services.team_workflow.research_runtime.receipt_persistence import (
             enqueue_question_model_invocation_receipt,
         )
-        from core.web.services.team_workflow.research_runtime.runtime_factory import (
-            production_workflow_runtime,
-        )
 
-        runtime = production_workflow_runtime()
-        if runtime is None:
-            raise RuntimeError("research workflow runtime is unavailable")
+        ledger_store = injected_research_runtime_store()
+        if ledger_store is None:
+            # Backward-compatible fallback: the production singleton runtime,
+            # for turns running outside an injected runtime assembly.
+            from core.web.services.team_workflow.research_runtime.runtime_factory import (
+                production_workflow_runtime,
+            )
+
+            runtime = production_workflow_runtime()
+            if runtime is None:
+                raise RuntimeError("research workflow runtime is unavailable")
+            ledger_store = runtime.store
         enqueue_question_model_invocation_receipt(
-            runtime.store,
+            ledger_store,
             team_id=team_id,
             question_id=question_id,
             workflow_run_id=workflow_run_id,

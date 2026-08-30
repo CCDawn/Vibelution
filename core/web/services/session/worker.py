@@ -346,6 +346,18 @@ def _challenge_budget_window(receipt_context: dict[str, Any]) -> dict[str, Any]:
     node_run_id = str(binding.get("formalNodeRunId") or "").strip()
     if not run_id or not node_run_id:
         raise RuntimeError("challenge_budget_binding_missing")
+    reservation_id = f"reservation-{node_run_id}"
+    from core.web.services.team_workflow.research_runtime.budget_window_resolver import (
+        injected_budget_window_resolver,
+    )
+
+    resolver = injected_budget_window_resolver()
+    if resolver is not None:
+        # The runtime that owns the Ledger injected this resolver at assembly
+        # time: embedded runtimes never register the production singleton, and
+        # reaching for a global from here would be the wrong dependency
+        # direction.
+        return resolver(run_id, node_run_id, reservation_id)
     from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
         read_node_budget_window,
     )
@@ -360,7 +372,7 @@ def _challenge_budget_window(receipt_context: dict[str, Any]) -> dict[str, Any]:
         runtime.store,
         run_id,
         node_run_id,
-        f"reservation-{node_run_id}",
+        reservation_id,
     )
 
 

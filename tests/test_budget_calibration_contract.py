@@ -394,6 +394,132 @@ def test_preflight_output_floor_is_env_configurable(monkeypatch) -> None:
     assert allowed["maxOutputTokens"] == 6_000
 
 
+# ------------------------------------------------------- injected authority
+
+
+def test_budget_window_prefers_injected_resolver(monkeypatch) -> None:
+    """The runtime-assembled resolver wins; the production singleton is never
+    consulted when an injection exists (embedded runtimes)."""
+    from core.web.services.session import worker as session_worker
+    from core.web.services.team_workflow.research_runtime import (
+        budget_window_resolver as bwr,
+    )
+
+    def _forbidden():
+        raise AssertionError("production singleton must not be consulted")
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.runtime_factory.production_workflow_runtime",
+        _forbidden,
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def resolver(run_id: str, node_run_id: str, reservation_id: str):
+        calls.append((run_id, node_run_id, reservation_id))
+        return {"status": "reserved", "remaining": 4321}
+
+    store = object()
+    bwr.configure_budget_window_resolver(resolver, store=store)
+    try:
+        window = session_worker._challenge_budget_window(
+            {
+                "questionStageBinding": {
+                    "workflowRunId": "run-injected",
+                    "formalNodeRunId": "nr-injected",
+                }
+            }
+        )
+        assert window == {"status": "reserved", "remaining": 4321}
+        assert calls == [("run-injected", "nr-injected", "reservation-nr-injected")]
+    finally:
+        bwr.release_budget_window_resolver_for_store(store)
+    assert bwr.injected_budget_window_resolver() is None
+
+
+def test_budget_window_falls_back_to_production_singleton(monkeypatch) -> None:
+    """Without injection the pre-production singleton path stays intact."""
+    from core.web.services.session import worker as session_worker
+    from core.web.services.team_workflow.research_runtime import (
+        budget_authority_adapter as baa,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        budget_window_resolver as bwr,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        runtime_factory,
+    )
+
+    assert bwr.injected_budget_window_resolver() is None
+
+    class _FakeRuntime:
+        store = object()
+
+    captured: dict[str, str] = {}
+
+    def fake_read(store, run_id, node_run_id, reservation_id):
+        captured["reservationId"] = reservation_id
+        return {"status": "reserved", "remaining": 7}
+
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: _FakeRuntime())
+    monkeypatch.setattr(baa, "read_node_budget_window", fake_read)
+    window = session_worker._challenge_budget_window(
+        {
+            "questionStageBinding": {
+                "workflowRunId": "run-fallback",
+                "formalNodeRunId": "nr-fallback",
+            }
+        }
+    )
+    assert window == {"status": "reserved", "remaining": 7}
+    assert captured["reservationId"] == "reservation-nr-fallback"
+
+
+def test_budget_window_fails_closed_without_injection_or_singleton(
+    monkeypatch,
+) -> None:
+    """Challenge scope with neither injection nor singleton still fails closed."""
+    import pytest
+
+    from core.web.services.session import worker as session_worker
+    from core.web.services.team_workflow.research_runtime import (
+        runtime_factory,
+    )
+
+    monkeypatch.setattr(
+        runtime_factory, "production_workflow_runtime", lambda: None
+    )
+    with pytest.raises(RuntimeError, match="challenge_budget_authority_unavailable"):
+        session_worker._challenge_budget_window(
+            {
+                "questionStageBinding": {
+                    "workflowRunId": "run-closed",
+                    "formalNodeRunId": "nr-closed",
+                }
+            }
+        )
+
+
+def test_injected_store_supports_receipt_persistence() -> None:
+    """The injected runtime store is exposed for the formal receipt enqueue
+    path, so embedded runtimes never need the production singleton."""
+    from core.web.services.team_workflow.research_runtime import (
+        budget_window_resolver as bwr,
+    )
+
+    assert bwr.injected_research_runtime_store() is None
+    store = object()
+
+    def resolver(run_id: str, node_run_id: str, reservation_id: str):
+        return {"status": "reserved", "remaining": 1}
+
+    bwr.configure_budget_window_resolver(resolver, store=store)
+    try:
+        assert bwr.injected_research_runtime_store() is store
+    finally:
+        bwr.release_budget_window_resolver_for_store(store)
+    assert bwr.injected_research_runtime_store() is None
+
+
 # ------------------------------------------------------- preserved semantics
 
 
