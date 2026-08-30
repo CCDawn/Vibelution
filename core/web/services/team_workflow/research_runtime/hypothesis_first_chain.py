@@ -4005,7 +4005,13 @@ def open_candidate_generation_meeting(
             "chatRoomRoundIds": bound_round_ids,
             "questionId": normalized_question_id,
         }
-    if open_meeting is None and meetings:
+    latest_closed_meeting = (
+        meetings[-1] if open_meeting is None and meetings else None
+    )
+    if (
+        latest_closed_meeting is not None
+        and not _is_execution_stopped_meeting(latest_closed_meeting)
+    ):
         # All attempts are closed.  When candidates were registered the latest
         # closed meeting is the answer and replays reuse it; a closed attempt
         # that produced nothing must not block a fresh attempt, so the new
@@ -4014,7 +4020,7 @@ def open_candidate_generation_meeting(
         # Crash between the closure write and the candidate registration left
         # a closed meeting whose proposals never landed; re-register them
         # (idempotent) instead of forcing a whole new generation discussion.
-        _heal_generation_candidates(normalized_team_id, meetings[-1])
+        _heal_generation_candidates(normalized_team_id, latest_closed_meeting)
         candidate_count = len(
             list_hypothesis_candidates(
                 normalized_team_id, question_id=normalized_question_id
@@ -4025,7 +4031,7 @@ def open_candidate_generation_meeting(
         # fresh generation attempt run instead of dead-locking the question.
         has_candidates = candidate_count >= 2
         if has_candidates:
-            existing = meetings[-1]
+            existing = latest_closed_meeting
             meeting_runtime._require_matching_model_invocation_receipt_authority(
                 existing,
                 _model_invocation_receipt_authority,
@@ -4051,6 +4057,8 @@ def open_candidate_generation_meeting(
         )
 
         for previous in reversed(meetings):
+            if _is_execution_stopped_meeting(previous):
+                continue
             previous_scope = previous.get("discussionScope")
             if not isinstance(previous_scope, Mapping):
                 continue
@@ -4197,7 +4205,10 @@ def _generation_proposals_from_messages(
 
 
 def _heal_generation_candidates(team_id: str, closed_meeting: Mapping[str, Any]) -> None:
-    if str(closed_meeting.get("status") or "") != "closed":
+    if (
+        str(closed_meeting.get("status") or "") != "closed"
+        or _is_execution_stopped_meeting(closed_meeting)
+    ):
         return
     digest = closed_meeting.get("digest")
     if not isinstance(digest, Mapping):
@@ -4808,17 +4819,30 @@ def _record_shadow_knowledge_invocation_for_chain(
 _EMPTY_DISCUSSION_RECOVERY_REASON = "discussion_has_no_completed_messages"
 
 
-def _is_superseded_review_attempt(meeting_round: Mapping[str, Any]) -> bool:
-    """True when a closed meeting is an abandoned empty-discussion attempt.
+def _is_execution_stopped_meeting(meeting_round: Mapping[str, Any]) -> bool:
+    """True when a Challenge execution fence made the meeting non-evidence."""
 
-    ``supersede_empty_discussion_meeting`` closes such attempts append-only
-    with a recovery reason and deliberately no digest/decisions: they are not
-    review authority and must never enter a ready fan-in group.
+    recovery_reason = str(meeting_round.get("recoveryReason") or "").strip()
+    return (
+        str(meeting_round.get("executionStatus") or "").strip().lower()
+        == "stopped"
+        or recovery_reason.startswith("challenge_")
+    )
+
+
+def _is_superseded_review_attempt(meeting_round: Mapping[str, Any]) -> bool:
+    """True when a closed meeting is abandoned and cannot be review authority.
+
+    Empty-discussion recovery and Challenge execution fences both close the
+    attempt append-only without making its partial discussion authoritative.
     """
     return (
         str(meeting_round.get("status") or "").strip().lower() == "closed"
-        and str(meeting_round.get("recoveryReason") or "").strip()
-        == _EMPTY_DISCUSSION_RECOVERY_REASON
+        and (
+            str(meeting_round.get("recoveryReason") or "").strip()
+            == _EMPTY_DISCUSSION_RECOVERY_REASON
+            or _is_execution_stopped_meeting(meeting_round)
+        )
     )
 
 
