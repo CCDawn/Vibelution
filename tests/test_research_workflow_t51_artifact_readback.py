@@ -182,6 +182,213 @@ def test_read_back_rejects_forged_team_run_and_hash(
     assert read_domain_artifact(forged_hash) is None
 
 
+def test_run_scoped_artifacts_survive_active_research_project_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every candidate-backed artifact must follow the frozen SC run owner."""
+    from core.infrastructure import path_containment
+    from core.web.services import (
+        data_processing_service,
+        team_knowledge_service,
+        team_service,
+    )
+    from core.web.services.team_workflow import research_projects
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        build_formal_evidence_retry_contract,
+    )
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        build_canonical_ref,
+        load_scoped_artifact_payload,
+        read_domain_artifact,
+    )
+    from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+        canonical_sha256,
+    )
+    from core.web.services.team_workflow.source_collection.candidates import (
+        register_candidate_source,
+    )
+    from tests._support.team_workflow.helpers import _use_tmp_project_root
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
+
+    team_id = str(team_service.create_team(name="Run owner readback team")["teamId"])
+    owner_project = research_projects.create_research_project(
+        team_id, {"name": "Owner project"}
+    )["project"]
+    research_projects.activate_research_project(team_id, owner_project["projectId"])
+    source_run = data_processing_service.create_processing_run(
+        title="Owner project source collection",
+        scope={
+            "teamId": team_id,
+            "researchProjectId": owner_project["projectId"],
+        },
+        metadata={"researchProjectId": owner_project["projectId"]},
+    )
+    source_run_id = str(source_run["runId"])
+    workflow_run_id = "wf-owner-1"
+
+    source_candidate = register_candidate_source(
+        team_id,
+        {
+            "title": "Owner-scoped source",
+            "sourceUrl": "https://example.test/owner-source",
+            "candidateType": "source_manifest",
+            "metadata": {
+                "sourceCollectionRunId": source_run_id,
+                "workflowRunId": workflow_run_id,
+                "sourceCollectionTrace": {"runId": source_run_id},
+            },
+        },
+        run_id=source_run_id,
+    )["candidate"]
+    register_candidate_source(
+        team_id,
+        {
+            "title": "Owner-scoped relation graph",
+            "sourceUrl": "https://example.test/owner-graph",
+            "candidateType": "candidate_graph",
+            "metadata": {
+                "sourceCollectionRunId": source_run_id,
+                "workflowRunId": workflow_run_id,
+                "graph": {
+                    "nodes": [{"id": "source-node"}],
+                    "edges": [],
+                    "summary": {"sourceCollectionRunId": source_run_id},
+                },
+            },
+        },
+        run_id=source_run_id,
+    )
+    knowledge_candidate = register_candidate_source(
+        team_id,
+        {
+            "title": "Owner-scoped knowledge package",
+            "sourceUrl": "https://example.test/owner-knowledge",
+            "candidateType": "review_record",
+            "metadata": {
+                "sourceCollectionRunId": source_run_id,
+                "workflowRunId": workflow_run_id,
+                "sourceCollectionTrace": {"runId": source_run_id},
+                "taskType": "steward_pack_draft",
+                "validation": {"valid": True, "schemaVersion": 1},
+                "knowledgeIngestion": {
+                    "status": "official_synced",
+                    "knowledgeBaseId": f"team:{team_id}:kb-1",
+                    "knowledgeItemIds": ["knowledge-item-1"],
+                    "sourceArtifactId": "source-artifact-1",
+                    "proposalId": "proposal-1",
+                    "batchId": "batch-1",
+                    "reviewedAt": "2026-08-30T00:00:00Z",
+                    "reviewedByAgentId": "reviewer-1",
+                },
+                "output": {
+                    "title": "Stable knowledge package",
+                    "claims": [{"claim": "Run ownership is stable"}],
+                    "approvalRequired": True,
+                    "requiresReview": True,
+                    "sourceTrace": {
+                        "teamId": team_id,
+                        "sourceCollectionRunId": source_run_id,
+                        "workflowRunId": workflow_run_id,
+                    },
+                },
+            },
+        },
+        run_id=source_run_id,
+    )["candidate"]
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "list_knowledge_items",
+        lambda _knowledge_base_id, *, agent_id: {
+            "items": [
+                {
+                    "knowledgeItemId": "knowledge-item-1",
+                    "knowledgeBaseId": "kb-1",
+                    "title": "Stable item",
+                    "summary": "Owner-scoped summary",
+                    "content": "Owner-scoped content",
+                    "sourceArtifactIds": ["source-artifact-1"],
+                    "createdAt": "2026-08-30T00:00:00Z",
+                }
+            ],
+            "reviewer": agent_id,
+        },
+    )
+
+    def snapshot() -> dict[str, object]:
+        source_payload = load_scoped_artifact_payload(
+            "source_candidate_batch",
+            team_id=team_id,
+            authority_run_id=source_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        relation_payload = load_scoped_artifact_payload(
+            "evidence_relation_graph",
+            team_id=team_id,
+            authority_run_id=source_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        draft_payload = load_scoped_artifact_payload(
+            "knowledge_package_draft",
+            team_id=team_id,
+            authority_run_id=source_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        package_payload = load_scoped_artifact_payload(
+            "knowledge_package",
+            team_id=team_id,
+            authority_run_id=source_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        assert source_payload is not None
+        assert relation_payload is not None
+        assert draft_payload is not None
+        assert package_payload is not None
+        return {
+            "source": source_payload,
+            "relation": relation_payload,
+            "draft": draft_payload,
+            "package": package_payload,
+            "hashes": {
+                "source": canonical_sha256(source_payload),
+                "relation": canonical_sha256(relation_payload),
+                "draft": canonical_sha256(draft_payload),
+                "package": canonical_sha256(package_payload),
+            },
+            "retry": build_formal_evidence_retry_contract(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                source_collection_run_id=source_run_id,
+                candidates=None,
+                evidence_records=[],
+            ),
+        }
+
+    before_switch = snapshot()
+    source_hash = str(before_switch["hashes"]["source"])
+    canonical_ref = build_canonical_ref(
+        kind="source_candidate_batch",
+        team_id=team_id,
+        authority_run_id=source_run_id,
+        content_hash=source_hash,
+    )
+    assert read_domain_artifact(canonical_ref) is not None
+    assert before_switch["retry"]["evidenceGapCandidateIds"] == sorted(
+        [source_candidate["candidateId"], knowledge_candidate["candidateId"]]
+    )
+
+    active_project = research_projects.create_research_project(
+        team_id, {"name": "Different active project"}
+    )["project"]
+    research_projects.activate_research_project(team_id, active_project["projectId"])
+
+    assert snapshot() == before_switch
+    replay = read_domain_artifact(canonical_ref)
+    assert replay is not None
+    assert replay.content_hash == source_hash
+
+
 def test_knowledge_draft_readback_uses_scoped_authority_and_preserves_old_refs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

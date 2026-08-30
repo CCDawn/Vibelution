@@ -239,7 +239,7 @@ def _load_scoped_candidates(
     )
 
     try:
-        payload = list_candidate_store(team_id, limit=500)
+        payload = list_candidate_store(team_id, limit=500, run_id=authority_run_id)
     except Exception:
         return None
     candidates = [
@@ -323,7 +323,12 @@ def _load_scoped_relation_graph(
         "workflowRunId": workflow_run_id,
     }
     try:
-        payload = list_candidate_store(team_id, candidate_type="candidate_graph", limit=500)
+        payload = list_candidate_store(
+            team_id,
+            candidate_type="candidate_graph",
+            limit=500,
+            run_id=authority_run_id,
+        )
     except Exception:
         # Fall back to SC summary metrics when the graph store is unavailable.
         try:
