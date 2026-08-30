@@ -414,7 +414,11 @@ def build_formal_evidence_retry_contract(
         )
 
         if candidates is None:
-            response = list_candidate_store(_text(team_id), limit=500)
+            response = list_candidate_store(
+                _text(team_id),
+                limit=500,
+                run_id=normalized_source_run,
+            )
             candidates = [
                 dict(item)
                 for item in response.get("candidates") or []

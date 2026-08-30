@@ -202,6 +202,22 @@ vi.mock("./ResearchProcessInspectorPane", () => ({
     </div>
   ),
 }));
+vi.mock("../challenge-cup/ChallengeQuestionRunResetDialog", () => ({
+  ChallengeQuestionRunResetDialog: (props: {
+    open: boolean;
+    teamId: string;
+    questionId: string;
+    onCompleted: (targetNodeId: string) => void;
+  }) => props.open ? (
+    <div
+      data-testid="question-run-reset-dialog"
+      data-team-id={props.teamId}
+      data-question-id={props.questionId}
+    >
+      <button type="button" onClick={() => props.onCompleted("hf_generation")}>complete reset</button>
+    </div>
+  ) : null,
+}));
 
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import { ResearchProcessWorkspace } from "./ResearchProcessWorkspace";
@@ -341,6 +357,13 @@ async function pickSwitchOption(option: HTMLElement): Promise<void> {
   });
 }
 
+async function openDropdown(trigger: HTMLElement): Promise<void> {
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
 describe("ResearchProcessWorkspace", () => {
   let root: Root | null = null;
 
@@ -413,6 +436,39 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui-region="current-task-body"]')).not.toBeNull();
+  });
+
+  it("opens the guarded reset dialog from selected-experiment actions", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.catalog.questions = [checkpointQuestion];
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const moreActions = Array.from(rendered.container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("更多操作"));
+    expect(moreActions).toBeTruthy();
+    await openDropdown(moreActions as HTMLElement);
+    const resetItem = Array.from(document.body.querySelectorAll('[role="menuitem"]'))
+      .find((item) => item.textContent?.includes("重置本题运行"));
+    expect(resetItem).toBeTruthy();
+
+    await act(async () => {
+      resetItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const dialog = document.body.querySelector('[data-testid="question-run-reset-dialog"]');
+    expect(dialog?.getAttribute("data-team-id")).toBe("research-team");
+    expect(dialog?.getAttribute("data-question-id")).toBe("SCI-096");
+
+    await act(async () => {
+      dialog?.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      runId: null,
+      questionId: "SCI-096",
+      node: "hf_generation",
+      panel: "node",
+    });
   });
 
   it("mounts the unified stage navigator beside the fixed canvas and inspector", async () => {

@@ -19,6 +19,7 @@ import {
 } from "./knowledgeSideflowCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
+import { ResearchExperimentResetAction } from "./ResearchExperimentResetAction";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import {
   isHypothesisFirstDiscussionActive,
@@ -805,6 +806,20 @@ export function ResearchProcessWorkspace({
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
+            experimentActions={experimentIdentity?.questionId ? (
+              <ResearchExperimentResetAction
+                teamId={teamId}
+                questionId={experimentIdentity.questionId}
+                onCompleted={(targetNodeId) => {
+                  location.replaceParams({
+                    runId: null,
+                    questionId: experimentIdentity.questionId,
+                    node: targetNodeId,
+                    panel: "node",
+                  });
+                }}
+              />
+            ) : undefined}
             navigationLabel={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.navigationLabel : undefined}
             nextActionStage={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.stage : undefined}
             scopeMismatch={hypothesisFirstChain.scopeMismatch || workspaceModel.scopeMismatch}

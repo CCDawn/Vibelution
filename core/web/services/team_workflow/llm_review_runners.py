@@ -56,15 +56,15 @@ _MAX_MESSAGES = 40
 # Wall-clock budget for one review-profile LLM call (digest draft and the
 # four hypothesis review runners).  Normal digest calls finish well under a
 # minute on faster team relays, but the low-cost GLM route has produced valid
-# discussion utterances in roughly 4.5-5 minutes.  A digest sees the whole
-# bounded transcript (<= _MAX_MESSAGES), so 360s leaves one minute of headroom
+# discussion utterances in roughly 4.5-7 minutes.  A digest sees the whole
+# bounded transcript (<= _MAX_MESSAGES), so 600s leaves three minutes of headroom
 # above that observed latency without removing the recovery boundary.  Without
 # a finite budget a wedged provider
 # connection pinned the meeting in ``summarizing`` for 33+ minutes while
 # holding the per-meeting summary lock with no in-product recovery path
-# (SCI-096 P0, validated 2026-08-28).  The 180s budget was raised after two
-# consecutive valid low-cost digest attempts were cut off at that boundary.
-REVIEW_LLM_CALL_TIMEOUT_SECONDS = 360.0
+# (SCI-096 P0, validated 2026-08-28).  Budgets of 180s and 360s both produced
+# false timeouts on valid low-cost digest attempts.
+REVIEW_LLM_CALL_TIMEOUT_SECONDS = 600.0
 _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
 
 

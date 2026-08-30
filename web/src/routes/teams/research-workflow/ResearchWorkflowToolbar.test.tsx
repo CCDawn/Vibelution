@@ -41,18 +41,20 @@ const BASE_PROPS = {
 } satisfies React.ComponentProps<typeof ResearchWorkflowToolbar>;
 
 describe("ResearchWorkflowToolbar", () => {
-  it("keeps only experiment context, View, and Collaborate in the visible toolbar", () => {
+  it("keeps experiment context and compact workspace actions in the visible toolbar", () => {
     const markup = renderToolbar({
       ...BASE_PROPS,
       navigationLabel: "前往确认候选",
       runtimeCurrentNodeIds: ["protocol_design"],
       onNavigateCurrent: vi.fn(),
       onOpenTeamCommunication: vi.fn(),
+      experimentActions: <button type="button">更多操作</button>,
     });
 
     expect(markup).toContain("切换实验");
     expect(markup).toContain("SCI-096 · 1 条假说待评审");
     expect(markup).toContain(">查看<");
+    expect(markup).toContain(">更多操作<");
     expect(markup).toContain(">协作<");
     expect(markup).toContain('data-testid="research-open-team-communication"');
     expect(markup).not.toContain('data-variant="primary"');
@@ -71,6 +73,18 @@ describe("ResearchWorkflowToolbar", () => {
     }
     expect(markup).not.toContain('data-vui="tabs"');
     expect(markup).not.toContain('data-vui="research-workflow-phase"');
+  });
+
+  it("does not expose reset actions without a selected experiment", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      identity: null,
+      runId: "",
+      experimentOptions: [],
+      experimentActions: <button type="button">更多操作</button>,
+    });
+
+    expect(markup).not.toContain("更多操作");
   });
 
   it("stays read-only before a workflow starts", () => {

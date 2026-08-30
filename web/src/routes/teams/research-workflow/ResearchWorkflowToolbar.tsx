@@ -130,6 +130,8 @@ export function ResearchWorkflowToolbar(props: {
   leading?: ReactNode;
   /** Opens the existing team communication surface from the workflow chrome. */
   onOpenTeamCommunication?: () => void;
+  /** Selected-experiment actions supplied by their owning feature component. */
+  experimentActions?: ReactNode;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
@@ -194,6 +196,7 @@ export function ResearchWorkflowToolbar(props: {
           items={detailItems}
           trigger={<VButton type="button" density="compact" variant="secondary">{isZh ? "查看" : "View"}</VButton>}
         />
+        {selectedQuestionId ? props.experimentActions : null}
         {runStatusBadge ? (
           <VStatusChip
             tone={runStatusBadge.tone}
