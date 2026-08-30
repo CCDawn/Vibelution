@@ -1360,7 +1360,7 @@ describe("ResearchProcessWorkspace", () => {
     expect(restore).toBeTruthy();
     await pickSwitchOption(restore!);
 
-    expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-003");
+    expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-003", "run-3");
     await act(async () => {
       await Promise.resolve();
     });
