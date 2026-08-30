@@ -26,7 +26,7 @@ def load_knowledge_package_draft_payload(
         list_candidate_store,
     )
 
-    response = list_candidate_store(team_id, limit=500)
+    response = list_candidate_store(team_id, limit=500, run_id=authority_run_id)
 
     scoped = [
         candidate
@@ -78,7 +78,7 @@ def load_knowledge_package_payload(
     )
 
     try:
-        response = list_candidate_store(team_id, limit=500)
+        response = list_candidate_store(team_id, limit=500, run_id=authority_run_id)
     except team_service.TeamNotFoundError:
         return None
     candidates = [
