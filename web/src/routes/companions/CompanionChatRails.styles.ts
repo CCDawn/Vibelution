@@ -2,10 +2,10 @@ const railBase = "!rounded-none !border-0 !shadow-none min-h-0 min-w-0 overflow-
 const personRail = `${railBase} relative isolate !flex flex-col border-r border-r-vui-border-subtle`;
 const lifeRail = `${railBase} !flex flex-col border-l border-l-vui-border-subtle`;
 const railActions = "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 p-3 [&>*]:pointer-events-auto";
-const railIconButton = "!size-8 !min-h-8 !rounded-full !border !border-vui-border-subtle !bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] !p-0 text-vui-fg-secondary shadow-sm backdrop-blur-md hover:!bg-vui-surface-row-hover hover:text-vui-fg-primary";
+const railIconButton = "!size-8 !min-h-8 !rounded-full !border !border-vui-border-subtle !bg-vui-surface-panel !p-0 text-vui-fg-secondary shadow-sm hover:!bg-vui-surface-row-hover hover:text-vui-fg-primary";
 const profile = "relative flex min-h-0 flex-1 flex-col overflow-hidden";
 const railPortrait = "!min-h-0 flex-1 !rounded-none !border-0 before:!inset-[10%_4%_0]";
-const personSummary = "relative z-10 grid gap-3 border-t border-vui-border-subtle bg-[linear-gradient(180deg,color-mix(in_srgb,var(--vui-surface-panel)_86%,transparent),var(--vui-surface-panel))] p-4 shadow-[0_-18px_42px_rgba(0,0,0,0.16)] backdrop-blur-xl max-[1100px]:gap-2.5 max-[1100px]:p-3";
+const personSummary = "relative z-10 grid gap-3 border-t border-vui-border-subtle bg-[linear-gradient(180deg,var(--vui-surface-row),var(--vui-surface-panel))] p-4 shadow-[0_-18px_42px_rgba(0,0,0,0.16)] max-[1100px]:gap-2.5 max-[1100px]:p-3";
 const personPresence = "flex min-w-0 items-center justify-between gap-2 [&>time]:font-mono [&>time]:text-[0.62rem] [&>time]:text-vui-fg-tertiary";
 const personNameCopy = "flex min-w-0 items-center justify-between gap-2 [&>h1]:m-0 [&>h1]:truncate [&>h1]:text-[clamp(1.65rem,2.2vw,2.15rem)] [&>h1]:font-[820] [&>h1]:tracking-[-0.05em] [&>span]:grid [&>span]:size-8 [&>span]:shrink-0 [&>span]:place-items-center [&>span]:rounded-full [&>span]:bg-[color-mix(in_srgb,var(--state-success)_12%,var(--vui-surface-row))] [&>span]:text-lg [&>span]:text-[var(--state-success)]";
 const personStatus = "m-0 line-clamp-2 min-h-[2.5em] text-[0.8rem] font-semibold leading-[1.4] text-vui-fg-secondary";
@@ -17,10 +17,6 @@ const cardLabel = "m-0 [font-size:0.62rem] font-extrabold uppercase tracking-[0.
 const cardTitle = "m-0 text-[0.86rem] font-[780] leading-[1.35] text-vui-fg-primary";
 const cardCopy = "m-0 [font-size:var(--vui-font-xs)] leading-[1.55] text-vui-fg-tertiary";
 const cardMeta = "font-mono text-[0.62rem] text-[var(--accent-cool)]";
-const conversationHeader = "flex min-w-0 flex-1 items-center justify-between gap-3 py-0.5";
-const conversationIdentity = "flex min-w-0 items-center gap-2.5";
-const conversationAvatar = "!size-9";
-const conversationIdentityCopy = "grid min-w-0 gap-0.5 [&>strong]:truncate [&>strong]:text-[0.82rem] [&>strong]:font-[780] [&>strong]:text-vui-fg-primary [&>span]:flex [&>span]:min-w-0 [&>span]:items-center [&>span]:gap-1 [&>span]:truncate [&>span]:text-[0.62rem] [&>span]:text-vui-fg-tertiary [&_i]:font-normal [&_i]:text-[var(--state-success)]";
 const lifeHeader = "grid gap-2 border-b border-vui-border-subtle px-3 pb-2 pt-3 max-[1100px]:px-2.5";
 const lifeTitleRow = "flex min-w-0 items-start justify-between gap-2";
 const lifeTitleCopy = "min-w-0 [&>p]:m-0 [&>p]:text-[0.6rem] [&>p]:font-bold [&>p]:uppercase [&>p]:tracking-[0.1em] [&>p]:text-[var(--accent-cool)] [&>h2]:m-0 [&>h2]:mt-0.5 [&>h2]:truncate [&>h2]:text-sm [&>h2]:font-[820]";
@@ -39,7 +35,7 @@ const meterTrack = "col-span-2 h-1.5 overflow-hidden rounded-full bg-vui-surface
 const meterFillEnergy = "block h-full rounded-full bg-[var(--accent-cool)] transition-[width] duration-300";
 const meterFillSocial = "block h-full rounded-full bg-[var(--state-success)] transition-[width] duration-300";
 const nextCard = "grid min-w-0 grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[16px] border border-vui-border-subtle bg-vui-surface-row px-3 py-2.5 [&>time]:font-mono [&>time]:text-[0.65rem] [&>time]:font-bold [&>time]:text-[var(--accent-cool)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&_small]:text-[0.58rem] [&_small]:text-vui-fg-tertiary [&_strong]:truncate [&_strong]:text-[0.72rem] [&>svg]:text-vui-fg-tertiary";
-const detailDisclosure = "group rounded-[16px] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)]";
+const detailDisclosure = "group rounded-[16px] border border-vui-border-subtle bg-vui-surface-row";
 const detailSummary = "cursor-pointer list-none px-3 py-2.5 text-[0.66rem] font-bold text-vui-fg-secondary marker:hidden after:float-right after:text-vui-fg-tertiary after:content-['＋'] group-open:after:content-['−']";
 const detailContent = "grid gap-2 border-t border-vui-border-subtle p-2";
 const scheduleList = "grid gap-0.5";
@@ -97,10 +93,6 @@ export default {
   cardTitle,
   cardCopy,
   cardMeta,
-  conversationHeader,
-  conversationIdentity,
-  conversationAvatar,
-  conversationIdentityCopy,
   lifeHeader,
   lifeTitleRow,
   lifeTitleCopy,

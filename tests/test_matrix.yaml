@@ -185,10 +185,10 @@ rules:
       - "web/src/components/conversation/**"
     commands:
       - "node web/node_modules/vitest/vitest.mjs run src/routes/ChatCodingRoute.layout.test.ts --root web"
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "Small Chat UI changes keep a focused route test, both VUI contracts, and incremental typecheck; they do not imply backend pytest or a full build."
+      - "Small Chat UI changes keep a focused route test, the global VUI policy contracts, and incremental typecheck; they do not imply backend pytest or a full build."
 
   - id: web-runtime-launcher
     description: "Launcher, runtime manager, runtime scene, and runtime route behavior."
@@ -487,10 +487,10 @@ rules:
       - "web/src/routes/teams/**"
     commands:
       - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts --root web"
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "Small Teams UI changes keep a focused route test, both VUI contracts, and incremental typecheck; they do not imply workflow pytest or a full build."
+      - "Small Teams UI changes keep a focused route test, the global VUI policy contracts, and incremental typecheck; they do not imply workflow pytest or a full build."
 
   - id: frontend-build-inputs
     description: "Frontend dependency, compiler, bundler, entrypoint, and static build inputs."
@@ -523,12 +523,12 @@ rules:
       - "web/src/components/**"
       - "web/src/app/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts --root web"
       - "node web/node_modules/vitest/vitest.mjs run --changed main --passWithNoTests --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "VUI/shadcn route contract + component design catalog are mandatory for any web UI path (root AGENTS.md §2)."
-      - "The UI fallback keeps changed-file Vitest, both VUI contracts, and incremental typecheck; it is suppressed file-by-file when a focused frontend rule owns every changed file."
+      - "VUI/shadcn route, component design, import ownership, and surface-alpha contracts are mandatory for any web UI path (root AGENTS.md §2)."
+      - "The UI fallback keeps changed-file Vitest, the global VUI policy contracts, and incremental typecheck; it is suppressed file-by-file when a focused frontend rule owns every changed file."
 
   - id: frontend-non-ui
     description: "Shared frontend API types, API helpers, i18n, and non-visual TypeScript surfaces."

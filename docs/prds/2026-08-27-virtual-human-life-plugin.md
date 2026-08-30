@@ -1323,6 +1323,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 6. 用户陪伴偏好只作为 Agent-scoped、可审阅和可删除的记忆投影，不建立第二用户画像库；虚拟人只能在相关话题中自然使用，不能反复主动背诵旧信息。
 7. 桌面端可增加头像呼吸、轻量表情和消息级非语言反馈，但继续使用现有 `/companions`、原生 Chat、单一 Composer 和单一“正在输入…”；无动画或资产时回退现有立绘。
 8. 所有新增能力只在启用 `virtual-human-life` 的 Agent、显式 Companion 路由和对应 direct Session 中生效。普通 Agent 的 Session admission、Journal、worker、persist、projection、SSE、`ConversationStore`、普通 composer 和普通 follow-up 语义保持零差异。
+9. 启用虚拟人插件的 Agent 及其 direct Session 默认不出现在普通聊天页的会话栏中，避免虚拟人与普通 Agent 入口混杂；人物大厅、Agent 管理和显式 Companion deep link 仍保持可用。
 
 ### 30.2 当前差距
 
@@ -1331,6 +1332,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - `build_prompt_segments()` 已注入生活状态和 `sessionId`，但动态 payload 没有确定性的 `localDate / localWeekday / localTime / timezone`，因此模型仍可能把星期、已发生和将发生的事情说错。
 - mailbox 已具备 `followup` 来源类型、generation fence 和用户插话取消预留，但当前非 `proactive` 条目仍走普通 conversation submitter；直接启用会制造额外普通 Turn，不能作为多气泡交付。
 - 原生 Agent Memory 已能承载 episodic memory，现阶段不需要 Memobase 服务、第二 profile 数据库或独立向量库。
+- 普通聊天页的会话栏仍可投影 Companion direct Session；入口没有根据“Agent 已启用虚拟人插件”进行可见性隔离，用户可能从普通会话栏误入同一虚拟人会话。
 
 ### 30.3 Companion 表达决定契约
 
@@ -1383,7 +1385,15 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 
 跨午夜后下一轮必须重新计算，不复用启用时常量。用户纠正日期或星期时，先以代码锚点复核；若用户提供的外部时间事实与本地锚点冲突，只说明当前采用的时区和日期，不编造确定性结论。
 
-### 30.6 复用研究裁决
+### 30.6 Companion 与普通会话栏的可见性隔离
+
+- 普通聊天页的会话栏、最近会话、搜索结果和会话级提醒不展示已启用 `virtual-human-life` 的 Agent 及其 direct Session，也不把该 Agent 作为普通新会话的可选对象。
+- 虚拟人仍在 `/companions` 人物大厅和 Agent 管理中可见。从人物大厅进入时继续打开原有 direct Session，显式携带 Companion 身份的 deep link 也保持可用。
+- 这是可见性投影，不是数据迁移：不删除 Agent、Session、消息、记忆、未读事实或主动消息 receipt，不建立第二套 transcript。
+- 过滤只能使用权威的 Companion 启用身份，不得根据 Agent 名称、人设文本或 Session 标题猜测，避免误隐藏普通 Agent。
+- 当前不新增“在普通会话栏显示”的例外开关；插件禁用后，该 Agent 和 Session 按普通会话规则恢复可见，不做历史数据改写。
+
+### 30.7 复用研究裁决
 
 | 候选 | 固定版本与许可证 | 裁决 | 复用内容 | 明确排除 |
 | --- | --- | --- | --- | --- |
@@ -1396,7 +1406,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 
 主决策：在 Vibelution 插件内改造复用 AstrBot 的表达决定纯逻辑，继续使用现有三阶段关系投影和 Affect Episode，不迁移到上游分数/角色体系；Parlant、AI Town 和 SOTOPIA 只借契约与测试思路；Memobase 槽位投影到现有 Agent Memory；AIRI 只用于桌面端轻量表现。这样不引入新的运行依赖、数据库或第二会话链路。
 
-### 30.7 实施任务图
+### 30.8 实施任务图
 
 #### Task 22：建立 Companion 真人化表达决定和心情/熟悉度联动
 
@@ -1435,9 +1445,16 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 
 #### Task 27：真人化对话全链路收口
 
-- Owner/Boundary: Companion-only golden dialogue、队列/恢复、Prompt 预算、桌面视觉和普通 Agent 零差异证据。
-- Dependency: Task 22—26。
+- Owner/Boundary: Companion-only golden dialogue、队列/恢复、Prompt 预算、桌面视觉、普通会话栏隔离和普通 Agent 零差异证据。
+- Dependency: Task 22—26 和 Task 28。
 - Mode: backend selector + frontend contracts + `tsc -b` + production build + desktop browser acceptance。
-- Verification/Stop: 使用可注入时钟和脚本化短场景覆盖初识到熟悉、正负情绪余波、用户纠错、连续短回执、重复话题、插话和崩溃恢复；不等待真实 7 天；普通 Agent 核心测试与会话行为零差异；不 push、不发布。
+- Verification/Stop: 使用可注入时钟和脚本化短场景覆盖初识到熟悉、正负情绪余波、用户纠错、连续短回执、重复话题、插话和崩溃恢复；验收虚拟人 Agent/direct Session 不出现在普通会话栏，但人物大厅可继续打开同一原生 Session；不等待真实 7 天；普通 Agent 核心测试与会话行为零差异；不 push、不发布。
 
-Critical Path 为 Task 22 → Task 23 → Task 25 → Task 27；Task 24 和 Task 26 在 Task 22 后可独立推进。由于用户仍在追加需求，本阶段任务当前保持 `PLANNED`，不进入实现。
+#### Task 28：隔离 Companion Agent 与普通会话目录
+
+- Owner/Boundary: 在普通聊天页会话栏的目录输入边界增加 Companion-only 可见性 selector，使用现有插件启用身份和 Agent/direct Session 映射；只过滤普通入口中的展示与聚合，不修改 Session admission、Journal、worker、persist、projection、SSE、`ConversationStore` 或普通 composer/follow-up。
+- Dependency: 复用现有 Companion 人物目录、插件启用状态和 direct Session 身份；与 Task 22—26 无写入依赖，可独立实施，但必须在 Task 27 前完成。
+- Mode: BDD/TDD + frontend contract + desktop browser acceptance。
+- Verification/Stop: 同一虚拟人的 Agent 选项、direct Session、最近/搜索/提醒投影默认均不进入普通会话栏；`/companions` 仍可打开同一 Session，历史消息与未读事实未删除；禁用插件后可见性自然恢复；未启用插件的 Agent 和普通 Session 的顺序、搜索、打开、未读与固定行为零差异；不得为过滤方便修改或复制原生会话链路。
+
+Critical Path 为 Task 22 → Task 23 → Task 25 → Task 27，Task 28 作为独立必需分支在 Task 27 前汇合；Task 24 和 Task 26 在 Task 22 后可独立推进。由于用户仍在追加需求，本阶段任务当前保持 `PLANNED`，不进入实现。
