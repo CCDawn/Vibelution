@@ -229,7 +229,10 @@ from core.orchestration.turn_carryover import (
     serialize_turn_message,
     serialize_turn_messages,
 )
-from core.orchestration.turn_compression import compress_turn_messages
+from core.orchestration.turn_compression import (
+    compress_turn_messages,
+    evaluate_context_budget_preflight,
+)
 from core.orchestration.turn_diagnostics import (
     build_llm_invocation_context,
     publish_llm_retry_status,
@@ -866,6 +869,19 @@ class SelfEvolvingAgent:
             cc.preservation.extract_key_decisions = bool(preservation.get("extractKeyDecisions"))
 
         self._context_compression_policy = dict(policy)
+        # Versioned budget contract (policy v3+): explicit compression trigger,
+        # hard input limit and post-compression target override the legacy
+        # ratio derivation. Agents without the explicit fields keep the legacy
+        # behavior unchanged.
+        explicit_trigger = int(policy.get("compressionTriggerTokenLimit") or 0)
+        post_target = int(policy.get("postCompressionTargetTokenLimit") or 0)
+        self._context_compression_trigger_tokens = max(0, explicit_trigger)
+        self._post_compression_target_tokens = max(0, post_target)
+        self._context_input_hard_limit = (
+            max(0, int(policy.get("effectiveTokenLimit") or 0))
+            if explicit_trigger > 0 and post_target > 0
+            else 0
+        )
         keep_ai_messages = (policy.get("preservation") or {}).get("keepAiMessages")
         if keep_ai_messages is None:
             keep_ai_messages = getattr(cc.preservation, "keep_ai_messages", 5) or 5
@@ -909,6 +925,9 @@ class SelfEvolvingAgent:
         return min(1.0, max(0.01, threshold))
 
     def _automatic_context_compression_threshold_tokens(self) -> int:
+        explicit_trigger = int(getattr(self, "_context_compression_trigger_tokens", 0) or 0)
+        if explicit_trigger > 0:
+            return explicit_trigger
         return int(
             max(1, int(self._effective_max_token_limit))
             * self._automatic_context_compression_threshold()
@@ -916,6 +935,76 @@ class SelfEvolvingAgent:
 
     def _should_automatically_compress(self, current_tokens: int) -> bool:
         return max(0, int(current_tokens)) > self._automatic_context_compression_threshold_tokens()
+
+    def _context_budget_retention_contract(self) -> Dict[str, Any]:
+        """Bounded scope fields pinned into every compression summary header."""
+
+        binding = getattr(self, "runtime_agent_binding", {}) or {}
+        turn_runtime = _turn_runtime_from_env() or {}
+        policy = getattr(self, "_context_compression_policy", {}) or {}
+        contract: Dict[str, Any] = {}
+        for key in ("researchProjectId", "projectId", "workflowId", "runId", "stageTaskId"):
+            value = str(binding.get(key) or turn_runtime.get(key) or "").strip()
+            if value:
+                contract[key] = value
+        for key, source_name in (
+            ("sessionId", "directSessionId"),
+            ("agentId", "agentId"),
+        ):
+            value = str(
+                turn_runtime.get(key)
+                or binding.get(source_name)
+                or ""
+            ).strip()
+            if value:
+                contract[key] = value
+        role_key = str(binding.get("roleKey") or binding.get("role") or "").strip()
+        if role_key:
+            contract["roleKey"] = role_key
+        policy_version = int(policy.get("policyVersion") or 0)
+        if policy_version > 0:
+            contract["policyVersion"] = policy_version
+        return contract
+
+    def _context_budget_preflight_guard(
+        self,
+        *,
+        estimated_tokens: int,
+        iteration: int,
+        message_count: int,
+    ) -> bool:
+        """Fail-closed hard input-limit gate before any model invocation."""
+
+        hard_limit = int(getattr(self, "_context_input_hard_limit", 0) or 0)
+        decision = evaluate_context_budget_preflight(
+            estimated_tokens=estimated_tokens,
+            context_input_hard_limit=hard_limit,
+        )
+        if not decision["exhausted"]:
+            return False
+        _record_agent_scene_event(
+            "llm",
+            "agent.context_budget_exhausted",
+            message="Estimated context exceeds the hard input limit; model call blocked (context_budget_exhausted).",
+            level="error",
+            outcome="blocked",
+            fields={
+                "iteration": iteration,
+                "estimatedTokens": decision["estimatedTokens"],
+                "contextInputHardLimit": decision["hardLimit"],
+                "messageCount": message_count,
+                "guardReason": decision["guardReason"],
+            },
+        )
+        try:
+            get_ui().add_log(
+                f"[上下文预算] 估算输入 {decision['estimatedTokens']} tokens 超过硬上限 "
+                f"{decision['hardLimit']}，本轮不再调用模型（context_budget_exhausted）。",
+                "ERROR",
+            )
+        except Exception:
+            pass
+        return True
 
     def _init_llm(self):
         """初始化统一 LLM client。"""
@@ -1286,6 +1375,9 @@ class SelfEvolvingAgent:
             get_ui_fn=get_ui,
             get_state_manager_fn=get_state_manager,
             scene_recorder_fn=_record_agent_scene_event,
+            context_input_hard_limit=int(getattr(self, "_context_input_hard_limit", 0) or 0),
+            post_compression_target_tokens=int(getattr(self, "_post_compression_target_tokens", 0) or 0),
+            retention_contract=self._context_budget_retention_contract(),
         )
         self._last_context_compression_applied = applied
         return compressed, should_break
@@ -2376,6 +2468,20 @@ class SelfEvolvingAgent:
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
                     },
                 )
+                # Hard input-limit preflight: never invoke the model when the
+                # estimated input still exceeds the versioned hard limit
+                # (auditable context_budget_exhausted, fail-closed).
+                preflight_tokens = max(
+                    int(current_tokens or 0),
+                    int(after_tokens) if compression_triggered else 0,
+                )
+                if self._context_budget_preflight_guard(
+                    estimated_tokens=preflight_tokens,
+                    iteration=iteration,
+                    message_count=len(messages),
+                ):
+                    self._last_turn_failed = True
+                    break
                 if policy.mode == AgentMode.CHAT:
                     messages, reconcile_ok = self._reconcile_chat_conversation_before_llm(messages)
                     if not reconcile_ok:

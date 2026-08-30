@@ -6537,7 +6537,14 @@ class TestRuntimeStateMemoryFlow:
         checkpoint.assert_not_called()
         attempt.assert_called_once()
         assert attempt.call_args.kwargs["status"] == "skipped_low_savings"
-        assert attempt.call_args.kwargs["summary"] == "压缩摘要收益不足。"
+        # Versioned compression policy v3: every summary carries the bounded
+        # retention contract header before the original summary body.
+        summary = str(attempt.call_args.kwargs["summary"])
+        assert summary.startswith("[上下文保留合同]")
+        assert "sessionId=session-low" in summary
+        assert "compressionGeneration=1" in summary
+        assert "unresolvedToolCallIds=none" in summary
+        assert summary.endswith("压缩摘要收益不足。")
         agent.prompt_manager.update_state_memory.assert_not_called()
 
     def test_high_token_context_with_four_messages_reaches_compressor_and_records_preflight(

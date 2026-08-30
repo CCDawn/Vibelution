@@ -1052,6 +1052,16 @@ class ContextCompressionConfig(BaseModel):
         le=1.0,
         description="压缩效率阈值"
     )
+    reserved_max_output_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="调用前为模型输出预留的 token 上限；0 表示使用模型能力配置的 max_output"
+    )
+    protocol_and_safety_reserve_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="协议封装、工具 schema 与估算误差的安全余量；0 表示使用版本化默认值 8192"
+    )
     levels: CompressionLevelsConfig = Field(
         default_factory=CompressionLevelsConfig,
         description="压缩级别阈值配置"

@@ -72,6 +72,152 @@ def _coerce_message_list(value: Any) -> list:
         return []
 
 
+# --- Context retention contract (versioned compression policy v3) -----------
+
+
+def _pairing_role(message: Any) -> str:
+    role = str(getattr(message, "type", "") or "").strip().lower()
+    if not role and isinstance(message, Mapping):
+        role = str(message.get("role") or "").strip().lower()
+    if not role:
+        role = type(message).__name__.strip().lower()
+    return role
+
+
+def _pairing_tool_call_ids(message: Any) -> list[str]:
+    raw = getattr(message, "tool_calls", None)
+    if raw is None and isinstance(message, Mapping):
+        raw = message.get("tool_calls")
+    ids: list[str] = []
+    for item in list(raw or []):
+        if isinstance(item, Mapping):
+            call_id = str(item.get("id") or "").strip()
+        else:
+            call_id = str(getattr(item, "id", "") or "").strip()
+        if call_id:
+            ids.append(call_id)
+    return ids
+
+
+def _pairing_tool_result_id(message: Any) -> str:
+    call_id = getattr(message, "tool_call_id", None)
+    if call_id is None and isinstance(message, Mapping):
+        call_id = message.get("tool_call_id")
+    return str(call_id or "").strip()
+
+
+def _tool_call_pairing_snapshot(messages: Any) -> Dict[str, Any]:
+    """Snapshot assistant tool-call / tool-result pairing for retention checks.
+
+    Compression may retire old pairs wholesale (they enter the summary), but it
+    must never create a new unresolved call or a new orphan tool result — that
+    would fail the strict provider payload validator at send time.
+    """
+
+    pending: list[str] = []
+    orphan_results = 0
+    assistant_tool_calls = 0
+    tool_results = 0
+    for message in list(messages or []):
+        role = _pairing_role(message)
+        if role in {"ai", "assistant"}:
+            call_ids = _pairing_tool_call_ids(message)
+            assistant_tool_calls += len(call_ids)
+            pending.extend(call_ids)
+            continue
+        result_id = _pairing_tool_result_id(message)
+        if role == "tool" or (result_id and role not in {"system", "user", "human"}):
+            tool_results += 1
+            if result_id and result_id in pending:
+                pending.remove(result_id)
+            elif result_id:
+                orphan_results += 1
+    return {
+        "unresolvedCallIds": list(pending),
+        "unresolvedCallCount": len(pending),
+        "orphanResultCount": orphan_results,
+        "assistantToolCallCount": assistant_tool_calls,
+        "toolResultCount": tool_results,
+    }
+
+
+def _retention_violation_reason(before: Mapping[str, Any], after: Mapping[str, Any]) -> str:
+    before_unresolved = set(before.get("unresolvedCallIds") or [])
+    after_unresolved = set(after.get("unresolvedCallIds") or [])
+    if after_unresolved - before_unresolved:
+        return "retention_missing"
+    if int(after.get("orphanResultCount") or 0) > int(before.get("orphanResultCount") or 0):
+        return "retention_missing"
+    return ""
+
+
+def build_retention_contract_summary_header(
+    *,
+    retention_contract: Any,
+    iteration: int,
+    compression_generation: int,
+    before_tokens: int,
+    after_tokens: int,
+    context_input_hard_limit: int,
+    pairing: Mapping[str, Any],
+) -> str:
+    """Bounded, structured retention header prefixed onto every compression summary."""
+
+    contract = _as_mapping(retention_contract)
+    scope_pairs: list[str] = []
+    for key in (
+        "researchProjectId",
+        "projectId",
+        "workflowId",
+        "runId",
+        "stageTaskId",
+        "sessionId",
+        "agentId",
+        "roleKey",
+    ):
+        snake_key = "".join("_" + char.lower() if char.isupper() else char for char in key)
+        value = _coerce_text(_mapping_get(contract, key, snake_key)).strip()
+        if value:
+            scope_pairs.append(f"{key}={value}")
+    unresolved = ",".join(list(pairing.get("unresolvedCallIds") or [])[:12]) or "none"
+    scope_text = " ".join(scope_pairs) if scope_pairs else "scope=unavailable"
+    return (
+        "[上下文保留合同] "
+        f"{scope_text}"
+        f" | compressionGeneration={max(0, int(compression_generation or 0))}"
+        f" | iteration={max(0, int(iteration or 0))}"
+        f" | unresolvedToolCallIds={unresolved}"
+        f" | budget: before={max(0, int(before_tokens or 0))}"
+        f" after={max(0, int(after_tokens or 0))}"
+        f" hardLimit={max(0, int(context_input_hard_limit or 0))}"
+    )
+
+
+def apply_retention_contract_summary(summary: str, header: str) -> str:
+    header_text = _coerce_text(header).strip()
+    if not header_text:
+        return summary
+    return f"{header_text}\n{summary}".strip() if _coerce_text(summary).strip() else header_text
+
+
+def evaluate_context_budget_preflight(
+    *,
+    estimated_tokens: int,
+    context_input_hard_limit: int,
+) -> Dict[str, Any]:
+    """Pre-model-call hard input-limit gate (fail-closed, auditable)."""
+
+    hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
+    estimated = _coerce_nonnegative_int(estimated_tokens)
+    exhausted = hard_limit > 0 and estimated > hard_limit
+    return {
+        "exhausted": exhausted,
+        "guardReason": "input_over_hard_limit" if exhausted else "",
+        "estimatedTokens": estimated,
+        "hardLimit": hard_limit,
+    }
+
+
 def compress_turn_messages(
     *,
     messages: List[Any],
@@ -94,8 +240,18 @@ def compress_turn_messages(
     get_ui_fn: Any = None,
     get_state_manager_fn: Any = None,
     scene_recorder_fn: Any = None,
+    context_input_hard_limit: int = 0,
+    post_compression_target_tokens: int = 0,
+    retention_contract: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[List[Any], bool, bool, int, int]:
     """Execute message compression.
+
+    Fail-closed contract (versioned compression policy v3): when the compressed
+    history breaks the retention chain (new unresolved tool calls / orphan tool
+    results) or still exceeds ``context_input_hard_limit``, the original
+    messages are returned with ``should_break=True`` and an auditable
+    ``agent.context_budget_exhausted`` scene event is recorded; the model is
+    never invoked with the over-limit or chain-broken context.
 
     Returns:
         (compressed_messages, should_break, last_context_compression_applied,
@@ -214,6 +370,9 @@ def compress_turn_messages(
         max(0, _coerce_nonnegative_int(comp_config.keep_ai_messages)),
         max(0, ai_message_count - 1),
     )
+    # Retention baseline: compression must never create a new unresolved call
+    # or a new orphan tool result (strict provider validator stays fail-closed).
+    before_pairing = _tool_call_pairing_snapshot(messages_for_compression)
     compressed, summary = token_compressor.compress(
         messages_for_compression,
         max_chars=comp_config.summary_max_chars,
@@ -229,6 +388,76 @@ def compress_turn_messages(
     # 日志
     after_tokens = _coerce_nonnegative_int(estimator(compressed))
     token_saved = current_tokens - after_tokens
+
+    # Fail-closed budget/retention gate: a broken retention chain or a
+    # post-compression size that still exceeds the hard input limit must stop
+    # the turn before any model call (auditable context_budget_exhausted).
+    after_pairing = _tool_call_pairing_snapshot(compressed)
+    retention_violation = _retention_violation_reason(before_pairing, after_pairing)
+    over_hard_limit = (
+        _coerce_nonnegative_int(context_input_hard_limit) > 0
+        and after_tokens > _coerce_nonnegative_int(context_input_hard_limit)
+    )
+    if retention_violation or over_hard_limit:
+        guard_reason = retention_violation or "post_compression_over_hard_limit"
+        recorder(
+            "runtime",
+            "agent.context_budget_exhausted",
+            message="Context compression could not satisfy the retention contract or hard input limit; model call blocked.",
+            level="error",
+            outcome="blocked",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "iteration": iteration,
+                "guardReason": guard_reason,
+                "estimatedTokens": current_tokens,
+                "afterTokens": after_tokens,
+                "contextInputHardLimit": _coerce_nonnegative_int(context_input_hard_limit),
+                "postCompressionTargetTokens": _coerce_nonnegative_int(post_compression_target_tokens),
+                "retentionBefore": {
+                    "unresolvedCallCount": before_pairing.get("unresolvedCallCount"),
+                    "orphanResultCount": before_pairing.get("orphanResultCount"),
+                },
+                "retentionAfter": {
+                    "unresolvedCallCount": after_pairing.get("unresolvedCallCount"),
+                    "orphanResultCount": after_pairing.get("orphanResultCount"),
+                },
+                "messageCount": len(messages),
+            },
+        )
+        return messages, True, False, compression_count_this_turn, last_compression_iteration
+
+    # Prefix the bounded retention contract header onto the summary so scope,
+    # compression generation and the tool calls that were summarized away
+    # (still unresolved at compression time) stay auditable.
+    if summary:
+        summary = apply_retention_contract_summary(
+            summary,
+            build_retention_contract_summary_header(
+                retention_contract=retention_contract,
+                iteration=iteration,
+                compression_generation=compression_count_this_turn + 1,
+                before_tokens=current_tokens,
+                after_tokens=after_tokens,
+                context_input_hard_limit=_coerce_nonnegative_int(context_input_hard_limit),
+                pairing=before_pairing,
+            ),
+        )
+    over_target = (
+        _coerce_nonnegative_int(post_compression_target_tokens) > 0
+        and after_tokens > _coerce_nonnegative_int(post_compression_target_tokens)
+    )
+    if over_target:
+        try:
+            ui.add_log(
+                f"[压缩] 超出压缩目标 {after_tokens} > {post_compression_target_tokens} tokens（未超硬上限）",
+                "WARN",
+            )
+        except Exception:
+            pass
+
     last_context_compression_applied = token_saved > 0
     if not summary and token_saved <= 0:
         recorder(

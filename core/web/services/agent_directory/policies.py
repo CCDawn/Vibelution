@@ -8,6 +8,7 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Iterable
 
 # Local default for signature evaluation (facade remains SSOT).
@@ -370,7 +371,7 @@ def _normalize_context_compression_levels(levels: Any) -> dict[str, float]:
 def _normalize_context_compression_preservation(preservation: Any) -> dict[str, Any]:
     s = _service()
     raw = preservation if preservation is not None else {}
-    return {
+    normalized = {
         "keepAiMessages": s._positive_context_compression_int(
             s._get_config_value(raw, "keepAiMessages", "keep_ai_messages"),
             default=5,
@@ -379,6 +380,17 @@ def _normalize_context_compression_preservation(preservation: Any) -> dict[str, 
         "preserveErrors": bool(s._get_config_value(raw, "preserveErrors", "preserve_errors", default=True)),
         "extractKeyDecisions": bool(s._get_config_value(raw, "extractKeyDecisions", "extract_key_decisions", default=True)),
     }
+    # Versioned retention contract (challenge cup policy v3+): ordered
+    # retention focus markers that must survive every compression summary.
+    retention_focus: list[str] = []
+    raw_focus = raw.get("retentionFocus") if isinstance(raw, Mapping) else None
+    for item in list(raw_focus or []):
+        normalized_focus = str(item or "").strip()
+        if normalized_focus:
+            retention_focus.append(normalized_focus)
+    if retention_focus:
+        normalized["retentionFocus"] = retention_focus
+    return normalized
 
 
 def _normalize_context_compression_summary_chars(summary_chars: Any) -> dict[str, int]:
@@ -1130,7 +1142,27 @@ def effective_agent_context_compression_policy(
     else:
         merged["maxTokenLimit"] = context_window
         merged["effectiveTokenLimit"] = context_window
-    merged["compressionTriggerTokenLimit"] = int(merged.get("effectiveTokenLimit") or 0)
+    # Versioned budget contract: an explicit compression trigger wins over the
+    # legacy "trigger == effective limit" derivation; the post-compression
+    # target and policy version pass through verbatim (0 = unset).
+    merged["policyVersion"] = s._positive_context_compression_int(
+        raw_agent_policy.get("policyVersion"),
+        default=0,
+        maximum=1_000_000,
+    )
+    explicit_trigger = s._positive_context_compression_int(
+        raw_agent_policy.get("compressionTriggerTokenLimit"),
+        default=0,
+        maximum=2_000_000,
+    )
+    merged["compressionTriggerTokenLimit"] = (
+        explicit_trigger if explicit_trigger > 0 else int(merged.get("effectiveTokenLimit") or 0)
+    )
+    merged["postCompressionTargetTokenLimit"] = s._positive_context_compression_int(
+        raw_agent_policy.get("postCompressionTargetTokenLimit"),
+        default=0,
+        maximum=2_000_000,
+    )
     merged["contextWindowLimit"] = context_window or int(merged.get("effectiveTokenLimit") or 0)
     merged["modelContextWindowLimit"] = int(merged.get("contextWindowLimit") or 0)
     return merged
@@ -1468,6 +1500,23 @@ def normalize_agent_context_compression_policy(policy: dict[str, Any] | None) ->
     )
     if max_token_limit > 0:
         payload["maxTokenLimit"] = max_token_limit
+    # Versioned budget contract fields (0 = unset; legacy policies keep their
+    # legacy trigger/target derivation).
+    payload["policyVersion"] = s._positive_context_compression_int(
+        source.get("policyVersion"),
+        default=0,
+        maximum=1_000_000,
+    )
+    payload["compressionTriggerTokenLimit"] = s._positive_context_compression_int(
+        source.get("compressionTriggerTokenLimit"),
+        default=0,
+        maximum=2_000_000,
+    )
+    payload["postCompressionTargetTokenLimit"] = s._positive_context_compression_int(
+        source.get("postCompressionTargetTokenLimit"),
+        default=0,
+        maximum=2_000_000,
+    )
     payload["maxCompressionsPerSession"] = s._positive_context_compression_int(
         source.get("maxCompressionsPerSession", source.get("max_compressions_per_session")),
         default=20,
