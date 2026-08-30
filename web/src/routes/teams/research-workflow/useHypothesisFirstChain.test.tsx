@@ -272,7 +272,7 @@ describe("useHypothesisFirstChain", () => {
     await flushQueries();
 
     expect(latest!.loading).toBe(false);
-    expect(latest!.questionScopeKey).toBe("team-1::no-question");
+    expect(latest!.questionScopeKey).toBe("team-1::no-question::no-run");
     expect(latest!.questionId).toBe("");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState).toBeNull();
@@ -292,7 +292,7 @@ describe("useHypothesisFirstChain", () => {
 
     expect(latest!.error).toBeNull();
     expect(latest!.loading).toBe(false);
-    expect(latest!.questionScopeKey).toBe("team-1::Q-01");
+    expect(latest!.questionScopeKey).toBe("team-1::Q-01::no-run");
     expect(latest!.questionId).toBe("Q-01");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState?.questionId).toBe("Q-01");
@@ -305,6 +305,156 @@ describe("useHypothesisFirstChain", () => {
     expect(mocked.stateV2).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
     expect(mocked.chainState).not.toHaveBeenCalled();
     expect(mocked.requests).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
+  });
+
+  it("isolates every chain read, cache entry, and ledger projection by workflow run", async () => {
+    const runId = "run-current";
+    const oldRunId = "run-old";
+    const canonical = stateV2Payload();
+    mocked.stateV2.mockResolvedValue({
+      ...canonical,
+      workflowRunId: runId,
+      scope: { ...canonical.scope, workflowRunId: runId },
+    } as never);
+    mocked.chainState.mockResolvedValue({ ...chainStatePayload(), workflowRunId: runId } as never);
+    mocked.selections.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      selectionCount: 2,
+      // The stale selection is newer on purpose: question-only filtering would
+      // incorrectly make it the active selection for run-current.
+      selections: [
+        { ...selectionRecord("sel-old", "2026-08-20T00:00:00Z"), workflowRunId: oldRunId },
+        { ...selectionRecord("sel-current", "2026-08-19T00:00:00Z"), workflowRunId: runId },
+      ],
+    });
+    mocked.meetings.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingCount: 2,
+      meetings: [
+        { ...meetingRecord("meeting-old"), workflowRunId: oldRunId },
+        { ...meetingRecord("meeting-current"), workflowRunId: runId },
+      ],
+    });
+    mocked.requests.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      requestCount: 2,
+      requests: [
+        { ...requestRecord("request-old"), workflowRunId: oldRunId, meetingRoundId: "meeting-old" },
+        { ...requestRecord("request-current"), workflowRunId: runId, meetingRoundId: "meeting-current" },
+      ],
+    });
+    mocked.links.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      linkCount: 2,
+      links: [
+        { ...linkRecord(), linkId: "link-old", workflowRunId: oldRunId, meetingRoundId: "meeting-old" },
+        { ...linkRecord(), linkId: "link-current", workflowRunId: runId, meetingRoundId: "meeting-current" },
+      ],
+    });
+
+    let latest: HypothesisFirstChainData | null = null;
+    render(
+      <Probe
+        teamId="team-1"
+        questionId="Q-01"
+        runId={runId}
+        onResult={(value) => { latest = value; }}
+      />,
+    );
+    await flushQueries();
+
+    expect(latest!.questionScopeKey).toContain(runId);
+    expect(latest!.selection?.selectionId).toBe("sel-current");
+    expect(latest!.meetings.map((meeting) => meeting.meetingRoundId)).toEqual(["meeting-current"]);
+    expect(latest!.collectionRequests.map((request) => request.requestId)).toEqual(["request-current"]);
+    expect(latest!.reviewRoundLinks.map((link) => link.linkId)).toEqual(["link-current"]);
+
+    expect(mocked.stateV2).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      expect.objectContaining({ runId }),
+    );
+    expect(mocked.chainState).not.toHaveBeenCalled();
+    expect(mocked.selections).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      expect.objectContaining({ runId }),
+    );
+    expect(mocked.meetings).toHaveBeenCalledWith("team-1", expect.anything());
+    expect(mocked.requests).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      expect.objectContaining({ runId }),
+    );
+    expect(mocked.links).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      expect.objectContaining({ runId }),
+    );
+
+    expect(queryClient.getQueryCache().find({
+      queryKey: queryKeys.hypothesisFirstChainStateV2("team-1", "Q-01", runId),
+    })).toBeDefined();
+    expect(queryClient.getQueryCache().find({
+      queryKey: queryKeys.hypothesisFirstSelections("team-1", "Q-01", runId),
+    })).toBeDefined();
+    expect(queryClient.getQueryCache().find({
+      queryKey: hypothesisFirstChainCollectionRequestsKey("team-1", "Q-01", runId),
+    })).toBeDefined();
+    expect(queryClient.getQueryCache().find({
+      queryKey: hypothesisFirstChainReviewRoundLinksKey("team-1", "Q-01", runId),
+    })).toBeDefined();
+  });
+
+  it("treats the meeting receipt as the run authority over conflicting legacy fields", async () => {
+    const runId = "run-current";
+    const oldRunId = "run-old";
+    const canonical = stateV2Payload();
+    mocked.stateV2.mockResolvedValue({
+      ...canonical,
+      workflowRunId: runId,
+      scope: { ...canonical.scope, workflowRunId: runId },
+    } as never);
+    mocked.chainState.mockResolvedValue({ ...chainStatePayload(), workflowRunId: runId } as never);
+    mocked.selections.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      selectionCount: 0,
+      selections: [],
+    });
+    mocked.meetings.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingCount: 1,
+      meetings: [{
+        ...meetingRecord("meeting-conflict"),
+        workflowRunId: runId,
+        discussionScope: { workflowRunId: runId },
+        modelInvocationReceiptAuthority: { workflowRunId: oldRunId },
+      }],
+    } as never);
+    mocked.requests.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", requestCount: 0, requests: [] });
+    mocked.links.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", linkCount: 0, links: [] });
+
+    let latest: HypothesisFirstChainData | null = null;
+    render(
+      <Probe
+        teamId="team-1"
+        questionId="Q-01"
+        runId={runId}
+        onResult={(value) => { latest = value; }}
+      />,
+    );
+    await flushQueries();
+
+    expect(latest!.scopeMismatch).toBe(false);
+    expect(latest!.meetings).toEqual([]);
+    expect(latest!.collectionRequests).toEqual([]);
+    expect(latest!.reviewRoundLinks).toEqual([]);
   });
 
   it("filters team-scoped ledgers to the requested question", async () => {
@@ -666,13 +816,14 @@ describe("question-scoped hypothesis polling", () => {
 function Probe(props: {
   teamId: string;
   questionId: string;
+  runId?: string;
   onResult: (value: HypothesisFirstChainData) => void;
 }) {
-  props.onResult(useHypothesisFirstChain(props.teamId, props.questionId));
+  props.onResult(useHypothesisFirstChain(props.teamId, props.questionId, props.runId));
   return null;
 }
 
-function InvalidationProbe(props: { teamId: string; questionId: string; lastSequence: number }) {
-  useHypothesisFirstChainInvalidation(props.teamId, props.questionId, props.lastSequence);
+function InvalidationProbe(props: { teamId: string; questionId: string; lastSequence: number; runId?: string }) {
+  useHypothesisFirstChainInvalidation(props.teamId, props.questionId, props.runId ?? "", props.lastSequence);
   return null;
 }

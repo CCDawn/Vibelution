@@ -4255,6 +4255,59 @@ def test_production_projector_reads_formal_and_program_authorities(
     assert state.programDelivery.outputRunId == "run-1"
 
 
+def test_scope_records_keeps_question_boundary_without_run_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy question reads remain question-scoped while run scope is optional."""
+
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    state_module.clear_hypothesis_first_state_v2_cache()
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        lambda *_args: {
+            "targetMeetingIds": {"meeting-target"},
+            "targetRoundIds": {"round-target"},
+            "chainRecords": [],
+            "selectionRecords": [],
+            "meetingRecords": [
+                {"meetingRoundId": "meeting-target"},
+                {"meetingRoundId": "meeting-other"},
+            ],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [
+                {"roundId": "round-target"},
+                {"roundId": "round-other"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: type(
+            "QueryService",
+            (),
+            {"list_runs": lambda self, **_kwargs: {"runs": []}},
+        )(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("challenge_question_run_not_found")
+        ),
+    )
+
+    sources = state_module._scope_records("team-question-scope", "SCI-001")
+
+    assert [item["meetingRoundId"] for item in sources["meeting_records"]] == [
+        "meeting-target"
+    ]
+    assert [item["roundId"] for item in sources["hypothesis_round_records"]] == [
+        "round-target"
+    ]
+    state_module.clear_hypothesis_first_state_v2_cache()
+
+
 def test_production_projector_reads_bound_chat_round_work_run_without_room_reconcile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

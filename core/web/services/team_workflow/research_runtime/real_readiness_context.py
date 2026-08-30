@@ -211,13 +211,17 @@ class RealDomainReadinessContext:
         return views
 
     def hypothesis_first_chain_state(
-        self, team_id: str, question_id: str
+        self, team_id: str, question_id: str, workflow_run_id: str
     ) -> Mapping[str, Any] | None:
         from core.web.services.team_workflow.research_runtime import (
             hypothesis_first_chain,
         )
 
-        return hypothesis_first_chain.chain_state(team_id, question_id)
+        return hypothesis_first_chain.chain_state(
+            team_id,
+            question_id,
+            workflow_run_id=workflow_run_id,
+        )
 
     def hypothesis_set(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
         return self._query("hypothesis_set", team_id, run_id) or self._artifact(

@@ -229,6 +229,90 @@ def test_formal_selection_replay_uses_node_run_bound_selection(
     assert observed == ["selection-bound"]
 
 
+def test_formal_selection_authority_is_read_from_action_workflow_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        formal_hypothesis_fanout,
+        "_selection_from_snapshot",
+        lambda _snapshot: None,
+    )
+    observed: dict[str, str] = {}
+
+    def chain_state(_team_id, _question_id, **kwargs):
+        observed["chain_run_id"] = str(kwargs.get("workflow_run_id") or "")
+        return {"selectionId": "selection-current"}
+
+    def get_selection(_team_id, _selection_id):
+        return {
+            "selection": {
+                "selectionId": "selection-current",
+                "workflowRunId": "run-1",
+                "selectedCandidateIds": ["H1"],
+            }
+        }
+
+    def list_candidates(_team_id, *, question_id, workflow_run_id):
+        observed["candidate_run_id"] = workflow_run_id
+        assert question_id == "SCI-096"
+        return {
+            "candidates": [
+                {
+                    "candidateId": "H1",
+                    "workflowRunId": workflow_run_id,
+                    "statement": "claim H1",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.chain_state",
+        chain_state,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.hypothesis_selection.get_hypothesis_selection",
+        get_selection,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.list_hypothesis_candidates",
+        list_candidates,
+    )
+
+    result = formal_hypothesis_fanout.formal_hypothesis_fan_out_input(
+        action=_action(),
+        snapshot={"teamId": "team-1", "questionId": "SCI-096"},
+    )
+
+    assert result["selection"]["workflowRunId"] == "run-1"
+    assert observed == {"chain_run_id": "run-1", "candidate_run_id": "run-1"}
+
+
+def test_real_domain_chain_state_uses_snapshot_workflow_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, str] = {}
+
+    def chain_state(_team_id, _question_id, **kwargs):
+        observed["workflow_run_id"] = str(kwargs.get("workflow_run_id") or "")
+        return {"selectionId": "selection-1"}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.chain_state",
+        chain_state,
+    )
+
+    state = RealDomainPorts(object())._hypothesis_chain_state(
+        {
+            "teamId": "team-1",
+            "questionId": "SCI-096",
+            "workflowRunId": "run-1",
+        }
+    )
+
+    assert state["selectionId"] == "selection-1"
+    assert observed == {"workflow_run_id": "run-1"}
+
+
 def test_reusable_fragment_prefers_prior_anchor_lineage_on_continuous_retry() -> None:
     rows = [
         {

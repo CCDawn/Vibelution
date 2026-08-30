@@ -52,6 +52,7 @@ const mockedGetChallengeQuestionRunDetail = vi.mocked(getChallengeQuestionRunDet
 vi.mock("./HypothesisFirstMeetingOps", () => ({
   HypothesisFirstMeetingOps: (props: {
     lang?: "zh" | "en";
+    runId?: string;
     meetingRoundId?: string;
     nextAction: { commandLabel?: string; stage: string; disabledReason?: string };
   }) => (
@@ -59,14 +60,20 @@ vi.mock("./HypothesisFirstMeetingOps", () => ({
       {props.lang === "en" ? "Review operations" : (props.nextAction.commandLabel || props.nextAction.stage)}
       {props.nextAction.disabledReason ? <span>{props.nextAction.disabledReason}</span> : null}
       {props.meetingRoundId ? <span data-testid="meeting-round-id">{props.meetingRoundId}</span> : null}
+      {props.runId ? <span data-testid="meeting-run-id">{props.runId}</span> : null}
     </div>
   ),
 }));
 
 vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
-  HypothesisSelectionList: (props: { compact?: boolean; lang?: "zh" | "en" }) => {
+  HypothesisSelectionList: (props: { compact?: boolean; lang?: "zh" | "en"; runId?: string }) => {
     selectionListProps(props);
-    return <div data-testid="selection-list">{props.lang === "en" ? "Record selection & start review" : "记录选择并开启评审"}</div>;
+    return (
+      <div data-testid="selection-list">
+        {props.lang === "en" ? "Record selection & start review" : "记录选择并开启评审"}
+        {props.runId ? <span data-testid="selection-run-id">{props.runId}</span> : null}
+      </div>
+    );
   },
 }));
 
@@ -203,6 +210,30 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_collection_1")).toBe(false);
     expect(inspectorNodeOwnsCurrentStep("hf_review", "hf_meeting_5")).toBe(true);
     expect(inspectorNodeOwnsCurrentStep("hf_collection", "source_finding")).toBe(true);
+  });
+
+  it("hides legacy generation and selection writes when the chain scope mismatches", () => {
+    mockedChain.mockReturnValue(chainData({
+      scopeMismatch: true,
+      chainState: { candidateCount: 2 } as HypothesisFirstChainData["chainState"],
+      meetings: [scopeMeeting({ status: "open" })],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-current"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="hypothesis-first-scope-mismatch"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="selection-list"]')).toBeNull();
+    expect(container.querySelector('[data-testid="meeting-ops"]')).toBeNull();
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container.textContent).not.toContain("生成候选假说");
+    expect(container.textContent).not.toContain("记录选择并开启评审");
   });
 
   beforeEach(() => {
@@ -391,6 +422,7 @@ describe("HypothesisFirstNodeInspector", () => {
     );
     expect(container.textContent).toContain("确认候选清单");
     expect(container.textContent).not.toContain("前往确认候选");
+    expect(container.querySelector('[data-testid="meeting-run-id"]')?.textContent).toBe("run-1");
   });
 
   it("shows the r5 review operation when no formal run id exists yet", () => {
@@ -685,7 +717,10 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       compact: true,
       allowLegacyMutation: true,
+      runId: "run-1",
     }));
+    expect(container.querySelector('[data-testid="selection-run-id"]')?.textContent).toBe("run-1");
+    expect(mockedChain).toHaveBeenCalledWith("team-1", "Q-01", "run-1");
     expect(container.textContent).toContain("打开题目档案");
   });
 
@@ -1132,7 +1167,13 @@ describe("HypothesisFirstNodeInspector", () => {
       await vi.waitFor(() => expect(onFormalRunCreated).toHaveBeenCalledTimes(1));
     });
 
-    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", action);
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      action,
+      undefined,
+      { runId: "" },
+    );
     expect(onFormalRunCreated).toHaveBeenCalledWith({
       runId: "run-formal-1",
       nodeId: "problem_understanding",
@@ -1330,7 +1371,13 @@ describe("HypothesisFirstNodeInspector", () => {
     await act(async () => {
       confirmButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", archive);
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      archive,
+      undefined,
+      { runId: "formal-run-1" },
+    );
   });
 
   it("renders the structured readiness rejection next to a refused retry command", async () => {
@@ -1422,7 +1469,13 @@ describe("HypothesisFirstNodeInspector", () => {
         expect(container.textContent).toContain("节点尚未就绪");
       });
     });
-    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", retry);
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      retry,
+      undefined,
+      { runId: "formal-run-1" },
+    );
     expect(container.textContent).toContain("缺少来源候选");
     expect(container.querySelector('[data-testid="canonical-command-readiness-blockers"]')).toBeTruthy();
   });

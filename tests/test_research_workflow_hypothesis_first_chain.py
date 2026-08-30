@@ -384,7 +384,11 @@ def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
         "_resolve_hypothesis_participants",
         lambda *_args: {"participants": ["agent-a"]},
     )
-    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    monkeypatch.setattr(
+        chain,
+        "_build_round_candidates",
+        lambda *_args, **_kwargs: [],
+    )
     opened_payloads: list[dict[str, object]] = []
 
     def fake_open(_team_id, payload, **_kwargs):
@@ -465,7 +469,11 @@ def test_selection_fans_out_per_candidate_without_receipt_authority(
         "_resolve_hypothesis_participants",
         lambda *_args: {"participants": ["agent-a"]},
     )
-    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    monkeypatch.setattr(
+        chain,
+        "_build_round_candidates",
+        lambda *_args, **_kwargs: [],
+    )
     monkeypatch.setattr(
         chain,
         "list_hypothesis_candidates",
@@ -549,7 +557,7 @@ def test_selection_reuses_server_generation_scope_when_receipt_unavailable(
     monkeypatch.setattr(
         chain,
         "_question_generation_meetings",
-        lambda *_args: [
+        lambda *_args, **_kwargs: [
             {
                 "meetingRoundId": "generation-1",
                 "discussionScope": generation_scope.to_dict(),
@@ -573,7 +581,11 @@ def test_selection_reuses_server_generation_scope_when_receipt_unavailable(
         "_resolve_hypothesis_participants",
         lambda *_args: {"participants": ["agent-a"]},
     )
-    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    monkeypatch.setattr(
+        chain,
+        "_build_round_candidates",
+        lambda *_args, **_kwargs: [],
+    )
     opened_payloads: list[dict[str, object]] = []
 
     def fake_open(_team_id, payload, **_kwargs):
@@ -611,7 +623,13 @@ def test_question_run_scopes_candidate_generation_before_receipt_resolution(
     from core.web.services.team_workflow.research_runtime import run_creation
 
     captured: dict[str, object] = {}
-    monkeypatch.setattr(chain, "needs_candidate_generation", lambda *_args: True)
+    need_calls: list[tuple[str, str, str]] = []
+
+    def fake_needs(team_id, question_id, *, workflow_run_id=""):
+        need_calls.append((team_id, question_id, workflow_run_id))
+        return True
+
+    monkeypatch.setattr(chain, "needs_candidate_generation", fake_needs)
 
     def fake_open(_team_id, _question_id, **kwargs):
         captured.update(kwargs)
@@ -638,6 +656,7 @@ def test_question_run_scopes_candidate_generation_before_receipt_resolution(
     )
 
     assert opened == {"status": "opened", "meetingRoundId": "generation-1"}
+    assert need_calls == [("team-created-run", _QUESTION_ID, "run-created-1")]
     assert captured["_discussion_scope"] == {
         "version": 1,
         "kind": "question_generation",
@@ -1176,6 +1195,136 @@ def test_chain_state_projects_first_open_candidate_anchor(
     assert anchor["candidateId"] == "hyp-a"
     assert "returnTo=" in anchor["deepLink"]
     assert anchor["returnLabel"] == "返回科研流程"
+
+
+def test_chain_state_ignores_review_artifacts_from_other_workflow_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+
+    team_id = "team-run-scoped-state"
+
+    def authority(run_id: str) -> dict[str, str]:
+        return {"workflowRunId": run_id}
+
+    meeting_rows = [
+        {
+            "meetingRoundId": "generation-old",
+            "meetingType": chain.CANDIDATE_GENERATION_MEETING_TYPE,
+            "question": _QUESTION_ID,
+            "status": "closed",
+            "modelInvocationReceiptAuthority": authority("run-old"),
+        },
+        {
+            "meetingRoundId": "review-old",
+            "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+            "question": _QUESTION_ID,
+            "status": "closed",
+            "modelInvocationReceiptAuthority": authority("run-old"),
+        },
+        {
+            "meetingRoundId": "generation-new",
+            "meetingType": chain.CANDIDATE_GENERATION_MEETING_TYPE,
+            "question": _QUESTION_ID,
+            "status": "open",
+            "modelInvocationReceiptAuthority": authority("run-new"),
+        },
+        {
+            "meetingRoundId": "review-new",
+            "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+            "question": _QUESTION_ID,
+            "status": "closed",
+            "modelInvocationReceiptAuthority": authority("run-new"),
+        },
+    ]
+    records = [
+        {
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": "link-old",
+            "selectionId": "selection-old",
+            "meetingRoundId": "review-old",
+            "questionId": _QUESTION_ID,
+            "roundIndex": 1,
+        },
+        {
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": "request-old",
+            "meetingRoundId": "review-old",
+            "questionId": _QUESTION_ID,
+            "status": "pending",
+        },
+        {
+            "recordKind": chain.CANDIDATE_KIND,
+            "candidateId": "candidate-old",
+            "meetingRoundId": "generation-old",
+            "questionId": _QUESTION_ID,
+        },
+        {
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": "link-new",
+            "selectionId": "selection-new",
+            "meetingRoundId": "review-new",
+            "questionId": _QUESTION_ID,
+            "roundIndex": 1,
+        },
+        {
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": "request-new",
+            "meetingRoundId": "review-new",
+            "questionId": _QUESTION_ID,
+            "status": "pending",
+        },
+        {
+            "recordKind": chain.CANDIDATE_KIND,
+            "candidateId": "candidate-new",
+            "meetingRoundId": "generation-new",
+            "questionId": _QUESTION_ID,
+        },
+    ]
+    rounds = [
+        {
+            "roundId": "round-old",
+            "question": _QUESTION_ID,
+            "status": "closed",
+            "meetingRefs": [{"kind": "meeting_round", "id": "review-old"}],
+        },
+        {
+            "roundId": "round-new",
+            "question": _QUESTION_ID,
+            "status": "open",
+            "meetingRefs": [{"kind": "meeting_round", "id": "review-new"}],
+        },
+    ]
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(chain, "_records", lambda _team_id: records)
+    monkeypatch.setattr(
+        meetings,
+        "list_meeting_rounds",
+        lambda _team_id: {"meetings": meeting_rows},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda *_args: rounds,
+    )
+    monkeypatch.setattr(chain, "_question_template_baselines", lambda *_args: [])
+
+    state = chain.chain_state(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id="run-new",
+    )
+
+    assert state["selectionId"] == "selection-new"
+    assert state["meetingCount"] == 1
+    assert [item["requestId"] for item in state["collectionRequests"]] == [
+        "request-new"
+    ]
+    assert state["hypothesisRoundCount"] == 1
+    assert state["latestHypothesisRoundId"] == "round-new"
+    assert state["candidateCount"] == 1
+    assert state["generationMeetingId"] == "generation-new"
 
 
 def _marker_runner(participant, prompt, context):
@@ -3111,6 +3260,288 @@ def test_stopped_generation_does_not_heal_or_reuse_for_a_new_run(
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)[
         "candidateCount"
     ] == 0
+
+
+def test_active_generation_from_cancelled_run_does_not_block_new_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-question meeting is reusable only inside its workflow run."""
+
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+    from core.web.services.team_workflow import research_projects
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    project_id = research_projects.create_research_project(
+        team_id, {"name": "跨 run 会议隔离"}
+    )["project"]["projectId"]
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+    monkeypatch.setattr(
+        selections,
+        "_approved_candidate_ids",
+        lambda _team_id, _question_id, *, workflow_run_id="": set(),
+    )
+
+    def generation_scope(run_id: str) -> dict[str, object]:
+        return WorkflowDiscussionScopeV1.generation(
+            teamId=team_id,
+            researchProjectId=project_id,
+            workflowRunId=run_id,
+            workflowNodeId=chain.HYPOTHESIS_DESIGN_NODE_ID,
+            questionId=_QUESTION_ID,
+        ).to_dict()
+
+    new_runner_calls: list[str] = []
+
+    def new_runner(participant, prompt, context):
+        new_runner_calls.append(str(participant.get("agentId") or ""))
+        return _candidate_generation_runner(participant, prompt, context)
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        old = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+            _model_invocation_receipt_authority=_generation_receipt_authority(
+                team_id, "run-old"
+            ),
+            _discussion_scope=generation_scope("run-old"),
+        )
+        old_id = old["meetingRound"]["meetingRoundId"]
+        old_meeting = meetings.get_meeting_round(team_id, old_id)["meetingRound"]
+        chain._append_generation_candidates(
+            team_id,
+            old_meeting,
+            [
+                {
+                    "statement": "旧运行候选不得进入新运行",
+                    "rationale": "跨 run 隔离回归",
+                    "proposedBy": "agent-old",
+                }
+            ],
+        )
+        old_snapshot = json.dumps(
+            meetings.get_meeting_round(team_id, old_id)["meetingRound"],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+        with pytest.raises(
+            chain.HypothesisFirstChainError,
+            match="belong to different workflow runs",
+        ):
+            chain.open_candidate_generation_meeting(
+                team_id,
+                _QUESTION_ID,
+                _model_invocation_receipt_authority=_generation_receipt_authority(
+                    team_id, "run-new"
+                ),
+                _discussion_scope=generation_scope("run-other"),
+            )
+
+        assert chain.needs_candidate_generation(
+            team_id, _QUESTION_ID, workflow_run_id="run-new"
+        ) is True
+        opened = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=new_runner,
+            _model_invocation_receipt_authority=_generation_receipt_authority(
+                team_id, "run-new"
+            ),
+            _discussion_scope=generation_scope("run-new"),
+        )
+        persisted_new = meetings.get_meeting_round(
+            team_id, opened["meetingRound"]["meetingRoundId"]
+        )["meetingRound"]
+        assert chain._meeting_workflow_run_id(persisted_new) == "run-new"
+        assert persisted_new["status"] == "open", persisted_new
+        monkeypatch.setattr(
+            meetings,
+            "running_bound_round_ids",
+            lambda meeting: list(meeting.get("chatRoomRoundIds") or []),
+        )
+        call_count_after_open = len(new_runner_calls)
+        replayed = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=new_runner,
+            _model_invocation_receipt_authority=_generation_receipt_authority(
+                team_id, "run-new"
+            ),
+            _discussion_scope=generation_scope("run-new"),
+        )
+
+    new_id = opened["meetingRound"]["meetingRoundId"]
+    assert opened["status"] == "opened"
+    assert new_id != old_id
+    assert new_id.endswith("-a2")
+    assert opened["meetingRound"]["modelInvocationReceiptAuthority"][
+        "workflowRunId"
+    ] == "run-new"
+    assert replayed["meetingRound"]["meetingRoundId"] == new_id
+    assert len(new_runner_calls) == call_count_after_open
+    assert json.dumps(
+        meetings.get_meeting_round(team_id, old_id)["meetingRound"],
+        ensure_ascii=False,
+        sort_keys=True,
+    ) == old_snapshot
+
+    run_state = chain.chain_state(
+        team_id, _QUESTION_ID, workflow_run_id="run-new"
+    )
+    assert run_state["generationMeetingId"] == new_id
+    assert run_state["candidateCount"] == 0
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)[
+        "candidateCount"
+    ] == 1
+
+
+def test_run_scoped_candidate_generation_reuses_formal_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two formal hypotheses already owned by this run skip a new meeting."""
+
+    calls: list[tuple[str, str, str]] = []
+
+    def approved_candidate_ids(team_id, question_id, *, workflow_run_id=""):
+        calls.append((team_id, question_id, workflow_run_id))
+        return {"formal-a", "formal-b"}
+
+    monkeypatch.setattr(selections, "_approved_candidate_ids", approved_candidate_ids)
+    monkeypatch.setattr(
+        chain,
+        "_question_generation_meetings",
+        lambda _team_id, _question_id, *, workflow_run_id="": [],
+    )
+
+    assert (
+        chain.needs_candidate_generation(
+            "team-formal-artifact",
+            _QUESTION_ID,
+            workflow_run_id="run-formal-artifact",
+        )
+        is False
+    )
+    assert calls == [
+        ("team-formal-artifact", _QUESTION_ID, "run-formal-artifact")
+    ]
+
+
+def test_review_scope_fallback_reads_candidates_from_the_same_workflow_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Ledger outage may reuse only the generation scope from this run."""
+
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+
+    generation_scope = WorkflowDiscussionScopeV1.generation(
+        teamId="team-run-fallback",
+        researchProjectId="project-run-fallback",
+        workflowRunId="run-new",
+        workflowNodeId=chain.HYPOTHESIS_DESIGN_NODE_ID,
+        questionId=_QUESTION_ID,
+    ).to_dict()
+    calls: list[tuple[str, str]] = []
+
+    def list_candidates(team_id, *, question_id="", workflow_run_id=""):
+        calls.append(("candidates", workflow_run_id))
+        return {
+            "candidates": [
+                {
+                    "candidateId": "candidate-new",
+                    "meetingRoundId": "generation-new",
+                }
+            ]
+        }
+
+    def list_generation_meetings(
+        team_id, question_id, *, workflow_run_id=""
+    ):
+        calls.append(("meetings", workflow_run_id))
+        return [
+            {
+                "meetingRoundId": "generation-new",
+                "discussionScope": generation_scope,
+            }
+        ]
+
+    monkeypatch.setattr(chain, "list_hypothesis_candidates", list_candidates)
+    monkeypatch.setattr(
+        chain, "_question_generation_meetings", list_generation_meetings
+    )
+
+    resolved = chain._review_discussion_scope_base(
+        "team-run-fallback",
+        _QUESTION_ID,
+        ["candidate-new"],
+        receipt_authority=None,
+        workflow_run_id="run-new",
+    )
+
+    assert resolved is not None
+    assert resolved.workflowRunId == "run-new"
+    assert calls == [("candidates", "run-new"), ("meetings", "run-new")]
+
+
+def test_human_adjudication_persists_and_checks_workflow_run_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newer round from another run cannot hide this run's current round."""
+
+    target_round = {
+        "roundId": "round-new",
+        "status": "closed",
+        "meetingRefs": [{"kind": "meeting_round", "id": "meeting-new"}],
+    }
+    other_run_round = {
+        "roundId": "round-other",
+        "status": "closed",
+        "meetingRefs": [{"kind": "meeting_round", "id": "meeting-other"}],
+    }
+    monkeypatch.setattr(
+        hrounds,
+        "get_hypothesis_round",
+        lambda _team_id, _round_id: {"round": target_round},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda _team_id, _question_id: [target_round, other_run_round],
+    )
+
+    def run_meetings(team_id, question_id, *, workflow_run_id=""):
+        assert workflow_run_id == "run-new"
+        return [{"meetingRoundId": "meeting-new"}]
+
+    monkeypatch.setattr(chain, "_question_meetings", run_meetings)
+    monkeypatch.setattr(
+        chain,
+        "_storage_path",
+        lambda _team_id: tmp_path / "hypothesis_first_chain.jsonl",
+    )
+
+    result = chain.record_human_adjudication(
+        "team-run-adjudication",
+        question_id=_QUESTION_ID,
+        hypothesis_round_id="round-new",
+        decision="rejected",
+        rationale="当前 run 的人工裁决",
+        idempotency_key="adjudication-run-new",
+        workflow_run_id="run-new",
+    )
+
+    assert result["status"] == "created"
+    assert result["adjudication"]["workflowRunId"] == "run-new"
+    assert result["adjudication"]["meetingRoundIds"] == ["meeting-new"]
 
 
 def _empty_generation_runner(participant, prompt, context):

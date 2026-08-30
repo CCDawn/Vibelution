@@ -540,12 +540,22 @@ def _hypothesis_chain_state(record: dict[str, Any]) -> dict[str, Any]:
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     team_id = str(record.get("teamId") or snapshot.get("teamId") or "").strip()
     question_id = str(record.get("questionId") or snapshot.get("questionId") or "").strip()
-    if not team_id or not question_id:
+    workflow_run_id = str(
+        record.get("runId")
+        or record.get("workflowRunId")
+        or snapshot.get("workflowRunId")
+        or ""
+    ).strip()
+    if not team_id or not question_id or not workflow_run_id:
         return {}
     try:
         from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
 
-        state = hypothesis_first_chain.chain_state(team_id, question_id)
+        state = hypothesis_first_chain.chain_state(
+            team_id,
+            question_id,
+            workflow_run_id=workflow_run_id,
+        )
     except Exception:
         return {}
     return dict(state) if isinstance(state, dict) else {}

@@ -885,7 +885,12 @@ def _discussion_inputs_from_run(
 
             chain = hypothesis_first_chain.chain_state(
                 str(getattr(run, "team_id", "") or ""),
-                str(snapshot.get("questionId") or getattr(run, "question_id", "") or ""),
+                str(
+                    snapshot.get("questionId")
+                    or getattr(run, "question_id", "")
+                    or ""
+                ),
+                workflow_run_id=str(getattr(run, "run_id", "") or "").strip(),
             )
             active = chain.get("activeDiscussionAnchor")
             if isinstance(active, Mapping):

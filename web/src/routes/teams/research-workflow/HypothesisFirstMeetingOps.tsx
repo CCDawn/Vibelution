@@ -33,6 +33,7 @@ export function HypothesisFirstMeetingOps(props: {
   lang?: Language;
   teamId: string;
   questionId: string;
+  runId?: string;
   meetingRoundId: string;
   nextAction: HypothesisFirstNextAction;
   compact?: boolean;
@@ -66,7 +67,12 @@ export function HypothesisFirstMeetingOps(props: {
     },
   });
 
-  const invalidate = () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+  const invalidate = () => invalidateHypothesisFirstQueries(
+    queryClient,
+    props.teamId,
+    props.questionId,
+    props.runId,
+  );
   const canonicalAction = props.nextAction.canonicalAction;
   const allowLegacyMutation = props.nextAction.stateSource !== "v2_canonical";
   const canonicalActionUnavailable = () => Promise.reject(new Error("canonical_action_unavailable"));
@@ -77,7 +83,13 @@ export function HypothesisFirstMeetingOps(props: {
   const draftMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
       if (canonicalAction?.command === "regenerate_summary") {
-        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          canonicalAction,
+          undefined,
+          { runId: props.runId },
+        );
       }
       if (allowLegacyMutation) {
         return draftMeetingSummary(props.teamId, props.meetingRoundId, { actor: "operator", force: false });
@@ -130,6 +142,7 @@ export function HypothesisFirstMeetingOps(props: {
           props.questionId,
           canonicalAction,
           { decision: "accepted" },
+          { runId: props.runId },
         ).then((receipt) => receipt.result as Awaited<ReturnType<typeof approveHypothesisDigest>>);
       }
       if (!allowLegacyMutation) return canonicalActionUnavailable();
@@ -200,6 +213,7 @@ export function HypothesisFirstMeetingOps(props: {
           props.questionId,
           canonicalAction,
           { decision: "rejected" },
+          { runId: props.runId },
         );
       }
       if (allowLegacyMutation) {
@@ -224,10 +238,16 @@ export function HypothesisFirstMeetingOps(props: {
     mutationFn: () => {
       if (canonicalAction
         && (canonicalAction.command === "open_generation" || canonicalAction.command === "retry_generation")) {
-        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          canonicalAction,
+          undefined,
+          { runId: props.runId },
+        );
       }
       if (allowLegacyMutation) {
-        return openHypothesisCandidateGeneration(props.teamId, props.questionId);
+        return openHypothesisCandidateGeneration(props.teamId, props.questionId, props.runId);
       }
       return canonicalActionUnavailable();
     },
@@ -258,7 +278,13 @@ export function HypothesisFirstMeetingOps(props: {
   const reopenReviewMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
       if (canonicalAction && ["retry_review_dispatch", "reopen_review", "resume_discussion", "stop_discussion"].includes(canonicalAction.command)) {
-        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          canonicalAction,
+          undefined,
+          { runId: props.runId },
+        );
       }
       if (allowLegacyMutation) return reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId);
       return canonicalActionUnavailable();
@@ -286,7 +312,13 @@ export function HypothesisFirstMeetingOps(props: {
   const handoffMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
       if (canonicalAction?.command === "handoff_collection") {
-        return executeHypothesisFirstCommand(props.teamId, props.questionId, canonicalAction);
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          canonicalAction,
+          undefined,
+          { runId: props.runId },
+        );
       }
       if (allowLegacyMutation) {
         return recordCollectionHandoff(props.teamId, props.nextAction.collectionRequestId || "", {

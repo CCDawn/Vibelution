@@ -25,14 +25,15 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 }));
 vi.mock("../../../api/queryKeys", () => ({
   queryKeys: {
-    hypothesisFirstSelectionContext: () => ["selection-context"],
-    hypothesisFirstChainStateV2: () => ["state-v2"],
+    hypothesisFirstSelectionContext: (_teamId: string, _questionId: string, runId = "") => ["selection-context", runId],
+    hypothesisFirstChainStateV2: (_teamId: string, _questionId: string, runId = "") => ["state-v2", runId],
     teamMeetingRound: () => ["meeting-round"],
     chatRoom: () => ["chat-room"],
   },
 }));
 
 import {
+  executeHypothesisFirstCommand,
   fetchHypothesisFirstStateV2,
   fetchCandidateEvidenceTrail,
   fetchHypothesisSelectionContext,
@@ -44,6 +45,7 @@ import { HypothesisSelectionList } from "./HypothesisSelectionList";
 const mockedContext = vi.mocked(fetchHypothesisSelectionContext);
 const mockedTrail = vi.mocked(fetchCandidateEvidenceTrail);
 const mockedStateV2 = vi.mocked(fetchHypothesisFirstStateV2);
+const mockedExecuteCommand = vi.mocked(executeHypothesisFirstCommand);
 
 function stateV2Payload(overrides: {
   currentPhase?: string;
@@ -265,6 +267,86 @@ describe("candidate evidence trail expansion", () => {
     });
     expect(mockedTrail).toHaveBeenCalledWith("team-1", "SCI-001", expect.anything());
     expect(container.textContent).toContain("评审 r1 · A016");
+  });
+
+  it("keeps selection context, evidence trail, command, and cache identity on the active run", async () => {
+    const runId = "run-current";
+    const base = candidateContext() as any;
+    mockedContext.mockResolvedValue({
+      ...base,
+      workflowRunId: runId,
+      scope: { ...base.scope, workflowRunId: runId },
+      candidates: [
+        { ...base.candidates[0], hypothesis_id: "candidate-a", statement: "当前候选 A" },
+        { ...base.candidates[0], hypothesis_id: "candidate-b", statement: "当前候选 B" },
+      ],
+    } as never);
+    const v2 = stateV2Payload();
+    mockedStateV2.mockResolvedValue({
+      ...v2,
+      workflowRunId: runId,
+      scope: { ...v2.scope, workflowRunId: runId },
+      allowedActions: v2.allowedActions.map((action: any) => ({
+        ...action,
+        payload: { ...action.payload, workflowRunId: runId },
+      })),
+    } as never);
+    mockedTrail.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      questionId: "SCI-001",
+      workflowRunId: runId,
+      trails: [],
+    } as never);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <HypothesisSelectionList teamId="team-1" questionId="SCI-001" runId={runId} />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("当前候选 B"));
+    });
+
+    expect(mockedContext).toHaveBeenCalledWith(
+      "team-1",
+      "SCI-001",
+      expect.objectContaining({ runId }),
+    );
+    expect(mockedStateV2).toHaveBeenCalledWith(
+      "team-1",
+      "SCI-001",
+      expect.objectContaining({ runId }),
+    );
+    expect(mockedTrail).toHaveBeenCalledWith(
+      "team-1",
+      "SCI-001",
+      expect.objectContaining({ runId }),
+    );
+    expect(queryClient.getQueryCache().find({ queryKey: ["selection-context", runId] })).toBeDefined();
+    expect(queryClient.getQueryCache().find({ queryKey: ["state-v2", runId] })).toBeDefined();
+
+    const choices = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    await act(async () => {
+      choices[0]?.click();
+      choices[1]?.click();
+    });
+    const submit = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("记录选择并开启评审"));
+    expect(submit).toBeTruthy();
+    await act(async () => {
+      submit?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "SCI-001",
+      expect.objectContaining({ command: "record_selection" }),
+      { candidateIds: ["candidate-a", "candidate-b"] },
+      { runId },
+    );
   });
 
   it("restores saved candidate ids as whole values without delimiter splitting", async () => {

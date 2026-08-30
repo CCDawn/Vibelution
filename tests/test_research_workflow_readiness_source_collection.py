@@ -4,7 +4,12 @@ command path will."""
 
 from __future__ import annotations
 
-from core.web.services.team_workflow.research_runtime.readiness import NodeReadinessService
+from core.web.services.team_workflow.research_runtime.readiness import (
+    NodeReadinessService,
+)
+from core.web.services.team_workflow.research_runtime.readiness.common import (
+    hypothesis_first_chain_state,
+)
 from tests._support.readiness_fakes import FakeDomainContext, make_run
 
 
@@ -62,6 +67,24 @@ def test_source_finding_missing_question_blocks() -> None:
     result = _evaluate(service, context, "source_finding")
     assert result.ready is False
     assert any(b.code == "question_snapshot_missing" for b in result.blockers)
+
+
+def test_hypothesis_chain_readiness_passes_current_workflow_run_id() -> None:
+    context = FakeDomainContext()
+    calls: list[tuple[str, str, str]] = []
+
+    def read_chain_state(team_id: str, question_id: str, workflow_run_id: str):
+        calls.append((team_id, question_id, workflow_run_id))
+        return {"collectionReady": False}
+
+    context.hypothesis_first_chain_state = read_chain_state  # type: ignore[attr-defined]
+    state = hypothesis_first_chain_state(
+        context,
+        make_run(run_id="run-new", team_id="team-new", question_id="SCI-002"),
+    )
+
+    assert state == {"collectionReady": False}
+    assert calls == [("team-new", "SCI-002", "run-new")]
 
 
 def test_sci096_missing_candidates_blocks_source_extraction() -> None:

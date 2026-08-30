@@ -203,6 +203,62 @@ def test_candidate_generation_persists_server_receipt_authority_and_refuses_rebi
         )
 
 
+def test_reused_formal_meeting_without_receipt_authority_fails_closed(monkeypatch):
+    scope = meeting_runtime.WorkflowDiscussionScopeV1.generation(
+        teamId="team-1",
+        researchProjectId="project-1",
+        workflowRunId="run-1",
+        workflowNodeId="hypothesis_design",
+        questionId="SCI-096",
+    )
+    monkeypatch.setattr(meeting_runtime, "assert_writes_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_ensure_linked_room",
+        lambda _team_id: ({"teamId": "team-1"}, "room-1"),
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_validated_participant_resolution",
+        lambda *_args, **_kwargs: {"participants": ["agent-1"]},
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_discussion_scope_for_request",
+        lambda *_args, **_kwargs: scope,
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_resolve_scoped_meeting_room",
+        lambda *_args, **_kwargs: ("room-1", scope),
+    )
+    monkeypatch.setattr(
+        meetings,
+        "create_meeting_round",
+        lambda *_args, **_kwargs: {
+            "status": "reused",
+            "meetingRound": {"meetingRoundId": "meeting-existing"},
+            "storagePath": "meeting-rounds.jsonl",
+        },
+    )
+
+    with pytest.raises(
+        meeting_runtime.ResearchMeetingRuntimeError,
+        match="no verifiable receipt authority",
+    ):
+        meeting_runtime.open_candidate_generation_meeting(
+            "team-1",
+            {
+                "questionId": "SCI-096",
+                "meetingRoundId": "meeting-existing",
+                "workflowRunId": "run-1",
+                "workflowNodeId": "hypothesis_design",
+                "researchProjectId": "project-1",
+            },
+            background=False,
+        )
+
+
 def test_candidate_generation_prompt_includes_canonical_question_context(
     tmp_path, monkeypatch
 ):

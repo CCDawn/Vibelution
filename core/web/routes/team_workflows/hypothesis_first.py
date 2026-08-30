@@ -34,6 +34,7 @@ from core.web.services.team_workflow.research_runtime import (
     anomaly_inbox_service,
     hypothesis_first_chain,
     hypothesis_first_state_v2,
+    meeting_receipt_authority,
 )
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     server_operator_scope_from_http,
@@ -195,6 +196,7 @@ _DOMAIN_ERRORS = (
     meeting_runtime.ResearchMeetingRuntimeError,
     hypothesis_rounds.ResearchHypothesisRoundError,
     hypothesis_first_chain.HypothesisFirstChainError,
+    meeting_receipt_authority.MeetingReceiptAuthorityError,
 )
 
 
@@ -230,11 +232,13 @@ def team_workflow_hypothesis_selection_record(
 def team_workflow_hypothesis_selection_list(
     team_id: str,
     question_id: str = Query("", alias="questionId", max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     try:
         return hypothesis_selection.list_hypothesis_selections(
             team_id,
             question_id=question_id,
+            workflow_run_id=workflow_run_id,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.selection.list", team_id, exc)
@@ -248,12 +252,14 @@ def team_workflow_hypothesis_selection_list(
 def team_workflow_hypothesis_selection_latest(
     team_id: str,
     question_id: str = Query(..., alias="questionId", min_length=1, max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     try:
         return hypothesis_selection.get_latest_hypothesis_selection(
             team_id,
             question_id,
             scope=_selection_read_scope(team_id, question_id),
+            workflow_run_id=workflow_run_id,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.selection.latest", team_id, exc)
@@ -282,10 +288,15 @@ def team_workflow_hypothesis_selection_get(
 def team_workflow_hypothesis_candidate_evidence_trail(
     team_id: str,
     question_id: str,
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     """Discussion-message evidence trail per candidate (click-through)."""
     try:
-        return hypothesis_first_chain.candidate_evidence_trail(team_id, question_id)
+        return hypothesis_first_chain.candidate_evidence_trail(
+            team_id,
+            question_id,
+            workflow_run_id=workflow_run_id,
+        )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.candidates.evidence_trail", team_id, exc)
 
@@ -298,6 +309,7 @@ def team_workflow_hypothesis_candidate_evidence_trail(
 def team_workflow_hypothesis_selection_context(
     team_id: str,
     question_id: str,
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     """Derive the server-authoritative scope + candidates for the selection UI.
 
@@ -307,10 +319,27 @@ def team_workflow_hypothesis_selection_context(
     第 0 轮候选生成讨论写入链条台账的 proposedCandidates。
     """
     normalized_question_id = question_id.strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     detail: dict[str, Any] | None = None
     try:
-        detail = get_challenge_question_run_detail(team_id, normalized_question_id)
+        if normalized_workflow_run_id:
+            authority = meeting_receipt_authority.resolve_active_question_authority(
+                team_id,
+                normalized_question_id,
+                normalized_workflow_run_id,
+            )
+            if authority is None:
+                raise meeting_receipt_authority.MeetingReceiptAuthorityError(
+                    "workflowRunId cannot be verified from the canonical Ledger"
+                )
+        detail = get_challenge_question_run_detail(
+            team_id,
+            normalized_question_id,
+            run_id=normalized_workflow_run_id,
+        )
     except TeamNotFoundError as exc:
+        _map_domain_error("hypothesis_first.selection.context", team_id, exc)
+    except meeting_receipt_authority.MeetingReceiptAuthorityError as exc:
         _map_domain_error("hypothesis_first.selection.context", team_id, exc)
     except ValueError as exc:
         if not str(exc).startswith("challenge_question_run_not_found"):
@@ -335,7 +364,9 @@ def team_workflow_hypothesis_selection_context(
         # Catalog cold start: candidates proposed by the round-0 generation
         # discussion, projected into the artifact hypothesis shape.
         ledger_candidates = hypothesis_first_chain.list_hypothesis_candidates(
-            team_id, question_id=normalized_question_id
+            team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=normalized_workflow_run_id,
         )["candidates"]
         candidates = [
             {
@@ -373,6 +404,7 @@ def team_workflow_hypothesis_selection_context(
                     mode=scope["mode"],
                 ),
             },
+            workflow_run_id=normalized_workflow_run_id,
         )["selection"]
     except hypothesis_selection.ResearchHypothesisSelectionNotFoundError:
         latest_selection = None
@@ -388,6 +420,12 @@ def team_workflow_hypothesis_selection_context(
             continue
         if str(meeting.get("question") or "").strip().upper() != normalized_question_id:
             continue
+        if (
+            normalized_workflow_run_id
+            and hypothesis_first_chain._meeting_workflow_run_id(meeting)
+            != normalized_workflow_run_id
+        ):
+            continue
         meeting_type = str(meeting.get("meetingType") or "")
         if meeting_type == "hypothesis_review":
             review_meeting = meeting
@@ -398,6 +436,7 @@ def team_workflow_hypothesis_selection_context(
         "schemaVersion": 1,
         "teamId": team_id,
         "questionId": normalized_question_id,
+        "workflowRunId": normalized_workflow_run_id,
         "scope": {
             key: scope[key]
             for key in ("program", "theme", "campaign", "question", "branch", "workflow", "agentId")
@@ -424,6 +463,7 @@ def team_workflow_hypothesis_candidate_generation_open(
     """Open (or reuse) the round-0 candidate-generation discussion."""
     request = payload if isinstance(payload, dict) else {}
     question_id = str(request.get("questionId") or "").strip()
+    workflow_run_id = str(request.get("workflowRunId") or "").strip()
     if not question_id:
         _raise_team_workflow_route_error(
             "hypothesis_first.candidate_generation.open",
@@ -433,9 +473,45 @@ def team_workflow_hypothesis_candidate_generation_open(
             fields={"questionId": question_id},
         )
     try:
+        receipt_authority = None
+        discussion_scope = None
+        if workflow_run_id:
+            from core.research.workflow.contracts.discussion_scope import (
+                WorkflowDiscussionScopeV1,
+            )
+            from core.web.services.team_workflow.research_project_agent_sessions import (
+                resolve_research_project_identity,
+            )
+
+            receipt_authority = (
+                meeting_receipt_authority.resolve_active_question_authority(
+                    team_id,
+                    question_id,
+                    workflow_run_id,
+                )
+            )
+            if receipt_authority is None:
+                raise meeting_receipt_authority.MeetingReceiptAuthorityError(
+                    "workflowRunId cannot be verified from the canonical Ledger"
+                )
+            project = resolve_research_project_identity(team_id)
+            research_project_id = str(project.get("projectId") or "").strip()
+            if not research_project_id:
+                raise meeting_receipt_authority.MeetingReceiptAuthorityError(
+                    "research project authority is unavailable for generation"
+                )
+            discussion_scope = WorkflowDiscussionScopeV1.generation(
+                teamId=team_id,
+                researchProjectId=research_project_id,
+                workflowRunId=workflow_run_id,
+                workflowNodeId=hypothesis_first_chain.HYPOTHESIS_DESIGN_NODE_ID,
+                questionId=question_id,
+            ).to_dict()
         return hypothesis_first_chain.open_candidate_generation_meeting(
             team_id,
             question_id,
+            _model_invocation_receipt_authority=receipt_authority,
+            _discussion_scope=discussion_scope,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.candidate_generation.open", team_id, exc)
@@ -675,9 +751,14 @@ def team_workflow_hypothesis_round_get(team_id: str, round_id: str) -> dict:
 def team_workflow_hypothesis_first_chain_state(
     team_id: str,
     question_id: str = Query(..., alias="questionId", min_length=1, max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     try:
-        return hypothesis_first_chain.chain_state(team_id, question_id)
+        return hypothesis_first_chain.chain_state(
+            team_id,
+            question_id,
+            workflow_run_id=workflow_run_id,
+        )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.state", team_id, exc)
 
@@ -701,6 +782,7 @@ def team_workflow_hypothesis_first_chain_state_v2(
     team_id: str,
     response: Response,
     question_id: str = Query(..., alias="questionId", min_length=1, max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
     if_none_match: str | None = Header(None, alias="If-None-Match"),
     include_source_cursor: bool = Query(False, alias="includeSourceCursor"),
 ) -> dict | Response:
@@ -708,6 +790,7 @@ def team_workflow_hypothesis_first_chain_state_v2(
         snapshot = hypothesis_first_state_v2.project_hypothesis_first_state_v2(
             team_id,
             question_id,
+            workflow_run_id=workflow_run_id,
             include_source_cursor=include_source_cursor,
         )
     except hypothesis_first_state_v2.HypothesisFirstStateScopeError as exc:
@@ -797,6 +880,7 @@ def team_workflow_hypothesis_first_command(
     payload: HypothesisFirstCommandRequest,
     http_request: Request,
     question_id: str = Query("", alias="questionId", max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     """Execute one server-authorized V2 command with scope-lock CAS.
 
@@ -811,6 +895,7 @@ def team_workflow_hypothesis_first_command(
                 team_id,
                 payload.model_dump(),
                 question_id=question_id,
+                workflow_run_id=workflow_run_id,
             )
     except hypothesis_first_chain.StateVersionConflictError as exc:
         raise HTTPException(
@@ -866,11 +951,13 @@ def team_workflow_hypothesis_first_command(
 def team_workflow_hypothesis_first_collection_requests(
     team_id: str,
     question_id: str = Query("", alias="questionId", max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     try:
         return hypothesis_first_chain.list_collection_requests(
             team_id,
             question_id=question_id,
+            workflow_run_id=workflow_run_id,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.collection_requests", team_id, exc)
@@ -884,11 +971,13 @@ def team_workflow_hypothesis_first_collection_requests(
 def team_workflow_hypothesis_first_review_round_links(
     team_id: str,
     question_id: str = Query("", alias="questionId", max_length=200),
+    workflow_run_id: str = Query("", alias="runId", max_length=200),
 ) -> dict:
     try:
         return hypothesis_first_chain.list_review_round_links(
             team_id,
             question_id=question_id,
+            workflow_run_id=workflow_run_id,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.review_round_links", team_id, exc)

@@ -367,7 +367,12 @@ def _safe_team_id(team_id: str) -> str:
     return safe_storage_component(team_id, fallback="team")
 
 
-def _question_requested_evidence(team_id: str, question_id: str) -> bool:
+def _question_requested_evidence(
+    team_id: str,
+    question_id: str,
+    *,
+    meeting_round_ids: set[str] | None = None,
+) -> bool:
     """True when this question's persisted review decisions asked for evidence.
 
     A ``request_new_evidence`` decision (valid or not) proves the discussion
@@ -381,6 +386,15 @@ def _question_requested_evidence(team_id: str, question_id: str) -> bool:
     normalized_question = str(question_id or "").strip().upper()
     if not normalized_question:
         return False
+    scoped_meeting_ids = (
+        {
+            str(meeting_round_id or "").strip()
+            for meeting_round_id in meeting_round_ids
+            if str(meeting_round_id or "").strip()
+        }
+        if meeting_round_ids is not None
+        else None
+    )
     try:
         question_by_meeting = {
             str(meeting.get("meetingRoundId") or ""): str(
@@ -409,6 +423,10 @@ def _question_requested_evidence(team_id: str, question_id: str) -> bool:
         return True
     return any(
         str(record.get("decision") or "") == "request_new_evidence"
+        and (
+            scoped_meeting_ids is None
+            or str(record.get("meetingRoundId") or "") in scoped_meeting_ids
+        )
         and question_by_meeting.get(
             str(record.get("meetingRoundId") or ""), normalized_question
         )
@@ -444,6 +462,7 @@ def selection_version_for(
     previous_selection_id: str = "",
     reset_id: str = "origin",
     scope_hash: str = "",
+    workflow_run_id: str = "",
 ) -> str:
     """Return the order-independent identity of one submitted selection.
 
@@ -463,6 +482,7 @@ def selection_version_for(
             "previousSelectionId": str(previous_selection_id or "").strip(),
             "resetId": str(reset_id or "origin").strip() or "origin",
             "scopeHash": str(scope_hash or "").strip(),
+            "workflowRunId": str(workflow_run_id or "").strip(),
         }
     )[:24]
 
@@ -871,6 +891,8 @@ def assert_expected_state_version(
     team_id: str,
     question_id: str,
     expected_state_version: str,
+    *,
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Re-read V2 inside the caller's scope lock and enforce coarse CAS."""
 
@@ -879,7 +901,12 @@ def assert_expected_state_version(
         raise ContractValidationError("expectedStateVersion is required")
     from .hypothesis_first_state_v2 import project_hypothesis_first_state_v2
 
-    snapshot = project_hypothesis_first_state_v2(team_id, question_id)
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    snapshot = project_hypothesis_first_state_v2(
+        team_id,
+        question_id,
+        workflow_run_id=normalized_workflow_run_id,
+    )
     actual = str(snapshot.get("stateVersion") or "").strip()
     if not actual or actual != expected:
         raise StateVersionConflictError(
@@ -890,6 +917,11 @@ def assert_expected_state_version(
                 + str(team_id)
                 + "/workflow-orchestration/hypothesis-first/chain/state-v2?questionId="
                 + str(question_id)
+                + (
+                    "&runId=" + normalized_workflow_run_id
+                    if normalized_workflow_run_id
+                    else ""
+                )
             ),
         )
     return snapshot
@@ -990,6 +1022,7 @@ def _selection_command_input_digest(
     question_id: str,
     payload: Mapping[str, Any],
     candidate_ids: Any,
+    workflow_run_id: str = "",
 ) -> str:
     """Hash semantic selection input while ignoring presentation ordering."""
 
@@ -998,6 +1031,7 @@ def _selection_command_input_digest(
             "actionId": str(action_id or "").strip(),
             "command": "record_selection",
             "questionId": str(question_id or "").strip().upper(),
+            "workflowRunId": str(workflow_run_id or "").strip(),
             "payload": dict(payload),
             "candidateIds": sorted(_normalized_str_list(candidate_ids)),
         }
@@ -1024,6 +1058,7 @@ def _selection_command_outcome(
     action_id: str,
     idempotency_key: str,
     reset_id: str,
+    workflow_run_id: str = "",
     records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Find a durable selection outcome in the existing chain ledger."""
@@ -1031,6 +1066,7 @@ def _selection_command_outcome(
     normalized_team_id = str(team_id or "").strip()
     normalized_question_id = str(question_id or "").strip().upper()
     normalized_reset_id = str(reset_id or "origin").strip() or "origin"
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     source = records if records is not None else _records(team_id)
     for record in reversed(source):
         if str(record.get("recordKind") or "") != SELECTION_COMMAND_OUTCOME_KIND:
@@ -1046,6 +1082,12 @@ def _selection_command_outcome(
         stored_reset_id = str(record.get("resetId") or "").strip()
         if stored_reset_id != normalized_reset_id:
             continue
+        if (
+            normalized_workflow_run_id
+            and str(record.get("workflowRunId") or "").strip()
+            != normalized_workflow_run_id
+        ):
+            continue
         return record
     return None
 
@@ -1057,6 +1099,7 @@ def _selection_command_outcome_for_version(
     action_id: str,
     selection_version: str,
     reset_id: str,
+    workflow_run_id: str = "",
     records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Find an earlier command outcome for the same selection version."""
@@ -1066,6 +1109,7 @@ def _selection_command_outcome_for_version(
     normalized_action_id = str(action_id or "").strip()
     normalized_version = str(selection_version or "").strip()
     normalized_reset_id = str(reset_id or "origin").strip() or "origin"
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     source = records if records is not None else _records(team_id)
     for record in reversed(source):
         if str(record.get("recordKind") or "") != SELECTION_COMMAND_OUTCOME_KIND:
@@ -1080,6 +1124,12 @@ def _selection_command_outcome_for_version(
             continue
         stored_reset_id = str(record.get("resetId") or "").strip()
         if stored_reset_id != normalized_reset_id:
+            continue
+        if (
+            normalized_workflow_run_id
+            and str(record.get("workflowRunId") or "").strip()
+            != normalized_workflow_run_id
+        ):
             continue
         return record
     return None
@@ -1142,6 +1192,7 @@ def _selection_command_replay(
     action_id: str,
     idempotency_key: str,
     expected_state_version: str,
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Build a replay envelope without re-entering any owning mutation."""
 
@@ -1149,6 +1200,7 @@ def _selection_command_replay(
         "schemaVersion": 2,
         "teamId": team_id,
         "questionId": question_id,
+        "workflowRunId": str(workflow_run_id or "").strip(),
         "command": "record_selection",
         "actionId": action_id,
         "idempotencyKey": idempotency_key,
@@ -1165,6 +1217,7 @@ def _active_review_binding_groups(
     *,
     question_id: str,
     selection_version: str,
+    workflow_run_id: str = "",
     records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return active candidate-review groups for one selection version."""
@@ -1173,6 +1226,7 @@ def _active_review_binding_groups(
 
     normalized_question_id = str(question_id or "").strip().upper()
     normalized_version = str(selection_version or "").strip()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     if not normalized_version:
         return []
     source = records if records is not None else _records(team_id)
@@ -1180,6 +1234,7 @@ def _active_review_binding_groups(
         selection_payload = hypothesis_selection.list_hypothesis_selections(
             team_id,
             question_id=normalized_question_id,
+            workflow_run_id=normalized_workflow_run_id,
         )
         selection_records = [
             dict(record)
@@ -1219,11 +1274,20 @@ def _active_review_binding_groups(
                     normalized_question_id,
                     records=source,
                 ),
+                workflow_run_id=str(
+                    linked_selection.get("workflowRunId") or ""
+                ).strip(),
             )
         if version != normalized_version:
             continue
         meeting_id = str(link.get("meetingRoundId") or "").strip()
         meeting = meeting_by_id.get(meeting_id)
+        if (
+            normalized_workflow_run_id
+            and meeting is not None
+            and _meeting_workflow_run_id(meeting) != normalized_workflow_run_id
+        ):
+            continue
         if not meeting or str(meeting.get("status") or "").strip().lower() not in _ACTIVE_MEETING_STATUSES:
             continue
         round_index = int(link.get("roundIndex") or 1)
@@ -1617,6 +1681,7 @@ def record_human_adjudication(
     decision: str,
     rationale: str,
     idempotency_key: str,
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Append the missing human authority for an exhausted convergence gate."""
 
@@ -1626,6 +1691,7 @@ def record_human_adjudication(
     normalized_round_id = str(hypothesis_round_id or "").strip()
     normalized_decision = str(decision or "").strip().lower()
     normalized_rationale = str(rationale or "").strip()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     if normalized_decision not in {"accepted", "rejected"}:
         raise ContractValidationError(
             "human_adjudication decision must be accepted or rejected"
@@ -1639,7 +1705,40 @@ def record_human_adjudication(
         raise HypothesisFirstChainError(
             "human adjudication requires a closed hypothesis round"
         )
+    round_meeting_ids = [
+        str(ref.get("id") or "").strip()
+        for ref in list(round_record.get("meetingRefs") or [])
+        if isinstance(ref, Mapping)
+        and str(ref.get("kind") or "") == "meeting_round"
+        and str(ref.get("id") or "").strip()
+    ]
     question_rounds = _question_hypothesis_rounds(team_id, normalized_question_id)
+    if normalized_workflow_run_id:
+        run_meeting_ids = {
+            str(meeting.get("meetingRoundId") or "").strip()
+            for meeting in _question_meetings(
+                team_id,
+                normalized_question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
+            if str(meeting.get("meetingRoundId") or "").strip()
+        }
+        if not round_meeting_ids or not set(round_meeting_ids).issubset(
+            run_meeting_ids
+        ):
+            raise HypothesisFirstChainError(
+                "human adjudication round does not belong to the workflow run"
+            )
+        question_rounds = [
+            item
+            for item in question_rounds
+            if any(
+                isinstance(ref, Mapping)
+                and str(ref.get("kind") or "") == "meeting_round"
+                and str(ref.get("id") or "").strip() in run_meeting_ids
+                for ref in list(item.get("meetingRefs") or [])
+            )
+        ]
     if not question_rounds or str(question_rounds[-1].get("roundId") or "") != normalized_round_id:
         raise HypothesisFirstChainError(
             "human adjudication must target the current hypothesis round"
@@ -1661,6 +1760,8 @@ def record_human_adjudication(
                 str(existing.get("hypothesisRoundId") or "") != normalized_round_id
                 or str(existing.get("decision") or "") != normalized_decision
                 or str(existing.get("rationale") or "") != normalized_rationale
+                or str(existing.get("workflowRunId") or "")
+                != normalized_workflow_run_id
             ):
                 raise HypothesisFirstChainError(
                     "human adjudication idempotency key is bound to different input"
@@ -1694,6 +1795,8 @@ def record_human_adjudication(
             "idempotencyKey": identity,
             "questionId": normalized_question_id,
             "hypothesisRoundId": normalized_round_id,
+            "workflowRunId": normalized_workflow_run_id,
+            "meetingRoundIds": round_meeting_ids,
             "decision": normalized_decision,
             "rationale": normalized_rationale,
             "decidedBy": _OPERATOR_AGENT_ID,
@@ -2081,6 +2184,7 @@ def execute_v2_command(
     request: Mapping[str, Any],
     *,
     question_id: str = "",
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Execute one V2 command under scope-lock reauthorization and CAS.
 
@@ -2096,11 +2200,17 @@ def execute_v2_command(
     identity = {
         "teamId": str(team_id or ""),
         "questionId": str(question_id or ""),
+        "workflowRunId": str(workflow_run_id or ""),
         "command": command,
         "actionId": action_id,
     }
     try:
-        result = _execute_v2_command_impl(team_id, request, question_id=question_id)
+        result = _execute_v2_command_impl(
+            team_id,
+            request,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
     except Exception as exc:
         _record_scene_event(
             "command.failed",
@@ -2131,6 +2241,7 @@ def _execute_v2_command_impl(
     request: Mapping[str, Any],
     *,
     question_id: str = "",
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Execute one V2 command under scope-lock reauthorization and CAS.
 
@@ -2156,6 +2267,7 @@ def _execute_v2_command_impl(
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     with hypothesis_first_scope_lock(normalized_team_id, normalized_question_id):
         # Selection commands are the one V2 path whose external side effect
         # can already have committed when the response is lost.  Look up the
@@ -2208,12 +2320,14 @@ def _execute_v2_command_impl(
                 ),
                 reset_id=reset_id,
                 scope_hash=selection_scope_hash,
+                workflow_run_id=normalized_workflow_run_id,
             )
             selection_input_digest = _selection_command_input_digest(
                 action_id=action_id,
                 question_id=normalized_question_id,
                 payload=payload,
                 candidate_ids=selected_candidate_ids,
+                workflow_run_id=normalized_workflow_run_id,
             )
             existing_outcome = _selection_command_outcome(
                 normalized_team_id,
@@ -2221,6 +2335,7 @@ def _execute_v2_command_impl(
                 action_id=action_id,
                 idempotency_key=idempotency_key,
                 reset_id=reset_id,
+                workflow_run_id=normalized_workflow_run_id,
                 records=records,
             )
             if existing_outcome is not None:
@@ -2241,6 +2356,7 @@ def _execute_v2_command_impl(
                     action_id=action_id,
                     idempotency_key=idempotency_key,
                     expected_state_version=expected,
+                    workflow_run_id=normalized_workflow_run_id,
                 )
 
             # A second client key can race after the first key's outcome has
@@ -2253,6 +2369,7 @@ def _execute_v2_command_impl(
                 action_id=action_id,
                 selection_version=selection_version,
                 reset_id=reset_id,
+                workflow_run_id=normalized_workflow_run_id,
                 records=records,
             )
             if version_outcome is not None:
@@ -2278,6 +2395,7 @@ def _execute_v2_command_impl(
                     action_id=action_id,
                     idempotency_key=idempotency_key,
                     expected_state_version=expected,
+                    workflow_run_id=normalized_workflow_run_id,
                 )
 
             # A crash can leave the review binding durable but not the command
@@ -2287,6 +2405,7 @@ def _execute_v2_command_impl(
                 normalized_team_id,
                 question_id=normalized_question_id,
                 selection_version=selection_version,
+                workflow_run_id=normalized_workflow_run_id,
                 records=records,
             )
             if active_bindings:
@@ -2338,6 +2457,7 @@ def _execute_v2_command_impl(
                     "outcomeId": f"hf2-selection-outcome-{_stable_hash({'actionId': action_id, 'idempotencyKey': idempotency_key})[:16]}",
                     "teamId": normalized_team_id,
                     "questionId": normalized_question_id,
+                    "workflowRunId": normalized_workflow_run_id,
                     "actionId": action_id,
                     "idempotencyKey": idempotency_key,
                     "inputDigest": selection_input_digest,
@@ -2355,12 +2475,14 @@ def _execute_v2_command_impl(
                     action_id=action_id,
                     idempotency_key=idempotency_key,
                     expected_state_version=expected,
+                    workflow_run_id=normalized_workflow_run_id,
                 )
 
         snapshot = assert_expected_state_version(
             normalized_team_id,
             normalized_question_id,
             expected,
+            workflow_run_id=normalized_workflow_run_id,
         )
         if not command:
             matching_actions = [
@@ -2396,9 +2518,46 @@ def _execute_v2_command_impl(
         from core.web.services.team_workflow import meeting_rounds, meeting_runtime
 
         if command in {"open_generation", "retry_generation"}:
+            receipt_authority = None
+            discussion_scope = None
+            if normalized_workflow_run_id:
+                from core.research.workflow.contracts.discussion_scope import (
+                    WorkflowDiscussionScopeV1,
+                )
+                from core.web.services.team_workflow.research_project_agent_sessions import (
+                    resolve_research_project_identity,
+                )
+                from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+                    resolve_active_question_authority,
+                )
+
+                receipt_authority = resolve_active_question_authority(
+                    normalized_team_id,
+                    normalized_question_id,
+                    normalized_workflow_run_id,
+                )
+                if receipt_authority is None:
+                    raise HypothesisFirstChainError(
+                        "workflow run authority is unavailable for generation"
+                    )
+                project = resolve_research_project_identity(normalized_team_id)
+                research_project_id = str(project.get("projectId") or "").strip()
+                if not research_project_id:
+                    raise HypothesisFirstChainError(
+                        "research project authority is unavailable for generation"
+                    )
+                discussion_scope = WorkflowDiscussionScopeV1.generation(
+                    teamId=normalized_team_id,
+                    researchProjectId=research_project_id,
+                    workflowRunId=normalized_workflow_run_id,
+                    workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
+                    questionId=normalized_question_id,
+                ).to_dict()
             result = open_candidate_generation_meeting(
                 normalized_team_id,
                 normalized_question_id,
+                _model_invocation_receipt_authority=receipt_authority,
+                _discussion_scope=discussion_scope,
             )
         elif command == "record_selection":
             from core.web.services.team_workflow import hypothesis_selection
@@ -2419,6 +2578,7 @@ def _execute_v2_command_impl(
                     normalized_question_id,
                 ),
                 "questionId": normalized_question_id,
+                "workflowRunId": normalized_workflow_run_id,
                 "selectedCandidateIds": selected_candidate_ids,
                 "decidedBy": _OPERATOR_AGENT_ID,
             }
@@ -2438,6 +2598,7 @@ def _execute_v2_command_impl(
                 selected_candidate_ids=selected_candidate_ids,
                 reset_id=reset_id,
                 scope_hash=selection_scope_hash,
+                workflow_run_id=normalized_workflow_run_id,
             )
             selection_result = _selection_command_result(result)
             selection_result["selectionVersion"] = selection_version
@@ -2447,6 +2608,7 @@ def _execute_v2_command_impl(
                 "outcomeId": f"hf2-selection-outcome-{_stable_hash({'actionId': action_id, 'idempotencyKey': idempotency_key})[:16]}",
                 "teamId": normalized_team_id,
                 "questionId": normalized_question_id,
+                "workflowRunId": normalized_workflow_run_id,
                 "actionId": action_id,
                 "idempotencyKey": idempotency_key,
                 "inputDigest": selection_input_digest,
@@ -2463,6 +2625,7 @@ def _execute_v2_command_impl(
                     action_id=action_id,
                     idempotency_key=idempotency_key,
                     reset_id=reset_id,
+                    workflow_run_id=normalized_workflow_run_id,
                 )
                 if existing_outcome is None:
                     _append_jsonl(_storage_path(normalized_team_id), outcome)
@@ -2579,6 +2742,7 @@ def _execute_v2_command_impl(
                 decision=str(action_input.get("decision") or ""),
                 rationale=str(action_input.get("rationale") or ""),
                 idempotency_key=idempotency_key,
+                workflow_run_id=normalized_workflow_run_id,
             )
         elif command == "create_formal_run":
             from .run_creation import create_question_run
@@ -2975,18 +3139,40 @@ def _finish_generation_attempt_for_meeting(
     )
 
 
-def list_collection_requests(team_id: str, *, question_id: str = "") -> dict[str, Any]:
+def list_collection_requests(
+    team_id: str,
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
     """List the latest record of every collection request, newest-last."""
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    if normalized_workflow_run_id and not normalized_question_id:
+        raise ContractValidationError("questionId is required when runId is provided")
     requests = _collection_requests(_records(normalized_team_id))
     if normalized_question_id:
         requests = [
             record
             for record in requests
             if str(record.get("questionId") or "").upper() == normalized_question_id
+        ]
+    if normalized_workflow_run_id:
+        meeting_ids = {
+            str(meeting.get("meetingRoundId") or "").strip()
+            for meeting in _question_meetings(
+                normalized_team_id,
+                normalized_question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
+        }
+        requests = [
+            record
+            for record in requests
+            if str(record.get("meetingRoundId") or "").strip() in meeting_ids
         ]
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -2997,18 +3183,40 @@ def list_collection_requests(team_id: str, *, question_id: str = "") -> dict[str
     }
 
 
-def list_review_round_links(team_id: str, *, question_id: str = "") -> dict[str, Any]:
+def list_review_round_links(
+    team_id: str,
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
     """List review-round lineage links ordered by round index."""
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    if normalized_workflow_run_id and not normalized_question_id:
+        raise ContractValidationError("questionId is required when runId is provided")
     links = _review_round_links(_records(normalized_team_id))
     if normalized_question_id:
         links = [
             record
             for record in links
             if str(record.get("questionId") or "").upper() == normalized_question_id
+        ]
+    if normalized_workflow_run_id:
+        meeting_ids = {
+            str(meeting.get("meetingRoundId") or "").strip()
+            for meeting in _question_meetings(
+                normalized_team_id,
+                normalized_question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
+        }
+        links = [
+            record
+            for record in links
+            if str(record.get("meetingRoundId") or "").strip() in meeting_ids
         ]
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -3148,9 +3356,11 @@ def open_review_meeting_for_selection(
         resolve_active_question_authority,
     )
 
+    workflow_run_id = str(selection_record.get("workflowRunId") or "").strip()
     receipt_authority = resolve_active_question_authority(
         normalized_team_id,
         question_id,
+        workflow_run_id,
     )
     normalized_round_index = max(1, int(round_index or 1))
     selected_candidate_ids = _normalized_str_list(
@@ -3170,6 +3380,7 @@ def open_review_meeting_for_selection(
             ),
             reset_id=_current_reset_id(normalized_team_id, question_id),
             scope_hash=str(selection_record.get("scopeHash") or ""),
+            workflow_run_id=workflow_run_id,
         )
     if _selection_version:
         selection_version = str(_selection_version).strip()
@@ -3192,6 +3403,7 @@ def open_review_meeting_for_selection(
             normalized_team_id,
             question_id=question_id,
             selection_version=selection_version,
+            workflow_run_id=workflow_run_id,
         )
         active_selection_ids = {
             str(item.get("selectionId") or "").strip()
@@ -3229,6 +3441,7 @@ def open_review_meeting_for_selection(
             question_id,
             selected_candidate_ids,
             receipt_authority=receipt_authority,
+            workflow_run_id=workflow_run_id,
         )
         # Fan-out intents are queued on disk before any meeting side effect
         # (same contract as generation attempts): a crash mid-fan-out still
@@ -3501,6 +3714,9 @@ def open_review_meeting_for_selection(
                 for candidate_id in payload["selectedCandidateIds"]
             ],
         },
+        workflow_run_id=str(
+            (receipt_authority or {}).get("workflowRunId") or workflow_run_id
+        ).strip(),
     )
     opened = meeting_runtime.open_hypothesis_review_meeting(
         normalized_team_id,
@@ -3536,6 +3752,7 @@ def _review_discussion_scope_base(
     selected_candidate_ids: list[str],
     *,
     receipt_authority: Mapping[str, Any] | None,
+    workflow_run_id: str = "",
 ):
     """Resolve a server-owned workflow identity for candidate review rooms.
 
@@ -3575,10 +3792,13 @@ def _review_discussion_scope_base(
         )
 
     selected = set(selected_candidate_ids)
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     try:
-        candidates = list_hypothesis_candidates(team_id, question_id=question_id)[
-            "candidates"
-        ]
+        candidates = list_hypothesis_candidates(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )["candidates"]
     except Exception:  # noqa: BLE001 - unscoped legacy fallback remains valid
         return None
     source_meeting_ids = {
@@ -3594,7 +3814,11 @@ def _review_discussion_scope_base(
     source_meeting = next(
         (
             meeting
-            for meeting in _question_generation_meetings(team_id, question_id)
+            for meeting in _question_generation_meetings(
+                team_id,
+                question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
             if str(meeting.get("meetingRoundId") or "").strip() == source_meeting_id
         ),
         None,
@@ -3682,19 +3906,56 @@ def _question_scope_envelope(team_id: str, question_id: str) -> dict[str, str]:
     }
 
 
-def _question_generation_meetings(team_id: str, question_id: str) -> list[dict[str, Any]]:
+def _meeting_workflow_run_id(meeting_round: Mapping[str, Any]) -> str:
+    """Return the immutable workflow-run identity persisted on a meeting.
+
+    The model invocation receipt is the execution authority.  Older formal
+    meetings may only carry the server-validated discussion scope, so retain
+    that as a read-compatible fallback without trusting arbitrary fields.
+    """
+
+    receipt_authority = meeting_round.get("modelInvocationReceiptAuthority")
+    if isinstance(receipt_authority, Mapping):
+        workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
+        if workflow_run_id:
+            return workflow_run_id
+
+    discussion_scope = meeting_round.get("discussionScope")
+    if not isinstance(discussion_scope, Mapping):
+        return ""
+    from core.research.workflow.contracts.discussion_scope import (
+        parse_discussion_scope,
+    )
+
+    try:
+        return parse_discussion_scope(discussion_scope).workflowRunId
+    except ContractValidationError:
+        return ""
+
+
+def _question_generation_meetings(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]]:
     from core.web.services.team_workflow import meeting_rounds
 
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
     return [
         meeting
         for meeting in meetings
         if str(meeting.get("meetingType") or "") == CANDIDATE_GENERATION_MEETING_TYPE
         and str(meeting.get("question") or "").upper() == question_id.upper()
+        and (
+            not normalized_workflow_run_id
+            or _meeting_workflow_run_id(meeting) == normalized_workflow_run_id
+        )
     ]
 
 
-_TRAIL_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_TRAIL_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
 _TRAIL_CACHE_MAX_ENTRIES = 32
 
 
@@ -3726,6 +3987,7 @@ def candidate_evidence_trail(
     team_id: str,
     question_id: str,
     *,
+    workflow_run_id: str = "",
     excerpt_chars: int = 240,
 ) -> dict[str, Any]:
     """Per-candidate trail of discussion messages that cite it.
@@ -3742,21 +4004,25 @@ def candidate_evidence_trail(
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     if not normalized_question_id:
         raise ContractValidationError("questionId is required")
 
-    cache_key = (normalized_team_id, normalized_question_id)
+    cache_key = (
+        normalized_team_id,
+        normalized_question_id,
+        normalized_workflow_run_id,
+    )
     source_stamp = _trail_source_stamp(normalized_team_id)
     cached = _TRAIL_CACHE.get(cache_key)
     if cached is not None and cached[0] == source_stamp:
         return cached[1]
 
-    candidates = [
-        record
-        for record in _records(normalized_team_id)
-        if str(record.get("recordKind") or "") == CANDIDATE_KIND
-        and str(record.get("questionId") or "").upper() == normalized_question_id
-    ]
+    candidates = list_hypothesis_candidates(
+        normalized_team_id,
+        question_id=normalized_question_id,
+        workflow_run_id=normalized_workflow_run_id,
+    )["candidates"]
     candidate_ids = [
         str(record.get("candidateId") or "").strip()
         for record in candidates
@@ -3769,6 +4035,10 @@ def candidate_evidence_trail(
         meeting
         for meeting in meetings
         if str(meeting.get("question") or "").upper() == normalized_question_id
+        and (
+            not normalized_workflow_run_id
+            or _meeting_workflow_run_id(meeting) == normalized_workflow_run_id
+        )
         and str(meeting.get("meetingType") or "")
         in {CANDIDATE_GENERATION_MEETING_TYPE, HYPOTHESIS_REVIEW_MEETING_TYPE}
     ]
@@ -3811,6 +4081,7 @@ def candidate_evidence_trail(
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "questionId": normalized_question_id,
+        "workflowRunId": normalized_workflow_run_id,
         "trails": [
             {"candidateId": cid, "entries": trail[cid]}
             for cid in candidate_ids
@@ -3823,12 +4094,31 @@ def candidate_evidence_trail(
     return result
 
 
-def list_hypothesis_candidates(team_id: str, *, question_id: str = "") -> dict[str, Any]:
+def list_hypothesis_candidates(
+    team_id: str,
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
     """List ledger-registered hypothesis candidates (round-0 output)."""
     from core.web.services import team_service
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    generation_meeting_ids = (
+        {
+            str(meeting.get("meetingRoundId") or "").strip()
+            for meeting in _question_generation_meetings(
+                normalized_team_id,
+                normalized_question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
+            if str(meeting.get("meetingRoundId") or "").strip()
+        }
+        if normalized_workflow_run_id
+        else set()
+    )
     candidates = [
         record
         for record in _records(normalized_team_id)
@@ -3836,6 +4126,10 @@ def list_hypothesis_candidates(team_id: str, *, question_id: str = "") -> dict[s
         and (
             not normalized_question_id
             or str(record.get("questionId") or "").upper() == normalized_question_id
+        )
+        and (
+            not normalized_workflow_run_id
+            or str(record.get("meetingRoundId") or "") in generation_meeting_ids
         )
     ]
     return {
@@ -3930,16 +4224,59 @@ def open_candidate_generation_meeting(
     normalized_team_id = team_service.assert_team_exists(team_id)
     scope = _question_scope_envelope(normalized_team_id, question_id)
     normalized_question_id = scope["question"]
+    receipt_workflow_run_id = ""
+    if isinstance(_model_invocation_receipt_authority, Mapping):
+        receipt_workflow_run_id = str(
+            _model_invocation_receipt_authority.get("workflowRunId") or ""
+        ).strip()
+    discussion_workflow_run_id = ""
+    if _discussion_scope is not None:
+        from core.research.workflow.contracts.discussion_scope import (
+            QUESTION_GENERATION_SCOPE_KIND,
+            parse_discussion_scope,
+        )
+
+        parsed_discussion_scope = parse_discussion_scope(_discussion_scope)
+        if (
+            parsed_discussion_scope.kind != QUESTION_GENERATION_SCOPE_KIND
+            or parsed_discussion_scope.teamId != normalized_team_id
+            or parsed_discussion_scope.questionId.upper() != normalized_question_id
+        ):
+            raise HypothesisFirstChainError(
+                "candidate generation discussion scope does not match team/question"
+            )
+        discussion_workflow_run_id = parsed_discussion_scope.workflowRunId
+        _discussion_scope = parsed_discussion_scope.to_dict()
+    if (
+        receipt_workflow_run_id
+        and discussion_workflow_run_id
+        and receipt_workflow_run_id != discussion_workflow_run_id
+    ):
+        raise HypothesisFirstChainError(
+            "candidate generation receipt and discussion scope belong to different workflow runs"
+        )
+    workflow_run_id = receipt_workflow_run_id or discussion_workflow_run_id
     scope_hash = scope_hash_for(
         **{field: scope[field] for field in _SCOPE_FIELDS},
         agent_id=scope["agentId"],
         mode=scope["mode"],
     )
-    meetings = _question_generation_meetings(normalized_team_id, normalized_question_id)
+    all_meetings = _question_generation_meetings(
+        normalized_team_id, normalized_question_id
+    )
+    run_meetings = (
+        _question_generation_meetings(
+            normalized_team_id,
+            normalized_question_id,
+            workflow_run_id=workflow_run_id,
+        )
+        if workflow_run_id
+        else all_meetings
+    )
     open_meeting = next(
         (
             meeting
-            for meeting in meetings
+            for meeting in run_meetings
             if str(meeting.get("status") or "")
             in {"open", "summarizing", "awaiting_approval"}
         ),
@@ -3981,8 +4318,17 @@ def open_candidate_generation_meeting(
                 lifecycle="failed",
                 error="discussion_has_no_completed_messages",
             )
-        meetings = _question_generation_meetings(
+        all_meetings = _question_generation_meetings(
             normalized_team_id, normalized_question_id
+        )
+        run_meetings = (
+            _question_generation_meetings(
+                normalized_team_id,
+                normalized_question_id,
+                workflow_run_id=workflow_run_id,
+            )
+            if workflow_run_id
+            else all_meetings
         )
         open_meeting = None
     if open_meeting is not None and _normalized_str_list(
@@ -4006,7 +4352,7 @@ def open_candidate_generation_meeting(
             "questionId": normalized_question_id,
         }
     latest_closed_meeting = (
-        meetings[-1] if open_meeting is None and meetings else None
+        run_meetings[-1] if open_meeting is None and run_meetings else None
     )
     if (
         latest_closed_meeting is not None
@@ -4021,11 +4367,12 @@ def open_candidate_generation_meeting(
         # a closed meeting whose proposals never landed; re-register them
         # (idempotent) instead of forcing a whole new generation discussion.
         _heal_generation_candidates(normalized_team_id, latest_closed_meeting)
-        candidate_count = len(
-            list_hypothesis_candidates(
-                normalized_team_id, question_id=normalized_question_id
-            )["candidates"]
-        )
+        candidates = list_hypothesis_candidates(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=workflow_run_id,
+        )["candidates"]
+        candidate_count = len(candidates)
         # A single candidate can never satisfy the >=2 selection floor; reuse
         # only when the registered set is actually selectable, otherwise let a
         # fresh generation attempt run instead of dead-locking the question.
@@ -4056,7 +4403,7 @@ def open_candidate_generation_meeting(
             parse_discussion_scope,
         )
 
-        for previous in reversed(meetings):
+        for previous in reversed(run_meetings):
             if _is_execution_stopped_meeting(previous):
                 continue
             previous_scope = previous.get("discussionScope")
@@ -4077,7 +4424,7 @@ def open_candidate_generation_meeting(
     if open_meeting is not None:
         meeting_round_id = str(open_meeting.get("meetingRoundId") or "")
     else:
-        attempt = len(meetings) + 1
+        attempt = len(all_meetings) + 1
         meeting_round_id = base_id if attempt == 1 else f"{base_id}-a{attempt}"
     with _LOCK:
         previous_attempts = _generation_attempts(
@@ -4086,7 +4433,7 @@ def open_candidate_generation_meeting(
         )
     attempt_number = max(
         [int(item.get("attemptNumber") or 0) for item in previous_attempts]
-        + [len(meetings) + 1]
+        + [len(all_meetings) + 1]
     )
     previous_attempt_id = (
         str(previous_attempts[-1].get("attemptId") or "")
@@ -4168,10 +4515,36 @@ def open_candidate_generation_meeting(
     }
 
 
-def needs_candidate_generation(team_id: str, question_id: str) -> bool:
+def needs_candidate_generation(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> bool:
     """True when the question has no selectable candidates and no generation meeting."""
     from core.web.services.team_workflow import hypothesis_selection
 
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    if normalized_workflow_run_id:
+        meetings = _question_generation_meetings(
+            team_id,
+            question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+        candidate_ids = hypothesis_selection._approved_candidate_ids(
+            team_id,
+            question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+        if len(candidate_ids) >= 2:
+            return False
+        if any(
+            str(meeting.get("status") or "").strip().lower()
+            in _ACTIVE_MEETING_STATUSES
+            for meeting in meetings
+        ):
+            return False
+        return True
     # _approved_candidate_ids already unions the approved artifact and the
     # chain-ledger candidates, so a non-empty set means selection can start.
     if hypothesis_selection._approved_candidate_ids(team_id, question_id):
@@ -5041,6 +5414,7 @@ def _build_round_candidates(
     meeting_round: Mapping[str, Any],
     *,
     candidate_ids: list[str] | None = None,
+    workflow_run_id: str = "",
 ) -> list[dict[str, Any]]:
     """Assemble review inputs for explicit candidates or one meeting's refs.
 
@@ -5065,9 +5439,14 @@ def _build_round_candidates(
     question_id = str(meeting_round.get("question") or "").strip()
     detail = question_launch._approved_details(team_id).get(question_id.upper())
     if detail is None:
-        ledger_candidates = list_hypothesis_candidates(team_id, question_id=question_id)[
-            "candidates"
-        ]
+        resolved_workflow_run_id = str(
+            workflow_run_id or _meeting_workflow_run_id(meeting_round)
+        ).strip()
+        ledger_candidates = list_hypothesis_candidates(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=resolved_workflow_run_id,
+        )["candidates"]
         artifact_by_id = {
             str(item.get("candidateId") or "").strip(): {
                 "hypothesis_id": str(item.get("candidateId") or "").strip(),
@@ -6245,15 +6624,25 @@ def _resume_one_run(runtime: Any, run: Any, trigger: str) -> dict[str, Any]:
 # chain state read model (readiness evaluators)
 
 
-def _question_meetings(team_id: str, question_id: str) -> list[dict[str, Any]]:
+def _question_meetings(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]]:
     from core.web.services.team_workflow import meeting_rounds
 
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
     return [
         meeting
         for meeting in meetings
         if str(meeting.get("meetingType") or "") == HYPOTHESIS_REVIEW_MEETING_TYPE
         and str(meeting.get("question") or "").upper() == question_id.upper()
+        and (
+            not normalized_workflow_run_id
+            or _meeting_workflow_run_id(meeting) == normalized_workflow_run_id
+        )
     ]
 
 
@@ -6348,29 +6737,57 @@ def _project_chain_discussion_anchor(
     )
 
 
-def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
-    """Aggregate the hypothesis-first chain state for one scoped question.
+def chain_state(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
+    """Aggregate one question's hypothesis-first state, optionally by run.
 
-    Read-only; used by the readiness evaluators.  Association is by the scope
-    ``question`` field (one hypothesis-first chain per team/question in DEV).
+    Read-only; used by the readiness evaluators.  Legacy DEV callers retain
+    the team/question projection; formal readiness supplies ``workflowRunId``
+    so retained history from another execution cannot advance or block it.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import hypothesis_selection as selections
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     records = _records(normalized_team_id)
+    meetings = (
+        _question_meetings(
+            normalized_team_id,
+            normalized_question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+        if normalized_workflow_run_id
+        else _question_meetings(normalized_team_id, normalized_question_id)
+    )
+    meeting_ids = {
+        str(meeting.get("meetingRoundId") or "").strip()
+        for meeting in meetings
+        if str(meeting.get("meetingRoundId") or "").strip()
+    }
     links = [
         link
         for link in _review_round_links(records)
         if str(link.get("questionId") or "").upper() == normalized_question_id
+        and (
+            not normalized_workflow_run_id
+            or str(link.get("meetingRoundId") or "") in meeting_ids
+        )
     ]
     requests = [
         request
         for request in _collection_requests(records)
         if str(request.get("questionId") or "").upper() == normalized_question_id
+        and (
+            not normalized_workflow_run_id
+            or str(request.get("meetingRoundId") or "") in meeting_ids
+        )
     ]
-    meetings = _question_meetings(normalized_team_id, normalized_question_id)
     meeting_by_id = {
         str(meeting.get("meetingRoundId") or ""): meeting for meeting in meetings
     }
@@ -6384,10 +6801,14 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         for item in records
         if str(item.get("recordKind") or "") == REVIEW_ROUND_LINK_KIND
         and str(item.get("questionId") or "").upper() == normalized_question_id
+        and (
+            not normalized_workflow_run_id
+            or str(item.get("meetingRoundId") or "") in meeting_ids
+        )
     ]
     if question_links_append_order:
         selection_id = str(question_links_append_order[-1].get("selectionId") or "")
-    if not selection_id:
+    if not selection_id and not normalized_workflow_run_id:
         try:
             scope = _question_scope_envelope(
                 normalized_team_id,
@@ -6495,6 +6916,17 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
     ]
 
     rounds = _question_hypothesis_rounds(normalized_team_id, normalized_question_id)
+    if normalized_workflow_run_id:
+        rounds = [
+            round_record
+            for round_record in rounds
+            if any(
+                isinstance(ref, Mapping)
+                and str(ref.get("kind") or "") == "meeting_round"
+                and str(ref.get("id") or "") in meeting_ids
+                for ref in list(round_record.get("meetingRefs") or [])
+            )
+        ]
     latest_round = rounds[-1] if rounds else {}
     latest_round_id = str(latest_round.get("roundId") or "")
     latest_round_closed = str(latest_round.get("status") or "") == "closed"
@@ -6593,15 +7025,32 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         [int(item.get("roundBudget") or 0) for item in selection_links]
         + [DEFAULT_ROUND_BUDGET]
     )
+    generation_meetings = (
+        _question_generation_meetings(
+            normalized_team_id,
+            normalized_question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )
+        if normalized_workflow_run_id
+        else _question_generation_meetings(
+            normalized_team_id, normalized_question_id
+        )
+    )
+    generation_meeting_ids = {
+        str(meeting.get("meetingRoundId") or "").strip()
+        for meeting in generation_meetings
+        if str(meeting.get("meetingRoundId") or "").strip()
+    }
     candidates = [
         record
         for record in records
         if str(record.get("recordKind") or "") == CANDIDATE_KIND
         and str(record.get("questionId") or "").upper() == normalized_question_id
+        and (
+            not normalized_workflow_run_id
+            or str(record.get("meetingRoundId") or "") in generation_meeting_ids
+        )
     ]
-    generation_meetings = _question_generation_meetings(
-        normalized_team_id, normalized_question_id
-    )
     generation_meeting = generation_meetings[-1] if generation_meetings else {}
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -6630,7 +7079,11 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
             and not open_meeting_ids
             and first_meeting_closed
             and not _question_requested_evidence(
-                normalized_team_id, normalized_question_id
+                normalized_team_id,
+                normalized_question_id,
+                meeting_round_ids=(
+                    meeting_ids if normalized_workflow_run_id else None
+                ),
             )
         ),
         "hypothesisRoundCount": len(rounds),

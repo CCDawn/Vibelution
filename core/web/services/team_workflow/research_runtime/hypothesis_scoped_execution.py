@@ -28,17 +28,29 @@ def load_hypothesis_fan_out_input(
     record: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Freeze the current ordered selection and canonical candidate snapshots."""
-    question_id = _text((record.get("inputSnapshot") or {}).get("questionId"))
+    input_snapshot = record.get("inputSnapshot")
+    input_snapshot = input_snapshot if isinstance(input_snapshot, Mapping) else {}
+    question_id = _text(input_snapshot.get("questionId"))
     if not question_id:
         raise ValueError("candidate fan-out requires inputSnapshot.questionId")
-    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow import challenge_question_runs, hypothesis_selection
     from core.web.services.team_workflow.research_runtime import (
         hypothesis_first_chain,
-        question_launch,
     )
 
     team_id = _text(record.get("teamId"))
-    chain = hypothesis_first_chain.chain_state(team_id, question_id)
+    workflow_run_id = _text(
+        record.get("runId")
+        or record.get("workflowRunId")
+        or input_snapshot.get("workflowRunId")
+    )
+    if not workflow_run_id:
+        raise ValueError("candidate fan-out requires a workflow run id")
+    chain = hypothesis_first_chain.chain_state(
+        team_id,
+        question_id,
+        workflow_run_id=workflow_run_id,
+    )
     selection_id = _text(chain.get("selectionId"))
     if not selection_id:
         raise ValueError("hypothesis_design requires a current hypothesis selection")
@@ -47,6 +59,8 @@ def load_hypothesis_fan_out_input(
     ).get("selection") or {}
     if _text(selection.get("questionId")).upper() != question_id.upper():
         raise ValueError("current hypothesis selection belongs to another question")
+    if _text(selection.get("workflowRunId")) != workflow_run_id:
+        raise ValueError("current hypothesis selection belongs to another workflow run")
     selected_candidate_ids = [
         _text(item)
         for item in list(selection.get("selectedCandidateIds") or [])
@@ -56,26 +70,41 @@ def load_hypothesis_fan_out_input(
         raise ValueError("current hypothesis selection has no candidates")
 
     candidate_records = hypothesis_first_chain.list_hypothesis_candidates(
-        team_id, question_id=question_id
+        team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
     ).get("candidates") or []
     by_id: dict[str, dict[str, Any]] = {
         _text(item.get("candidateId")): dict(item)
         for item in candidate_records
         if isinstance(item, dict) and _text(item.get("candidateId"))
     }
-    approved = question_launch._approved_details(team_id).get(question_id.upper())
-    output = (
-        approved.get("output")
-        if isinstance(approved, dict) and isinstance(approved.get("output"), dict)
-        else {}
+    # An approved v2 run can provide the selected hypotheses without a
+    # candidate-generation meeting. Hydrate only that same run's persisted
+    # output; a team/question-wide approved-details fallback could leak a
+    # sibling run's candidates into this fan-out.
+    try:
+        detail = challenge_question_runs.get_challenge_question_run_detail(
+            team_id,
+            question_id,
+            run_id=workflow_run_id,
+        )
+    except ValueError as exc:
+        if not str(exc).startswith("challenge_question_run_not_found"):
+            raise
+        detail = {}
+    output = detail.get("output") if isinstance(detail, Mapping) else {}
+    hypotheses = (
+        output.get("hypotheses")
+        if isinstance(output, Mapping) and isinstance(output.get("hypotheses"), list)
+        else []
     )
-    for item in list(output.get("hypotheses") or []):
-        if not isinstance(item, dict):
+    for item in hypotheses:
+        if not isinstance(item, Mapping):
             continue
         candidate_id = _text(item.get("hypothesis_id") or item.get("candidateId"))
         if candidate_id:
             by_id.setdefault(candidate_id, dict(item))
-
     snapshots: list[dict[str, Any]] = []
     for index, candidate_id in enumerate(selected_candidate_ids):
         source = by_id.get(candidate_id) or {}
@@ -108,11 +137,20 @@ def load_hypothesis_fan_out_input(
     }
 
 
-def _current_selection(team_id: str, question_id: str, selection_id: str) -> dict[str, Any]:
+def _current_selection(
+    team_id: str,
+    question_id: str,
+    selection_id: str,
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
     from core.web.services.team_workflow import hypothesis_selection
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
 
-    state = hypothesis_first_chain.chain_state(team_id, question_id)
+    state = hypothesis_first_chain.chain_state(
+        team_id,
+        question_id,
+        **({"workflow_run_id": workflow_run_id} if workflow_run_id else {}),
+    )
     if _text(state.get("selectionId")) != selection_id:
         raise ValueError(
             "The bound hypothesis selection is no longer current; restart the node for the new selection."
@@ -122,6 +160,8 @@ def _current_selection(team_id: str, question_id: str, selection_id: str) -> dic
     ).get("selection")
     if not isinstance(selection, dict):
         raise ValueError("The bound hypothesis selection cannot be read.")
+    if workflow_run_id and _text(selection.get("workflowRunId")) != workflow_run_id:
+        raise ValueError("The bound hypothesis selection belongs to another workflow run.")
     return selection
 
 
@@ -175,7 +215,12 @@ def record_candidate_fragment_and_maybe_aggregate(
     if not isinstance(run, dict):
         raise ValueError("The bound workflow run cannot be read.")
     question_id = _text((run.get("inputSnapshot") or {}).get("questionId"))
-    selection = _current_selection(team_id, question_id, _text(task["selectionId"]))
+    selection = _current_selection(
+        team_id,
+        question_id,
+        _text(task["selectionId"]),
+        _text(task["workflowRunId"]),
+    )
 
     fragment_result = record_hypothesis_fragment(
         team_id=team_id,

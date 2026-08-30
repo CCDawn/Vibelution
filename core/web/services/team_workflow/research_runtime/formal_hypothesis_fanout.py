@@ -87,6 +87,7 @@ def _selection_from_authority(
 ) -> dict[str, Any] | None:
     team_id = _text(snapshot.get("teamId"))
     question_id = _text(snapshot.get("questionId"))
+    workflow_run_id = _text(snapshot.get("workflowRunId"))
     if not team_id or not question_id:
         return None
     try:
@@ -97,7 +98,11 @@ def _selection_from_authority(
 
         selection_id = _text(bound_selection_id)
         if not selection_id:
-            chain = hypothesis_first_chain.chain_state(team_id, question_id)
+            chain = hypothesis_first_chain.chain_state(
+                team_id,
+                question_id,
+                **({"workflow_run_id": workflow_run_id} if workflow_run_id else {}),
+            )
             selection_id = _text(chain.get("selectionId"))
         if not selection_id:
             return None
@@ -105,6 +110,11 @@ def _selection_from_authority(
         selection = _mapping(response.get("selection"))
         if not selection:
             return None
+        selection_run_id = _text(selection.get("workflowRunId"))
+        if workflow_run_id and selection_run_id != workflow_run_id:
+            raise RuntimeError(
+                "current hypothesis selection belongs to another workflow run"
+            )
         selected = [_text(item) for item in list(selection.get("selectedCandidateIds") or [])]
         selected = [item for item in selected if item]
         if not selected or len(set(selected)) != len(selected):
@@ -112,6 +122,7 @@ def _selection_from_authority(
         records = hypothesis_first_chain.list_hypothesis_candidates(
             team_id,
             question_id=question_id,
+            **({"workflow_run_id": workflow_run_id} if workflow_run_id else {}),
         ).get("candidates") or []
         by_id = {
             _text(item.get("candidateId")): dict(item)
@@ -119,9 +130,14 @@ def _selection_from_authority(
             if isinstance(item, Mapping) and _text(item.get("candidateId"))
         }
         snapshots = [by_id[candidate_id] for candidate_id in selected if candidate_id in by_id]
+        if workflow_run_id and len(snapshots) != len(selected):
+            raise RuntimeError(
+                "current hypothesis selection contains a candidate outside its workflow run"
+            )
         return {
             **selection,
             "selectionId": selection_id,
+            "workflowRunId": selection_run_id or workflow_run_id,
             "selectedCandidateIds": selected,
             "candidateSnapshots": snapshots,
         }
@@ -143,10 +159,16 @@ def formal_hypothesis_fan_out_input(
 
     if action.node_id != "hypothesis_design":
         return None
-    selection = _selection_from_snapshot(snapshot)
+    # The graph action is the authoritative run fence.  Do not let a stale
+    # snapshot field (or a question-only fallback) select another run's chain.
+    scoped_snapshot = dict(snapshot)
+    workflow_run_id = _text(action.run_id)
+    if workflow_run_id:
+        scoped_snapshot["workflowRunId"] = workflow_run_id
+    selection = _selection_from_snapshot(scoped_snapshot)
     if selection is None:
         selection = _selection_from_authority(
-            snapshot,
+            scoped_snapshot,
             bound_selection_id=bound_selection_id,
         )
     if selection is None:
@@ -154,8 +176,24 @@ def formal_hypothesis_fan_out_input(
     selected = list(selection.get("selectedCandidateIds") or [])
     if not selected:
         raise RuntimeError("hypothesis_design selection has no candidates")
+    selection_run_id = _text(selection.get("workflowRunId"))
+    if workflow_run_id and selection_run_id and selection_run_id != workflow_run_id:
+        raise RuntimeError(
+            "hypothesis selection belongs to another workflow run"
+        )
+    for candidate in list(selection.get("candidateSnapshots") or []):
+        if not isinstance(candidate, Mapping):
+            continue
+        candidate_run_id = _text(candidate.get("workflowRunId"))
+        if workflow_run_id and candidate_run_id and candidate_run_id != workflow_run_id:
+            raise RuntimeError(
+                "hypothesis candidate belongs to another workflow run"
+            )
     return {
-        "selection": selection,
+        "selection": {
+            **selection,
+            **({"workflowRunId": selection_run_id or workflow_run_id} if workflow_run_id else {}),
+        },
         "selectionId": _text(selection.get("selectionId")),
         "selectedCandidateIds": selected,
         "candidateSnapshots": list(selection.get("candidateSnapshots") or []),

@@ -37,6 +37,7 @@ export const HYPOTHESIS_SELECTION_MAX = 16;
 export type HypothesisSelectionListProps = {
   teamId: string;
   questionId: string;
+  runId?: string;
   lang?: "zh" | "en";
   compact?: boolean;
   hideSubmit?: boolean;
@@ -53,6 +54,7 @@ function sameIdSet(left: string[], right: string[]): boolean {
 export function HypothesisSelectionList({
   teamId,
   questionId,
+  runId = "",
   lang = "zh",
   compact = false,
   hideSubmit = false,
@@ -62,15 +64,15 @@ export function HypothesisSelectionList({
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
   const contextQuery = useQuery({
-    queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
-    queryFn: () => fetchHypothesisSelectionContext(teamId, questionId),
+    queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId, runId),
+    queryFn: () => fetchHypothesisSelectionContext(teamId, questionId, { runId }),
     enabled: Boolean(teamId && questionId),
     staleTime: 15_000,
   });
   const context: HypothesisSelectionContext | undefined = contextQuery.data;
   const stateV2Query = useQuery({
-    queryKey: queryKeys.hypothesisFirstChainStateV2(teamId, questionId),
-    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(teamId, questionId, { signal }),
+    queryKey: queryKeys.hypothesisFirstChainStateV2(teamId, questionId, runId),
+    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(teamId, questionId, { signal, runId }),
     enabled: Boolean(teamId && questionId),
     retry: false,
     staleTime: 15_000,
@@ -154,21 +156,21 @@ export function HypothesisSelectionList({
       if (mutationCanonicalAction) {
         return executeHypothesisFirstCommand(teamId, questionId, mutationCanonicalAction, {
           candidateIds: input.selectedCandidateIds,
-        });
+        }, { runId });
       }
       if (useLegacyFallback) return recordHypothesisSelection(teamId, input);
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
     onSuccess: (_data, _vars, ctx) => {
       ctx?.telemetry?.succeeded();
-      invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+      invalidateHypothesisFirstQueries(queryClient, teamId, questionId, runId);
     },
     onError: (error, _vars, ctx) => {
       ctx?.telemetry?.failed(error, {
         stateConflict: isHypothesisFirstCommandStateConflict(error),
       });
       if (isHypothesisFirstCommandStateConflict(error)) {
-        invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+        invalidateHypothesisFirstQueries(queryClient, teamId, questionId, runId);
       }
     },
   });
@@ -196,8 +198,8 @@ export function HypothesisSelectionList({
 
   const [expandedTrailCandidateId, setExpandedTrailCandidateId] = useState<string | null>(null);
   const trailQuery = useQuery({
-    queryKey: ["hypothesis-first", "candidate-evidence-trail", teamId, questionId],
-    queryFn: ({ signal }) => fetchCandidateEvidenceTrail(teamId, questionId, { signal }),
+    queryKey: ["hypothesis-first", "candidate-evidence-trail", teamId, questionId, runId],
+    queryFn: ({ signal }) => fetchCandidateEvidenceTrail(teamId, questionId, { signal, runId }),
     enabled: Boolean(teamId && questionId && candidates.length > 0),
     staleTime: 30_000,
   });
@@ -250,6 +252,7 @@ export function HypothesisSelectionList({
     recordMutation.mutate({
       ...context.scope,
       mode: context.mode,
+      workflowRunId: runId,
       questionId,
       selectedCandidateIds: selectedIds,
       decidedBy: "operator",

@@ -181,7 +181,12 @@ def _storage_path(team_id: str) -> Path:
     return _kind_path(team_id, "hypothesis_selections")
 
 
-def _approved_candidate_ids(team_id: str, question_id: str) -> set[str]:
+def _approved_candidate_ids(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> set[str]:
     """Return the selectable candidate ids for one question.
 
     Primary source is the approved formal v2 question artifact, reusing the
@@ -191,6 +196,63 @@ def _approved_candidate_ids(team_id: str, question_id: str) -> set[str]:
     candidate-generation discussion recorded in the hypothesis-first chain
     ledger.
     """
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    if normalized_workflow_run_id:
+        from core.web.services.team_workflow import challenge_question_runs
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+        from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+            MeetingReceiptAuthorityError,
+            resolve_active_question_authority,
+        )
+
+        try:
+            authority = resolve_active_question_authority(
+                team_id,
+                question_id,
+                normalized_workflow_run_id,
+            )
+        except MeetingReceiptAuthorityError as exc:
+            raise ResearchHypothesisSelectionError(str(exc)) from exc
+        if authority is None:
+            raise ResearchHypothesisSelectionError(
+                "workflowRunId cannot be verified from the canonical Ledger"
+            )
+
+        candidate_ids = {
+            str(record.get("candidateId") or "").strip()
+            for record in hypothesis_first_chain.list_hypothesis_candidates(
+                team_id,
+                question_id=question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )["candidates"]
+            if str(record.get("candidateId") or "").strip()
+        }
+        try:
+            detail = challenge_question_runs.get_challenge_question_run_detail(
+                team_id,
+                question_id,
+                run_id=normalized_workflow_run_id,
+            )
+        except ValueError as exc:
+            if not str(exc).startswith("challenge_question_run_not_found"):
+                raise
+            detail = {}
+        output = detail.get("output") if isinstance(detail, Mapping) else {}
+        hypotheses = (
+            output.get("hypotheses")
+            if isinstance(output, Mapping) and isinstance(output.get("hypotheses"), list)
+            else []
+        )
+        candidate_ids.update(
+            str(item.get("hypothesis_id") or "").strip()
+            for item in hypotheses
+            if isinstance(item, Mapping)
+            and str(item.get("hypothesis_id") or "").strip()
+        )
+        return candidate_ids
+
     from core.web.services.team_workflow.research_runtime import question_launch
 
     detail = question_launch._approved_details(team_id).get(question_id.upper())
@@ -241,6 +303,7 @@ def _selection_hash(payload: Mapping[str, Any]) -> str:
     return _stable_hash(
         {
             "scopeHash": str(payload.get("scopeHash") or ""),
+            "workflowRunId": str(payload.get("workflowRunId") or ""),
             "questionId": str(payload.get("questionId") or ""),
             "selectedCandidateIds": list(payload.get("selectedCandidateIds") or []),
             "previousSelectionId": str(payload.get("previousSelectionId") or ""),
@@ -264,6 +327,7 @@ def _selection_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "agentId",
             "mode",
             "scopeHash",
+            "workflowRunId",
             "questionId",
             "selectedCandidateIds",
             "previousSelectionId",
@@ -277,12 +341,19 @@ def _scoped_question_records(
     *,
     scope_hash: str,
     question_id: str,
+    workflow_run_id: str = "",
 ) -> list[dict[str, Any]]:
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     return [
         record
         for record in records
         if str(record.get("scopeHash") or "") == scope_hash
         and str(record.get("questionId") or "").upper() == question_id.upper()
+        and (
+            not normalized_workflow_run_id
+            or str(record.get("workflowRunId") or "").strip()
+            == normalized_workflow_run_id
+        )
     ]
 
 
@@ -431,8 +502,13 @@ def _record_hypothesis_selection_impl(
     decided_by = str(request.get("decidedBy") or "").strip()
     if not decided_by:
         raise ContractValidationError("decidedBy must be a non-empty string")
+    workflow_run_id = str(request.get("workflowRunId") or "").strip()
     candidates = _normalize_candidate_ids(request.get("selectedCandidateIds"))
-    approved_candidates = _approved_candidate_ids(normalized_team_id, question_id)
+    approved_candidates = _approved_candidate_ids(
+        normalized_team_id,
+        question_id,
+        workflow_run_id=workflow_run_id,
+    )
     unknown = [candidate for candidate in candidates if candidate not in approved_candidates]
     if unknown:
         raise ContractValidationError(
@@ -452,6 +528,7 @@ def _record_hypothesis_selection_impl(
         "schemaVersion": SCHEMA_VERSION,
         "selectionId": "",
         **scope,
+        "workflowRunId": workflow_run_id,
         "questionId": question_id,
         "selectedCandidateIds": candidates,
         "previousSelectionId": previous_selection_id,
@@ -504,6 +581,7 @@ def _record_hypothesis_selection_impl(
             records,
             scope_hash=scope["scopeHash"],
             question_id=question_id,
+            workflow_run_id=workflow_run_id,
         )
         if question_records and not previous_selection_id:
             raise ResearchHypothesisSelectionError(
@@ -532,12 +610,18 @@ def _record_hypothesis_selection_impl(
     }
 
 
-def list_hypothesis_selections(team_id: str, *, question_id: str = "") -> dict[str, Any]:
+def list_hypothesis_selections(
+    team_id: str,
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
     """List selection records for a team, optionally filtered by question."""
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     with _LOCK:
         records, corrupt_count = _read_store(_storage_path(normalized_team_id))
     selections = [
@@ -545,6 +629,13 @@ def list_hypothesis_selections(team_id: str, *, question_id: str = "") -> dict[s
         for record in records
         if not normalized_question_id
         or str(record.get("questionId") or "").upper() == normalized_question_id
+    ]
+    if normalized_workflow_run_id:
+        selections = [
+            record
+            for record in selections
+            if str(record.get("workflowRunId") or "").strip()
+            == normalized_workflow_run_id
     ]
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -581,6 +672,7 @@ def get_latest_hypothesis_selection(
     question_id: str,
     *,
     scope: Mapping[str, Any] | None = None,
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Return the current base hypothesis set of one question.
 
@@ -596,6 +688,7 @@ def get_latest_hypothesis_selection(
     if not normalized_question_id:
         raise ResearchHypothesisSelectionError("Question id is required.")
     resolved_scope = _resolve_read_scope(scope)
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     with _LOCK:
         records, corrupt_count = _read_store(_storage_path(normalized_team_id))
     matched = [
@@ -607,6 +700,11 @@ def get_latest_hypothesis_selection(
         and all(
             str(record.get(field) or "").strip() == resolved_scope[field]
             for field in (*_SCOPE_FIELDS, "agentId", "mode")
+        )
+        and (
+            not normalized_workflow_run_id
+            or str(record.get("workflowRunId") or "").strip()
+            == normalized_workflow_run_id
         )
     ]
     if not matched:

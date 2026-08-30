@@ -11,8 +11,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -46,6 +46,7 @@ from core.web.services.team_workflow import (
     hypothesis_selection,
     meeting_rounds,
     meeting_runtime,
+    research_project_agent_sessions,
 )
 from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
 
@@ -315,6 +316,11 @@ def _expected_routes() -> set[tuple[str, str]]:
             "GET",
             f"{prefix}/hypothesis-first/questions/{{question_id}}/selection-context",
         ),
+        (
+            "GET",
+            f"{prefix}/hypothesis-first/questions/{{question_id}}/candidates/evidence-trail",
+        ),
+        ("POST", f"{prefix}/hypothesis-first/candidate-generation"),
         ("GET", f"{prefix}/meeting-rounds"),
         ("GET", f"{prefix}/meeting-rounds/{{meeting_round_id}}"),
         ("GET", f"{prefix}/meeting-rounds/{{meeting_round_id}}/source-messages"),
@@ -425,6 +431,7 @@ def test_selection_record_route_rejects_incomplete_payload() -> None:
 
 
 def test_selection_query_routes(monkeypatch) -> None:
+    calls = []
     monkeypatch.setattr(
         hf_routes,
         "_selection_read_scope",
@@ -443,7 +450,14 @@ def test_selection_query_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_selection,
         "list_hypothesis_selections",
-        lambda team_id, question_id="": {
+        lambda team_id, question_id="", *, workflow_run_id="": calls.append(
+            {
+                "kind": "list",
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+            }
+        )
+        or {
             "schemaVersion": 1,
             "teamId": team_id,
             "selectionCount": 1,
@@ -454,7 +468,14 @@ def test_selection_query_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_selection,
         "get_latest_hypothesis_selection",
-        lambda team_id, question_id, *, scope=None: {
+        lambda team_id, question_id, *, scope=None, workflow_run_id="": calls.append(
+            {
+                "kind": "latest",
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+            }
+        )
+        or {
             "schemaVersion": 1,
             "teamId": team_id,
             "selection": {"selectionId": "hsel-2", "questionId": question_id},
@@ -475,17 +496,21 @@ def test_selection_query_routes(monkeypatch) -> None:
 
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/selections",
-        params={"questionId": "SCI-096"},
+        params={"questionId": "SCI-096", "runId": "run-096"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["selections"][0]["questionId"] == "SCI-096"
 
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/selections/latest",
-        params={"questionId": "SCI-096"},
+        params={"questionId": "SCI-096", "runId": "run-096"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["selection"]["selectionId"] == "hsel-2"
+    assert calls == [
+        {"kind": "list", "questionId": "SCI-096", "workflowRunId": "run-096"},
+        {"kind": "latest", "questionId": "SCI-096", "workflowRunId": "run-096"},
+    ]
 
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/selections/hsel-9",
@@ -495,7 +520,7 @@ def test_selection_query_routes(monkeypatch) -> None:
 
 
 def test_selection_latest_maps_not_found_to_404(monkeypatch) -> None:
-    def fake_latest(team_id, question_id, *, scope=None):
+    def fake_latest(team_id, question_id, *, scope=None, workflow_run_id=""):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError(
             "No hypothesis selection recorded for this question."
         )
@@ -550,7 +575,7 @@ def _retry_command_body() -> dict[str, object]:
 def test_chain_commands_keep_structured_readiness_rejection(monkeypatch) -> None:
     """A readiness-blocked formal retry must return 412 with blocker details."""
 
-    def fake_execute(team_id, payload, *, question_id=""):
+    def fake_execute(team_id, payload, *, question_id="", workflow_run_id=""):
         raise hypothesis_first_chain.FormalCommandRejectedError(
             "节点尚未就绪，无法开始新的尝试。",
             code="node_not_ready",
@@ -582,7 +607,7 @@ def test_chain_commands_keep_structured_readiness_rejection(monkeypatch) -> None
 
 
 def test_chain_commands_map_runtime_guard_rejection_to_409(monkeypatch) -> None:
-    def fake_execute(team_id, payload, *, question_id=""):
+    def fake_execute(team_id, payload, *, question_id="", workflow_run_id=""):
         raise hypothesis_first_chain.FormalCommandRejectedError(
             "attempt running 不可重试",
             code="command_not_allowed",
@@ -607,7 +632,7 @@ def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> No
     monkeypatch.setattr(
         hf_routes,
         "get_challenge_question_run_detail",
-        lambda team_id, question_id: {
+        lambda team_id, question_id, *, run_id="": {
             "teamId": team_id,
             "questionId": question_id,
             "output": {
@@ -651,7 +676,7 @@ def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> No
     monkeypatch.setattr(
         hypothesis_selection,
         "get_latest_hypothesis_selection",
-        lambda team_id, question_id, *, scope=None: {
+        lambda team_id, question_id, *, scope=None, workflow_run_id="": {
             "schemaVersion": 1,
             "teamId": team_id,
             "selection": {"selectionId": "hsel-1"},
@@ -717,13 +742,13 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
     monkeypatch.setattr(
         hf_routes,
         "get_challenge_question_run_detail",
-        lambda team_id, question_id: {
+        lambda team_id, question_id, *, run_id="": {
             "teamId": team_id,
             "questionId": question_id,
             "output": {"hypotheses": [], "selection": {}},
         },
     )
-    monkeypatch.setattr(hf_routes, "frozen_theme_registry", lambda: {})
+    monkeypatch.setattr(hf_routes, "frozen_theme_registry", dict)
 
     class _DevContract:
         programId = "dev-program"
@@ -742,7 +767,7 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
         lambda team_id, *, theme_id, campaign_id="": _DevContract(),
     )
 
-    def fake_latest(team_id, question_id, *, scope=None):
+    def fake_latest(team_id, question_id, *, scope=None, workflow_run_id=""):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
 
     monkeypatch.setattr(
@@ -751,7 +776,7 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_first_chain,
         "list_hypothesis_candidates",
-        lambda team_id, question_id="": {
+        lambda team_id, question_id="", *, workflow_run_id="": {
             "schemaVersion": 1,
             "teamId": team_id,
             "candidates": [],
@@ -775,11 +800,11 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
 def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> None:
     """Catalog question without an approved artifact: no 404, ledger candidates."""
 
-    def fake_detail(team_id, question_id):
+    def fake_detail(team_id, question_id, *, run_id=""):
         raise ValueError("challenge_question_run_not_found")
 
     monkeypatch.setattr(hf_routes, "get_challenge_question_run_detail", fake_detail)
-    monkeypatch.setattr(hf_routes, "frozen_theme_registry", lambda: {})
+    monkeypatch.setattr(hf_routes, "frozen_theme_registry", dict)
 
     class _DevContract:
         programId = "dev-program"
@@ -800,7 +825,7 @@ def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> Non
     monkeypatch.setattr(
         hypothesis_first_chain,
         "list_hypothesis_candidates",
-        lambda team_id, question_id="": {
+        lambda team_id, question_id="", *, workflow_run_id="": {
             "schemaVersion": 1,
             "teamId": team_id,
             "candidates": [
@@ -813,7 +838,7 @@ def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> Non
         },
     )
 
-    def fake_latest(team_id, question_id, *, scope=None):
+    def fake_latest(team_id, question_id, *, scope=None, workflow_run_id=""):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
 
     monkeypatch.setattr(
@@ -854,11 +879,11 @@ def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> Non
 def test_selection_context_unknown_question_falls_back_to_dev_mode(monkeypatch) -> None:
     """Unknown/catalog-cold-start questions no longer 404: dev-mode context."""
 
-    def fake_detail(team_id, question_id):
+    def fake_detail(team_id, question_id, *, run_id=""):
         raise ValueError("challenge_question_run_not_found")
 
     monkeypatch.setattr(hf_routes, "get_challenge_question_run_detail", fake_detail)
-    monkeypatch.setattr(hf_routes, "frozen_theme_registry", lambda: {})
+    monkeypatch.setattr(hf_routes, "frozen_theme_registry", dict)
 
     class _DevContract:
         programId = "dev-program"
@@ -879,14 +904,14 @@ def test_selection_context_unknown_question_falls_back_to_dev_mode(monkeypatch) 
     monkeypatch.setattr(
         hypothesis_first_chain,
         "list_hypothesis_candidates",
-        lambda team_id, question_id="": {
+        lambda team_id, question_id="", *, workflow_run_id="": {
             "schemaVersion": 1,
             "teamId": team_id,
             "candidates": [],
         },
     )
 
-    def fake_latest(team_id, question_id, *, scope=None):
+    def fake_latest(team_id, question_id, *, scope=None, workflow_run_id=""):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
 
     monkeypatch.setattr(
@@ -1125,10 +1150,19 @@ def test_hypothesis_round_read_routes(monkeypatch) -> None:
 
 
 def test_chain_query_routes(monkeypatch) -> None:
+    calls = []
+
     monkeypatch.setattr(
         hypothesis_first_chain,
         "chain_state",
-        lambda team_id, question_id: {
+        lambda team_id, question_id, *, workflow_run_id="": calls.append(
+            {
+                "kind": "state",
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+            }
+        )
+        or {
             "schemaVersion": 1,
             "teamId": team_id,
             "questionId": question_id,
@@ -1139,7 +1173,14 @@ def test_chain_query_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_first_chain,
         "list_collection_requests",
-        lambda team_id, question_id="": {
+        lambda team_id, question_id="", *, workflow_run_id="": calls.append(
+            {
+                "kind": "collection",
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+            }
+        )
+        or {
             "schemaVersion": 1,
             "teamId": team_id,
             "requestCount": 1,
@@ -1150,7 +1191,14 @@ def test_chain_query_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_first_chain,
         "list_review_round_links",
-        lambda team_id, question_id="": {
+        lambda team_id, question_id="", *, workflow_run_id="": calls.append(
+            {
+                "kind": "links",
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+            }
+        )
+        or {
             "schemaVersion": 1,
             "teamId": team_id,
             "linkCount": 1,
@@ -1158,28 +1206,151 @@ def test_chain_query_routes(monkeypatch) -> None:
             "storagePath": "x",
         },
     )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "candidate_evidence_trail",
+        lambda team_id, question_id, *, workflow_run_id="": calls.append(
+            {
+                "kind": "trail",
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+            }
+        )
+        or {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "questionId": question_id,
+            "trails": [{"candidateId": "cand-1", "entries": []}],
+            "storagePath": "x",
+        },
+    )
     client = _client()
 
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state",
-        params={"questionId": "SCI-096"},
+        params={"questionId": "SCI-096", "runId": "run-096"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["questionId"] == "SCI-096"
 
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/collection-requests",
-        params={"questionId": "SCI-096"},
+        params={"questionId": "SCI-096", "runId": "run-096"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["requests"][0]["requestId"] == "cr-1"
 
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/review-round-links",
-        params={"questionId": "SCI-096"},
+        params={"questionId": "SCI-096", "runId": "run-096"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["links"][0]["meetingRoundId"] == "mr-1"
+
+    response = client.get(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/questions/SCI-096/candidates/evidence-trail",
+        params={"runId": "run-096"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["trails"][0]["candidateId"] == "cand-1"
+    assert calls == [
+        {"kind": "state", "questionId": "SCI-096", "workflowRunId": "run-096"},
+        {
+            "kind": "collection",
+            "questionId": "SCI-096",
+            "workflowRunId": "run-096",
+        },
+        {"kind": "links", "questionId": "SCI-096", "workflowRunId": "run-096"},
+        {"kind": "trail", "questionId": "SCI-096", "workflowRunId": "run-096"},
+    ]
+
+
+def test_selection_context_invalid_run_authority_maps_to_422(monkeypatch) -> None:
+    calls = []
+
+    def fake_resolve(team_id, question_id, workflow_run_id):
+        calls.append((team_id, question_id, workflow_run_id))
+
+    monkeypatch.setattr(
+        hf_routes.meeting_receipt_authority,
+        "resolve_active_question_authority",
+        fake_resolve,
+    )
+    client = _client()
+    response = client.get(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/questions/SCI-002/selection-context",
+        params={"runId": "run-missing"},
+    )
+    assert response.status_code == 422, response.text
+    assert calls == [("team-1", "SCI-002", "run-missing")]
+    assert "workflowRunId cannot be verified" in str(response.json()["detail"])
+
+
+def test_candidate_generation_route_builds_verified_generation_scope(monkeypatch) -> None:
+    run_id = "run-sci-002"
+    authority = {
+        "teamId": "team-1",
+        "questionId": "SCI-002",
+        "workflowRunId": run_id,
+        "receiptId": "receipt-1",
+    }
+    authority_calls = []
+    project_calls = []
+    open_calls = []
+
+    def fake_resolve(team_id, question_id, workflow_run_id):
+        authority_calls.append((team_id, question_id, workflow_run_id))
+        return authority
+
+    def fake_project(team_id):
+        project_calls.append(team_id)
+        return {"projectId": "research-project-1"}
+
+    def fake_open(team_id, question_id, **kwargs):
+        open_calls.append(
+            {"teamId": team_id, "questionId": question_id, "kwargs": kwargs}
+        )
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "status": "created",
+            "meetingRound": {"meetingRoundId": "mr-gen-1"},
+            "storagePath": "x",
+        }
+
+    monkeypatch.setattr(
+        hf_routes.meeting_receipt_authority,
+        "resolve_active_question_authority",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        research_project_agent_sessions,
+        "resolve_research_project_identity",
+        fake_project,
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "open_candidate_generation_meeting",
+        fake_open,
+    )
+
+    client = _client()
+    response = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/candidate-generation",
+        json={"questionId": "SCI-002", "workflowRunId": run_id},
+    )
+
+    assert response.status_code == 201, response.text
+    assert authority_calls == [("team-1", "SCI-002", run_id)]
+    assert project_calls == ["team-1"]
+    assert open_calls[0]["kwargs"]["_model_invocation_receipt_authority"] is authority
+    discussion_scope = open_calls[0]["kwargs"]["_discussion_scope"]
+    assert discussion_scope["kind"] == "question_generation"
+    assert discussion_scope["teamId"] == "team-1"
+    assert discussion_scope["researchProjectId"] == "research-project-1"
+    assert discussion_scope["workflowRunId"] == run_id
+    assert discussion_scope["questionId"] == "SCI-002"
+    assert discussion_scope["workflowNodeId"] == hypothesis_first_chain.HYPOTHESIS_DESIGN_NODE_ID
 
 
 def test_chain_close_review_meeting_passes_runtime_and_payload(monkeypatch) -> None:

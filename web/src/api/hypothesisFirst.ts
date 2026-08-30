@@ -57,8 +57,24 @@ function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {
   });
 }
 
-function questionQuery(questionId: string): string {
-  return questionId ? `?questionId=${encodeURIComponent(questionId)}` : "";
+function scopedQuery(input: {
+  questionId?: string;
+  runId?: string;
+  includeSourceCursor?: boolean;
+}): string {
+  const parts: string[] = [];
+  if (input.questionId) parts.push(`questionId=${encodeURIComponent(input.questionId)}`);
+  if (input.runId) parts.push(`runId=${encodeURIComponent(input.runId)}`);
+  if (input.includeSourceCursor) parts.push("includeSourceCursor=true");
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
+function commandRunId(action: CommandAction, explicitRunId = ""): string {
+  if (explicitRunId.trim()) return explicitRunId.trim();
+  const payload = action.payload as Record<string, unknown>;
+  return [payload.workflowRunId, payload.runId, payload.outputRunId]
+    .map((value) => typeof value === "string" ? value.trim() : "")
+    .find(Boolean) ?? "";
 }
 
 const V2_ENDPOINT_UNAVAILABLE_CODES = new Set([
@@ -101,10 +117,10 @@ export function recordHypothesisSelection(
 export function fetchHypothesisSelections(
   teamId: string,
   questionId = "",
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<HypothesisSelectionListResponse> {
   return fetchJson<HypothesisSelectionListResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/selections${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/selections${scopedQuery({ questionId, runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -112,10 +128,10 @@ export function fetchHypothesisSelections(
 export function fetchLatestHypothesisSelection(
   teamId: string,
   questionId: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<HypothesisSelectionGetResponse> {
   return fetchJson<HypothesisSelectionGetResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/selections/latest${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/selections/latest${scopedQuery({ questionId, runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -134,10 +150,10 @@ export function fetchHypothesisSelection(
 export function fetchHypothesisSelectionContext(
   teamId: string,
   questionId: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<HypothesisSelectionContext> {
   return fetchJson<HypothesisSelectionContext>(
-    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/selection-context`,
+    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/selection-context${scopedQuery({ runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -145,10 +161,10 @@ export function fetchHypothesisSelectionContext(
 export function fetchCandidateEvidenceTrail(
   teamId: string,
   questionId: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<CandidateEvidenceTrailResponse> {
   return fetchJson<CandidateEvidenceTrailResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/candidates/evidence-trail`,
+    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/candidates/evidence-trail${scopedQuery({ runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -156,11 +172,12 @@ export function fetchCandidateEvidenceTrail(
 export function openHypothesisCandidateGeneration(
   teamId: string,
   questionId: string,
+  runId = "",
 ): Promise<MeetingRoundMutationResponse> {
   return writeJson<MeetingRoundMutationResponse>(
     `${teamPrefix(teamId)}/hypothesis-first/candidate-generation`,
     "POST",
-    { questionId },
+    { questionId, ...(runId ? { workflowRunId: runId } : {}) },
   );
 }
 
@@ -331,10 +348,10 @@ export function fetchHypothesisRound(
 export function fetchHypothesisFirstChainState(
   teamId: string,
   questionId: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<HypothesisFirstChainState> {
   return fetchJson<HypothesisFirstChainState>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/state${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/chain/state${scopedQuery({ questionId, runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -343,11 +360,14 @@ export function fetchHypothesisFirstChainState(
 export function fetchHypothesisFirstStateV2(
   teamId: string,
   questionId: string,
-  options?: { signal?: AbortSignal; includeSourceCursor?: boolean },
+  options?: { signal?: AbortSignal; includeSourceCursor?: boolean; runId?: string },
 ): Promise<HypothesisFirstStateV2> {
-  const includeSourceCursor = options?.includeSourceCursor ? "&includeSourceCursor=true" : "";
   return fetchJson<unknown>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/state-v2${questionQuery(questionId)}${includeSourceCursor}`,
+    `${teamPrefix(teamId)}/hypothesis-first/chain/state-v2${scopedQuery({
+      questionId,
+      runId: options?.runId,
+      includeSourceCursor: options?.includeSourceCursor,
+    })}`,
     { signal: options?.signal },
   ).then((payload) => parseHypothesisFirstStateV2(payload));
 }
@@ -375,9 +395,11 @@ export function executeHypothesisFirstCommand<C extends ActionCommand>(
   questionId: string,
   action: Extract<CommandAction, { command: C }>,
   input?: C extends keyof ActionInputByCommand ? ActionInputByCommand[C] : never,
+  options?: { runId?: string },
 ): Promise<HypothesisFirstCommandExecutionResponse> {
+  const runId = commandRunId(action, options?.runId);
   return writeJson<HypothesisFirstCommandExecutionResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/commands${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/chain/commands${scopedQuery({ questionId, runId })}`,
     "POST",
     {
       actionId: action.actionId,
@@ -436,10 +458,10 @@ function parseHypothesisFirstStateV2(payload: unknown): HypothesisFirstStateV2 {
 export function fetchCollectionRequests(
   teamId: string,
   questionId = "",
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<CollectionRequestListResponse> {
   return fetchJson<CollectionRequestListResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/collection-requests${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/chain/collection-requests${scopedQuery({ questionId, runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -447,10 +469,10 @@ export function fetchCollectionRequests(
 export function fetchReviewRoundLinks(
   teamId: string,
   questionId = "",
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; runId?: string },
 ): Promise<ReviewRoundLinkListResponse> {
   return fetchJson<ReviewRoundLinkListResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/review-round-links${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/chain/review-round-links${scopedQuery({ questionId, runId: options?.runId })}`,
     { signal: options?.signal },
   );
 }
@@ -465,7 +487,7 @@ export function fetchHypothesisFirstAnomalyInbox(
   options?: { signal?: AbortSignal },
 ): Promise<AnomalyInboxResponse> {
   return fetchJson<unknown>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/anomaly-inbox${questionQuery(questionId)}`,
+    `${teamPrefix(teamId)}/hypothesis-first/chain/anomaly-inbox${scopedQuery({ questionId })}`,
     { signal: options?.signal },
   ).then((payload) => parseAnomalyInboxResponse(payload));
 }

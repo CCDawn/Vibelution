@@ -18,6 +18,10 @@ from core.web.services.team_workflow.research_runtime.projection_builder import 
     ProjectionInputs,
     build_research_workflow_snapshot,
 )
+from core.web.services.team_workflow.research_runtime import (
+    hypothesis_first_chain,
+    question_launch,
+)
 from core.web.services.team_workflow.research_runtime.query_service import (
     TeamScopeMismatchError,
     WorkflowLedgerUnavailable,
@@ -1519,6 +1523,115 @@ def test_discussion_query_uses_formal_meeting_read_and_raw_room_read(
     assert meetings == []
     assert rooms == []
     assert meeting_calls == ["research-team"]
+
+
+def test_hypothesis_first_discussion_projection_uses_current_run_chain_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = replace(
+        build_run_record(run_id="run-current"),
+        input_snapshot_json=json.dumps(
+            {
+                "questionId": "SCI-096",
+                "researchObjectiveContract": {"hypothesisFirst": True},
+                "discussionAuthority": {"meetings": [], "rooms": []},
+            }
+        ),
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.query_service._discussion_projection_from_sources",
+        lambda *_args: None,
+    )
+
+    def chain_state(team_id, question_id, *, workflow_run_id=""):
+        calls.append((team_id, question_id, workflow_run_id))
+        return {
+            "activeDiscussionAnchor": {
+                "workflowRunId": workflow_run_id or "run-sibling",
+                "meetingRoundId": "meeting-current",
+            }
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.chain_state",
+        chain_state,
+    )
+
+    projection, meetings, rooms = _discussion_inputs_from_run(run, [], {})
+
+    assert projection == {
+        "workflowRunId": "run-current",
+        "meetingRoundId": "meeting-current",
+    }
+    assert meetings == []
+    assert rooms == []
+    assert calls == [("research-team", "SCI-096", "run-current")]
+
+
+def test_round_candidate_ledger_fallback_uses_meeting_workflow_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope = WorkflowDiscussionScopeV1.generation(
+        teamId="research-team",
+        researchProjectId="challenge-sci-096",
+        workflowRunId="run-current",
+        workflowNodeId="hypothesis_design",
+        questionId="SCI-096",
+    ).to_dict()
+    calls: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(question_launch, "_approved_details", lambda _team_id: {})
+
+    def list_candidates(team_id, *, question_id="", workflow_run_id=""):
+        calls.append((team_id, question_id, workflow_run_id))
+        return {
+            "candidates": [
+                {
+                    "candidateId": "candidate-current",
+                    "statement": "current claim",
+                    "rationale": "current rationale",
+                    "differenceFromAlternatives": "current difference",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        list_candidates,
+    )
+
+    candidates = hypothesis_first_chain._build_round_candidates(
+        "research-team",
+        {
+            "question": "SCI-096",
+            "discussionScope": scope,
+            "discussionItemRefs": ["hypothesis_candidate:candidate-current"],
+        },
+    )
+
+    assert calls == [("research-team", "SCI-096", "run-current")]
+    assert candidates == [
+        {
+            "candidateId": "candidate-current",
+            "claim": "current claim",
+            "rationale": "current rationale",
+            "differenceFromAlternatives": "current difference",
+        }
+    ]
+
+    selection_candidates = hypothesis_first_chain._build_round_candidates(
+        "research-team",
+        {
+            "question": "SCI-096",
+            "discussionItemRefs": ["hypothesis_candidate:candidate-current"],
+        },
+        workflow_run_id="run-selection",
+    )
+    assert selection_candidates == candidates
+    assert calls[-1] == ("research-team", "SCI-096", "run-selection")
 
 
 def test_snapshot_current_task_points_at_rerun_target_for_hollow_success() -> None:

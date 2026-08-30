@@ -28,6 +28,14 @@ const hypothesisLeafHarness = vi.hoisted(() => ({
 const launchLeafHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
+const questionDetailHarness = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
+const mockedGetQuestionRunDetail = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+
+vi.mock("../../../api/challengeQuestionRuns", () => ({
+  getChallengeQuestionRunDetail: mockedGetQuestionRunDetail,
+}));
 
 vi.mock("../teamLazyPanels", async () => {
   const actual = await vi.importActual<typeof import("../teamLazyPanels")>("../teamLazyPanels");
@@ -44,6 +52,10 @@ vi.mock("../teamLazyPanels", async () => {
     ResearchRunLaunchPanel: (props: Record<string, unknown>) => {
       launchLeafHarness.props = props;
       return <div data-testid="mock-research-run-launch-panel" />;
+    },
+    ChallengeQuestionDetailPanel: (props: Record<string, unknown>) => {
+      questionDetailHarness.props = props;
+      return <div data-testid="mock-challenge-question-detail-panel" />;
     },
   };
 });
@@ -137,7 +149,7 @@ async function renderAgentsPane(language: "zh" | "en") {
       </QueryClientProvider>,
     );
   });
-  return { container, root };
+  return { container, root, queryClient };
 }
 
 function makeInspectorScope(panel: ResearchProcessPanel, patch: Partial<InspectorProps["scope"]> = {}): InspectorProps["scope"] {
@@ -237,7 +249,7 @@ async function renderInspectorLeaf(
       </QueryClientProvider>,
     );
   });
-  return { container, root };
+  return { container, root, queryClient };
 }
 
 describe("ResearchProcessInspectorPane agents panel language", () => {
@@ -334,6 +346,55 @@ describe("ResearchProcessInspectorPane current-task ownership", () => {
   it("returns from the archive to the semantic current task", () => {
     expect(researchArchiveReturnNodeId("hf_selection", "hf_meeting_4")).toBe("hf_review");
     expect(researchArchiveReturnNodeId("hf_collection", null)).toBe("hf_collection");
+  });
+});
+
+describe("ResearchProcessInspectorPane question-run cache scope", () => {
+  afterEach(() => {
+    questionDetailHarness.props = null;
+    mockedGetQuestionRunDetail.mockClear();
+    document.body.innerHTML = "";
+  });
+
+  it("uses the selected workflow run in the question detail query key and transport", async () => {
+    const { container, root, queryClient } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("question", {
+        questionId: "SCI-002",
+        runId: "run-current",
+      }),
+    );
+
+    await act(async () => {
+      await vi.waitFor(() => expect(questionDetailHarness.props).not.toBeNull());
+    });
+    expect(mockedGetQuestionRunDetail).toHaveBeenCalledWith(
+      "research-team",
+      "SCI-002",
+      undefined,
+    );
+    expect(queryClient.getQueryCache().find({
+      queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-002", ""),
+    })).toBeDefined();
+
+    const onSelectRunId = questionDetailHarness.props?.onSelectRunId as ((runId: string) => void) | undefined;
+    expect(onSelectRunId).toBeTypeOf("function");
+    await act(async () => {
+      onSelectRunId?.("run-current");
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(mockedGetQuestionRunDetail).toHaveBeenCalledWith(
+        "research-team",
+        "SCI-002",
+        "run-current",
+      ));
+    });
+    expect(queryClient.getQueryCache().find({
+      queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-002", "run-current"),
+    })).toBeDefined();
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 });
 

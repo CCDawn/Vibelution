@@ -31,6 +31,7 @@ class HypothesisSelectionRecordPayload(BaseModel):
     workflow: str = Field("hypothesis_first", min_length=1, max_length=200)
     agentId: str = Field(..., min_length=1, max_length=200)
     mode: str = Field("formal", max_length=50)
+    workflowRunId: str = Field("", max_length=200)
     questionId: str = Field(..., min_length=1, max_length=200)
     selectedCandidateIds: list[str] = Field(..., min_length=2, max_length=16)
     previousSelectionId: str = Field("", max_length=200)

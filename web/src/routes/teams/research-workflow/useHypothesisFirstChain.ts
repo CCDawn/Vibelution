@@ -41,12 +41,18 @@ const EMPTY_LINKS: ReviewRoundLinkRecord[] = [];
 const LIVE_MEETING = new Set(["open", "summarizing"]);
 const BOUNDED_POLL_MS = 4_000;
 
-// queryKeys.ts is read-only in this lane; the two chain list keys follow the
-// established hypothesis-first key shape so invalidation by prefix works.
-export const hypothesisFirstChainCollectionRequestsKey = (teamId: string, questionId: string) =>
-  ["teams", teamId, "hypothesis-first", "chain", "collection-requests", questionId] as const;
-export const hypothesisFirstChainReviewRoundLinksKey = (teamId: string, questionId: string) =>
-  ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId] as const;
+// These lists are requested separately from V2, so their cache identity must
+// carry the same workflow-run scope as the canonical snapshot.
+export const hypothesisFirstChainCollectionRequestsKey = (
+  teamId: string,
+  questionId: string,
+  runId = "",
+) => ["teams", teamId, "hypothesis-first", "chain", "collection-requests", questionId, runId] as const;
+export const hypothesisFirstChainReviewRoundLinksKey = (
+  teamId: string,
+  questionId: string,
+  runId = "",
+) => ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId, runId] as const;
 
 /**
  * Display contract for the current review-round budget N, shared with the
@@ -101,7 +107,8 @@ export type HypothesisFirstChainData = {
   /** Stable identity of the requested read scope. */
   questionScopeKey: string;
   questionId: string;
-  /** True when a question-keyed payload declares a different question. */
+  runId: string;
+  /** True when a scoped payload declares a different question or run. */
   scopeMismatch: boolean;
   /** Canonical server snapshot when the V2 endpoint is available. */
   stateV2: HypothesisFirstStateV2 | null;
@@ -126,12 +133,13 @@ export function invalidateHypothesisFirstQueries(
   queryClient: QueryClient,
   teamId: string,
   questionId: string,
+  runId = "",
 ): void {
   void queryClient.invalidateQueries({ queryKey: ["teams", teamId, "hypothesis-first"] });
   void queryClient.invalidateQueries({ queryKey: queryKeys.teamMeetingRounds(teamId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.teamHypothesisRounds(teamId) });
   void queryClient.invalidateQueries({
-    queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
+    queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId, runId),
   });
 }
 
@@ -155,6 +163,32 @@ function normalizedQuestion(value: string | null | undefined): string {
 function recordMatchesQuestion(value: string | null | undefined, questionId: string): boolean {
   const recordQuestion = normalizedQuestion(value);
   return Boolean(recordQuestion && recordQuestion === questionId);
+}
+
+function normalizedRun(value: string | null | undefined): string {
+  return String(value || "").trim();
+}
+
+function meetingWorkflowRunId(meeting: MeetingRoundRecord): string {
+  const receiptAuthority = (meeting as MeetingRoundRecord & {
+    modelInvocationReceiptAuthority?: Record<string, unknown>;
+  }).modelInvocationReceiptAuthority;
+  if (typeof receiptAuthority?.workflowRunId === "string") {
+    const receiptRunId = normalizedRun(receiptAuthority.workflowRunId);
+    if (receiptRunId) return receiptRunId;
+  }
+  const discussionScope = meeting.discussionScope;
+  if (discussionScope && typeof discussionScope.workflowRunId === "string") {
+    const discussionRunId = normalizedRun(discussionScope.workflowRunId);
+    if (discussionRunId) return discussionRunId;
+  }
+  // Compatibility for meetings created before receipt/discussion scope
+  // identity was persisted. This is deliberately the last fallback.
+  return normalizedRun(meeting.workflowRunId);
+}
+
+function recordMatchesRun(value: string | null | undefined, runId: string): boolean {
+  return !runId || normalizedRun(value) === runId;
 }
 
 function isTerminalLifecycle(value: string | null | undefined): boolean {
@@ -256,16 +290,24 @@ export function shouldPollHypothesisFirstStateV2(state: HypothesisFirstStateV2 |
   ));
 }
 
-export function useHypothesisFirstChain(teamId: string, questionId: string): HypothesisFirstChainData {
+export function useHypothesisFirstChain(
+  teamId: string,
+  questionId: string,
+  runId = "",
+): HypothesisFirstChainData {
   const requestedQuestionId = normalizedQuestion(questionId);
+  const requestedRunId = normalizedRun(runId);
   const enabled = Boolean(teamId.trim() && requestedQuestionId);
   const pageVisible = usePageVisibility();
   const queryClient = useQueryClient();
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const stateV2Query = useQuery({
-    queryKey: queryKeys.hypothesisFirstChainStateV2(teamId, questionId),
-    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(teamId, questionId, { signal }),
+    queryKey: queryKeys.hypothesisFirstChainStateV2(teamId, questionId, requestedRunId),
+    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(teamId, questionId, {
+      signal,
+      runId: requestedRunId,
+    }),
     enabled,
     retry: false,
     refetchOnWindowFocus: "always",
@@ -284,8 +326,11 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
   });
   const v2EndpointUnavailable = isHypothesisFirstStateV2EndpointUnavailable(stateV2Query.error);
   const legacyChainStateQuery = useQuery({
-    queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
-    queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
+    queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId, requestedRunId),
+    queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, {
+      signal,
+      runId: requestedRunId,
+    }),
     enabled: enabled && v2EndpointUnavailable,
     retry: false,
     refetchOnWindowFocus: "always",
@@ -299,8 +344,11 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
         : false,
   });
   const selections = useQuery({
-    queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId),
-    queryFn: ({ signal }) => fetchHypothesisSelections(teamId, questionId, { signal }),
+    queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId, requestedRunId),
+    queryFn: ({ signal }) => fetchHypothesisSelections(teamId, questionId, {
+      signal,
+      runId: requestedRunId,
+    }),
     enabled,
     // Per-query override of the global focus default (app/providers.tsx): the
     // chain ledgers must be current when the user returns to the tab without
@@ -318,13 +366,17 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     refetchInterval: (query) =>
       shouldPollMeetings((query.state.data?.meetings ?? []).filter((meeting) => (
         recordMatchesQuestion(meeting.question, requestedQuestionId)
+        && recordMatchesRun(meetingWorkflowRunId(meeting), requestedRunId)
       )))
         ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
         : false,
   });
   const requests = useQuery({
-    queryKey: hypothesisFirstChainCollectionRequestsKey(teamId, questionId),
-    queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, { signal }),
+    queryKey: hypothesisFirstChainCollectionRequestsKey(teamId, questionId, requestedRunId),
+    queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, {
+      signal,
+      runId: requestedRunId,
+    }),
     enabled,
     // See `selections`: same per-query focus/reconnect refresh contract.
     refetchOnWindowFocus: "always",
@@ -338,8 +390,11 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
         : false,
   });
   const links = useQuery({
-    queryKey: hypothesisFirstChainReviewRoundLinksKey(teamId, questionId),
-    queryFn: ({ signal }) => fetchReviewRoundLinks(teamId, questionId, { signal }),
+    queryKey: hypothesisFirstChainReviewRoundLinksKey(teamId, questionId, requestedRunId),
+    queryFn: ({ signal }) => fetchReviewRoundLinks(teamId, questionId, {
+      signal,
+      runId: requestedRunId,
+    }),
     enabled,
     // See `selections`: same per-query focus/reconnect refresh contract.
     refetchOnWindowFocus: "always",
@@ -348,6 +403,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
 
   const selectionList = selections.data?.selections.filter((selection) => (
     recordMatchesQuestion(selection.questionId, requestedQuestionId)
+    && recordMatchesRun(selection.workflowRunId, requestedRunId)
   ));
   const selection = selectionList?.length
     ? selectionList.reduce((latest, item) =>
@@ -402,16 +458,22 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
       ));
       if (canonicalAction?.kind === "command"
         && (canonicalAction.command === "retry_collection" || canonicalAction.command === "continue_collection")) {
-        await executeHypothesisFirstCommand(teamId, questionId, canonicalAction);
+        await executeHypothesisFirstCommand(
+          teamId,
+          questionId,
+          canonicalAction,
+          undefined,
+          { runId: requestedRunId },
+        );
       } else if (v2EndpointUnavailable) {
         await recoverCollectionRequest(teamId, normalizedRequestId);
       } else {
         throw new Error("canonical_action_unavailable");
       }
-      invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+      invalidateHypothesisFirstQueries(queryClient, teamId, questionId, requestedRunId);
     } catch (error) {
       if (isHypothesisFirstCommandStateConflict(error)) {
-        invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+        invalidateHypothesisFirstQueries(queryClient, teamId, questionId, requestedRunId);
         setRecoveryError("状态已更新，请重新确认。");
       } else {
         setRecoveryError(error instanceof Error ? error.message : String(error));
@@ -419,22 +481,31 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     } finally {
       setRecoveryBusy(false);
     }
-  }, [questionId, queryClient, recoveryBusy, stateV2Query.data, teamId, v2EndpointUnavailable]);
+  }, [questionId, queryClient, recoveryBusy, requestedRunId, stateV2Query.data, teamId, v2EndpointUnavailable]);
 
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,
   // inspectors, and next-action navigation all share one numbering. These are
   // memoized because downstream canvas/inspector composition is reference-
   // sensitive; rebuilding per render would invalidate that memoization.
+  const runScopedMeetings = useMemo(() => (meetings.data?.meetings ?? EMPTY_MEETINGS)
+    .filter((meeting) => (
+      recordMatchesQuestion(meeting.question, requestedQuestionId)
+      && recordMatchesRun(meetingWorkflowRunId(meeting), requestedRunId)
+    )), [meetings.data?.meetings, requestedQuestionId, requestedRunId]);
+  const runMeetingIds = useMemo(
+    () => new Set(runScopedMeetings.map((meeting) => String(meeting.meetingRoundId || ""))),
+    [runScopedMeetings],
+  );
   const scopedLinks = useMemo(() => (links.data?.links ?? EMPTY_LINKS).filter((link) => (
     recordMatchesQuestion(link.questionId, requestedQuestionId)
-  )), [links.data?.links, requestedQuestionId]);
+    && (!requestedRunId || runMeetingIds.has(String(link.meetingRoundId || "")))
+  )), [links.data?.links, requestedQuestionId, requestedRunId, runMeetingIds]);
   const linkByMeetingId = useMemo(
     () => new Map(scopedLinks.map((link) => [String(link.meetingRoundId || ""), link])),
     [scopedLinks],
   );
-  const decoratedMeetings = useMemo(() => (meetings.data?.meetings ?? EMPTY_MEETINGS)
-    .filter((meeting) => recordMatchesQuestion(meeting.question, requestedQuestionId))
+  const decoratedMeetings = useMemo(() => runScopedMeetings
     .map((meeting) => {
       const link = linkByMeetingId.get(String(meeting.meetingRoundId || ""));
       if (!link) return meeting;
@@ -444,19 +515,24 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
         previousMeetingRoundId: meeting.previousMeetingRoundId
           || (String(link.previousMeetingRoundId || "") || undefined),
       };
-    }), [meetings.data?.meetings, requestedQuestionId, linkByMeetingId]);
+    }), [runScopedMeetings, linkByMeetingId]);
   const scopedRequests = useMemo(() => (requests.data?.requests ?? EMPTY_REQUESTS).filter((request) => (
     recordMatchesQuestion(request.questionId, requestedQuestionId)
-  )), [requests.data?.requests, requestedQuestionId]);
+    && (!requestedRunId || runMeetingIds.has(String(request.meetingRoundId || "")))
+  )), [requests.data?.requests, requestedQuestionId, requestedRunId, runMeetingIds]);
   const resolvedChainQuestionId = normalizedQuestion(chainState?.questionId);
+  const resolvedStateRunId = normalizedRun(canonicalState?.scope.workflowRunId);
   const scopeMismatch = Boolean(
     enabled
-    && resolvedChainQuestionId
-    && resolvedChainQuestionId !== requestedQuestionId,
+    && (
+      (resolvedChainQuestionId && resolvedChainQuestionId !== requestedQuestionId)
+      || (requestedRunId && resolvedStateRunId !== requestedRunId)
+    ),
   );
   return {
-    questionScopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}`,
+    questionScopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}::${requestedRunId || "no-run"}`,
     questionId: requestedQuestionId,
+    runId: requestedRunId,
     scopeMismatch,
     stateV2: scopeMismatch ? null : canonicalState,
     stateSource,
@@ -484,6 +560,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
 export function useHypothesisFirstChainInvalidation(
   teamId: string,
   questionId: string,
+  runId: string,
   lastSequence: number,
 ): void {
   const queryClient = useQueryClient();
@@ -492,8 +569,8 @@ export function useHypothesisFirstChainInvalidation(
       return;
     }
     const timer = setTimeout(() => {
-      invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+      invalidateHypothesisFirstQueries(queryClient, teamId, questionId, runId);
     }, 250);
     return () => clearTimeout(timer);
-  }, [queryClient, teamId, questionId, lastSequence]);
+  }, [queryClient, teamId, questionId, runId, lastSequence]);
 }

@@ -537,6 +537,7 @@ def _selection_version_for_link(
         previous_selection_id=str(selection.get("previousSelectionId") or ""),
         reset_id=reset_id,
         scope_hash=str(selection.get("scopeHash") or ""),
+        workflow_run_id=str(selection.get("workflowRunId") or "").strip(),
     )
 
 
@@ -2262,18 +2263,25 @@ def project_state_from_records(
     formal_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
     program_output: Mapping[str, Any] | None = None,
     chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
+    workflow_run_id: str = "",
     return_to: str = "",
     include_source_cursor: bool = False,
 ) -> dict[str, Any]:
     """Project one canonical snapshot from already scoped durable records."""
 
     normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     return_to = return_to or "/teams?" + urlencode(
         {
             "teamId": team_id,
             "researchView": "workflow",
             "workflowId": "challenge-cup-research",
             "questionId": normalized_question_id,
+            **(
+                {"runId": normalized_workflow_run_id}
+                if normalized_workflow_run_id
+                else {}
+            ),
             "panel": "node",
         }
     )
@@ -2660,6 +2668,9 @@ def project_state_from_records(
             ),
             reset_id=reset_selection_id,
             scope_hash=str((selection_record or {}).get("scopeHash") or ""),
+            workflow_run_id=str(
+                (selection_record or {}).get("workflowRunId") or ""
+            ).strip(),
         )
         if selection_version and selection_version == record_version and selection_id != str(
             durable_binding.get("selectionId") or ""
@@ -3480,6 +3491,7 @@ def project_state_from_records(
             "questionInOfficialCatalog": True,
             "catalogId": CATALOG_ID,
             "catalogSha256": CATALOG_SHA256,
+            "workflowRunId": normalized_workflow_run_id or None,
         },
         "resetBoundary": {
             "resetId": reset_id,
@@ -3505,12 +3517,18 @@ def project_state_from_records(
     return finalize_state_versions(raw, reset_id=reset_id)
 
 
-def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
+def _scope_records(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
     snapshot = _cached_question_reset_snapshot(team_id, question_id)
-    meeting_ids = set(snapshot["targetMeetingIds"])
-    round_ids = set(snapshot["targetRoundIds"])
+    target_meeting_ids = set(snapshot["targetMeetingIds"])
+    target_round_ids = set(snapshot["targetRoundIds"])
     normalized = question_id.upper()
-    chain_records = [
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    all_chain_records = [
         record
         for record in snapshot["chainRecords"]
         if str(record.get("questionId") or "").strip().upper() == normalized
@@ -3525,8 +3543,35 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
     meeting_records = [
         record
         for record in snapshot["meetingRecords"]
-        if str(record.get("meetingRoundId") or "") in meeting_ids
+        if str(record.get("meetingRoundId") or "") in target_meeting_ids
+        and (
+            not normalized_workflow_run_id
+            or hypothesis_first_chain._meeting_workflow_run_id(record)
+            == normalized_workflow_run_id
+        )
     ]
+    meeting_ids = {
+        str(record.get("meetingRoundId") or "").strip()
+        for record in meeting_records
+        if str(record.get("meetingRoundId") or "").strip()
+    }
+    if normalized_workflow_run_id:
+        chain_records = []
+        for record in all_chain_records:
+            record_kind = str(record.get("recordKind") or "")
+            if record_kind == _RESET_AUDIT_KIND:
+                chain_records.append(record)
+                continue
+            record_run_id = str(record.get("workflowRunId") or "").strip()
+            if record_run_id:
+                if record_run_id == normalized_workflow_run_id:
+                    chain_records.append(record)
+                continue
+            meeting_id = str(record.get("meetingRoundId") or "").strip()
+            if meeting_id and meeting_id in meeting_ids:
+                chain_records.append(record)
+    else:
+        chain_records = all_chain_records
     chat_room_round_snapshots: dict[str, dict[str, Any]] = {}
     try:
         # WorkRun snapshots are the read-only runtime authority.  Do not call
@@ -3580,7 +3625,18 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
             for record in list(run_payload.get("runs") or [])
             if isinstance(record, Mapping)
             and str(record.get("questionId") or "").strip().upper() == normalized
+            and (
+                not normalized_workflow_run_id
+                or str(record.get("runId") or "").strip()
+                == normalized_workflow_run_id
+            )
         ]
+        if normalized_workflow_run_id and not formal_runs:
+            raise HypothesisFirstStateScopeError(
+                "workflow_run_scope_mismatch",
+                "runId 不属于当前团队、赛题或挑战杯工作流",
+                status_code=404,
+            )
         formal_snapshots: dict[str, dict[str, Any]] = {}
         for run in formal_runs:
             run_id = str(run.get("runId") or "").strip()
@@ -3596,11 +3652,14 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
             program_output = challenge_question_runs.get_challenge_question_run_detail(
                 team_id,
                 normalized,
+                run_id=normalized_workflow_run_id,
             )
         except ValueError as exc:
             if "challenge_question_run_not_found" not in str(exc):
                 raise
             program_output = None
+    except HypothesisFirstStateScopeError:
+        raise
     except Exception as exc:
         _record_projection_scene_event(
             "state_projection.failed",
@@ -3619,6 +3678,11 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
             record
             for record in snapshot["selectionRecords"]
             if str(record.get("questionId") or "").strip().upper() == normalized
+            and (
+                not normalized_workflow_run_id
+                or str(record.get("workflowRunId") or "").strip()
+                == normalized_workflow_run_id
+            )
         ],
         "meeting_records": [
             dict(record) for record in meeting_records
@@ -3636,7 +3700,16 @@ def _scope_records(team_id: str, question_id: str) -> dict[str, Any]:
         "hypothesis_round_records": [
             record
             for record in snapshot["hypothesisRoundRecords"]
-            if str(record.get("roundId") or "") in round_ids
+            if str(record.get("roundId") or "") in target_round_ids
+            and (
+                not normalized_workflow_run_id
+                or any(
+                    isinstance(ref, Mapping)
+                    and str(ref.get("kind") or "") == "meeting_round"
+                    and str(ref.get("id") or "") in meeting_ids
+                    for ref in list(record.get("meetingRefs") or [])
+                )
+            )
         ],
         "formal_runs": formal_runs,
         "formal_snapshots": formal_snapshots,
@@ -3649,6 +3722,7 @@ def project_hypothesis_first_state_v2(
     team_id: str,
     question_id: str,
     *,
+    workflow_run_id: str = "",
     return_to: str = "",
     include_source_cursor: bool = False,
 ) -> dict[str, Any]:
@@ -3670,10 +3744,16 @@ def project_hypothesis_first_state_v2(
             "题号不在官方挑战杯目录中",
             status_code=404,
         )
-    sources = _scope_records(normalized_team_id, normalized_question_id)
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    sources = _scope_records(
+        normalized_team_id,
+        normalized_question_id,
+        workflow_run_id=normalized_workflow_run_id,
+    )
     return project_state_from_records(
         team_id=normalized_team_id,
         question_id=normalized_question_id,
+        workflow_run_id=normalized_workflow_run_id,
         return_to=return_to,
         include_source_cursor=include_source_cursor,
         **sources,

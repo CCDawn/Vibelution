@@ -247,7 +247,7 @@ class DomainReadinessContext(Protocol):
     def hypothesis_first_flow(self, team_id: str, run_id: str) -> bool: ...
 
     def hypothesis_first_chain_state(
-        self, team_id: str, question_id: str
+        self, team_id: str, question_id: str, workflow_run_id: str
     ) -> Mapping[str, Any] | None: ...
 
 
@@ -274,7 +274,7 @@ def hypothesis_first_chain_state(
     if not callable(reader):
         return {}
     try:
-        state = reader(run.team_id, run.question_id)
+        state = reader(run.team_id, run.question_id, run.run_id)
     except Exception:
         return {}
     return dict(state) if isinstance(state, Mapping) else {}

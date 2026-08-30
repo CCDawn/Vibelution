@@ -63,6 +63,124 @@ def _fragment(candidate_id: str) -> dict:
     }
 
 
+def test_load_fan_out_reads_selection_and_candidates_from_current_run(
+    monkeypatch,
+) -> None:
+    observed: dict[str, str] = {}
+
+    def chain_state(_team_id, _question_id, **kwargs):
+        observed["chain_run_id"] = str(kwargs.get("workflow_run_id") or "")
+        return {"selectionId": "selection-1"}
+
+    def get_selection(_team_id, _selection_id):
+        return {
+            "selection": {
+                "selectionId": "selection-1",
+                "questionId": "SCI-096",
+                "workflowRunId": "run-1",
+                "selectedCandidateIds": ["H1"],
+            }
+        }
+
+    def list_candidates(_team_id, *, question_id, workflow_run_id):
+        observed["candidate_run_id"] = workflow_run_id
+        assert question_id == "SCI-096"
+        return {
+            "candidates": [
+                {
+                    "candidateId": "H1",
+                    "workflowRunId": workflow_run_id,
+                    "statement": "statement H1",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.chain_state",
+        chain_state,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.hypothesis_selection.get_hypothesis_selection",
+        get_selection,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.list_hypothesis_candidates",
+        list_candidates,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: {"output": {}},
+    )
+
+    result = hypothesis_scoped_execution.load_hypothesis_fan_out_input(
+        {
+            "teamId": "team-1",
+            "runId": "run-1",
+            "inputSnapshot": {"questionId": "SCI-096"},
+        }
+    )
+
+    assert result["selectedCandidateIds"] == ["H1"]
+    assert observed == {"chain_run_id": "run-1", "candidate_run_id": "run-1"}
+
+
+def test_agent_and_reconciliation_chain_reads_stay_on_current_run(monkeypatch) -> None:
+    observed: list[tuple[str, str, str]] = []
+
+    def chain_state(team_id, question_id, **kwargs):
+        workflow_run_id = str(kwargs.get("workflow_run_id") or "")
+        observed.append((team_id, question_id, workflow_run_id))
+        return {"selectionId": workflow_run_id}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.chain_state",
+        chain_state,
+    )
+    record = {
+        "runId": "run-current",
+        "workflowRunId": "run-stale",
+        "teamId": "team-1",
+        "inputSnapshot": {
+            "questionId": "SCI-096",
+            "workflowRunId": "run-stale",
+        },
+        "taskBundles": [],
+    }
+    assert agent_node_execution._hypothesis_chain_state(record) == {
+        "selectionId": "run-current"
+    }
+
+    monkeypatch.setattr(
+        external_agent_task_reconciliation,
+        "resolve_hypothesis_scope_activation",
+        lambda _record, *, chain_state: {
+            "fanOutEnabled": bool(chain_state.get("selectionId")),
+            "selectionRequired": False,
+        },
+    )
+    assert external_agent_task_reconciliation._candidate_scope_applies(record)
+    assert observed == [
+        ("team-1", "SCI-096", "run-current"),
+        ("team-1", "SCI-096", "run-current"),
+    ]
+
+
+def test_hypothesis_chain_read_fails_closed_without_run_id(monkeypatch) -> None:
+    def unexpected_question_wide_read(*_args, **_kwargs):
+        raise AssertionError("run-scoped execution must not read question-wide state")
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain.chain_state",
+        unexpected_question_wide_read,
+    )
+    assert agent_node_execution._hypothesis_chain_state(
+        {
+            "teamId": "team-1",
+            "inputSnapshot": {"questionId": "SCI-096"},
+        }
+    ) == {}
+
+
 def test_fragments_close_independent_subtasks_and_last_one_fans_in(
     tmp_path, monkeypatch
 ) -> None:

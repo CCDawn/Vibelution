@@ -68,12 +68,17 @@ def _auto_open_candidate_generation(
         question_id = str(run_input.get("questionId") or "").strip()
         if not team_id or not question_id:
             return None
-        if not hypothesis_first_chain.needs_candidate_generation(team_id, question_id):
+        workflow_run_id = str(created_run.get("runId") or "").strip()
+        if not hypothesis_first_chain.needs_candidate_generation(
+            team_id,
+            question_id,
+            workflow_run_id=workflow_run_id,
+        ):
             return None
         discussion_scope = WorkflowDiscussionScopeV1.generation(
             teamId=team_id,
             researchProjectId=str(run_input.get("projectId") or "").strip(),
-            workflowRunId=str(created_run.get("runId") or "").strip(),
+            workflowRunId=workflow_run_id,
             workflowNodeId=hypothesis_first_chain.HYPOTHESIS_DESIGN_NODE_ID,
             questionId=question_id,
         )

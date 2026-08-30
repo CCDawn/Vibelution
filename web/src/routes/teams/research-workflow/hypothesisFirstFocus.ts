@@ -34,18 +34,55 @@ function meetingMatchesQuestion(meeting: MeetingRoundRecord, questionId: string)
   return String(meeting.question || "").trim().toUpperCase() === needle;
 }
 
+function normalizedRun(value: string | null | undefined): string {
+  return String(value || "").trim();
+}
+
+function meetingWorkflowRunId(meeting: MeetingRoundRecord): string {
+  const receiptAuthority = (meeting as MeetingRoundRecord & {
+    modelInvocationReceiptAuthority?: Record<string, unknown>;
+  }).modelInvocationReceiptAuthority;
+  const receiptRunId = normalizedRun(
+    typeof receiptAuthority?.workflowRunId === "string"
+      ? receiptAuthority.workflowRunId
+      : "",
+  );
+  if (receiptRunId) return receiptRunId;
+
+  const discussionScope = meeting.discussionScope;
+  const discussionRunId = normalizedRun(
+    typeof discussionScope?.workflowRunId === "string"
+      ? discussionScope.workflowRunId
+      : "",
+  );
+  if (discussionRunId) return discussionRunId;
+
+  // Older meetings predate both server-owned identity fields. Keep the old
+  // top-level field only as a compatibility fallback after the authorities
+  // above have been exhausted.
+  return normalizedRun(meeting.workflowRunId);
+}
+
+function meetingMatchesRun(meeting: MeetingRoundRecord, runId: string): boolean {
+  return !runId || meetingWorkflowRunId(meeting) === runId;
+}
+
 export async function fetchHypothesisFirstFocusNode(
   teamId: string,
   questionId: string,
+  runId = "",
 ): Promise<string> {
   const trimmedTeam = teamId.trim();
   const trimmedQuestion = questionId.trim();
+  const trimmedRun = normalizedRun(runId);
   if (!trimmedTeam || !trimmedQuestion) {
     return HYPOTHESIS_FIRST_GENERATION_NODE_ID;
   }
 
   try {
-    const stateV2 = await fetchHypothesisFirstStateV2(trimmedTeam, trimmedQuestion);
+    const stateV2 = await fetchHypothesisFirstStateV2(trimmedTeam, trimmedQuestion, {
+      runId: trimmedRun,
+    });
     const fatalProblem = stateV2.problems.find((problem) => problem.severity === "fatal");
     if (fatalProblem) {
       throw new Error(fatalProblem.message || `Hypothesis-first state is fatal: ${fatalProblem.code}`);
@@ -61,20 +98,33 @@ export async function fetchHypothesisFirstFocusNode(
   }
 
   const [chainState, meetingList, selectionList, requestList, reviewLinkList] = await Promise.all([
-    fetchHypothesisFirstChainState(trimmedTeam, trimmedQuestion),
+    fetchHypothesisFirstChainState(trimmedTeam, trimmedQuestion, { runId: trimmedRun }),
     fetchMeetingRounds(trimmedTeam),
-    fetchHypothesisSelections(trimmedTeam, trimmedQuestion),
-    fetchCollectionRequests(trimmedTeam, trimmedQuestion),
-    fetchReviewRoundLinks(trimmedTeam, trimmedQuestion),
+    fetchHypothesisSelections(trimmedTeam, trimmedQuestion, { runId: trimmedRun }),
+    fetchCollectionRequests(trimmedTeam, trimmedQuestion, { runId: trimmedRun }),
+    fetchReviewRoundLinks(trimmedTeam, trimmedQuestion, { runId: trimmedRun }),
   ]);
+  const meetings = (meetingList.meetings ?? []).filter((meeting) => (
+    meetingMatchesQuestion(meeting, trimmedQuestion)
+    && meetingMatchesRun(meeting, trimmedRun)
+  ));
+  const meetingIds = new Set(meetings.map((meeting) => String(meeting.meetingRoundId || "")));
+  const selections = (selectionList.selections ?? []).filter((selection) => (
+    (!trimmedRun || normalizedRun(selection.workflowRunId) === trimmedRun)
+  ));
+  const requests = (requestList.requests ?? []).filter((request) => (
+    !trimmedRun || meetingIds.has(String(request.meetingRoundId || ""))
+  ));
+  const reviewRoundLinks = (reviewLinkList.links ?? []).filter((link) => (
+    !trimmedRun || meetingIds.has(String(link.meetingRoundId || ""))
+  ));
   const next = resolveHypothesisFirstNextAction({
-    run: { runId: "present" },
+    run: { runId: trimmedRun || "present" },
     chainState,
-    meetings: (meetingList.meetings ?? []).filter((meeting) =>
-      meetingMatchesQuestion(meeting, trimmedQuestion)),
-    reviewRoundLinks: reviewLinkList.links,
-    selection: latestSelection(selectionList.selections),
-    collectionRequests: requestList.requests,
+    meetings,
+    reviewRoundLinks,
+    selection: latestSelection(selections),
+    collectionRequests: requests,
   });
   return focusNodeFromNextAction(next);
 }

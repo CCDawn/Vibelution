@@ -131,7 +131,7 @@ export function ResearchProcessWorkspace({
   const runState = useResearchWorkflowRun(teamId, location.runId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const chainQuestionId = location.questionId || runState.run?.questionId || "";
-  const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId);
+  const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId, location.runId);
   // Budget display contract (see resolveHypothesisFirstRoundBudget): current
   // budget N = V2 convergence.roundBudget ?? V1 chainState.roundBudget ??
   // backend default 3. "第 x 轮 / 当前预算 N" — N is the server-owned current
@@ -140,7 +140,12 @@ export function ResearchProcessWorkspace({
     stateV2: hypothesisFirstChain.stateV2,
     chainState: hypothesisFirstChain.chainState,
   });
-  useHypothesisFirstChainInvalidation(teamId, chainQuestionId, runState.lastSequence);
+  useHypothesisFirstChainInvalidation(
+    teamId,
+    chainQuestionId,
+    location.runId,
+    runState.lastSequence,
+  );
   const activeDiscussionAnchor = useMemo(() => {
     for (const source of [
       runState.snapshot,
@@ -304,7 +309,7 @@ export function ResearchProcessWorkspace({
       location.replaceParams(patch);
       return;
     }
-    void fetchHypothesisFirstFocusNode(teamId, patch.questionId).then((node) => {
+    void fetchHypothesisFirstFocusNode(teamId, patch.questionId, patch.runId || "").then((node) => {
       location.replaceParams({ ...patch, node });
     });
   }, [experimentOptions, location, teamId]);

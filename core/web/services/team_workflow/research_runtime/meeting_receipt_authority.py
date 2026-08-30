@@ -100,6 +100,7 @@ def authority_from_created_run(
 def resolve_active_question_authority(
     team_id: str,
     question_id: str,
+    workflow_run_id: str = "",
 ) -> dict[str, Any] | None:
     """Resolve one active formal run without trusting selection/API payload fields."""
 
@@ -111,6 +112,7 @@ def resolve_active_question_authority(
 
     normalized_team = _required_text(team_id, "teamId")
     normalized_question = _required_text(question_id, "questionId").upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
     try:
         store = get_write_store()
     except (FormalWriteRuntimeUnavailable, WorkflowMigrationRequired):
@@ -118,12 +120,41 @@ def resolve_active_question_authority(
         # Only a configured Ledger can be receipt authority; never fall back to
         # client payloads or the legacy JSON run store.
         return None
+    if normalized_workflow_run_id:
+        selected = store.get_run(normalized_workflow_run_id)
+        if selected is None:
+            raise MeetingReceiptAuthorityError(
+                "workflowRunId does not resolve to a canonical Ledger run"
+            )
+        candidate_runs = [selected]
+    else:
+        candidate_runs = store.list_runs_for_team(
+            normalized_team,
+            CHALLENGE_CUP_WORKFLOW_ID,
+        )
+
     matches: list[tuple[Any, dict[str, Any]]] = []
-    for run in store.list_runs_for_team(
-        normalized_team,
-        CHALLENGE_CUP_WORKFLOW_ID,
-    ):
+    for run in candidate_runs:
+        if str(getattr(run, "team_id", "") or "").strip() != normalized_team:
+            if normalized_workflow_run_id:
+                raise MeetingReceiptAuthorityError(
+                    "workflowRunId does not belong to this team"
+                )
+            continue
+        if (
+            str(getattr(run, "workflow_id", "") or "").strip()
+            != CHALLENGE_CUP_WORKFLOW_ID
+        ):
+            if normalized_workflow_run_id:
+                raise MeetingReceiptAuthorityError(
+                    "workflowRunId is not a Challenge Cup workflow run"
+                )
+            continue
         if str(getattr(run, "status", "") or "").strip().lower() in _TERMINAL_RUN_STATUSES:
+            if normalized_workflow_run_id:
+                raise MeetingReceiptAuthorityError(
+                    "workflowRunId is no longer active"
+                )
             continue
         try:
             snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
@@ -139,9 +170,24 @@ def resolve_active_question_authority(
             if isinstance(snapshot.get("researchObjectiveContract"), Mapping)
             else {}
         )
-        if run_question == normalized_question and objective.get("hypothesisFirst") is True:
-            matches.append((run, snapshot))
+        if run_question != normalized_question:
+            if normalized_workflow_run_id:
+                raise MeetingReceiptAuthorityError(
+                    "workflowRunId does not belong to this question"
+                )
+            continue
+        if objective.get("hypothesisFirst") is not True:
+            if normalized_workflow_run_id:
+                raise MeetingReceiptAuthorityError(
+                    "workflowRunId is not hypothesis-first"
+                )
+            continue
+        matches.append((run, snapshot))
     if not matches:
+        if normalized_workflow_run_id:
+            raise MeetingReceiptAuthorityError(
+                "workflowRunId has no valid meeting receipt authority"
+            )
         return None
     if len(matches) != 1:
         raise MeetingReceiptAuthorityError(

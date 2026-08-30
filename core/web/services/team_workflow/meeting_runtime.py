@@ -1156,6 +1156,38 @@ def _require_matching_model_invocation_receipt_authority(
     return normalized
 
 
+def _require_reused_formal_meeting_authority(
+    meeting_round: Mapping[str, Any],
+    authority: Mapping[str, Any] | None,
+    *,
+    team_id: str,
+    question_id: str,
+) -> dict[str, Any]:
+    """Fail closed when a formal meeting cannot prove its run authority.
+
+    ``create_meeting_round`` is append-only and intentionally idempotent, so a
+    legacy record with the same meeting id can otherwise be returned as
+    ``reused``.  A formal run must never continue from that record unless both
+    sides of its server-owned receipt binding are present and equal.
+    """
+
+    stored = meeting_round.get("modelInvocationReceiptAuthority")
+    if not isinstance(stored, Mapping):
+        raise ResearchMeetingRuntimeError(
+            "existing formal meeting has no verifiable receipt authority"
+        )
+    if authority is None:
+        raise ResearchMeetingRuntimeError(
+            "existing formal meeting requires receipt authority"
+        )
+    return _require_matching_model_invocation_receipt_authority(
+        meeting_round,
+        authority,
+        team_id=team_id,
+        question_id=question_id,
+    ) or {}
+
+
 def _round_id_from_start_result(result: Mapping[str, Any], meeting_round_id: str) -> str:
     round_id = str(result.get("roundId") or "").strip()
     if round_id:
@@ -1274,6 +1306,16 @@ def open_hypothesis_review_meeting(
             ),
         },
     )
+    if created["status"] == "reused" and (
+        receipt_authority is not None
+        or isinstance(discussion_scope, WorkflowDiscussionScopeV1)
+    ):
+        _require_reused_formal_meeting_authority(
+            created["meetingRound"],
+            receipt_authority,
+            team_id=team["teamId"],
+            question_id=str(selection.get("questionId") or ""),
+        )
     meeting_round = _persist_discussion_scope_projection(
         team["teamId"], created["meetingRound"], discussion_scope
     )
@@ -1428,6 +1470,16 @@ def open_candidate_generation_meeting(
             ),
         },
     )
+    if created["status"] == "reused" and (
+        receipt_authority is not None
+        or isinstance(discussion_scope, WorkflowDiscussionScopeV1)
+    ):
+        _require_reused_formal_meeting_authority(
+            created["meetingRound"],
+            receipt_authority,
+            team_id=team["teamId"],
+            question_id=question_id,
+        )
     meeting_round = _persist_discussion_scope_projection(
         team["teamId"], created["meetingRound"], discussion_scope
     )
@@ -1537,8 +1589,6 @@ def run_meeting_discussion(
     passing in the latest round (convergence signal), and the planned-round
     budget from the meeting contract (default 3).
     """
-    from core.web.services import chat_room_service, team_service
-
     _DISCUSSION_DRIVER.active = True
     try:
         return _run_meeting_discussion_impl(

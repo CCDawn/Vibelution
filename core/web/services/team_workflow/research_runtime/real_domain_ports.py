@@ -439,6 +439,7 @@ class RealDomainPorts:
 
         team_id = str(snapshot.get("teamId") or "").strip()
         question_id = str(snapshot.get("questionId") or "").strip()
+        workflow_run_id = str(snapshot.get("workflowRunId") or "").strip()
         if not team_id or not question_id:
             return {}
         try:
@@ -446,7 +447,11 @@ class RealDomainPorts:
                 hypothesis_first_chain,
             )
 
-            state = hypothesis_first_chain.chain_state(team_id, question_id)
+            state = hypothesis_first_chain.chain_state(
+                team_id,
+                question_id,
+                **({"workflow_run_id": workflow_run_id} if workflow_run_id else {}),
+            )
         except Exception as exc:
             raise _HypothesisAuthorityUnavailable(
                 f"hypothesis selection authority is unavailable: {exc}"
@@ -465,7 +470,13 @@ class RealDomainPorts:
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """Resolve live scope, then classify an explicit compatibility fallback."""
 
-        chain_state = self._hypothesis_chain_state(snapshot)
+        # The PendingAction run is the authoritative fence.  The input
+        # snapshot is copied so a stale/malformed workflowRunId cannot make a
+        # question-only chain read another run's selection.
+        scoped_snapshot = dict(snapshot)
+        if str(action.run_id or "").strip():
+            scoped_snapshot["workflowRunId"] = str(action.run_id).strip()
+        chain_state = self._hypothesis_chain_state(scoped_snapshot)
         decision = _resolve_hypothesis_scope_activation(
             snapshot,
             chain_state=chain_state,

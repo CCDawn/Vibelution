@@ -294,7 +294,7 @@ export function HypothesisFirstNodeInspector({
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
   const [retrying, setRetrying] = useState(false);
-  const chain = useHypothesisFirstChain(teamId, questionId);
+  const chain = useHypothesisFirstChain(teamId, questionId, runId);
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
   const generation = pickGeneration(questionMeetings);
   const currentSelectionId = chain.selection?.selectionId || chain.chainState?.selectionId || "";
@@ -310,11 +310,22 @@ export function HypothesisFirstNodeInspector({
   const roomQuery = useQuery({
     queryKey: queryKeys.chatRoom(scopedRoomId),
     queryFn: ({ signal }) => fetchChatRoomDetail(scopedRoomId, { signal }),
-    enabled: Boolean(scopedRoomId) && activeMeeting?.status === "open",
+    enabled: !chain.scopeMismatch && Boolean(scopedRoomId) && activeMeeting?.status === "open",
     refetchInterval: activeMeeting?.status === "open"
       ? resolvePollingInterval(pageVisible, 4_000)
       : false,
   });
+  if (chain.scopeMismatch) {
+    return (
+      <VSurface tone="panel" className={styles.panel} data-testid="hypothesis-first-scope-mismatch">
+        <VStateRow tone="warning">
+          {isZh
+            ? "流程上下文与当前题目或运行不一致，已隐藏写操作。请刷新后重试。"
+            : "The workflow scope does not match the current question or run; write actions are hidden. Refresh and try again."}
+        </VStateRow>
+      </VSurface>
+    );
+  }
   const selectedProjectedReview = reviewProjection.byNodeId.get(nodeId)
     ?? (activeMeeting ? reviewProjection.byMeetingId.get(activeMeeting.meetingRoundId) : undefined);
   const nextAction = chain.stateV2
@@ -372,8 +383,8 @@ export function HypothesisFirstNodeInspector({
       queueKind: pendingQueueKind,
     };
   }) ?? null;
-  const nodeOwnsCurrentStep = formalRuntime
-    || inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
+  const nodeOwnsCurrentStep = !chain.scopeMismatch && (formalRuntime
+    || inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId));
   const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
   );
@@ -446,7 +457,7 @@ export function HypothesisFirstNodeInspector({
                   type: "active",
                 }),
                 queryClient.refetchQueries({
-                  queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
+                  queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId, runId),
                   type: "active",
                 }),
               ]);
@@ -485,6 +496,7 @@ export function HypothesisFirstNodeInspector({
           <InspectorBody
             teamId={teamId}
             questionId={questionId}
+            runId={runId}
             nodeId={nodeId}
             liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
             nextAction={nextAction}
@@ -669,6 +681,7 @@ function inspectorTitle(nodeId: string, lang: Language): string {
 function InspectorBody(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   nodeId: string;
   liveMeetingRoundId: string;
   nextAction: HypothesisFirstNextAction;
@@ -682,7 +695,7 @@ function InspectorBody(props: {
   chainState?: HypothesisFirstChainState | null;
   formalRuntime?: boolean;
 }) {
-  const { nodeId, nextAction, teamId, questionId, liveMeetingRoundId, lang } = props;
+  const { nodeId, nextAction, teamId, questionId, runId, liveMeetingRoundId, lang } = props;
   const isZh = lang === "zh";
   const outputRunId = props.stateV2?.programDelivery?.outputRunId || "";
   const programDeliveryQuery = useQuery({
@@ -699,6 +712,7 @@ function InspectorBody(props: {
       <FormalRuntimeActionBody
         teamId={teamId}
         questionId={questionId}
+        runId={runId}
         nextAction={nextAction}
         stateV2={props.stateV2}
         lang={lang}
@@ -726,6 +740,7 @@ function InspectorBody(props: {
         <OpenGenerationButton
           teamId={teamId}
           questionId={questionId}
+          runId={runId}
           label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
           lang={lang}
           canonicalAction={nextAction.canonicalAction}
@@ -738,6 +753,7 @@ function InspectorBody(props: {
         <HypothesisFirstMeetingOps
           teamId={teamId}
           questionId={questionId}
+          runId={runId}
           meetingRoundId={liveMeetingRoundId || nextAction.meetingRoundId || ""}
           nextAction={nextAction}
           compact
@@ -750,6 +766,7 @@ function InspectorBody(props: {
       <OpenGenerationButton
         teamId={teamId}
         questionId={questionId}
+        runId={runId}
         label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
         lang={lang}
         canonicalAction={nextAction.canonicalAction}
@@ -762,6 +779,7 @@ function InspectorBody(props: {
       <HypothesisSelectionList
         teamId={teamId}
         questionId={questionId}
+        runId={runId}
         compact
         lang={lang}
         canonicalAction={nextAction.canonicalAction?.command === "record_selection"
@@ -779,6 +797,7 @@ function InspectorBody(props: {
       <HypothesisFirstMeetingOps
         teamId={teamId}
         questionId={questionId}
+        runId={runId}
         meetingRoundId={liveMeetingRoundId || nextAction.meetingRoundId || ""}
         nextAction={nextAction}
         compact
@@ -799,6 +818,7 @@ function InspectorBody(props: {
         lang={lang}
         teamId={teamId}
         questionId={questionId}
+        runId={runId}
         stateV2={props.stateV2}
         onRetryCollection={props.onRetryCollection}
       />
@@ -846,6 +866,7 @@ function InspectorBody(props: {
               <CanonicalCommandActionList
                 teamId={teamId}
                 questionId={questionId}
+                runId={runId}
                 actions={canonicalActions}
                 lang={lang}
                 onFormalRunCreated={props.onFormalRunCreated}
@@ -854,6 +875,7 @@ function InspectorBody(props: {
               <CanonicalCommandButton
                 teamId={teamId}
                 questionId={questionId}
+                runId={runId}
                 action={nextAction.canonicalAction}
                 lang={lang}
               />
@@ -870,6 +892,7 @@ function InspectorBody(props: {
             <CanonicalCommandButton
               teamId={teamId}
               questionId={questionId}
+              runId={runId}
               action={nextAction.canonicalAction}
               lang={lang}
             />
@@ -934,6 +957,7 @@ function InspectorBody(props: {
           <HumanAdjudicationAction
             teamId={teamId}
             questionId={questionId}
+            runId={runId}
             action={humanAdjudication}
             lang={lang}
           />
@@ -942,6 +966,7 @@ function InspectorBody(props: {
           <NextReviewRoundButton
             teamId={teamId}
             questionId={questionId}
+            runId={runId}
             meetingRoundId={liveMeetingRoundId}
             roundBudget={resolveHypothesisFirstReviewRoundBudget({
               stateV2: props.stateV2,
@@ -958,6 +983,7 @@ function InspectorBody(props: {
           <CanonicalCommandActionList
             teamId={teamId}
             questionId={questionId}
+            runId={runId}
             actions={genericCanonicalActions}
             lang={lang}
             onFormalRunCreated={props.onFormalRunCreated}
@@ -966,6 +992,7 @@ function InspectorBody(props: {
           <CanonicalCommandButton
             teamId={teamId}
             questionId={questionId}
+            runId={runId}
             action={nextAction.canonicalAction}
             lang={lang}
             onFormalRunCreated={props.onFormalRunCreated}
@@ -1009,6 +1036,7 @@ function workflowProblemList(problems: readonly WorkflowProblem[]) {
 function CanonicalCommandActionList(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   actions: readonly CommandAction[];
   lang: Language;
   onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
@@ -1023,6 +1051,7 @@ function CanonicalCommandActionList(props: {
             key={action.actionId}
             teamId={props.teamId}
             questionId={props.questionId}
+            runId={props.runId}
             action={action}
             lang={props.lang}
             onFormalRunCreated={props.onFormalRunCreated}
@@ -1065,6 +1094,7 @@ function formalRuntimeStatusTone(status: string | null | undefined): "neutral" |
 function FormalRuntimeActionBody(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   nextAction: HypothesisFirstV2NextAction;
   stateV2?: HypothesisFirstStateV2 | null;
   lang: Language;
@@ -1097,6 +1127,7 @@ function FormalRuntimeActionBody(props: {
         <CanonicalCommandActionList
           teamId={props.teamId}
           questionId={props.questionId}
+          runId={props.runId}
           actions={actions}
           lang={props.lang}
           onFormalRunCreated={props.onFormalRunCreated}
@@ -1291,6 +1322,7 @@ function readinessBlockerLabel(blocker: unknown): string {
 function CanonicalCommandButton(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   action: CommandAction;
   lang: Language;
   onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
@@ -1302,10 +1334,12 @@ function CanonicalCommandButton(props: {
       props.teamId,
       props.questionId,
       props.action,
+      undefined,
+      { runId: props.runId },
     ),
     onSuccess: (response) => {
       setConfirmationOpen(false);
-      invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
       if (props.action.command !== "create_formal_run" || !props.onFormalRunCreated) {
         return;
       }
@@ -1329,7 +1363,7 @@ function CanonicalCommandButton(props: {
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
         setConfirmationOpen(false);
-        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
       }
     },
   });
@@ -1424,6 +1458,7 @@ function canonicalCommandConfirmationText(command: CommandAction["command"], lan
 function HumanAdjudicationAction(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   action: Extract<CommandAction, { command: "human_adjudication" }>;
   lang: Language;
 }) {
@@ -1435,15 +1470,17 @@ function HumanAdjudicationAction(props: {
       props.questionId,
       props.action,
       { decision, rationale: rationale.trim() },
+      { runId: props.runId },
     ),
     onSuccess: () => invalidateHypothesisFirstQueries(
       queryClient,
       props.teamId,
       props.questionId,
+      props.runId,
     ),
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
-        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
       }
     },
   });
@@ -1495,6 +1532,7 @@ function HumanAdjudicationAction(props: {
 function NextReviewRoundButton(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   meetingRoundId: string;
   roundBudget: number;
   nextRoundIndex: number | null;
@@ -1513,7 +1551,7 @@ function NextReviewRoundButton(props: {
           ? (props.lang === "zh" ? `轮次预算已达上限 ${max}，无法再开启新的评审轮。` : `The round budget has reached its limit of ${max}; no new review round can be opened.`)
           : null,
       );
-      invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+      invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
     },
   });
   return (
@@ -1548,6 +1586,7 @@ function NextReviewRoundButton(props: {
 function OpenGenerationButton(props: {
   teamId: string;
   questionId: string;
+  runId: string;
   label: string;
   lang: Language;
   canonicalAction?: HypothesisFirstNextAction["canonicalAction"];
@@ -1558,17 +1597,28 @@ function OpenGenerationButton(props: {
     mutationFn: () => {
       if (props.canonicalAction
         && (props.canonicalAction.command === "open_generation" || props.canonicalAction.command === "retry_generation")) {
-        return executeHypothesisFirstCommand(props.teamId, props.questionId, props.canonicalAction);
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          props.canonicalAction,
+          undefined,
+          { runId: props.runId },
+        );
       }
       if (props.allowLegacyMutation) {
-        return openHypothesisCandidateGeneration(props.teamId, props.questionId);
+        return openHypothesisCandidateGeneration(props.teamId, props.questionId, props.runId);
       }
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
-    onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
+    onSuccess: () => invalidateHypothesisFirstQueries(
+      queryClient,
+      props.teamId,
+      props.questionId,
+      props.runId,
+    ),
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
-        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
       }
     },
   });
@@ -1669,6 +1719,7 @@ function CollectionTaskBody(props: {
   lang: Language;
   teamId: string;
   questionId: string;
+  runId: string;
   stateV2?: HypothesisFirstStateV2 | null;
   onRetryCollection?: () => Promise<void>;
 }) {
@@ -1690,6 +1741,8 @@ function CollectionTaskBody(props: {
           props.teamId,
           props.questionId,
           props.nextAction.canonicalAction,
+          undefined,
+          { runId: props.runId },
         );
       }
       if (props.nextAction.stateSource !== "v2_canonical") {
@@ -1699,10 +1752,15 @@ function CollectionTaskBody(props: {
       }
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
-    onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
+    onSuccess: () => invalidateHypothesisFirstQueries(
+      queryClient,
+      props.teamId,
+      props.questionId,
+      props.runId,
+    ),
     onError: (error) => {
       if (isHypothesisFirstCommandStateConflict(error)) {
-        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
       }
     },
   });

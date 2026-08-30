@@ -21,6 +21,7 @@ export type HypothesisFirstScope = {
   branch: string;
   workflow: string;
   agentId: string;
+  workflowRunId?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,7 @@ export type CandidateEvidenceTrailResponse = {
   schemaVersion: number;
   teamId: string;
   questionId: string;
+  workflowRunId?: string;
   trails: CandidateEvidenceTrail[];
   storagePath?: string;
 };
@@ -100,6 +102,7 @@ export type HypothesisSelectionContext = {
   schemaVersion: number;
   teamId: string;
   questionId: string;
+  workflowRunId: string;
   scope: HypothesisFirstScope;
   mode: string;
   candidates: ChallengeQuestionHypothesis[];
@@ -731,6 +734,7 @@ export type HypothesisFirstStateV2 = {
     questionInOfficialCatalog: true;
     catalogId: string;
     catalogSha256: string;
+    workflowRunId: string | null;
   };
   resetBoundary: {
     resetId: string;

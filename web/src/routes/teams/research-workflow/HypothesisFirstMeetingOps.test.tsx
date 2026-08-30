@@ -94,6 +94,23 @@ function render(nextAction: HypothesisFirstNextAction) {
   });
 }
 
+function renderScoped(nextAction: HypothesisFirstNextAction, runId: string) {
+  act(() => {
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <HypothesisFirstMeetingOps
+          teamId="team-1"
+          questionId="Q-01"
+          runId={runId}
+          meetingRoundId="meeting-1"
+          nextAction={nextAction}
+          compact
+        />
+      </QueryClientProvider>,
+    );
+  });
+}
+
 describe("HypothesisFirstMeetingOps automatic organization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -457,8 +474,72 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
     });
 
-    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", canonicalAction);
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      canonicalAction,
+      undefined,
+      { runId: undefined },
+    );
     expect(mockedReopenReview).not.toHaveBeenCalled();
+  });
+
+  it("passes the active workflow run to canonical meeting commands", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("stopped"), meetingType: "hypothesis_review" },
+    });
+    mockedFetchMessages.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRoundId: "meeting-1",
+      messageCount: 0,
+      messages: [],
+    });
+    const canonicalAction = {
+      kind: "command" as const,
+      actionId: "reopen-review:meeting-1",
+      label: "重新发起评审讨论",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "review" as const,
+      targetNodeId: "hf_review",
+      command: "reopen_review" as const,
+      payload: { meetingRoundId: "meeting-1", workflowRunId: "run-current" },
+      inputSchemaRef: "hypothesis-first/reopen-review/v1",
+      idempotencyKey: "hf2:reopen-review:meeting-1",
+      expectedStateVersion: "hf2-action:origin:current",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+
+    renderScoped({
+      ...AUTO_ACTION,
+      stage: "blocked",
+      stateSource: "v2_canonical",
+      command: "reopen_review",
+      commandLabel: "重新发起评审讨论",
+      meetingRoundId: "meeting-1",
+      canonicalAction,
+      canonicalActions: [canonicalAction],
+    }, "run-current");
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重新发起评审讨论"));
+      const reopen = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("重新发起评审讨论"));
+      reopen?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      canonicalAction,
+      undefined,
+      { runId: "run-current" },
+    );
   });
 
   it("executes the canonical summary retry for the selected failed candidate", async () => {
@@ -508,7 +589,13 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
     });
 
-    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", canonicalAction);
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      canonicalAction,
+      undefined,
+      { runId: undefined },
+    );
     expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
   });
 
@@ -543,7 +630,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       restart?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await vi.waitFor(() => expect(mockedOpenGeneration).toHaveBeenCalledTimes(1));
     });
-    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01");
+    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01", undefined);
   });
 
   it("offers one manual retry when meeting creation was interrupted before chat binding", async () => {
@@ -577,7 +664,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await vi.waitFor(() => expect(mockedOpenGeneration).toHaveBeenCalledTimes(1));
     });
-    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01");
+    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01", undefined);
   });
 
   it("does not auto-loop when the request fails and exposes one manual retry", async () => {

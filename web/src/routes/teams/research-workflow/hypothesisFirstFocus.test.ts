@@ -160,7 +160,7 @@ describe("fetchHypothesisFirstFocusNode", () => {
     }));
 
     await expect(fetchHypothesisFirstFocusNode("team-1", "SCI-002")).resolves.toBe("hf_selection");
-    expect(mockedStateV2).toHaveBeenCalledWith("team-1", "SCI-002");
+    expect(mockedStateV2).toHaveBeenCalledWith("team-1", "SCI-002", { runId: "" });
     expect(mockedState).not.toHaveBeenCalled();
     expect(mockedMeetings).not.toHaveBeenCalled();
   });
@@ -234,7 +234,45 @@ describe("fetchHypothesisFirstFocusNode", () => {
     mockedReviewLinks.mockResolvedValue({ links: [] } as never);
 
     await expect(fetchHypothesisFirstFocusNode("team-1", "SCI-002")).resolves.toBe("hf_selection");
-    expect(mockedState).toHaveBeenCalledWith("team-1", "SCI-002");
+    expect(mockedState).toHaveBeenCalledWith("team-1", "SCI-002", { runId: "" });
+  });
+
+  it("keeps the compatibility focus reads and projection on the requested workflow run", async () => {
+    const runId = "run-current";
+    mockedState.mockResolvedValue({ candidateCount: 2 } as never);
+    mockedMeetings.mockResolvedValue({
+      meetings: [
+        {
+          question: "SCI-002",
+          meetingType: "hypothesis_candidate_generation",
+          status: "open",
+          meetingRoundId: "gen-old",
+          startedAt: "2026-08-19T00:00:00Z",
+          workflowRunId: "run-old",
+        },
+        {
+          question: "SCI-002",
+          meetingType: "hypothesis_candidate_generation",
+          status: "closed",
+          meetingRoundId: "gen-current",
+          startedAt: "2026-08-19T01:00:00Z",
+          workflowRunId: runId,
+        },
+      ],
+    } as never);
+    mockedSelections.mockResolvedValue({
+      selections: [{ selectionId: "sel-current", createdAt: "2026-08-19T02:00:00Z", workflowRunId: runId }],
+    } as never);
+    mockedRequests.mockResolvedValue({ requests: [] } as never);
+    mockedReviewLinks.mockResolvedValue({ links: [] } as never);
+
+    await expect(fetchHypothesisFirstFocusNode("team-1", "SCI-002", runId)).resolves.toBe("hf_selection");
+    expect(mockedStateV2).toHaveBeenCalledWith("team-1", "SCI-002", { runId });
+    expect(mockedState).toHaveBeenCalledWith("team-1", "SCI-002", { runId });
+    expect(mockedMeetings).toHaveBeenCalledWith("team-1");
+    expect(mockedSelections).toHaveBeenCalledWith("team-1", "SCI-002", { runId });
+    expect(mockedRequests).toHaveBeenCalledWith("team-1", "SCI-002", { runId });
+    expect(mockedReviewLinks).toHaveBeenCalledWith("team-1", "SCI-002", { runId });
   });
 
   it("lands on generation when a candidate-generation meeting is open", async () => {

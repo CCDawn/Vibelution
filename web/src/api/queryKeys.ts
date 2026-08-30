@@ -81,14 +81,14 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "catalog-overview"] as const,
   challengeCupTokenUsage: (teamId: string) =>
     ["teams", teamId, "challenge-program", "token-usage"] as const,
-  hypothesisFirstSelectionContext: (teamId: string, questionId: string) =>
-    ["teams", teamId, "hypothesis-first", "selection-context", questionId] as const,
-  hypothesisFirstSelections: (teamId: string, questionId = "") =>
-    ["teams", teamId, "hypothesis-first", "selections", questionId] as const,
-  hypothesisFirstChainState: (teamId: string, questionId: string) =>
-    ["teams", teamId, "hypothesis-first", "chain", "state", questionId] as const,
-  hypothesisFirstChainStateV2: (teamId: string, questionId: string) =>
-    ["teams", teamId, "hypothesis-first", "chain", "state-v2", questionId] as const,
+  hypothesisFirstSelectionContext: (teamId: string, questionId: string, runId = "") =>
+    ["teams", teamId, "hypothesis-first", "selection-context", questionId, runId] as const,
+  hypothesisFirstSelections: (teamId: string, questionId = "", runId = "") =>
+    ["teams", teamId, "hypothesis-first", "selections", questionId, runId] as const,
+  hypothesisFirstChainState: (teamId: string, questionId: string, runId = "") =>
+    ["teams", teamId, "hypothesis-first", "chain", "state", questionId, runId] as const,
+  hypothesisFirstChainStateV2: (teamId: string, questionId: string, runId = "") =>
+    ["teams", teamId, "hypothesis-first", "chain", "state-v2", questionId, runId] as const,
   hypothesisFirstChainAnomalyInbox: (teamId: string, questionId: string) =>
     ["teams", teamId, "hypothesis-first", "chain", "anomaly-inbox", questionId] as const,
   teamMeetingRounds: (teamId: string) =>

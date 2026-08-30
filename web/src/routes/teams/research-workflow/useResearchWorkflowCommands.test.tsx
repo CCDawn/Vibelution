@@ -229,7 +229,7 @@ describe("useResearchWorkflowCommands", () => {
       });
     });
 
-    expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-002");
+    expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-002", "run-new");
     expect(replaceParams).toHaveBeenCalledWith({
       runId: "run-new",
       questionId: "SCI-002",

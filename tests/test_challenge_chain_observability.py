@@ -84,7 +84,11 @@ def _fanout_env(tmp_path, monkeypatch, *, open_meeting=None):
         "_resolve_hypothesis_participants",
         lambda *_args: {"participants": ["agent-a"]},
     )
-    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_args: [])
+    monkeypatch.setattr(
+        chain,
+        "_build_round_candidates",
+        lambda *_args, **_kwargs: [],
+    )
     monkeypatch.setattr(
         chain,
         "list_hypothesis_candidates",

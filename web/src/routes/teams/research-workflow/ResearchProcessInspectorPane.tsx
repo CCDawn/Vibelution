@@ -147,7 +147,11 @@ export function ResearchProcessInspectorPane(props: {
     : (state.projection?.run.nodeRuns.source_finding?.status ?? null);
   const [selectedQuestionRunId, setSelectedQuestionRunId] = useState("");
   const questionDetail = useQuery({
-    queryKey: queryKeys.challengeQuestionRunDetail(scope.teamId, scope.questionId),
+    queryKey: queryKeys.challengeQuestionRunDetail(
+      scope.teamId,
+      scope.questionId,
+      selectedQuestionRunId,
+    ),
     queryFn: () => getChallengeQuestionRunDetail(scope.teamId, scope.questionId, selectedQuestionRunId || undefined),
     enabled: Boolean(scope.teamId && scope.questionId && scope.panel === "question"),
     staleTime: 60_000,

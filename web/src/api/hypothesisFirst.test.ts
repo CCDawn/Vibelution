@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { FetchJsonHttpError } from "./client";
+import { clearControlToken, FetchJsonHttpError, seedControlTokenForTests } from "./client";
+import {
+  executeHypothesisFirstCommand,
+  fetchCollectionRequests,
+  fetchHypothesisFirstChainState,
+  fetchHypothesisFirstStateV2,
+  fetchLatestHypothesisSelection,
+  fetchHypothesisSelections,
+  fetchHypothesisSelectionContext,
+  fetchReviewRoundLinks,
+  recordHypothesisSelection,
+} from "./hypothesisFirst";
 import { isHypothesisFirstStateV2EndpointUnavailable } from "./hypothesisFirst";
 import apiSource from "./hypothesisFirst.ts?raw";
 import typesSource from "./types/hypothesisFirst.ts?raw";
@@ -11,6 +22,64 @@ import meetingOpsSource from "../routes/teams/research-workflow/HypothesisFirstM
 import selectionListSource from "../routes/teams/challenge-cup/HypothesisSelectionList.tsx?raw";
 
 describe("hypothesis-first API", () => {
+  it("keeps every run-scoped read and command transport on the requested workflow run", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+
+    const action = {
+      kind: "command",
+      command: "record_selection",
+      actionId: "action:record-selection",
+      idempotencyKey: "idem:record-selection",
+      expectedStateVersion: "state-1",
+      payload: {
+        questionId: "SCI-002",
+        generationAttemptId: "generation-1",
+        workflowRunId: "run-current",
+      },
+    } as never;
+
+    try {
+      await Promise.allSettled([
+        fetchHypothesisSelections("team-1", "SCI-002", { runId: "run-current" }),
+        fetchLatestHypothesisSelection("team-1", "SCI-002", { runId: "run-current" }),
+        fetchHypothesisSelectionContext("team-1", "SCI-002", { runId: "run-current" }),
+        fetchHypothesisFirstChainState("team-1", "SCI-002", { runId: "run-current" }),
+        fetchHypothesisFirstStateV2("team-1", "SCI-002", { runId: "run-current" }),
+        fetchCollectionRequests("team-1", "SCI-002", { runId: "run-current" }),
+        fetchReviewRoundLinks("team-1", "SCI-002", { runId: "run-current" }),
+        recordHypothesisSelection("team-1", {
+          workflowRunId: "run-current",
+          questionId: "SCI-002",
+          selectedCandidateIds: ["candidate-1"],
+        } as never),
+        executeHypothesisFirstCommand("team-1", "SCI-002", action, { candidateIds: ["candidate-1"] }),
+      ]);
+
+      const urls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/selections?questionId=SCI-002&runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/selections/latest?questionId=SCI-002&runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/questions/SCI-002/selection-context?runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state?questionId=SCI-002&runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2?questionId=SCI-002&runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/collection-requests?questionId=SCI-002&runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/review-round-links?questionId=SCI-002&runId=run-current");
+      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/commands?questionId=SCI-002&runId=run-current");
+      const selectionWrite = fetchMock.mock.calls.find(([input, init]) => (
+        String(input).endsWith("/hypothesis-first/selections")
+        && String((init as RequestInit | undefined)?.method).toUpperCase() === "POST"
+      ));
+      expect(selectionWrite).toBeDefined();
+      expect(JSON.parse(String((selectionWrite?.[1] as RequestInit).body))).toEqual(
+        expect.objectContaining({ workflowRunId: "run-current" }),
+      );
+    } finally {
+      clearControlToken();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("falls back only for an absent route, not a domain 404", () => {
     expect(isHypothesisFirstStateV2EndpointUnavailable(new FetchJsonHttpError(
       JSON.stringify({ detail: "Not Found" }),

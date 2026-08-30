@@ -67,7 +67,7 @@ export function useResearchWorkflowCommands(options: {
         const created = await createRun(input);
         telemetry.succeeded({ runId: created.runId });
         const questionId = created.questionId || input.questionId;
-        const node = await fetchHypothesisFirstFocusNode(options.teamId, questionId);
+        const node = await fetchHypothesisFirstFocusNode(options.teamId, questionId, created.runId);
         replaceParams({
           runId: created.runId,
           questionId,

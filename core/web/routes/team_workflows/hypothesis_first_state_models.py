@@ -625,6 +625,7 @@ class OfficialCatalogScope(StrictWireModel):
     questionInOfficialCatalog: Literal[True]
     catalogId: str = Field(..., min_length=1)
     catalogSha256: str = Field(..., min_length=1)
+    workflowRunId: str | None = None
 
 
 class ResetBoundary(StrictWireModel):
