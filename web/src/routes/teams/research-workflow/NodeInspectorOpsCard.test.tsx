@@ -148,4 +148,51 @@ describe("NodeInspectorOpsCard", () => {
     });
     container.remove();
   });
+
+  it("shows a stale primary offer's refresh reason inline instead of tooltip-only", () => {
+    const staleOffer = {
+      command: "retry_node",
+      idempotencyKey: "key-stale-primary",
+      label: "重试节点",
+      available: false,
+      reasonCode: "node_in_flight",
+      blockerIds: [],
+      expectedRunVersion: 5,
+    } as unknown as CommandOffer;
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <NodeInspectorOpsCard
+          stageLabel="知识搜集"
+          title="知识入库"
+          status={{ tone: "warning", label: "阻塞" }}
+          unbound={false}
+          agentId="agent-ingestor"
+          agentName="资料入库"
+          agentInitial="资"
+          modelLabel="qwen-plus"
+          modelMeta="通义"
+          providerVisual="qwen"
+          selectedModelRef="qwen-plus"
+          candidates={[candidate("qwen-plus", "qwen-plus")]}
+          pendingModelRef=""
+          modelPending={false}
+          meters={[]}
+          primaryOffer={staleOffer}
+          busy={false}
+          runVersion={8}
+          sessionHref={null}
+          configHref={null}
+          agents={[]}
+          agentSwitchDisabled
+          onSelectPinned={() => undefined}
+          onPromote={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("重试节点");
+    expect(markup).toContain("运行状态已更新，请刷新后重试");
+    expect(markup).toContain('role="status"');
+    expect(markup).not.toContain("当前节点已在执行");
+  });
 });

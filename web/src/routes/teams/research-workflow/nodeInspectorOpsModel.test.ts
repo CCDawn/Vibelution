@@ -148,4 +148,36 @@ describe("nodeInspectorOpsModel", () => {
     expect(commandOfferUnavailableReason(blocked, true)).not.toBe("hypothesis_first_meeting_open");
     expect(withoutStartNodeOffers([blocked, offer({ command: "retry_node", label: "重试" })]).map((item) => item.command)).toEqual(["retry_node"]);
   });
+
+  it("drops unavailable retry offers instead of resurrecting a dead primary button", () => {
+    const staleRetry = offer({
+      command: "retry_node",
+      label: "重试 知识入库",
+      available: false,
+      reasonCode: "node_in_flight",
+      expectedRunVersion: 5,
+    });
+    expect(pickPrimaryCommandOffer([staleRetry])).toBeNull();
+    const freshRetry = offer({
+      command: "retry_node",
+      label: "重试 知识入库",
+      idempotencyKey: "offer:retry-fresh",
+      expectedRunVersion: 8,
+    });
+    expect(pickPrimaryCommandOffer([staleRetry, freshRetry])).toEqual(freshRetry);
+  });
+
+  it("reports run-version mismatches as a refresh need for available and unavailable offers", () => {
+    const stale = offer({ command: "retry_node", label: "重试", expectedRunVersion: 5 });
+    expect(commandOfferUnavailableReason(stale, true, 8)).toBe("运行状态已更新，请刷新后重试");
+    expect(commandOfferUnavailableReason(stale, false, 8)).toBe("Run state has been updated; refresh and try again");
+    expect(commandOfferUnavailableReason({ ...stale, available: false, reasonCode: "node_in_flight" }, true, 8))
+      .toBe("运行状态已更新，请刷新后重试");
+    expect(commandOfferUnavailableReason(stale, true, 5)).toBe("");
+    expect(commandOfferUnavailableReason({ ...stale, available: false, reasonCode: "node_in_flight" }, true, 5))
+      .toBe("当前节点已在执行");
+    // No current version wired -> legacy behavior, no version gate.
+    expect(commandOfferUnavailableReason(stale, true, null)).toBe("");
+    expect(commandOfferUnavailableReason(stale, true, undefined)).toBe("");
+  });
 });

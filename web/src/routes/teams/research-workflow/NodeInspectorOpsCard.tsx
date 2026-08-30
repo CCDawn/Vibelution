@@ -55,6 +55,9 @@ export type NodeInspectorOpsCardProps = {
   busy: boolean;
   readOnly?: boolean;
   onOffer?: (offer: CommandOffer) => Promise<void>;
+  /** Current snapshot run version; a primary offer signed against a
+   * different version disables with an inline refresh hint. */
+  runVersion?: number | null;
   sessionHref: string | null;
   sessionDisabledReason?: string;
   configHref: string | null;
@@ -103,6 +106,9 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
   const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
   const isZh = props.lang !== "en";
+  const primaryReason = props.primaryOffer
+    ? commandOfferUnavailableReason(props.primaryOffer, isZh, props.runVersion)
+    : "";
   const modelDisabled = props.readOnly || props.unbound || props.modelPending;
   const groups = useMemo(
     () => groupAgentModelCandidates(props.candidates, "dialogue", query),
@@ -271,15 +277,9 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
           <VButton
             type="button"
             variant="primary"
-            isDisabled={props.busy || Boolean(commandOfferUnavailableReason(props.primaryOffer, isZh))}
-            disabledReason={
-              commandOfferUnavailableReason(props.primaryOffer, isZh) || undefined
-            }
-            aria-label={
-              commandOfferUnavailableReason(props.primaryOffer, isZh)
-                ? `${props.primaryOffer.label}：${commandOfferUnavailableReason(props.primaryOffer, isZh)}`
-                : undefined
-            }
+            isDisabled={props.busy || Boolean(primaryReason)}
+            disabledReason={primaryReason || undefined}
+            aria-label={primaryReason ? `${props.primaryOffer.label}：${primaryReason}` : undefined}
             onClick={() => {
               if (!props.primaryOffer || !props.onOffer) return;
               setOfferError(null);
@@ -290,6 +290,9 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
           >
             {props.primaryOffer.label}
           </VButton>
+        ) : null}
+        {props.primaryOffer && primaryReason ? (
+          <span className={styles.notice} role="status">{primaryReason}</span>
         ) : null}
         {props.sessionHref ? (
           <VRouteLinkButton

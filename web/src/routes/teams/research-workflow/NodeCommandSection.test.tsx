@@ -18,13 +18,23 @@ function offer(overrides: Partial<CommandOffer> = {}): CommandOffer {
   } as CommandOffer;
 }
 
-async function renderSection(onOffer: (offer: CommandOffer) => Promise<void>) {
+async function renderSection(
+  onOffer: (offer: CommandOffer) => Promise<void>,
+  options: { offers?: CommandOffer[]; runVersion?: number | null } = {},
+) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(<NodeCommandSection offers={[offer()]} busy={false} onOffer={onOffer} />);
+    root.render(
+      <NodeCommandSection
+        offers={options.offers ?? [offer()]}
+        busy={false}
+        onOffer={onOffer}
+        runVersion={options.runVersion}
+      />,
+    );
   });
   return { container, root };
 }
@@ -78,5 +88,36 @@ describe("NodeCommandSection", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("shows the stale-version reason inline next to a disabled stale offer", async () => {
+    const stale = offer({
+      command: "retry_node",
+      idempotencyKey: "key-stale",
+      label: "重试节点",
+      available: false,
+      reasonCode: "",
+      blockerIds: [],
+      expectedRunVersion: 5,
+    });
+    const rendered = await renderSection(async () => undefined, { offers: [stale], runVersion: 8 });
+    root = rendered.root;
+    const { container } = rendered;
+
+    const button = container.querySelector("button");
+    expect(button?.hasAttribute("disabled")).toBe(true);
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toContain("运行状态已更新，请刷新后重试");
+  });
+
+  it("keeps a version-matched available offer enabled without an inline reason", async () => {
+    const fresh = offer({ idempotencyKey: "key-fresh", expectedRunVersion: 8 });
+    const rendered = await renderSection(async () => undefined, { offers: [fresh], runVersion: 8 });
+    root = rendered.root;
+    const { container } = rendered;
+
+    const button = container.querySelector("button");
+    expect(button?.hasAttribute("disabled")).toBe(false);
+    expect(container.querySelector('[role="status"]')).toBeNull();
   });
 });

@@ -186,6 +186,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         busy={props.busy}
         onOffer={props.onOffer}
         lang={lang}
+        runVersion={detail.runVersion}
       />
     </VSurface>
   );

@@ -153,8 +153,11 @@ export function pickPrimaryCommandOffer(offers: CommandOffer[] | null | undefine
   const availableStart = startOffers.find((offer) => offer.available);
   if (availableStart) return availableStart;
   if (startOffers[0]) return startOffers[0];
-  const retry = list.find((offer) => offer.command === "retry_node" && offer.available)
-    ?? list.find((offer) => offer.command === "retry_node");
+  // No fallback to an unavailable retry_node offer: once the run version has
+  // moved on, the stale signed offer is dead (the workspace footer and the
+  // server both reject it), so resurrecting it as a disabled primary button
+  // only hides the refresh need. No available retry means no primary action.
+  const retry = list.find((offer) => offer.command === "retry_node" && offer.available);
   return retry ?? null;
 }
 
@@ -179,7 +182,11 @@ function payloadRemediationLabel(payload: Record<string, unknown> | null | undef
   return typeof label === "string" ? label.trim() : "";
 }
 
-export function commandOfferUnavailableReason(offer: CommandOffer, isZh: boolean): string {
+export function commandOfferUnavailableReason(
+  offer: CommandOffer,
+  isZh: boolean,
+  currentRunVersion?: number | null,
+): string {
   // The operator gate outranks availability: a server-signed operator-only
   // offer is not actionable from this surface regardless of `available`, so
   // every button rendering this reason disables with the cause instead of
@@ -189,6 +196,14 @@ export function commandOfferUnavailableReason(offer: CommandOffer, isZh: boolean
     return isZh
       ? `需要 operator 权限：${reason}`
       : `Operator permission required: ${reason}`;
+  }
+  // Mirrors the workspace footer and server version gates: an offer signed
+  // against a different run version is stale even while it still claims to
+  // be available, so the surface asks for a refresh instead of a dead click.
+  if (currentRunVersion != null && Number(offer.expectedRunVersion) !== Number(currentRunVersion)) {
+    return isZh
+      ? "运行状态已更新，请刷新后重试"
+      : "Run state has been updated; refresh and try again";
   }
   if (offer.available) return "";
   const remediation = payloadRemediationLabel(offer.payload);
