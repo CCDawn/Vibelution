@@ -67,6 +67,69 @@ def _seed_attempt(harness: CommandHarness, action: PendingAction) -> None:
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
+_PROVIDER_USAGE = {
+    "source": "canonical_turn_outcome",
+    "provider": "autodl",
+    "model": "GLM-5.3-flash",
+    "inputTokens": 13_668,
+    "outputTokens": 598,
+    "totalTokens": 14_266,
+}
+
+
+@pytest.mark.parametrize(
+    ("canonical_usage", "expected_usage"),
+    [
+        pytest.param(_PROVIDER_USAGE, _PROVIDER_USAGE, id="canonical"),
+        pytest.param(None, {"estimate_tokens": 50_000}, id="estimate-fallback"),
+    ],
+)
+def test_agent_adapter_settles_with_best_available_usage(
+    canonical_usage: dict[str, object] | None,
+    expected_usage: dict[str, object],
+) -> None:
+    from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+        AgentActionAdapter,
+    )
+    from core.web.services.team_workflow.research_runtime.domain_ports import (
+        AgentTaskHandle,
+        AgentTurnResult,
+        BindingResolution,
+    )
+
+    handle = AgentTaskHandle(
+        session_id="session-budget",
+        session_attempt=1,
+        task_id="task-budget",
+        turn_id="turn-budget",
+    )
+
+    class _Ports:
+        def resolve_binding(self, _action):  # type: ignore[no-untyped-def]
+            return BindingResolution(agent_id="agent-budget", role_key="source_finder")
+
+        def reserve_budget(self, *, action, estimate_tokens):  # type: ignore[no-untyped-def]
+            assert action == _action()
+            assert estimate_tokens == 50_000
+            return {"reservationId": "reservation-budget"}
+
+        def create_agent_task(self, *, action):  # type: ignore[no-untyped-def]
+            assert action == _action()
+            return handle
+
+        def execute_agent_turn(self, *, action, handle):  # type: ignore[no-untyped-def]
+            assert action == _action()
+            return AgentTurnResult(
+                materialized_refs=(),
+                handle=handle,
+                usage=canonical_usage,
+            )
+
+    result = AgentActionAdapter(_Ports(), estimate_tokens=50_000).execute(_action())  # type: ignore[arg-type]
+
+    assert result.usage == expected_usage
+
+
 def test_reserve_persists_budget_receipt(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:

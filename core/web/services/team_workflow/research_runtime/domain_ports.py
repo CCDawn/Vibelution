@@ -101,6 +101,7 @@ class AgentTurnResult:
 
     materialized_refs: tuple[dict[str, str], ...]
     handle: AgentTaskHandle
+    usage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

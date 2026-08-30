@@ -52,9 +52,12 @@ class AgentActionAdapter:
         )
         handle = self._ports.create_agent_task(action=action)
         executed = self._ports.execute_agent_turn(action=action, handle=handle)
+        usage: dict[str, Any] = {"estimate_tokens": self._estimate_tokens}
         if isinstance(executed, AgentTurnResult):
             refs = list(executed.materialized_refs)
             handle = executed.handle
+            if executed.usage:
+                usage = dict(executed.usage)
         else:
             refs = executed
         anchor = {
@@ -97,7 +100,7 @@ class AgentActionAdapter:
             outcome="succeeded",
             materialized_refs=tuple(refs),
             anchor=anchor,
-            usage={"estimate_tokens": self._estimate_tokens},
+            usage=usage,
             reserved=dict(reservation),
         )
 
