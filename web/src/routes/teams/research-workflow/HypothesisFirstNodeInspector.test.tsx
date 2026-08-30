@@ -1235,10 +1235,11 @@ describe("HypothesisFirstNodeInspector", () => {
       />,
     );
     await act(async () => {
-      await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="program-review-form"]')?.textContent).toContain("run-output-1");
+      });
     });
     expect(mockedGetChallengeQuestionRunDetail).toHaveBeenCalledWith("team-1", "Q-01", "run-output-1");
-    expect(container.querySelector('[data-testid="program-review-form"]')?.textContent).toContain("run-output-1");
     expect(reviewFormProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       allowLegacyMutation: false,
     }));
