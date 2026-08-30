@@ -374,10 +374,10 @@ def test_reconcile_command_accepts_blocked_run_and_revives_failed_dispatch(
         commands.close()
 
 
-def test_reconcile_command_without_failed_dispatch_skips_worker_wake(
+def test_reconcile_command_without_active_work_stays_fail_closed(
     tmp_path: Path,
 ) -> None:
-    """No failed dispatch rows to revive: accepted, no spurious wake."""
+    """No dispatch to revive: keep the run diagnosable and do not wake."""
     commands = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed_stuck_production_shape(commands, run_status="blocked")
@@ -398,7 +398,11 @@ def test_reconcile_command_without_failed_dispatch_skips_worker_wake(
             )
         )
         assert receipt.accepted_run_version is not None
-        assert commands.store.get_run("run-test").status == "running"
+        recovered = commands.store.get_run("run-test")
+        assert recovered.status == "reconciliation_required"
+        assert json.loads(str(recovered.blocked_problem_json))["code"] == (
+            "reconcile_no_active_work"
+        )
         assert commands.wake_count == wake_before
     finally:
         commands.close()
