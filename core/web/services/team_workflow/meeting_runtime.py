@@ -1337,6 +1337,18 @@ def open_hypothesis_review_meeting(
     topic = str(request.get("topic") or "").strip() or _opening_topic(
         meeting_round_id, effective_selection, agenda, candidate_contexts
     )
+    bound_result: dict[str, Any] = {}
+
+    def bind_opening_round(_room: Mapping[str, Any], round_payload: Mapping[str, Any]) -> None:
+        bound_result.update(
+            meeting_rounds.bind_meeting_chat_room_round(
+                team["teamId"],
+                meeting_round_id,
+                room_id,
+                str(round_payload.get("roundId") or ""),
+            )
+        )
+
     result = chat_room_service.start_chat_room_round(
         room_id,
         topic,
@@ -1353,11 +1365,10 @@ def open_hypothesis_review_meeting(
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
         _model_invocation_receipt_authority=receipt_authority,
+        _on_round_persisted=bind_opening_round,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
-    bound = meeting_rounds.bind_meeting_chat_room_round(
-        team["teamId"], meeting_round_id, room_id, round_id
-    )
+    bound = bound_result
     if background and agent_runner is None:
         # The first room round can finish before its meeting binding is
         # persisted. Scheduling after the bind closes that race; the scheduler
@@ -1509,6 +1520,18 @@ def open_candidate_generation_meeting(
         "questionId": question_id,
         "selectedCandidateIds": [],
     }
+    bound_result: dict[str, Any] = {}
+
+    def bind_opening_round(_room: Mapping[str, Any], round_payload: Mapping[str, Any]) -> None:
+        bound_result.update(
+            meeting_rounds.bind_meeting_chat_room_round(
+                team["teamId"],
+                meeting_round_id,
+                room_id,
+                str(round_payload.get("roundId") or ""),
+            )
+        )
+
     result = chat_room_service.start_chat_room_round(
         room_id,
         topic,
@@ -1525,11 +1548,10 @@ def open_candidate_generation_meeting(
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
         _model_invocation_receipt_authority=receipt_authority,
+        _on_round_persisted=bind_opening_round,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
-    bound = meeting_rounds.bind_meeting_chat_room_round(
-        team["teamId"], meeting_round_id, room_id, round_id
-    )
+    bound = bound_result
     if background and agent_runner is None:
         schedule_meeting_discussion(team["teamId"], meeting_round_id)
     return {
@@ -1836,7 +1858,21 @@ def _run_meeting_discussion_impl(
         # Existing meetings may drain, but they cannot create another room
         # round after maintenance starts.
         assert_writes_allowed(normalized_team_id, operation="meeting_round_start")
-        result = chat_room_service.start_chat_room_round(
+        bound_result: dict[str, Any] = {}
+
+        def bind_follow_up_round(
+            _room: Mapping[str, Any], round_payload: Mapping[str, Any]
+        ) -> None:
+            bound_result.update(
+                meeting_rounds.bind_meeting_chat_room_round(
+                    normalized_team_id,
+                    normalized_round_id,
+                    room_id,
+                    str(round_payload.get("roundId") or ""),
+                )
+            )
+
+        chat_room_service.start_chat_room_round(
             room_id,
             _follow_up_topic(discussion_round_index),
             purpose="meeting",
@@ -1850,11 +1886,9 @@ def _run_meeting_discussion_impl(
             background=False,
             max_topic_lines=MEETING_TOPIC_MAX_LINES,
             _model_invocation_receipt_authority=receipt_authority,
+            _on_round_persisted=bind_follow_up_round,
         )
-        round_id = _round_id_from_start_result(result, normalized_round_id)
-        bound = meeting_rounds.bind_meeting_chat_room_round(
-            normalized_team_id, normalized_round_id, room_id, round_id
-        )
+        bound = bound_result
         meeting_round = bound["meetingRound"]
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
     else:
@@ -2536,3 +2570,58 @@ def maybe_auto_draft_after_chat_round(
         meeting_round_id,
         required_round_id=str(round_payload.get("roundId") or "").strip(),
     )
+
+
+def finalize_stopped_meeting_after_chat_round(
+    room: Mapping[str, Any] | None,
+    round_payload: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Propagate one formal Chat Room stop into its bound workflow owners."""
+
+    if not isinstance(room, Mapping) or not isinstance(round_payload, Mapping):
+        return None
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    meeting_round_id = str(config.get("meetingRoundId") or "").strip()
+    terminal_reason = str(round_payload.get("terminalReason") or "").strip()
+    if not meeting_round_id or not terminal_reason:
+        return None
+    team_id = _team_id_for_auto_draft(room, round_payload)
+    if not team_id:
+        raise ResearchMeetingRuntimeError(
+            "stopped formal meeting round has no owning team"
+        )
+    meeting_round = meeting_rounds.get_meeting_round(
+        team_id, meeting_round_id
+    )["meetingRound"]
+    meeting_status = str(meeting_round.get("status") or "").strip().lower()
+    if meeting_status not in {"open", "summarizing"}:
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": team_id,
+            "status": "already_terminal",
+            "meetingRound": meeting_round,
+        }
+    terminal = meeting_rounds.terminate_meeting_execution(
+        team_id,
+        meeting_round_id,
+        reason=terminal_reason,
+    )
+    meeting_round = terminal.get("meetingRound") or {}
+    if (
+        str(meeting_round.get("meetingType") or "").strip().lower()
+        == CANDIDATE_GENERATION_MEETING_TYPE
+    ):
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        hypothesis_first_chain.fail_generation_attempt_for_meeting(
+            team_id,
+            meeting_round_id,
+            reason=terminal_reason,
+        )
+    return terminal

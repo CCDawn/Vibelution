@@ -3139,6 +3139,49 @@ def _finish_generation_attempt_for_meeting(
     )
 
 
+def fail_generation_attempt_for_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reason: str,
+) -> dict[str, Any] | None:
+    """Finish the active generation attempt when its bound meeting is fenced.
+
+    The bound MeetingRound is the execution authority.  A formal chat-room
+    stop must close the duplicate attempt projection in the same terminal
+    callback so the UI never keeps reporting a dead attempt as ``running``.
+    """
+
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise HypothesisFirstChainError("generation terminal reason is required")
+    with _LOCK:
+        attempts = _generation_attempts(_read_jsonl(_storage_path(team_id)))
+    current = next(
+        (
+            item
+            for item in reversed(attempts)
+            if str(item.get("meetingRoundId") or "") == meeting_round_id
+        ),
+        None,
+    )
+    if current is None:
+        return None
+    lifecycle = str(current.get("lifecycle") or "").strip().lower()
+    if lifecycle in {"completed", "failed", "cancelled", "superseded"}:
+        return current
+    return _append_generation_attempt_state(
+        team_id,
+        question_id=str(current.get("questionId") or ""),
+        attempt_id=str(current.get("attemptId") or ""),
+        attempt_number=int(current.get("attemptNumber") or 1),
+        meeting_round_id=meeting_round_id,
+        lifecycle="cancelled" if "cancel" in normalized_reason else "failed",
+        supersedes_attempt_id=str(current.get("supersedesAttemptId") or ""),
+        error=normalized_reason,
+    )
+
+
 def list_collection_requests(
     team_id: str,
     *,
