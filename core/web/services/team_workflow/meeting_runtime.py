@@ -1365,10 +1365,12 @@ def open_hypothesis_review_meeting(
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
         _model_invocation_receipt_authority=receipt_authority,
-        _on_round_persisted=bind_opening_round,
+        _on_round_persisted=bind_opening_round if background else None,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
-    bound = bound_result
+    bound = bound_result or meeting_rounds.bind_meeting_chat_room_round(
+        team["teamId"], meeting_round_id, room_id, round_id
+    )
     if background and agent_runner is None:
         # The first room round can finish before its meeting binding is
         # persisted. Scheduling after the bind closes that race; the scheduler
@@ -1548,10 +1550,12 @@ def open_candidate_generation_meeting(
         lightweight_response=background,
         max_topic_lines=MEETING_TOPIC_MAX_LINES,
         _model_invocation_receipt_authority=receipt_authority,
-        _on_round_persisted=bind_opening_round,
+        _on_round_persisted=bind_opening_round if background else None,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
-    bound = bound_result
+    bound = bound_result or meeting_rounds.bind_meeting_chat_room_round(
+        team["teamId"], meeting_round_id, room_id, round_id
+    )
     if background and agent_runner is None:
         schedule_meeting_discussion(team["teamId"], meeting_round_id)
     return {
