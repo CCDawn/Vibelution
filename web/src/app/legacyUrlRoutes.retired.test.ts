@@ -12,6 +12,7 @@ describe("legacy frontend URL redirects retired", () => {
     expect(routerSource).not.toContain("LegacyTeamsRedirect");
     expect(routerSource).not.toContain("LegacyMemoryRedirect");
     expect(routerSource).not.toContain("LegacyEvolutionRedirect");
+    expect(routerSource).not.toContain("research-workflow");
     expect(routerSource).not.toContain('path: "chat-rooms"');
     expect(routerSource).not.toContain('path: "agents/teams"');
     expect(routerSource).not.toContain('path: "agents/memory"');

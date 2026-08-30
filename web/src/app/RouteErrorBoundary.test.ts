@@ -40,6 +40,47 @@ describe("RouteErrorBoundary view model", () => {
     expect(viewModel.technicalSummary).toContain("ordinary render failure");
   });
 
+  it("labels router ErrorResponse 404 as a missing page with navigable primary action", () => {
+    const notFoundError = {
+      status: 404,
+      statusText: "Not Found",
+      internal: false,
+      data: 'No route matches URL "/teams/research-workflow"',
+    };
+    const viewModel = buildRouteErrorBoundaryViewModel(notFoundError, "workbench");
+
+    expect(viewModel.isDynamicImportFailure).toBe(false);
+    expect(viewModel.kicker).toBe("工作台页面不存在");
+    expect(viewModel.title).toContain("页面不存在");
+    expect(viewModel.primaryActionLabel).toBe("返回工作台");
+    expect(viewModel.primaryAction).toBe("navigate");
+    expect(viewModel.secondaryActionLabel).toBe("刷新前端");
+    expect(viewModel.secondaryAction).toBe("reload");
+    expect(viewModel.technicalSummary).toContain("404");
+    expect(viewModel.technicalSummary).toContain('No route matches URL "/teams/research-workflow"');
+    expect(viewModel.technicalSummary).not.toContain("[object Object]");
+  });
+
+  it("reports non-404 ErrorResponse status in the failure copy", () => {
+    const serverError = { status: 500, statusText: "Internal Server Error", internal: false, data: "boom" };
+    const viewModel = buildRouteErrorBoundaryViewModel(serverError, "workbench");
+
+    expect(viewModel.isDynamicImportFailure).toBe(false);
+    expect(viewModel.title).toContain("HTTP 500");
+    expect(viewModel.primaryActionLabel).toBe("刷新前端");
+    expect(viewModel.primaryAction).toBe("reload");
+    expect(viewModel.technicalSummary).toContain("500");
+    expect(viewModel.technicalSummary).not.toContain("[object Object]");
+  });
+
+  it("serializes non-Error objects instead of leaking [object Object]", () => {
+    const viewModel = buildRouteErrorBoundaryViewModel({ reason: "mystery" }, "workbench");
+
+    expect(viewModel.technicalSummary).toContain('"reason"');
+    expect(viewModel.technicalSummary).toContain('"mystery"');
+    expect(viewModel.technicalSummary).not.toContain("[object Object]");
+  });
+
   it("renders route recovery actions through shared VUI primitives", () => {
     expect(routeErrorBoundarySource).toContain("VButton");
     expect(routeErrorBoundarySource).toContain('data-vui-app={surface}');
