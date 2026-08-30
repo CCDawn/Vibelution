@@ -102,9 +102,23 @@ const MOOD_LABELS: Record<string, { zh: string; en: string }> = {
   sad: { zh: "低落", en: "Low" },
 };
 
+const MOOD_SYMBOLS: Record<string, string> = {
+  calm: "😌",
+  happy: "😊",
+  curious: "🤔",
+  focused: "🧐",
+  tired: "😴",
+  sad: "😔",
+};
+
 export function lifeMoodLabel(snapshot: VirtualHumanSnapshot, lang: "zh" | "en"): string {
   const mood = String(snapshot.state?.mood?.label || "calm").trim().toLowerCase();
   return MOOD_LABELS[mood]?.[lang] || mood || (lang === "zh" ? "平静" : "Calm");
+}
+
+export function lifeMoodSymbol(snapshot: VirtualHumanSnapshot): string {
+  const mood = String(snapshot.state?.mood?.label || "calm").trim().toLowerCase();
+  return MOOD_SYMBOLS[mood] || MOOD_SYMBOLS.calm;
 }
 
 export function formatLifeTime(value: string, lang: "zh" | "en"): string {

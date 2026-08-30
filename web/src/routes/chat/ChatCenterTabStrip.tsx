@@ -22,7 +22,7 @@ export type ChatCenterTabStripProps = {
   workspaceActiveTab: string;
   sessionTabs: ReactNode;
   fileTabs: ReactNode;
-  companionActions?: ReactNode;
+  companionHeader?: ReactNode;
   leftOverlayVisible: boolean;
   rightOverlayVisible: boolean;
   conversationIndexOverlayOpen: boolean;
@@ -45,7 +45,7 @@ export function ChatCenterTabStrip({
   workspaceActiveTab,
   sessionTabs,
   fileTabs,
-  companionActions,
+  companionHeader,
   leftOverlayVisible,
   rightOverlayVisible,
   conversationIndexOverlayOpen,
@@ -68,7 +68,7 @@ export function ChatCenterTabStrip({
         </Link>
       ) : null}
       <div className={styles.tabStripSessions}>
-        {groupPanelActive ? (
+        {companionHeader ?? (groupPanelActive ? (
           <VButton
             type="button"
             className={`${styles.tab} ${styles.tabActive}`}
@@ -86,10 +86,9 @@ export function ChatCenterTabStrip({
           >
             {agentSessionLabel}
           </VButton>
-        ) : null}
-        <Suspense fallback={null}>{fileTabs}</Suspense>
+        ) : null)}
+        {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
-      {companionActions}
       {!leftOverlayVisible || !rightOverlayVisible ? (
         <div className={styles.overlayPaneControls}>
           {!leftOverlayVisible ? (

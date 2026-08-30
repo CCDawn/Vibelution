@@ -1,15 +1,15 @@
-import { Settings } from "lucide-react";
+import { ArrowLeft, Heart, MapPin, Settings, Sparkles } from "lucide-react";
 
 import type { VirtualHumanCompanion } from "../../api/types";
 import { VRouteLinkButton, VStateSurface, VStatusChip } from "../../components/vui";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import { CompanionPortrait } from "./CompanionPortrait";
 import {
-  companionAbout,
-  companionIdentity,
+  formatCompanionLocalTime,
   companionReturnTarget,
   currentLifeActivityLabel,
   lifeMoodLabel,
+  lifeMoodSymbol,
 } from "./companionPresentation";
 import styles from "./CompanionChatRails.styles";
 
@@ -38,6 +38,9 @@ export function CompanionPersonRail({
       ? (lang === "zh" ? "人物状态载入失败" : "Failed to load person")
       : (lang === "zh" ? "这个人物当前不可进入" : "This person is unavailable");
   const activityLabel = companion ? currentLifeActivityLabel(companion.snapshot, lang) : "";
+  const locationLabel = companion?.snapshot.state?.currentLocation || (lang === "zh" ? "未记录" : "Not recorded");
+  const relationshipLabel = companion?.snapshot.state?.relationshipSummary || (lang === "zh" ? "慢慢熟悉" : "Getting closer");
+  const localTime = companion ? formatCompanionLocalTime(companion.snapshot, lang) : "--:--";
   return (
     <aside
       className={`${className} ${styles.personRail}`}
@@ -47,9 +50,13 @@ export function CompanionPersonRail({
       data-companion-person-rail="true"
     >
       <div className={styles.railActions}>
-        <VRouteLinkButton to="/companions" variant="ghost" className={styles.quietLink}>
-          ← {lang === "zh" ? "人物大厅" : "Companion lobby"}
-        </VRouteLinkButton>
+        <VRouteLinkButton
+          to="/companions"
+          variant="ghost"
+          className={styles.railIconButton}
+          aria-label={lang === "zh" ? "返回人物大厅" : "Back to companion lobby"}
+          icon={<ArrowLeft size={16} aria-hidden="true" />}
+        />
         {companion ? (
           <VRouteLinkButton
             to={agentCenterConfigRoute({
@@ -59,9 +66,9 @@ export function CompanionPersonRail({
               returnLabel: companion.displayName,
             })}
             variant="ghost"
-            className={styles.quietLink}
+            className={styles.railIconButton}
             aria-label={lang === "zh" ? "虚拟人设置" : "Virtual human settings"}
-            icon={<Settings size={14} />}
+            icon={<Settings size={16} aria-hidden="true" />}
           />
         ) : null}
       </div>
@@ -78,46 +85,29 @@ export function CompanionPersonRail({
           {errorMessage || (lang === "zh" ? "请从人物大厅重新进入。" : "Open this person again from the lobby.")}
         </VStateSurface>
       ) : (
-        <>
-          <div className={styles.profile}>
-            <CompanionPortrait companion={companion} className={styles.railPortrait} />
+        <div className={styles.profile}>
+          <CompanionPortrait companion={companion} className={styles.railPortrait} />
+          <div className={styles.personSummary}>
             <div className={styles.personPresence}>
-              <span>{companion.agentCode}</span>
               <VStatusChip tone={companion.snapshot.state?.lifePaused ? "warning" : "success"}>
                 {companion.snapshot.state?.lifePaused
                   ? (lang === "zh" ? "已暂停" : "Paused")
-                  : (lang === "zh" ? "和你在一起" : "Here with you")}
+                  : (lang === "zh" ? "在线" : "Online")}
               </VStatusChip>
+              <time>{localTime}</time>
             </div>
             <div className={styles.personNameCopy}>
               <h1>{companion.displayName}</h1>
-              <p>{companionIdentity(companion)}</p>
+              <span title={`${lang === "zh" ? "心情" : "Mood"}: ${lifeMoodLabel(companion.snapshot, lang)}`} aria-label={`${lang === "zh" ? "心情" : "Mood"}: ${lifeMoodLabel(companion.snapshot, lang)}`}>{lifeMoodSymbol(companion.snapshot)}</span>
             </div>
-            <blockquote className={styles.personQuote}>{companionAbout(companion)}</blockquote>
-            <div className={styles.personFacts}>
-              <span><small>{lang === "zh" ? "心情" : "Mood"}</small><strong>{lifeMoodLabel(companion.snapshot, lang)}</strong></span>
-              <span><small>{lang === "zh" ? "关系" : "Relationship"}</small><strong>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "慢慢熟悉中" : "Getting acquainted")}</strong></span>
-              <span><small>{lang === "zh" ? "此刻" : "Now"}</small><strong>{activityLabel}</strong></span>
+            <p className={styles.personStatus}>{activityLabel}</p>
+            <div className={styles.personFacts} aria-label={lang === "zh" ? "人物状态摘要" : "Person status summary"}>
+              <span title={locationLabel}><MapPin size={14} aria-hidden="true" /><strong>{locationLabel}</strong></span>
+              <span title={activityLabel}><Sparkles size={14} aria-hidden="true" /><strong>{activityLabel}</strong></span>
+              <span title={relationshipLabel}><Heart size={14} aria-hidden="true" /><strong>{relationshipLabel}</strong></span>
             </div>
-            <VRouteLinkButton
-              to={agentCenterConfigRoute({
-                agentId: companion.agentId,
-                pane: "config",
-                returnTo: companionReturnTarget(companion),
-                returnLabel: companion.displayName,
-              })}
-              variant="secondary"
-              className={styles.profileLink}
-            >
-              {lang === "zh" ? "打开她的完整档案" : "Open full profile"}
-            </VRouteLinkButton>
           </div>
-
-          <footer className={styles.personFooter}>
-            <strong>{lang === "zh" ? "当前人物专属栏" : "Current-person rail"}</strong>
-            <span>{lang === "zh" ? "这里不选择其他人；切换人物请返回人物大厅。" : "There is no person picker here. Return to the lobby to switch."}</span>
-          </footer>
-        </>
+        </div>
       )}
     </aside>
   );

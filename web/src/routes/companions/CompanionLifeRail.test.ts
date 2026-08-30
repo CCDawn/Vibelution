@@ -16,7 +16,8 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("memory.scoreBreakdown");
     expect(railSource).toContain("memory.reinforcedAt");
     expect(railSource).toContain("sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left))");
-    expect(railSource).toContain("只展示从真实生活经历晋升的记忆");
+    expect(railSource).toContain("styles.memoryVisual");
+    expect(railSource).toContain("段重要生活片段");
   });
 
   it("projects causal life continuity without adding another chat or data route", () => {
@@ -32,7 +33,7 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("夜间回想");
     expect(railSource).toContain("想说的话");
     expect(railSource).toContain("生活节律");
-    expect(railSource).toContain("呈现方式");
+    expect(railSource).toContain("呈现与表达");
     expect(railSource).toContain("长期日历");
     expect(railSource).toContain("兴趣成长");
     expect(railSource).toContain("生活动态");
@@ -50,6 +51,7 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("snapshot.todayCalendar");
     expect(railSource).toContain("snapshot.rhythms");
     expect(railSource).not.toContain("fetchVirtualHumanTimeline");
+    expect(railSource).not.toContain("事实边界");
   });
 
   it("keeps legacy backends usable when the memories endpoint is unavailable", () => {
@@ -59,11 +61,18 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("retry: false");
   });
 
-  it("uses a stable scroll region and compact desktop density", () => {
+  it("uses a stable visual desktop rail with progressive detail disclosure", () => {
     expect(styles.lifeContent).toContain("overscroll-contain");
     expect(styles.lifeContent).toContain("scrollbar-gutter:stable");
     expect(styles.lifeContent).toContain("max-[1100px]:p-2.5");
     expect(styles.lifeCard).toContain("max-[1100px]:p-2");
-    expect(styles.personRail).toContain("max-[1100px]:p-2.5");
+    expect(styles.personRail).toContain("overflow-hidden");
+    expect(styles.sceneCard).toContain("radial-gradient");
+    expect(styles.vitalGrid).toContain("grid-cols");
+    expect(styles.meterTrack).toContain("rounded-full");
+    expect(styles.scheduleItem).toContain("grid-cols-[44px_10px_minmax(0,1fr)]");
+    expect(styles.detailDisclosure).toContain("group");
+    expect(railSource).toContain('role="meter"');
+    expect(railSource).toContain("<details className={styles.detailDisclosure}>");
   });
 });

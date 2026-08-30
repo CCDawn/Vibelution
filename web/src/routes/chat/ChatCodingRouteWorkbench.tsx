@@ -158,9 +158,9 @@ import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
+import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
 import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
-import { CompanionProactiveSettingsPopover } from "../companions/CompanionProactiveSettingsPopover";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
 import {
@@ -794,6 +794,7 @@ export function ChatCodingRoute() {
       && companion.directSessionId === requestedSessionId
     )) ?? null;
   }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
+  const verifiedCompanionMode = Boolean(activeCompanion);
   const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
@@ -2832,7 +2833,7 @@ export function ChatCodingRoute() {
         </VButton>
       ) : null
       }
-      statusRail={companionMode ? (
+      statusRail={verifiedCompanionMode ? (
       <CompanionLifeRail
         className={statusRailClassName}
         collapsed={statusRailCollapsed}
@@ -2919,10 +2920,10 @@ export function ChatCodingRoute() {
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            showSessionTabs={!companionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
-            showAgentFallbackTab={!companionMode}
-            companionActions={companionMode && activeCompanion ? (
-              <CompanionProactiveSettingsPopover companion={activeCompanion} lang={lang} />
+            showSessionTabs={!verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+            showAgentFallbackTab={!verifiedCompanionMode}
+            companionHeader={verifiedCompanionMode && activeCompanion ? (
+              <CompanionConversationHeader companion={activeCompanion} lang={lang} />
             ) : null}
             workspaceActiveTab={workspace.activeTab}
             leftOverlayVisible={responsiveLayout.leftVisible}
@@ -3120,16 +3121,16 @@ export function ChatCodingRoute() {
                 defaultFileContext: detail.defaultFileContext,
                 showHeader: false,
                 showSessionOverview: false,
-                companionMode,
+                companionMode: verifiedCompanionMode,
                 // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
-                showMentalSnapshots: true,
+                showMentalSnapshots: !verifiedCompanionMode,
                 composerFocusSignal:
                   composerFocusRequest.sessionId === activeSessionId
                     ? composerFocusRequest.signal
                     : "",
                 onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
                 composer: companionConversationComposer,
-                composerLeadingControl: (
+                composerLeadingControl: verifiedCompanionMode ? undefined : (
                   <ChatComposerPlusMenu
                     lang={lang}
                     attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
@@ -3162,7 +3163,7 @@ export function ChatCodingRoute() {
                     } : null}
                   />
                 ),
-                permissionControl: activeSessionAgent ? {
+                permissionControl: !verifiedCompanionMode && activeSessionAgent ? {
                   value: activeSessionAgent.permissionPreset || "request_approval",
                   disabled: (
                     agentPermissionPresetMutation.isPending
@@ -3193,10 +3194,10 @@ export function ChatCodingRoute() {
                     });
                   },
                 } : undefined,
-                llmControl: sessionLlmControl,
-                composerContextRing,
-                onOpenComposerContextDetail: cacheDetailAvailable ? openCacheDetail : undefined,
-                slashCommandSuggestions,
+                llmControl: verifiedCompanionMode ? undefined : sessionLlmControl,
+                composerContextRing: verifiedCompanionMode ? null : composerContextRing,
+                onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
+                slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
                 cancelComposerModeLabel: t("cancelEditMessage"),
                 turnError: detail.lastTurnError,
                 stopLabel: t("stop"),
@@ -3267,7 +3268,7 @@ export function ChatCodingRoute() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       /> : null
       }
-      conversationIndex={companionMode ? (
+      conversationIndex={verifiedCompanionMode ? (
       <CompanionPersonRail
         className={conversationIndexPaneClassName}
         collapsed={conversationIndexCollapsed}

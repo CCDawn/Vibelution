@@ -7,6 +7,7 @@ import {
   currentLifeActivity,
   currentLifeActivityLabel,
   formatCompanionLocalTime,
+  lifeMoodSymbol,
   upcomingLifeActivities,
 } from "./companionPresentation";
 
@@ -66,6 +67,14 @@ describe("companion presentation", () => {
 
   it("formats the person's real timezone without persisting a second clock", () => {
     expect(formatCompanionLocalTime(companion.snapshot, "zh", new Date("2026-08-28T00:42:00Z"))).toBe("08:42");
+  });
+
+  it("keeps the visual mood cue consistent with the current life state", () => {
+    expect(lifeMoodSymbol(companion.snapshot)).toBe("😌");
+    expect(lifeMoodSymbol({
+      ...companion.snapshot,
+      state: { ...companion.snapshot.state!, mood: { ...companion.snapshot.state!.mood, label: "sad" } },
+    })).toBe("😔");
   });
 
   it("uses one human-readable fallback for sleeping, resting, and unscheduled time", () => {

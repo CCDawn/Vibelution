@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays, Coffee, Heart, MapPin, Sparkles } from "lucide-react";
 
 import {
   fetchVirtualHumanDiary,
@@ -35,6 +36,7 @@ import {
   currentLifeActivityLabel,
   formatLifeTime,
   lifeMoodLabel,
+  lifeMoodSymbol,
   upcomingLifeActivities,
 } from "./companionPresentation";
 import type { CompanionRailState } from "./CompanionPersonRail";
@@ -49,9 +51,10 @@ function ScheduleRows({ activities, lang }: { activities: VirtualHumanActivity[]
       {activities.map((activity) => (
         <div key={activity.activityId} className={styles.scheduleItem}>
           <time>{formatLifeTime(activity.startAt, lang)}</time>
+          <i aria-hidden="true" />
           <div>
             <strong>{activity.title}</strong>
-            <span>{formatLifeTime(activity.startAt, lang)}–{formatLifeTime(activity.endAt, lang)} · {activity.status}</span>
+            <span>{formatLifeTime(activity.startAt, lang)}–{formatLifeTime(activity.endAt, lang)}</span>
           </div>
         </div>
       ))}
@@ -234,6 +237,7 @@ function CalendarRows({ calendar, lang }: { calendar: VirtualHumanCalendarProjec
       {occurrences.slice(0, 5).map((item) => (
         <div key={item.calendarOccurrenceId} className={styles.scheduleItem}>
           <time>{formatLifeTime(item.startAt, lang)}</time>
+          <i aria-hidden="true" />
           <div>
             <strong>{item.title}</strong>
             <span>{formatLifeTime(item.startAt, lang)}–{formatLifeTime(item.endAt, lang)} · {item.kind}</span>
@@ -520,13 +524,18 @@ function MemoryRows({ memories, lang }: { memories: VirtualHumanEpisodicMemory[]
         const sourceCount = Array.isArray(memory.sourceEventIds) ? memory.sourceEventIds.length : 0;
         return (
           <article key={memory.episodeId} className={styles.memoryItem}>
-            <div className={styles.memoryItemHeader}>
-              <strong>{lang === "zh" ? "生活片段" : "Lived moment"}</strong>
-              <time>{formatMemoryTimestamp(memory.occurredAt, lang)}</time>
+            <div className={styles.memoryVisualRow}>
+              <span className={styles.memoryVisual} aria-hidden="true"><Sparkles size={19} /></span>
+              <div className={styles.memoryBody}>
+                <div className={styles.memoryItemHeader}>
+                  <strong>{lang === "zh" ? "生活片段" : "Lived moment"}</strong>
+                  <time>{formatMemoryTimestamp(memory.occurredAt, lang)}</time>
+                </div>
+                <p className={styles.memoryText}>
+                  {memory.text || (lang === "zh" ? "这条记忆暂时没有正文。" : "This memory has no text yet.")}
+                </p>
+              </div>
             </div>
-            <p className={styles.memoryText}>
-              {memory.text || (lang === "zh" ? "这条记忆暂时没有正文。" : "This memory has no text yet.")}
-            </p>
             <div className={styles.progressHeader}>
               <span>{lang === "zh" ? "记忆强度" : "Memory strength"}</span>
               <strong>{strength}%</strong>
@@ -776,143 +785,136 @@ export function CompanionLifeRail({
         <div className={styles.lifeContent}>
           {activeTab === "now" ? (
             <>
-              <section className={styles.lifeCardAccent}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "现在" : "Now"}</p>
-                <h3 className={styles.cardTitle}>{activityLabel}</h3>
-                {activity ? (
-                  <span className={styles.cardMeta}>
-                    {formatLifeTime(activity.startAt, lang)}–{formatLifeTime(activity.endAt, lang)}
-                  </span>
-                ) : null}
-                <div className={styles.locationRow}>
-                  <span>{locationStatus === "moving" ? (lang === "zh" ? "在路上" : "On the way") : (lang === "zh" ? "所在地点" : "Location")}</span>
-                  <strong>{locationLabel}</strong>
-                </div>
-                {locationSource?.sourceKind ? (
-                  <small
-                    className={styles.sourceCopy}
-                    title={locationSource.sourceRef}
-                    aria-label={`${sourceKindLabel(locationSource.sourceKind, lang)}: ${locationSource.sourceRef || "--"}`}
-                  >
-                    {sourceKindLabel(locationSource.sourceKind, lang)}
-                    {locationSource.arrivedAt ? ` · ${formatMemoryTimestamp(locationSource.arrivedAt, lang)}` : ""}
-                  </small>
-                ) : null}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "心情" : "Mood"}</p>
-                <div className={styles.moodRow}>
-                  <strong>{lifeMoodLabel(companion.snapshot, lang)}</strong>
-                  <span>
-                    {activeAffectCount > 0
-                      ? (lang === "zh" ? `${activeAffectCount} 段经历仍有余波` : `${activeAffectCount} lived afterglow(s)`)
-                      : (lang === "zh" ? "已回到自己的日常基线" : "Back at her usual baseline")}
-                  </span>
-                </div>
-                <div className={styles.facts}>
-                  <span className={styles.fact}><span>{lang === "zh" ? "体力" : "Energy"}</span><strong>{companion.snapshot.state?.energy ?? 0}%</strong></span>
-                  <span className={styles.fact}><span>{lang === "zh" ? "社交需要" : "Social"}</span><strong>{companion.snapshot.state?.socialNeed ?? 0}%</strong></span>
+              <section className={styles.sceneCard}>
+                <span className={styles.sceneIcon} aria-hidden="true"><Sparkles size={38} /></span>
+                <div className={styles.sceneCopy}>
+                  <span>{lang === "zh" ? "此刻" : "Right now"}</span>
+                  <strong>{activityLabel}</strong>
+                  <small><MapPin size={12} aria-hidden="true" />{locationLabel}</small>
                 </div>
               </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "生活节律" : "Life rhythm"}</p>
-                <RhythmRows rhythms={companion.snapshot.rhythms} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "呈现方式" : "Embodiment"}</p>
-                <p className={styles.cardCopy}>
-                  {embodiment?.activeMode && embodiment.activeMode !== "portrait"
-                    ? (lang === "zh" ? `正在使用 ${embodiment.activeMode} 形态；文字对话保持原生链路。` : `Using ${embodiment.activeMode}; text chat stays on the native session path.`)
-                    : (lang === "zh" ? "当前使用人物立绘；语音或 Live2D 不可用时不会影响文字聊天。" : "Using the portrait; optional voice or Live2D never blocks text chat.")}
-                </p>
-                {embodiment?.fallbackReason && embodiment.fallbackReason !== "disabled" ? (
-                  <small className={styles.sourceCopy}>{lang === "zh" ? `安全回退：${embodiment.fallbackReason}` : `Safe fallback: ${embodiment.fallbackReason}`}</small>
-                ) : null}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "表达习惯" : "Expression habits"}</p>
-                <p className={styles.cardCopy}>
-                  {expressionRules.length
-                    ? (lang === "zh" ? `当前有 ${expressionRules.length} 条可解释的表达规则生效。` : `${expressionRules.length} explainable expression rule(s) are active.`)
-                    : (lang === "zh" ? "当前保持人物自己的基础说话方式。" : "Using the character's baseline voice right now.")}
-                </p>
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "身边环境" : "Around her"}</p>
-                <EnvironmentRows facts={environmentFacts} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "接下来" : "Next"}</p>
-                <ScheduleRows activities={upcoming.filter((item) => item.activityId !== activity?.activityId)} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "想说的话" : "Something to say"}</p>
-                <p className={styles.cardCopy}>{proactiveStateCopy(latestProactiveCandidate, lang)}</p>
-                {latestProactiveCandidate?.reason ? (
-                  <small className={styles.sourceCopy}>{latestProactiveCandidate.reason}</small>
-                ) : null}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "与你的连续性" : "Continuity with you"}</p>
-                <p className={styles.cardCopy}>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "关系仍在自然形成中。" : "The relationship is still taking shape.")}</p>
-              </section>
+              <div className={styles.vitalGrid} aria-label={lang === "zh" ? "人物状态摘要" : "Person status summary"}>
+                <section className={styles.moodVisual}>
+                  <span aria-hidden="true">{lifeMoodSymbol(companion.snapshot)}</span>
+                  <div>
+                    <small>{lang === "zh" ? "心情" : "Mood"}</small>
+                    <strong>{lifeMoodLabel(companion.snapshot, lang)}</strong>
+                  </div>
+                </section>
+                <section className={styles.meterPanel}>
+                  <div className={styles.meterLine}>
+                    <small>{lang === "zh" ? "体力" : "Energy"}</small>
+                    <strong>{boundedPercent(companion.snapshot.state?.energy)}%</strong>
+                    <div className={styles.meterTrack} role="meter" aria-label={`${lang === "zh" ? "体力" : "Energy"} ${boundedPercent(companion.snapshot.state?.energy)}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={boundedPercent(companion.snapshot.state?.energy)}>
+                      <span className={styles.meterFillEnergy} style={{ width: `${boundedPercent(companion.snapshot.state?.energy)}%` }} />
+                    </div>
+                  </div>
+                  <div className={styles.meterLine}>
+                    <small>{lang === "zh" ? "想聊天" : "Social"}</small>
+                    <strong>{boundedPercent(companion.snapshot.state?.socialNeed)}%</strong>
+                    <div className={styles.meterTrack} role="meter" aria-label={`${lang === "zh" ? "想聊天" : "Social"} ${boundedPercent(companion.snapshot.state?.socialNeed)}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={boundedPercent(companion.snapshot.state?.socialNeed)}>
+                      <span className={styles.meterFillSocial} style={{ width: `${boundedPercent(companion.snapshot.state?.socialNeed)}%` }} />
+                    </div>
+                  </div>
+                </section>
+              </div>
+              {upcoming.find((item) => item.activityId !== activity?.activityId) ? (() => {
+                const nextActivity = upcoming.find((item) => item.activityId !== activity?.activityId)!;
+                return (
+                  <section className={styles.nextCard}>
+                    <time>{formatLifeTime(nextActivity.startAt, lang)}</time>
+                    <div><small>{lang === "zh" ? "接下来" : "Next"}</small><strong>{nextActivity.title}</strong></div>
+                    <Coffee size={18} aria-hidden="true" />
+                  </section>
+                );
+              })() : null}
+              <details className={styles.detailDisclosure}>
+                <summary className={styles.detailSummary}>{lang === "zh" ? "更多生活细节" : "More life details"}</summary>
+                <div className={styles.detailContent}>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "心情余波" : "Mood afterglow"}</p>
+                    <p className={styles.cardCopy}>{activeAffectCount > 0 ? (lang === "zh" ? `${activeAffectCount} 段经历仍有余波` : `${activeAffectCount} lived afterglow(s)`) : (lang === "zh" ? "已回到自己的日常基线" : "Back at her usual baseline")}</p>
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "生活节律" : "Life rhythm"}</p>
+                    <RhythmRows rhythms={companion.snapshot.rhythms} lang={lang} />
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "身边环境" : "Around her"}</p>
+                    <EnvironmentRows facts={environmentFacts} lang={lang} />
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "想说的话" : "Something to say"}</p>
+                    <p className={styles.cardCopy}>{proactiveStateCopy(latestProactiveCandidate, lang)}</p>
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "与你的连续性" : "Continuity with you"}</p>
+                    <p className={styles.cardCopy}>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "关系仍在自然形成中。" : "The relationship is still taking shape.")}</p>
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "呈现与表达" : "Presence and expression"}</p>
+                    <p className={styles.cardCopy}>{embodiment?.activeMode && embodiment.activeMode !== "portrait" ? embodiment.activeMode : (lang === "zh" ? "人物立绘" : "Portrait")}{expressionRules.length ? ` · ${expressionRules.length} ${lang === "zh" ? "条表达习惯" : "expression habit(s)"}` : ""}</p>
+                    {locationSource?.sourceKind ? <small className={styles.sourceCopy} title={locationSource.sourceRef}>{sourceKindLabel(locationSource.sourceKind, lang)}</small> : null}
+                  </section>
+                </div>
+              </details>
             </>
           ) : null}
 
           {activeTab === "today" ? (
             <>
               <section className={styles.lifeCardAccent}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "个人目标" : "Personal goals"}</p>
-                <DriveRows drives={personalDrives} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{companion.snapshot.todaySchedule?.localDate || (lang === "zh" ? "今天" : "Today")}</p>
+                <p className={styles.cardLabel}><CalendarDays size={13} aria-hidden="true" /> {companion.snapshot.todaySchedule?.localDate || (lang === "zh" ? "今天" : "Today")}</p>
                 <ScheduleRows activities={today} lang={lang} />
               </section>
               <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "长期日历" : "Long-term calendar"}</p>
-                <CalendarRows calendar={companion.snapshot.todayCalendar} lang={lang} />
+                <p className={styles.cardLabel}>{lang === "zh" ? "个人目标" : "Personal goals"}</p>
+                <DriveRows drives={personalDrives} lang={lang} />
               </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "兴趣成长" : "Growing interests"}</p>
-                <InterestRows interests={interests} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "实际经历" : "Lived events"}</p>
-                {todayEventsQuery.isPending ? (
-                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取经历" : "Loading lived events"} tone="loading" busy skeletonLines={2} />
-                ) : todayEventsQuery.isError ? (
-                  <VStateSurface density="compact" title={lang === "zh" ? "经历暂时不可用" : "Lived events unavailable"} tone="error">
-                    {todayEventsQuery.error instanceof Error ? todayEventsQuery.error.message : undefined}
-                  </VStateSurface>
-                ) : (
-                  <EventRows events={todayEventsQuery.data ?? []} lang={lang} />
-                )}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "未完话题" : "Open topics"}</p>
-                <OpenLoopRows loops={openLoops} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "生活动态" : "Life feed"}</p>
-                <LifeFeedRows items={lifeFeed} lang={lang} />
-              </section>
+              <details className={styles.detailDisclosure}>
+                <summary className={styles.detailSummary}>{lang === "zh" ? "经历、兴趣与未完话题" : "Events, interests and open topics"}</summary>
+                <div className={styles.detailContent}>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "实际经历" : "Lived events"}</p>
+                    {todayEventsQuery.isPending ? (
+                      <VStateSurface density="compact" title={lang === "zh" ? "正在读取经历" : "Loading lived events"} tone="loading" busy skeletonLines={2} />
+                    ) : todayEventsQuery.isError ? (
+                      <VStateSurface density="compact" title={lang === "zh" ? "经历暂时不可用" : "Lived events unavailable"} tone="error">
+                        {todayEventsQuery.error instanceof Error ? todayEventsQuery.error.message : undefined}
+                      </VStateSurface>
+                    ) : (
+                      <EventRows events={todayEventsQuery.data ?? []} lang={lang} />
+                    )}
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "长期日历" : "Long-term calendar"}</p>
+                    <CalendarRows calendar={companion.snapshot.todayCalendar} lang={lang} />
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "兴趣成长" : "Growing interests"}</p>
+                    <InterestRows interests={interests} lang={lang} />
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "未完话题" : "Open topics"}</p>
+                    <OpenLoopRows loops={openLoops} lang={lang} />
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "生活动态" : "Life feed"}</p>
+                    <LifeFeedRows items={lifeFeed} lang={lang} />
+                  </section>
+                </div>
+              </details>
             </>
           ) : null}
 
           {activeTab === "memory" ? (
             <>
               <section className={styles.lifeCardAccent}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "长期记忆" : "Long-term memory"}</p>
+                <p className={styles.cardLabel}><Heart size={13} aria-hidden="true" /> {lang === "zh" ? "共同回忆" : "Shared memories"}</p>
                 <div className={styles.memoryOverview}>
                   <strong>{memoryCountLabel}</strong>
-                  <span className={styles.cardMeta}>{lang === "zh" ? "条已晋升片段" : "promoted moment(s)"}</span>
+                  <span className={styles.cardMeta}>{lang === "zh" ? "段重要生活片段" : "important lived moments"}</span>
                 </div>
-                <p className={styles.cardCopy}>
-                  {lang === "zh"
-                    ? "只展示从真实生活经历晋升的记忆；计划和未完成的活动不会直接出现在这里。"
-                    : "Only memories promoted from lived events appear here; plans and unfinished activities stay out."}
-                </p>
               </section>
               <section className={styles.lifeCard}>
                 <p className={styles.cardLabel}>{lang === "zh" ? "自我人生线" : "Self timeline"}</p>
@@ -927,79 +929,54 @@ export function CompanionLifeRail({
                 )}
               </section>
               <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "夜间回想" : "Night reflection"}</p>
-                <ReflectionRows reflections={recentReflections} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "待审核的变化" : "Changes awaiting review"}</p>
-                <PendingReflectionRows
-                  reflections={recentReflections}
-                  lang={lang}
-                  pendingReview={reflectionReviewMutation.isPending ? reflectionReviewMutation.variables : null}
-                  reviewDisabled={!companion.snapshot.state?.stateVersion}
-                  onReview={(proposalId, decision) => {
-                    const expectedVersion = companion.snapshot.state?.stateVersion;
-                    if (!expectedVersion) {
-                      setReviewFeedback(lang === "zh" ? "生活状态版本尚未就绪，请稍后重试。" : "Life state version is not ready yet. Try again shortly.");
-                      return;
-                    }
-                    reflectionReviewMutation.mutate({
-                      agentId: companion.agentId,
-                      proposalId,
-                      decision,
-                      expectedVersion,
-                    });
-                  }}
-                />
-                {reviewFeedback ? (
-                  <p
-                    className={styles.reviewNotice}
-                    role={reflectionReviewMutation.isError ? "alert" : "status"}
-                  >
-                    {reviewFeedback}
-                  </p>
-                ) : null}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "共同记忆" : "Shared memory"}</p>
+                <p className={styles.cardLabel}>{lang === "zh" ? "你们之间" : "Between you"}</p>
                 <p className={styles.cardCopy}>{companion.snapshot.state?.relationshipSummary || (lang === "zh" ? "暂时还没有形成稳定的关系摘要。" : "No stable relationship summary yet.")}</p>
               </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "关系" : "Relationships"}</p>
-                {relationshipsQuery.isPending ? (
-                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取关系" : "Loading relationships"} tone="loading" busy skeletonLines={2} />
-                ) : relationshipsQuery.isError ? (
-                  <VStateSurface density="compact" title={lang === "zh" ? "关系暂时不可用" : "Relationships unavailable"} tone="error">
-                    {relationshipsQuery.error instanceof Error ? relationshipsQuery.error.message : undefined}
-                  </VStateSurface>
-                ) : (
-                  <RelationshipRows relationships={relationshipsQuery.data ?? []} lang={lang} />
-                )}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "她的社会圈" : "Her social circle"}</p>
-                <SocialCircleRows npcs={socialCircle} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "熟悉的地点与物品" : "Familiar places and belongings"}</p>
-                <WorldRows world={causal?.world} lang={lang} />
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "日记" : "Diary"}</p>
-                {diaryQuery.isPending ? (
-                  <VStateSurface density="compact" title={lang === "zh" ? "正在读取日记" : "Loading diary"} tone="loading" busy skeletonLines={2} />
-                ) : diaryQuery.isError ? (
-                  <VStateSurface density="compact" title={lang === "zh" ? "日记暂时不可用" : "Diary unavailable"} tone="error">
-                    {diaryQuery.error instanceof Error ? diaryQuery.error.message : undefined}
-                  </VStateSurface>
-                ) : (
-                  <DiaryRows entries={diaryQuery.data ?? []} lang={lang} />
-                )}
-              </section>
-              <section className={styles.lifeCard}>
-                <p className={styles.cardLabel}>{lang === "zh" ? "事实边界" : "Fact boundary"}</p>
-                <p className={styles.cardCopy}>{lang === "zh" ? "这里只显示生活经历、晋升记忆和关系摘要；原始对话历史仍由当前 Session 拥有。" : "Only lived events, promoted memories, and relationship summaries appear here. The current Session still owns conversation history."}</p>
-              </section>
+              <details className={styles.detailDisclosure}>
+                <summary className={styles.detailSummary}>{lang === "zh" ? "关系、回想与日记" : "Relationships, reflections and diary"}</summary>
+                <div className={styles.detailContent}>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "夜间回想" : "Night reflection"}</p>
+                    <ReflectionRows reflections={recentReflections} lang={lang} />
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "待审核的变化" : "Changes awaiting review"}</p>
+                    <PendingReflectionRows
+                      reflections={recentReflections}
+                      lang={lang}
+                      pendingReview={reflectionReviewMutation.isPending ? reflectionReviewMutation.variables : null}
+                      reviewDisabled={!companion.snapshot.state?.stateVersion}
+                      onReview={(proposalId, decision) => {
+                        const expectedVersion = companion.snapshot.state?.stateVersion;
+                        if (!expectedVersion) {
+                          setReviewFeedback(lang === "zh" ? "生活状态版本尚未就绪，请稍后重试。" : "Life state version is not ready yet. Try again shortly.");
+                          return;
+                        }
+                        reflectionReviewMutation.mutate({ agentId: companion.agentId, proposalId, decision, expectedVersion });
+                      }}
+                    />
+                    {reviewFeedback ? <p className={styles.reviewNotice} role={reflectionReviewMutation.isError ? "alert" : "status"}>{reviewFeedback}</p> : null}
+                  </section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "关系" : "Relationships"}</p>
+                    {relationshipsQuery.isPending ? (
+                      <VStateSurface density="compact" title={lang === "zh" ? "正在读取关系" : "Loading relationships"} tone="loading" busy skeletonLines={2} />
+                    ) : relationshipsQuery.isError ? (
+                      <VStateSurface density="compact" title={lang === "zh" ? "关系暂时不可用" : "Relationships unavailable"} tone="error">{relationshipsQuery.error instanceof Error ? relationshipsQuery.error.message : undefined}</VStateSurface>
+                    ) : <RelationshipRows relationships={relationshipsQuery.data ?? []} lang={lang} />}
+                  </section>
+                  <section className={styles.lifeCard}><p className={styles.cardLabel}>{lang === "zh" ? "她的社会圈" : "Her social circle"}</p><SocialCircleRows npcs={socialCircle} lang={lang} /></section>
+                  <section className={styles.lifeCard}><p className={styles.cardLabel}>{lang === "zh" ? "熟悉的地点与物品" : "Familiar places and belongings"}</p><WorldRows world={causal?.world} lang={lang} /></section>
+                  <section className={styles.lifeCard}>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "日记" : "Diary"}</p>
+                    {diaryQuery.isPending ? (
+                      <VStateSurface density="compact" title={lang === "zh" ? "正在读取日记" : "Loading diary"} tone="loading" busy skeletonLines={2} />
+                    ) : diaryQuery.isError ? (
+                      <VStateSurface density="compact" title={lang === "zh" ? "日记暂时不可用" : "Diary unavailable"} tone="error">{diaryQuery.error instanceof Error ? diaryQuery.error.message : undefined}</VStateSurface>
+                    ) : <DiaryRows entries={diaryQuery.data ?? []} lang={lang} />}
+                  </section>
+                </div>
+              </details>
             </>
           ) : null}
         </div>

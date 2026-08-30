@@ -1020,7 +1020,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps actions in the composer plus menu and the status rail read-only", () => {
     expect(routeSource).toContain('import { ChatComposerPlusMenu } from "./ChatComposerPlusMenu"');
-    expect(routeSource).toContain("composerLeadingControl: (");
+    expect(routeSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined : (");
     expect(routeSource).toContain("<ChatComposerPlusMenu");
     expect(chatComposerPlusMenuSource).toContain('label: lang === "zh" ? "添加与引用" : "Add and reference"');
     expect(chatComposerPlusMenuSource).toContain('label: lang === "zh" ? "对话能力" : "Conversation capabilities"');
@@ -1391,7 +1391,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("titleLines");
     expect(tokenCoreStatusPanelSource).toContain("\"--token-status-value\": metric.percent");
     expect(routeSource).toContain("cacheDetailOpenLabel");
-    expect(routeSource).toContain("onOpenComposerContextDetail: cacheDetailAvailable ? openCacheDetail : undefined");
+    expect(routeSource).toContain("onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined");
     expect(tokenCoreStatusPanelSource).toContain("isDisabled={!cacheDetailAvailable}");
     expect(tokenCoreStatusPanelSource).toContain("onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}");
     expect(tokenCoreStatusPanelSource).toContain("aria-disabled={!cacheDetailAvailable}");
@@ -1903,7 +1903,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps mental model next-turn opt-in explicit without gating historical snapshots", () => {
     expect(routeSource).toContain("readStoredMentalModelToggle() ?? false");
     expect(routeSource).not.toContain("const defaultEnabled = String(runtime.mentalState?.source");
-    expect(routeSource).toContain("showMentalSnapshots: true");
+    expect(routeSource).toContain("const verifiedCompanionMode = Boolean(activeCompanion);");
+    expect(routeSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
     expect(routeSource).not.toContain("showMentalSnapshots: mentalModelEnabledForNextTurn");
     expect(routeAndComposerSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
     expect(routeAndIndexRailSource).toContain("const memberMental = latestMentalSnapshot(memberDetail?.messages)");
