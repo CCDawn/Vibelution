@@ -13,13 +13,27 @@ RED/GREEN 合同：
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
 import pytest
 
 from scripts import audit_research_workflow_runtime as audit
-from tests._support.workflow_ledger_helpers import build_run_record, open_ledger_store
+from scripts import research_workflow_ledger_audit as ledger_audit
+from core.research.competition.question_result_package import canonical_model_policy
+from core.research.workflow.ledger import CatalogRunAuthorization
+from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    authorization_to_dict,
+    batch_scope_sha256,
+    expected_record_hash,
+)
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_event_record,
+    build_run_record,
+    open_ledger_store,
+)
 
 
 def _build_run_record(**overrides) -> dict:
@@ -131,6 +145,94 @@ def _audit(tmp_path: Path, data_root: Path, workspace_root: Path | None = None) 
         project_root=tmp_path,
         workspace_root=workspace_root or (tmp_path / "workspace"),
     )
+
+
+def _authorization_record(
+    *,
+    family: str = "qwen",
+    provider_ids: list[str] | None = None,
+    model_ids: list[str] | None = None,
+    require_official_provider: bool = True,
+) -> CatalogRunAuthorization:
+    policy = canonical_model_policy(
+        {
+            "family": family,
+            "providerIds": provider_ids or ["dashscope_main"],
+            "modelIds": model_ids or ["qwen3.6-plus"],
+            "requireOfficialProvider": require_official_provider,
+        }
+    )
+    scope = {
+        "planId": "real-1",
+        "gateId": "G1",
+        "questionIds": ["SCI-091"],
+        "modelPolicy": policy,
+    }
+    record = CatalogRunAuthorization(
+        authorization_id="auth-audit-real-1",
+        team_id="research-team",
+        plan_id="real-1",
+        batch_scope_json=json.dumps(
+            scope,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        scope_hash=batch_scope_sha256(scope),
+        approved_by="server-operator",
+        approved_at_ms=FIXED_NOW_MS,
+        readiness_report_sha256="b" * 64,
+        record_hash="",
+        created_at_ms=FIXED_NOW_MS,
+    )
+    return replace(record, record_hash=expected_record_hash(record))
+
+
+def _insert_authorization(store, record: CatalogRunAuthorization) -> None:
+    store.submit(
+        lambda uow: uow.repository.insert_catalog_run_authorization(record),
+        force_flush=True,
+    ).result(timeout=10)
+
+
+def _insert_authorized_run(
+    store,
+    record: CatalogRunAuthorization,
+    *,
+    question_id: str = "SCI-091",
+    event_payload: dict | None = None,
+) -> str:
+    run_id = "run-authorized-audit"
+    run = replace(
+        build_run_record(
+            run_id=run_id,
+            team_id=record.team_id,
+            last_event_sequence=1,
+        ),
+        question_id=question_id,
+    )
+    event = replace(
+        build_event_record(
+            1,
+            run_id=run_id,
+            event_type="catalog_run_authorized",
+            event_id=f"evt-catalog-run-authorized-{run_id}",
+        ),
+        actor_json=json.dumps(
+            {"actorType": "system", "actorId": "catalog-run-authorization"}
+        ),
+        payload_json=json.dumps(
+            event_payload or authorization_to_dict(record),
+            ensure_ascii=False,
+        ),
+    )
+
+    def mutate(uow) -> None:
+        uow.repository.insert_run(run)
+        uow.repository.insert_event(event)
+
+    store.submit(mutate, force_flush=True).result(timeout=10)
+    return run_id
 
 
 class TestAuditCorrupt:
@@ -448,7 +550,186 @@ class TestAuditInventory:
         assert inv["humanTaskResolveRoute"] == 0
 
 
+class TestCanonicalAuthorizationAudit:
+    def test_tampered_authorization_hash_fails_closed(self, tmp_path: Path) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            _insert_authorization(
+                store,
+                replace(_authorization_record(), record_hash="f" * 64),
+            )
+        finally:
+            store.close()
+
+        report = ledger_audit.audit_ledger(ledger_path, data_root=tmp_path)
+
+        assert report["passed"] is False
+        assert report["summary"]["catalogRunAuthorizationValidCount"] == 0
+        assert report["summary"]["catalogRunAuthorizationInvalidCount"] == 1
+        assert report["authorizations"][0]["findings"] == [
+            {
+                "code": "catalog_run_authorization_invalid",
+                "detail": "CatalogRunAuthorization 不满足 canonical record/scope/readiness 合同",
+                "category": "corrupt",
+            }
+        ]
+
+    def test_self_hashed_noncanonical_question_scope_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        record = _authorization_record()
+        scope = json.loads(record.batch_scope_json)
+        scope["questionIds"] = 91
+        record = replace(
+            record,
+            batch_scope_json=json.dumps(
+                scope,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            scope_hash=batch_scope_sha256(scope),
+            record_hash="",
+        )
+        record = replace(record, record_hash=expected_record_hash(record))
+        store = open_ledger_store(ledger_path)
+        try:
+            _insert_authorization(store, record)
+        finally:
+            store.close()
+
+        report = ledger_audit.audit_ledger(ledger_path, data_root=tmp_path)
+
+        assert report["passed"] is False
+        assert report["authorizations"][0]["questionIds"] == []
+        assert {
+            finding["code"] for finding in report["authorizations"][0]["findings"]
+        } == {"catalog_run_authorization_invalid"}
+
+    def test_non_official_glm_authorization_is_blocking(self, tmp_path: Path) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            _insert_authorization(
+                store,
+                _authorization_record(
+                    family="glm",
+                    provider_ids=["opencode_go"],
+                    model_ids=["glm-5.3-flash"],
+                    require_official_provider=False,
+                ),
+            )
+        finally:
+            store.close()
+
+        report = ledger_audit.audit_ledger(ledger_path, data_root=tmp_path)
+
+        assert report["passed"] is False
+        assert report["summary"]["catalogRunAuthorizationInvalidCount"] == 1
+        assert report["summary"]["catalogRunAuthorizationOfficialQwenCount"] == 0
+        assert {
+            finding["code"] for finding in report["authorizations"][0]["findings"]
+        } == {"catalog_run_authorization_not_official_qwen"}
+
+    def test_official_qwen_authorization_passes(self, tmp_path: Path) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            _insert_authorization(store, _authorization_record())
+        finally:
+            store.close()
+
+        report = ledger_audit.audit_ledger(ledger_path, data_root=tmp_path)
+
+        assert report["passed"] is True
+        assert report["summary"]["catalogRunAuthorizationValidCount"] == 1
+        assert report["summary"]["catalogRunAuthorizationInvalidCount"] == 0
+        assert report["summary"]["catalogRunAuthorizationOfficialQwenCount"] == 1
+        assert report["authorizations"][0]["findings"] == []
+
+    def test_authorization_event_payload_mismatch_fails(self, tmp_path: Path) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            record = _authorization_record()
+            _insert_authorization(store, record)
+            payload = authorization_to_dict(record)
+            payload["readinessReportSha256"] = "c" * 64
+            _insert_authorized_run(store, record, event_payload=payload)
+        finally:
+            store.close()
+
+        report = ledger_audit.audit_ledger(ledger_path, data_root=tmp_path)
+
+        assert report["passed"] is False
+        assert report["summary"]["catalogRunAuthorizationInvalidCount"] == 1
+        assert {
+            finding["code"] for finding in report["authorizations"][0]["findings"]
+        } == {"catalog_run_authorization_event_mismatch"}
+
+    def test_authorized_run_must_match_team_and_question_scope(
+        self, tmp_path: Path
+    ) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            record = _authorization_record()
+            _insert_authorization(store, record)
+            run_id = _insert_authorized_run(store, record, question_id="SCI-096")
+        finally:
+            store.close()
+
+        report = ledger_audit.audit_ledger(ledger_path, data_root=tmp_path)
+
+        assert report["passed"] is False
+        assert report["summary"]["catalogRunAuthorizationInvalidCount"] == 1
+        assert {
+            finding["code"] for finding in report["authorizations"][0]["findings"]
+        } == {"catalog_run_authorization_run_scope_mismatch"}
+        assert report["authorizations"][0]["boundRunIds"] == [run_id]
+
+
 class TestAuditCli:
+    def test_cli_prints_blocking_authorization_findings(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        ledger_path = tmp_path / "workflow-ledger.sqlite"
+        store = open_ledger_store(ledger_path)
+        try:
+            _insert_authorization(
+                store,
+                _authorization_record(
+                    family="glm",
+                    provider_ids=["opencode_go"],
+                    model_ids=["glm-5.3-flash"],
+                    require_official_provider=False,
+                ),
+            )
+        finally:
+            store.close()
+
+        code = audit.main(
+            [
+                "--source",
+                "ledger",
+                "--data-root",
+                str(tmp_path),
+                "--ledger-path",
+                str(ledger_path),
+                "--project-root",
+                str(tmp_path),
+            ]
+        )
+
+        output = capsys.readouterr().out
+        assert code == 1
+        assert (
+            "auth-audit-real-1: real-1 "
+            "[catalog_run_authorization_not_official_qwen]" in output
+        )
+
     def test_cli_prefers_canonical_ledger_over_legacy_json_store(
         self, tmp_path: Path, data_root: Path
     ) -> None:

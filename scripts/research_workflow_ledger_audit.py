@@ -7,8 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from core.research.workflow.ledger import runtime as ledger_runtime
+from core.research.workflow.ledger.records import CatalogRunAuthorization
 from core.research.workflow.ledger.schema import MIGRATIONS, V5_LEGACY_CHECKSUM
 from core.research.workflow.ledger.schema import SCHEMA_VERSION as LEDGER_SCHEMA_VERSION
+from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    authorization_to_dict,
+    authorized_model_policy_sha256,
+    validate_catalog_run_authorization,
+)
 
 HARD_CATEGORIES = ("corrupt", "identity", "scope", "reconciliation")
 LEDGER_TABLES = (
@@ -109,6 +115,179 @@ def _ledger_migration_report(connection: Any) -> tuple[dict[str, Any], list[dict
 
 def _grouped_counts(connection: Any, sql: str) -> dict[str, int]:
     return {str(row[0]): int(row[1]) for row in connection.execute(sql)}
+
+
+def _append_unique_finding(
+    findings: list[dict[str, str]],
+    code: str,
+    detail: str,
+    category: str,
+) -> None:
+    if any(finding["code"] == code for finding in findings):
+        return
+    findings.append(_finding(code, detail, category))
+
+
+def _catalog_authorization_report(
+    connection: Any,
+    *,
+    runs_by_id: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Audit immutable authorizations and their Run event bindings."""
+
+    records = [
+        CatalogRunAuthorization(
+            authorization_id=str(row[0]),
+            team_id=str(row[1]),
+            plan_id=str(row[2]),
+            batch_scope_json=str(row[3]),
+            scope_hash=str(row[4]),
+            approved_by=str(row[5]),
+            approved_at_ms=int(row[6]),
+            readiness_report_sha256=str(row[7]),
+            record_hash=str(row[8]),
+            created_at_ms=int(row[9]),
+        )
+        for row in connection.execute(
+            "SELECT authorization_id, team_id, plan_id, batch_scope_json, "
+            "scope_hash, approved_by, approved_at_ms, readiness_report_sha256, "
+            "record_hash, created_at_ms FROM catalog_run_authorizations "
+            "ORDER BY approved_at_ms DESC, authorization_id DESC"
+        )
+    ]
+    entries: list[dict[str, Any]] = []
+    entries_by_id: dict[str, dict[str, Any]] = {}
+    expected_payloads: dict[str, dict[str, Any]] = {}
+    event_findings: list[dict[str, str]] = []
+
+    for record in records:
+        findings: list[dict[str, str]] = []
+        payload: dict[str, Any] | None = None
+        batch_scope: dict[str, Any] = {}
+        model_policy: dict[str, Any] | None = None
+        model_policy_sha256: str | None = None
+        contract_valid = validate_catalog_run_authorization(
+            record,
+            require_model_policy=True,
+        )
+        try:
+            payload = authorization_to_dict(record)
+            if isinstance(payload.get("batchScope"), dict):
+                batch_scope = dict(payload["batchScope"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = None
+        if not contract_valid or payload is None:
+            _append_unique_finding(
+                findings,
+                "catalog_run_authorization_invalid",
+                "CatalogRunAuthorization 不满足 canonical record/scope/readiness 合同",
+                "corrupt",
+            )
+        else:
+            raw_policy = batch_scope.get("modelPolicy")
+            if isinstance(raw_policy, dict):
+                model_policy = dict(raw_policy)
+            try:
+                model_policy_sha256 = authorized_model_policy_sha256(record)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                _append_unique_finding(
+                    findings,
+                    "catalog_run_authorization_invalid",
+                    "CatalogRunAuthorization 的 model policy hash 不可解析",
+                    "corrupt",
+                )
+
+        official_qwen = bool(
+            contract_valid
+            and model_policy is not None
+            and str(model_policy.get("family") or "").strip().casefold() == "qwen"
+            and model_policy.get("requireOfficialProvider") is True
+        )
+        if contract_valid and not official_qwen:
+            _append_unique_finding(
+                findings,
+                "catalog_run_authorization_not_official_qwen",
+                "正式挑战杯授权必须绑定 Qwen 且 requireOfficialProvider=true",
+                "scope",
+            )
+
+        raw_question_ids = batch_scope.get("questionIds")
+        question_ids = (
+            [str(value) for value in raw_question_ids]
+            if isinstance(raw_question_ids, list)
+            else []
+        )
+        entry = {
+            "authorizationId": record.authorization_id,
+            "teamId": record.team_id,
+            "planId": record.plan_id,
+            "gateId": batch_scope.get("gateId"),
+            "questionIds": question_ids,
+            "scopeHash": record.scope_hash,
+            "readinessReportSha256": record.readiness_report_sha256,
+            "recordHash": record.record_hash,
+            "modelPolicy": model_policy,
+            "modelPolicySha256": model_policy_sha256,
+            "officialQwen": official_qwen,
+            "boundRunIds": [],
+            "findings": findings,
+        }
+        entries.append(entry)
+        entries_by_id[record.authorization_id] = entry
+        if payload is not None:
+            expected_payloads[record.authorization_id] = payload
+
+    for row in connection.execute(
+        "SELECT run_id, event_id, payload_json FROM workflow_events "
+        "WHERE event_type = 'catalog_run_authorized' ORDER BY run_id, sequence"
+    ):
+        run_id = str(row[0])
+        event_id = str(row[1])
+        try:
+            payload = json.loads(str(row[2]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = None
+        authorization_id = (
+            str(payload.get("authorizationId") or "").strip()
+            if isinstance(payload, dict)
+            else ""
+        )
+        entry = entries_by_id.get(authorization_id)
+        if entry is None:
+            event_findings.append(
+                _finding(
+                    "catalog_run_authorization_event_unknown",
+                    f"Run {run_id} 的授权事件 {event_id} 未绑定可识别的 canonical authorization",
+                    "reconciliation",
+                )
+            )
+            continue
+        entry["boundRunIds"].append(run_id)
+        expected_payload = expected_payloads.get(authorization_id)
+        if expected_payload is None or payload != expected_payload:
+            _append_unique_finding(
+                entry["findings"],
+                "catalog_run_authorization_event_mismatch",
+                f"Run {run_id} 的 catalog_run_authorized 载荷与不可变授权不一致",
+                "corrupt",
+            )
+        run = runs_by_id.get(run_id)
+        question_ids = {str(value).strip() for value in entry["questionIds"]}
+        if (
+            run is None
+            or str(run.get("teamId") or "").strip() != entry["teamId"]
+            or str(run.get("questionId") or "").strip() not in question_ids
+        ):
+            _append_unique_finding(
+                entry["findings"],
+                "catalog_run_authorization_run_scope_mismatch",
+                f"Run {run_id} 的 team/question 不在授权执行 scope 内",
+                "scope",
+            )
+
+    for entry in entries:
+        entry["boundRunIds"] = sorted(set(entry["boundRunIds"]))
+    return entries, event_findings
 
 
 def audit_ledger(ledger_path: Path, *, data_root: Path) -> dict[str, Any]:
@@ -238,6 +417,11 @@ def audit_ledger(ledger_path: Path, *, data_root: Path) -> dict[str, Any]:
                 }
             )
 
+        authorizations, authorization_event_findings = _catalog_authorization_report(
+            connection,
+            runs_by_id={entry["runId"]: entry for entry in entries},
+        )
+        ledger_findings.extend(authorization_event_findings)
         hard_findings: list[tuple[str, str]] = [
             ("ledger", finding["code"])
             for finding in ledger_findings
@@ -249,7 +433,17 @@ def audit_ledger(ledger_path: Path, *, data_root: Path) -> dict[str, Any]:
             for finding in entry["findings"]
             if finding["category"] in HARD_CATEGORIES
         )
+        hard_findings.extend(
+            (entry["authorizationId"], finding["code"])
+            for entry in authorizations
+            for finding in entry["findings"]
+            if finding["category"] in HARD_CATEGORIES
+        )
         legacy_run_count = len(list((data_root / "runs").glob("run-*.json")))
+        valid_authorizations = sum(
+            1 for entry in authorizations if not entry["findings"]
+        )
+        invalid_authorizations = len(authorizations) - valid_authorizations
         summary = {
             "runCount": int(table_counts.get("workflow_runs", 0)),
             "eventCount": int(table_counts.get("workflow_events", 0)),
@@ -261,6 +455,11 @@ def audit_ledger(ledger_path: Path, *, data_root: Path) -> dict[str, Any]:
             "artifactManifestCount": int(table_counts.get("artifact_receipts", 0)),
             "catalogRunAuthorizationCount": int(
                 table_counts.get("catalog_run_authorizations", 0)
+            ),
+            "catalogRunAuthorizationValidCount": valid_authorizations,
+            "catalogRunAuthorizationInvalidCount": invalid_authorizations,
+            "catalogRunAuthorizationOfficialQwenCount": sum(
+                1 for entry in authorizations if entry["officialQwen"]
             ),
             "reservedBudgetReceiptCount": int(budget_status_counts.get("reserved", 0)),
             "pendingOutboxCount": int(outbox_status_counts.get("pending", 0)),
@@ -285,6 +484,7 @@ def audit_ledger(ledger_path: Path, *, data_root: Path) -> dict[str, Any]:
             },
             "passed": not hard_findings,
             "runs": entries,
+            "authorizations": authorizations,
             "summary": summary,
             "hardFindings": hard_findings,
         }

@@ -733,6 +733,14 @@ def main(argv: list[str] | None = None) -> int:
                     sorted({finding["code"] for finding in entry["findings"]})
                 )
                 print(f"  {entry['runId']}: {entry['status']} [{codes}]")
+        for entry in report.get("authorizations") or []:
+            if entry["findings"]:
+                codes = ",".join(
+                    sorted({finding["code"] for finding in entry["findings"]})
+                )
+                print(
+                    f"  {entry['authorizationId']}: {entry['planId']} [{codes}]"
+                )
         print(
             "legacySurfaceInventory: "
             f"{json.dumps(report['legacySurfaceInventory'])}"
