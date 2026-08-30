@@ -305,6 +305,8 @@ def test_selector_matches_chat_style_map_to_chat_validation_commands():
     assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
+    assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
+    assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert all(
         command.endswith(select_tests.FRONTEND_TEST_ROOT_ARGUMENT)
@@ -328,6 +330,8 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
     assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
     assert any("src/routes/teams" in command for command in result["commands"])
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
+    assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
+    assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any("npm --prefix web run build" in command for command in result["commands"])
     assert not any("挑战杯/" in command for command in result["commands"])
@@ -653,6 +657,20 @@ def test_selector_keeps_frontend_validation_separate_from_remote_distributed():
     assert FRONTEND_TYPECHECK_COMMAND in result["commands"]
     assert not any(command == "node web/node_modules/vitest/vitest.mjs run" for command in result["commands"])
     assert not any(command == "npm --prefix web run build" for command in result["commands"])
+
+
+def test_selector_includes_global_vui_policy_gates_for_visible_ui():
+    result = select_tests.select_tests(
+        [
+            "web/src/routes/companions/CompanionChatRails.styles.ts",
+            "web/src/routes/companions/CompanionConversationHeader.tsx",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "frontend-workbench"
+    assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
+    assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])
 
 
 def test_selector_suppresses_frontend_fallback_when_chat_rule_covers_file():
