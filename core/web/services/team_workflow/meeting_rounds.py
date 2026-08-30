@@ -49,7 +49,6 @@ from core.research.workflow.contracts import (
 SCHEMA_VERSION = 2
 LEGACY_DIGEST_SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
-_FORMAL_MEETING_TIMEOUT_MS = 300_000
 _LOCK = threading.RLock()
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
@@ -270,6 +269,7 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         "discussionItemRefs": _normalized_str_list(request.get("discussionItemRefs")),
         "status": "open",
         "startedAt": str(request.get("startedAt") or "").strip() or now,
+        "serverCreatedAtMs": server_created_at_ms,
         "closedAt": "",
         "closedBy": "",
         "stage": str(request.get("stage") or "").strip().lower(),
@@ -298,15 +298,27 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
                 "modelInvocationReceiptAuthority": dict(
                     request["modelInvocationReceiptAuthority"]
                 ),
-                # This clock belongs to the persisted logical meeting, not to
-                # the older WorkflowRun and not to a caller-supplied startedAt.
-                "challengeDeadlineAtMs": server_created_at_ms
-                + _FORMAL_MEETING_TIMEOUT_MS,
             }
             if isinstance(request.get("modelInvocationReceiptAuthority"), Mapping)
             else {}
         ),
     }
+    if isinstance(record.get("modelInvocationReceiptAuthority"), Mapping):
+        from core.web.services.team_workflow.challenge_deadline_policy import (
+            derive_meeting_deadline_policy,
+        )
+        from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+            current_challenge_task_deadline_at_ms,
+        )
+
+        record.update(
+            derive_meeting_deadline_policy(
+                normalized_team_id,
+                record,
+                server_created_at_ms=server_created_at_ms,
+                outer_deadline_at_ms=current_challenge_task_deadline_at_ms(),
+            )
+        )
     if not record["participants"]:
         raise ContractValidationError("a meeting round requires at least one participant")
     parsed = MeetingRound.from_dict(record)
@@ -485,6 +497,63 @@ def persist_preformal_meeting_discussion_scope(
             "selectionId": scope.selectionId,
             "candidateId": scope.candidateId,
             "roomId": scope.roomId,
+            "updatedAt": _utc_now(),
+        }
+        _append_round_record(normalized_team_id, updated)
+    return updated
+
+
+def persist_challenge_meeting_deadline_policy(
+    team_id: str,
+    meeting_round_id: str,
+) -> dict[str, Any]:
+    """Append one server-derived deadline policy to a Challenge meeting.
+
+    Formal meetings normally receive the policy in their creation record;
+    preformal meetings become identifiable only after their validated scope is
+    appended.  Existing fixed-300s records are upgraded here without changing
+    the logical meeting identity or using caller-supplied timestamps.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+    from core.web.services.team_workflow.challenge_deadline_policy import (
+        DEADLINE_POLICY_VERSION,
+        derive_meeting_deadline_policy,
+        is_challenge_meeting,
+    )
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        current_challenge_task_deadline_at_ms,
+    )
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_meeting_id = str(meeting_round_id or "").strip()
+    with _LOCK:
+        meeting = _load_meeting_round(normalized_team_id, normalized_meeting_id)
+        if not is_challenge_meeting(meeting):
+            return meeting
+        if (
+            str(meeting.get("deadlinePolicyVersion") or "").strip()
+            == DEADLINE_POLICY_VERSION
+            and int(meeting.get("challengeDeadlineAtMs") or 0) > 0
+        ):
+            return meeting
+        server_created_at_ms = int(meeting.get("serverCreatedAtMs") or 0)
+        if server_created_at_ms <= 0:
+            # Legacy records did not persist a trustworthy server clock.  The
+            # migration starts a fresh meeting window at the first governed
+            # execution rather than trusting caller-controlled ``startedAt``.
+            server_created_at_ms = int(
+                datetime.now(timezone.utc).timestamp() * 1000
+            )
+        updated = {
+            **meeting,
+            "serverCreatedAtMs": server_created_at_ms,
+            **derive_meeting_deadline_policy(
+                normalized_team_id,
+                meeting,
+                server_created_at_ms=server_created_at_ms,
+                outer_deadline_at_ms=current_challenge_task_deadline_at_ms(),
+            ),
             "updatedAt": _utc_now(),
         }
         _append_round_record(normalized_team_id, updated)

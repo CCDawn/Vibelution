@@ -136,6 +136,8 @@ _CHALLENGE_ROOM_DEADLINE_CONFIG_KEY = "challengeDeadlineAtMs"
 _CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhausted"
 _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX = "challenge_workflow_run_"
 _CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS = 0.5
+_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_CHALLENGE_MEETING_SPEAKER_MAX_OUTPUT_TOKENS = 512
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1831,6 +1833,21 @@ def _execute_chat_room_round(
             ),
             "_modelInvocationReceiptAuthority": receipt_authority,
         }
+        per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
+        if per_call_budget_ms is not None and context["challengeDeadlineAtMs"] is not None:
+            from core.web.services.team_workflow.challenge_deadline_policy import (
+                effective_call_deadline_at_ms,
+            )
+
+            context["challengeDeadlineAtMs"] = effective_call_deadline_at_ms(
+                call_started_at_ms=int(time.time() * 1000),
+                per_call_budget_ms=per_call_budget_ms,
+                meeting_deadline_at_ms=_positive_int(
+                    round_config.get("meetingDeadlineAtMs")
+                )
+                or context["challengeDeadlineAtMs"],
+                outer_deadline_at_ms=context["challengeDeadlineAtMs"],
+            )
         # A deadline is an absolute round fence.  Check it before constructing
         # the next prompt so an expired formal round never starts another
         # speaker, even when the previous runner returned a late result.
@@ -2190,6 +2207,57 @@ def force_stop_active_chat_room_rounds_for_shutdown(reason: str) -> list[dict[st
     return stopped
 
 
+def _start_challenge_speaker_heartbeat(
+    context: Mapping[str, Any],
+) -> tuple[threading.Event, threading.Thread | None]:
+    """Refresh only the Challenge WorkRun projection while a speaker runs."""
+
+    stop = threading.Event()
+    if _positive_int(context.get("challengeDeadlineAtMs")) is None:
+        return stop, None
+    room_id = str(context.get("roomId") or "").strip()
+    round_id = str(context.get("roundId") or "").strip()
+    if not room_id or not round_id:
+        return stop, None
+
+    def heartbeat() -> None:
+        while not stop.wait(_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS):
+            if _request_challenge_room_execution_stop(round_id, context):
+                return
+            heartbeat_at = utc_now_iso()
+            with _CHAT_ROOM_LOCK:
+                state = _store().load()
+                room = _find_room(state, room_id)
+                target_round = _find_round(room, round_id) if isinstance(room, dict) else None
+                if (
+                    not isinstance(room, dict)
+                    or not isinstance(target_round, dict)
+                    or _chat_room_round_is_terminal(room, target_round, round_id)
+                ):
+                    return
+                target_round["heartbeatAt"] = heartbeat_at
+                target_round["updatedAt"] = heartbeat_at
+                room["updatedAt"] = heartbeat_at
+                _store().save(state)
+                room_snapshot = dict(room)
+                round_snapshot = dict(target_round)
+            _persist_chat_room_work_run(
+                room_snapshot,
+                round_snapshot,
+                status="running",
+                summary="challenge_meeting_speaker_heartbeat",
+            )
+            _publish_chat_room_detail_snapshot(room_id)
+
+    worker = threading.Thread(
+        target=heartbeat,
+        name=f"challenge-room-heartbeat:{round_id}",
+        daemon=True,
+    )
+    worker.start()
+    return stop, worker
+
+
 def _run_one_speaker(
     participant: dict[str, Any],
     prompt: str,
@@ -2224,7 +2292,13 @@ def _run_one_speaker(
         }
     try:
         stage_started_at = _perf_counter()
-        result = runner(participant, prompt, context)
+        heartbeat_stop, heartbeat_thread = _start_challenge_speaker_heartbeat(context)
+        try:
+            result = runner(participant, prompt, context)
+        finally:
+            heartbeat_stop.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=1.0)
         runner_ms = _elapsed_ms(stage_started_at)
         content = _result_visible_text(result)
         if not content:
@@ -2462,6 +2536,31 @@ def _supervision_decision_to_message(decision: Any) -> dict[str, Any]:
     }
 
 
+def _apply_challenge_speaker_output_cap(
+    agent_config: Any,
+    *,
+    profile_id: str,
+    context: Mapping[str, Any],
+) -> bool:
+    """Clamp only formal candidate-generation speaker output in memory."""
+
+    if (
+        agent_config is None
+        or _positive_int(context.get("challengeDeadlineAtMs")) is None
+        or str(context.get("meetingType") or "").strip()
+        != "hypothesis_candidate_generation"
+    ):
+        return False
+    profile = agent_config.llm.get_profile(profile_id=profile_id)
+    configured_limit = int(getattr(profile, "max_output_tokens", 0) or 0)
+    if 0 < configured_limit <= _CHALLENGE_MEETING_SPEAKER_MAX_OUTPUT_TOKENS:
+        return False
+    agent_config.llm.profiles[profile_id] = profile.model_copy(
+        update={"max_output_tokens": _CHALLENGE_MEETING_SPEAKER_MAX_OUTPUT_TOKENS}
+    )
+    return True
+
+
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     prepare_started_at = _perf_counter()
     timings: dict[str, Any] = {}
@@ -2537,6 +2636,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         stage_started_at = _perf_counter()
         resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
         agent_config = resolved_agent_llm.config
+        _apply_challenge_speaker_output_cap(
+            agent_config,
+            profile_id=str(resolved_agent_llm.runtime_profile_id or "primary"),
+            context=context,
+        )
         receipt_context = build_speaker_receipt_context(
             participant,
             context,
@@ -2749,6 +2853,20 @@ def _build_participant_prompt(
     purpose_lines = _purpose_prompt_lines(effective_purpose)
     role_view = _participant_role_view(participant)
     team_context_lines = _format_participant_team_context(participant)
+    challenge_short_answer_lines = (
+        [
+            "挑战杯会议短答合同：只给 1 个新增判断和 1 个依据，正文不超过 180 个中文字符。",
+            "不要复述题目、其他 Agent 发言或自己的角色；候选生成时只输出一条 CANDIDATE 标记。",
+        ]
+        if isinstance(round_payload.get("config"), Mapping)
+        and _positive_int(
+            (round_payload.get("config") or {}).get("challengeDeadlineAtMs")
+        )
+        is not None
+        and str((round_payload.get("config") or {}).get("meetingType") or "").strip()
+        == "hypothesis_candidate_generation"
+        else []
+    )
     return "\n".join(
         [
             "你正在参加 Vibelution 的只读 Agent 群聊。",
@@ -2780,6 +2898,7 @@ def _build_participant_prompt(
             "",
             "本轮发言风格:",
             *purpose_lines,
+            *challenge_short_answer_lines,
             "",
             "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
             "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
@@ -3752,6 +3871,22 @@ def _is_scoped_discussion_room(value: Mapping[str, Any] | None) -> bool:
     )
 
 
+def _is_challenge_discussion_room(value: Mapping[str, Any] | None) -> bool:
+    """Recognize formal and preformal server-scoped Challenge rooms."""
+
+    if not isinstance(value, Mapping):
+        return False
+    config = value.get("config") if isinstance(value.get("config"), Mapping) else value
+    if str(config.get("scopeAuthority") or "").strip() not in {
+        "workflow_discussion_scope.v1",
+        "preformal_candidate_review_scope.v1",
+    }:
+        return False
+    return isinstance(config.get("discussionScope"), Mapping) and bool(
+        str(config.get("discussionScopeHash") or config.get("scopeHash") or "").strip()
+    )
+
+
 def _refresh_participants(
     participants: list[dict[str, Any]],
     *,
@@ -4636,7 +4771,7 @@ def _resolve_challenge_room_deadline_at_ms(
 ) -> int | None:
     """Carry one persisted logical-meeting clock into all of its room rounds."""
 
-    if receipt_authority is None or not _is_scoped_discussion_room(room):
+    if not _is_challenge_discussion_room(room):
         return None
     from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
         current_challenge_task_deadline_at_ms,
@@ -4958,6 +5093,10 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
                     if final_status == "stopped"
                     else reason
                 )
+                if final_status == "stopped" and not str(
+                    round_payload.get("terminalReason") or ""
+                ).strip():
+                    round_payload["terminalReason"] = reason
                 round_payload["updatedAt"] = finished_at
                 round_payload["finishedAt"] = finished_at
                 room["status"] = "ready" if final_status in {"completed", "partial", "stopped"} else "failed"
@@ -4993,6 +5132,15 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
             )
             store.persist_snapshot(RUN_KIND, work_run_payload, active_run_id="")
         _sync_stopped_round_to_sessions_if_needed(item["room"], item["round"])
+        if (
+            item["finalStatus"] == "stopped"
+            and str(item["round"].get("terminalReason") or "").strip()
+        ):
+            from core.web.services.team_workflow import meeting_runtime
+
+            meeting_runtime.finalize_stopped_meeting_after_chat_round(
+                item["room"], item["round"]
+            )
         _record_room_event(
             "round",
             "chat_room.round.orphan_reconciled",
@@ -5096,6 +5244,9 @@ def _persist_chat_room_work_run(
         "summary": str(summary or round_payload.get("summary") or "").strip(),
         "startedAt": str(round_payload.get("startedAt") or now).strip(),
         "updatedAt": now,
+        "heartbeatAt": str(round_payload.get("heartbeatAt") or now).strip()
+        if normalized_status in RUNNING_ROUND_STATUSES
+        else str(round_payload.get("heartbeatAt") or "").strip(),
         "finishedAt": str(round_payload.get("finishedAt") or "").strip()
         if normalized_status not in RUNNING_ROUND_STATUSES
         else "",

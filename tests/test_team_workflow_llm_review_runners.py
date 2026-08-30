@@ -743,81 +743,83 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
 
 
 def test_review_llm_call_timeout_seconds_env_override(monkeypatch):
+    from core.web.services.team_workflow import challenge_deadline_policy
+
+    monkeypatch.setattr(
+        challenge_deadline_policy,
+        "derive_per_call_budget",
+        lambda *_args, **_kwargs: {"perCallBudgetMs": 450_000},
+    )
     monkeypatch.delenv(
         llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, raising=False
     )
     default = llm_review_runners.review_llm_call_timeout_seconds()
-    assert default == llm_review_runners.REVIEW_LLM_CALL_TIMEOUT_SECONDS
-    assert 420 < default <= 600
+    assert default == 450.0
 
     monkeypatch.setenv(
-        llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, "42.5"
+        llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, "420"
     )
-    assert llm_review_runners.review_llm_call_timeout_seconds() == 42.5
+    assert llm_review_runners.review_llm_call_timeout_seconds() == 420.0
 
-    for junk in ("not-a-number", "0", "-3"):
+    for junk in ("not-a-number", "0", "-3", "42.5", "601"):
         monkeypatch.setenv(
             llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, junk
         )
         assert (
             llm_review_runners.review_llm_call_timeout_seconds()
-            == llm_review_runners.REVIEW_LLM_CALL_TIMEOUT_SECONDS
+            == 450.0
         )
 
 
 def test_digest_drafter_times_out_with_structured_error(monkeypatch):
-    release = threading.Event()
+    now = [1_000.0]
+    monkeypatch.setattr(llm_review_runners.time, "time", lambda: now[0])
 
     def hanging_invoke_llm(client, messages, tools=None, context=None, **kwargs):
-        # Simulate the wedged provider transport: never returns on its own.
-        assert release.wait(timeout=10), "test cleanup must release the worker"
+        now[0] = 1_001.0
         return _FakeResponse("{}")
 
     monkeypatch.setattr(llm_review_runners, "invoke_llm", hanging_invoke_llm)
     monkeypatch.setattr(
-        llm_review_runners, "review_llm_call_timeout_seconds", lambda: 0.2
+        llm_review_runners, "review_llm_call_timeout_seconds", lambda **_kwargs: 0.2
     )
 
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
-    try:
-        with pytest.raises(llm_review_runners.ReviewLLMTimeoutError) as exc_info:
-            drafter(_meeting_round(), _source_messages())
-    finally:
-        release.set()
+    with pytest.raises(llm_review_runners.ReviewLLMTimeoutError) as exc_info:
+        drafter(_meeting_round(), _source_messages())
 
     error = exc_info.value
     assert isinstance(error, LLMError)
-    assert error.category == "timeout"
-    assert error.retryable is True
+    assert error.category == "cancelled"
+    assert error.retryable is False
     assert error.purpose == "meeting_digest"
     assert error.timeout_seconds == 0.2
     assert "meeting_digest" in str(error)
 
 
 def test_receipt_bound_runner_times_out_with_structured_error(monkeypatch):
-    release = threading.Event()
+    now = [1_000.0]
+    monkeypatch.setattr(llm_review_runners.time, "time", lambda: now[0])
 
     def hanging_invoke_outcome(client, messages, tools=None, context=None, **kwargs):
-        assert release.wait(timeout=10), "test cleanup must release the worker"
-        raise AssertionError("the hung call must not produce an outcome")
+        now[0] = 1_001.0
+        return object()
 
     monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", hanging_invoke_outcome)
     monkeypatch.setattr(
-        llm_review_runners, "review_llm_call_timeout_seconds", lambda: 0.2
+        llm_review_runners, "review_llm_call_timeout_seconds", lambda **_kwargs: 0.2
     )
     runners = llm_review_runners.build_hypothesis_review_runners(
         dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
     )
     context = _formal_review_context()
-    try:
-        with pytest.raises(llm_review_runners.ReviewLLMTimeoutError) as exc_info:
-            runners["pairwise_runner"](
-                _candidate("cand-a", "假说 A"),
-                _candidate("cand-b", "假说 B"),
-                context,
-            )
-    finally:
-        release.set()
+    with pytest.raises(llm_review_runners.ReviewLLMTimeoutError) as exc_info:
+        runners["pairwise_runner"](
+            _candidate("cand-a", "假说 A"),
+            _candidate("cand-b", "假说 B"),
+            context,
+        )
 
     assert exc_info.value.purpose == "hypothesis_pairwise"
-    assert exc_info.value.category == "timeout"
+    assert exc_info.value.category == "cancelled"
+    assert exc_info.value.retryable is False

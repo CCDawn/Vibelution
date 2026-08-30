@@ -317,7 +317,7 @@ def test_review_prompt_includes_selected_candidate_content(tmp_path, monkeypatch
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
 
     agent_ids = list(agents.values())
-    meeting_runtime.open_hypothesis_review_meeting(
+    opened = meeting_runtime.open_hypothesis_review_meeting(
         team_id,
         _selection_payload(
             agent_ids,
@@ -338,6 +338,12 @@ def test_review_prompt_includes_selected_candidate_content(tmp_path, monkeypatch
     assert all("cand-a" in prompt for prompt in prompts)
     assert all("素数是整数乘法的原子单元" in prompt for prompt in prompts)
     assert all("算术基本定理保证唯一分解" in prompt for prompt in prompts)
+    meeting = opened["meetingRound"]
+    assert meeting["scopeAuthority"] == "preformal_candidate_review_scope.v1"
+    assert meeting["deadlinePolicyVersion"] == "challenge_meeting_deadline.v1"
+    assert meeting["challengeDeadlineAtMs"] == (
+        meeting["serverCreatedAtMs"] + meeting["meetingBudgetMs"]
+    )
 
 
 def test_review_prompt_teaches_evidence_request_marker(tmp_path, monkeypatch):
@@ -952,7 +958,13 @@ def test_old_workflow_run_can_open_new_review_meeting_with_fresh_server_deadline
 
     meeting_round = created["meetingRound"]
     deadline_at_ms = meeting_round["challengeDeadlineAtMs"]
-    assert before_ms + 299_000 <= deadline_at_ms <= before_ms + 301_000
+    assert meeting_round["deadlinePolicyVersion"] == "challenge_meeting_deadline.v1"
+    assert meeting_round["meetingBudgetMs"] == (
+        meeting_round["perCallBudgetMs"]
+        * meeting_round["plannedSerialCallCount"]
+    )
+    assert before_ms + meeting_round["meetingBudgetMs"] - 1_000 <= deadline_at_ms
+    assert deadline_at_ms > before_ms + 300_000
     assert meeting_round["startedAt"] == "2025-01-01T00:00:00Z"
     assert meetings.get_meeting_round(
         team_id,

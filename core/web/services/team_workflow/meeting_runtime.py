@@ -1084,6 +1084,21 @@ def _round_config(
             and challenge_deadline_at_ms > 0
             else {}
         ),
+        **{
+            field: meeting_round[field]
+            for field in (
+                "deadlinePolicyVersion",
+                "deadlinePolicyHash",
+                "plannedSerialCallCount",
+                "perCallBudgetMs",
+                "meetingBudgetMs",
+                "meetingDeadlineAtMs",
+                "sampleSource",
+                "sampleCount",
+                "latencyP95Ms",
+            )
+            if meeting_round.get(field) not in (None, "")
+        },
     }
 
 
@@ -1319,6 +1334,9 @@ def open_hypothesis_review_meeting(
     meeting_round = _persist_discussion_scope_projection(
         team["teamId"], created["meetingRound"], discussion_scope
     )
+    meeting_round = meeting_rounds.persist_challenge_meeting_deadline_policy(
+        team["teamId"], str(meeting_round.get("meetingRoundId") or "")
+    )
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     if created["status"] == "reused":
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
@@ -1333,6 +1351,13 @@ def open_hypothesis_review_meeting(
                 "chatRoomRoundIds": bound_round_ids,
                 "storagePath": created["storagePath"],
             }
+    if meeting_round.get("deadlineBudgetSufficient") is False:
+        problem = meeting_round.get("deadlineProblem") or {}
+        raise ResearchMeetingRuntimeError(
+            "deadline_budget_insufficient: "
+            f"availableMs={int(problem.get('availableMs') or 0)} "
+            f"requiredMs={int(problem.get('requiredMs') or 0)}"
+        )
 
     topic = str(request.get("topic") or "").strip() or _opening_topic(
         meeting_round_id, effective_selection, agenda, candidate_contexts
@@ -1496,6 +1521,9 @@ def open_candidate_generation_meeting(
     meeting_round = _persist_discussion_scope_projection(
         team["teamId"], created["meetingRound"], discussion_scope
     )
+    meeting_round = meeting_rounds.persist_challenge_meeting_deadline_policy(
+        team["teamId"], str(meeting_round.get("meetingRoundId") or "")
+    )
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     if created["status"] == "reused":
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
@@ -1510,6 +1538,13 @@ def open_candidate_generation_meeting(
                 "chatRoomRoundIds": bound_round_ids,
                 "storagePath": created["storagePath"],
             }
+    if meeting_round.get("deadlineBudgetSufficient") is False:
+        problem = meeting_round.get("deadlineProblem") or {}
+        raise ResearchMeetingRuntimeError(
+            "deadline_budget_insufficient: "
+            f"availableMs={int(problem.get('availableMs') or 0)} "
+            f"requiredMs={int(problem.get('requiredMs') or 0)}"
+        )
 
     topic = str(request.get("topic") or "").strip() or _generation_opening_topic(
         meeting_round_id,

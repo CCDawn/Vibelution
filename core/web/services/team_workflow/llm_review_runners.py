@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -29,7 +29,7 @@ from config import get_config
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import agent_dialogue_model_id, config_for_agent_llm_model
-from core.llm.client import model_invocation_receipt_context_scope
+from core.llm.client import llm_cancel_context, model_invocation_receipt_context_scope
 from core.llm.invocation import invoke_llm_outcome
 from core.llm.types import LLMError
 from core.research.workflow.contracts import ContractValidationError
@@ -64,12 +64,17 @@ _MAX_MESSAGES = 40
 # holding the per-meeting summary lock with no in-product recovery path
 # (SCI-096 P0, validated 2026-08-28).  Budgets of 180s and 360s both produced
 # false timeouts on valid low-cost digest attempts.
-REVIEW_LLM_CALL_TIMEOUT_SECONDS = 600.0
+REVIEW_LLM_CALL_TIMEOUT_SECONDS = 450.0
 _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
 
 
-def review_llm_call_timeout_seconds() -> float:
-    """Return the review-call timeout, tunable via the environment override."""
+def review_llm_call_timeout_seconds(*, model_ref: str = "") -> float:
+    """Return the receipt-derived review-call budget.
+
+    The historical seconds override remains accepted only inside the governed
+    300-600 second range.  New deployments should use the shared millisecond
+    Challenge policy override so its source is persisted in the meeting.
+    """
 
     raw = str(os.environ.get(_REVIEW_LLM_CALL_TIMEOUT_ENV) or "").strip()
     if raw:
@@ -77,25 +82,34 @@ def review_llm_call_timeout_seconds() -> float:
             value = float(raw)
         except ValueError:
             return REVIEW_LLM_CALL_TIMEOUT_SECONDS
-        if value > 0:
+        if 300.0 <= value <= 600.0:
             return value
-    return REVIEW_LLM_CALL_TIMEOUT_SECONDS
+    from core.web.services.team_workflow.challenge_deadline_policy import (
+        derive_per_call_budget,
+    )
+
+    return float(
+        derive_per_call_budget(
+            CHALLENGE_CUP_RESEARCH_TEAM_ID,
+            model_refs=[model_ref] if model_ref else [],
+            purpose="team_workflow_review",
+        )["perCallBudgetMs"]
+    ) / 1000.0
 
 
 class ReviewLLMTimeoutError(LLMError):
     """One review-profile LLM call exceeded the configured wall-clock budget.
 
-    Classified as the canonical ``timeout`` LLM error category (retryable) so
-    existing error consumers can handle it like any other provider timeout;
-    ``purpose`` and ``timeout_seconds`` keep the structured context for the
-    meeting runtime's persisted ``summaryDraftError``.
+    Classified as non-retryable cancellation because the absolute Challenge
+    fence has already elapsed.  Retrying inside the same meeting would only
+    create a duplicate late provider call.
     """
 
     def __init__(self, *, purpose: str, timeout_seconds: float) -> None:
         super().__init__(
-            "timeout",
+            "cancelled",
             f"review step `{purpose}` did not return within {timeout_seconds:g}s",
-            retryable=True,
+            retryable=False,
         )
         self.purpose = str(purpose)
         self.timeout_seconds = float(timeout_seconds)
@@ -106,38 +120,49 @@ def _invoke_llm_with_timeout(
     *,
     purpose: str,
     timeout_seconds: float,
+    deadline_at_ms: int | None = None,
 ) -> Any:
-    """Run one review LLM call, failing structured when the budget elapses.
+    """Run one review call through the existing abortable provider transport."""
 
-    The provider call keeps running on its daemon worker after a timeout (the
-    transport has no cooperative cancel); the caller returns immediately so
-    the meeting runtime can persist a recoverable draft error and release the
-    summary lock instead of hanging forever.
-    """
-
-    outcome: dict[str, Any] = {}
-    finished = threading.Event()
-
-    def _run() -> None:
-        try:
-            outcome["value"] = invoke()
-        except BaseException as exc:  # noqa: BLE001 - re-raised on the waiter
-            outcome["error"] = exc
-        finally:
-            finished.set()
-
-    worker = threading.Thread(
-        target=_run,
-        name=f"review-llm-{purpose}",
-        daemon=True,
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        current_challenge_task_deadline_at_ms,
     )
-    worker.start()
-    if not finished.wait(timeout_seconds):
-        raise ReviewLLMTimeoutError(purpose=purpose, timeout_seconds=timeout_seconds)
-    error = outcome.get("error")
-    if error is not None:
-        raise error
-    return outcome.get("value")
+
+    now_ms = int(time.time() * 1000)
+    candidates = [now_ms + max(1, int(timeout_seconds * 1000))]
+    for value in (deadline_at_ms, current_challenge_task_deadline_at_ms()):
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            candidates.append(value)
+    effective_deadline_at_ms = min(candidates)
+
+    def interrupt_checker() -> str:
+        return (
+            "challenge_review_deadline_exceeded"
+            if int(time.time() * 1000) >= effective_deadline_at_ms
+            else ""
+        )
+
+    if interrupt_checker():
+        raise ReviewLLMTimeoutError(
+            purpose=purpose,
+            timeout_seconds=max(0.001, (effective_deadline_at_ms - now_ms) / 1000),
+        )
+    try:
+        with llm_cancel_context(interrupt_checker, enable_chat_provider_abort=True):
+            value = invoke()
+    except LLMError as exc:
+        if exc.category == "cancelled" and interrupt_checker():
+            raise ReviewLLMTimeoutError(
+                purpose=purpose,
+                timeout_seconds=timeout_seconds,
+            ) from exc
+        raise
+    if interrupt_checker():
+        raise ReviewLLMTimeoutError(
+            purpose=purpose,
+            timeout_seconds=timeout_seconds,
+        )
+    return value
 
 
 def resolve_review_llm() -> dict[str, Any] | None:
@@ -244,6 +269,7 @@ def _invoke_review_llm(
     session_id: str,
     receipt_context: Mapping[str, Any] | None = None,
     require_provider_receipt: bool = False,
+    deadline_at_ms: int | None = None,
 ) -> dict[str, Any] | ProviderBoundReviewResult:
     """Run one review model call and parse its JSON object output."""
 
@@ -303,7 +329,10 @@ def _invoke_review_llm(
                 context=invocation_context,
             ),
             purpose=purpose,
-            timeout_seconds=review_llm_call_timeout_seconds(),
+            timeout_seconds=review_llm_call_timeout_seconds(
+                model_ref=str(llm.get("modelRef") or "")
+            ),
+            deadline_at_ms=deadline_at_ms,
         )
         content = str(getattr(response, "content", "") or "")
         return _parse_json_object(content, what=f"review step `{purpose}`")
@@ -321,7 +350,10 @@ def _invoke_review_llm(
     outcome = _invoke_llm_with_timeout(
         _invoke_bound_outcome,
         purpose=purpose,
-        timeout_seconds=review_llm_call_timeout_seconds(),
+        timeout_seconds=review_llm_call_timeout_seconds(
+            model_ref=str(llm.get("modelRef") or "")
+        ),
+        deadline_at_ms=deadline_at_ms,
     )
     identity = getattr(outcome, "identity", None)
     if (
@@ -425,6 +457,8 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
                 "messages": transcript,
             },
             session_id=str(meeting_round.get("teamId") or "") or "team",
+            deadline_at_ms=int(meeting_round.get("challengeDeadlineAtMs") or 0)
+            or None,
         )
         # Server-owned fields: source refs are computed from the bound
         # messages, never delegated to the model.
@@ -607,6 +641,7 @@ def build_hypothesis_review_runners(
                 identity_parts=(str(candidate.get("candidateId") or ""),),
             ),
             require_provider_receipt=require_provider_receipts,
+            deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
         )
         provider_receipt = None
         if isinstance(produced, ProviderBoundReviewResult):
@@ -651,6 +686,7 @@ def build_hypothesis_review_runners(
                 ),
             ),
             require_provider_receipt=require_provider_receipts,
+            deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
         )
 
     def pareto_runner(scores_by_candidate: dict[str, dict[str, float]], context: dict[str, Any]):
@@ -673,6 +709,7 @@ def build_hypothesis_review_runners(
                 identity_parts=tuple(sorted(scores_by_candidate)),
             ),
             require_provider_receipt=require_provider_receipts,
+            deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
         )
 
     def metareview_runner(
@@ -704,6 +741,7 @@ def build_hypothesis_review_runners(
                 ),
             ),
             require_provider_receipt=require_provider_receipts,
+            deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
         )
         provider_receipt = None
         if isinstance(produced, ProviderBoundReviewResult):

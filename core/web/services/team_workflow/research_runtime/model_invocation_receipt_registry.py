@@ -775,6 +775,57 @@ def list_team_scoped_model_invocation_receipts(
     return rows
 
 
+def list_team_model_invocation_latency_samples(
+    team_id: str,
+    *,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Return bounded, excerpt-free latency facts for deadline calibration.
+
+    The immutable receipt files remain the fact source.  This projection does
+    not expose prompts, responses, evidence locators or token data and never
+    writes the registry.  Corrupt stores fail closed instead of silently
+    biasing the wall-clock policy.
+    """
+
+    normalized_team = _reset_receipt_text(team_id, field="teamId")
+    root = _receipt_store_root(normalized_team)
+    if not root.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*.json")):
+        payload = _load(path)
+        if not isinstance(payload, Mapping):
+            continue
+        question_id = str(payload.get("questionId") or "").strip().upper()
+        workflow_run_id = str(payload.get("workflowRunId") or "").strip()
+        receipts = _validate_store_payload(
+            payload,
+            team_id=normalized_team,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
+        for raw in receipts:
+            receipt = ModelInvocationReceipt.from_dict(raw)
+            if receipt.status not in {
+                ModelInvocationStatus.SUCCEEDED,
+                ModelInvocationStatus.RETRIED,
+            }:
+                continue
+            rows.append(
+                {
+                    "provider": receipt.provider,
+                    "model": receipt.model,
+                    "latencyMs": receipt.latency_ms,
+                    "finishedAtMs": receipt.finished_at_ms,
+                    "purpose": str(receipt.metadata.get("purpose") or "").strip(),
+                }
+            )
+    rows.sort(key=lambda item: int(item.get("finishedAtMs") or 0), reverse=True)
+    bounded_limit = max(1, min(10_000, int(limit)))
+    return rows[:bounded_limit]
+
+
 def _receipt_stage_summary(stage: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: stage[key]
@@ -1120,6 +1171,7 @@ __all__ = [
     "RECEIPT_RESET_PORT_SCHEMA_VERSION",
     "ReceiptResetPortError",
     "destroy_model_invocation_receipt_reset_stage",
+    "list_team_model_invocation_latency_samples",
     "list_team_scoped_model_invocation_receipts",
     "prepare_model_invocation_receipt_reset_stage",
     "purge_model_invocation_receipt_reset_stage",

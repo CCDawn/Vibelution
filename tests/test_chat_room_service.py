@@ -2921,6 +2921,128 @@ def test_formal_room_uses_earliest_outer_and_meeting_deadline(monkeypatch):
     ) == 200_000
 
 
+def test_preformal_room_receives_server_meeting_deadline_without_receipt(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import challenge_turn_policy
+
+    room = {
+        "config": {
+            "scopeAuthority": "preformal_candidate_review_scope.v1",
+            "discussionScope": {
+                "kind": "preformal_candidate_review",
+                "questionId": "SCI-096",
+            },
+            "discussionScopeHash": "e" * 64,
+        }
+    }
+    monkeypatch.setattr(
+        challenge_turn_policy,
+        "current_challenge_task_deadline_at_ms",
+        lambda: None,
+    )
+
+    assert chat_room_service._resolve_challenge_room_deadline_at_ms(
+        room,
+        {"challengeDeadlineAtMs": 900_000},
+        receipt_authority=None,
+    ) == 900_000
+
+
+def test_challenge_speaker_persists_heartbeat_without_touching_ordinary_rooms(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(
+        chat_room_service, "_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS", 0.01
+    )
+    room = chat_room_service.create_chat_room(
+        title="preformal heartbeat",
+        participant_session_ids=["session-alpha"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "preformal_candidate_review_scope.v1",
+            "discussionScope": {
+                "kind": "preformal_candidate_review",
+                "questionId": "SCI-096",
+            },
+            "discussionScopeHash": "e" * 64,
+        },
+    )
+
+    def slow_runner(*_args):
+        time.sleep(0.05)
+        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "heartbeat",
+        config={"challengeDeadlineAtMs": int(time.time() * 1000) + 5_000},
+        agent_runner=slow_runner,
+    )
+
+    assert detail["rounds"][-1]["status"] == "completed"
+    assert detail["rounds"][-1]["heartbeatAt"]
+    work_run = chat_room_service._work_run_store().load_snapshot(
+        chat_room_service.RUN_KIND, detail["rounds"][-1]["roundId"]
+    )
+    assert work_run["heartbeatAt"]
+
+
+def test_candidate_generation_uses_trusted_short_answer_contract_and_output_cap():
+    class FakeProfile:
+        max_output_tokens = 32_768
+
+        def model_copy(self, *, update):
+            return SimpleNamespace(**update)
+
+    class FakeLLM:
+        def __init__(self):
+            self.profiles = {"primary": FakeProfile()}
+
+        def get_profile(self, *, profile_id):
+            return self.profiles[profile_id]
+
+    config = SimpleNamespace(llm=FakeLLM())
+    context = {
+        "challengeDeadlineAtMs": 1_000_000,
+        "meetingType": "hypothesis_candidate_generation",
+    }
+
+    assert chat_room_service._apply_challenge_speaker_output_cap(
+        config, profile_id="primary", context=context
+    ) is True
+    assert config.llm.profiles["primary"].max_output_tokens == 512
+
+    prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": "room-formal", "title": "formal"},
+        round_payload={
+            "topic": "候选生成",
+            "purpose": "meeting",
+            "mode": "round_robin",
+            "config": {
+                "challengeDeadlineAtMs": 1_000_000,
+                "meetingType": "hypothesis_candidate_generation",
+            },
+        },
+        participant={
+            "participantId": "participant-a",
+            "agentCode": "A",
+            "sessionId": "session-a",
+        },
+        prior_messages=[],
+    )
+    assert "正文不超过 180 个中文字符" in prompt
+    assert "只输出一条 CANDIDATE 标记" in prompt
+
+    ordinary = SimpleNamespace(llm=FakeLLM())
+    assert chat_room_service._apply_challenge_speaker_output_cap(
+        ordinary,
+        profile_id="primary",
+        context={"meetingType": "hypothesis_candidate_generation"},
+    ) is False
+    assert ordinary.llm.profiles["primary"].max_output_tokens == 32_768
+
+
 def test_ordinary_room_does_not_inherit_challenge_deadline(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
@@ -3426,6 +3548,13 @@ def test_chat_room_detail_reconciles_terminal_work_run_after_backend_restart(tmp
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    terminal_bridges = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.meeting_runtime.finalize_stopped_meeting_after_chat_round",
+        lambda room, round_payload: terminal_bridges.append(
+            (dict(room), dict(round_payload))
+        ),
+    )
 
     room = chat_room_service.create_chat_room(
         title="重启后待收口群聊",
@@ -3495,6 +3624,9 @@ def test_chat_room_detail_reconciles_terminal_work_run_after_backend_restart(tmp
     stored_detail = chat_room_service._store().load()["rooms"][0]
     assert stored_detail["rounds"][-1]["messages"] == [original_message]
     assert "pytest launcher force stop" in reconciled_round["summary"]
+    assert reconciled_round["terminalReason"] == "pytest launcher force stop"
+    assert len(terminal_bridges) == 1
+    assert terminal_bridges[0][1]["terminalReason"] == "pytest launcher force stop"
     assert chat_room_service.list_active_chat_room_work_runs() == []
 
 
