@@ -3011,7 +3011,7 @@ def test_candidate_generation_uses_trusted_short_answer_contract_and_output_cap(
     assert chat_room_service._apply_challenge_speaker_output_cap(
         config, profile_id="primary", context=context
     ) is True
-    assert config.llm.profiles["primary"].max_output_tokens == 512
+    assert config.llm.profiles["primary"].max_output_tokens == 1024
 
     prompt = chat_room_service._build_participant_prompt(
         room={"roomId": "room-formal", "title": "formal"},
