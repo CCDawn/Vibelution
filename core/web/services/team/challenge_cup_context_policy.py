@@ -224,20 +224,53 @@ def export_challenge_cup_context_policy_snapshot() -> dict[str, Any]:
     }
 
 
+def _policy_version(policy: Any) -> int:
+    """Return the declared policy version, or 0 for legacy/unversioned data."""
+
+    if not isinstance(policy, dict):
+        return 0
+    try:
+        return max(0, int(policy.get("policyVersion") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def challenge_cup_context_policies_outdated() -> bool:
+    """Return whether any managed role still runs below the contract version.
+
+    Registry read failures propagate to the caller on purpose: the bootstrap
+    hook owns the fail-soft decision so a broken registry can never be
+    mistaken for "already migrated".
+    """
+
+    for _role_key, agent in _challenge_cup_role_agents():
+        version = _policy_version(agent.get("contextCompressionPolicy"))
+        if version < CHALLENGE_CUP_CONTEXT_POLICY_VERSION:
+            return True
+    return False
+
+
 def apply_challenge_cup_context_policies(
     *,
     snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Migrate the six roles onto the explicit versioned custom policies.
+    """One-time version-gated migration onto the explicit v3 policies.
 
-    Returns the applied snapshot and the number of roles actually changed.
+    Only roles whose current policy has no ``policyVersion`` or a version
+    below ``CHALLENGE_CUP_CONTEXT_POLICY_VERSION`` are migrated to the
+    canonical contract. Roles already at the current version are never
+    overwritten: an exact canonical match is reported as ``skipped_current``
+    while any other current-version policy is treated as a deliberate
+    operator customization (``skipped_custom``). The pre-change snapshot is
+    exported before the first actual write so rollback can restore the
+    explicit prior policies.
     """
 
     from core.web.services import agent_directory_service
 
-    safe_snapshot = snapshot or export_challenge_cup_context_policy_snapshot()
-    changed_roles: list[str] = []
-    unchanged_roles: list[str] = []
+    plans: list[tuple[str, str, dict[str, Any]]] = []
+    skipped_current: list[str] = []
+    skipped_custom: list[str] = []
     for role_key, agent in _challenge_cup_role_agents():
         target = challenge_cup_role_context_policy(role_key)
         if target is None:
@@ -246,25 +279,47 @@ def apply_challenge_cup_context_policies(
         if not agent_id:
             continue
         current = agent.get("contextCompressionPolicy")
-        normalized_current = agent_directory_service.normalize_agent_context_compression_policy(
-            current if isinstance(current, dict) else {}
-        )
-        normalized_target = agent_directory_service.normalize_agent_context_compression_policy(target)
-        if normalized_current == normalized_target:
-            unchanged_roles.append(role_key)
+        if _policy_version(current) >= CHALLENGE_CUP_CONTEXT_POLICY_VERSION:
+            normalized_current = agent_directory_service.normalize_agent_context_compression_policy(
+                current if isinstance(current, dict) else {}
+            )
+            normalized_target = agent_directory_service.normalize_agent_context_compression_policy(target)
+            if normalized_current == normalized_target:
+                skipped_current.append(role_key)
+            else:
+                skipped_custom.append(role_key)
             continue
+        plans.append((role_key, agent_id, target))
+
+    result: dict[str, Any] = {
+        "policyVersion": CHALLENGE_CUP_CONTEXT_POLICY_VERSION,
+        "migratedRoles": [],
+        "skippedCurrentRoles": skipped_current,
+        "skippedCustomRoles": skipped_custom,
+        "migratedCount": 0,
+        "snapshotExported": False,
+    }
+    if snapshot is not None:
+        result["snapshot"] = snapshot
+    if not plans:
+        return result
+    safe_snapshot = snapshot or export_challenge_cup_context_policy_snapshot()
+    migrated_roles: list[str] = []
+    for role_key, agent_id, target in plans:
         agent_directory_service.update_agent_instance(
             agent_id,
             context_compression_policy=copy.deepcopy(target),
         )
-        changed_roles.append(role_key)
-    return {
-        "snapshot": safe_snapshot,
-        "policyVersion": CHALLENGE_CUP_CONTEXT_POLICY_VERSION,
-        "changedRoles": changed_roles,
-        "unchangedRoles": unchanged_roles,
-        "changedRoleCount": len(changed_roles),
-    }
+        migrated_roles.append(role_key)
+    result.update(
+        {
+            "snapshot": safe_snapshot,
+            "snapshotExported": snapshot is None,
+            "migratedRoles": migrated_roles,
+            "migratedCount": len(migrated_roles),
+        }
+    )
+    return result
 
 
 def rollback_challenge_cup_context_policies(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -272,7 +327,10 @@ def rollback_challenge_cup_context_policies(snapshot: dict[str, Any]) -> dict[st
 
     Rollback never restores ``inherit``: a prior policy that was
     ``inherit``/unmaterialized falls back to the canonical versioned custom
-    policy so the role stays explicitly configured.
+    policy so the role stays explicitly configured. A restored prior custom
+    policy is stamped with the current contract version (when older) so the
+    version gate treats it as a deliberate choice and never re-migrates the
+    rolled-back role on the next bootstrap.
     """
 
     from core.web.services import agent_directory_service
@@ -303,6 +361,9 @@ def rollback_challenge_cup_context_policies(snapshot: dict[str, Any]) -> dict[st
         )
         if normalized_prior.get("mode") == "custom":
             restore = normalized_prior
+            prior_version = _policy_version(restore)
+            if prior_version < CHALLENGE_CUP_CONTEXT_POLICY_VERSION:
+                restore["policyVersion"] = CHALLENGE_CUP_CONTEXT_POLICY_VERSION
         else:
             canonical = challenge_cup_role_context_policy(role_key)
             if canonical is None:

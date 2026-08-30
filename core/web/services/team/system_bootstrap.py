@@ -217,7 +217,65 @@ def _system_team_bootstrap_required_steps() -> list[str]:
         required_steps.append("challenge_cup_research_team")
     if s.knowledge_expansion_team_agents_need_repair():
         required_steps.append("knowledge_expansion_team_agents")
+    try:
+        if _challenge_cup_context_policy_migration_needed():
+            required_steps.append("challenge_cup_context_policy_migration")
+    except Exception as exc:
+        # Fail soft: a registry read failure must never block startup. The
+        # version-gated migration simply retries on the next bootstrap cycle.
+        _record_system_team_bootstrap_event(
+            "team.system_bootstrap.context_policy_check_failed",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
     return required_steps
+
+
+def _challenge_cup_context_policy_migration_needed() -> bool:
+    """Version gate for the one-time Challenge Cup policy migration."""
+
+    from core.web.services.team.challenge_cup_context_policy import (
+        challenge_cup_context_policies_outdated,
+    )
+
+    return challenge_cup_context_policies_outdated()
+
+
+def _apply_challenge_cup_context_policy_migration(*, reason: str) -> None:
+    """Apply the version-gated policy migration without ever raising.
+
+    This runs on every bootstrap execution; when every managed role already
+    carries the current contract version it is a read-only no-op.
+    """
+
+    from core.web.services.team.challenge_cup_context_policy import (
+        apply_challenge_cup_context_policies,
+        challenge_cup_context_policies_outdated,
+    )
+
+    try:
+        if not challenge_cup_context_policies_outdated():
+            return
+        result = apply_challenge_cup_context_policies()
+        migrated_count = int(result.get("migratedCount") or 0)
+        if migrated_count > 0:
+            _record_system_team_bootstrap_event(
+                "team.challenge_cup_context_policy_migrated",
+                outcome="succeeded",
+                fields={
+                    "reason": reason,
+                    "policyVersion": int(result.get("policyVersion") or 0),
+                    "migratedRoles": list(result.get("migratedRoles") or []),
+                    "skippedCustomRoles": list(result.get("skippedCustomRoles") or []),
+                    "migratedCount": migrated_count,
+                },
+            )
+    except Exception as exc:
+        _record_system_team_bootstrap_event(
+            "team.challenge_cup_context_policy_migration_failed",
+            outcome="failed",
+            fields={"reason": reason, "errorType": type(exc).__name__},
+        )
 
 
 def _system_team_bootstrap_state_snapshot_locked() -> dict[str, Any]:
@@ -254,6 +312,10 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
             s.ensure_knowledge_expansion_team_agents(purge_stale=True)
         if "evolution_system_teams" in required_steps:
             s.ensure_evolution_system_teams()
+        # Fail-soft version-gated migration for the six Challenge Cup roles;
+        # runs unconditionally so a freshly materialized team converges within
+        # the same bootstrap run, and is a read-only no-op once migrated.
+        _apply_challenge_cup_context_policy_migration(reason=reason)
         remaining_steps = _system_team_bootstrap_required_steps()
         elapsed_ms = s._elapsed_ms(started_at)
         status = "ready" if not remaining_steps else "needs_retry"

@@ -150,6 +150,13 @@ def _seed_system_team_bootstrap_ready() -> None:
     _seed_challenge_cup_agent_assets()
     team_service.bootstrap_challenge_cup_research_team()
     team_service.ensure_knowledge_expansion_team_agents(purge_stale=False)
+    # "Ready" steady state includes the version-gated context policy migration
+    # for the six Challenge Cup roles (same entrypoint the bootstrap uses).
+    from core.web.services.team.challenge_cup_context_policy import (
+        apply_challenge_cup_context_policies,
+    )
+
+    apply_challenge_cup_context_policies()
     now = team_service.utc_now_iso()
     state = team_service._load_index()
     teams = [

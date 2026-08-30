@@ -213,7 +213,9 @@ def test_apply_migrates_all_roles_and_resolution_never_reports_migration_require
     assert extractor_entry["policy"]["enabled"] is False
 
     result = ccp.apply_challenge_cup_context_policies()
-    assert result["changedRoleCount"] == len(agents)
+    assert result["migratedCount"] == len(agents)
+    assert set(result["migratedRoles"]) == set(agents)
+    assert result["snapshotExported"] is True
     for role_key, agent in agents.items():
         stored = agent_directory_service.get_agent(agent["agentId"])
         stored_policy = stored.get("contextCompressionPolicy")
@@ -233,14 +235,112 @@ def test_apply_migrates_all_roles_and_resolution_never_reports_migration_require
         assert int(effective.get("compressionTriggerTokenLimit") or 0) == TRIGGER
         assert int(effective.get("effectiveTokenLimit") or 0) == HARD_LIMIT
 
-    # Idempotent: second apply changes nothing.
+    # Version-gated idempotence: the second apply is a read-only no-op that
+    # classifies every role as already current and writes nothing.
     second = ccp.apply_challenge_cup_context_policies()
-    assert second["changedRoleCount"] == 0
+    assert second["migratedCount"] == 0
+    assert set(second["skippedCurrentRoles"]) == set(agents)
+    assert second["skippedCustomRoles"] == []
+    assert second.get("snapshotExported") is False
 
 
 def test_non_challenge_role_policy_contract_does_not_cover_other_roles():
     assert ccp.challenge_cup_role_context_policy("source_finder") is None
     assert ccp.challenge_cup_role_context_policy("") is None
+
+
+def test_version_gate_migrates_v1_v2_and_unversioned_policies(monkeypatch, tmp_path):
+    """Policies without a version or below v3 are migrated exactly once."""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    versioned = {
+        "challenge_cup_search": {"mode": "custom", "enabled": True, "policyVersion": 1, "maxTokenLimit": 262_144},
+        "challenge_cup_extractor": {"mode": "custom", "enabled": False, "policyVersion": 2, "maxTokenLimit": 1_000_000},
+        "challenge_cup_knowledge_manager": {"mode": "custom", "enabled": True, "maxTokenLimit": 262_144},
+    }
+    seeded = {
+        role_key: _seed_role_agent(role_key, policy=policy, monkeypatch=monkeypatch, tmp_path=tmp_path)
+        for role_key, policy in versioned.items()
+    }
+    assert ccp.challenge_cup_context_policies_outdated() is True
+
+    result = ccp.apply_challenge_cup_context_policies()
+    assert result["migratedCount"] == 3
+    assert set(result["migratedRoles"]) == set(seeded)
+    # The snapshot was exported before the first write and keeps priors verbatim.
+    search_entry = next(
+        entry
+        for entry in result["snapshot"]["agents"]
+        if entry["role"] == "challenge_cup_search"
+    )
+    assert search_entry["policy"]["policyVersion"] == 1
+
+    for agent in seeded.values():
+        stored = agent_directory_service.get_agent(agent["agentId"])
+        policy = stored.get("contextCompressionPolicy")
+        assert int(policy.get("policyVersion") or 0) == ccp.CHALLENGE_CUP_CONTEXT_POLICY_VERSION
+        assert int(policy["compressionTriggerTokenLimit"] or 0) == TRIGGER
+        assert int(policy["maxTokenLimit"] or 0) == HARD_LIMIT
+    assert ccp.challenge_cup_context_policies_outdated() is False
+
+
+def test_operator_customized_v3_policy_is_never_overwritten(monkeypatch, tmp_path):
+    """A current-version policy that drifts from canonical is operator intent."""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    canonical = ccp.challenge_cup_role_context_policy("challenge_cup_search")
+    assert canonical is not None
+    customized = dict(canonical)
+    customized["maxCompressionsPerSession"] = 25
+    agent = _seed_role_agent(
+        "challenge_cup_search", policy=customized, monkeypatch=monkeypatch, tmp_path=tmp_path
+    )
+
+    updates: list[str] = []
+    original_update = agent_directory_service.update_agent_instance
+
+    def _tracking_update(agent_id, *args, **kwargs):
+        updates.append(str(agent_id))
+        return original_update(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", _tracking_update)
+    result = ccp.apply_challenge_cup_context_policies()
+    assert result["migratedCount"] == 0
+    assert result["skippedCustomRoles"] == ["challenge_cup_search"]
+    assert result["skippedCurrentRoles"] == []
+    assert updates == [], "operator customization must not be rewritten"
+    assert result.get("snapshotExported") is False
+
+    stored = agent_directory_service.get_agent(agent["agentId"])
+    assert int(stored["contextCompressionPolicy"]["maxCompressionsPerSession"]) == 25
+    assert ccp.challenge_cup_context_policies_outdated() is False
+
+
+def test_rollback_survives_next_version_gated_apply(monkeypatch, tmp_path):
+    """§10.2: a rolled-back explicit custom policy must not be re-migrated."""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = _seed_role_agent(
+        "challenge_cup_extractor",
+        policy={"mode": "custom", "enabled": False, "maxTokenLimit": 262_144},
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+    )
+    snapshot = ccp.export_challenge_cup_context_policy_snapshot()
+    ccp.apply_challenge_cup_context_policies()
+
+    rollback = ccp.rollback_challenge_cup_context_policies(snapshot)
+    assert rollback["restoredCount"] == 1
+    restored = agent_directory_service.get_agent(agent["agentId"])
+    restored_policy = restored["contextCompressionPolicy"]
+    assert restored_policy["enabled"] is False
+    assert int(restored_policy.get("policyVersion") or 0) == ccp.CHALLENGE_CUP_CONTEXT_POLICY_VERSION
+
+    result = ccp.apply_challenge_cup_context_policies()
+    assert result["migratedCount"] == 0
+    assert result["skippedCustomRoles"] == ["challenge_cup_extractor"]
+    after = agent_directory_service.get_agent(agent["agentId"])
+    assert after["contextCompressionPolicy"]["enabled"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -634,3 +734,162 @@ def test_effective_policy_carries_explicit_trigger_and_target():
     assert int(effective["compressionTriggerTokenLimit"]) == TRIGGER
     assert int(effective["postCompressionTargetTokenLimit"]) <= POST_TARGET
     assert int(effective["effectiveTokenLimit"]) == HARD_LIMIT
+
+
+# ---------------------------------------------------------------------------
+# 6) Bootstrap hook: fail-soft, version-gated one-time migration
+# ---------------------------------------------------------------------------
+
+
+def _reset_bootstrap_state() -> None:
+    with team_service._TEAM_SYSTEM_BOOTSTRAP_LOCK:
+        team_service._TEAM_SYSTEM_BOOTSTRAP_THREAD = None
+        team_service._TEAM_SYSTEM_BOOTSTRAP_STATE.update(
+            {
+                "status": "idle",
+                "requiredSteps": [],
+                "reason": "",
+                "startedAt": "",
+                "finishedAt": "",
+                "lastError": "",
+                "elapsedMs": 0,
+                "attempt": 0,
+                "requestId": "",
+                "checkedAtMonotonic": 0.0,
+            }
+        )
+
+
+def _stub_team_checks_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(team_service, "evolution_system_teams_missing", lambda: False)
+    monkeypatch.setattr(team_service, "ai_search_system_team_missing", lambda: False)
+    monkeypatch.setattr(team_service, "challenge_cup_research_team_missing", lambda: False)
+    monkeypatch.setattr(
+        team_service, "knowledge_expansion_team_agents_need_repair", lambda: False
+    )
+
+
+def test_bootstrap_required_steps_fail_soft_when_registry_read_fails(monkeypatch, tmp_path):
+    from core.web.services.team import system_bootstrap
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_team_checks_absent(monkeypatch)
+
+    def _registry_boom() -> bool:
+        raise RuntimeError("agent registry read failed")
+
+    monkeypatch.setattr(ccp, "challenge_cup_context_policies_outdated", _registry_boom)
+    events: list[str] = []
+    monkeypatch.setattr(
+        system_bootstrap,
+        "_record_system_team_bootstrap_event",
+        lambda code, **kwargs: events.append(code),
+    )
+
+    steps = system_bootstrap._system_team_bootstrap_required_steps()
+
+    assert "challenge_cup_context_policy_migration" not in steps
+    assert steps == []
+    assert "team.system_bootstrap.context_policy_check_failed" in events
+
+
+def test_bootstrap_request_survives_registry_read_failure(monkeypatch, tmp_path):
+    """A broken agent registry must not fail startup (status stays ready)."""
+
+    from core.web.services.team import system_bootstrap
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _reset_bootstrap_state()
+    _stub_team_checks_absent(monkeypatch)
+
+    def _registry_boom() -> bool:
+        raise RuntimeError("agent registry read failed")
+
+    monkeypatch.setattr(ccp, "challenge_cup_context_policies_outdated", _registry_boom)
+    monkeypatch.setattr(
+        system_bootstrap,
+        "_record_system_team_bootstrap_event",
+        lambda code, **kwargs: None,
+    )
+
+    payload = team_service.request_system_team_bootstrap(reason="team_list")
+
+    assert payload["status"] == "ready"
+    assert payload["requiredSteps"] == []
+
+
+def test_bootstrap_run_applies_version_gated_migration(monkeypatch, tmp_path):
+    from core.web.services.team import system_bootstrap
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_team_checks_absent(monkeypatch)
+    state = {"outdated": True}
+    applied: list[dict] = []
+    monkeypatch.setattr(
+        ccp, "challenge_cup_context_policies_outdated", lambda: state["outdated"]
+    )
+
+    def _apply(*, snapshot=None):
+        applied.append({"snapshot": snapshot})
+        state["outdated"] = False
+        return {
+            "policyVersion": ccp.CHALLENGE_CUP_CONTEXT_POLICY_VERSION,
+            "migratedRoles": ["challenge_cup_search", "challenge_cup_evaluator"],
+            "skippedCustomRoles": ["challenge_cup_extractor"],
+            "migratedCount": 2,
+        }
+
+    monkeypatch.setattr(ccp, "apply_challenge_cup_context_policies", _apply)
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        system_bootstrap,
+        "_record_system_team_bootstrap_event",
+        lambda code, **kwargs: events.append((code, kwargs)),
+    )
+
+    system_bootstrap._run_system_team_bootstrap(
+        "request-policy-test", ["challenge_cup_context_policy_migration"], "team_list"
+    )
+
+    assert applied and applied[0]["snapshot"] is None
+    migrated_events = [
+        kwargs for code, kwargs in events if code == "team.challenge_cup_context_policy_migrated"
+    ]
+    assert migrated_events, "successful migration must be recorded as an event"
+    assert migrated_events[0]["fields"]["migratedCount"] == 2
+    assert migrated_events[0]["fields"]["migratedRoles"] == [
+        "challenge_cup_search",
+        "challenge_cup_evaluator",
+    ]
+    assert migrated_events[0]["fields"]["skippedCustomRoles"] == ["challenge_cup_extractor"]
+    with team_service._TEAM_SYSTEM_BOOTSTRAP_LOCK:
+        assert team_service._TEAM_SYSTEM_BOOTSTRAP_STATE.get("status") == "ready"
+
+
+def test_bootstrap_run_never_raises_when_migration_fails(monkeypatch, tmp_path):
+    from core.web.services.team import system_bootstrap
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_team_checks_absent(monkeypatch)
+    monkeypatch.setattr(ccp, "challenge_cup_context_policies_outdated", lambda: True)
+
+    def _apply_boom(*, snapshot=None):
+        raise RuntimeError("policy write failed")
+
+    monkeypatch.setattr(ccp, "apply_challenge_cup_context_policies", _apply_boom)
+    events: list[str] = []
+    monkeypatch.setattr(
+        system_bootstrap,
+        "_record_system_team_bootstrap_event",
+        lambda code, **kwargs: events.append(code),
+    )
+
+    # Must not raise: the migration failure is recorded, never propagated.
+    system_bootstrap._run_system_team_bootstrap(
+        "request-policy-fail", ["challenge_cup_context_policy_migration"], "team_list"
+    )
+
+    assert "team.challenge_cup_context_policy_migration_failed" in events
+    with team_service._TEAM_SYSTEM_BOOTSTRAP_LOCK:
+        status = team_service._TEAM_SYSTEM_BOOTSTRAP_STATE.get("status")
+    assert status != "failed"
