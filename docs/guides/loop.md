@@ -46,6 +46,7 @@
 # 最终收口必须从根 main cwd 调用；未生成 manifest 时只执行一次 selector 计划
 Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>"
+# selector 中的 .venv 是逻辑命令；同 requirements 指纹时由 gate 只读解析到根 main .venv，禁止在任务树创建 junction
 # 已有 manifest 或 integration 冲突返回 manifest：原样复用，禁止再跑测试
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --manifest "<MANIFEST_PATH>"
 # 仅 stale_main：同步/提交最新 main 后，携带返回的一次性 token 做一次 reserve retry
@@ -127,6 +128,7 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 | 需 force、远端删除、或归属不明的删/重置 | 停；要确认；已合入本任务的安全本地清理不重复询问 |
 | SSOT 表填不出 | 停；不实现 |
 | 未评估本地复用，或任务有复杂/开放复用决策却未完成必要仓外排序 | 停；不实现 |
+| `validation_toolchain_mismatch|missing|unhealthy` | 停；修复根共享环境或依赖身份，不创建任务 `.venv` junction |
 | 仅 archive 有「规定」 | 提炼到现行或标 historical；不直接执行 archive |
 
 ---

@@ -20,7 +20,41 @@ function New-CheckResult {
 }
 
 $resolvedRoot = (Resolve-Path $ProjectRoot).Path
-$expectedPython = Join-Path $resolvedRoot ".venv\Scripts\python.exe"
+$localPython = Join-Path $resolvedRoot ".venv\Scripts\python.exe"
+$gitCommonDir = (& git -C $resolvedRoot rev-parse --path-format=absolute --git-common-dir 2>$null)
+$integrationRoot = $resolvedRoot
+if (($LASTEXITCODE -eq 0) -and -not [string]::IsNullOrWhiteSpace(($gitCommonDir -join "").Trim())) {
+    $resolvedCommonDir = [System.IO.Path]::GetFullPath(($gitCommonDir -join "").Trim())
+    if ((Split-Path -Leaf $resolvedCommonDir) -eq ".git") {
+        $integrationRoot = Split-Path -Parent $resolvedCommonDir
+    } else {
+        $integrationRoot = $resolvedCommonDir
+    }
+}
+$integrationPython = Join-Path $integrationRoot ".venv\Scripts\python.exe"
+$bootstrapPython = if (Test-Path $localPython) { $localPython } else { $integrationPython }
+$toolchainScript = Join-Path $resolvedRoot "scripts\validation_toolchain.py"
+$toolchainPayload = $null
+$toolchainError = "validation_toolchain_missing"
+if ((Test-Path $bootstrapPython) -and (Test-Path $toolchainScript)) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $toolchainOutput = & $bootstrapPython $toolchainScript --checkout $resolvedRoot --json 2>$null
+    $toolchainExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    try {
+        $toolchainPayload = ($toolchainOutput -join "`n") | ConvertFrom-Json
+    } catch {
+        $toolchainPayload = $null
+    }
+    if (($null -ne $toolchainPayload) -and -not $toolchainPayload.ok) {
+        $toolchainError = [string]$toolchainPayload.error
+    } elseif (($toolchainExitCode -ne 0) -or ($null -eq $toolchainPayload)) {
+        $toolchainError = "validation_toolchain_unhealthy"
+    }
+}
+$toolchainOk = ($null -ne $toolchainPayload) -and [bool]$toolchainPayload.ok
+$expectedPython = if ($toolchainOk) { [string]$toolchainPayload.pythonExecutable } else { $integrationPython }
 $selectedPython = $expectedPython
 $expectedHooksPath = ".githooks"
 $configuredHooksPath = (& git -C $resolvedRoot config --get core.hooksPath 2>$null)
@@ -35,7 +69,7 @@ if (-not (Test-Path $selectedPython)) {
     }
 }
 
-$venvOk = Test-Path $expectedPython
+$venvOk = $toolchainOk -and (Test-Path $expectedPython)
 
 $criticalModules = @(
     "rich",
@@ -46,16 +80,23 @@ $criticalModules = @(
 
 $imports = @()
 foreach ($moduleName in $criticalModules) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $selectedPython -c "import $moduleName" 2>$null
+    $moduleOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $previousPreference
     $imports += [PSCustomObject]@{
         name = $moduleName
-        ok = ($LASTEXITCODE -eq 0)
+        ok = $moduleOk
     }
 }
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $pytestVersion = & $selectedPython -m pytest --version
 $pytestOk = $LASTEXITCODE -eq 0
 $ruffVersion = & $selectedPython -m ruff --version 2>$null
 $ruffOk = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $previousPreference
 
 $importChecksOk = (($imports | Where-Object { -not $_.ok }).Count -eq 0)
 $preCommitHookOk = Test-Path $preCommitHook
@@ -75,12 +116,18 @@ $report = [PSCustomObject]@{
     python = [PSCustomObject]@{
         expected = $expectedPython
         selected = $selectedPython
-        using_venv = ($selectedPython -eq $expectedPython)
+        using_venv = $toolchainOk
     }
     checks = [PSCustomObject]@{
         venv = [PSCustomObject]@{
             ok = $venvOk
             path = $expectedPython
+        }
+        validation_toolchain = [PSCustomObject]@{
+            ok = $toolchainOk
+            source = $(if ($toolchainOk) { [string]$toolchainPayload.source } else { "" })
+            fingerprint = $(if ($toolchainOk) { [string]$toolchainPayload.fingerprint } else { "" })
+            error = $(if ($toolchainOk) { "" } else { $toolchainError })
         }
         imports = @($imports)
         pytest_module = [PSCustomObject]@{
@@ -118,6 +165,7 @@ Write-Host "== Vibelution Environment Doctor =="
 Write-Host "ProjectRoot : $($report.project_root)"
 Write-Host "Python      : $($report.python.selected)"
 Write-Host "Venv        : $(if ($report.checks.venv.ok) { 'OK' } else { 'MISSING' })"
+Write-Host "Toolchain   : $(if ($report.checks.validation_toolchain.ok) { $report.checks.validation_toolchain.source } else { $report.checks.validation_toolchain.error })"
 
 foreach ($item in $report.checks.imports) {
     Write-Host ("Import {0,-18}: {1}" -f $item.name, $(if ($item.ok) { "OK" } else { "FAIL" }))

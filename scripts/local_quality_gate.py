@@ -41,6 +41,10 @@ Outcome = Literal[
     "gate_definition_dirty",
     "reuse_research_missing",
     "reuse_research_invalid",
+    "validation_toolchain_missing",
+    "validation_toolchain_mismatch",
+    "validation_toolchain_requirements_missing",
+    "validation_toolchain_unhealthy",
 ]
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
@@ -48,8 +52,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from vibelution_storage import resolve_project_cache_home
 from scripts import reuse_research_contract
+from scripts.validation_toolchain import (
+    ValidationToolchain,
+    ValidationToolchainError,
+    resolve_validation_toolchain,
+)
+from vibelution_storage import resolve_project_cache_home
 
 GUARD_SCRIPT_CANDIDATES = (
     Path.home()
@@ -65,7 +74,7 @@ GUARD_SCRIPT_CANDIDATES = (
     / "scripts"
     / "agent_work_guard.py",
 )
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
 SHELL_META = re.compile(r"[|&;<>\r\n]|\$\(|`")
 FAILURE_SUMMARY_REDACTIONS = (
@@ -93,7 +102,7 @@ GATE_SELF_TEST_COMMANDS = (
     (
         ".\\.venv\\Scripts\\python.exe -m pytest "
         "tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
-        "tests/test_select_tests.py tests/test_reuse_research_contract.py "
+        "tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py "
         "tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
     ),
     (
@@ -110,9 +119,11 @@ GATE_DEFINITION_FILES = frozenset(
         "scripts/reuse_research_contract.py",
         "scripts/reuse_research_evidence.py",
         "scripts/task_closeout.py",
+        "scripts/validation_toolchain.py",
         "tests/select_tests.py",
         "tests/test_matrix.yaml",
         "tests/test_task_closeout.py",
+        "tests/test_validation_toolchain.py",
     }
 )
 SUPPORTED_RECORDED_COMMAND_KINDS = frozenset(
@@ -396,8 +407,11 @@ def measured(
     )
 
 
-def execute_command(spec: CommandSpec) -> ProcessResult:
-    materialized = materialize_command(spec)
+def execute_command(
+    spec: CommandSpec,
+    toolchain: ValidationToolchain | None = None,
+) -> ProcessResult:
+    materialized = materialize_command(spec, toolchain)
     return measured(
         materialized.kind,
         materialized.argv,
@@ -406,10 +420,14 @@ def execute_command(spec: CommandSpec) -> ProcessResult:
     )
 
 
-def materialize_command(spec: CommandSpec) -> CommandSpec:
+def materialize_command(
+    spec: CommandSpec,
+    toolchain: ValidationToolchain | None = None,
+) -> CommandSpec:
     argv = list(spec.argv)
     if Path(argv[0]) == PROJECT_PYTHON_NAME:
-        argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
+        resolved = toolchain or resolve_validation_toolchain(spec.cwd)
+        argv[0] = str(resolved.python_executable)
     elif os.name == "nt" and str(argv[0]).strip().lower() == "npm":
         npm_launcher = shutil.which("npm.cmd") or shutil.which("npm")
         if npm_launcher:
@@ -603,6 +621,7 @@ def manifest_payload(
     outcome: Outcome,
     reuse_research_required: bool = False,
     reuse_research: dict[str, object] | None = None,
+    validation_toolchain: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
@@ -628,6 +647,7 @@ def manifest_payload(
         "checks": checks,
         "reuseResearchRequired": reuse_research_required,
         "reuseResearch": reuse_research,
+        "validationToolchain": validation_toolchain,
         "outcome": outcome,
         "generatedAt": utc_now(),
     }
@@ -675,7 +695,10 @@ def expected_closeout_commands(
     files: Sequence[str],
     validated_main_sha: str,
     head_sha: str,
+    *,
+    toolchain: ValidationToolchain | None = None,
 ) -> list[CommandSpec]:
+    resolved_toolchain = toolchain or resolve_validation_toolchain(root)
     selection = selected_validation(files)
     raw_commands = selection.get("commands", [])
     if not isinstance(raw_commands, list):
@@ -695,7 +718,7 @@ def expected_closeout_commands(
             CommandSpec(
                 "changed-python-ruff",
                 [
-                    sys.executable,
+                    str(PROJECT_PYTHON_NAME),
                     "-m",
                     "ruff",
                     "check",
@@ -714,7 +737,7 @@ def expected_closeout_commands(
         )
         for command in selected_commands
     )
-    return [materialize_command(spec) for spec in specs]
+    return [materialize_command(spec, resolved_toolchain) for spec in specs]
 
 
 def manifest_commands_are_valid(
@@ -750,12 +773,14 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     head_sha = rev_parse(root, "HEAD")
     reuse_research_required = False
     reuse_research: dict[str, object] | None = None
+    validation_toolchain: ValidationToolchain | None = None
     checks = {
         "worktreeClean": False,
         "claimValid": False,
         "mergePreflight": False,
         "commandsAllowlisted": False,
         "reuseResearch": False,
+        "validationToolchain": False,
     }
 
     def finish(outcome: Outcome) -> GateResult:
@@ -772,6 +797,11 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
             outcome=outcome,
             reuse_research_required=reuse_research_required,
             reuse_research=reuse_research,
+            validation_toolchain=(
+                validation_toolchain.snapshot()
+                if validation_toolchain is not None
+                else None
+            ),
         )
         path = write_manifest(root, task_id, payload)
         return GateResult(
@@ -806,7 +836,19 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     checks["reuseResearch"] = True
 
     try:
-        specs = expected_closeout_commands(root, files, validated_main_sha, head_sha)
+        validation_toolchain = resolve_validation_toolchain(root)
+    except ValidationToolchainError as error:
+        return finish(error.code)
+    checks["validationToolchain"] = True
+
+    try:
+        specs = expected_closeout_commands(
+            root,
+            files,
+            validated_main_sha,
+            head_sha,
+            toolchain=validation_toolchain,
+        )
     except UnsupportedValidationCommand:
         return finish("unsupported_validation_command")
     checks["commandsAllowlisted"] = True
@@ -901,6 +943,7 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
         "mergePreflight",
         "commandsAllowlisted",
         "reuseResearch",
+        "validationToolchain",
     )
     if not isinstance(checks, dict) or not all(
         checks.get(name) is True for name in required_checks
@@ -918,11 +961,18 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
     elif snapshot is not None:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     try:
+        validation_toolchain = resolve_validation_toolchain(root)
+    except ValidationToolchainError as error:
+        return GateResult(outcome=error.code, exit_code=1, manifest_path=path)
+    if payload.get("validationToolchain") != validation_toolchain.snapshot():
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    try:
         expected_commands = expected_closeout_commands(
             root,
             files,
             str(payload["validatedMainSha"]),
             str(payload["headSha"]),
+            toolchain=validation_toolchain,
         )
     except UnsupportedValidationCommand:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
@@ -970,13 +1020,19 @@ def run_commit_gate(root: Path) -> GateResult:
     if diff_check.status == "failed":
         return GateResult(outcome="failed", exit_code=1, commands=commands)
 
+    validation_toolchain: ValidationToolchain | None = None
     for path in staged:
         if not path.endswith(".py"):
             continue
+        if validation_toolchain is None:
+            try:
+                validation_toolchain = resolve_validation_toolchain(root)
+            except ValidationToolchainError as error:
+                return GateResult(outcome=error.code, exit_code=1, commands=commands)
         lint = measured(
             "ruff-staged",
             [
-                sys.executable,
+                str(validation_toolchain.python_executable),
                 "-m",
                 "ruff",
                 "check",

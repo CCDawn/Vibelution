@@ -5,12 +5,44 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts import local_quality_gate as gate
+from scripts.validation_toolchain import (
+    PythonIdentity,
+    ValidationToolchain,
+    ValidationToolchainError,
+)
 from tests import select_tests
+
+
+@pytest.fixture(autouse=True)
+def _stable_validation_toolchain(monkeypatch: pytest.MonkeyPatch) -> None:
+    identity = PythonIdentity(
+        implementation="cpython",
+        version="3.12.10",
+        cache_tag="cpython-312",
+        architecture="AMD64",
+        distributions_sha256="d" * 64,
+    )
+
+    def resolve(root: Path | str) -> ValidationToolchain:
+        checkout = Path(root).resolve()
+        return ValidationToolchain(
+            checkout_root=checkout,
+            integration_root=checkout,
+            python_executable=Path(sys.executable).resolve(),
+            source="checkout_venv",
+            requirements_sha256="a" * 64,
+            python_identity=identity,
+            fingerprint="b" * 64,
+        )
+
+    monkeypatch.setattr(gate, "resolve_validation_toolchain", resolve)
 
 
 def test_pre_commit_is_thin_adapter() -> None:
@@ -286,14 +318,12 @@ def create_recorded_contract_manifest(
     ]
     for raw_command in raw_commands:
         spec = gate.parse_allowed_command(raw_command, git_repo.resolve())
-        argv = list(spec.argv)
-        if Path(argv[0]) == gate.PROJECT_PYTHON_NAME:
-            argv[0] = str((spec.cwd / gate.PROJECT_PYTHON_NAME).resolve())
+        materialized = gate.materialize_command(spec)
         commands.append(
             gate.ProcessResult(
-                kind=spec.kind,
-                argv=argv,
-                cwd=str(spec.cwd),
+                kind=materialized.kind,
+                argv=materialized.argv,
+                cwd=str(materialized.cwd),
                 exit_code=0,
                 duration_ms=1,
                 status="passed",
@@ -326,10 +356,12 @@ def create_recorded_contract_manifest(
             "mergePreflight": True,
             "commandsAllowlisted": True,
             "reuseResearch": True,
+            "validationToolchain": True,
         },
         outcome="passed",
         reuse_research_required=True,
         reuse_research=reuse_snapshot,
+        validation_toolchain=gate.resolve_validation_toolchain(git_repo).snapshot(),
     )
     return gate.write_manifest(git_repo, "test-task", payload)
 
@@ -565,6 +597,29 @@ def test_materialize_command_resolves_windows_npm_launcher(git_repo: Path) -> No
     assert materialized.cwd == git_repo
 
 
+def test_materialize_python_command_uses_resolved_validation_toolchain(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    shared_python = tmp_path / "shared-runtime" / "Scripts" / "python.exe"
+    monkeypatch.setattr(
+        gate,
+        "resolve_validation_toolchain",
+        lambda _root: SimpleNamespace(python_executable=shared_python),
+        raising=False,
+    )
+    spec = gate.parse_allowed_command(
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_select_tests.py -q",
+        git_repo,
+    )
+
+    materialized = gate.materialize_command(spec)
+
+    assert materialized.argv[0] == str(shared_python)
+    assert not (git_repo / ".venv").exists()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
 def test_materialize_command_resolves_windowless_vitest_launcher(git_repo: Path) -> None:
     spec = gate.parse_allowed_command(
@@ -639,7 +694,9 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
 def test_selected_validation_loads_from_isolated_script_execution(
     git_repo: Path,
 ) -> None:
-    project_python = gate.PROJECT_ROOT / gate.PROJECT_PYTHON_NAME
+    project_python = gate.resolve_validation_toolchain(
+        gate.PROJECT_ROOT
+    ).python_executable
     script = gate.PROJECT_ROOT / "scripts" / "local_quality_gate.py"
     probe = (
         "import runpy; "
@@ -825,7 +882,7 @@ def test_closeout_writes_bounded_passed_manifest(
     assert result.manifest_path.is_relative_to(git_repo / ".git")
     assert git(git_repo, "status", "--porcelain").stdout.strip() == ""
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schemaVersion"] == 2
+    assert manifest["schemaVersion"] == 3
     assert manifest["taskId"] == "test-task"
     assert manifest["branch"] == "codex/test-task"
     assert manifest["claimId"] == "claim-test"
@@ -835,6 +892,10 @@ def test_closeout_writes_bounded_passed_manifest(
     assert manifest["checks"]["mergePreflight"] is True
     assert manifest["checks"]["commandsAllowlisted"] is True
     assert manifest["checks"]["reuseResearch"] is True
+    assert manifest["checks"]["validationToolchain"] is True
+    assert manifest["validationToolchain"] == gate.resolve_validation_toolchain(
+        git_repo
+    ).snapshot()
     assert manifest["reuseResearchRequired"] is False
     assert manifest["reuseResearch"] is None
     assert manifest["outcome"] == "passed"
@@ -1166,13 +1227,42 @@ def test_closeout_reports_unsupported_validation_command(
     assert result.outcome == "unsupported_validation_command"
 
 
+def test_closeout_reports_validation_toolchain_mismatch(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "docs/note.md", "changed\n", "docs change")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "resolve_validation_toolchain",
+        lambda _root: (_ for _ in ()).throw(
+            ValidationToolchainError(
+                "validation_toolchain_mismatch",
+                "requirements.txt differs",
+            )
+        ),
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "validation_toolchain_mismatch"
+    assert result.exit_code == 1
+
+
 def test_verify_manifest_detects_stale_main(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
     manifest = git_repo / "manifest.json"
     manifest.write_text(
         json.dumps(
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "outcome": "passed",
                 "validatedMainSha": "0" * 40,
                 "headSha": git(git_repo, "rev-parse", "HEAD").stdout.strip(),
@@ -1195,6 +1285,23 @@ def test_verify_manifest_accepts_current_authorization(
     result = gate.verify_manifest(manifest, git_repo, "main")
 
     assert result.outcome == "passed"
+
+
+def test_verify_manifest_rejects_changed_validation_toolchain(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    current = gate.resolve_validation_toolchain(git_repo)
+    monkeypatch.setattr(
+        gate,
+        "resolve_validation_toolchain",
+        lambda _root: replace(current, fingerprint="c" * 64),
+    )
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
 
 
 def test_verify_manifest_rejects_inactive_claim(
@@ -1422,8 +1529,10 @@ def test_verify_manifest_rejects_non_ancestor_validated_main(
             "mergePreflight": True,
             "commandsAllowlisted": True,
             "reuseResearch": True,
+            "validationToolchain": True,
         },
         outcome="passed",
+        validation_toolchain=gate.resolve_validation_toolchain(git_repo).snapshot(),
     )
     manifest = gate.write_manifest(git_repo, "test-task", payload)
 

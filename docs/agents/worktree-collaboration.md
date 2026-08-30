@@ -64,6 +64,7 @@ Inside its own worktree, an Agent should:
 - check `git status --short --branch` before staging;
 - stage only files that belong to the current task;
 - run the narrowest useful validation;
+- let the quality gate resolve the integration worktree's read-only `.venv` when `requirements.txt` is byte-identical; do not create a task `.venv` junction. A dependency mismatch is an explicit toolchain blocker until a compatible environment exists;
 - reuse a passed result when HEAD, command, and all relevant inputs are unchanged; do not rerun the final selector plan before managed closeout;
 - commit locally;
 - self-review the current-task diff and merge readiness without waiting for the user to request review;
@@ -87,7 +88,7 @@ The session currently closing work into `main` should:
 - handle semantic conflicts instead of letting Agents resolve them blindly;
 - keep successful merges on local `main`; do not push `main` after merge-result inspection unless the user explicitly asks to sync GitHub or publish;
 - serialize project-memory updates after code merges;
-- clean every successfully merged task's claim, temporary content, junction, worktree, and local branch immediately.
+- clean every successfully merged task's claim, temporary content, legacy junction if present, worktree, and local branch immediately. The integration worktree's shared `.venv` is not task-owned and must never be removed by task cleanup.
 
 When a branch cannot merge cleanly, leave the task in its own worktree and mark the claim `blocked` with the conflicting files and next action. Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace. The owning Agent should rebase/merge against the current local `main` or create a new conflict-resolved commit, then re-enter the queue as a fresh `ready_for_merge` claim. Use `origin/main` only when the user explicitly asks to align with GitHub.
 
@@ -99,7 +100,7 @@ All review, testing, quality gates, mergeability checks, and acceptance evidence
 
 If managed closeout reports `merged_cleanup_pending`, do not run validation or merge again. From root `main`, call `--cleanup-only --branch <task-branch>` so the idempotent safety checks can finish only the remaining task-owned cleanup.
 
-First remove only disposable files/directories, debug output, scratch artifacts, and background processes/listeners that are provably owned by the merged task. Use exact paths and exact process ownership; do not scan broadly or infer ownership. Then release only the task's claim, remove its junction when present, and remove its clean worktree and merged local branch:
+First remove only disposable files/directories, debug output, scratch artifacts, and background processes/listeners that are provably owned by the merged task. Use exact paths and exact process ownership; do not scan broadly or infer ownership. Then release only the task's claim, remove any legacy task-owned junction when present, and remove its clean worktree and merged local branch. Never create a junction merely to satisfy validation:
 
 ```powershell
 cd <project-root>

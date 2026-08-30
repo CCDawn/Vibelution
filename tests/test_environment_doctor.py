@@ -7,13 +7,15 @@ import json
 import os
 import shutil
 import subprocess
-import pytest
 from pathlib import Path
 
+import pytest
+
+from scripts.validation_toolchain import resolve_validation_toolchain
 
 PROJECT_ROOT = Path(__file__).parent.parent
 DOCTOR_SCRIPT = PROJECT_ROOT / "scripts" / "doctor.ps1"
-EXPECTED_VENV_PYTHON = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+EXPECTED_VENV_PYTHON = resolve_validation_toolchain(PROJECT_ROOT).python_executable
 
 
 pytestmark = [pytest.mark.slow, pytest.mark.serial]
@@ -59,6 +61,11 @@ def test_doctor_reports_expected_python_and_venv():
     assert Path(report["python"]["expected"]).resolve() == EXPECTED_VENV_PYTHON.resolve()
     assert Path(report["python"]["selected"]).resolve() == EXPECTED_VENV_PYTHON.resolve()
     assert report["checks"]["venv"]["ok"] is True
+    assert report["checks"]["validation_toolchain"]["ok"] is True
+    assert report["checks"]["validation_toolchain"]["source"] in {
+        "checkout_venv",
+        "integration_venv",
+    }
 
 
 def test_doctor_reports_critical_imports_and_pytest():
