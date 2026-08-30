@@ -275,7 +275,128 @@ class AdapterDispatchWorker:
         )
         for action in leased:
             self._handle(action)
-        return len(leased)
+        repaired = self._repair_terminal_failed_adapter_dispatch(limit=limit)
+        return len(leased) + repaired
+
+    def _repair_terminal_failed_adapter_dispatch(self, *, limit: int = 4) -> int:
+        """Project lease-gate dead letters onto their latest active attempt.
+
+        The ledger marks an adapter row ``failed`` after repeated expired
+        leases, before this worker can lease it again.  Without this sweep the
+        attempt and run remain active forever even though no worker can claim
+        the action.  Re-read every identity in the writer transaction so a
+        newer retry or live replacement wins and receives no late side effect.
+        """
+
+        now_ms = self._now()
+
+        def find_exhausted(uow):
+            return uow.repository.execute(
+                """
+                SELECT o.action_id, o.payload_json, o.last_problem_json
+                FROM outbox_actions o
+                JOIN workflow_runs r ON r.run_id = o.run_id
+                WHERE o.action_kind = 'adapter_dispatch'
+                  AND o.status = 'failed'
+                  AND INSTR(o.last_problem_json, 'lease_attempt_exhausted') > 0
+                  AND r.status IN ('running', 'waiting_human')
+                ORDER BY o.updated_at_ms ASC, o.action_id ASC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+
+        rows = self._store.submit(find_exhausted, force_flush=True).result(timeout=10)
+        repaired = 0
+        for row in rows or ():
+            action_id = str(row[0] or "")
+            try:
+                action = PendingAction.from_dict(json.loads(str(row[1] or "{}")))
+                recorded_problem = json.loads(str(row[2] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if (
+                not isinstance(recorded_problem, dict)
+                or recorded_problem.get("code") != "lease_attempt_exhausted"
+            ):
+                continue
+            problem = dict(recorded_problem)
+            problem.setdefault(
+                "detail",
+                "adapter dispatch lease attempts exhausted before acknowledgement",
+            )
+            problem["actionId"] = action.action_id
+
+            def mutate(
+                uow,
+                *,
+                expected_action_id=action_id,
+                pending=action,
+                repair_problem=problem,
+            ):
+                outbox = uow.repository.get_outbox(expected_action_id)
+                run = uow.repository.get_run(pending.run_id)
+                latest = uow.repository.latest_attempt(pending.run_id, pending.node_id)
+                if outbox is None:
+                    return False
+                try:
+                    current_problem = json.loads(str(outbox.last_problem_json or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    current_problem = {}
+                if (
+                    outbox.status != "failed"
+                    or not isinstance(current_problem, dict)
+                    or current_problem.get("code") != "lease_attempt_exhausted"
+                    or run is None
+                    or run.status not in {"running", "waiting_human"}
+                    or latest is None
+                    or latest.node_run_id != pending.node_run_id
+                    or latest.status
+                    not in {"starting", "dispatching", "running", "waiting_human"}
+                ):
+                    return False
+                live = uow.repository.execute(
+                    """
+                    SELECT 1 FROM outbox_actions
+                    WHERE node_run_id = ?
+                      AND action_kind = 'adapter_dispatch'
+                      AND status IN ('pending', 'leased')
+                    LIMIT 1
+                    """,
+                    (pending.node_run_id,),
+                ).fetchone()
+                if live is not None:
+                    return False
+                self._close_execution_anchor(
+                    uow,
+                    action=pending,
+                    status="failed",
+                    problem=repair_problem,
+                )
+                apply_node_run_failure(
+                    uow,
+                    run_id=pending.run_id,
+                    node_run_id=pending.node_run_id,
+                    node_id=pending.node_id,
+                    problem=repair_problem,
+                    now_ms=now_ms,
+                    actor_id=self._owner,
+                    correlation_id=expected_action_id,
+                )
+                return True
+
+            if self._store.submit(mutate, force_flush=True).result(timeout=30):
+                _record_scene_event(
+                    "adapter_dispatch.terminal_failure_reconciled",
+                    outcome="blocked",
+                    fields={
+                        **_action_identity(action),
+                        "outboxActionId": action_id,
+                        "problemCode": problem["code"],
+                    },
+                )
+                repaired += 1
+        return repaired
 
     def _handle(self, outbox: Any) -> None:
         action = PendingAction.from_dict(json.loads(outbox.payload_json))
