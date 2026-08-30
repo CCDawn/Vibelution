@@ -590,6 +590,10 @@ class AdapterDispatchWorker:
                 )
 
             if budget_receipt_id and verified.budget_receipt:
+                from .budget_authority_adapter import (
+                    settle_budget_authority_in_uow,
+                )
+
                 reservation_id = str(
                     verified.budget_receipt.get("reservationId")
                     or f"res-{action.action_id}"
@@ -612,16 +616,17 @@ class AdapterDispatchWorker:
                         ),
                         created_at_ms=now_ms,
                     )
-                    receipt_to_settle = budget_receipt_id
-                else:
-                    receipt_to_settle = str(existing[0])
-                if str(existing[1] if existing else "") != "settled":
-                    uow.repository.update_budget_receipt(
-                        receipt_to_settle,
-                        status="settled",
-                        now_ms=now_ms,
-                        settled_json=json.dumps({"usage": usage}),
-                    )
+                settle_budget_authority_in_uow(
+                    uow,
+                    reservation={
+                        **verified.budget_receipt,
+                        "reservationId": reservation_id,
+                        "runId": action.run_id,
+                        "nodeRunId": action.node_run_id,
+                    },
+                    usage=usage,
+                    now_ms=now_ms,
+                )
 
             uow.repository.update_attempt_status(
                 action.node_run_id,

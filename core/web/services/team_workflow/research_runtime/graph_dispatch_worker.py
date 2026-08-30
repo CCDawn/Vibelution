@@ -643,13 +643,18 @@ class GraphDispatchWorker:
             raise
         return True
 
-    def _pending_with_node_binding(self, pending: Any) -> Any:
-        """Force successor PendingAction to use that node's frozen binding."""
+    def _pending_with_node_binding(
+        self, pending: Any, *, run: Any | None = None
+    ) -> Any:
+        """Restore frozen node binding and budget authority onto PendingAction."""
         from dataclasses import replace
 
-        from .graph_dispatch_factory import binding_snapshot_id_for_node
+        from .graph_dispatch_factory import (
+            binding_snapshot_id_for_node,
+            budget_policy_hash_from_input_snapshot,
+        )
 
-        run = self._store.get_run(pending.run_id)
+        run = run or self._store.get_run(pending.run_id)
         if run is None or not run.input_snapshot_json:
             return pending
         try:
@@ -659,9 +664,20 @@ class GraphDispatchWorker:
         if not isinstance(input_snapshot, dict):
             return pending
         snap_id = binding_snapshot_id_for_node(input_snapshot, pending.node_id)
-        if snap_id == pending.binding_snapshot_id:
+        budget_policy_hash = budget_policy_hash_from_input_snapshot(input_snapshot)
+        resolved_budget_policy_hash = (
+            budget_policy_hash or pending.budget_policy_hash
+        )
+        if (
+            snap_id == pending.binding_snapshot_id
+            and resolved_budget_policy_hash == pending.budget_policy_hash
+        ):
             return pending
-        return replace(pending, binding_snapshot_id=snap_id)
+        return replace(
+            pending,
+            binding_snapshot_id=snap_id,
+            budget_policy_hash=resolved_budget_policy_hash,
+        )
 
     def _commit_upstream_accept(
         self,
@@ -1631,6 +1647,10 @@ class GraphDispatchWorker:
                 pending = _pending_from_dispatching_row(row)
                 if pending is None:
                     continue
+                pending = self._pending_with_node_binding(
+                    pending,
+                    run=uow.repository.get_run(pending.run_id),
+                )
                 if _ensure_adapter_dispatch(
                     uow,
                     pending=pending,

@@ -125,6 +125,9 @@ def test_repair_inserts_missing_adapter_dispatch_for_dispatching_attempt(
 ) -> None:
     from dataclasses import replace
 
+    from core.web.services.team_workflow.research_runtime.graph_dispatch_factory import (
+        budget_policy_hash_from_input_snapshot,
+    )
     from tests._support.workflow_ledger_helpers import (
         build_attempt_record,
         build_command_record,
@@ -132,9 +135,26 @@ def test_repair_inserts_missing_adapter_dispatch_for_dispatching_attempt(
 
     harness = GraphHarness(tmp_path)
     try:
+        input_snapshot = {
+            "snapshotHash": "a" * 64,
+            "budgetPolicy": {
+                "stages": {
+                    "experiment": {
+                        "tokens": 2_000_000,
+                        "toolCalls": 300,
+                        "seconds": 21_600,
+                        "autoRetries": 2,
+                    }
+                }
+            },
+        }
         harness.seed()
 
         def mutate(uow):
+            uow.repository.execute(
+                "UPDATE workflow_runs SET input_snapshot_json = ? WHERE run_id = ?",
+                (json.dumps(input_snapshot), "run-test"),
+            )
             uow.repository.insert_command(
                 build_command_record(
                     command_id="cmd-orphan-1",
@@ -169,6 +189,10 @@ def test_repair_inserts_missing_adapter_dispatch_for_dispatching_attempt(
         assert payload["actionId"] == "act-48c9c78e19b08b93"
         assert payload["nodeId"] == "controlled_run"
         assert payload["nodeRunId"] == "nr-run-test-controlled_run-a2"
+        assert payload["budgetPolicyHash"] == budget_policy_hash_from_input_snapshot(
+            input_snapshot
+        )
+        assert payload["budgetPolicyHash"]
         again = harness.worker.run_once()
         assert again == 0
         rows = [

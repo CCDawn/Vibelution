@@ -810,13 +810,15 @@ def record_budget_usage(
     ).result(timeout=30)
 
 
-def settle_budget_authority(
-    store: WorkflowLedgerStore,
+def settle_budget_authority_in_uow(
+    uow: Any,
     *,
     reservation: dict[str, Any],
     usage: dict[str, Any],
+    now_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Settle a reserved budget while retaining provider usage observations."""
+    """Settle inside an existing Ledger transaction without losing usage."""
+
     reservation_id = _identity(
         reservation.get("reservationId"), "reservation_id"
     )
@@ -827,72 +829,88 @@ def settle_budget_authority(
         reservation.get("nodeRunId") or reservation.get("node_run_id") or ""
     ).strip()
     incoming_usage = _validated_usage(usage)
+    resolved_now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
 
-    def mutate(uow):
-        row = uow.repository.execute(
-            "SELECT receipt_id, run_id, node_run_id, reservation_id, stage_id, "
-            "policy_hash, reserved_json, settled_json, status, created_at_ms, "
-            "updated_at_ms FROM budget_receipts WHERE reservation_id = ?",
-            (reservation_id,),
-        ).fetchone()
-        if row is None:
-            raise BudgetAuthorityError(
-                f"budget receipt missing for {reservation_id}",
-                code="budget_settle_missing",
-            )
-        mapped = _row_mapping(row)
-        if expected_run_id and str(mapped.get("run_id") or "") != expected_run_id:
-            raise BudgetAuthorityError(
-                "budget receipt three-way binding mismatch",
-                code="budget_binding_mismatch",
-            )
-        if expected_node_run_id and str(mapped.get("node_run_id") or "") != expected_node_run_id:
-            raise BudgetAuthorityError(
-                "budget receipt three-way binding mismatch",
-                code="budget_binding_mismatch",
-            )
-        current = str(mapped.get("status") or "")
-        current_payload = _payload(
-            mapped.get("settled_json"), label="settled_json"
+    row = uow.repository.execute(
+        "SELECT receipt_id, run_id, node_run_id, reservation_id, stage_id, "
+        "policy_hash, reserved_json, settled_json, status, created_at_ms, "
+        "updated_at_ms FROM budget_receipts WHERE reservation_id = ?",
+        (reservation_id,),
+    ).fetchone()
+    if row is None:
+        raise BudgetAuthorityError(
+            f"budget receipt missing for {reservation_id}",
+            code="budget_settle_missing",
         )
-        if current == "settled":
-            # Settlement is idempotent; never replace a committed cumulative
-            # usage projection with a later estimate.
-            return {
-                **_window_from_row(mapped),
-                "receiptId": str(mapped.get("receipt_id") or ""),
-                "status": "settled",
-                "idempotent": True,
-                "usage": dict(_usage_payload(current_payload)),
-            }
-        if current in {"released", "voided", "failed"}:
-            raise BudgetAuthorityError(
-                f"budget receipt {reservation_id} is terminal ({current}); cannot settle",
-                code="budget_settle_terminal",
-            )
-
-        merged_payload, _ = _merge_usage_projection(
-            current_payload,
-            incoming_usage,
+    mapped = _row_mapping(row)
+    if expected_run_id and str(mapped.get("run_id") or "") != expected_run_id:
+        raise BudgetAuthorityError(
+            "budget receipt three-way binding mismatch",
+            code="budget_binding_mismatch",
         )
-        settled_json = json.dumps(merged_payload, ensure_ascii=False)
-        uow.repository.update_budget_receipt(
-            str(mapped["receipt_id"]),
-            status="settled",
-            now_ms=int(time.time() * 1000),
-            settled_json=settled_json,
+    if expected_node_run_id and str(mapped.get("node_run_id") or "") != expected_node_run_id:
+        raise BudgetAuthorityError(
+            "budget receipt three-way binding mismatch",
+            code="budget_binding_mismatch",
         )
-        mapped["status"] = "settled"
-        mapped["settled_json"] = settled_json
+    current = str(mapped.get("status") or "")
+    current_payload = _payload(
+        mapped.get("settled_json"), label="settled_json"
+    )
+    if current == "settled":
+        # Settlement is idempotent; never replace a committed cumulative
+        # usage projection with a later estimate.
         return {
             **_window_from_row(mapped),
             "receiptId": str(mapped.get("receipt_id") or ""),
             "status": "settled",
-            "idempotent": False,
-            "usage": dict(_usage_payload(merged_payload)),
+            "idempotent": True,
+            "usage": dict(_usage_payload(current_payload)),
         }
+    if current in {"released", "voided", "failed"}:
+        raise BudgetAuthorityError(
+            f"budget receipt {reservation_id} is terminal ({current}); cannot settle",
+            code="budget_settle_terminal",
+        )
 
-    return store.submit(mutate, force_flush=True).result(timeout=30)
+    merged_payload, _ = _merge_usage_projection(
+        current_payload,
+        incoming_usage,
+    )
+    settled_json = json.dumps(merged_payload, ensure_ascii=False)
+    uow.repository.update_budget_receipt(
+        str(mapped["receipt_id"]),
+        status="settled",
+        now_ms=resolved_now_ms,
+        settled_json=settled_json,
+    )
+    mapped["status"] = "settled"
+    mapped["settled_json"] = settled_json
+    return {
+        **_window_from_row(mapped),
+        "receiptId": str(mapped.get("receipt_id") or ""),
+        "status": "settled",
+        "idempotent": False,
+        "usage": dict(_usage_payload(merged_payload)),
+    }
+
+
+def settle_budget_authority(
+    store: WorkflowLedgerStore,
+    *,
+    reservation: dict[str, Any],
+    usage: dict[str, Any],
+) -> dict[str, Any]:
+    """Settle a reserved budget while retaining provider usage observations."""
+
+    return store.submit(
+        lambda uow: settle_budget_authority_in_uow(
+            uow,
+            reservation=reservation,
+            usage=usage,
+        ),
+        force_flush=True,
+    ).result(timeout=30)
 
 
 _TERMINAL_BUDGET_STATUSES = frozenset(
