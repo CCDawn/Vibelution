@@ -23,6 +23,7 @@ queues its post-opening rounds on a bounded in-process executor.
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
@@ -49,6 +50,9 @@ from core.research.workflow.contracts.discussion_scope import (
 from core.web.services.team_workflow import meeting_rounds
 from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
     assert_writes_allowed,
+)
+from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+    workflow_run_stop_reason,
 )
 
 DEFAULT_MAX_MESSAGES = 40
@@ -1037,6 +1041,7 @@ def _round_config(
         == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
         else _SCOPED_DISCUSSION_SCOPE_AUTHORITY
     )
+    challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
     return {
         "source": MEETING_SOURCE,
         "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
@@ -1072,6 +1077,13 @@ def _round_config(
         "agendaRules": list(meeting_round.get("agendaRules") or []),
         "selectedCandidateIds": list(selection.get("selectedCandidateIds") or []),
         "participantAgentIds": _frozen_participant_agent_ids(meeting_round),
+        **(
+            {"challengeDeadlineAtMs": int(challenge_deadline_at_ms)}
+            if isinstance(challenge_deadline_at_ms, int)
+            and not isinstance(challenge_deadline_at_ms, bool)
+            and challenge_deadline_at_ms > 0
+            else {}
+        ),
     }
 
 
@@ -1719,9 +1731,37 @@ def _run_meeting_discussion_impl(
         if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
         else None
     )
+    if receipt_authority is not None:
+        challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
+        if not (
+            isinstance(challenge_deadline_at_ms, int)
+            and not isinstance(challenge_deadline_at_ms, bool)
+            and challenge_deadline_at_ms > 0
+        ):
+            challenge_deadline_at_ms = _bound_room_challenge_deadline_at_ms(
+                room_id,
+                bound_round_ids,
+            )
+        if challenge_deadline_at_ms is not None:
+            meeting_round = {
+                **dict(meeting_round),
+                "challengeDeadlineAtMs": challenge_deadline_at_ms,
+            }
     budget = int(meeting_round.get("rounds") or 3)
     stop_reason = ""
     while len(bound_round_ids) < budget:
+        parent_run_stop_reason = workflow_run_stop_reason(receipt_authority)
+        if parent_run_stop_reason:
+            stop_reason = parent_run_stop_reason
+            break
+        challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
+        if (
+            isinstance(challenge_deadline_at_ms, int)
+            and not isinstance(challenge_deadline_at_ms, bool)
+            and int(time.time() * 1000) >= challenge_deadline_at_ms
+        ):
+            stop_reason = "challenge_deadline"
+            break
         all_messages = meeting_rounds.meeting_source_messages(meeting_round)
         completed = [
             message
@@ -1771,6 +1811,37 @@ def _run_meeting_discussion_impl(
         stop_reason = "budget_exhausted"
 
     all_messages = meeting_rounds.meeting_source_messages(meeting_round)
+    if stop_reason == "challenge_deadline" or stop_reason.startswith(
+        "challenge_workflow_run_"
+    ):
+        # The room round is the source of truth for the stopped discussion.
+        # Do not draft or approve a digest from a partial, deadline-expired
+        # fan-out; a retry must remain a no-op against the same absolute clock.
+        terminal = meeting_rounds.terminate_meeting_execution(
+            normalized_team_id,
+            normalized_round_id,
+            reason=stop_reason,
+        )
+        meeting_round = terminal["meetingRound"]
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "stopped",
+            "meetingRound": meeting_round,
+            "roomId": room_id,
+            "chatRoomRoundIds": bound_round_ids,
+            "roundsRun": len(bound_round_ids),
+            "roundBudget": budget,
+            "maxMessages": normalized_max_messages,
+            "messageCount": len(all_messages),
+            "completedMessageCount": sum(
+                1
+                for message in all_messages
+                if str(message.get("status") or "").strip().lower() == "completed"
+            ),
+            "stopReason": stop_reason,
+            "summaryDraft": None,
+        }
     completed_count = sum(
         1
         for message in all_messages
@@ -1798,6 +1869,33 @@ def _run_meeting_discussion_impl(
         "stopReason": stop_reason,
         "summaryDraft": drafted,
     }
+
+
+def _bound_room_challenge_deadline_at_ms(
+    room_id: str,
+    bound_round_ids: Sequence[str],
+) -> int | None:
+    """Read the first formal round's server-owned deadline for follow-ups."""
+
+    from core.web.services import chat_room_service
+
+    room = chat_room_service.get_chat_room_detail(room_id) or {}
+    expected_round_ids = set(_normalized_str_list(bound_round_ids))
+    for round_payload in reversed(list(room.get("rounds") or [])):
+        if not isinstance(round_payload, Mapping):
+            continue
+        if str(round_payload.get("roundId") or "").strip() not in expected_round_ids:
+            continue
+        config = round_payload.get("config") if isinstance(round_payload.get("config"), Mapping) else {}
+        value = config.get("challengeDeadlineAtMs")
+        if isinstance(value, bool):
+            return None
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0 else None
+    return None
 
 
 def build_meeting_digest_draft(

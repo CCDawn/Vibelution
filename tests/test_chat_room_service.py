@@ -96,6 +96,10 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_receipt_authority.workflow_run_stop_reason",
+        lambda _authority: "",
+    )
     monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
@@ -2536,6 +2540,10 @@ def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_receipt_authority.workflow_run_stop_reason",
+        lambda _authority: "",
+    )
     base_config = session_service.get_config().model_copy(deep=True)
     _provider_id = base_config.llm.profiles["primary"].provider_id
     _model_key = f"{_provider_id}/agent-explorer-model"
@@ -2744,6 +2752,245 @@ def test_scoped_discussion_room_round_fails_closed_without_receipt_authority(tmp
     except chat_room_service.ChatRoomValidationError as exc:
         with_authority_message = str(exc)
     assert "回执授权" not in with_authority_message and "receipt authority" not in with_authority_message
+
+
+def test_formal_room_speakers_share_one_challenge_deadline(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    now_seconds = [999.0]
+    deadline_at_ms = 1_000_000
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: now_seconds[0])
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.challenge_turn_policy.current_challenge_task_deadline_at_ms",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_receipt_authority.workflow_run_stop_reason",
+        lambda _authority: "",
+    )
+    room = chat_room_service.create_chat_room(
+        title="正式共享截止时间群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "question_generation", "questionId": "SCI-096"},
+            "scopeHash": "d" * 64,
+        },
+    )
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+    called_participants = []
+
+    def runner(participant, _prompt, context):
+        called_participants.append(participant["participantId"])
+        assert context["challengeDeadlineAtMs"] == deadline_at_ms
+        now_seconds[0] = 1000.001
+        return {"status": "completed", "raw_output": "候选一", "summary": "ok"}
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "候选生成",
+        config={"challengeDeadlineAtMs": deadline_at_ms},
+        agent_runner=runner,
+        _model_invocation_receipt_authority=authority,
+    )
+
+    latest = detail["rounds"][-1]
+    assert len(called_participants) == 1
+    assert latest["config"]["challengeDeadlineAtMs"] == deadline_at_ms
+    assert latest["status"] == "stopped"
+    assert latest["terminalReason"] == "challenge_logical_task_deadline_exhausted"
+    assert len(latest["messages"]) == 1
+    assert latest["messages"][0]["status"] == "stopped"
+    assert latest["messages"][0]["content"] == ""
+    assert latest["messages"][0]["lateResultDiscarded"] is True
+    assert "1/2" in latest["summary"]
+    assert "challenge_logical_task_deadline_exhausted" in latest["summary"]
+
+
+@pytest.mark.parametrize(
+    "stop_reason",
+    ["challenge_workflow_run_cancelled", "challenge_workflow_run_blocked"],
+)
+def test_formal_room_stops_fanout_when_parent_workflow_run_is_inactive(
+    tmp_path,
+    monkeypatch,
+    stop_reason,
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="父任务取消群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "question_generation", "questionId": "SCI-096"},
+            "scopeHash": "d" * 64,
+        },
+    )
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-cancelled",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+    run_reads = ["", stop_reason]
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_receipt_authority.workflow_run_stop_reason",
+        lambda _authority: run_reads.pop(0) if run_reads else stop_reason,
+    )
+    called_participants = []
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "候选生成",
+        agent_runner=lambda participant, _prompt, _context: (
+            called_participants.append(participant["participantId"])
+            or {"status": "completed", "raw_output": "候选一", "summary": "ok"}
+        ),
+        _model_invocation_receipt_authority=authority,
+    )
+
+    latest = detail["rounds"][-1]
+    assert len(called_participants) == 1
+    assert len(latest["messages"]) == 1
+    assert latest["status"] == "stopped"
+    assert latest["terminalReason"] == stop_reason
+    assert "1/2" in latest["summary"]
+
+
+def test_formal_room_uses_earliest_outer_and_meeting_deadline(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import challenge_turn_policy
+
+    room = {
+        "config": {
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "question_generation", "questionId": "SCI-096"},
+            "scopeHash": "d" * 64,
+        }
+    }
+    authority = {"workflowRunId": "run-formal"}
+    monkeypatch.setattr(
+        challenge_turn_policy,
+        "current_challenge_task_deadline_at_ms",
+        lambda: 1_800_000,
+    )
+    assert chat_room_service._resolve_challenge_room_deadline_at_ms(
+        room,
+        {"challengeDeadlineAtMs": 300_000},
+        receipt_authority=authority,
+    ) == 300_000
+
+    monkeypatch.setattr(
+        challenge_turn_policy,
+        "current_challenge_task_deadline_at_ms",
+        lambda: 200_000,
+    )
+    assert chat_room_service._resolve_challenge_room_deadline_at_ms(
+        room,
+        {"challengeDeadlineAtMs": 300_000},
+        receipt_authority=authority,
+    ) == 200_000
+
+
+def test_ordinary_room_does_not_inherit_challenge_deadline(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    from core.web.services.team_workflow.research_runtime import challenge_turn_policy
+
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(
+        challenge_turn_policy,
+        "current_challenge_task_deadline_at_ms",
+        lambda: 999_000,
+    )
+    room = chat_room_service.create_chat_room(
+        title="普通群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    contexts = []
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "普通讨论",
+        agent_runner=lambda participant, _prompt, context: (
+            contexts.append(dict(context))
+            or {"status": "completed", "raw_output": participant["title"], "summary": "ok"}
+        ),
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    assert len(latest["messages"]) == 2
+    assert "challengeDeadlineAtMs" not in latest["config"]
+    assert all(context["challengeDeadlineAtMs"] is None for context in contexts)
+
+
+def test_challenge_room_interrupt_checker_enables_provider_abort_and_classifies_cancel(monkeypatch):
+    now_seconds = [999.0]
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: now_seconds[0])
+    context = {
+        "roomId": "room-formal",
+        "roundId": "round-formal",
+        "challengeDeadlineAtMs": 1_000_000,
+        "speakerStartedAtMonotonic": chat_room_service._perf_counter(),
+        "caseState": {},
+    }
+    checker = chat_room_service._chat_room_interrupt_checker("round-formal", context)
+    assert checker() == ""
+    assert checker._vibelution_chat_provider_abort_enabled is True
+
+    def cancelled_runner(*_args):
+        now_seconds[0] = 1000.001
+        raise RuntimeError("provider connection closed after cancellation")
+
+    message = chat_room_service._run_one_speaker(
+        {
+            "participantId": "participant-formal",
+            "agentId": "agent-formal",
+            "sessionId": "session-formal",
+        },
+        "prompt",
+        context,
+        cancelled_runner,
+    )
+
+    assert checker() == "challenge_logical_task_deadline_exhausted"
+    assert message["status"] == "stopped"
+    assert message["summary"] == "challenge_logical_task_deadline_exhausted"
+    ordinary_checker = chat_room_service._chat_room_interrupt_checker(
+        "round-ordinary", {"challengeDeadlineAtMs": None}
+    )
+    assert ordinary_checker._vibelution_chat_provider_abort_enabled is False
+
+    blocked_context = {
+        "challengeDeadlineAtMs": 2_000_000,
+        "_modelInvocationReceiptAuthority": {"workflowRunId": "run-blocked"},
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_receipt_authority.workflow_run_stop_reason",
+        lambda _authority: "challenge_workflow_run_blocked",
+    )
+    blocked_checker = chat_room_service._chat_room_interrupt_checker(
+        "round-blocked",
+        blocked_context,
+    )
+    assert blocked_checker() == "challenge_workflow_run_blocked"
+    assert blocked_checker._vibelution_chat_provider_abort_enabled is True
 
 
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):

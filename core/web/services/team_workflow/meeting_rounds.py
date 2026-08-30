@@ -49,6 +49,7 @@ from core.research.workflow.contracts import (
 SCHEMA_VERSION = 2
 LEGACY_DIGEST_SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
+_FORMAL_MEETING_TIMEOUT_MS = 300_000
 _LOCK = threading.RLock()
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
@@ -232,6 +233,9 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
     request = dict(payload) if isinstance(payload, Mapping) else {}
     scope = _resolve_scope(request)
     now = _utc_now()
+    server_created_at_ms = int(
+        datetime.fromisoformat(now.replace("Z", "+00:00")).timestamp() * 1000
+    )
     requested_status = str(request.get("status") or "open").strip().lower()
     if requested_status != "open":
         raise ContractValidationError(
@@ -293,7 +297,11 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
             {
                 "modelInvocationReceiptAuthority": dict(
                     request["modelInvocationReceiptAuthority"]
-                )
+                ),
+                # This clock belongs to the persisted logical meeting, not to
+                # the older WorkflowRun and not to a caller-supplied startedAt.
+                "challengeDeadlineAtMs": server_created_at_ms
+                + _FORMAL_MEETING_TIMEOUT_MS,
             }
             if isinstance(request.get("modelInvocationReceiptAuthority"), Mapping)
             else {}
@@ -684,6 +692,61 @@ def supersede_empty_discussion_meeting(
         "teamId": normalized_team_id,
         "status": "superseded",
         "meetingRound": closed_record,
+        "storagePath": str(_rounds_path(normalized_team_id)),
+    }
+
+
+def terminate_meeting_execution(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reason: str,
+    actor: str = "system:challenge-execution-fence",
+) -> dict[str, Any]:
+    """Close a fenced formal meeting without promoting a partial digest."""
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    normalized_reason = str(reason or "").strip()
+    if not normalized_round_id or not normalized_reason:
+        raise ResearchMeetingRoundError("meeting id and terminal reason are required")
+    with _LOCK:
+        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
+        status = str(meeting_round.get("status") or "").strip().lower()
+        if status == "closed" and str(meeting_round.get("executionStatus") or "") == "stopped":
+            updated = meeting_round
+            result_status = "reused"
+        else:
+            if status not in {"open", "summarizing"}:
+                raise ResearchMeetingRoundError(
+                    f"meeting status {status or '<unknown>'} cannot be execution-stopped"
+                )
+            now = _utc_now()
+            updated = {
+                **meeting_round,
+                "status": "closed",
+                "closedAt": now,
+                "closedBy": str(actor or "").strip()
+                or "system:challenge-execution-fence",
+                "executionStatus": "stopped",
+                "terminalReason": normalized_reason,
+                "recoveryReason": normalized_reason,
+                "summaryDraftError": {
+                    "code": normalized_reason,
+                    "message": "正式会议已由服务端执行边界终止，未生成或晋升纪要。",
+                    "remediationLabel": "在新的正式运行中重新发起会议",
+                },
+                "updatedAt": now,
+            }
+            _append_round_record(normalized_team_id, updated)
+            result_status = "stopped"
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": result_status,
+        "meetingRound": updated,
         "storagePath": str(_rounds_path(normalized_team_id)),
     }
 
