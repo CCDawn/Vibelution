@@ -19,6 +19,13 @@ from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, TurnOutcome
 
 _CONTRACT_KIND = "source_collection_stage_session_task_writeback"
 
+# Deterministic model-call facts for stub receipts.  The stub replaces only the
+# model decision, so its receipts carry fixed usage/timing magnitudes that
+# mirror a real stage invocation instead of random noise.
+_STUB_INVOCATION_INPUT_TOKENS = 24_000
+_STUB_INVOCATION_OUTPUT_TOKENS = 2_000
+_STUB_INVOCATION_STARTED_AT_MS = 1_750_000_000_000
+
 
 def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
     """Monkeypatch LLM outcome helpers; return a mutable call counter."""
@@ -32,6 +39,7 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         "writeback_calls": 0,
         "final_answers": 0,
         "claim_evidence_errors": 0,
+        "receipts_attached": 0,
     }
 
     def _invoke(
@@ -43,9 +51,17 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         metadata: dict[str, Any] | None = None,
         replay_state: Any = None,
     ) -> TurnOutcome:
-        _ = (client, tools, metadata, replay_state)
+        _ = (tools, replay_state)
         counters["invoke"] += 1
-        return _outcome_for_messages(messages, context=context, counters=counters)
+        outcome = _outcome_for_messages(messages, context=context, counters=counters)
+        return _attach_invocation_receipt(
+            client,
+            outcome,
+            context=context,
+            messages=messages,
+            metadata=metadata,
+            counters=counters,
+        )
 
     def _stream(
         client: Any,
@@ -57,9 +73,17 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         metadata: dict[str, Any] | None = None,
         replay_state: Any = None,
     ) -> TurnOutcome:
-        _ = (client, on_event, tools, metadata, replay_state)
+        _ = (on_event, tools, replay_state)
         counters["stream"] += 1
-        return _outcome_for_messages(messages, context=context, counters=counters)
+        outcome = _outcome_for_messages(messages, context=context, counters=counters)
+        return _attach_invocation_receipt(
+            client,
+            outcome,
+            context=context,
+            messages=messages,
+            metadata=metadata,
+            counters=counters,
+        )
 
     def _auto_approve_tool(**_kwargs: Any) -> ToolApprovalOutcome:
         # High-permission writeback would otherwise block on UI approval (300s).
@@ -95,6 +119,73 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         _auto_approve_tool,
     )
     return counters
+
+
+def _attach_invocation_receipt(
+    client: Any,
+    outcome: TurnOutcome,
+    *,
+    context: Any,
+    messages: list[Any],
+    metadata: dict[str, Any] | None,
+    counters: dict[str, Any],
+) -> TurnOutcome:
+    """Mirror the real provider-boundary receipt attach for stubbed calls.
+
+    The stub replaces only the model decision, so a durable Challenge Cup
+    receipt must still come from the same fact source as a real invocation:
+    the client's own ``_attach_model_invocation_receipt`` helper, driven by the
+    server-owned binding in the ambient receipt ContextVar. Ordinary sessions
+    have no binding and stay a no-op; the stub never mints a receipt itself.
+    """
+
+    attach = getattr(client, "_attach_model_invocation_receipt", None)
+    if not callable(attach):
+        return outcome
+    from core.llm.client import _canonical_receipt_response_summary
+    from core.llm.invocation import invocation_scope_from_metadata
+
+    # Same identity merge as ``core.llm.invocation.invoke_llm_outcome`` so the
+    # receipt scope matches what the real client would have derived.
+    merged: dict[str, Any] = dict(metadata or {})
+    try:
+        merged.update(context.to_metadata(client=client))
+    except (AttributeError, TypeError):
+        merged.update(
+            {
+                key: value
+                for key, value in dict(
+                    getattr(context, "metadata", None) or {}
+                ).items()
+                if isinstance(value, (str, int, float, bool))
+            }
+        )
+    invocation_scope = invocation_scope_from_metadata(merged)
+    attached = attach(
+        outcome,
+        metadata=merged,
+        invocation_scope=invocation_scope,
+        request_content={
+            "messageCount": len(list(messages or [])),
+            "stubSurface": "fast_stage_writeback_llm_stub",
+        },
+        response_content=_canonical_receipt_response_summary(outcome),
+        started_at_ms=_STUB_INVOCATION_STARTED_AT_MS,
+        finished_at_ms=_STUB_INVOCATION_STARTED_AT_MS + 1_000,
+        attempt=1,
+        retry_count=0,
+        token_usage={
+            "inputTokens": _STUB_INVOCATION_INPUT_TOKENS,
+            "outputTokens": _STUB_INVOCATION_OUTPUT_TOKENS,
+            "totalTokens": _STUB_INVOCATION_INPUT_TOKENS
+            + _STUB_INVOCATION_OUTPUT_TOKENS,
+            "cachedInputTokens": 0,
+            "reasoningTokens": 0,
+        },
+    )
+    if isinstance(getattr(attached, "model_invocation_receipt", None), dict):
+        counters["receipts_attached"] += 1
+    return attached
 
 
 def _outcome_for_messages(
