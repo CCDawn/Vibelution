@@ -1308,3 +1308,136 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Agent 专属工具包已补长期日历、地点/物品、作品 receipt、NPC 和反思提案；反思工具只能 `list/propose`，操作员在 `/companions` 右侧“待审核的变化”中通过现有 `/commands` 链路批准或拒绝。
 - 前端继续复用人物大厅、当前人物栏、原生 Direct Session Chat 和右侧“现在 / 今天 / 记忆”；没有新增 Session、SSE、Composer、记忆库或权限系统。
 - 自动验证使用注入时钟覆盖跨日和长期场景，不等待真实 7 天；桌面运行态验收仍按本章目标视口和原生会话边界在本地集成后执行，push/发布不属于本轮。
+
+## 30. 第四阶段：真人化会话表达与消息到达（需求收集中，待开发）
+
+2026-08-30，用户要求先把已确认的真人化对话优化落盘为开发任务，再继续追加需求。本阶段当前只固定需求、复用裁决、任务边界和验收契约，不表示已经开始实现。新增需求继续追加到本节；在用户明确要求开始本阶段开发前，不修改产品代码或运行数据。
+
+### 30.1 可观察结果与硬边界
+
+1. 虚拟人的普通回复先经过 Companion 专属表达决策：能短答时不写成客服式长答，普通闲聊不会每轮都追问，用户纠错时先承认和更正，再回应原话题。
+2. 每轮 Prompt 都获得由代码计算的本地日期、星期、时间和时区；模型不能自行推算星期，也不能混淆当前活动、已完成经历和未来计划。
+3. 回复内容与当前可追溯心情、体力及对当前用户的熟悉程度挂钩；熟悉度设定表达上限，心情只能在上限内调节节奏，不能把初识用户直接提升为亲密关系。
+4. 用户在虚拟人回复或后续气泡期间仍可发送消息；到达消息只进入 Companion 私有 mailbox，按真实到达顺序串行交给原生 Session。
+5. 后续多气泡必须可被用户插话取消。尚未展示的内容不能提前进入 transcript；如果原生 Journal/SSE 权威无法成立，则保持单气泡，不以 UI 假动画伪装实现。
+6. 用户陪伴偏好只作为 Agent-scoped、可审阅和可删除的记忆投影，不建立第二用户画像库；虚拟人只能在相关话题中自然使用，不能反复主动背诵旧信息。
+7. 桌面端可增加头像呼吸、轻量表情和消息级非语言反馈，但继续使用现有 `/companions`、原生 Chat、单一 Composer 和单一“正在输入…”；无动画或资产时回退现有立绘。
+8. 所有新增能力只在启用 `virtual-human-life` 的 Agent、显式 Companion 路由和对应 direct Session 中生效。普通 Agent 的 Session admission、Journal、worker、persist、projection、SSE、`ConversationStore`、普通 composer 和普通 follow-up 语义保持零差异。
+
+### 30.2 当前差距
+
+- `relationship_events.py` 已从事件账本投影 `getting_to_know / friend / close`、`intimacy`、`trust` 和 `interactionCount`，`affect.py` 已投影 `valence / arousal / stability`、有效情绪 Episode 和恢复状态；这些仍是唯一关系与心情权威。
+- `expression_policy.py` 目前只是通用 condition/action 规则排序器。活跃人物没有规则时不会生成“本轮该怎么说”的决定；已有心情和熟悉度尚未系统影响回复长度、追问、幽默、自我披露、称呼和话题主动性。
+- `build_prompt_segments()` 已注入生活状态和 `sessionId`，但动态 payload 没有确定性的 `localDate / localWeekday / localTime / timezone`，因此模型仍可能把星期、已发生和将发生的事情说错。
+- mailbox 已具备 `followup` 来源类型、generation fence 和用户插话取消预留，但当前非 `proactive` 条目仍走普通 conversation submitter；直接启用会制造额外普通 Turn，不能作为多气泡交付。
+- 原生 Agent Memory 已能承载 episodic memory，现阶段不需要 Memobase 服务、第二 profile 数据库或独立向量库。
+
+### 30.3 Companion 表达决定契约
+
+新增纯函数型 `CompanionExpressionDecision`，由插件内适配层在同一次原生 Turn 的 Prompt 组装前生成，不增加第二次 LLM 调用。输入只取有来源的有界投影：
+
+| 输入 | 现有权威 | 只允许影响 |
+| --- | --- | --- |
+| 用户当前意图 | 当前用户消息和本 Session 的只读近期终态 | 是否短回执、是否需要澄清、纠错/结束/求助等回应顺序 |
+| 熟悉度和关系边界 | `relationships/events.jsonl` → `relationship_events.py` 投影 | 语气上限、称呼、共同记忆提及、自我披露和主动关心上限 |
+| 心情和体力 | `affect/episodes.jsonl`、`state.json` → `affect.py` 投影 | 节奏、长度、幽默、热度、话题主动性；不能改事实或关系阶段 |
+| 当前生活事实 | state、Schedule、Calendar、Life Event | 当前活动、已完成经历、未来计划和可分享话题 |
+| 用户陪伴偏好 | 已审核的 Agent episodic memory 投影 | 回答长度、玩笑接受度、称呼、追问容忍度和主动联系偏好 |
+| 最近对话节奏 | 原生 transcript 的 Companion 只读窗口 | 最近是否连续提问、重复话题或重复提及同一记忆 |
+
+输出至少包含：`responseLength`、`questionBudget`、`followup`、`initiative`、`validationStyle`、`selfDisclosure`、`topicInitiative`、`pacing`、`directness`、`humorMode`、`addressStyle`、`memoryMention`、`reasonCodes`。它只形成有界 Prompt 摘要，不替代原生 composer、安全、工具权限或消息持久化。
+
+优先级固定为：身份/安全与用户当前明确请求 → 用户边界和纠错事实 → 熟悉度表达上限 → 当前心情/体力调制 → 已审核偏好与习惯。低优先级只能收紧或在上限内微调，不能越级放宽。
+
+### 30.4 心情 × 熟悉度联动规则
+
+熟悉度不是越高就问得越多，而是改变可用的相处方式。默认联动如下：
+
+| 熟悉阶段 | 基础表达 | 可用连续性 | 禁止越界 |
+| --- | --- | --- | --- |
+| `getting_to_know` | 友好、自然、不过度热情；自我披露轻量 | 只使用用户刚提供或明确要求记住的信息；普通闲聊可偶尔追问 | 未确认昵称、共同仪式、亲密措辞、突然提及敏感旧记忆 |
+| `friend` | 更轻松，可有少量玩笑和自然接话 | 可提及相关的非敏感共同经历、偏好和未完话题；可用已确认昵称 | 把熟悉说成排他关系、用记忆施压、每轮查户口式追问 |
+| `close` | 温暖、有默契，允许更多互惠式自我表达 | 可自然续接共同经历、承诺和双方已接受的称呼；更常用陈述式续话 | 占有欲、情感勒索、未经确认的浪漫/成人升级、因高亲密度绕过边界 |
+
+心情只在当前阶段上限内调节：
+
+- 低 valence、低 stability、低体力或高脆弱余波：更短、更慢、更克制，降低幽默、追问和主动换题；仍然回答用户，不用沉默或人为延迟惩罚用户。
+- 中性稳定：按熟悉阶段和用户偏好自然回应；不默认附加问题。
+- 正向且体力足：可略微提升活泼度、轻量玩笑和自我表达，但不能因此使用未获关系许可的亲昵称呼或强行分享。
+- 情绪 Episode 指向非用户事件时，不能让措辞暗示用户应负责；指向用户且存在未修复冲突时，可以诚实、低压力地更谨慎，但不得冷暴力或操纵关系。
+- 用户明确求助、表达痛苦或纠正事实时，当前意图优先于人物心情：执行“具体承认 → 必要更正/支持 → 回应当前需求”，不立即转到无关新话题。
+
+普通闲聊采用滚动窗口节奏门：最近 8 条人物终态回复中，默认只有 2—3 条包含问题，即约 25%—37.5%；单条最多一个问题。“好啊/知道了/哈哈”等短回执、用户纠错、用户结束话题和人物低体力时默认 `questionBudget=0`。只有完成用户请求确实缺少必要信息时允许澄清问题，不把澄清计作陪伴式追问配额。
+
+### 30.5 时间与生活事实锚定
+
+`build_prompt_segments()` 在启用 Companion 时注入以下代码计算字段：
+
+- `localDate`：人物时区对应日期；
+- `localWeekday`：由日期库计算的确定性星期文本；
+- `localTime`：分钟级本地时间；
+- `timezone`：绑定时区；
+- `currentActivity`：当前正在执行的活动及起止时间；
+- `completedExperiences`：仅来自成功 outcome 的当日已完成经历；
+- `futurePlans`：今天剩余和明日计划，并显式标记为未发生。
+
+跨午夜后下一轮必须重新计算，不复用启用时常量。用户纠正日期或星期时，先以代码锚点复核；若用户提供的外部时间事实与本地锚点冲突，只说明当前采用的时区和日期，不编造确定性结论。
+
+### 30.6 复用研究裁决
+
+| 候选 | 固定版本与许可证 | 裁决 | 复用内容 | 明确排除 |
+| --- | --- | --- | --- | --- |
+| [AstrBot Private Companion](https://github.com/menglimi/astrbot_plugin_private_companion/tree/8b6a6d7dd5318c242dae4c53f682bdba5e0f71e8) | `8b6a6d7dd5318c242dae4c53f682bdba5e0f71e8`；公开仓库未识别许可证，用户确认已获作者代码复用许可 | `REUSE_WITH_EXPLICIT_PERMISSION + ADAPT` | `companion_interaction_expression.py` 的单一 `ExpressionDecision`，`relationship_policy.py` 的阶段上限/软行为/迟滞，`reply_temperature.py` 的关系上限与状态调制，`interaction_dynamics.py` 的情绪余波恢复，以及相关边界测试 | AstrBot 平台身份、P4/owner-exclusive 模型、九阶段分数制、成人/排他关系、忙碌回复延迟、TTS 和页面运行时；公开发布前仍需确认署名与分发边界 |
+| [Parlant](https://github.com/emcie-co/parlant/tree/ea737442b8ae65854a842542e544fbe7e6144bad) | `ea737442b8ae65854a842542e544fbe7e6144bad`；Apache-2.0 | `REFERENCE_ONLY` | 每轮只投影命中的 condition/action，以及 priority/dependency/exclusion 处理冲突 | Parlant 会话引擎、第二套 composer、额外 guideline LLM 匹配调用 |
+| [Memobase](https://github.com/memodb-io/memobase/tree/358c16bbc6d687937d79bc2f984a11c3be8da901) | `358c16bbc6d687937d79bc2f984a11c3be8da901`；Apache-2.0 | `ADAPT` | Companion profile 中的称呼、互动风格、联系频率、兴趣、幽默、回复长度和隐私偏好槽位；冲突更新与相关时才注入 | Memobase 服务、第二数据库、第二记忆权威、热路径 profile 提取调用 |
+| [AI Town](https://github.com/a16z-infra/ai-town/tree/8e05997f2409275669c8344b84a51692e83f3f33) | `8e05997f2409275669c8344b84a51692e83f3f33`；MIT | `REFERENCE_ONLY` | 对当前交谈对象检索相关共同记忆、注入上次对话时间，以及“对方正在输入时仍允许用户发消息”的交互语义 | 世界引擎、第二向量库，以及“有旧记忆就强制问问题”的逻辑；该强制规则会加重当前每轮追问问题 |
+| [AIRI](https://github.com/moeru-ai/airi/tree/0a30c2298f901c07df3f73aa8341476e7e9329a0) | `0a30c2298f901c07df3f73aa8341476e7e9329a0`；MIT | `ADAPT` | 文本情绪到轻量头像表情/动作映射、expression store 与 motion 降级思路 | AIRI runtime、Live2D 模型和音频链；人物资产授权继续独立处理 |
+| [SOTOPIA](https://github.com/sotopia-lab/sotopia/tree/a0aaafb440e570e5e61b7c44a44e5e417c545383) | `a0aaafb440e570e5e61b7c44a44e5e417c545383`；MIT | `REFERENCE_ONLY` | 用 believability、relationship、social-rules 和 goal consistency 构造加速验收场景 | SOTOPIA 环境、角色运行时和评价模型线上依赖 |
+
+主决策：在 Vibelution 插件内改造复用 AstrBot 的表达决定纯逻辑，继续使用现有三阶段关系投影和 Affect Episode，不迁移到上游分数/角色体系；Parlant、AI Town 和 SOTOPIA 只借契约与测试思路；Memobase 槽位投影到现有 Agent Memory；AIRI 只用于桌面端轻量表现。这样不引入新的运行依赖、数据库或第二会话链路。
+
+### 30.7 实施任务图
+
+#### Task 22：建立 Companion 真人化表达决定和心情/熟悉度联动
+
+- Owner/Boundary: 新增插件内纯逻辑 owner（优先独立 `interaction_expression.py`，避免继续膨胀 `service.py`），由 `expression_policy.py` 和 `build_prompt_segments()` 有界调用；只在 enabled Companion 路由生效。
+- Dependency: Task 21；复用 AstrBot `8b6a6d7` 的已授权切片并按 Vibelution 三阶段关系、Affect Episode 和 Prompt Pack 改造。
+- Mode: BDD/TDD。
+- Verification/Stop: 表驱动覆盖三种熟悉阶段 × 正向/中性/低落/低体力 × 短回执/纠错/求助/结束/普通闲聊；单条最多一个问题，滚动 8 条普通回复中只有 2—3 条包含问题，不新增第二次 LLM 调用；情绪来源非用户时不暗示用户负责；未启用 Agent 不产生表达决定。
+
+#### Task 23：注入确定性时间和生活事实并处理用户纠错
+
+- Owner/Boundary: `service.py` 的 Companion Prompt 投影与 Prompt Pack；不改原生 Session、composer 或模型客户端。
+- Dependency: Task 22；与 Task 22 共享 `service.py`，按顺序实施。
+- Mode: BDD/TDD。
+- Verification/Stop: 上海时区和另一非 UTC+8 时区均覆盖星期、跨午夜、夏令时边界；“今天是周日不是周六”执行承认、更正、回应且不追加无关问题；当前活动、完成经历和未来计划不串时态；普通 Agent Prompt 零差异。
+
+#### Task 24：建立可审阅的陪伴偏好卡
+
+- Owner/Boundary: 从原生 Agent episodic memory 投影称呼、回答长度、追问容忍度、幽默、主动联系频率、兴趣和隐私偏好；插件只保存 promotion/reconciliation receipt。
+- Dependency: Task 22。
+- Mode: BDD/TDD。
+- Verification/Stop: 冲突偏好使用 supersede 保留历史；未经审核、敏感推断和跨 Agent 记忆不进入表达决定；用户可查看、纠正和删除；相关话题之外不主动提及记忆；不创建 profile 数据库或热路径 LLM 调用。
+
+#### Task 25：设计并实现 Companion 多气泡交付与用户插话
+
+- Owner/Boundary: `mailbox.py`、插件 service/facade 和 Companion-only delivery adapter；只复用原生 assistant-only/proactive admission 能力，不改普通 Session 核心文件和普通 follow-up。
+- Dependency: Task 22、Task 23；先提交可审查的 `DeliveryPlan / generation / arrivalSequence / receipt` 契约，再进入实现。
+- Mode: HIGH_RISK BDD/TDD。
+- Verification/Stop: 用户在人物“正在输入”或气泡间发送的消息能按真实到达顺序排队；新用户消息取消尚未送达的同 generation followup；每个已展示气泡都有原生 Journal/SSE 可关联终态，未展示内容不在 transcript；崩溃恢复不重复送达；无法同时满足这些条件时停止在单气泡，不修改普通链路迁就功能。
+
+#### Task 26：增加轻量非语言反馈
+
+- Owner/Boundary: `/companions` 既有左侧人物栏、消息头像和 VUI 表现组件；不新建聊天页面，不改原生消息结构。
+- Dependency: Task 22 的稳定表达投影；可与 Task 24 在不重叠文件时并行。
+- Mode: frontend contract + browser acceptance。
+- Verification/Stop: 人物头像和名字保留；“正在输入…”仍带人物头像并只出现一个；表情/呼吸由同一 mood/expression 投影驱动；支持 `prefers-reduced-motion`；缺资产或异常时回退静态立绘；不出现推理文字、工具过程、第二 Composer 或原生文件输入。
+
+#### Task 27：真人化对话全链路收口
+
+- Owner/Boundary: Companion-only golden dialogue、队列/恢复、Prompt 预算、桌面视觉和普通 Agent 零差异证据。
+- Dependency: Task 22—26。
+- Mode: backend selector + frontend contracts + `tsc -b` + production build + desktop browser acceptance。
+- Verification/Stop: 使用可注入时钟和脚本化短场景覆盖初识到熟悉、正负情绪余波、用户纠错、连续短回执、重复话题、插话和崩溃恢复；不等待真实 7 天；普通 Agent 核心测试与会话行为零差异；不 push、不发布。
+
+Critical Path 为 Task 22 → Task 23 → Task 25 → Task 27；Task 24 和 Task 26 在 Task 22 后可独立推进。由于用户仍在追加需求，本阶段任务当前保持 `PLANNED`，不进入实现。
