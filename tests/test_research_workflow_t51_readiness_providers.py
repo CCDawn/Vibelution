@@ -306,22 +306,22 @@ def test_unscoped_team_candidates_do_not_unlock_current_run(
         }
     ]
 
-    def fake_list(team_id: str, limit: int = 500):
-        _ = (team_id, limit)
+    def fake_list(team_id: str, limit: int = 500, *, run_id: str = ""):
+        _ = (team_id, limit, run_id)
         return {"candidates": unscoped_history + current_only}
 
-    def fake_summary(team_id: str, *, run_id: str = ""):
-        _ = (team_id, run_id)
+    def fake_processing_status(run_id: str = ""):
+        _ = run_id
         # Zero summary so orphan store rows cannot unlock via SC fallback either.
-        return {"runSummary": {"recordCount": 0, "candidateCount": 0}}
+        return {"summary": {"recordCount": 0}}
 
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
         fake_list,
     )
     monkeypatch.setattr(
-        "core.web.services.team_workflow.source_collection.runs.get_source_collection_summary",
-        fake_summary,
+        "core.web.services.data_processing_service.get_processing_status",
+        fake_processing_status,
     )
     stats = readiness_providers.fetch_candidate_stats(
         "team-1",
@@ -341,7 +341,7 @@ def test_unscoped_team_candidates_do_not_unlock_current_run(
     # Only unscoped history: must not unlock (no scoped stats).
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
-        lambda team_id, limit=500: {"candidates": unscoped_history},
+        lambda team_id, limit=500, run_id="": {"candidates": unscoped_history},
     )
     assert (
         readiness_providers.fetch_candidate_stats(
