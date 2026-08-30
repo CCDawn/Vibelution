@@ -17,9 +17,13 @@ from ..action_registry import (
     AdapterResult,
     VerifiedDomainResult,
 )
+from ..budget_authority_adapter import DEFAULT_AGENT_NODE_RESERVE_TOKENS
 from ..domain_ports import AgentTurnResult, DomainPorts
 
-DEFAULT_AGENT_ESTIMATE_TOKENS = 25_000
+# The construction default is the conservative contract fallback, never a flat
+# small constant: production ports derive the real estimate from the explicit
+# budget contract (task budgetRequest > frozen stage budget > this fallback).
+DEFAULT_AGENT_ESTIMATE_TOKENS = DEFAULT_AGENT_NODE_RESERVE_TOKENS
 
 
 class AgentActionAdapter:

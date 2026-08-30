@@ -10,6 +10,7 @@ persist, capture, live_output) remain effective.
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,27 @@ _STRICT_RESEARCH_TASK_KINDS = frozenset(
 # terminal state remains the authoritative accounting; this constant only
 # stops live overspend early.
 DEFAULT_SESSION_TOKEN_BUDGET = 2_000_000
+
+# Minimum usable output space for one formal invocation. Real node inputs are
+# ~24K tokens and reasoning models spend the whole allowance on thinking
+# first, so silently clamping max_output_tokens to a sliver below this floor
+# makes the model spin and return an empty answer. The invocation preflight
+# must reject fail-closed instead. Override with
+# VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS.
+MIN_INVOCATION_OUTPUT_TOKENS = 4_096
+_MIN_INVOCATION_OUTPUT_TOKENS_ENV = "VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS"
+
+
+def _min_invocation_output_tokens() -> int:
+    raw = os.environ.get(_MIN_INVOCATION_OUTPUT_TOKENS_ENV, "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return MIN_INVOCATION_OUTPUT_TOKENS
+        if value > 0:
+            return value
+    return MIN_INVOCATION_OUTPUT_TOKENS
 
 
 def _challenge_deadline_stop_reason(
@@ -347,18 +369,37 @@ def _challenge_invocation_budget_preflight(
     *,
     estimated_input_tokens: int,
     max_output_tokens: int,
-) -> dict[str, int]:
+) -> dict[str, int | str | bool]:
     window = _challenge_budget_window(receipt_context)
     if str(window.get("status") or "") not in {"reserved", "consumed"}:
         raise RuntimeError("challenge_budget_reservation_terminal")
     remaining = max(0, int(window.get("remaining") or 0))
     estimated_input = max(0, int(estimated_input_tokens or 0))
     profile_limit = max(0, int(max_output_tokens or 0))
-    allowed_output = min(profile_limit, max(0, remaining - estimated_input))
+    headroom = remaining - estimated_input
+    min_output = _min_invocation_output_tokens()
+    if headroom < min_output:
+        # Fail closed with the explicit budget_exhausted decision instead of
+        # silently clamping max_output_tokens to an unusable sliver. The two
+        # failure sides stay distinguishable: input overruns the remaining
+        # budget (the compression/truncation responsibility surface) versus an
+        # output space below the usable floor.
+        if headroom < 0:
+            reason = "input_exceeds_remaining"
+        else:
+            reason = "insufficient_budget"
+        return {
+            "remainingTokens": remaining,
+            "estimatedInputTokens": estimated_input,
+            "maxOutputTokens": 0,
+            "budgetExhausted": True,
+            "reason": reason,
+            "requiredMinOutput": min_output,
+        }
     return {
         "remainingTokens": remaining,
         "estimatedInputTokens": estimated_input,
-        "maxOutputTokens": allowed_output,
+        "maxOutputTokens": min(profile_limit, headroom),
     }
 
 

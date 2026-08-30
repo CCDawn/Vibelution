@@ -3120,17 +3120,32 @@ class LLMClient:
         allowed_output = max(0, int(decision.get("maxOutputTokens") or 0))
         remaining = max(0, int(decision.get("remainingTokens") or 0))
         if allowed_output <= 0:
+            # Machine-readable rejection detail: which side failed (input
+            # overrun vs output floor) and how much output space the floor
+            # requires, mirroring quota-style 429/403 payloads.
+            reason = str(decision.get("reason") or "").strip() or (
+                "insufficient_budget"
+            )
+            required_min_output = decision.get("requiredMinOutput")
+            details = {
+                "payloadValidationResult": "blocked_before_provider",
+                "remainingTokens": remaining,
+                "estimatedInputTokens": estimated_input,
+                "reason": reason,
+            }
+            if (
+                isinstance(required_min_output, int)
+                and not isinstance(required_min_output, bool)
+                and required_min_output > 0
+            ):
+                details["requiredMinOutput"] = required_min_output
             raise LLMError(
                 "budget_exhausted",
                 "Challenge invocation token budget is exhausted.",
                 retryable=False,
                 provider=self.provider.kind,
                 model=self.profile.model,
-                details={
-                    "payloadValidationResult": "blocked_before_provider",
-                    "remainingTokens": remaining,
-                    "estimatedInputTokens": estimated_input,
-                },
+                details=details,
             )
         clamped = dict(payload)
         clamped[output_key] = min(profile_limit, allowed_output)

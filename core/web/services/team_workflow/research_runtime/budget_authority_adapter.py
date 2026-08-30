@@ -17,7 +17,18 @@ from core.research.workflow.ledger import WorkflowLedgerStore
 
 from .ids import new_id
 
-DEFAULT_STAGE_TOKENS = 250_000
+# Missing-contract budget scale for the formal runtime. Real single model
+# invocations already carry ~24K input tokens and a settled formal node can
+# consume ~300K; the previous 250K stage default permanently rejected any
+# stage attempt after one real node settled. Aligned with the conservative
+# task budget fallback (session worker ``DEFAULT_SESSION_TOKEN_BUDGET``) and
+# the 2026-08-29 修复方案 contract: explicit task budget first, 2,000,000 as
+# the conservative fallback when no contract exists.
+DEFAULT_FORMAL_TOKEN_BUDGET = 2_000_000
+DEFAULT_STAGE_TOKENS = DEFAULT_FORMAL_TOKEN_BUDGET
+# Per-Agent-node-attempt reservation fallback (the turn-budget scale), used
+# only when neither a task budgetRequest nor a frozen stage budget exists.
+DEFAULT_AGENT_NODE_RESERVE_TOKENS = DEFAULT_FORMAL_TOKEN_BUDGET
 DEFAULT_TOOL_CALLS = 300
 DEFAULT_WALL_CLOCK_SECONDS = 21_600
 DEFAULT_AUTO_RETRIES = 2
@@ -79,6 +90,41 @@ def _policy_limits(snapshot: dict[str, Any], stage_id: str) -> dict[str, int]:
         "seconds": seconds,
         "retries": retries,
     }
+
+
+def _positive_contract_tokens(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return int(value)
+
+
+def stage_budget_tokens(snapshot: Mapping[str, Any] | None, node_id: str) -> int | None:
+    """Explicit frozen budget for the node's stage from the run contract.
+
+    Priority: ``budgetPolicy.stageBudgets[stage].tokens`` then the run-level
+    ``budgetPolicy.tokens``.  Returns ``None`` when the snapshot carries no
+    budget contract at all; callers then fall back to
+    ``DEFAULT_AGENT_NODE_RESERVE_TOKENS`` instead of a flat per-node constant.
+    """
+
+    policy = (
+        snapshot.get("budgetPolicy")
+        if isinstance(snapshot, Mapping)
+        else None
+    )
+    if not isinstance(policy, Mapping):
+        return None
+    stage_budgets = policy.get("stageBudgets")
+    stage = (
+        stage_budgets.get(stage_for_node(node_id))
+        if isinstance(stage_budgets, Mapping)
+        else None
+    )
+    if isinstance(stage, Mapping):
+        tokens = _positive_contract_tokens(stage.get("tokens"))
+        if tokens is not None:
+            return tokens
+    return _positive_contract_tokens(policy.get("tokens"))
 
 
 _BUDGET_RECEIPT_COLUMNS = (
@@ -340,13 +386,6 @@ def reserve_budget_authority(
 
     now_ms = int(time.time() * 1000)
     receipt_id = new_id("br")
-    reserved_payload = {
-        "estimatedTokens": estimate,
-        "tokens": estimate,
-        "toolCalls": 1,
-        "seconds": 60,
-        "retries": 0,
-    }
 
     def mutate(uow):
         # Keep the idempotency lookup, stage admission check, and INSERT in
@@ -390,12 +429,37 @@ def reserve_budget_authority(
         admitted = sum(
             _stage_admitted_tokens(_row_mapping(row)) for row in stage_rows
         )
-        if admitted + estimate > limits["tokens"]:
+        # Per-run stage cumulative ceiling semantics (chosen over a pure
+        # concurrency guard): live reservations occupy their full estimate and
+        # settled attempts occupy their real usage, so a finished attempt
+        # releases its estimate weight (K8s ResourceQuota "completed pods
+        # release" semantics) and one real node can never permanently lock the
+        # stage. Invariant: the stage limit must stay >= one attempt's
+        # legitimate consumption x (1 + autoRetries) — the 2M default versus a
+        # real ~300K node keeps that true, while the old 250K default (below
+        # one real attempt) violated it.
+        stage_remaining = max(0, int(limits["tokens"]) - admitted)
+        if stage_remaining <= 0:
             raise BudgetAuthorityError(
                 f"stage token limit exceeded for {stage_id}: "
                 f"consumed={admitted} estimate={estimate} limit={limits['tokens']}",
                 code="budget_safety_limit_reached",
             )
+        # The per-attempt reservation is the contract estimate capped by the
+        # stage's remaining capacity. A serial stage must keep later attempts
+        # and retries admissible after earlier attempts settle their real
+        # usage (a settled real node consumes ~300K), while live+settled
+        # admission still never exceeds the frozen stage limit. A stage with
+        # no remaining capacity is rejected fail-closed above. The estimate is
+        # only an admission hint; settled usage remains the sole authority.
+        effective_estimate = min(estimate, stage_remaining)
+        reserved_payload = {
+            "estimatedTokens": effective_estimate,
+            "tokens": effective_estimate,
+            "toolCalls": 1,
+            "seconds": 60,
+            "retries": 0,
+        }
 
         uow.repository.insert_budget_receipt(
             receipt_id=receipt_id,

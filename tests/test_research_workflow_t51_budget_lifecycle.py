@@ -96,8 +96,15 @@ def test_reserve_blocks_when_token_limit_exhausted(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
-        action = _action()
-        _seed_attempt(harness, action)
+        first = _action()
+        second = _action("source_extraction")
+        second = replace(
+            second,
+            action_id="act-budget-2",
+            node_run_id="nr-run-test-source_extraction-a2",
+        )
+        _seed_attempt(harness, first)
+        _seed_attempt(harness, second)
 
         def shrink(uow):
             import json
@@ -118,8 +125,13 @@ def test_reserve_blocks_when_token_limit_exhausted(tmp_path: Path) -> None:
 
         harness.store.submit(shrink, force_flush=True).result(timeout=10)
         ports = RealDomainPorts(harness.store)
+        # The contract-derived estimate (stage budget 500) is admitted for the
+        # first attempt, capped to the full stage capacity.
+        reservation = ports.reserve_budget(action=first, estimate_tokens=25_000)
+        assert reservation["reserved"]["estimatedTokens"] == 500
+        # The stage is exhausted: the next attempt is rejected fail-closed.
         with pytest.raises(RuntimeError, match="budget|limit|exceed"):
-            ports.reserve_budget(action=action, estimate_tokens=25_000)
+            ports.reserve_budget(action=second, estimate_tokens=25_000)
     finally:
         harness.close()
 
@@ -537,10 +549,10 @@ def test_read_node_budget_window_uses_ledger_and_validates_binding(
             action.node_run_id,
             reservation["reservationId"],
         )
-        assert before["reserved"] == 25_000
+        assert before["reserved"] == 2_000_000
         assert before["used"] == 0
-        assert before["remaining"] == 25_000
-        assert before["stageLimit"] == 250_000
+        assert before["remaining"] == 2_000_000
+        assert before["stageLimit"] == 2_000_000
         assert before["status"] == "reserved"
 
         record_budget_usage(
@@ -560,7 +572,7 @@ def test_read_node_budget_window_uses_ledger_and_validates_binding(
             reservation["reservationId"],
         )
         assert after["used"] == 150
-        assert after["remaining"] == 24_850
+        assert after["remaining"] == 1_999_850
 
         with pytest.raises(BudgetAuthorityError, match="binding"):
             read_node_budget_window(
@@ -609,7 +621,7 @@ def test_record_budget_usage_is_exactly_once_and_reasoning_is_not_double_counted
             reservation["reservationId"],
         )
         assert window["used"] == 150
-        assert window["remaining"] == 850
+        assert window["remaining"] == 1_999_850
         payload = harness.store.submit(
             lambda uow: uow.repository.execute(
                 "SELECT settled_json FROM budget_receipts WHERE reservation_id = ?",
@@ -671,7 +683,7 @@ def test_settle_merges_accumulated_usage_instead_of_overwriting_with_estimate(
         )
         assert window["status"] == "settled"
         assert window["used"] == 500
-        assert window["remaining"] == 1_500
+        assert window["remaining"] == 1_999_500
     finally:
         harness.close()
 
@@ -680,7 +692,6 @@ def test_reserve_stage_admission_is_atomic_under_concurrency(tmp_path: Path) -> 
     from concurrent.futures import ThreadPoolExecutor
 
     from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
-        BudgetAuthorityError,
         reserve_budget_authority,
     )
 
@@ -714,20 +725,21 @@ def test_reserve_stage_admission_is_atomic_under_concurrency(tmp_path: Path) -> 
             outcomes = [pool.submit(reserve, action) for action in (first, second)]
             results = [future.result() for future in outcomes]
 
-        assert sum(result["status"] == "reserved" for result in results) == 1
-        failures = [result for result in results if isinstance(result, BaseException)]
-        assert not failures
-    except BudgetAuthorityError:
-        # The assertion below inspects the persisted receipt count; one of the
-        # two concurrent reservations must be rejected by stage admission.
-        pass
+        # Under the capacity-capped admission contract both concurrent
+        # reservations are admitted, but the second is capped to the stage's
+        # remaining capacity: the aggregate can never exceed the frozen stage
+        # limit (400 + capped 100 = 500).
+        assert all(result["status"] == "reserved" for result in results)
+        assert sum(result["reserved"]["estimatedTokens"] for result in results) <= 500
     finally:
         rows = harness.store.submit(
             lambda uow: uow.repository.execute(
-                "SELECT COUNT(*) FROM budget_receipts WHERE run_id = ? AND stage_id = ?",
+                "SELECT reserved_json FROM budget_receipts WHERE run_id = ? AND stage_id = ?",
                 ("run-test", "knowledge_collection"),
-            ).fetchone(),
+            ).fetchall(),
             force_flush=True,
         ).result(timeout=10)
-        assert rows is not None and rows[0] == 1
+        assert len(rows) == 2
+        total = sum(json.loads(row[0])["reserved"]["estimatedTokens"] for row in rows)
+        assert total <= 500
         harness.close()

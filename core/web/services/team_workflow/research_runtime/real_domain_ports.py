@@ -20,6 +20,7 @@ from typing import Any
 
 from core.research.workflow.contracts import PendingAction, WorkflowSessionScopeV3
 from core.research.workflow.ledger import WorkflowLedgerStore
+from core.research.workflow.models import ActorKind
 
 from .domain_ports import (
     AgentTaskHandle,
@@ -88,10 +89,101 @@ from .hypothesis_session_scope_mode import (
     resolve_hypothesis_session_scope_mode as _resolve_hypothesis_session_scope_mode,
 )
 
-DEFAULT_AGENT_ESTIMATE_TOKENS = 25_000
 _HYPOTHESIS_SELECTION_MISSING = (
     "hypothesis_design requires a current hypothesis selection"
 )
+
+
+def _positive_contract_tokens(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return int(value)
+
+
+def _task_budget_request_tokens(run_id: str, node_run_id: str) -> int | None:
+    """Explicit per-node task budget from the workflow-run reservation.
+
+    Mirrors the turn-budget lookup path introduced in 281b18b5f: the
+    ``budgetRequest.requested.tokens`` of ``reservation-{node_run_id}`` (or the
+    node's ``budgetLedgerRef``) is the authoritative per-node token budget.
+    Best-effort by design: a formal Ledger run without a legacy run record has
+    no task budgetRequest, and callers fall through to the frozen snapshot
+    contract. Token budgets stay a distinct counter family from count budgets
+    (``toolCalls``), so a turns-style small constant can never leak back in as
+    a token reservation.
+    """
+
+    try:
+        from .store import WorkflowRunStore
+
+        record = WorkflowRunStore().get_run(run_id)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    reservation_ids = {f"reservation-{node_run_id}"}
+    for node_run in record.get("nodeRuns") or []:
+        if (
+            isinstance(node_run, dict)
+            and str(node_run.get("nodeRunId") or "").strip() == node_run_id
+        ):
+            ledger_ref = str(node_run.get("budgetLedgerRef") or "").strip()
+            if ledger_ref:
+                reservation_ids.add(ledger_ref)
+    for reservation in record.get("budgetReservations") or []:
+        if not isinstance(reservation, dict):
+            continue
+        if (
+            str(reservation.get("reservationId") or "").strip()
+            not in reservation_ids
+        ):
+            continue
+        requested = (
+            reservation.get("requested")
+            if isinstance(reservation.get("requested"), dict)
+            else {}
+        )
+        tokens = _positive_contract_tokens(requested.get("tokens"))
+        if tokens is not None:
+            return tokens
+    return None
+
+
+def resolve_agent_reserve_tokens(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    run_id: str,
+    node_id: str,
+    node_run_id: str,
+    budget_request_lookup: Any = None,
+) -> int:
+    """Derive the Agent node attempt reservation from the budget contract.
+
+    Priority (three levels, never a flat per-node constant): the explicit task
+    budget (``budgetRequest.requested.tokens``), the frozen run snapshot stage
+    budget (``budgetPolicy.stageBudgets[stage].tokens`` then
+    ``budgetPolicy.tokens``), then the conservative 2,000,000 fallback that
+    matches the session turn budget scale. The stage-admission cap applied by
+    the budget authority keeps the derived estimate within the stage's
+    remaining capacity, which is where the derived-estimate responsibility
+    (call inputs + output space) is actually observable. The reservation is an
+    admission hint only; settled usage stays the sole budgeting authority.
+    """
+
+    lookup = budget_request_lookup or _task_budget_request_tokens
+    try:
+        requested = lookup(run_id, node_run_id)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        requested = None
+    tokens = _positive_contract_tokens(requested)
+    if tokens is not None:
+        return tokens
+    from .budget_authority_adapter import (
+        DEFAULT_AGENT_NODE_RESERVE_TOKENS,
+        stage_budget_tokens,
+    )
+
+    return stage_budget_tokens(snapshot, node_id) or DEFAULT_AGENT_NODE_RESERVE_TOKENS
 
 
 def _hypothesis_fan_out_wait_timeout_ms(*, child_turn_id: str) -> int:
@@ -223,12 +315,25 @@ class RealDomainPorts:
             reserve_budget_authority,
         )
 
+        snapshot = self._run_input_snapshot(action.run_id)
+        if action.actor_kind == ActorKind.AGENT:
+            # A formal Agent attempt reserves the contract-derived budget,
+            # never a flat adapter constant: explicit task budgetRequest
+            # first, then the frozen stage budget, then the conservative 2M
+            # fallback. System actions keep their explicit zero estimate.
+            estimate_tokens = resolve_agent_reserve_tokens(
+                snapshot,
+                run_id=action.run_id,
+                node_id=action.node_id,
+                node_run_id=action.node_run_id,
+            )
+
         try:
             return reserve_budget_authority(
                 self._store,
                 action=action,
                 estimate_tokens=estimate_tokens,
-                input_snapshot=self._run_input_snapshot(action.run_id),
+                input_snapshot=snapshot,
             )
         except BudgetAuthorityError as exc:
             raise RuntimeError(str(exc)) from exc
