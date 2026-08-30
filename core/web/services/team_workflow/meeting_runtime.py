@@ -47,6 +47,7 @@ from core.research.workflow.contracts.discussion_scope import (
     parse_discussion_scope,
     session_scope_key,
 )
+from core.web.services.team_workflow import meeting_driver_work
 from core.web.services.team_workflow import meeting_rounds
 from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
     assert_writes_allowed,
@@ -1701,10 +1702,36 @@ def _record_meeting_discussion_driver_event(
         return
 
 
+def _record_driver_work_state(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    status: str,
+    error: Exception | None = None,
+) -> None:
+    """Persist the durable driver intent; storage outages never alter the run."""
+
+    try:
+        meeting_driver_work.record_intent(
+            team_id,
+            meeting_round_id,
+            status=status,
+            last_problem=None if error is None else meeting_driver_work.format_problem(error),
+        )
+    except Exception:  # noqa: BLE001 - durable intent accelerates recovery only
+        return
+
+
 def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> None:
     key = (team_id, meeting_round_id)
     try:
+        _record_driver_work_state(
+            team_id, meeting_round_id, status=meeting_driver_work.STATUS_RUNNING
+        )
         result = run_meeting_discussion(team_id, meeting_round_id)
+        _record_driver_work_state(
+            team_id, meeting_round_id, status=meeting_driver_work.STATUS_COMPLETED
+        )
         _record_meeting_discussion_driver_event(
             team_id,
             meeting_round_id,
@@ -1712,6 +1739,12 @@ def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> No
             outcome=str(result.get("stopReason") or "completed"),
         )
     except Exception as exc:  # noqa: BLE001 - background failures need durable evidence
+        _record_driver_work_state(
+            team_id,
+            meeting_round_id,
+            status=meeting_driver_work.STATUS_FAILED,
+            error=exc,
+        )
         _record_meeting_discussion_driver_event(
             team_id,
             meeting_round_id,
@@ -1779,15 +1812,28 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
                 "meetingRoundId": normalized_round_id,
             }
         _MEETING_DISCUSSION_JOBS.add(key)
+    # Persist the intent before the executor accepts the job: a backend
+    # restart between here and completion must leave a recoverable record.
+    _record_driver_work_state(
+        normalized_team_id,
+        normalized_round_id,
+        status=meeting_driver_work.STATUS_PENDING,
+    )
     try:
         _MEETING_DISCUSSION_EXECUTOR.submit(
             _run_scheduled_meeting_discussion,
             normalized_team_id,
             normalized_round_id,
         )
-    except Exception:
+    except Exception as exc:
         with _MEETING_DISCUSSION_JOBS_LOCK:
             _MEETING_DISCUSSION_JOBS.discard(key)
+        _record_driver_work_state(
+            normalized_team_id,
+            normalized_round_id,
+            status=meeting_driver_work.STATUS_FAILED,
+            error=exc,
+        )
         raise
     _record_meeting_discussion_driver_event(
         normalized_team_id,

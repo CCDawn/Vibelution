@@ -1248,7 +1248,9 @@ def test_formal_candidate_generation_runs_all_speakers_for_human_meeting_gate(
     assert len(completed_messages) == len(agent_ids)
 
 
-def test_background_discussion_scheduler_deduplicates_one_ready_meeting(monkeypatch):
+def test_background_discussion_scheduler_deduplicates_one_ready_meeting(
+    tmp_path, monkeypatch
+):
     class DeferredExecutor:
         def __init__(self):
             self.submissions: list[tuple[object, tuple[object, ...]]] = []
@@ -1257,6 +1259,10 @@ def test_background_discussion_scheduler_deduplicates_one_ready_meeting(monkeypa
             self.submissions.append((callback, args))
             return object()
 
+    # The scheduler now persists a durable intent next to meeting_rounds.jsonl;
+    # keep that write hermetic like the other meeting fixtures.
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
     team_id = "team-scheduled-discussion"
     meeting_id = "meeting-scheduled-discussion"
     executor = DeferredExecutor()

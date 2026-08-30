@@ -1,0 +1,335 @@
+"""Durable intent store and startup recovery for challenge meeting drivers.
+
+The in-process meeting discussion driver
+(``meeting_runtime._MEETING_DISCUSSION_EXECUTOR`` plus its dedup set) is the
+only scheduler; a backend restart used to orphan every open challenge meeting
+because the pending driver existed only in memory.  This module persists one
+append-only intent record per ``(teamId, meetingRoundId, actionKind)`` next to
+``meeting_rounds.jsonl`` so a startup sweep can fence deadline-expired
+meetings and re-drive interrupted discussions.
+
+Reads are latest-wins by ``(teamId, meetingRoundId, actionKind)``, mirroring
+the append + latest read contract of ``meeting_rounds``.  No second scheduler
+lives here: the recovery sweep only re-enters
+``meeting_runtime.schedule_meeting_discussion``, whose in-process dedup set
+still guarantees at most one live driver per meeting.  A full lease/heartbeat
+contract remains future work (plan T3).
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+import uuid
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+SCHEMA_VERSION = 1
+ACTION_RUN_DISCUSSION = "run_discussion"
+STATUS_PENDING = "pending"
+STATUS_RUNNING = "running"
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"
+STATUS_SUPERSEDED = "superseded"
+_VALID_STATUSES = frozenset(
+    {
+        STATUS_PENDING,
+        STATUS_RUNNING,
+        STATUS_COMPLETED,
+        STATUS_FAILED,
+        STATUS_SUPERSEDED,
+    }
+)
+# Same terminal vocabulary meeting_runtime uses when the discussion runner
+# observes an expired ``challengeDeadlineAtMs`` (stop_reason ``challenge_deadline``).
+_FENCE_REASON_DEADLINE = "challenge_deadline"
+MAX_AUTO_RESCHEDULE_ATTEMPTS = 3
+_MAX_LAST_PROBLEM_LENGTH = 240
+
+_LOCK = threading.RLock()
+_WORKER_BOOT_ID = uuid.uuid4().hex
+
+
+class MeetingDriverWorkError(RuntimeError):
+    """Base error for the durable meeting driver intent store."""
+
+
+def worker_boot_id() -> str:
+    """Process-level boot id stamped onto intents this process touches."""
+
+    with _LOCK:
+        return _WORKER_BOOT_ID
+
+
+def reset_for_tests() -> str:
+    """Test seam: drop in-memory state and rotate the boot id (new process)."""
+
+    global _WORKER_BOOT_ID
+    with _LOCK:
+        _WORKER_BOOT_ID = uuid.uuid4().hex
+        return _WORKER_BOOT_ID
+
+
+def format_problem(error: BaseException) -> str:
+    """Bounded problem text: exception type plus message, never a traceback."""
+
+    return f"{type(error).__name__}: {error}"[:_MAX_LAST_PROBLEM_LENGTH]
+
+
+def _meeting_rounds():
+    from core.web.services.team_workflow import meeting_rounds
+
+    return meeting_rounds
+
+
+def _require_id(value: Any, field: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise MeetingDriverWorkError(f"{field} is required")
+    return normalized
+
+
+def work_path(team_id: str) -> Path:
+    """Store path sharing the meeting_rounds team workspace resolution."""
+
+    meeting_rounds = _meeting_rounds()
+    rounds_path = meeting_rounds._rounds_path(_require_id(team_id, "teamId"))
+    return rounds_path.with_name("meeting_driver_work.jsonl")
+
+
+def _read_records(path: Path) -> list[dict[str, Any]]:
+    from core.web.services.team_workflow.storage_durability import read_jsonl_tolerant
+
+    return read_jsonl_tolerant(path)
+
+
+def _attempt_count(record: Mapping[str, Any] | None) -> int:
+    if not isinstance(record, Mapping):
+        return 0
+    value = record.get("attemptCount")
+    if isinstance(value, bool):
+        return 0
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return normalized if normalized > 0 else 0
+
+
+def latest_intent(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+) -> dict[str, Any] | None:
+    """Latest-wins intent for one meeting, mirroring meeting_rounds reads."""
+
+    normalized_team_id = _require_id(team_id, "teamId")
+    normalized_round_id = _require_id(meeting_round_id, "meetingRoundId")
+    with _LOCK:
+        records = _read_records(work_path(normalized_team_id))
+    for record in reversed(records):
+        if (
+            str(record.get("teamId") or "") == normalized_team_id
+            and str(record.get("meetingRoundId") or "") == normalized_round_id
+            and str(record.get("actionKind") or "") == action_kind
+        ):
+            return record
+    return None
+
+
+def record_intent(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    status: str,
+    last_problem: str | None = None,
+) -> dict[str, Any]:
+    """Append one durable intent record for the meeting discussion driver."""
+
+    normalized_team_id = _require_id(team_id, "teamId")
+    normalized_round_id = _require_id(meeting_round_id, "meetingRoundId")
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in _VALID_STATUSES:
+        raise MeetingDriverWorkError(f"unsupported driver work status: {status!r}")
+    now_ms = int(time.time() * 1000)
+    with _LOCK:
+        previous = latest_intent(normalized_team_id, normalized_round_id)
+        previous_attempts = _attempt_count(previous)
+        if normalized_status in {STATUS_PENDING, STATUS_RUNNING}:
+            boot_id = worker_boot_id()
+        else:
+            boot_id = (
+                str((previous or {}).get("workerBootId") or "").strip()
+                or worker_boot_id()
+            )
+        record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "workId": uuid.uuid4().hex,
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+            "actionKind": ACTION_RUN_DISCUSSION,
+            "status": normalized_status,
+            "attemptCount": previous_attempts + (1 if normalized_status == STATUS_RUNNING else 0),
+            "workerBootId": boot_id,
+            "createdAtMs": now_ms,
+            "updatedAtMs": now_ms,
+            "lastProblem": str(last_problem or "").strip()[:_MAX_LAST_PROBLEM_LENGTH],
+        }
+        from core.web.services.team_workflow.storage_durability import append_jsonl_locked
+
+        append_jsonl_locked(work_path(normalized_team_id), record)
+        return record
+
+
+def _teams_workspace_root() -> Path:
+    """Parent of every team workspace, resolved exactly like meeting_rounds."""
+
+    meeting_rounds = _meeting_rounds()
+    # Any team id resolves to <teams-root>/<team-id>/research_workflow/...;
+    # a probe id inherits the sandbox/formal resolution without duplicating it.
+    return meeting_rounds._team_workspace_root("driver-recovery-probe").parent
+
+
+def _team_ids_with_meeting_rounds() -> list[str]:
+    root = _teams_workspace_root()
+    if not root.exists():
+        return []
+    team_ids: list[str] = []
+    for rounds_path in sorted(root.glob("*/research_workflow/meeting_rounds.jsonl")):
+        parts = rounds_path.parts
+        if len(parts) >= 3 and parts[-3]:
+            team_ids.append(parts[-3])
+    return team_ids
+
+
+def recover_challenge_meeting_drivers() -> dict[str, Any]:
+    """Startup sweep for orphaned challenge meeting drivers.
+
+    For every open/summarizing meeting: fence it through the existing
+    terminal path when its ``challengeDeadlineAtMs`` has passed, re-enter
+    ``schedule_meeting_discussion`` when its durable intent shows an
+    interrupted run, and leave everything else untouched.  Idempotent: a
+    second consecutive run is a no-op because fenced meetings are closed and
+    rescheduled ones are protected by the in-process dedup set.  Never
+    raises; every team/meeting failure is isolated into ``skipped``.
+    """
+
+    summary: dict[str, Any] = {
+        "teams": 0,
+        "meetingsScanned": 0,
+        "fenced": 0,
+        "rescheduled": 0,
+        "skipped": 0,
+    }
+    try:
+        team_ids = _team_ids_with_meeting_rounds()
+    except Exception:  # noqa: BLE001 - startup sweep must never block boot
+        _record_recovery_scene_event(summary)
+        return summary
+    for team_id in team_ids:
+        summary["teams"] += 1
+        try:
+            _recover_team_drivers(team_id, summary)
+        except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
+            summary["skipped"] += 1
+    _record_recovery_scene_event(summary)
+    return summary
+
+
+def _recover_team_drivers(team_id: str, summary: dict[str, Any]) -> None:
+    meeting_rounds = _meeting_rounds()
+    meetings = meeting_rounds.list_meeting_rounds(
+        team_id, status=("open", "summarizing")
+    )["meetings"]
+    now_ms = int(time.time() * 1000)
+    for meeting in meetings:
+        summary["meetingsScanned"] += 1
+        meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+        if not meeting_round_id:
+            summary["skipped"] += 1
+            continue
+        try:
+            outcome = _recover_one_meeting(
+                team_id, meeting_round_id, dict(meeting), now_ms
+            )
+        except Exception:  # noqa: BLE001 - one broken meeting cannot stop the sweep
+            summary["skipped"] += 1
+            continue
+        if outcome == "fenced":
+            summary["fenced"] += 1
+        elif outcome == "rescheduled":
+            summary["rescheduled"] += 1
+        else:
+            summary["skipped"] += 1
+
+
+def _recover_one_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    meeting: Mapping[str, Any],
+    now_ms: int,
+) -> str:
+    deadline_at_ms = meeting.get("challengeDeadlineAtMs")
+    deadline_passed = (
+        isinstance(deadline_at_ms, int)
+        and not isinstance(deadline_at_ms, bool)
+        and deadline_at_ms > 0
+        and now_ms >= deadline_at_ms
+    )
+    if deadline_passed:
+        # terminate_meeting_execution closes without promoting a partial digest.
+        _meeting_rounds().terminate_meeting_execution(
+            team_id,
+            meeting_round_id,
+            reason=_FENCE_REASON_DEADLINE,
+        )
+        return "fenced"
+    work = latest_intent(team_id, meeting_round_id)
+    if work is None:
+        # No durable intent and no expired deadline: the preformal deadline
+        # backfill task owns these meetings; do not touch them here.
+        return "skipped"
+    status = str(work.get("status") or "").strip().lower()
+    stale_boot = str(work.get("workerBootId") or "") != worker_boot_id()
+    should_reschedule = (
+        status == STATUS_PENDING
+        or (status == STATUS_RUNNING and stale_boot)
+        or (status == STATUS_FAILED and _attempt_count(work) < MAX_AUTO_RESCHEDULE_ATTEMPTS)
+    )
+    if not should_reschedule:
+        return "skipped"
+    from core.web.services.team_workflow import meeting_runtime
+
+    result = meeting_runtime.schedule_meeting_discussion(team_id, meeting_round_id)
+    return "rescheduled" if str(result.get("status") or "") == "scheduled" else "skipped"
+
+
+def _record_recovery_scene_event(summary: Mapping[str, Any]) -> None:
+    """Bounded sweep evidence, following the meeting_runtime quiet pattern."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_discussion_recovery",
+            "meeting_discussion.recovery.sweep_completed",
+            message="Challenge meeting driver recovery sweep finished.",
+            level="info",
+            outcome="completed",
+            fields={
+                "teams": int(summary.get("teams") or 0),
+                "meetingsScanned": int(summary.get("meetingsScanned") or 0),
+                "fenced": int(summary.get("fenced") or 0),
+                "rescheduled": int(summary.get("rescheduled") or 0),
+                "skipped": int(summary.get("skipped") or 0),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        # A diagnostic outage must not alter the recovery outcome.
+        return

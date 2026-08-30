@@ -88,6 +88,14 @@ def _recover_wakeable_agent_inbox_messages_on_startup() -> object:
     return recover_wakeable_agent_inbox_messages_on_startup()
 
 
+def _recover_challenge_meeting_drivers_on_startup() -> object:
+    from .services.team_workflow.meeting_driver_work import (
+        recover_challenge_meeting_drivers,
+    )
+
+    return recover_challenge_meeting_drivers()
+
+
 def shutdown_session_catalog_on_shutdown() -> None:
     """Cancel opt-in catalog-only work before web shutdown completes."""
 
@@ -191,6 +199,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_wakeable_agent_inbox_messages_on_startup)
     )
+    startup_meeting_driver_recovery_task = asyncio.create_task(
+        asyncio.to_thread(_recover_challenge_meeting_drivers_on_startup)
+    )
     startup_external_agent_reconcile_task = asyncio.create_task(
         reconcile_external_agent_tasks_forever()
     )
@@ -239,6 +250,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
+    startup_meeting_driver_recovery_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Challenge meeting driver recovery failed during startup."
+        )
+    )
     startup_external_agent_reconcile_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="External Agent task reconciliation stopped unexpectedly."
@@ -278,6 +294,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "session_directory",
                         "session_catalog",
                         "agent_inbox_recovery",
+                        "meeting_driver_recovery",
                         "external_agent_task_reconcile",
                         "virtual_human_life",
                     ],
@@ -298,6 +315,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_directory_task,
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
+            startup_meeting_driver_recovery_task,
             startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,
             startup_workflow_runtime_task,

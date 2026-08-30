@@ -1825,16 +1825,35 @@ def close_meeting_round(
     }
 
 
-def list_meeting_rounds(team_id: str) -> dict[str, Any]:
+def list_meeting_rounds(
+    team_id: str,
+    *,
+    status: str | Sequence[str] | None = None,
+) -> dict[str, Any]:
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
+    statuses = {
+        str(item or "").strip().lower()
+        for item in (
+            list(status) if isinstance(status, (list, tuple, set)) else [status]
+        )
+        if str(item or "").strip()
+    }
     with _LOCK:
         records = _read_jsonl(_rounds_path(normalized_team_id))
     latest: dict[str, dict[str, Any]] = {}
     for record in records:
         latest[str(record.get("meetingRoundId") or "")] = record
-    rows = sorted(latest.values(), key=lambda item: str(item.get("startedAt") or ""))
+    rows = sorted(
+        (
+            record
+            for record in latest.values()
+            if not statuses
+            or str(record.get("status") or "").strip().lower() in statuses
+        ),
+        key=lambda item: str(item.get("startedAt") or ""),
+    )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
