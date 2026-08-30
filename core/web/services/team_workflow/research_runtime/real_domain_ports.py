@@ -906,6 +906,7 @@ class RealDomainPorts:
             action=action,
             handle=handle,
             input_snapshot=snapshot,
+            return_result=True,
         )
 
     def _create_hypothesis_fan_out(

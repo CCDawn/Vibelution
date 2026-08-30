@@ -25,7 +25,7 @@ from .challenge_turn_policy import (
     current_challenge_task_started_at_ms,
     remaining_challenge_task_ms,
 )
-from .domain_ports import AgentTaskHandle
+from .domain_ports import AgentTaskHandle, AgentTurnResult
 
 _SUCCESS_TERMINAL_STATUSES = frozenset({"ready", "completed", "done", "success"})
 _FAILURE_TERMINAL_STATUSES = frozenset(
@@ -846,7 +846,8 @@ def complete_agent_turn_outputs(
     input_snapshot: dict[str, Any],
     timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
-) -> list[dict[str, str]]:
+    return_result: bool = False,
+) -> list[dict[str, str]] | AgentTurnResult:
     """Wait for turn terminal, reconcile its task authority, collect store refs."""
     from .task_adapter_registry import resolve_agent_task_adapter
 
@@ -969,6 +970,12 @@ def complete_agent_turn_outputs(
                     challenge_contract.get("modelPolicySha256") or ""
                 ).strip().lower(),
             )
+    if return_result:
+        return AgentTurnResult(
+            materialized_refs=tuple(refs),
+            handle=handle,
+            usage=receipt_usage or None,
+        )
     return refs
 
 
