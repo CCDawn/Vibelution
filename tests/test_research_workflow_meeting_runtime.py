@@ -41,6 +41,7 @@ from core.web.services import (
 from core.web.services.team_workflow import meeting_rounds as meetings
 from core.web.services.team_workflow import meeting_runtime
 from core.web.services.team_workflow import personal_memory_candidates as memories
+from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
 
 from tests._support.team_workflow.helpers import (
     _use_fake_local_research_config,
@@ -162,6 +163,11 @@ def test_candidate_generation_persists_server_receipt_authority_and_refuses_rebi
     tmp_path, monkeypatch
 ):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "workflow_run_stop_reason",
+        lambda _authority: "",
+    )
     contexts: list[dict[str, object]] = []
 
     def capture_runner(participant, prompt, context):
@@ -792,6 +798,221 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
         assert [message["agentId"] for message in bound["messages"]] == list(
             agents.values()
         )
+
+
+def test_formal_discussion_driver_reuses_bound_deadline_and_starts_no_late_round(monkeypatch):
+    meeting = {
+        "meetingRoundId": "meeting-deadline",
+        "status": "open",
+        "linkedChatRoomId": "room-deadline",
+        "chatRoomRoundIds": ["round-opening"],
+        "rounds": 3,
+        "question": "SCI-096",
+        "meetingType": "hypothesis_candidate_generation",
+        "modelInvocationReceiptAuthority": {
+            "schemaVersion": 1,
+            "authorityKind": "workflow_run",
+            "teamId": "team-deadline",
+            "questionId": "SCI-096",
+            "workflowRunId": "run-deadline",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "wv-deadline",
+            "modelPolicySha256": "a" * 64,
+        },
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args: {"meetingRound": dict(meeting)},
+    )
+    monkeypatch.setattr(meeting_runtime, "_frozen_participant_agent_ids", lambda *_args: ["agent-1"])
+    monkeypatch.setattr(meeting_runtime, "_selection_from_meeting", lambda *_args: {})
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_bound_room_challenge_deadline_at_ms",
+        lambda *_args: 1_000_000,
+    )
+    monkeypatch.setattr(meeting_runtime.time, "time", lambda: 1000.001)
+    monkeypatch.setattr(meeting_runtime, "workflow_run_stop_reason", lambda _authority: "")
+    monkeypatch.setattr(meetings, "meeting_source_messages", lambda *_args: [{"status": "completed"}])
+    monkeypatch.setattr(
+        meeting_runtime,
+        "prepare_meeting_summary_draft",
+        lambda *_args, **_kwargs: {"meetingRound": dict(meeting)},
+    )
+    monkeypatch.setattr(
+        meetings,
+        "terminate_meeting_execution",
+        lambda *_args, reason, **_kwargs: {
+            "meetingRound": {**meeting, "status": "closed", "terminalReason": reason}
+        },
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "start_chat_room_round",
+        lambda *_args, **_kwargs: pytest.fail("expired formal meeting must not start another room round"),
+    )
+
+    result = meeting_runtime._run_meeting_discussion_impl(
+        "team-deadline",
+        "meeting-deadline",
+    )
+
+    assert result["stopReason"] == "challenge_deadline"
+    assert result["roundsRun"] == 1
+    assert result["completedMessageCount"] == 1
+    assert meeting_runtime._round_config(
+        {**meeting, "challengeDeadlineAtMs": 1_000_000},
+        {},
+        discussion_round_index=2,
+        team_id="team-deadline",
+    )["challengeDeadlineAtMs"] == 1_000_000
+
+
+def test_old_workflow_run_can_open_new_review_meeting_with_fresh_server_deadline(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    before_ms = int(meeting_runtime.time.time() * 1000)
+    selection = _selection_payload(
+        list(agents.values()),
+        meetingRoundId="meeting-review-after-old-run",
+        startedAt="2025-01-01T00:00:00Z",
+    )
+    created = meetings.create_meeting_round(
+        team_id,
+        {
+            **selection,
+            "meetingType": "plan_review",
+            "stage": "protocol",
+            "roundType": "decision_gate",
+            "modelInvocationReceiptAuthority": _receipt_authority(
+                team_id,
+                run_id="run-created-long-before-review",
+            ),
+        },
+    )
+
+    meeting_round = created["meetingRound"]
+    deadline_at_ms = meeting_round["challengeDeadlineAtMs"]
+    assert before_ms + 299_000 <= deadline_at_ms <= before_ms + 301_000
+    assert meeting_round["startedAt"] == "2025-01-01T00:00:00Z"
+    assert meetings.get_meeting_round(
+        team_id,
+        meeting_round["meetingRoundId"],
+    )["meetingRound"]["challengeDeadlineAtMs"] == deadline_at_ms
+
+
+@pytest.mark.parametrize(
+    "stop_reason",
+    ["challenge_workflow_run_cancelled", "challenge_workflow_run_blocked"],
+)
+def test_formal_discussion_starts_no_new_round_after_parent_run_inactive(
+    monkeypatch,
+    stop_reason,
+):
+    meeting = {
+        "meetingRoundId": "meeting-parent-cancelled",
+        "status": "open",
+        "linkedChatRoomId": "room-parent-cancelled",
+        "chatRoomRoundIds": ["round-opening"],
+        "rounds": 3,
+        "question": "SCI-096",
+        "meetingType": "hypothesis_candidate_generation",
+        "modelInvocationReceiptAuthority": {
+            "schemaVersion": 1,
+            "authorityKind": "workflow_run",
+            "teamId": "team-deadline",
+            "questionId": "SCI-096",
+            "workflowRunId": "run-cancelled",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "wv-deadline",
+            "modelPolicySha256": "a" * 64,
+        },
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(meetings, "get_meeting_round", lambda *_args: {"meetingRound": dict(meeting)})
+    monkeypatch.setattr(meeting_runtime, "_frozen_participant_agent_ids", lambda *_args: ["agent-1"])
+    monkeypatch.setattr(meeting_runtime, "_selection_from_meeting", lambda *_args: {})
+    monkeypatch.setattr(meeting_runtime, "_bound_room_challenge_deadline_at_ms", lambda *_args: None)
+    monkeypatch.setattr(meetings, "meeting_source_messages", lambda *_args: [{"status": "completed"}])
+    monkeypatch.setattr(
+        meeting_runtime,
+        "workflow_run_stop_reason",
+        lambda _authority: stop_reason,
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "start_chat_room_round",
+        lambda *_args, **_kwargs: pytest.fail("cancelled parent must not start another room round"),
+    )
+    monkeypatch.setattr(
+        meetings,
+        "terminate_meeting_execution",
+        lambda *_args, reason, **_kwargs: {
+            "meetingRound": {**meeting, "status": "closed", "terminalReason": reason}
+        },
+    )
+
+    result = meeting_runtime._run_meeting_discussion_impl(
+        "team-deadline",
+        "meeting-parent-cancelled",
+    )
+
+    assert result["status"] == "stopped"
+    assert result["stopReason"] == stop_reason
+    assert result["roundsRun"] == 1
+
+
+def test_fenced_meeting_persists_closed_terminal_and_cannot_reschedule(tmp_path, monkeypatch):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    created = meetings.create_meeting_round(
+        team_id,
+        {
+            **_selection_payload(
+                list(agents.values()),
+                meetingRoundId="meeting-fenced-terminal",
+            ),
+            "meetingType": "plan_review",
+            "stage": "protocol",
+            "roundType": "decision_gate",
+            "modelInvocationReceiptAuthority": _receipt_authority(team_id),
+        },
+    )["meetingRound"]
+
+    terminal = meetings.terminate_meeting_execution(
+        team_id,
+        created["meetingRoundId"],
+        reason="challenge_workflow_run_cancelled",
+    )["meetingRound"]
+
+    assert terminal["status"] == "closed"
+    assert terminal["executionStatus"] == "stopped"
+    assert terminal["terminalReason"] == "challenge_workflow_run_cancelled"
+    assert meeting_runtime.schedule_meeting_discussion(
+        team_id,
+        created["meetingRoundId"],
+    )["status"] == "not_open"
+
+
+def test_workflow_run_stop_reason_rechecks_blocked_then_allows_resumed_run(monkeypatch):
+    statuses = iter(["blocked", "running"])
+
+    class FakeStore:
+        def get_run(self, _run_id):
+            return type("Run", (), {"status": next(statuses)})()
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_write_store",
+        lambda: FakeStore(),
+    )
+    authority = {"workflowRunId": "run-resumable"}
+
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == (
+        "challenge_workflow_run_blocked"
+    )
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
 
 
 def test_background_discussion_scheduler_deduplicates_one_ready_meeting(monkeypatch):

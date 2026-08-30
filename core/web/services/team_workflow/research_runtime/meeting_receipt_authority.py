@@ -16,6 +16,9 @@ class MeetingReceiptAuthorityError(RuntimeError):
 
 
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled", "archived"})
+_EXECUTION_INACTIVE_RUN_STATUSES = _TERMINAL_RUN_STATUSES | frozenset(
+    {"blocked", "reconciliation_required"}
+)
 
 
 def _required_text(value: Any, field: str) -> str:
@@ -152,6 +155,32 @@ def resolve_active_question_authority(
         workflow_id=getattr(run, "workflow_id", ""),
         workflow_version_id=getattr(run, "workflow_version_id", ""),
         run_input=snapshot,
+    )
+
+
+def workflow_run_stop_reason(authority: Mapping[str, Any] | None) -> str:
+    """Read the canonical Ledger run before formal meeting fan-out continues."""
+
+    if not isinstance(authority, Mapping):
+        return ""
+    run_id = str(authority.get("workflowRunId") or "").strip()
+    if not run_id:
+        return "challenge_workflow_run_missing"
+    from .formal_write_runtime import get_write_store
+
+    try:
+        run = get_write_store().get_run(run_id)
+    except Exception:
+        # Formal execution cannot safely continue when its server-owned run
+        # authority is unreadable.  Do not fall back to legacy JSON state.
+        return "challenge_workflow_run_status_unavailable"
+    if run is None:
+        return "challenge_workflow_run_missing"
+    status = str(getattr(run, "status", "") or "").strip().lower()
+    return (
+        f"challenge_workflow_run_{status}"
+        if status in _EXECUTION_INACTIVE_RUN_STATUSES
+        else ""
     )
 
 
@@ -424,4 +453,5 @@ __all__ = [
     "build_speaker_receipt_context",
     "register_speaker_receipts",
     "resolve_active_question_authority",
+    "workflow_run_stop_reason",
 ]

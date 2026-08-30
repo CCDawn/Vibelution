@@ -132,6 +132,10 @@ _PARTICIPANT_CONTEXT_FIELDS = (
 AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
+_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY = "challengeDeadlineAtMs"
+_CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhausted"
+_CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX = "challenge_workflow_run_"
+_CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS = 0.5
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1095,6 +1099,11 @@ def start_chat_room_round(
                 en="This room is bound to a formal workflow stage; rounds require model invocation receipt authority.",
             )
         )
+    challenge_deadline_at_ms = _resolve_challenge_room_deadline_at_ms(
+        existing_room,
+        supplied_config,
+        receipt_authority=receipt_authority,
+    )
     if background and not _try_acquire_chat_room_inflight():
         # Reject before any durable round write so the room stays clean.
         raise ChatRoomBusyError(
@@ -1134,6 +1143,9 @@ def start_chat_room_round(
                 raise
             submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
             round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
+            round_config.pop(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY, None)
+            if challenge_deadline_at_ms is not None:
+                round_config[_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY] = challenge_deadline_at_ms
             participant_seed = copy.deepcopy(room.get("participants") or [])
 
         stage_started_at = _perf_counter()
@@ -1191,6 +1203,9 @@ def start_chat_room_round(
                 raise
             submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
             round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
+            round_config.pop(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY, None)
+            if challenge_deadline_at_ms is not None:
+                round_config[_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY] = challenge_deadline_at_ms
             try:
                 participant_candidates = (
                     refreshed_participants
@@ -1788,12 +1803,6 @@ def _execute_chat_room_round(
         if stopped_detail is not None:
             _clear_chat_room_round_control(round_id)
             return stopped_detail
-        prompt = _build_participant_prompt(
-            room=room,
-            round_payload=round_payload,
-            participant=participant,
-            prior_messages=messages,
-        )
         round_config = (
             round_payload.get("config")
             if isinstance(round_payload.get("config"), dict)
@@ -1813,17 +1822,47 @@ def _execute_chat_room_round(
             "meetingType": str(round_config.get("meetingType") or "").strip().lower(),
             "teamId": str(round_config.get("teamId") or "").strip(),
             "questionId": str(round_config.get("question") or "").strip().upper(),
+            "challengeDeadlineAtMs": _positive_int(
+                round_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
+            ),
             "_modelInvocationReceiptAuthority": receipt_authority,
         }
+        # A deadline is an absolute round fence.  Check it before constructing
+        # the next prompt so an expired formal round never starts another
+        # speaker, even when the previous runner returned a late result.
+        if _request_challenge_room_execution_stop(round_id, context, force_run_read=True):
+            stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+            if stopped_detail is not None:
+                _clear_chat_room_round_control(round_id)
+                return stopped_detail
+        prompt = _build_participant_prompt(
+            room=room,
+            round_payload=round_payload,
+            participant=participant,
+            prior_messages=messages,
+        )
         prompt_build_ms = _elapsed_ms(speaker_started_at)
         context["speakerStartedAtMonotonic"] = speaker_started_at
         context["promptBuildMs"] = prompt_build_ms
         message = _run_one_speaker(participant, prompt, context, runner)
         speaker_run_ms = _elapsed_ms(speaker_started_at)
-        stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-        if stopped_detail is not None:
-            _clear_chat_room_round_control(round_id)
-            return stopped_detail
+        stop_reason = _request_challenge_room_execution_stop(
+            round_id,
+            context,
+            force_run_read=True,
+        )
+        if stop_reason and str(message.get("status") or "").strip().lower() == "completed":
+            # The provider/custom runner returned after the formal fence. Keep
+            # only auditable stop metadata; late content cannot become formal
+            # meeting evidence.
+            message = {
+                **message,
+                "status": "stopped",
+                "resultStatus": "stopped",
+                "content": "",
+                "summary": stop_reason,
+                "lateResultDiscarded": True,
+            }
         messages.append(message)
         message_time = utc_now_iso()
         with _CHAT_ROOM_LOCK:
@@ -2218,7 +2257,13 @@ def _run_one_speaker(
         }
     except Exception as exc:
         total_speaker_ms = _elapsed_ms_between(speaker_started_at)
-        stop_reason = _chat_room_round_stop_reason(str(context.get("roundId") or "").strip())
+        normalized_round_id = str(context.get("roundId") or "").strip()
+        stop_reason = _chat_room_round_stop_reason(normalized_round_id)
+        if not stop_reason:
+            stop_reason = _request_challenge_room_execution_stop(
+                normalized_round_id,
+                context,
+            )
         if stop_reason:
             timestamp = utc_now_iso()
             return {
@@ -2427,6 +2472,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     round_id = str(context.get("roundId") or "").strip()
     participant_id = str(participant.get("participantId") or agent_id or session_id).strip()
     turn_identity = f"chat-room:{round_id}:{participant_id}"
+    interrupt_checker = _chat_room_interrupt_checker(round_id, context)
     from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
         build_speaker_receipt_context,
     )
@@ -2460,8 +2506,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         # A worker (max 2) must not wait forever for the agent slot held by a
         # long session turn: time out and fail the round instead of stalling
         # every room.
-        wait_timeout_seconds=900.0,
+        wait_timeout_seconds=_challenge_room_execution_slot_wait_seconds(context),
     ):
+        stop_reason = interrupt_checker()
+        if stop_reason:
+            raise RuntimeError(stop_reason)
         stage_started_at = _perf_counter()
         agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
         timings["agentContextBuildMs"] = _elapsed_ms(stage_started_at)
@@ -2534,7 +2583,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             prepare_agent_turn(
                 agent_runtime,
                 turn_identity=turn_identity,
-                interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                interrupt_checker=interrupt_checker,
                 chat_history=canonical_chat_history,
                 runtime_context=agent_context.context_block if agent_context is not None else "",
                 static_runtime_context=(
@@ -2588,7 +2637,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                         initial_prompt=prompt,
                         disable_tools=True,
                         turn_identity=turn_identity,
-                        interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                        interrupt_checker=interrupt_checker,
                         chat_history=canonical_chat_history,
                     )
             finally:
@@ -4565,6 +4614,126 @@ def _chat_room_round_stop_reason(round_id: str) -> str:
         return str(control.get("stopReason") or "").strip()
 
 
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
+
+
+def _resolve_challenge_room_deadline_at_ms(
+    room: Mapping[str, Any] | None,
+    supplied_config: Mapping[str, Any],
+    *,
+    receipt_authority: Mapping[str, Any] | None,
+) -> int | None:
+    """Carry one persisted logical-meeting clock into all of its room rounds."""
+
+    if receipt_authority is None or not _is_scoped_discussion_room(room):
+        return None
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        current_challenge_task_deadline_at_ms,
+    )
+
+    # Follow-up meeting rounds execute in their own scheduler thread. Their
+    # config is server-derived from the persisted formal MeetingRound.
+    candidates = [
+        value
+        for value in (
+            _positive_int(supplied_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)),
+            _positive_int(current_challenge_task_deadline_at_ms()),
+        )
+        if value is not None
+    ]
+    return min(candidates) if candidates else None
+
+
+def _challenge_room_deadline_stop_reason(context: Mapping[str, Any]) -> str:
+    deadline_at_ms = _positive_int(context.get("challengeDeadlineAtMs"))
+    if deadline_at_ms is None:
+        return ""
+    return (
+        _CHALLENGE_ROOM_DEADLINE_STOP_REASON
+        if int(time.time() * 1000) >= deadline_at_ms
+        else ""
+    )
+
+
+def _challenge_room_workflow_run_stop_reason(
+    context: Mapping[str, Any],
+    *,
+    force: bool = False,
+) -> str:
+    authority = context.get("_modelInvocationReceiptAuthority")
+    if not isinstance(authority, Mapping):
+        return ""
+    now = time.monotonic()
+    if isinstance(context, dict):
+        last_read = context.get("_challengeWorkflowRunReadAtMonotonic")
+        if (
+            not force
+            and isinstance(last_read, (int, float))
+            and now - float(last_read) < _CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS
+        ):
+            return str(context.get("_challengeWorkflowRunStopReason") or "")
+    from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+        workflow_run_stop_reason,
+    )
+
+    reason = workflow_run_stop_reason(authority)
+    if isinstance(context, dict):
+        context["_challengeWorkflowRunReadAtMonotonic"] = now
+        context["_challengeWorkflowRunStopReason"] = reason
+    return reason
+
+
+def _request_challenge_room_execution_stop(
+    round_id: str,
+    context: Mapping[str, Any],
+    *,
+    force_run_read: bool = False,
+) -> str:
+    reason = _challenge_room_deadline_stop_reason(context)
+    if not reason:
+        reason = _challenge_room_workflow_run_stop_reason(
+            context,
+            force=force_run_read,
+        )
+    if reason and _chat_room_round_has_process_control(round_id):
+        _request_chat_room_round_stop(round_id, reason)
+    return reason
+
+
+def _challenge_room_execution_slot_wait_seconds(context: Mapping[str, Any]) -> float:
+    deadline_at_ms = _positive_int(context.get("challengeDeadlineAtMs"))
+    if deadline_at_ms is None:
+        return 900.0
+    remaining_seconds = max(0.001, (deadline_at_ms - int(time.time() * 1000)) / 1000.0)
+    return min(900.0, remaining_seconds)
+
+
+def _chat_room_interrupt_checker(
+    round_id: str,
+    context: Mapping[str, Any],
+) -> Callable[[], str]:
+    """Compose manual stop + formal deadline and opt Chat transport into abort."""
+
+    def interrupt_checker() -> str:
+        reason = _chat_room_round_stop_reason(round_id)
+        if reason:
+            return reason
+        return _request_challenge_room_execution_stop(round_id, context)
+
+    interrupt_checker._vibelution_chat_provider_abort_enabled = bool(  # type: ignore[attr-defined]
+        _positive_int(context.get("challengeDeadlineAtMs"))
+        or isinstance(context.get("_modelInvocationReceiptAuthority"), Mapping)
+    )
+    return interrupt_checker
+
+
 def _clear_chat_room_round_control(round_id: str) -> None:
     normalized_round_id = str(round_id or "").strip()
     if not normalized_round_id:
@@ -4867,6 +5036,10 @@ def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, An
                 message_count=len(list(target_round.get("messages") or [])),
                 speaker_count=len(list(target_round.get("speakerOrder") or [])),
             )
+            if stop_reason == _CHALLENGE_ROOM_DEADLINE_STOP_REASON or stop_reason.startswith(
+                _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX
+            ):
+                target_round["terminalReason"] = stop_reason
             target_round["updatedAt"] = stopped_at
             target_round["finishedAt"] = stopped_at
             room["status"] = "ready"

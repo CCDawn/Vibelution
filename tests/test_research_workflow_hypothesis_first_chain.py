@@ -813,6 +813,68 @@ def test_fan_in_skips_superseded_attempt_and_binds_latest_authority(
     assert ready_from_latest["roundIndex"] == 2
 
 
+def test_fan_in_skips_execution_stopped_review_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fenced partial review cannot become the candidate's authority."""
+
+    from core.web.services import team_service
+
+    team_id = "team-fan-in-stopped"
+    links = [
+        {
+            "meetingRoundId": "meeting-a-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+        },
+        {
+            "meetingRoundId": "meeting-b-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-b",
+            "candidateOrder": 1,
+        },
+    ]
+    meeting_by_id = {
+        "meeting-a-r1": {
+            "meetingRoundId": "meeting-a-r1",
+            "status": "closed",
+            "executionStatus": "stopped",
+            "recoveryReason": "challenge_workflow_run_blocked",
+            "digest": {"decisions": [{"decision": "stale partial result"}]},
+        },
+        "meeting-b-r1": {"meetingRoundId": "meeting-b-r1", "status": "closed"},
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        chain,
+        "list_review_round_links",
+        lambda *_args, **_kwargs: {"links": links},
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args: {
+            "selection": {"selectedCandidateIds": ["hyp-a", "hyp-b"]}
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meeting_by_id[meeting_id]},
+    )
+
+    waiting = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-b-r1"]
+    )
+
+    assert waiting["status"] == "waiting_for_sibling_reviews"
+    assert waiting["supersededCandidateIds"] == ["hyp-a"]
+    assert waiting["supersededMeetingRoundIds"] == ["meeting-a-r1"]
+
+
 def test_fan_in_waits_when_superseded_candidate_has_no_successor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2797,6 +2859,19 @@ def _candidate_generation_runner(participant, prompt, context):
     return {"status": "completed", "raw_output": content, "summary": "ok"}
 
 
+def _generation_receipt_authority(team_id: str, run_id: str) -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": team_id,
+        "questionId": _QUESTION_ID,
+        "workflowRunId": run_id,
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "challenge-cup-research@1",
+        "modelPolicySha256": "a" * 64,
+    }
+
+
 def test_candidate_generation_cold_start_registers_ledger_candidates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2980,6 +3055,62 @@ def test_closed_generation_heals_candidates_from_source_messages(
     assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)[
         "candidateCount"
     ] == 2
+
+
+def test_stopped_generation_does_not_heal_or_reuse_for_a_new_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Partial stopped speech is audit evidence, never candidate authority."""
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        first = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+        )
+        first_id = first["meetingRound"]["meetingRoundId"]
+        first_meeting = meetings.get_meeting_round(team_id, first_id)["meetingRound"]
+        meetings._append_round_record(
+            team_id,
+            {
+                **first_meeting,
+                "modelInvocationReceiptAuthority": _generation_receipt_authority(
+                    team_id, "run-old"
+                ),
+            },
+        )
+        stopped = meetings.terminate_meeting_execution(
+            team_id,
+            first_id,
+            reason="challenge_workflow_run_blocked",
+        )["meetingRound"]
+        assert len(meetings.completed_meeting_source_messages(stopped)) >= 2
+
+        restarted = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_empty_generation_runner,
+            _model_invocation_receipt_authority=_generation_receipt_authority(
+                team_id, "run-new"
+            ),
+        )
+
+    assert restarted["status"] == "opened"
+    assert restarted["meetingRound"]["meetingRoundId"] != first_id
+    assert restarted["meetingRound"]["meetingRoundId"].endswith("-a2")
+    assert restarted["meetingRound"]["modelInvocationReceiptAuthority"][
+        "workflowRunId"
+    ] == "run-new"
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)[
+        "candidateCount"
+    ] == 0
 
 
 def _empty_generation_runner(participant, prompt, context):
