@@ -308,8 +308,15 @@ def test_initial_source_stage_submit_carries_only_ephemeral_challenge_deadline(
                 lightweight_response=True,
             )
 
+        from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+            CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+        )
+
         assert result["accepted"] is True
-        assert scheduled_contexts[0]["_challenge_task_deadline_at_ms"] == 301_000
+        assert (
+            scheduled_contexts[0]["_challenge_task_deadline_at_ms"]
+            == 1_000 + CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
+        )
         assert "_challenge_task_deadline_at_ms" not in scheduled_contexts[0]["message_metadata"]
     finally:
         _reset_seeded_session_runtime(session_id)
@@ -352,7 +359,14 @@ def test_continuation_submit_carries_same_ephemeral_challenge_deadline(
             )
 
         assert result["accepted"] is True
-        assert scheduled_contexts[0]["_challenge_task_deadline_at_ms"] == 302_000
+        from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+            CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+        )
+
+        assert (
+            scheduled_contexts[0]["_challenge_task_deadline_at_ms"]
+            == 2_000 + CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
+        )
         assert "_challenge_task_deadline_at_ms" not in scheduled_contexts[0]["message_metadata"]
     finally:
         _reset_seeded_session_runtime(session_id)

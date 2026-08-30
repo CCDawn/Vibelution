@@ -16,10 +16,10 @@ from typing import Any
 from core.research.workflow.contracts import PendingAction
 
 from .challenge_turn_policy import (
-    CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
     CHALLENGE_TURN_WAIT_WINDOW_MS,
     ChallengeTaskDeadlineExceeded,
     challenge_deadline_problem,
+    challenge_deadline_waited_ms,
     challenge_task_deadline_scope,
     current_challenge_task_resume_problem,
     current_challenge_task_started_at_ms,
@@ -685,7 +685,7 @@ def _wait_with_bounded_turn_continuation(
         if remaining_ms <= 0:
             raise ChallengeTaskDeadlineExceeded(
                 challenge_deadline_problem(
-                    waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                    waited_ms=challenge_deadline_waited_ms(),
                     turn_chain=turn_chain,
                 )
             )
@@ -724,7 +724,7 @@ def _wait_with_bounded_turn_continuation(
             if logical_deadline_bounded:
                 raise ChallengeTaskDeadlineExceeded(
                     challenge_deadline_problem(
-                        waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                        waited_ms=challenge_deadline_waited_ms(),
                         turn_chain=turn_chain,
                     )
                 ) from exc
@@ -757,7 +757,7 @@ def _wait_with_bounded_turn_continuation(
             if failure_problem_code == "challenge_logical_task_deadline_exhausted":
                 raise ChallengeTaskDeadlineExceeded(
                     challenge_deadline_problem(
-                        waited_ms=CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+                        waited_ms=challenge_deadline_waited_ms(),
                         turn_chain=turn_chain,
                     )
                 ) from exc

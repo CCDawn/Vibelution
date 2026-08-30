@@ -65,6 +65,7 @@ def test_ordinary_agent_inbox_does_not_gain_internal_continuation() -> None:
 
 def test_challenge_deadline_is_executor_ephemeral_and_continuation_safe() -> None:
     from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
         challenge_task_deadline_scope,
     )
 
@@ -74,10 +75,17 @@ def test_challenge_deadline_is_executor_ephemeral_and_continuation_safe() -> Non
         "nodeRunId": "node-1",
     }
     with challenge_task_deadline_scope(1_000):
-        assert submit._challenge_deadline_at_ms_for_submit(continuation_metadata) == 301_000
-        assert submit._challenge_deadline_at_ms_for_submit(
-            {"kind": "research_project_agent_task", **continuation_metadata}
-        ) == 301_000
+        expected_deadline = 1_000 + CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
+        assert (
+            submit._challenge_deadline_at_ms_for_submit(continuation_metadata)
+            == expected_deadline
+        )
+        assert (
+            submit._challenge_deadline_at_ms_for_submit(
+                {"kind": "research_project_agent_task", **continuation_metadata}
+            )
+            == expected_deadline
+        )
 
     assert submit._challenge_deadline_at_ms_for_submit(continuation_metadata) is None
     assert submit._challenge_deadline_at_ms_for_submit(
@@ -109,8 +117,15 @@ def test_source_stage_deadline_uses_canonical_task_contract(monkeypatch) -> None
         "sourceCollectionStageTaskId": "stage-task-1",
         # The initial stage message intentionally has no generic node fields.
     }
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        CHALLENGE_LOGICAL_TASK_TIMEOUT_MS,
+    )
+
     with challenge_task_deadline_scope(1_000):
-        assert submit._challenge_deadline_at_ms_for_submit(metadata) == 301_000
+        assert (
+            submit._challenge_deadline_at_ms_for_submit(metadata)
+            == 1_000 + CHALLENGE_LOGICAL_TASK_TIMEOUT_MS
+        )
 
 
 def test_source_stage_deadline_does_not_trust_message_contract(monkeypatch) -> None:

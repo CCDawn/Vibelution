@@ -518,7 +518,10 @@ def test_live_turn_wait_same_state_hits_no_progress_cap(tmp_path: Path) -> None:
             "completionSource": "running",
             "messageCount": 1,
             "activeTurnId": "turn-finding",
-            "turnCurrent": True,
+            # A truly silent turn: no in-flight signal.  A turnCurrent=True
+            # snapshot is an actively executing model call and is never
+            # no-progress (see test_challenge_logical_deadline_scale).
+            "turnCurrent": False,
             "challengeTaskStartedAtMs": created_at_ms,
         }
         stalled = _replace(
@@ -580,6 +583,9 @@ def test_live_turn_wait_real_progress_resets_only_no_progress_clock() -> None:
     assert decision.no_progress_ms == 0
     assert decision.stop_code == ""
 
+    # The absolute wait stop derives from the deadline contract (explicit
+    # contract here; the bounded default applies when the dispatcher has no
+    # contract -- see test_challenge_logical_deadline_scale).
     logical_timeout = decide_live_turn_wait(
         now_ms=created_at_ms + 300_000,
         created_at_ms=created_at_ms,
@@ -589,8 +595,24 @@ def test_live_turn_wait_real_progress_resets_only_no_progress_clock() -> None:
             "progressFingerprint": live_turn_progress_fingerprint(previous_snapshot),
         },
         snapshot=current_snapshot,
+        deadline_at_ms=created_at_ms + 300_000,
     )
     assert logical_timeout.stop_code == "live_turn_wait_timeout"
+    assert logical_timeout.deadline_source == "task_bundle_contract"
+
+    # Without a contract the same state stays inside the bounded default.
+    within_default = decide_live_turn_wait(
+        now_ms=created_at_ms + 300_000,
+        created_at_ms=created_at_ms,
+        previous_problem={
+            "code": "live_turn_wait",
+            "lastProgressAtMs": created_at_ms + 299_000,
+            "progressFingerprint": live_turn_progress_fingerprint(previous_snapshot),
+        },
+        snapshot=current_snapshot,
+    )
+    assert within_default.stop_code == ""
+    assert within_default.deadline_source == "bounded_default"
 
 
 def test_live_turn_wait_cannot_reset_missing_task_clock_on_requeue(

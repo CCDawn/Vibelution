@@ -54,6 +54,66 @@ from .iteration_route import branch_decision_from_run, routed_successors
 DEFAULT_ADAPTER_DISPATCH_LEASE_MS = 150_000
 
 
+def _task_bundle_contract_deadline_at_ms(action: PendingAction) -> int | None:
+    """Read the node's explicit subtask deadline contract (read-only).
+
+    task_bundle_lifecycle owns the UTC-aware ``deadlineAt`` on the task-bundle
+    subtask; this module only interprets it.  A missing/unreadable/malformed
+    contract returns None so the bounded conservative default window applies --
+    the fail-closed semantics never depend on this read succeeding.
+    """
+
+    from core.web.services.session.timebase import parse_timestamp_utc
+
+    from .store import WorkflowRunStore
+    from .task_bundle_lifecycle import task_bundle_id
+
+    node_run_id = str(getattr(action, "node_run_id", "") or "").strip()
+    run_id = str(getattr(action, "run_id", "") or "").strip()
+    if not node_run_id or not run_id:
+        return None
+    try:
+        record = WorkflowRunStore().get_run(run_id)
+        bundle = next(
+            (
+                item
+                for item in (record or {}).get("taskBundles") or []
+                if str(item.get("bundleId") or "") == task_bundle_id(node_run_id)
+            ),
+            None,
+        )
+        if bundle is None:
+            return None
+        subtasks = [
+            item for item in bundle.get("subtasks") or [] if isinstance(item, dict)
+        ]
+        selection_id = str(getattr(action, "selection_id", "") or "").strip()
+        candidate_id = str(getattr(action, "candidate_id", "") or "").strip()
+        subtask = None
+        if selection_id and candidate_id:
+            subtask = next(
+                (
+                    item
+                    for item in subtasks
+                    if str((item.get("scope") or {}).get("selectionId") or "")
+                    == selection_id
+                    and str((item.get("scope") or {}).get("candidateId") or "")
+                    == candidate_id
+                ),
+                None,
+            )
+        if subtask is None and len(subtasks) == 1:
+            subtask = subtasks[0]
+        if subtask is None:
+            return None
+        deadline_at = parse_timestamp_utc(subtask.get("deadlineAt"))
+        if deadline_at is None:
+            return None
+        return int(deadline_at.timestamp() * 1000)
+    except Exception:  # noqa: BLE001 - contract read is advisory, default applies
+        return None
+
+
 def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
     """Best-effort worker observability; never breaks the dispatch path."""
     from core.web.services.runtime_scene_service import (
@@ -411,10 +471,16 @@ class AdapterDispatchWorker:
             daemon=True,
         )
         thread.start()
+        contract_deadline_at_ms = (
+            _task_bundle_contract_deadline_at_ms(action)
+            if action.actor_kind == ActorKind.AGENT
+            else None
+        )
         deadline_scope = (
             challenge_task_deadline_scope(
                 int(getattr(outbox, "created_at_ms", 0) or self._now()),
                 resume_problem=getattr(outbox, "last_problem_json", ""),
+                deadline_at_ms=contract_deadline_at_ms,
             )
             if action.actor_kind == ActorKind.AGENT
             else nullcontext()
@@ -1094,12 +1160,19 @@ class AdapterDispatchWorker:
             (value for value in start_candidates if value > 0),
             default=now_ms,
         )
+        contract_deadline_at_ms = _task_bundle_contract_deadline_at_ms(action)
         decision = decide_live_turn_wait(
             now_ms=now_ms,
             created_at_ms=created_at_ms,
             previous_problem=previous_problem,
             snapshot=snapshot,
+            deadline_at_ms=contract_deadline_at_ms,
         )
+        # The actual derived budget: contract window when present, else the
+        # bounded default window from the task start.
+        derived_max_wait_ms = max(
+            0, int(decision.deadline_at_ms) - int(decision.started_at_ms)
+        ) or self._MAX_LIVE_TURN_WAIT_MS
         continuation_chain = [
             str(item or "").strip()
             for item in list(snapshot.get("continuationTurnChain") or [])
@@ -1141,10 +1214,12 @@ class AdapterDispatchWorker:
                     "code": decision.stop_code,
                     "detail": str(detail)[:400],
                     "waitedMs": decision.waited_ms,
-                    "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+                    "maxWaitMs": derived_max_wait_ms,
                     "noProgressMs": decision.no_progress_ms,
                     "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
                     "logicalTaskStartedAtMs": decision.started_at_ms,
+                    "deadlineAtMs": decision.deadline_at_ms,
+                    "deadlineSource": decision.deadline_source,
                     **continuation_problem,
                 },
             )
@@ -1179,6 +1254,7 @@ class AdapterDispatchWorker:
             waited_ms=decision.waited_ms,
             no_progress_ms=decision.no_progress_ms,
             progress_advanced=decision.progress_advanced,
+            max_wait_ms=derived_max_wait_ms,
         )
         outbox_api.requeue_action(
             self._store,
@@ -1191,10 +1267,12 @@ class AdapterDispatchWorker:
                     "code": "live_turn_wait",
                     "detail": str(detail)[:400],
                     "waitedMs": decision.waited_ms,
-                    "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+                    "maxWaitMs": derived_max_wait_ms,
                     "noProgressMs": decision.no_progress_ms,
                     "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
                     "logicalTaskStartedAtMs": decision.started_at_ms,
+                    "deadlineAtMs": decision.deadline_at_ms,
+                    "deadlineSource": decision.deadline_source,
                     "lastProgressAtMs": decision.last_progress_at_ms,
                     "progressFingerprint": decision.progress_fingerprint,
                     **continuation_problem,
@@ -1211,6 +1289,7 @@ class AdapterDispatchWorker:
         waited_ms: int,
         no_progress_ms: int,
         progress_advanced: bool,
+        max_wait_ms: int | None = None,
     ) -> None:
         """Append one workflow event per live-turn wait requeue (observability).
 
@@ -1223,7 +1302,7 @@ class AdapterDispatchWorker:
             **_action_identity(action),
             "attemptCount": int(attempt_count or 0),
             "waitedMs": int(waited_ms or 0),
-            "maxWaitMs": self._MAX_LIVE_TURN_WAIT_MS,
+            "maxWaitMs": int(max_wait_ms or self._MAX_LIVE_TURN_WAIT_MS),
             "noProgressMs": int(no_progress_ms or 0),
             "maxNoProgressMs": self._MAX_LIVE_TURN_NO_PROGRESS_MS,
             "progressAdvanced": bool(progress_advanced),
