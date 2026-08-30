@@ -12,11 +12,14 @@ from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import (
     LLMClient,
+    _cancellable_client_cache_key,
     _configure_litellm_import_environment,
     _default_completion_backend,
     _default_responses_backend,
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
+    _new_cancellable_completion_http_handler,
+    _new_cancellable_responses_http_handler,
     _retry_policy_backoff_seconds,
     _retry_policy_max_attempts,
     _safe_prompt_cache_payload_summary,
@@ -3985,6 +3988,237 @@ def test_responses_stream_reuses_cancellable_http_handler(monkeypatch):
     assert [event.type for event in second] == ["text_delta", "done"]
     assert len(created_handlers) == 1
     assert observed_clients == [created_handlers[0], created_handlers[0]]
+
+
+def test_new_cancellable_completion_http_handler_builds_credentialed_openai_client():
+    """litellm 1.96.0 completion(client=) requires an openai.OpenAI instance."""
+    import openai
+
+    payload = {
+        "api_key": "sk-cancellable-test",
+        "base_url": "https://relay.example/v1/chat/completions",
+        "timeout": 12.5,
+        "messages": [{"role": "user", "content": "ping"}],
+    }
+
+    client = _new_cancellable_completion_http_handler(payload)
+
+    assert isinstance(client, openai.OpenAI)
+    assert client.api_key == "sk-cancellable-test"
+    # attach happens before _default_completion_backend shifts the endpoint,
+    # so the builder must repeat the /chat/completions -> service-root shift.
+    assert str(client.base_url).rstrip("/") == "https://relay.example/v1"
+    assert client.max_retries == 0
+    assert client._client.timeout.read == 12.5
+    client.close()
+
+
+def test_new_cancellable_completion_http_handler_forwards_transport_options(monkeypatch):
+    import httpx
+
+    captured = {}
+    real_client = httpx.Client
+
+    class RecordingClient(real_client):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(httpx, "Client", RecordingClient)
+
+    client = _new_cancellable_completion_http_handler(
+        {
+            "api_key": "k",
+            "base_url": "https://relay.example/v1",
+            "timeout": 3,
+            "ssl_verify": False,
+            "messages": [],
+        }
+    )
+
+    assert captured["timeout"] == 3
+    assert captured["verify"] is False
+    client.close()
+
+
+def test_cancellable_client_cache_key_matches_shifted_endpoints():
+    chat_full = {"api_key": "k", "base_url": "https://relay.example/v1/chat/completions", "messages": []}
+    chat_root = {"api_key": "k", "base_url": "https://relay.example/v1", "messages": []}
+    responses_full = {"api_key": "k", "base_url": "https://relay.example/v1/responses", "input": "x"}
+    responses_root = {"api_key": "k", "base_url": "https://relay.example/v1", "input": "x"}
+
+    assert _cancellable_client_cache_key(chat_full) == _cancellable_client_cache_key(chat_root)
+    assert _cancellable_client_cache_key(responses_full) == _cancellable_client_cache_key(responses_root)
+    # Chat and Responses live in separate slots, so an identical effective
+    # endpoint may hash the same; only the credential must always diverge.
+    assert _cancellable_client_cache_key(chat_full) != _cancellable_client_cache_key(dict(chat_full, api_key="other"))
+
+
+def test_cancellable_client_slot_keyed_by_credentials_and_transport():
+    """Cached cancellable clients must never be reused across credentials."""
+
+    client = LLMClient.__new__(LLMClient)
+    created = []
+    closed = []
+
+    class FakeClient:
+        def close(self):
+            closed.append(self)
+
+    def factory(_payload):
+        instance = FakeClient()
+        created.append(instance)
+        return instance
+
+    lock = threading.Lock()
+    base_payload = {
+        "api_key": "key-a",
+        "base_url": "https://relay.example/v1/chat/completions",
+        "timeout": 10,
+        "messages": [{"role": "user", "content": "ping"}],
+    }
+
+    with lock:
+        first = client._get_or_create_cancellable_client(
+            "_cancellable_completion_http_handler", factory, base_payload
+        )
+        second = client._get_or_create_cancellable_client(
+            "_cancellable_completion_http_handler", factory, dict(base_payload)
+        )
+    assert first is second
+    assert created == [first]
+    assert closed == []
+
+    # A rotated api key must rebuild and close the stale credential-bearing client.
+    rotated = dict(base_payload, api_key="key-b")
+    with lock:
+        third = client._get_or_create_cancellable_client(
+            "_cancellable_completion_http_handler", factory, rotated
+        )
+    assert third is not first
+    assert created == [first, third]
+    assert closed == [first]
+
+    with lock:
+        fourth = client._get_or_create_cancellable_client(
+            "_cancellable_completion_http_handler", factory, dict(rotated)
+        )
+    assert fourth is third
+    assert created == [first, third]
+
+    # Transport option drift rebuilds too.
+    with lock:
+        fifth = client._get_or_create_cancellable_client(
+            "_cancellable_completion_http_handler", factory, dict(rotated, timeout=99)
+        )
+    assert fifth is not third
+    assert created == [first, third, fifth]
+    assert closed == [first, third]
+
+
+def test_new_cancellable_responses_http_handler_stays_litellm_http_handler():
+    """litellm 1.96.0 responses(client=) contract is an HTTPHandler; an openai
+    SDK client would fail its isinstance check and be silently ignored."""
+    from litellm import HTTPHandler
+
+    handler = _new_cancellable_responses_http_handler(
+        {"api_key": "k", "base_url": "https://relay.example/v1/responses", "timeout": 7, "input": "x"}
+    )
+
+    assert isinstance(handler, HTTPHandler)
+    assert not hasattr(handler, "api_key")
+    handler.close()
+
+
+def test_chat_non_stream_attaches_credentialed_openai_client(monkeypatch):
+    """The cancellable chat attach must hand litellm an openai.OpenAI client."""
+    import litellm
+    import openai
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "relay-secret",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-5.3-flash",
+        }
+    )
+    observed = {}
+
+    def completion(**kwargs):
+        observed.update(kwargs)
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    monkeypatch.setattr(litellm, "completion", completion, raising=False)
+    client = LLMClient(config=config)
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+        client._invoke_payload_once(
+            {
+                "model": "glm-5.3-flash",
+                "messages": [{"role": "user", "content": "ping"}],
+                "stream": False,
+                "api_key": "relay-secret",
+                "base_url": "https://pixel.try-chatapi.com/v1/chat/completions",
+            }
+        )
+
+    attached = observed.get("client")
+    assert isinstance(attached, openai.OpenAI)
+    assert attached.api_key == "relay-secret"
+    assert str(attached.base_url).rstrip("/") == "https://pixel.try-chatapi.com/v1"
+    attached.close()
+
+
+def test_chat_stream_reuses_keyed_cancellable_client(monkeypatch):
+    """Same credentials reuse one openai client; the factory is not re-run."""
+
+    import litellm
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-5.3-flash",
+        }
+    )
+    observed_clients = []
+    created = []
+
+    class FakeClient:
+        def close(self):
+            raise AssertionError("successful same-key streams must not close the reusable client")
+
+    def new_handler(_payload):
+        instance = FakeClient()
+        created.append(instance)
+        return instance
+
+    def completion(**kwargs):
+        observed_clients.append(kwargs["client"])
+        return iter(
+            [
+                {"choices": [{"delta": {"role": "assistant", "content": "ok"}}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            ]
+        )
+
+    monkeypatch.setattr(litellm, "completion", completion, raising=False)
+    monkeypatch.setattr("core.llm.client._new_cancellable_completion_http_handler", new_handler)
+
+    client = LLMClient(config=config)
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+        first = list(client.stream_events([{"role": "user", "content": "first"}]))
+        second = list(client.stream_events([{"role": "user", "content": "second"}]))
+
+    assert any(event.type == "text_delta" for event in first)
+    assert any(event.type == "text_delta" for event in second)
+    assert len(created) == 1
+    assert observed_clients == [created[0], created[0]]
 
 
 def test_stream_does_not_replay_after_partial_output(monkeypatch):

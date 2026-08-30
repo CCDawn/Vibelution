@@ -1819,8 +1819,39 @@ def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
 _default_responses_backend._vibelution_default_responses_backend = True
 
 
+def _cancellable_client_cache_key(payload: Dict[str, Any]) -> tuple:
+    """Identity of a cached cancellable client: baked credentials and transport options.
+
+    Cancellable clients carry ``api_key``/``base_url`` (openai SDK) plus
+    transport options, so slots must never be reused across credentials,
+    endpoints or timeouts; otherwise one provider's credential would be sent
+    to another provider. The base_url uses the same LiteLLM service-root shift
+    as the corresponding backend so equivalent endpoints share one entry.
+    """
+
+    if _payload_uses_responses(payload):
+        base_url = _litellm_responses_api_base(payload.get("base_url"))
+    else:
+        base_url = _litellm_chat_completions_api_base(payload.get("base_url"))
+    return (
+        str(payload.get("api_key") or ""),
+        str(base_url or ""),
+        repr(payload.get("timeout")),
+        repr(payload.get("ssl_verify")),
+    )
+
+
 def _new_cancellable_responses_http_handler(payload: Dict[str, Any]) -> Any:
-    """Create one reusable LiteLLM HTTP client whose active request can be aborted."""
+    """Create one reusable LiteLLM HTTP client whose active request can be aborted.
+
+    LiteLLM 1.96.0's ``responses()`` native handler
+    (``BaseLLMHTTPHandler.response_api_handler``) expects ``client=`` to be a
+    litellm ``HTTPHandler`` and calls ``.post()`` on it directly; an openai SDK
+    client fails the ``isinstance`` check there and would be silently ignored,
+    losing the in-flight abort semantics. Unlike the Chat Completions path it
+    never reads ``client.api_key``, so the credential-free HTTPHandler is the
+    installed contract here.
+    """
 
     from litellm import HTTPHandler
 
@@ -1830,13 +1861,39 @@ def _new_cancellable_responses_http_handler(payload: Dict[str, Any]) -> Any:
 
 
 def _new_cancellable_completion_http_handler(payload: Dict[str, Any]) -> Any:
-    """Create a LiteLLM HTTP client for an interruptible Chat Completions call."""
+    """Create an interruptible Chat Completions client as an openai SDK client.
 
-    from litellm import HTTPHandler
+    LiteLLM 1.96.0's ``completion()`` contract for ``client=`` is an
+    ``openai.OpenAI``/``openai.AsyncOpenAI`` instance: the OpenAI handler uses
+    the passed client as-is and reads ``client.api_key`` in ``pre_call``
+    (``litellm/llms/openai/openai.py``), so an httpx-level ``HTTPHandler``
+    crashes with ``'HTTPHandler' object has no attribute 'api_key'``. The
+    attach happens before ``_default_completion_backend`` shifts the final
+    endpoint to LiteLLM's service root, so the same shift is repeated here.
+    ``close()`` closes the underlying httpx client, preserving the in-flight
+    TCP-level abort semantics the watcher relies on.
+    """
+
+    try:
+        import httpx
+        import openai
+    except Exception as exc:  # pragma: no cover
+        raise LLMError(
+            "configuration_error",
+            "openai/httpx 未安装，无法创建可中断的 Chat Completions 客户端",
+            retryable=False,
+        ) from exc
 
     timeout = payload.get("timeout")
     ssl_verify = payload.get("ssl_verify")
-    return HTTPHandler(timeout=timeout, ssl_verify=ssl_verify)
+    if ssl_verify is None:
+        ssl_verify = True
+    return openai.OpenAI(
+        api_key=payload.get("api_key"),
+        base_url=_litellm_chat_completions_api_base(payload.get("base_url")),
+        http_client=httpx.Client(timeout=timeout, verify=ssl_verify),
+        max_retries=0,
+    )
 
 
 class _CancellableProviderStream:
@@ -2015,10 +2072,12 @@ class LLMClient:
         self._responses_backend = responses_backend or backend or _default_responses_backend
         self._anthropic_backend = anthropic_backend or backend or _default_anthropic_native_backend
         self._cancellable_responses_http_handler: Any = None
+        self._cancellable_responses_http_handler_key: Any = None
         self._cancellable_responses_http_handler_lock = threading.Lock()
         self._cancellable_responses_stream_lock = threading.Lock()
         self._cancellable_responses_request_lock = self._cancellable_responses_stream_lock
         self._cancellable_completion_http_handler: Any = None
+        self._cancellable_completion_http_handler_key: Any = None
         self._cancellable_completion_http_handler_lock = threading.Lock()
         self._cancellable_completion_stream_lock = threading.Lock()
         self._cancellable_completion_request_lock = self._cancellable_completion_stream_lock
@@ -2108,6 +2167,36 @@ class LLMClient:
                 **fields,
             )
 
+    def _get_or_create_cancellable_client(
+        self,
+        attr: str,
+        factory: Callable[[Dict[str, Any]], Any],
+        payload: Dict[str, Any],
+    ) -> Any:
+        """Return the slot's cached cancellable client, rebuilding on drift.
+
+        Cancellable clients bake in credentials/endpoints, so the slot is keyed
+        by ``_cancellable_client_cache_key`` (api_key, shifted base_url,
+        timeout, ssl_verify). A cache hit reuses the instance; any other state
+        closes the stale instance first so credentials never leak across
+        providers or profiles. The caller must hold the slot lock.
+        """
+
+        key_attr = f"{attr}_key"
+        cache_key = _cancellable_client_cache_key(payload)
+        handler = getattr(self, attr, None)
+        if handler is not None and getattr(self, key_attr, None) == cache_key:
+            return handler
+        if handler is not None:
+            try:
+                handler.close()
+            except Exception:
+                pass
+        handler = factory(payload)
+        setattr(self, attr, handler)
+        setattr(self, key_attr, cache_key)
+        return handler
+
     def _prepare_cancellable_responses_stream(
         self,
         payload: Dict[str, Any],
@@ -2135,10 +2224,11 @@ class LLMClient:
                 raise LLMCancelledError(reason)
         try:
             with self._cancellable_responses_http_handler_lock:
-                handler = self._cancellable_responses_http_handler
-                if handler is None:
-                    handler = _new_cancellable_responses_http_handler(payload)
-                    self._cancellable_responses_http_handler = handler
+                handler = self._get_or_create_cancellable_client(
+                    "_cancellable_responses_http_handler",
+                    _new_cancellable_responses_http_handler,
+                    payload,
+                )
         except Exception:
             self._cancellable_responses_stream_lock.release()
             raise
@@ -2164,6 +2254,7 @@ class LLMClient:
                 with self._cancellable_responses_http_handler_lock:
                     if self._cancellable_responses_http_handler is handler:
                         self._cancellable_responses_http_handler = None
+                        self._cancellable_responses_http_handler_key = None
                 return
 
         watcher = threading.Thread(
@@ -2219,10 +2310,11 @@ class LLMClient:
                 raise LLMCancelledError(reason)
         try:
             with self._cancellable_completion_http_handler_lock:
-                handler = self._cancellable_completion_http_handler
-                if handler is None:
-                    handler = _new_cancellable_completion_http_handler(payload)
-                    self._cancellable_completion_http_handler = handler
+                handler = self._get_or_create_cancellable_client(
+                    "_cancellable_completion_http_handler",
+                    _new_cancellable_completion_http_handler,
+                    payload,
+                )
         except Exception:
             self._cancellable_completion_stream_lock.release()
             raise
@@ -2248,6 +2340,7 @@ class LLMClient:
                 with self._cancellable_completion_http_handler_lock:
                     if self._cancellable_completion_http_handler is handler:
                         self._cancellable_completion_http_handler = None
+                        self._cancellable_completion_http_handler_key = None
                 return
 
         watcher = threading.Thread(
@@ -2320,10 +2413,7 @@ class LLMClient:
                 raise LLMCancelledError(reason)
         with handler_lock:
             try:
-                handler = getattr(self, handler_attr)
-                if handler is None:
-                    handler = factory(payload)
-                    setattr(self, handler_attr, handler)
+                handler = self._get_or_create_cancellable_client(handler_attr, factory, payload)
             except Exception:
                 request_lock.release()
                 raise
@@ -2348,6 +2438,7 @@ class LLMClient:
                 with handler_lock:
                     if getattr(self, handler_attr) is handler:
                         setattr(self, handler_attr, None)
+                        setattr(self, f"{handler_attr}_key", None)
                 return
 
         watcher = threading.Thread(
