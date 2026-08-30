@@ -1036,6 +1036,8 @@ def start_chat_room_round(
     lightweight_response: bool = False,
     max_topic_lines: int = 6,
     _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
+    _on_round_persisted: Callable[[Mapping[str, Any], Mapping[str, Any]], None]
+    | None = None,
 ) -> dict[str, Any]:
     submit_started_at = _perf_counter()
     submit_timings: dict[str, Any] = {}
@@ -1294,6 +1296,8 @@ def start_chat_room_round(
 
     inflight_submitted = False
     try:
+        if _on_round_persisted is not None:
+            _on_round_persisted(room, round_payload)
         # A background round must become observable as soon as its durable room
         # and round records exist. Kernel tracing and WorkRun persistence can
         # touch other stores, so doing either before ``submit`` makes sibling
@@ -5036,10 +5040,7 @@ def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, An
                 message_count=len(list(target_round.get("messages") or [])),
                 speaker_count=len(list(target_round.get("speakerOrder") or [])),
             )
-            if stop_reason == _CHALLENGE_ROOM_DEADLINE_STOP_REASON or stop_reason.startswith(
-                _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX
-            ):
-                target_round["terminalReason"] = stop_reason
+            target_round["terminalReason"] = stop_reason
             target_round["updatedAt"] = stopped_at
             target_round["finishedAt"] = stopped_at
             room["status"] = "ready"
@@ -5061,6 +5062,10 @@ def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, An
         )
         _sync_stopped_round_to_sessions_if_needed(room, target_round)
         _publish_chat_room_detail_snapshot(room_id)
+    if str(target_round.get("terminalReason") or "").strip():
+        from core.web.services.team_workflow import meeting_runtime
+
+        meeting_runtime.finalize_stopped_meeting_after_chat_round(room, target_round)
     return _room_to_api(room)
 
 

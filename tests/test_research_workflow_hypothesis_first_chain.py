@@ -124,6 +124,36 @@ class _DeferredExecutor:
             future.set_result(submitted["fn"](*submitted["args"], **submitted["kwargs"]))
 
 
+def test_generation_attempt_finishes_when_bound_meeting_is_fenced(monkeypatch):
+    attempt = {
+        "recordKind": "generation_attempt",
+        "attemptId": "attempt-terminal-bridge",
+        "attemptNumber": 2,
+        "questionId": "SCI-002",
+        "meetingRoundId": "meeting-terminal-bridge",
+        "lifecycle": "running",
+        "supersedesAttemptId": "attempt-1",
+    }
+    appended = []
+    monkeypatch.setattr(chain, "_storage_path", lambda _team_id: Path("unused"))
+    monkeypatch.setattr(chain, "_read_jsonl", lambda _path: [dict(attempt)])
+    monkeypatch.setattr(
+        chain,
+        "_append_generation_attempt_state",
+        lambda team_id, **kwargs: appended.append((team_id, kwargs)) or kwargs,
+    )
+
+    result = chain.fail_generation_attempt_for_meeting(
+        "research-team",
+        "meeting-terminal-bridge",
+        reason="challenge_workflow_run_blocked",
+    )
+
+    assert result["lifecycle"] == "failed"
+    assert result["error"] == "challenge_workflow_run_blocked"
+    assert appended[0][1]["supersedes_attempt_id"] == "attempt-1"
+
+
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -3217,6 +3247,11 @@ def test_stopped_generation_does_not_heal_or_reuse_for_a_new_run(
         "challenge_question_run_summary",
         lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
     )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "maybe_auto_draft_after_chat_round",
+        lambda *_args, **_kwargs: None,
+    )
 
     with server_operator_scope("u-1", roles=("operator",)):
         first = chain.open_candidate_generation_meeting(
@@ -3285,6 +3320,10 @@ def test_active_generation_from_cancelled_run_does_not_block_new_run(
         selections,
         "_approved_candidate_ids",
         lambda _team_id, _question_id, *, workflow_run_id="": set(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_receipt_authority.workflow_run_stop_reason",
+        lambda _authority: "",
     )
 
     def generation_scope(run_id: str) -> dict[str, object]:
@@ -3360,7 +3399,7 @@ def test_active_generation_from_cancelled_run_does_not_block_new_run(
             team_id, opened["meetingRound"]["meetingRoundId"]
         )["meetingRound"]
         assert chain._meeting_workflow_run_id(persisted_new) == "run-new"
-        assert persisted_new["status"] == "open", persisted_new
+        assert persisted_new["status"] == "awaiting_approval", persisted_new
         monkeypatch.setattr(
             meetings,
             "running_bound_round_ids",

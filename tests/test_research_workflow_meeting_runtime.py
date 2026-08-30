@@ -1052,6 +1052,62 @@ def test_fenced_meeting_persists_closed_terminal_and_cannot_reschedule(tmp_path,
     )["status"] == "not_open"
 
 
+def test_stopped_candidate_room_closes_meeting_and_generation_attempt(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    meeting = {
+        "meetingRoundId": "meeting-terminal-bridge",
+        "meetingType": "hypothesis_candidate_generation",
+        "status": "closed",
+        "terminalReason": "challenge_workflow_run_blocked",
+    }
+    closed = []
+    attempts = []
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda *_args: {"meetingRound": {**meeting, "status": "open"}},
+    )
+    monkeypatch.setattr(
+        meetings,
+        "terminate_meeting_execution",
+        lambda team_id, meeting_id, *, reason: (
+            closed.append((team_id, meeting_id, reason))
+            or {"status": "stopped", "meetingRound": dict(meeting)}
+        ),
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "fail_generation_attempt_for_meeting",
+        lambda team_id, meeting_id, *, reason: attempts.append(
+            (team_id, meeting_id, reason)
+        ),
+    )
+
+    result = meeting_runtime.finalize_stopped_meeting_after_chat_round(
+        {"roomId": "room-terminal-bridge"},
+        {
+            "roundId": "round-terminal-bridge",
+            "terminalReason": "challenge_workflow_run_blocked",
+            "config": {
+                "teamId": "team-terminal-bridge",
+                "meetingRoundId": "meeting-terminal-bridge",
+                "meetingType": "hypothesis_candidate_generation",
+            },
+        },
+    )
+
+    assert result == {"status": "stopped", "meetingRound": meeting}
+    assert closed == [
+        (
+            "team-terminal-bridge",
+            "meeting-terminal-bridge",
+            "challenge_workflow_run_blocked",
+        )
+    ]
+    assert attempts == closed
+
+
 def test_workflow_run_stop_reason_rechecks_blocked_then_allows_resumed_run(monkeypatch):
     statuses = iter(["blocked", "running"])
 

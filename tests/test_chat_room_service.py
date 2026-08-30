@@ -2854,10 +2854,22 @@ def test_formal_room_stops_fanout_when_parent_workflow_run_is_inactive(
         lambda _authority: run_reads.pop(0) if run_reads else stop_reason,
     )
     called_participants = []
+    terminal_bridges = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.meeting_runtime.finalize_stopped_meeting_after_chat_round",
+        lambda room, round_payload: terminal_bridges.append(
+            (dict(room), dict(round_payload))
+        ),
+    )
 
     detail = chat_room_service.start_chat_room_round(
         room["roomId"],
         "候选生成",
+        config={
+            "meetingRoundId": "meeting-parent-run-stop",
+            "meetingType": "hypothesis_candidate_generation",
+            "teamId": "team-formal",
+        },
         agent_runner=lambda participant, _prompt, _context: (
             called_participants.append(participant["participantId"])
             or {"status": "completed", "raw_output": "候选一", "summary": "ok"}
@@ -2871,6 +2883,8 @@ def test_formal_room_stops_fanout_when_parent_workflow_run_is_inactive(
     assert latest["status"] == "stopped"
     assert latest["terminalReason"] == stop_reason
     assert "1/2" in latest["summary"]
+    assert len(terminal_bridges) == 1
+    assert terminal_bridges[0][1]["roundId"] == latest["roundId"]
 
 
 def test_formal_room_uses_earliest_outer_and_meeting_deadline(monkeypatch):
