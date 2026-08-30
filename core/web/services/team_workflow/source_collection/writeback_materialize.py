@@ -1382,6 +1382,7 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
             writeback=writeback,
             graph_response=graph_response,
             agent_graph=agent_graph,
+            run_id=run_id,
         )
     materialized = {
         "candidateGraphId": candidate_graph_id,

@@ -145,10 +145,12 @@ def _attach_candidate_graph_stage_writeback_metadata(
     writeback: dict[str, Any],
     graph_response: dict[str, Any],
     agent_graph: dict[str, Any],
+    run_id: str = "",
 ) -> None:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_graph_id = s._trim_text(candidate_graph_id, max_length=160)
+    normalized_run_id = s._trim_text(run_id, max_length=160)
     if not normalized_candidate_graph_id:
         return
     normalized_stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="relations")
@@ -166,7 +168,14 @@ def _attach_candidate_graph_stage_writeback_metadata(
         "result": {"candidateGraph": s._normalize_metadata(agent_graph)} if agent_graph else {},
     }
     with s._WORKFLOW_LOCK:
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        # Run-scoped writebacks resolve the store through the shared run-owner
+        # resolver so the graph record is updated (and, on write, adopted) in
+        # the run's owning project store instead of the active project's.
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         changed = False
         for candidate in list(candidate_store.get("candidates") or []):
             if not isinstance(candidate, dict) or str(candidate.get("candidateId") or "") != normalized_candidate_graph_id:
@@ -215,7 +224,10 @@ def _attach_candidate_graph_stage_writeback_metadata(
             break
         if changed:
             candidate_store["updatedAt"] = s.utc_now_iso()
-            s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+            s._write_json(
+                s._candidate_store_path(normalized_team_id, normalized_run_id),
+                candidate_store,
+            )
 
 
 def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:

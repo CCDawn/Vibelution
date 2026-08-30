@@ -1716,6 +1716,52 @@ def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[di
                     item,
                 )
             )
+    # ``candidateRelations[]`` is the relations prompt contract's canonical
+    # output shape (writeback prompt contracts mandate it). Classify each
+    # relation the same way the payload normalizer does: theme endpoints map
+    # to ``source-theme:`` node ids, everything else stays a candidate edge.
+    # Endpoints that resolve nowhere keep the merge's fail-closed dangling
+    # semantics; the caller dedupes by (source, target, relation).
+    theme_ids: set[str] = set()
+    for item in list(agent_graph.get("themeNodes") or []):
+        if not isinstance(item, dict):
+            continue
+        theme_id = s._source_collection_agent_graph_theme_id(item)
+        if theme_id:
+            theme_ids.add(theme_id)
+
+    def _theme_endpoint(token: str) -> str:
+        bare = token.split(":", 1)[1] if token.startswith("source-theme:") else token
+        return s._source_collection_agent_graph_theme_node_id(bare) if bare in theme_ids else ""
+
+    for item in list(agent_graph.get("candidateRelations") or []):
+        if not isinstance(item, dict):
+            continue
+        source_token = s._trim_text(
+            item.get("from")
+            or item.get("source")
+            or item.get("sourceCandidateId")
+            or item.get("candidateId"),
+            max_length=160,
+        )
+        target_token = s._trim_text(
+            item.get("to")
+            or item.get("target")
+            or item.get("targetCandidateId")
+            or item.get("themeId"),
+            max_length=160,
+        )
+        relation = s._trim_text(
+            item.get("relation") or item.get("relationType") or item.get("relation_type") or item.get("type"),
+            max_length=160,
+        )
+        if not source_token or not target_token or not relation:
+            continue
+        source_id = node_aliases.get(source_token, source_token)
+        target_id = node_aliases.get(target_token, target_token)
+        source_id = _theme_endpoint(source_id) or source_id
+        target_id = _theme_endpoint(target_id) or target_id
+        edges.append(canonical_edge(source_id, target_id, relation, item))
     return edges
 
 

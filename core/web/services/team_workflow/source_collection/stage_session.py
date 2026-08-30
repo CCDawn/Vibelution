@@ -198,7 +198,11 @@ def _source_collection_run_graph_metrics(
         if isinstance(item, dict) and s._trim_text(item.get("candidateId"), max_length=160)
     }
     with s._WORKFLOW_LOCK:
-        candidate_store = s._load_candidate_store(team_id)
+        # Ingestion precheck reads through the shared run-owner resolver so
+        # graph records written under the run's owning project (and legacy
+        # records still sitting in the active-project store) are both visible;
+        # owner entries win and the merged view matches the write side.
+        candidate_store = s._load_candidate_store(team_id, run_id=run_id)
         stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
     graph_candidates = [
         item

@@ -8893,6 +8893,246 @@ def test_stage_task_store_follows_run_owner_project_after_active_project_switch(
     assert Path(paths["runDirectory"]).is_relative_to(owner_root)
 
 
+def test_relations_graph_materialization_and_precheck_follow_run_owner_store(tmp_path, monkeypatch):
+    """关系图物化与入库预检按 run 属主 store 读写，不随活跃项目漂移。
+
+    复现 run-16cfab646d08：relations 写回物化把 candidate_graph 记录落在活跃项目
+    store（challenge-sci-001），入库预检读到陈旧 graph（有节点 0 边）被拦。
+    同时覆盖 candidateRelations[]（relations 契约规范输出）必须物化进图边。
+    """
+    from core.web.services.team_workflow import research_projects as research_projects_service
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
+    )
+    stage_response = _start_research_stage_round_with_problem_understanding(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "goal": "搜集可追踪资料",
+            "agentRoles": ["source_relation_mapper"],
+            "agentIds": {"source_relation_mapper": agent["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+
+    def _capture_submit(session_id, content, **kwargs):
+        return {"accepted": True, "sessionId": session_id, "turnId": "turn-relations-owner-store", "status": "running"}
+
+    monkeypatch.setattr(session_service, "submit_session_message", _capture_submit)
+
+    # relations 开任务前置门：先落候选，再开阶段任务。
+    candidate_ids: list[str] = []
+    for index in range(3):
+        candidate = team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding relation candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/relation-regression-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence for relation regression. " * 4,
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id},
+                "createdByAgent": "relation-mapper-agent",
+            },
+        )["candidate"]
+        candidate_ids.append(candidate["candidateId"])
+
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "relations", "agentId": agent["agentId"], "agentRole": "source_relation_mapper"},
+    )
+
+    project_b = research_projects_service.create_research_project(
+        team["teamId"], {"name": "challenge-sci-001-sim"}
+    )["project"]
+    research_projects_service.activate_research_project(team["teamId"], project_b["projectId"])
+
+    owner_store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"], run_id)
+    active_store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"])
+    assert owner_store_path != active_store_path
+
+    # 模拟修复前错位：a1 时代的陈旧 graph（有节点 0 边）挂在活跃项目 B 的 store。
+    stale_record = {
+        "schemaVersion": team_workflow_orchestration_service.SCHEMA_VERSION,
+        "candidateId": "candidate-graph-stale-misplaced",
+        "candidateType": "candidate_graph",
+        "teamId": team["teamId"],
+        "workflowId": "workflow-stale",
+        "title": "Stale candidate graph snapshot",
+        "sourceKind": "candidate_graph_builder",
+        "summary": "2 nodes, 0 edges",
+        "sourceRefs": [],
+        "evidenceRefs": [],
+        "metadata": {
+            "generatedFromCandidateIds": candidate_ids[:1],
+            "graph": {
+                "nodes": [
+                    {"candidateId": candidate_ids[0], "candidateType": "source_manifest", "title": "stale node"},
+                ],
+                "edges": [],
+                "missingLinks": [],
+                "unreviewedNodes": [],
+                "summary": {"nodeCount": 1, "edgeCount": 0, "missingLinkCount": 0},
+            },
+            "knowledgeCollectionIngestion": {
+                "fingerprint": "stale-fingerprint",
+                "purpose": "candidate_graph",
+                "inputCandidateIds": candidate_ids[:1],
+                "sourceCollectionRunId": run_id,
+            },
+        },
+        "createdByAgent": "relation-mapper-agent",
+        "currentWorkflowNode": "candidate_graph",
+        "currentState": "candidate_graph_visible",
+        "qualityStatus": "preview_ready",
+        "createdAt": "2026-08-01T00:00:00+00:00",
+        "updatedAt": "2026-08-01T00:00:00+00:00",
+    }
+    active_store = team_workflow_orchestration_service._read_json(active_store_path)
+    active_store.setdefault("candidates", []).append(stale_record)
+    team_workflow_orchestration_service._write_json(active_store_path, active_store)
+
+    agent_graph = {
+        "themeNodes": [
+            {"themeId": "theme-prediction-error", "label": "预测误差"},
+            {"themeId": "theme-hierarchical-models", "label": "层级模型"},
+        ],
+        "candidateRelations": [
+            {
+                "sourceCandidateId": candidate_ids[0],
+                "targetCandidateId": "theme-prediction-error",
+                "relation": "supports_theme",
+                "evidenceRefs": ["ev-1"],
+            },
+            {
+                "sourceCandidateId": candidate_ids[1],
+                "targetCandidateId": "theme-hierarchical-models",
+                "relation": "extends_theme",
+                "evidenceRefs": ["ev-2"],
+            },
+            {
+                "sourceCandidateId": candidate_ids[0],
+                "targetCandidateId": candidate_ids[1],
+                "relation": "complements_evidence",
+                "evidenceRefs": ["ev-3"],
+            },
+            {
+                "sourceCandidateId": candidate_ids[2],
+                "targetCandidateId": candidate_ids[1],
+                "relation": "replicates_finding",
+                "evidenceRefs": ["ev-4"],
+            },
+        ],
+    }
+    summary = team_workflow_orchestration_service._materialize_source_collection_stage_writeback_candidate_graph(
+        team["teamId"],
+        run_id,
+        task,
+        {"status": "needs_review", "result": {"candidateGraph": agent_graph}},
+    )
+    assert summary["status"] == "completed"
+    assert summary["edgeCount"] == 4
+    assert summary["nodeCount"] == 5
+    assert summary["danglingEdgeCount"] == 0
+
+    # 新图（含 4 条 candidateRelations 物化边）落在 run 属主 store。
+    owner_store = team_workflow_orchestration_service._read_json(owner_store_path)
+    owner_graphs = [
+        item for item in list(owner_store.get("candidates") or []) if item.get("candidateType") == "candidate_graph"
+    ]
+    fresh_records = [item for item in owner_graphs if item.get("candidateId") == summary["candidateGraphId"]]
+    assert len(fresh_records) == 1
+    fresh_record = fresh_records[0]
+    assert fresh_record["metadata"]["graph"]["summary"]["edgeCount"] == 4
+    assert fresh_record["metadata"]["graph"]["summary"]["nodeCount"] == 5
+    assert [item["taskId"] for item in fresh_record["metadata"].get("stageTaskWritebacks") or []] == [task["taskId"]]
+    # 访问即认领：写回把活跃项目 store 的存量记录一并归一到属主 store（读侧按 candidateId 去重）。
+    assert "candidate-graph-stale-misplaced" in [item.get("candidateId") for item in owner_graphs]
+    # 活跃项目 B 的 store 不新增图记录，只剩错位存量。
+    active_after = team_workflow_orchestration_service._read_json(active_store_path)
+    assert [
+        item.get("candidateId")
+        for item in list(active_after.get("candidates") or [])
+        if item.get("candidateType") == "candidate_graph"
+    ] == ["candidate-graph-stale-misplaced"]
+
+    # 入库预检（run-scoped 合并读）能看到最新图：5 节点 / 4 边 / 0 缺口，门禁放行。
+    from core.web.services.team_workflow.source_collection.stage_session import (
+        _source_collection_run_graph_metrics,
+        assert_source_collection_stage_advance_ready,
+    )
+
+    source_candidates = team_workflow_orchestration_service._source_collection_candidates_for_run(
+        team["teamId"], run_id
+    )
+    metrics = _source_collection_run_graph_metrics(team["teamId"], run_id, source_candidates)
+    assert metrics == {"nodeCount": 5, "edgeCount": 4, "missingLinkCount": 0}
+    assert_source_collection_stage_advance_ready(
+        stage_id="ingestion",
+        record_count=1,
+        approved_or_source_candidate_count=len(source_candidates),
+        graph_node_count=metrics["nodeCount"],
+        graph_edge_count=metrics["edgeCount"],
+        graph_missing_link_count=metrics["missingLinkCount"],
+    )
+
+
+def test_agent_graph_edges_extract_candidate_relations_contract_payload() -> None:
+    """candidateRelations[] 是 relations 写回契约的规范输出，边提取必须解析它。
+
+    复现 a3 写回：15 条 candidateRelations 因提取器只认 edges/sourceThemeEdges/
+    topicRelations 被整体丢弃，图停留在 0 边，而闭门判定仍报 candidate_graph_ready。
+    """
+    agent_graph = {
+        "themeNodes": [
+            {"themeId": "theme-numerical-verification", "label": "数值验证"},
+            {"themeId": "theme-analytic-progress", "label": "解析进展"},
+        ],
+        "candidateRelations": [
+            {
+                "sourceCandidateId": "candidate-a",
+                "targetCandidateId": "theme-numerical-verification",
+                "relation": "independent_strict_verification_baseline",
+                "evidenceRefs": ["dprec-1"],
+            },
+            {
+                "from": "candidate-b",
+                "to": "candidate-c",
+                "type": "complementary_numerical_coverage",
+            },
+            {
+                "sourceCandidateId": "theme-numerical-verification",
+                "targetCandidateId": "theme-analytic-progress",
+                "relation": "grounds_progress",
+                "evidenceRefs": ["dprec-2"],
+            },
+        ],
+    }
+    edges = team_workflow_orchestration_service._source_collection_agent_graph_edges(agent_graph)
+    assert len(edges) == 3
+    by_relation = {edge["relation"]: edge for edge in edges}
+    assert by_relation["independent_strict_verification_baseline"]["targetCandidateId"] == (
+        "source-theme:theme-numerical-verification"
+    )
+    assert by_relation["independent_strict_verification_baseline"]["sourceCandidateId"] == "candidate-a"
+    assert by_relation["independent_strict_verification_baseline"]["evidenceRefs"] == ["dprec-1"]
+    assert by_relation["complementary_numerical_coverage"]["sourceCandidateId"] == "candidate-b"
+    assert by_relation["complementary_numerical_coverage"]["targetCandidateId"] == "candidate-c"
+    assert by_relation["grounds_progress"]["sourceCandidateId"] == "source-theme:theme-numerical-verification"
+    assert by_relation["grounds_progress"]["targetCandidateId"] == "source-theme:theme-analytic-progress"
+
+
 def test_finding_writeback_candidates_carry_scope_markers(tmp_path, monkeypatch):
     """根因 B：finding 写回物化创建的候选带 SC run / workflow run / 研究项目三类定界标记。"""
     env = _finding_close_first_step_task(tmp_path, monkeypatch)

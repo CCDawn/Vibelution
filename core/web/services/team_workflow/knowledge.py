@@ -1835,7 +1835,16 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     now = s.utc_now_iso()
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        # Run-scoped builds resolve the candidate store through the shared
+        # run-owner resolver (owner-first merged read) so the graph
+        # materializes into the run's owning project instead of whichever
+        # project happens to be active; writes stay normalized to the
+        # owner-project store path.
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=source_collection_run_id)
+            if source_collection_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         all_candidates = [
             item
             for item in list(candidate_store.get("candidates") or [])
@@ -1976,7 +1985,10 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
         }
         candidate_store.setdefault("candidates", []).append(record)
         candidate_store["updatedAt"] = now
-        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(
+            s._candidate_store_path(normalized_team_id, source_collection_run_id),
+            candidate_store,
+        )
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
