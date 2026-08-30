@@ -525,3 +525,108 @@ def test_plain_drift_reconcile_still_revives_live_rows(tmp_path: Path) -> None:
         assert commands.wake_count == 1
     finally:
         commands.close()
+
+
+def test_reconcile_with_zero_revivable_or_active_work_stays_reconciliation_required(
+    tmp_path: Path,
+) -> None:
+    """A failed adapter-only frontier must not be projected back to running."""
+
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-zero-work"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-zero-work",
+                    run_id=run_id,
+                    idempotency_key="key:zero-work",
+                    node_id="knowledge_ingestion",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    status="succeeded",
+                    run_id=run_id,
+                    command_id="cmd-zero-work",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    status="failed",
+                    problem={
+                        "code": "adapter_execution_exception",
+                        "detail": "evidence graph has nodes but no relations",
+                    },
+                    started_at_ms=FIXED_NOW_MS + 1_000,
+                    run_id=run_id,
+                    command_id="cmd-zero-work",
+                )
+            )
+            uow.repository.execute(
+                "UPDATE workflow_runs SET active_node_id = 'knowledge_ingestion'"
+                " WHERE run_id = ?",
+                (run_id,),
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-zero-work-adapter",
+                        run_id=run_id,
+                        command_id="cmd-zero-work",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=f"nr-{run_id}-knowledge_ingestion-a1",
+                    last_problem_json=json.dumps(
+                        {"code": "adapter_execution_exception"}
+                    ),
+                )
+            )
+            # Receipt/cancel reconciliation work is durable bookkeeping, not a
+            # workflow action capable of advancing this failed node frontier.
+            uow.repository.insert_outbox(
+                build_outbox_record(
+                    "act-zero-work-receipt",
+                    run_id=run_id,
+                    command_id="cmd-zero-work",
+                    action_kind="reconcile",
+                    status="pending",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-zero-work",
+            )
+        )
+
+        run = store.get_run(run_id)
+        assert run.status == "reconciliation_required"
+        assert run.active_node_id == "knowledge_ingestion"
+        assert json.loads(str(run.blocked_problem_json))["code"] == (
+            "reconcile_no_active_work"
+        )
+        assert [row.action_kind for row in store.list_pending_outbox(run_id)] == [
+            "reconcile"
+        ]
+        assert commands.wake_count == 0
+    finally:
+        commands.close()

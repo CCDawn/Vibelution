@@ -1179,10 +1179,6 @@ class WorkflowCommandService:
         # nodeId conflicts with the chain frontier) would otherwise pin
         # active_node_id and re-derive the same failing dispatch forever.
         plan = plan_ledger_authority(attempts, node_order=formal_node_order())
-        target_status = (
-            RunStatus.BLOCKED if plan.lands_blocked else RunStatus.RUNNING
-        )
-        require_run_transition(RunStatus(run.status), target_status)
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped
@@ -1221,26 +1217,6 @@ class WorkflowCommandService:
                 """,
                 (now_ms, node_run_id),
             )
-        if plan.lands_blocked:
-            # The landing verdict is copied verbatim from the deepest readiness
-            # verdict the pipeline itself wrote beyond every success —
-            # reconcile only re-projects ledger truth onto the run record,
-            # never hand-authors a state. The V2 rerun mapping keys off
-            # exactly this projection (blocked + auto_advance_not_ready).
-            uow.repository.update_run_status(
-                request.run_id,
-                request.team_id,
-                RunStatus.BLOCKED.value,
-                now_ms,
-                active_node_id=str(plan.active_node_id or ""),
-                blocked_problem_json=json.dumps(
-                    dict(plan.landing_problem), ensure_ascii=False
-                ),
-            )
-        else:
-            uow.repository.update_run_status(
-                request.run_id, request.team_id, RunStatus.RUNNING.value, now_ms
-            )
         # Reconciliation re-derives execution from the durable ledger.  A
         # blocked run usually got there via a terminal-failed graph_dispatch
         # (e.g. checkpoint_node_mismatch); reviving only the run status would
@@ -1275,6 +1251,64 @@ class WorkflowCommandService:
             (now_ms, now_ms, request.run_id),
         )
         revived = int(uow.repository.affected() or 0)
+        active_work_row = uow.repository.execute(
+            """
+            SELECT
+                EXISTS(
+                    SELECT 1 FROM outbox_actions
+                    WHERE run_id = ?
+                      AND action_kind IN ('graph_dispatch', 'adapter_dispatch', 'checkpoint_fork')
+                      AND status IN ('pending', 'leased')
+                )
+                OR EXISTS(
+                    SELECT 1 FROM node_attempts
+                    WHERE run_id = ?
+                      AND status IN ('starting', 'dispatching', 'running', 'waiting_human')
+                )
+            """,
+            (request.run_id, request.run_id),
+        ).fetchone()
+        has_active_work = revived > 0 or bool(active_work_row and active_work_row[0])
+        zero_work_problem = {
+            "code": "reconcile_no_active_work",
+            "detail": "ledger authority has no active or revivable workflow work",
+        }
+        if plan.lands_blocked:
+            target_status = RunStatus.BLOCKED
+            landing_problem = dict(plan.landing_problem)
+        elif has_active_work:
+            target_status = RunStatus.RUNNING
+            landing_problem = None
+        else:
+            target_status = RunStatus.RECONCILIATION_REQUIRED
+            landing_problem = zero_work_problem
+        require_run_transition(RunStatus(run.status), target_status)
+        if target_status == RunStatus.BLOCKED:
+            # The landing verdict is copied verbatim from the deepest readiness
+            # verdict the pipeline itself wrote beyond every success —
+            # reconcile only re-projects ledger truth onto the run record,
+            # never hand-authors a state. The V2 rerun mapping keys off
+            # exactly this projection (blocked + auto_advance_not_ready).
+            uow.repository.update_run_status(
+                request.run_id,
+                request.team_id,
+                target_status.value,
+                now_ms,
+                active_node_id=str(plan.active_node_id or ""),
+                blocked_problem_json=json.dumps(landing_problem, ensure_ascii=False),
+            )
+        else:
+            uow.repository.update_run_status(
+                request.run_id,
+                request.team_id,
+                target_status.value,
+                now_ms,
+                blocked_problem_json=(
+                    json.dumps(landing_problem, ensure_ascii=False)
+                    if landing_problem is not None
+                    else None
+                ),
+            )
         uow.repository.insert_event(
             _event_record(
                 run_id=request.run_id,
@@ -1286,17 +1320,19 @@ class WorkflowCommandService:
                 payload={
                     "reconciled": True,
                     "revivedDispatchCount": revived,
+                    "activeWorkFound": has_active_work,
+                    "reconciledStatus": target_status.value,
                     "artifactReceiptIds": list(artifact_receipt_ids),
                     "staleAttemptIds": list(plan.superseded_node_run_ids),
                     "recomputedActiveNodeId": plan.active_node_id,
                     "landingProblemCode": (
-                        str(plan.landing_problem.get("code") or "")
-                        if plan.landing_problem
+                        str(landing_problem.get("code") or "")
+                        if landing_problem
                         else None
                     ),
                     "landingProblemDetail": (
-                        str(plan.landing_problem.get("detail") or "")
-                        if plan.landing_problem
+                        str(landing_problem.get("detail") or "")
+                        if landing_problem
                         else None
                     ),
                 },
